@@ -13,6 +13,9 @@ struct SettingsView: View {
     /// Audio input enumeration helper (AVAudioSession-backed, Simulator-safe).
     @State private var audio = AudioInputProvider()
 
+    /// Camera permission + device-capability helper for the facecam.
+    @State private var camera = CameraSupport()
+
     // MARK: - Quality presets
 
     /// Target SHORT edge (px). The long edge follows the live screen aspect, so
@@ -54,6 +57,7 @@ struct SettingsView: View {
         }
         .onAppear {
             audio.refresh()
+            camera.refresh()
         }
     }
 
@@ -204,7 +208,11 @@ struct SettingsView: View {
         Section {
             Toggle("Facecam Overlay", isOn: Binding(
                 get: { settings.pipEnabled },
-                set: { settings.pipEnabled = $0; onChange() }
+                set: { newValue in
+                    settings.pipEnabled = newValue
+                    if newValue { camera.request() }
+                    onChange()
+                }
             ))
 
             if settings.pipEnabled {
@@ -246,7 +254,37 @@ struct SettingsView: View {
         } header: {
             Text("Picture in Picture")
         } footer: {
+            pipFooter
+        }
+    }
+
+    @ViewBuilder
+    private var pipFooter: some View {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Composites a corner facecam onto your screen frames inside the broadcast (not the system PiP window).")
+
+            if settings.pipEnabled {
+                if !camera.multitaskingSupported {
+                    Label(
+                        "This device can't run the camera during a system broadcast, so the facecam won't appear — the stream stays screen-only. Camera-while-broadcasting needs a device that supports multitasking camera access (e.g. iPad Pro / iPad Air).",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .foregroundStyle(.orange)
+                } else {
+                    switch camera.permission {
+                    case .denied:
+                        Label("Camera access denied. Enable it in Settings to use the facecam.",
+                              systemImage: "video.slash.fill")
+                            .foregroundStyle(.red)
+                    case .undetermined:
+                        Label("Grant camera access to use the facecam.",
+                              systemImage: "video.fill")
+                    case .granted:
+                        Label("Facecam ready on this device.", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
         }
     }
 

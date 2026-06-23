@@ -192,7 +192,9 @@ after going live keeps the original orientation rather than re-negotiating.
 
 ## Facecam (PIP) usage
 
-1. In **Settings**, toggle **Picture-in-Picture** on.
+1. In **Settings**, toggle **Picture-in-Picture (Facecam Overlay)** on. The app
+   immediately requests **camera permission** — grant it. (The broadcast extension
+   cannot show the prompt itself, so it must be granted in the app first.)
 2. Choose the **corner** (top/bottom × left/right), the **scale** (10%–40% of the
    frame width), and the **camera** (front or back).
 3. Start the broadcast. Inside the extension, each screen frame is composited with
@@ -201,6 +203,37 @@ after going live keeps the original orientation rather than re-negotiating.
    The front camera is mirrored; the overlay has rounded corners and a 24pt inset.
 
 > The facecam requires a physical device — it is compiled out on the Simulator.
+
+### ⚠️ Device requirement (important)
+
+The facecam runs the camera **inside the broadcast extension**, which is active
+while *another* app is in the foreground (the screen you're capturing). iOS only
+permits that when the device supports **multitasking camera access**
+(`AVCaptureSession.isMultitaskingCameraAccessSupported`) — the extension sets
+`isMultitaskingCameraAccessEnabled = true` when it can. Otherwise the camera
+session is interrupted (`...VideoDeviceNotAvailableWithMultipleForegroundApps`)
+and **no facecam frames are produced — the stream falls back to screen-only**.
+
+- **Supported:** devices with multitasking camera access (e.g. iPad Pro / iPad
+  Air). There the facecam composites normally.
+- **Not supported:** **most iPhones report `false`** for this capability, so the
+  facecam can't run during a *system-wide* broadcast on those devices. This is an
+  Apple platform limitation, not an app bug.
+
+The **Picture in Picture** settings section shows your device's status live: a
+green "Facecam ready" when it will work, or an orange warning when the device
+can't run the camera during a broadcast.
+
+> If you're on a supported device and the facecam still doesn't appear, the
+> restricted entitlement `com.apple.developer.avfoundation.multitasking-camera-access`
+> (requires Apple approval) may be required. It is intentionally **not** bundled,
+> to avoid breaking signing for everyone else; add it to `project.yml` if Apple
+> grants it to your account.
+>
+> For guaranteed iPhone facecam, the only alternative is **in-app** capture
+> (`RPScreenRecorder.startCapture`), which records just this app's content (not
+> other apps) while it stays in the foreground — a different product than the
+> system-wide screen broadcast this app implements.
 
 ---
 
