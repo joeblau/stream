@@ -1,0 +1,115 @@
+name: Stream
+options:
+  bundleIdPrefix: com.joeblau
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: K78G42H4U2    # Apple Developer Team ID for device builds
+    TARGETED_DEVICE_FAMILY: "1,2"
+
+packages:
+  HaishinKit:
+    url: https://github.com/HaishinKit/HaishinKit.swift
+    from: 2.2.5
+
+targets:
+
+  # ---------------------------------------------------------------
+  # Shared dynamic framework (settings model + store; links HaishinKit core only)
+  # ---------------------------------------------------------------
+  StreamCore:
+    type: framework
+    platform: iOS
+    sources:
+      - StreamCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamCore
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: HaishinKit
+        product: HaishinKit
+
+  # ---------------------------------------------------------------
+  # iOS application (SwiftUI)
+  # ---------------------------------------------------------------
+  Stream:
+    type: application
+    platform: iOS
+    sources:
+      - Stream
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.Stream
+    info:
+      path: Stream/Info.plist
+      properties:
+        CFBundleDisplayName: Stream
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSCameraUsageDescription: Stream uses the camera for the optional facecam picture-in-picture overlay on your broadcast.
+        NSMicrophoneUsageDescription: Stream uses the microphone (including connected Bluetooth mics) to capture audio for your broadcast.
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    entitlements:
+      path: Stream/Stream.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.joeblau.Stream
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.joeblau.Stream
+    dependencies:
+      - target: StreamCore
+        embed: true
+      - target: StreamBroadcast
+        embed: true
+
+  # ---------------------------------------------------------------
+  # ReplayKit broadcast upload extension
+  # ---------------------------------------------------------------
+  StreamBroadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      - StreamBroadcast
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.Stream.Broadcast
+    info:
+      path: StreamBroadcast/Info.plist
+      properties:
+        CFBundleDisplayName: StreamBroadcast
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSCameraUsageDescription: Stream uses the camera for the optional facecam picture-in-picture overlay on your broadcast.
+        NSMicrophoneUsageDescription: Stream uses the microphone (including connected Bluetooth mics) to capture audio for your broadcast.
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
+          NSExtensionAttributes:
+            RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
+    entitlements:
+      path: StreamBroadcast/StreamBroadcast.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.joeblau.Stream
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.joeblau.Stream
+    dependencies:
+      - target: StreamCore
+        embed: false
+      - package: HaishinKit
+        product: HaishinKit
+      - package: HaishinKit
+        product: RTMPHaishinKit
