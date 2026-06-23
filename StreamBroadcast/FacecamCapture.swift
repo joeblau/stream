@@ -46,8 +46,25 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             return
         }
 
+        // The host app must have already granted camera permission — a broadcast
+        // extension cannot present the permission prompt itself. Bail cleanly if
+        // not authorized (the stream continues screen-only).
+        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
+            return
+        }
+
         session.beginConfiguration()
         session.sessionPreset = .vga640x480
+
+        // REQUIRED for the camera to run inside a broadcast extension: the
+        // extension is not the foreground app, so without this the session is
+        // interrupted with .videoDeviceNotAvailableWithMultipleForegroundApps and
+        // delivers no frames. Settable only where supported (iPad Pro/Air and other
+        // multitasking-camera devices; most iPhones report false — there the
+        // facecam can't run and the stream stays screen-only).
+        if session.isMultitaskingCameraAccessSupported {
+            session.isMultitaskingCameraAccessEnabled = true
+        }
 
         let position: AVCaptureDevice.Position =
             settings.cameraPosition == .front ? .front : .back
