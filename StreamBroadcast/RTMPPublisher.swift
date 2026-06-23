@@ -58,6 +58,9 @@ actor RTMPPublisher {
         v.scalingMode = .letterbox
         v.bitRate = settings.videoBitrate
         v.expectedFrameRate = Double(settings.frameRate)
+        // 2-second keyframe interval (GOP) — required by most RTMP ingests
+        // (restream.io, YouTube, etc.) for clean stream startup and seeking.
+        v.maxKeyFrameIntervalDuration = 2
         v.profileLevel = kVTProfileLevel_H264_Baseline_AutoLevel as String
         try? await stream.setVideoSettings(v)
         outputSizeConfigured = true
