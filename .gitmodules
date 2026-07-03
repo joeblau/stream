@@ -1,0 +1,3 @@
+[submodule "Vendor/HaishinKit.swift"]
+	path = Vendor/HaishinKit.swift
+	url = https://github.com/joeblau/HaishinKit.swift
