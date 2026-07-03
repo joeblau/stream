@@ -38,10 +38,73 @@ public enum BackupQuality: String, Codable, CaseIterable, Sendable {
     case native
 }
 
+/// The transport protocol the user is publishing with. Each protocol's URL and
+/// key are stored SEPARATELY in the Keychain, so switching the segmented control
+/// recalls that protocol's own credentials.
+public enum StreamProtocol: String, Codable, CaseIterable, Sendable {
+    case rtmp, rtmps, srt, whip
+
+    public var displayName: String {
+        switch self {
+        case .rtmp: return "RTMP"
+        case .rtmps: return "RTMPS"
+        case .srt: return "SRT"
+        case .whip: return "WHIP"
+        }
+    }
+
+    /// URL scheme(s) accepted for this protocol.
+    public var urlSchemes: [String] {
+        switch self {
+        case .rtmp: return ["rtmp"]
+        case .rtmps: return ["rtmps"]
+        case .srt: return ["srt"]
+        case .whip: return ["http", "https"]
+        }
+    }
+
+    public var urlPlaceholder: String {
+        switch self {
+        case .rtmp: return "rtmp://host:1935/app"
+        case .rtmps: return "rtmps://live.restream.io/live"
+        case .srt: return "srt://host:port"
+        case .whip: return "https://host/whip/endpoint"
+        }
+    }
+
+    /// Label for the second (key) field — protocols carry the key differently.
+    public var keyFieldLabel: String {
+        switch self {
+        case .rtmp, .rtmps: return "Stream key"
+        case .srt: return "Stream ID / passphrase (optional)"
+        case .whip: return "Bearer token (optional)"
+        }
+    }
+
+    /// RTMP/RTMPS require a separate stream key; SRT/WHIP embed it in the URL.
+    public var requiresKey: Bool {
+        switch self {
+        case .rtmp, .rtmps: return true
+        case .srt, .whip: return false
+        }
+    }
+
+    /// Whether the broadcast publisher can currently stream this protocol.
+    /// RTMP/RTMPS ship today; the SRT/WHIP transports are wired next.
+    public var isPublishingSupported: Bool {
+        switch self {
+        case .rtmp, .rtmps: return true
+        case .srt, .whip: return false
+        }
+    }
+}
+
 // MARK: - StreamSettings (the ONLY shared persisted model)
 public struct StreamSettings: Codable, Equatable, Sendable {
-    public var rtmpURL: String          // e.g. "rtmps://live.restream.io/live"
-    public var streamKey: String        // publish name / stream key
+    /// The selected transport. Its URL + key live in the Keychain per-protocol.
+    public var selectedProtocol: StreamProtocol
+    public var rtmpURL: String          // active protocol's connection URL
+    public var streamKey: String        // active protocol's key / stream id
     /// Target SHORT edge of the encoded video, in px (e.g. 720). The long edge is
     /// derived from the live screen's real aspect ratio at broadcast start, so the
     /// stream matches the device orientation (portrait or landscape) with no squish.
@@ -68,6 +131,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     public var backupQuality: BackupQuality
 
     public init(
+        selectedProtocol: StreamProtocol = .rtmps,
         rtmpURL: String = "",
         streamKey: String = "",
         videoQuality: Int = 720,
@@ -84,6 +148,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         backupEnabled: Bool = false,
         backupQuality: BackupQuality = .hd1080
     ) {
+        self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
         self.streamKey = streamKey
         self.videoQuality = videoQuality
@@ -108,6 +173,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = StreamSettings.default
+        selectedProtocol = try c.decodeIfPresent(StreamProtocol.self, forKey: .selectedProtocol) ?? d.selectedProtocol
         rtmpURL = try c.decodeIfPresent(String.self, forKey: .rtmpURL) ?? d.rtmpURL
         streamKey = try c.decodeIfPresent(String.self, forKey: .streamKey) ?? d.streamKey
         videoQuality = try c.decodeIfPresent(Int.self, forKey: .videoQuality) ?? d.videoQuality
@@ -127,18 +193,24 @@ public struct StreamSettings: Codable, Equatable, Sendable {
 
     public static let `default` = StreamSettings()
 
-    /// True only when a host and a stream key are present.
+    /// True only when the selected protocol can currently publish AND its URL
+    /// (plus its key, where the protocol requires one) are present and valid.
     public var isPublishable: Bool {
-        guard let url = URL(string: rtmpURL),
+        guard selectedProtocol.isPublishingSupported,
+              let url = URL(string: rtmpURL),
               let scheme = url.scheme?.lowercased(),
-              scheme == "rtmp" || scheme == "rtmps",
+              selectedProtocol.urlSchemes.contains(scheme),
               url.host != nil else { return false }
-        return !streamKey.isEmpty
+        return selectedProtocol.requiresKey ? !streamKey.isEmpty : true
     }
 
-    /// True when the URL scheme is rtmps (TLS auto-negotiated by HaishinKit).
+    /// True when the connection is encrypted (RTMPS TLS, SRT AES, or WHIP HTTPS).
     public var isSecure: Bool {
-        URL(string: rtmpURL)?.scheme?.lowercased() == "rtmps"
+        switch selectedProtocol {
+        case .rtmps, .srt: return true
+        case .whip: return URL(string: rtmpURL)?.scheme?.lowercased() == "https"
+        case .rtmp: return false
+        }
     }
 
     /// Derives the encode dimensions from the live (already upright-oriented)

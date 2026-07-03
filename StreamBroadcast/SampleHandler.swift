@@ -29,6 +29,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     private let videoGate = InFlightSampleGate()
     private let micGate = InFlightSampleGate()
     private let appAudioGate = InFlightSampleGate()
+    private let memoryMonitor = MemoryPressureMonitor()
 
     /// Encode dimensions, locked once from the first screen frame so the stream
     /// matches the device's real orientation/aspect. Touched only on the serial
@@ -58,6 +59,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
 
         admission.setAccepting(true)
         micLevelChannel.publish(0)
+        memoryMonitor.start()
 
         // Publish live state and let the app's "End Stream" button reach us — the
         // extension is the only process that can stop itself. The heartbeat lets
@@ -115,6 +117,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         admission.setAccepting(false)
         micLevelChannel.publish(0)
         facecam.stop()
+        memoryMonitor.stop()
         let publisher = self.publisher
         Task { await publisher.pause() }
     }
@@ -144,6 +147,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         admission.setAccepting(false)
         micLevelChannel.publish(0)
         facecam.stop()
+        memoryMonitor.stop()
         // Release the mic/HFP route deterministically BEFORE the async network
         // teardown: iOS may suspend the extension the moment this callback
         // returns, and a deferred stop often never ran, leaving the session
@@ -171,6 +175,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         admission.setAccepting(false)
         micLevelChannel.publish(0)
         facecam.stop()
+        memoryMonitor.stop()
         // Deterministic mic release, same rationale as broadcastFinished().
         audioSession.stop()
         let publisher = self.publisher
@@ -211,7 +216,11 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
 
         switch sampleBufferType {
         case .video:
-            handleVideo(sampleBuffer)
+            // Drain the CoreImage/CoreMedia compositing transients immediately: in
+            // the ~50 MB extension budget, autoreleased CIImages and pixel/sample
+            // buffers piling up across frames until the run loop drains its pool is
+            // a primary jetsam trigger.
+            autoreleasepool { handleVideo(sampleBuffer) }
 
         case .audioMic:
             if let level = micLevelMeter.measure(sampleBuffer) {
@@ -266,10 +275,16 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
             configuration = (targetSize, min(dims.width, dims.height))
         }
 
+        // Under memory pressure, shed the facecam compositor entirely — its BGRA
+        // canvas buffers are the ~2x per-frame memory multiplier — and pass the raw
+        // screen through, so the stream stays up (screen-only) instead of the
+        // extension being jetsam-killed. Restored automatically when headroom recovers.
+        let pipActive = settings.pipEnabled && !memoryMonitor.isUnderPressure
+
         // Fast path: facecam off AND the frame is already upright. Pass the native
         // buffer straight through; the encoder letterbox-scales it to targetSize
         // (same aspect → a clean downscale, no bars, no distortion).
-        if !settings.pipEnabled, orientation == .up {
+        if !pipActive, orientation == .up {
             submitVideo(sampleBuffer, configuration: configuration)
             return
         }
@@ -277,7 +292,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         // Otherwise render into the locked canvas: this reorients the frame and/or
         // composites the facecam. The camera frame is nil when PIP is off (a purely
         // rotated frame still needs reorienting).
-        let camera = settings.pipEnabled ? facecam.latest.take() : nil
+        let camera = pipActive ? facecam.latest.take() : nil
 
         guard let composited = compositor.composite(screen: screen,
                                                      camera: camera,
@@ -479,5 +494,70 @@ private final class InFlightSampleGate: @unchecked Sendable {
         os_unfair_lock_lock(&lock)
         occupied = false
         os_unfair_lock_unlock(&lock)
+    }
+}
+
+/// Watches the extension's remaining memory headroom (`os_proc_available_memory`)
+/// and flips an "under pressure" flag with hysteresis, so the video path can shed
+/// the facecam compositor — its BGRA canvas buffers are the biggest per-frame
+/// allocation — BEFORE the ~50MB jetsam limit kills the extension. Also logs the
+/// available headroom periodically so the thresholds can be tuned on device.
+final class MemoryPressureMonitor: @unchecked Sendable {
+    private static let log = Logger(subsystem: "com.joeblau.Stream", category: "memory")
+    /// Shed load when fewer than this many bytes remain before the jetsam limit.
+    private static let shedBelow: UInt = 12 * 1024 * 1024
+    /// Restore load only after headroom climbs back above this (hysteresis).
+    private static let recoverAbove: UInt = 20 * 1024 * 1024
+
+    private var lock = os_unfair_lock_s()
+    private var underPressure = false
+    private var task: Task<Void, Never>?
+
+    var isUnderPressure: Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return underPressure
+    }
+
+    func start() {
+        task?.cancel()
+        task = Task { [weak self] in
+            var tick = 0
+            while !Task.isCancelled {
+                self?.sample(shouldLog: tick % 4 == 0)
+                tick &+= 1
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+        os_unfair_lock_lock(&lock)
+        underPressure = false
+        os_unfair_lock_unlock(&lock)
+    }
+
+    private func sample(shouldLog: Bool) {
+        let available = UInt(os_proc_available_memory())
+        // 0 means the platform can't report (e.g. Simulator) — never false-trip.
+        guard available > 0 else { return }
+        os_unfair_lock_lock(&lock)
+        let was = underPressure
+        if available < Self.shedBelow {
+            underPressure = true
+        } else if available > Self.recoverAbove {
+            underPressure = false
+        }
+        let now = underPressure
+        os_unfair_lock_unlock(&lock)
+
+        let mb = available / (1024 * 1024)
+        if now != was {
+            Self.log.error("Memory pressure \(now ? "ON — shedding facecam" : "cleared", privacy: .public); available=\(mb)MB")
+        } else if shouldLog {
+            Self.log.info("Memory available=\(mb)MB (pressure=\(now, privacy: .public))")
+        }
     }
 }

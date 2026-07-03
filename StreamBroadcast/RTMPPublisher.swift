@@ -46,6 +46,9 @@ actor RTMPPublisher {
     private var lastMediaAt = DispatchTime.now().uptimeNanoseconds
     private var timeline = MediaTimelineNormalizer()
     private var hasPublished = false
+    /// Sheds input video frames when the outbound queue is deep, to bound latency
+    /// (HaishinKit's send queue is otherwise unbounded). Refreshed by checkNetworkHealth.
+    private let videoAdmission = VideoFrameAdmission()
 
     /// Set to true ONLY by `stop()`, when the user (or the system) ends the
     /// broadcast. It is the single signal that distinguishes a deliberate teardown
@@ -293,6 +296,9 @@ actor RTMPPublisher {
         defer { recoveryInProgress = false }
 
         streamLog.warning("RTMP recovery requested: \(reason, privacy: .public)")
+        // The fresh connection starts admitting every frame; shedding only
+        // re-raises via checkNetworkHealth if congestion actually returns.
+        videoAdmission.reset()
         if streamAttached {
             await mixer.removeOutput(stream)
             streamAttached = false
@@ -398,11 +404,17 @@ actor RTMPPublisher {
         // Ceiling first: cheap, idempotent, applied immediately (not at the
         // next 1 Hz strategy event). The baseline flag keeps the very first
         // emission from reseeding the ABR's full-rate starting target.
-        await networkController.setPathProfile(
-            ceiling: snapshot.videoBitRateCeiling(configuredMaximum: settings.videoBitrate),
-            interface: snapshot.interface,
-            isBaseline: previous == nil,
-            applyingTo: stream)
+        // Only touch the encoder when the path actually changed (or first emission).
+        // NWPathMonitor re-emits equal paths on DNS/VPN/agent churn; an unconditional
+        // setVideoSettings round-trip here contends the same actor executor that
+        // serializes every appended frame.
+        if previous == nil || snapshot != previous {
+            await networkController.setPathProfile(
+                ceiling: snapshot.videoBitRateCeiling(configuredMaximum: settings.videoBitrate),
+                interface: snapshot.interface,
+                isBaseline: previous == nil,
+                applyingTo: stream)
+        }
 
         guard let previous, snapshot != previous else { return }  // baseline / no-op
         let now = DispatchTime.now().uptimeNanoseconds
@@ -548,6 +560,7 @@ actor RTMPPublisher {
             streamLog.warning("Mic buffers stalled >4s; app audio is now the mix clock")
         }
         let health = await networkController.healthSnapshot()
+        videoAdmission.setQueueDepth(health.queueBytes)
         // A growing queue by itself means congestion, not a dead connection. The
         // adaptive controller needs time to lower the encoder rate and drain it.
         // Reconnect only when progress has stopped, telemetry has stopped, or the
@@ -601,7 +614,11 @@ actor RTMPPublisher {
         v.expectedFrameRate = Double(frameRate)
         v.frameInterval = max(0, (1.0 / Double(frameRate)) - 0.001)
         v.maxKeyFrameIntervalDuration = 2
-        v.bitRateMode = .constant
+        // VBR (.average), not CBR: a mostly-static screen compresses to near-
+        // nothing instead of being padded to the full target, and mid-session
+        // AverageBitRate changes are reliably applied so the ABR actually takes
+        // effect. HaishinKit auto-derives a ~1.5x burst cap (dataRateLimits).
+        v.bitRateMode = .average
         v.profileLevel = kVTProfileLevel_H264_Main_AutoLevel as String
         v.allowFrameReordering = false
         do {
@@ -617,6 +634,9 @@ actor RTMPPublisher {
     func appendVideo(_ sb: CMSampleBuffer) async {
         guard outputSizeConfigured, isRunning, !isPaused, streamAttached else { return }
         lastMediaAt = DispatchTime.now().uptimeNanoseconds
+        // Under outbound congestion, drop a proportion of video frames (audio is
+        // never dropped) so latency stays bounded instead of the queue growing.
+        guard videoAdmission.admit() else { return }
         let duration = CMTime(value: 1,
                               timescale: CMTimeScale(min(max(settings.frameRate, 1), 60)))
         await mixer.append(timeline.normalize(sb, kind: .video,
@@ -713,6 +733,48 @@ actor RTMPPublisher {
         _ = try? await stream.close()
         _ = try? await connection.close()
         await mixer.stopRunning()
+    }
+}
+
+/// Bounded video-frame admission under outbound congestion. HaishinKit's RTMP
+/// send queue is unbounded, so when the uplink can't drain it, SHEDDING input
+/// video frames (proportional to how deep the queue is) keeps glass-to-glass
+/// latency bounded instead of letting it grow to seconds and then hard-recycling.
+/// Audio is never dropped. The depth is refreshed ~every 2s from the real socket
+/// queue by checkNetworkHealth; this is the fast, coarse bound that complements
+/// the encoder-level bitrate/frame-rate reductions the ABR already applies.
+private final class VideoFrameAdmission: @unchecked Sendable {
+    private struct State { var keep = 1; var period = 1; var counter = 0 }
+    private let lock = OSAllocatedUnfairLock<State>(initialState: State())
+
+    /// Maps outbound queue depth to a keep/period frame-pacing ratio.
+    func setQueueDepth(_ bytes: Int) {
+        let keep: Int, period: Int
+        switch bytes {
+        case ..<524_288:   (keep, period) = (1, 1)  // < 0.5 MB: keep every frame
+        case ..<1_048_576: (keep, period) = (2, 3)  // 0.5-1 MB: drop 1 in 3
+        case ..<2_097_152: (keep, period) = (1, 2)  // 1-2 MB: drop 1 in 2
+        default:           (keep, period) = (1, 3)  // > 2 MB: drop 2 in 3
+        }
+        lock.withLock { state in
+            if state.period != period { state.counter = 0 }
+            state.keep = keep
+            state.period = period
+        }
+    }
+
+    /// True when this video frame should be encoded and sent.
+    func admit() -> Bool {
+        lock.withLock { state in
+            guard state.period > 1 else { return true }
+            let keep = state.counter % state.period < state.keep
+            state.counter &+= 1
+            return keep
+        }
+    }
+
+    func reset() {
+        lock.withLock { $0 = State() }
     }
 }
 
@@ -944,6 +1006,16 @@ private struct MediaTimelineNormalizer {
                 }
             }
             needsRebase = false
+        }
+
+        // Steady-state fast path: with no accumulated offset the copy below would
+        // produce a bit-identical buffer (PTS − 0 == PTS), so skip the per-buffer
+        // heap alloc + CMSampleBuffer copy entirely. This is the state for the
+        // whole broadcast until the first pause/reconnect sets an offset — at
+        // ~150 buffers/s it was pure waste on the gated real-time append path.
+        if accumulatedOffset == .zero {
+            lastPresentationTime[kind] = sourcePTS
+            return sampleBuffer
         }
 
         var entryCount: CMItemCount = 0
