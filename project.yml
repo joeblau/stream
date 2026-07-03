@@ -14,6 +14,9 @@ settings:
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: K78G42H4U2    # Apple Developer Team ID for device builds
     TARGETED_DEVICE_FAMILY: "1,2"
+    # RTCHaishinKit's libdatachannel xcframework ships no x86_64 simulator slice,
+    # so the iOS simulator builds arm64-only (devices are arm64; CI is Apple Silicon).
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
 
 packages:
   HaishinKit:
@@ -116,6 +119,10 @@ targets:
         product: HaishinKit
       - package: HaishinKit
         product: RTMPHaishinKit
+      - package: HaishinKit
+        product: SRTHaishinKit
+      - package: HaishinKit
+        product: RTCHaishinKit
 
 # ---------------------------------------------------------------
 # Shared scheme so `xcodegen generate` produces a deterministic,

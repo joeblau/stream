@@ -90,13 +90,10 @@ public enum StreamProtocol: String, Codable, CaseIterable, Sendable {
     }
 
     /// Whether the broadcast publisher can currently stream this protocol.
-    /// RTMP/RTMPS ship today; the SRT/WHIP transports are wired next.
-    public var isPublishingSupported: Bool {
-        switch self {
-        case .rtmp, .rtmps: return true
-        case .srt, .whip: return false
-        }
-    }
+    /// All four are wired: RTMP/RTMPS via RTMPPublisher, SRT/WHIP via the unified
+    /// StreamSession publisher. WHIP (WebRTC) is experimental — validate memory on
+    /// device, as libdatachannel adds to the tight extension budget.
+    public var isPublishingSupported: Bool { true }
 }
 
 // MARK: - StreamSettings (the ONLY shared persisted model)
