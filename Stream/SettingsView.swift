@@ -47,7 +47,7 @@ struct SettingsView: View {
         1_000_000, 2_000_000, 3_000_000, 4_500_000, 6_000_000, 8_000_000
     ]
     private static let audioBitrates: [Int] = [64_000, 96_000, 128_000, 192_000, 256_000]
-    private static let frameRates: [Int] = [24, 30, 60]
+    private static let frameRates: [Int] = [24, 30]
 
     private func bitrateLabel(_ bps: Int) -> String {
         String(format: "%.1f Mbps", Double(bps) / 1_000_000)
@@ -190,7 +190,7 @@ struct SettingsView: View {
         } header: {
             Text("Video")
         } footer: {
-            Text("Bitrate is a maximum and automatically drops when the uplink is congested. A 60 fps stream temporarily uses 30 fps when needed to keep the connection stable.")
+            Text("Bitrate is a maximum and automatically drops when the uplink is congested. Capped at 30 fps — best for a stable screen-share within the broadcast extension's memory budget.")
         }
     }
 

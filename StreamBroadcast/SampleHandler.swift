@@ -18,7 +18,7 @@ private let broadcastLog = Logger(subsystem: "com.joeblau.Stream", category: "br
 /// or lock-guarded collaborators; per buffer it spawns `Task { await ... }`.
 final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
 
-    private let publisher = RTMPPublisher()
+    private let publisher: any Publisher
     private let facecam = FacecamCapture()
     private let compositor = FacecamCompositor()
     private let settings: StreamSettings
@@ -47,6 +47,14 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         let settings = SettingsStore().load()
         self.settings = settings
         self.micLevelMeter = MicrophoneLevelMeter(gain: settings.micVolume)
+        // RTMP/RTMPS use the dedicated publisher; SRT/WHIP use the unified
+        // StreamSession publisher. Chosen once, from the persisted protocol.
+        switch settings.selectedProtocol {
+        case .rtmp, .rtmps:
+            self.publisher = RTMPPublisher()
+        case .srt, .whip:
+            self.publisher = SessionPublisher(protocol: settings.selectedProtocol)
+        }
         super.init()
     }
 
@@ -224,19 +232,18 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
             if let level = micLevelMeter.measure(sampleBuffer) {
                 micLevelChannel.publish(level)
             }
-            // NEVER drop audio. Audio buffers are a few KB — the one-slot gate was
-            // discarding a mic buffer whenever the mixer was mid-video-encode (i.e.
-            // constantly), which is exactly what made the audio choppy. Only video
-            // (multi-MB IOSurfaces) needs the memory gate.
+            // Enqueue SYNCHRONOUSLY here on ReplayKit's serial thread — FIFO and
+            // ordered. A Task-per-buffer had no ordering guarantee, so mic buffers
+            // reached HaishinKit's ring buffer out of PTS order → silence-fill +
+            // swapped PCM = choppy audio. The publisher's single consumer drains
+            // each buffer in order. Never dropped (buffers are a few KB).
             if sampleBuffer.dataReadiness == .ready {
-                let publisher = self.publisher
-                Task { await publisher.appendMic(sampleBuffer) }
+                publisher.enqueueMic(sampleBuffer)
             }
 
         case .audioApp:
             if settings.includeAppAudio, sampleBuffer.dataReadiness == .ready {
-                let publisher = self.publisher
-                Task { await publisher.appendApp(sampleBuffer) }
+                publisher.enqueueApp(sampleBuffer)
             }
 
         @unknown default:

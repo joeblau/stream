@@ -17,7 +17,7 @@ private let streamLog = Logger(subsystem: "com.joeblau.Stream", category: "rtmp"
 ///
 /// rtmps:// URLs auto-negotiate TLS on port 443; rtmp:// uses 1935 — the scheme
 /// alone drives the decision, no extra flag required.
-actor RTMPPublisher {
+actor RTMPPublisher: Publisher {
     private let mixer = MediaMixer(captureSessionMode: .manual,
                                    multiTrackAudioMixingEnabled: true)
     /// Use the conservative RTMP connect payload understood by traditional
@@ -49,6 +49,32 @@ actor RTMPPublisher {
     /// Sheds input video frames when the outbound queue is deep, to bound latency
     /// (HaishinKit's send queue is otherwise unbounded). Refreshed by checkNetworkHealth.
     private let videoAdmission = VideoFrameAdmission()
+
+    // Ordered, lossless audio ingress: ReplayKit yields synchronously (FIFO), a
+    // single consumer per track awaits each append — preserving PTS order so
+    // HaishinKit's ring buffer never silence-fills or swaps out-of-order PCM.
+    private let micStream: AsyncStream<CMSampleBuffer>
+    private let micCont: AsyncStream<CMSampleBuffer>.Continuation
+    private let appStream: AsyncStream<CMSampleBuffer>
+    private let appCont: AsyncStream<CMSampleBuffer>.Continuation
+    private var audioConsumers: [Task<Void, Never>] = []
+
+    init() {
+        (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
+        (appStream, appCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
+    }
+
+    nonisolated func enqueueMic(_ sb: CMSampleBuffer) { micCont.yield(sb) }
+    nonisolated func enqueueApp(_ sb: CMSampleBuffer) { appCont.yield(sb) }
+
+    private func startAudioConsumers() {
+        guard audioConsumers.isEmpty else { return }
+        let mic = micStream, app = appStream
+        audioConsumers = [
+            Task { [weak self] in for await sb in mic { await self?.appendMic(sb) } },
+            Task { [weak self] in for await sb in app { await self?.appendApp(sb) } }
+        ]
+    }
 
     /// Set to true ONLY by `stop()`, when the user (or the system) ends the
     /// broadcast. It is the single signal that distinguishes a deliberate teardown
@@ -111,6 +137,7 @@ actor RTMPPublisher {
         // and publish failures therefore retry just like a mid-stream drop instead
         // of calling finishBroadcastWithError and ending ReplayKit.
         isRunning = true
+        startAudioConsumers()
         // 4th long-lived task, spawned BEFORE the first connect so path gating
         // covers it. NWPathMonitor is Sendable + AsyncSequence on this target;
         // the first element is the CURRENT path (baseline), then one per change.
@@ -603,7 +630,7 @@ actor RTMPPublisher {
     /// Idempotent — only the first call takes effect.
     func setOutputSize(_ size: CGSize, nativeShortEdge _: Int) async {
         guard !outputSizeConfigured else { return }
-        let frameRate = min(max(settings.frameRate, 1), 60)
+        let frameRate = min(max(settings.frameRate, 1), 30)
         var v = await stream.videoSettings
         v.videoSize = size
         v.scalingMode = .letterbox
@@ -638,7 +665,7 @@ actor RTMPPublisher {
         // never dropped) so latency stays bounded instead of the queue growing.
         guard videoAdmission.admit() else { return }
         let duration = CMTime(value: 1,
-                              timescale: CMTimeScale(min(max(settings.frameRate, 1), 60)))
+                              timescale: CMTimeScale(min(max(settings.frameRate, 1), 30)))
         await mixer.append(timeline.normalize(sb, kind: .video,
                                               fallbackDuration: duration))
     }
@@ -683,7 +710,9 @@ actor RTMPPublisher {
         // here so a mid-fallback setMicVolume cannot silently revert the clock.
         await mixer.setAudioMixerSettings(AudioMixerSettings(
             sampleRate: 48_000,
-            channels: 2,
+            // Mono mic-only → 1 channel (halves AAC payload); stereo only when app
+            // audio (track 1) is actually mixed in.
+            channels: settings.includeAppAudio ? 2 : 1,
             mainTrack: micTrackStalled ? 1 : 0,
             tracks: [0: AudioMixerTrackSettings(volume: gain),
                      1: .default]
@@ -702,6 +731,10 @@ actor RTMPPublisher {
     func stop() async {
         userInitiatedStop = true
         isPaused = false
+        micCont.finish()
+        appCont.finish()
+        audioConsumers.forEach { $0.cancel() }
+        audioConsumers = []
         connectionSupervisorTask?.cancel()
         connectionSupervisorTask = nil
         streamSupervisorTask?.cancel()
@@ -743,7 +776,7 @@ actor RTMPPublisher {
 /// Audio is never dropped. The depth is refreshed ~every 2s from the real socket
 /// queue by checkNetworkHealth; this is the fast, coarse bound that complements
 /// the encoder-level bitrate/frame-rate reductions the ABR already applies.
-private final class VideoFrameAdmission: @unchecked Sendable {
+final class VideoFrameAdmission: @unchecked Sendable {
     private struct State { var keep = 1; var period = 1; var counter = 0 }
     private let lock = OSAllocatedUnfairLock<State>(initialState: State())
 
@@ -778,7 +811,7 @@ private final class VideoFrameAdmission: @unchecked Sendable {
     }
 }
 
-private struct BroadcastNetworkHealth: Sendable {
+struct BroadcastNetworkHealth: Sendable {
     let queueBytes: Int
     let zeroOutputSeconds: Int
     let eventAgeSeconds: Int
@@ -788,7 +821,7 @@ private struct BroadcastNetworkHealth: Sendable {
 /// HaishinKit 2.2.5's built-in adaptive controller calculates a normal
 /// congestion reduction but does not apply it. This implementation applies every
 /// reduction immediately and exposes the socket telemetry needed by the watchdog.
-private actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
+actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     let mamimumVideoBitRate: Int
     let mamimumAudioBitRate = 0
 
@@ -817,7 +850,7 @@ private actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
         minimumVideoBitRate = max(300_000, maximumBitRate / 10)
         targetBitRate = maximumBitRate
         pathCeiling = maximumBitRate
-        let clampedFrameRate = min(max(frameRate, 1), 60)
+        let clampedFrameRate = min(max(frameRate, 1), 30)
         configuredFrameRate = clampedFrameRate
         preferredFrameInterval = max(0, (1.0 / Double(clampedFrameRate)) - 0.001)
     }
@@ -966,7 +999,7 @@ private actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     }
 }
 
-private enum MediaTimelineKind: Hashable {
+enum MediaTimelineKind: Hashable {
     case video
     case mic
     case app
@@ -975,7 +1008,7 @@ private enum MediaTimelineKind: Hashable {
 /// Removes capture/reconnect wall-clock gaps before samples reach HaishinKit.
 /// Without this, its audio ring buffer materializes a long pause as thousands of
 /// silence buffers and its RTMP timestamp accumulator sends a large first delta.
-private struct MediaTimelineNormalizer {
+struct MediaTimelineNormalizer {
     private var accumulatedOffset = CMTime.zero
     private var lastPresentationTime: [MediaTimelineKind: CMTime] = [:]
     private var needsRebase = false
