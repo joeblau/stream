@@ -81,8 +81,24 @@ struct SettingsView: View {
     @ViewBuilder
     private var connectionSection: some View {
         Section {
+            Picker("Protocol", selection: Binding(
+                get: { settings.selectedProtocol },
+                set: { newProtocol in
+                    // Save the current protocol's creds, switch, then load the target
+                    // protocol's stored creds — each has its own Keychain slot.
+                    var updated = settings
+                    SettingsStore().switchProtocol(to: newProtocol, in: &updated)
+                    settings = updated
+                }
+            )) {
+                ForEach(StreamProtocol.allCases, id: \.self) { proto in
+                    Text(proto.displayName).tag(proto)
+                }
+            }
+            .pickerStyle(.segmented)
+
             HStack {
-                TextField("rtmps://live.restream.io/live", text: Binding(
+                TextField(settings.selectedProtocol.urlPlaceholder, text: Binding(
                     get: { settings.rtmpURL },
                     set: { settings.rtmpURL = $0; onChange() }
                 ))
@@ -90,32 +106,36 @@ struct SettingsView: View {
                 .autocorrectionDisabled(true)
                 .keyboardType(.URL)
 
-                clearButton(for: \.rtmpURL, label: "Clear RTMP URL")
+                clearButton(for: \.rtmpURL, label: "Clear URL")
             }
 
             HStack {
-                SecureField("Stream key", text: Binding(
+                SecureField(settings.selectedProtocol.keyFieldLabel, text: Binding(
                     get: { settings.streamKey },
                     set: { settings.streamKey = $0; onChange() }
                 ))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
 
-                clearButton(for: \.streamKey, label: "Clear stream key")
+                clearButton(for: \.streamKey, label: "Clear key")
             }
         } header: {
             Text("Connection")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                if settings.isPublishable {
+                if !settings.selectedProtocol.isPublishingSupported {
+                    Label("\(settings.selectedProtocol.displayName) publishing is coming soon — your settings are saved. RTMP/RTMPS stream today.",
+                          systemImage: "hourglass")
+                        .foregroundStyle(.orange)
+                } else if settings.isPublishable {
                     Label(
-                        settings.isSecure ? "TLS will be negotiated (rtmps)." : "Unencrypted (rtmp).",
+                        settings.isSecure ? "Encrypted connection." : "Unencrypted connection.",
                         systemImage: settings.isSecure ? "lock.fill" : "lock.open"
                     )
                 } else {
-                    Text("Enter a valid rtmp:// or rtmps:// URL and a stream key.")
+                    Text("Enter a valid \(settings.selectedProtocol.displayName) URL\(settings.selectedProtocol.requiresKey ? " and stream key" : "").")
                 }
-                Label("Saved securely to your Keychain — entered once.", systemImage: "key.fill")
+                Label("Each protocol's URL + key are saved separately in your Keychain.", systemImage: "key.fill")
             }
         }
     }
@@ -494,12 +514,13 @@ private final class MicrophoneLevelMonitor {
                     isReceiving = false
                     target = 0
                 }
-                if target >= level {
-                    level = level * 0.3 + target * 0.7
-                } else {
-                    level = max(target, level * 0.82)
-                }
-                if level < 0.005 { level = 0 }
+                var next = target >= level
+                    ? level * 0.3 + target * 0.7
+                    : max(target, level * 0.82)
+                if next < 0.005 { next = 0 }
+                // Only publish on change — @Observable fires on every set, so an
+                // idle meter otherwise re-renders the view 20x/s for nothing.
+                if next != level { level = next }
             }
         }
     }
@@ -604,14 +625,15 @@ private final class MicrophoneLevelMonitor {
     }
 
     private func stopLocalCapture() {
-        if let engine {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-        }
-        engine = nil
+        // No-op when nothing was captured. Otherwise the 50ms meter loop fired a
+        // blocking setActive(false) + deactivation-notification storm ~20x/s at the
+        // audio server — stalling the app AND interrupting the broadcast extension's
+        // live mic session. Deactivate exactly once, on the real handover.
+        guard let engine else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        self.engine = nil
         meterLevel.withLock { $0 = 0 }
-        // Release the route so the app doesn't hold the mic when the meter isn't
-        // showing a local level (e.g. once the broadcast extension takes over).
         try? AVAudioSession.sharedInstance()
             .setActive(false, options: .notifyOthersOnDeactivation)
     }

@@ -17,10 +17,23 @@ import Security
 /// secrets while running in the background after the device has been unlocked once.
 public struct KeychainStore: Sendable {
 
-    /// The secrets this store manages.
-    public enum Item: String, Sendable {
-        case rtmpURL = "stream.connection.url"
-        case streamKey = "stream.connection.key"
+    /// The secrets this store manages, keyed per transport protocol so each of
+    /// RTMP/RTMPS/SRT/WHIP keeps its own URL + key.
+    public enum Item: Sendable {
+        case url(StreamProtocol)
+        case key(StreamProtocol)
+        /// Pre-multiprotocol single slots, kept only for one-time migration.
+        case legacyURL
+        case legacyKey
+
+        var account: String {
+            switch self {
+            case .url(let proto): return "stream.connection.\(proto.rawValue).url"
+            case .key(let proto): return "stream.connection.\(proto.rawValue).key"
+            case .legacyURL: return "stream.connection.url"
+            case .legacyKey: return "stream.connection.key"
+            }
+        }
     }
 
     private let service: String
@@ -70,7 +83,7 @@ public struct KeychainStore: Sendable {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: item.rawValue
+            kSecAttrAccount as String: item.account
         ]
     }
 }

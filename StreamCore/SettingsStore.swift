@@ -41,8 +41,15 @@ public struct SettingsStore: Sendable {
             persistNonSecret(settings)
         }
 
-        if let url = keychain.string(for: .rtmpURL) { settings.rtmpURL = url }
-        if let key = keychain.string(for: .streamKey) { settings.streamKey = key }
+        // One-time migration of the old single connection secret into its
+        // per-protocol slot; on that first upgrade it also selects the protocol the
+        // existing URL belongs to, so the user's saved values stay visible.
+        if let migratedProtocol = migrateConnectionSecretsIfNeeded() {
+            settings.selectedProtocol = migratedProtocol
+        }
+
+        settings.rtmpURL = keychain.string(for: .url(settings.selectedProtocol)) ?? ""
+        settings.streamKey = keychain.string(for: .key(settings.selectedProtocol)) ?? ""
         // A local video backup requires a second encoder in the upload extension
         // and can exceed ReplayKit's jetsam budget. Keep the persisted field for
         // backward compatibility, but do not allow stale opt-ins to re-enable it.
@@ -54,9 +61,41 @@ public struct SettingsStore: Sendable {
     /// broadcast extension) and the remaining settings to the container file with
     /// the secrets blanked, so they are never persisted in plaintext.
     public func save(_ settings: StreamSettings) {
-        keychain.set(settings.rtmpURL, for: .rtmpURL)
-        keychain.set(settings.streamKey, for: .streamKey)
+        keychain.set(settings.rtmpURL, for: .url(settings.selectedProtocol))
+        keychain.set(settings.streamKey, for: .key(settings.selectedProtocol))
         persistNonSecret(settings)
+    }
+
+    /// Saves the currently-shown protocol's credentials, switches, then loads the
+    /// target protocol's stored credentials into the active fields (each protocol
+    /// keeps its own Keychain slot). Persists the new selection.
+    public func switchProtocol(to newProtocol: StreamProtocol, in settings: inout StreamSettings) {
+        keychain.set(settings.rtmpURL, for: .url(settings.selectedProtocol))
+        keychain.set(settings.streamKey, for: .key(settings.selectedProtocol))
+        settings.selectedProtocol = newProtocol
+        settings.rtmpURL = keychain.string(for: .url(newProtocol)) ?? ""
+        settings.streamKey = keychain.string(for: .key(newProtocol)) ?? ""
+        persistNonSecret(settings)
+    }
+
+    /// Moves the pre-multiprotocol single connection secret into its protocol's
+    /// slot exactly once and returns that protocol (so the caller can select it on
+    /// first upgrade). Returns nil when there is nothing to migrate.
+    private func migrateConnectionSecretsIfNeeded() -> StreamProtocol? {
+        guard let legacyURL = keychain.string(for: .legacyURL), !legacyURL.isEmpty else {
+            return nil
+        }
+        let legacyKey = keychain.string(for: .legacyKey) ?? ""
+        let proto: StreamProtocol =
+            URL(string: legacyURL)?.scheme?.lowercased() == "rtmp" ? .rtmp : .rtmps
+        // Never clobber a per-protocol slot that already has a value.
+        if keychain.string(for: .url(proto)) == nil {
+            keychain.set(legacyURL, for: .url(proto))
+            keychain.set(legacyKey, for: .key(proto))
+        }
+        keychain.remove(.legacyURL)
+        keychain.remove(.legacyKey)
+        return proto
     }
 
     // MARK: - File storage

@@ -194,10 +194,13 @@ struct ContentView: View {
         if settings.isPublishable {
             return "Tap the broadcast button, choose \"Stream\", then Start Broadcast. Tap again to stop."
         }
-        if settings.rtmpURL.isEmpty || URL(string: settings.rtmpURL)?.host == nil {
-            return "Enter a valid rtmp:// or rtmps:// URL above to enable broadcasting."
+        if !settings.selectedProtocol.isPublishingSupported {
+            return "\(settings.selectedProtocol.displayName) publishing is coming soon — RTMP/RTMPS are live now. Your \(settings.selectedProtocol.displayName) settings are saved."
         }
-        if settings.streamKey.isEmpty {
+        if settings.rtmpURL.isEmpty || URL(string: settings.rtmpURL)?.host == nil {
+            return "Enter a valid \(settings.selectedProtocol.displayName) URL above to enable broadcasting."
+        }
+        if settings.selectedProtocol.requiresKey, settings.streamKey.isEmpty {
             return "Enter your stream key above to enable broadcasting."
         }
         return "Complete the connection settings above to enable broadcasting."
