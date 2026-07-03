@@ -29,6 +29,7 @@ struct ChatView: View {
                     }
                 }
             }
+            .task { chat.autoConnect() }
         }
     }
 

@@ -20,10 +20,12 @@ settings:
 
 packages:
   HaishinKit:
-    url: https://github.com/HaishinKit/HaishinKit.swift
+    # Fork keeps NWConnection alive across recoverable `.waiting`/viability
+    # transitions instead of dropping RTMPS during ordinary app switches.
+    url: https://github.com/joeblau/HaishinKit.swift
     # Includes ordered mixer-output delivery; 2.2.5 can reorder frames and then
     # silently drop them as invalid RTMP timestamp sequences.
-    revision: 23838718b33aa68dfc71afd069ecb3277bfd12fa
+    revision: 685562fb2902664a4e9b2c9abf279c37bfb227ba
 
 targets:
 

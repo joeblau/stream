@@ -96,7 +96,14 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        } header: {
+            Text("Connection")
+        }
 
+        Section {
             HStack {
                 TextField(settings.selectedProtocol.urlPlaceholder, text: Binding(
                     get: { settings.rtmpURL },
@@ -123,8 +130,6 @@ struct SettingsView: View {
                     clearButton(for: \.streamKey, label: "Clear key")
                 }
             }
-        } header: {
-            Text("Connection")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 if !settings.selectedProtocol.isPublishingSupported {

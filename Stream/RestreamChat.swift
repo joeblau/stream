@@ -101,11 +101,33 @@ final class RestreamChat: NSObject {
     /// Store the Restream application's client id + secret (obtained by registering
     /// an app at dashboard.restream.io and whitelisting the redirect URI).
     func saveCredentials(clientID: String, clientSecret: String) {
-        self.clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.clientSecret = clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clientSecret = clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        let credentialsChanged = clientID != self.clientID || clientSecret != self.clientSecret
+        self.clientID = clientID
+        self.clientSecret = clientSecret
         RestreamKeychain.set(self.clientID, for: "clientID")
         RestreamKeychain.set(self.clientSecret, for: "clientSecret")
+        // OAuth tokens belong to the client credentials that issued them. Never
+        // reuse an old token after the user replaces either credential.
+        if credentialsChanged {
+            webSocket?.cancel(with: .goingAway, reason: nil)
+            webSocket = nil
+            accessToken = nil
+            refreshToken = nil
+            RestreamKeychain.set(nil, for: "accessToken")
+            RestreamKeychain.set(nil, for: "refreshToken")
+        }
         refreshStatus()
+    }
+
+    /// Reconnect silently when both credentials and a prior OAuth token are in
+    /// Keychain. First-time authorization still requires the explicit Connect
+    /// button because it presents Restream's consent UI.
+    func autoConnect() {
+        guard hasCredentials, accessToken != nil,
+              status != .connecting, status != .connected else { return }
+        connect()
     }
 
     /// Begin (or resume) a chat session: connect the WebSocket if we already hold a
