@@ -67,7 +67,7 @@ public enum StreamProtocol: String, Codable, CaseIterable, Sendable {
         switch self {
         case .rtmp: return "rtmp://host:1935/app"
         case .rtmps: return "rtmps://live.restream.io/live"
-        case .srt: return "srt://host:port"
+        case .srt: return "srt://host:port?streamid=…&passphrase=…"
         case .whip: return "https://host/whip/endpoint"
         }
     }
