@@ -25,6 +25,7 @@ final class LatestCameraFrame: @unchecked Sendable {
     func take() -> CVPixelBuffer? {
         os_unfair_lock_lock(&lock)
         let b = buffer
+        buffer = nil
         os_unfair_lock_unlock(&lock)
         return b
     }

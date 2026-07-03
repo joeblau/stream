@@ -2,8 +2,14 @@ import HaishinKit       // MediaMixer, VideoCodecSettings, AudioCodecSettings
 import RTMPHaishinKit   // RTMPConnection, RTMPStream
 import AVFoundation
 import CoreMedia
+import Network          // NWPathMonitor drives proactive Wi-Fi <-> 5G handoff
 import VideoToolbox
 import StreamCore
+import os                // filterable diagnostics for the opaque broadcast extension
+
+/// Connection, congestion, and recovery diagnostics. Filter with:
+/// subsystem:com.joeblau.Stream category:rtmp
+private let streamLog = Logger(subsystem: "com.joeblau.Stream", category: "rtmp")
 
 /// Actor wrapping the HaishinKit pipeline: a `MediaMixer` in manual capture mode
 /// wired to an `RTMPStream` over an `RTMPConnection`. All HaishinKit access is
@@ -14,80 +20,985 @@ import StreamCore
 actor RTMPPublisher {
     private let mixer = MediaMixer(captureSessionMode: .manual,
                                    multiTrackAudioMixingEnabled: true)
-    private let connection = RTMPConnection()
+    /// Use the conservative RTMP connect payload understood by traditional
+    /// ingests such as Restream. The enhanced-codec fields are unnecessary for
+    /// this H.264/AAC publisher and some RTMP frontends reject them.
+    private let connection = RTMPConnection(fourCcList: nil,
+                                            videoFourCcInfoMap: nil,
+                                            audioFourCcInfoMap: nil,
+                                            capsEx: 0,
+                                            requestTimeout: 5_000,
+                                            qualityOfService: .userInteractive)
     private lazy var stream = RTMPStream(connection: connection)
+    private lazy var networkController = BroadcastAdaptiveBitRateController(
+        maximumBitRate: settings.videoBitrate,
+        frameRate: settings.frameRate
+    )
     private var isRunning = false
     private var settings: StreamSettings = .default
     /// The encode dimensions are locked once, from the first screen frame, so the
     /// stream matches the device orientation/aspect. Until set, video is dropped.
     private var outputSizeConfigured = false
+    private var isPaused = false
+    private var streamAttached = false
+    private var recoveryInProgress = false
+    private var nextRecoveryDelay: UInt64 = 1_000_000_000
+    private var lastMediaAt = DispatchTime.now().uptimeNanoseconds
+    private var timeline = MediaTimelineNormalizer()
+    private var hasPublished = false
+
+    /// Set to true ONLY by `stop()`, when the user (or the system) ends the
+    /// broadcast. It is the single signal that distinguishes a deliberate teardown
+    /// from an unexpected drop: while it is false, any disconnect auto-reconnects.
+    private var userInitiatedStop = false
+    /// Long-lived task that watches the RTMP connection and reconnects on any
+    /// unexpected drop, for the life of the broadcast. Cancelled by `stop()`.
+    private var connectionSupervisorTask: Task<Void, Never>?
+    private var streamSupervisorTask: Task<Void, Never>?
+    private var watchdogTask: Task<Void, Never>?
+    private var stableConnectionTask: Task<Void, Never>?
+
+    /// Proactive network-path supervision (Wi-Fi <-> 5G handoffs, dead zones).
+    /// All of it is control-plane state — one NWPathMonitor queue plus a few
+    /// Ints/continuations — with no effect on the extension's jetsam budget.
+    private var pathSupervisorTask: Task<Void, Never>?
+    private var handoffDebounceTask: Task<Void, Never>?
+    private var pathLossDebounceTask: Task<Void, Never>?
+    private var currentPath: NetworkPathSnapshot?
+    private var lastPathChangeAt: UInt64 = 0
+    private var lastPathLostAt: UInt64 = 0
+    /// The reconnect loop's currently-sleeping backoff; cancelling = "retry now".
+    private var backoffSleepTask: Task<Void, any Error>?
+    /// Reconnect loops parked because NWPath is unsatisfied.
+    private var pathWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// Mic-stall fallback: HaishinKit renders the audio mix only when the MAIN
+    /// track appends, so a silently dead mic route would mute app audio too.
+    private var lastMicAppendAt: UInt64 = 0
+    private var lastAppAppendAt: UInt64 = 0
+    private var micTrackStalled = false
 
     /// Builds + starts the pipeline, connects, and begins publishing. The video
     /// size is NOT set here — it is locked from the first frame via `setOutputSize`.
     func start(_ settings: StreamSettings) async throws {
         self.settings = settings
 
-        // Audio encode settings.
-        var a = await stream.audioSettings
-        a.bitRate = settings.audioBitrate
+        // Keep AAC stable across Bluetooth HFP/built-in route changes.
+        let a = AudioCodecSettings(bitRate: settings.audioBitrate,
+                                   sampleRate: 48_000,
+                                   format: .aac)
         try await stream.setAudioSettings(a)
+        await applyAudioMixerSettings()
 
-        // Passthrough video mixing + cap encoder input for the ~50MB budget.
+        // Latest-only raw video buffering is mandatory inside the extension's
+        // tight jetsam budget. Admission is also bounded in SampleHandler.
         var vm = await mixer.videoMixerSettings
         vm.mode = .passthrough
         await mixer.setVideoMixerSettings(vm)
-        await stream.setVideoInputBufferCounts(5)
+        await stream.setVideoInputBufferCounts(1)
+        await stream.setBitRateStrategy(networkController)
 
-        await mixer.addOutput(stream)
         await mixer.startRunning()
 
-        // rtmps:// -> TLS + port 443 automatically; rtmp:// -> 1935. No extra flag.
-        _ = try await connection.connect(settings.rtmpURL)
-        _ = try await stream.publish(settings.streamKey)   // stream key = publish name
+        if settings.backupEnabled {
+            streamLog.warning("Local backup disabled: a second video encoder is unsafe in the ReplayKit extension memory budget")
+        }
+
+        // A broadcast is user-owned, not network-owned. Initial DNS, TLS, RTMP,
+        // and publish failures therefore retry just like a mid-stream drop instead
+        // of calling finishBroadcastWithError and ending ReplayKit.
         isRunning = true
+        // 4th long-lived task, spawned BEFORE the first connect so path gating
+        // covers it. NWPathMonitor is Sendable + AsyncSequence on this target;
+        // the first element is the CURRENT path (baseline), then one per change.
+        // Cancellation ends iteration at the next emission at the latest; the
+        // weak-self + isRunning guards make any late delivery a no-op. This task
+        // never touches the single-continuation status streams below.
+        pathSupervisorTask = Task { [weak self] in
+            for await path in NWPathMonitor() {
+                if Task.isCancelled { return }
+                await self?.handlePathUpdate(NetworkPathSnapshot(path))
+            }
+        }
+        // Single-flight marker: while ANY reconnect loop runs (including this
+        // initial one) path events must wake/steer that loop rather than start
+        // a competing one on the same RTMPConnection.
+        recoveryInProgress = true
+        await reconnect(immediately: true)
+        recoveryInProgress = false
+        guard isRunning, !userInitiatedStop else { return }
+
+        // Each property owns a single continuation, so capture each exactly once.
+        // Capture after the initial retry loop succeeds so failures from earlier
+        // attempts cannot be replayed as stale recovery events.
+        let connectionStatuses = await connection.status
+        let streamStatuses = await stream.status
+
+        connectionSupervisorTask = Task { [weak self] in
+            await self?.superviseConnection(connectionStatuses)
+        }
+        streamSupervisorTask = Task { [weak self] in
+            await self?.superviseStream(streamStatuses)
+        }
+        watchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await self?.checkNetworkHealth()
+            }
+        }
+    }
+
+    /// Establishes (or re-establishes) the live connection: opens the RTMP
+    /// connection, then publishes under the stream key. Atomic — if `publish()`
+    /// fails after a successful connect (e.g. the server still holds the previous
+    /// session), it tears the connection back down so `connection.connected`
+    /// returns to false and the next attempt starts clean (RTMPConnection rejects a
+    /// re-connect while already connected).
+    ///
+    /// Reuses the SAME connection and stream across reconnects. The mixer output
+    /// is detached while offline so captured buffers cannot accumulate in the
+    /// network encoder, then attached again only after publish succeeds.
+    ///
+    /// rtmps:// -> TLS + port 443 automatically; rtmp:// -> 1935. No extra flag.
+    private func connectAndPublish() async throws {
+        _ = try await connection.connect(settings.rtmpURL)
+        // `stop()` may have run (actor reentrancy) while we were parked in the
+        // non-cancellable connect(). Its `connection.close()` is a no-op while the
+        // socket is still in the `.uninitialized` handshake window, so we must tear
+        // down here rather than proceed to a LIVE publish the user already ended.
+        if userInitiatedStop {
+            _ = try? await connection.close()
+            throw CancellationError()
+        }
+        do {
+            _ = try await stream.publish(settings.streamKey)   // stream key = publish name
+        } catch {
+            _ = try? await connection.close()
+            throw error
+        }
+        // The same race can land during publish(); never leave a live stream up
+        // after the user stopped.
+        if userInitiatedStop {
+            _ = try? await stream.close()
+            _ = try? await connection.close()
+            throw CancellationError()
+        }
+        if hasPublished {
+            timeline.markDiscontinuity()
+        } else {
+            hasPublished = true
+        }
+        if !streamAttached {
+            await mixer.addOutput(stream)
+            streamAttached = true
+        }
+    }
+
+    /// Converts a HaishinKit connect/publish failure into a useful diagnostic,
+    /// surfacing the server's real RTMP reject code (e.g.
+    /// `NetStream.Publish.BadName`) instead of an opaque enum error.
+    private func describe(_ error: any Error) -> any Error {
+        let domain = "com.joeblau.Stream.Broadcast"
+        func rejected(_ what: String, _ response: RTMPResponse) -> NSError {
+            let code = response.status?.code ?? "unknown"
+            let reason = response.status?.description ?? ""
+            streamLog.error("\(what, privacy: .public) rejected: \(code, privacy: .public) — \(reason, privacy: .public)")
+            var message = "\(what) rejected by the server (\(code))."
+            if !reason.isEmpty { message += " \(reason)" }
+            let hint = Self.publishHint(for: code)
+            if !hint.isEmpty { message += " \(hint)" }
+            return NSError(domain: domain, code: 1,
+                           userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        func plain(_ code: Int, _ message: String) -> NSError {
+            streamLog.error("Broadcast start failed: \(message, privacy: .public)")
+            return NSError(domain: domain, code: code,
+                           userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        switch error {
+        case let e as RTMPStream.Error:
+            switch e {
+            case .requestFailed(let response): return rejected("Publish", response)
+            case .requestTimedOut: return plain(2, "The server accepted the connection but never answered the publish request. Check the stream key and your network.")
+            case .invalidState: return plain(3, "The stream was in an invalid state when publishing.")
+            case .unsupportedCodec: return plain(4, "The server does not support the negotiated codec.")
+            @unknown default: return error
+            }
+        case let e as RTMPConnection.Error:
+            switch e {
+            case .requestFailed(let response): return rejected("Connection", response)
+            case .connectionTimedOut, .requestTimedOut: return plain(5, "Could not reach the RTMP server (timed out). Check the URL and your network.")
+            case .socketErrorOccurred(let underlying): return plain(6, "Network error connecting to the RTMP server. \(underlying.map { String(describing: $0) } ?? "")")
+            case .unsupportedCommand(let command): return plain(7, "The server rejected an unsupported RTMP command (\(command)).")
+            case .invalidState: return plain(8, "The connection was in an invalid state.")
+            @unknown default: return error
+            }
+        default:
+            return error
+        }
+    }
+
+    /// Human-readable next step for the most common publish/connect reject codes.
+    private static func publishHint(for code: String) -> String {
+        switch code {
+        case "NetStream.Publish.BadName":
+            return "The stream key is invalid or already publishing — verify the key and stop any other active broadcast, then retry."
+        case "NetStream.Publish.Denied":
+            return "Publishing was denied — check that the stream key is authorized."
+        case "NetConnection.Connect.Rejected":
+            return "The server rejected the connection — check the RTMP URL, application path, and stream key."
+        case "NetConnection.Connect.InvalidApp":
+            return "The RTMP application path in the URL is incorrect."
+        default:
+            return ""
+        }
+    }
+
+    private func superviseConnection(_ statuses: AsyncStream<RTMPStatus>) async {
+        for await status in statuses {
+            if userInitiatedStop { return }
+            if await connection.connected { continue }
+            streamLog.error("RTMP connection dropped (\(status.code, privacy: .public)); reconnecting")
+            await requestRecovery(reason: status.code)
+        }
+    }
+
+    /// A server may retire only the publishing NetStream while leaving the TCP
+    /// connection alive. Those events never appear on RTMPConnection.status.
+    private func superviseStream(_ statuses: AsyncStream<RTMPStatus>) async {
+        let fatalCodes: Set<String> = [
+            RTMPStream.Code.publishIdle.rawValue,
+            RTMPStream.Code.publishBadName.rawValue,
+            RTMPStream.Code.failed.rawValue,
+            RTMPStream.Code.connectClosed.rawValue,
+            RTMPStream.Code.connectFailed.rawValue,
+            RTMPStream.Code.connectRejected.rawValue
+        ]
+        for await status in statuses {
+            if userInitiatedStop { return }
+            guard fatalCodes.contains(status.code) || status.level == "error" else { continue }
+            streamLog.error("RTMP publisher rejected/stopped (\(status.code, privacy: .public)); recovering")
+            await requestRecovery(reason: status.code)
+        }
+    }
+
+    /// Coalesces connection, stream, watchdog, and path failures into one
+    /// recovery loop. `immediately: true` (proactive path events) skips the
+    /// first backoff sleep; every reconnect still flows through
+    /// `connectAndPublish`, preserving the timeline-discontinuity rebase and
+    /// HaishinKit's structural SPS/PPS + IDR re-send on publish.
+    private func requestRecovery(reason: String, immediately: Bool = false) async {
+        guard isRunning, !userInitiatedStop, !recoveryInProgress else { return }
+        recoveryInProgress = true
+        defer { recoveryInProgress = false }
+
+        streamLog.warning("RTMP recovery requested: \(reason, privacy: .public)")
+        if streamAttached {
+            await mixer.removeOutput(stream)
+            streamAttached = false
+        }
+        _ = try? await stream.close()
+        _ = try? await connection.close()
+        await reconnect(immediately: immediately)
+    }
+
+    /// Jittered exponential backoff is retained across short-lived successful
+    /// connections. It resets only after 30 seconds of stable publishing, or
+    /// when a fresh network route appears. While iOS reports no satisfied path
+    /// the loop parks at zero cost instead of burning backoff doublings (each
+    /// dead attempt would also eat RTMPSocket's hardcoded 15 s connect timeout).
+    private func reconnect(immediately: Bool) async {
+        let maxDelay: UInt64 = 30_000_000_000
+        var attempt = 0
+        var shouldDelay = !immediately
+        while isRunning, !userInitiatedStop {
+            let waited = await waitUntilPathUsable()
+            guard isRunning, !userInitiatedStop else { return }
+            if waited {
+                // A fresh route just appeared — probe it immediately with a
+                // reset budget; a flapping path costs at most one fast attempt
+                // per transition (RTMPSocket fast-fails on .waiting).
+                shouldDelay = false
+                nextRecoveryDelay = 1_000_000_000
+            }
+            if shouldDelay {
+                await interruptibleBackoffSleep()
+                guard isRunning, !userInitiatedStop else { return }
+                // A path event may have ended the sleep early; if the route is
+                // gone, park at the gate instead of burning a doomed attempt.
+                if let path = currentPath, !path.isSatisfied { continue }
+            }
+            shouldDelay = true
+            attempt += 1
+            do {
+                try await connectAndPublish()
+                nextRecoveryDelay = min(nextRecoveryDelay * 2, maxDelay)
+                streamLog.info("RTMP reconnected after \(attempt) attempt(s)")
+                stableConnectionTask?.cancel()
+                stableConnectionTask = Task { [weak self] in
+                    do {
+                        try await Task.sleep(nanoseconds: 30_000_000_000)
+                    } catch {
+                        return
+                    }
+                    await self?.markConnectionStable()
+                }
+                return
+            } catch {
+                if userInitiatedStop || !isRunning { return }
+                // A failed RTMP command can leave the TCP socket open even though
+                // `connected` is false. Always clear both layers before retrying.
+                _ = try? await stream.close()
+                _ = try? await connection.close()
+                let described = describe(error)
+                streamLog.error("RTMP reconnect attempt \(attempt) failed: \(described.localizedDescription, privacy: .public)")
+                nextRecoveryDelay = min(nextRecoveryDelay * 2, maxDelay)
+            }
+        }
+    }
+
+    /// Sleeps the current backoff with jitter. A path event (or stop) cancels
+    /// `backoffSleepTask` to end the wait early; early wake is progress, not error.
+    private func interruptibleBackoffSleep() async {
+        let jitter = Double.random(in: 0.8...1.2)
+        let nanoseconds = UInt64(Double(nextRecoveryDelay) * jitter)
+        let sleeper = Task { try await Task.sleep(nanoseconds: nanoseconds) }
+        backoffSleepTask = sleeper
+        defer { backoffSleepTask = nil }
+        _ = try? await sleeper.value
+    }
+
+    /// Parks while iOS reports no satisfied path. Returns true when it actually
+    /// waited (a route transition happened while parked). Passes straight
+    /// through when the path is satisfied or the monitor has not reported yet,
+    /// so the first connect is never blocked on monitor startup.
+    private func waitUntilPathUsable() async -> Bool {
+        var waited = false
+        while isRunning, !userInitiatedStop,
+              let path = currentPath, !path.isSatisfied {
+            waited = true
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                pathWaiters.append(continuation)
+            }
+        }
+        return waited
+    }
+
+    /// Reacts to every NWPathMonitor emission. Supervisor discipline: this never
+    /// touches the single-continuation status streams; all recovery funnels
+    /// through the existing requestRecovery/reconnect machinery, so proactive
+    /// recycles inherit the timeline rebase and keyframe re-send for free.
+    private func handlePathUpdate(_ snapshot: NetworkPathSnapshot) async {
+        guard isRunning, !userInitiatedStop else { return }
+        let previous = currentPath
+        currentPath = snapshot
+        // Any parked reconnect loop re-checks its gate on every update.
+        defer { resumePathWaiters() }
+
+        // Ceiling first: cheap, idempotent, applied immediately (not at the
+        // next 1 Hz strategy event). The baseline flag keeps the very first
+        // emission from reseeding the ABR's full-rate starting target.
+        await networkController.setPathProfile(
+            ceiling: snapshot.videoBitRateCeiling(configuredMaximum: settings.videoBitrate),
+            interface: snapshot.interface,
+            isBaseline: previous == nil,
+            applyingTo: stream)
+
+        guard let previous, snapshot != previous else { return }  // baseline / no-op
+        let now = DispatchTime.now().uptimeNanoseconds
+        lastPathChangeAt = now
+        handoffDebounceTask?.cancel()
+        pathLossDebounceTask?.cancel()
+        streamLog.info("Network path: \(previous.linkIdentity, privacy: .public) -> \(snapshot.linkIdentity, privacy: .public), satisfied=\(snapshot.isSatisfied), expensive=\(snapshot.isExpensive), constrained=\(snapshot.isConstrained)")
+
+        if !snapshot.isSatisfied {
+            // PATH LOST. Debounce briefly — AP roams and VPN/agent churn pass
+            // through unsatisfied for well under a second and must not disturb
+            // a TCP flow that survives them.
+            lastPathLostAt = now
+            pathLossDebounceTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.confirmPathLost()
+            }
+            return
+        }
+
+        if !previous.isSatisfied {
+            // PATH RESTORED. A parked/sleeping reconnect loop only needs waking
+            // (the defer above resumes gate waiters); a loop mid-connect on the
+            // dead route needs its socket fast-failed so it retries on the new
+            // path now instead of after the 15 s hardcoded connect timeout.
+            wakeBackoff(resetDelay: true)
+            if recoveryInProgress {
+                _ = try? await connection.close()
+            } else if !isPaused {
+                let outage = now &- lastPathLostAt
+                let connected = await connection.connected
+                if !streamAttached || !connected || outage > 1_000_000_000 {
+                    await requestRecovery(reason: "network path restored (\(snapshot.linkIdentity))",
+                                          immediately: true)
+                }
+                // else: the TCP flow survived a sub-second blip untouched — the
+                // supervisors and watchdog own any latent failure.
+            }
+            return
+        }
+
+        if snapshot.linkIdentity != previous.linkIdentity {
+            // LIVE HANDOFF (Wi-Fi <-> 5G) while both old and new report
+            // satisfied: the TCP flow is bound to the old interface and is dead
+            // or dying. Debounce 500 ms so a Wi-Fi-edge flap can't tear down a
+            // healthy connection twice; genuine handoffs still beat the 1-10 s
+            // reactive detection by an order of magnitude.
+            let identity = snapshot.linkIdentity
+            handoffDebounceTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.recycleForHandoff(expectedIdentity: identity)
+            }
+        }
+        // Same link with only isExpensive/isConstrained/linkQuality flips:
+        // ceiling already updated above — never reconnect for that.
+    }
+
+    /// The path stayed unsatisfied through the debounce: pause sending cleanly.
+    /// Detaching the mixer output keeps encoded frames from piling into
+    /// RTMPSocket's unbounded Data queue while the socket dies; the reconnect
+    /// loop parks in waitUntilPathUsable() until a route returns.
+    private func confirmPathLost() async {
+        guard isRunning, !userInitiatedStop,
+              currentPath?.isSatisfied == false else { return }
+        streamLog.warning("Network path lost; pausing outbound media until a route returns")
+        if streamAttached {
+            await mixer.removeOutput(stream)
+            streamAttached = false
+        }
+        // Wake a sleeping backoff so the loop parks at the path gate (the
+        // post-sleep gate re-check keeps it from burning a doomed attempt).
+        wakeBackoff(resetDelay: false)
+    }
+
+    /// Wi-Fi <-> 5G handoff confirmed by the debounce: recycle onto the new
+    /// interface. Single-flight: while a reconnect loop is live it is steered
+    /// (socket fast-failed, backoff woken) rather than raced with a second
+    /// loop on the same RTMPConnection.
+    private func recycleForHandoff(expectedIdentity: String) async {
+        guard isRunning, !userInitiatedStop, !isPaused,
+              currentPath?.isSatisfied == true,
+              currentPath?.linkIdentity == expectedIdentity else { return }
+        wakeBackoff(resetDelay: true)
+        if recoveryInProgress {
+            _ = try? await connection.close()
+            return
+        }
+        await requestRecovery(reason: "network path changed (\(expectedIdentity))",
+                              immediately: true)
+    }
+
+    private func wakeBackoff(resetDelay: Bool) {
+        if resetDelay { nextRecoveryDelay = 1_000_000_000 }
+        backoffSleepTask?.cancel()
+    }
+
+    private func resumePathWaiters() {
+        guard !pathWaiters.isEmpty else { return }
+        let waiters = pathWaiters
+        pathWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    private func markConnectionStable() {
+        guard isRunning, !userInitiatedStop else { return }
+        nextRecoveryDelay = 1_000_000_000
+    }
+
+    /// HaishinKit exposes queue telemetry only through StreamBitRateStrategy. A
+    /// growing/zero-progress queue is our post-connect liveness signal; recycling
+    /// the socket is the only public way to purge its unbounded Data queue.
+    private func checkNetworkHealth() async {
+        guard isRunning, !userInitiatedStop, !recoveryInProgress else { return }
+        guard await connection.connected else {
+            streamLog.error("RTMP watchdog found a disconnected socket; recovering")
+            await requestRecovery(reason: "connection state is disconnected")
+            return
+        }
+        guard await stream.readyState == .publishing else {
+            streamLog.error("RTMP watchdog found a non-publishing stream; recovering")
+            await requestRecovery(reason: "publisher state is not publishing")
+            return
+        }
+        // No queue-health conclusion can be drawn while ReplayKit is paused or
+        // the device is showing static content and no recent samples arrived.
+        guard !isPaused else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now &- lastMediaAt < 10_000_000_000 else { return }
+        // Mic-stall fallback (control plane only): HaishinKit's multitrack mixer
+        // renders the mix only when the MAIN track appends, so a dead mic route
+        // would silence app audio too. If app audio is flowing but the mic went
+        // quiet, promote track 1 to the mix clock; the first mic buffer back
+        // flips it home (see appendMic). No timeline rebase on either side —
+        // video/app kept flowing, so mic samples re-enter already aligned.
+        if settings.includeAppAudio, !micTrackStalled,
+           lastMicAppendAt > 0,
+           now &- lastAppAppendAt < 2_000_000_000,
+           now &- lastMicAppendAt > 4_000_000_000 {
+            micTrackStalled = true
+            await applyAudioMixerSettings()
+            streamLog.warning("Mic buffers stalled >4s; app audio is now the mix clock")
+        }
+        let health = await networkController.healthSnapshot()
+        // A growing queue by itself means congestion, not a dead connection. The
+        // adaptive controller needs time to lower the encoder rate and drain it.
+        // Reconnect only when progress has stopped, telemetry has stopped, or the
+        // backlog is large enough that viewers would receive several stale seconds.
+        // For 10 s after a network path change the tolerance halves: the old flow
+        // is known-suspect, so a genuine stall should recycle fast.
+        let recentPathChange = lastPathChangeAt > 0 && now &- lastPathChangeAt < 10_000_000_000
+        let queueLimit = recentPathChange ? 2_000_000 : 4_000_000
+        let zeroLimit = recentPathChange ? 2 : 4
+        if health.queueBytes >= queueLimit || health.zeroOutputSeconds >= zeroLimit || health.eventAgeSeconds >= 10 {
+            streamLog.error("RTMP socket stalled: queue=\(health.queueBytes) bytes, zeroOut=\(health.zeroOutputSeconds)s, target=\(health.targetBitRate) bps")
+            await requestRecovery(reason: "outbound queue stalled")
+        }
+    }
+
+    func pause() async {
+        guard isRunning, !isPaused, !userInitiatedStop else { return }
+        isPaused = true
+        await networkController.setCapturePaused(true)
+        timeline.markDiscontinuity()
+    }
+
+    func resume() async {
+        guard isRunning, isPaused, !userInitiatedStop else { return }
+        isPaused = false
+        await networkController.setCapturePaused(false)
+        timeline.markDiscontinuity()
+        let isConnected = await connection.connected
+        let publishState = await stream.readyState
+        // `!streamAttached` covers a path loss during the pause that detached
+        // the mixer output while the TCP session itself survived.
+        if !isConnected || publishState != .publishing || !streamAttached {
+            await requestRecovery(reason: "ReplayKit resumed without an active publisher")
+        }
     }
 
     /// Locks the encoder to a concrete output size (derived from the first screen
     /// frame's real aspect ratio). `.letterbox` scaling guarantees the source is
     /// fit without distortion even if a later frame's aspect differs slightly.
     /// Idempotent — only the first call takes effect.
-    func setOutputSize(_ size: CGSize) async {
+    func setOutputSize(_ size: CGSize, nativeShortEdge _: Int) async {
         guard !outputSizeConfigured else { return }
+        let frameRate = min(max(settings.frameRate, 1), 60)
         var v = await stream.videoSettings
         v.videoSize = size
         v.scalingMode = .letterbox
-        v.bitRate = settings.videoBitrate
-        v.expectedFrameRate = Double(settings.frameRate)
-        // 2-second keyframe interval (GOP) — required by most RTMP ingests
-        // (restream.io, YouTube, etc.) for clean stream startup and seeking.
+        // Seed the encoder at the ABR's current (possibly path-clamped) target
+        // so a size lock landing after a path change cannot overwrite the
+        // learned rate until the next 1 Hz strategy event.
+        v.bitRate = min(settings.videoBitrate, await networkController.currentTargetBitRate())
+        v.expectedFrameRate = Double(frameRate)
+        v.frameInterval = max(0, (1.0 / Double(frameRate)) - 0.001)
         v.maxKeyFrameIntervalDuration = 2
-        v.profileLevel = kVTProfileLevel_H264_Baseline_AutoLevel as String
-        try? await stream.setVideoSettings(v)
-        outputSizeConfigured = true
+        v.bitRateMode = .constant
+        v.profileLevel = kVTProfileLevel_H264_Main_AutoLevel as String
+        v.allowFrameReordering = false
+        do {
+            try await stream.setVideoSettings(v)
+            outputSizeConfigured = true
+        } catch {
+            streamLog.error("Video encoder configuration failed: \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Appends a (raw or composited) screen video buffer. Dropped until the output
     /// size is locked, so the encoder never starts at the wrong dimensions.
     func appendVideo(_ sb: CMSampleBuffer) async {
-        guard outputSizeConfigured else { return }
-        await mixer.append(sb)
+        guard outputSizeConfigured, isRunning, !isPaused, streamAttached else { return }
+        lastMediaAt = DispatchTime.now().uptimeNanoseconds
+        let duration = CMTime(value: 1,
+                              timescale: CMTimeScale(min(max(settings.frameRate, 1), 60)))
+        await mixer.append(timeline.normalize(sb, kind: .video,
+                                              fallbackDuration: duration))
     }
 
     /// Appends microphone audio on track 0.
-    func appendMic(_ sb: CMSampleBuffer) async { await mixer.append(sb, track: 0) }
+    func appendMic(_ sb: CMSampleBuffer) async {
+        guard isRunning, !isPaused, streamAttached else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        lastMediaAt = now
+        lastMicAppendAt = now
+        if micTrackStalled {
+            // The mic route came back: hand the mix clock straight back to it.
+            // Mic samples share ReplayKit's host clock with the still-continuous
+            // video/app timeline, so no discontinuity rebase is needed (or safe).
+            micTrackStalled = false
+            await applyAudioMixerSettings()
+            streamLog.info("Mic buffers resumed; mic is the mix clock again")
+        }
+        let normalized = timeline.normalize(sb, kind: .mic,
+                                             fallbackDuration: CMTime(value: 1_024, timescale: 48_000))
+        await mixer.append(normalized, track: 0)
+    }
 
     /// Appends app/system audio on track 1.
-    func appendApp(_ sb: CMSampleBuffer) async { await mixer.append(sb, track: 1) }
+    func appendApp(_ sb: CMSampleBuffer) async {
+        guard isRunning, !isPaused, streamAttached else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        lastMediaAt = now
+        lastAppAppendAt = now
+        let normalized = timeline.normalize(sb, kind: .app,
+                                             fallbackDuration: CMTime(value: 1_024, timescale: 48_000))
+        await mixer.append(normalized, track: 1)
+    }
 
-    /// Tears down the stream, connection, and mixer.
+    /// Configures the multitrack audio mixer: mic on track 0 (its user level
+    /// applied as a linear gain, clamped to a safe range), app audio on track 1.
+    /// Mic is the main track, so it also drives the mix clock.
+    private func applyAudioMixerSettings() async {
+        let gain = Float(max(0.0, min(settings.micVolume, 2.0)))
+        // While the mic route is stalled, app audio (track 1) drives the mix
+        // clock so the whole mix does not fall silent with it. Threaded through
+        // here so a mid-fallback setMicVolume cannot silently revert the clock.
+        await mixer.setAudioMixerSettings(AudioMixerSettings(
+            sampleRate: 48_000,
+            channels: 2,
+            mainTrack: micTrackStalled ? 1 : 0,
+            tracks: [0: AudioMixerTrackSettings(volume: gain),
+                     1: .default]
+        ))
+    }
+
+    /// Updates the mic level, live — the app's Mic Volume slider reaches this via
+    /// the broadcast control channel while streaming. Only re-applies the mixer's
+    /// track volume, so it is smooth and safe to call repeatedly.
+    func setMicVolume(_ volume: Double) async {
+        settings.micVolume = volume
+        await applyAudioMixerSettings()
+    }
+
+    /// Tears down every long-lived task and the media/network pipeline.
     func stop() async {
+        userInitiatedStop = true
+        isPaused = false
+        connectionSupervisorTask?.cancel()
+        connectionSupervisorTask = nil
+        streamSupervisorTask?.cancel()
+        streamSupervisorTask = nil
+        watchdogTask?.cancel()
+        watchdogTask = nil
+        stableConnectionTask?.cancel()
+        stableConnectionTask = nil
+        pathSupervisorTask?.cancel()
+        pathSupervisorTask = nil
+        handoffDebounceTask?.cancel()
+        handoffDebounceTask = nil
+        pathLossDebounceTask?.cancel()
+        pathLossDebounceTask = nil
+        // The reconnect loop's backoff sleep and path parking are unstructured;
+        // wake both explicitly so the loop observes userInitiatedStop and exits.
+        backoffSleepTask?.cancel()
+        resumePathWaiters()
+
         guard isRunning else {
             await mixer.stopRunning()
             return
         }
         isRunning = false
+        if streamAttached {
+            await mixer.removeOutput(stream)
+            streamAttached = false
+        }
         _ = try? await stream.close()
         _ = try? await connection.close()
         await mixer.stopRunning()
+    }
+}
+
+private struct BroadcastNetworkHealth: Sendable {
+    let queueBytes: Int
+    let zeroOutputSeconds: Int
+    let eventAgeSeconds: Int
+    let targetBitRate: Int
+}
+
+/// HaishinKit 2.2.5's built-in adaptive controller calculates a normal
+/// congestion reduction but does not apply it. This implementation applies every
+/// reduction immediately and exposes the socket telemetry needed by the watchdog.
+private actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
+    let mamimumVideoBitRate: Int
+    let mamimumAudioBitRate = 0
+
+    private let minimumVideoBitRate: Int
+    private let configuredFrameRate: Int
+    private let preferredFrameInterval: Double
+    private var targetBitRate: Int
+    private var healthySeconds = 0
+    private var zeroOutputSeconds = 0
+    private var queueBytes = 0
+    private var congestionActive = false
+    private var capturePaused = false
+    private var lastEventAt = DispatchTime.now().uptimeNanoseconds
+
+    /// Per-network-path ceiling and seeding. The protocol requires a
+    /// synchronous get-only `mamimumVideoBitRate`, which on an actor must stay
+    /// a nonisolated `let`; the dynamic per-path ceiling therefore lives here.
+    private var pathCeiling: Int
+    private var currentInterface: NetworkPathSnapshot.Interface?
+    private var lastGoodTarget: [NetworkPathSnapshot.Interface: Int] = [:]
+
+    private var effectiveMaximum: Int { min(mamimumVideoBitRate, pathCeiling) }
+
+    init(maximumBitRate: Int, frameRate: Int) {
+        mamimumVideoBitRate = maximumBitRate
+        minimumVideoBitRate = max(300_000, maximumBitRate / 10)
+        targetBitRate = maximumBitRate
+        pathCeiling = maximumBitRate
+        let clampedFrameRate = min(max(frameRate, 1), 60)
+        configuredFrameRate = clampedFrameRate
+        preferredFrameInterval = max(0, (1.0 / Double(clampedFrameRate)) - 0.001)
+    }
+
+    func adjustBitrate(_ event: NetworkMonitorEvent,
+                       stream: some StreamConvertible) async {
+        lastEventAt = DispatchTime.now().uptimeNanoseconds
+        switch event {
+        case .reset:
+            // Keep the bitrate learned from the previous socket. Returning to the
+            // configured maximum here caused a congestion/reconnect feedback loop
+            // on constrained Wi-Fi links.
+            healthySeconds = 0
+            zeroOutputSeconds = 0
+            queueBytes = 0
+            await applyTarget(to: stream)
+
+        case .publishInsufficientBWOccured(let report):
+            queueBytes = report.currentQueueBytesOut
+            guard !capturePaused else {
+                zeroOutputSeconds = 0
+                healthySeconds = 0
+                return
+            }
+            healthySeconds = 0
+            congestionActive = true
+            let audio = await stream.audioSettings
+            if report.currentBytesOutPerSecond > 0 {
+                zeroOutputSeconds = 0
+                let available = max(0, report.currentBytesOutPerSecond * 8 - audio.bitRate)
+                // Leave substantial headroom for Wi-Fi variance, RTMP overhead,
+                // and keyframes instead of targeting the measured ceiling.
+                let reduced = Int(Double(available) * 0.65)
+                targetBitRate = max(minimumVideoBitRate,
+                                    min(targetBitRate, reduced))
+            } else {
+                zeroOutputSeconds += 1
+                targetBitRate = max(minimumVideoBitRate, targetBitRate / 2)
+            }
+            await applyTarget(to: stream,
+                              severe: report.currentBytesOutPerSecond == 0)
+            streamLog.warning("ABR reduced video to \(self.targetBitRate) bps; queue=\(self.queueBytes) bytes")
+
+        case .status(let report):
+            queueBytes = report.currentQueueBytesOut
+            guard !capturePaused else {
+                zeroOutputSeconds = 0
+                healthySeconds = 0
+                return
+            }
+            // Zero output with an empty queue is normal for a paused/static
+            // capture. It is a stall only when bytes are waiting to be sent.
+            if report.currentBytesOutPerSecond == 0, queueBytes > 0 {
+                zeroOutputSeconds += 1
+                if zeroOutputSeconds >= 2 {
+                    congestionActive = true
+                    healthySeconds = 0
+                    targetBitRate = max(minimumVideoBitRate, targetBitRate / 2)
+                    await applyTarget(to: stream, severe: true)
+                }
+            } else {
+                zeroOutputSeconds = 0
+            }
+            if queueBytes <= 32 * 1_024, report.currentBytesOutPerSecond > 0 {
+                healthySeconds += 1
+            } else {
+                healthySeconds = 0
+            }
+            // Probe upward only after a sustained clean queue and in small steps.
+            // A fast 10%-every-10s ramp repeatedly overshot variable Wi-Fi uplinks.
+            guard healthySeconds >= 30 else { return }
+            healthySeconds = 0
+            if targetBitRate < effectiveMaximum {
+                targetBitRate = min(effectiveMaximum,
+                                    targetBitRate + max(75_000, effectiveMaximum / 20))
+            } else {
+                congestionActive = false
+            }
+            await applyTarget(to: stream)
+            streamLog.info("ABR recovered video to \(self.targetBitRate) bps")
+        }
+    }
+
+    func setCapturePaused(_ paused: Bool) {
+        capturePaused = paused
+        healthySeconds = 0
+        zeroOutputSeconds = 0
+    }
+
+    /// Called from RTMPPublisher.handlePathUpdate on every path emission.
+    /// Remembers the last achieved target per interface so Wi-Fi -> 5G does not
+    /// inherit Wi-Fi's degraded learned rate (which `.reset` deliberately
+    /// keeps), and 5G -> Wi-Fi does not re-climb 30 s per probe step from a low
+    /// seed. The baseline (first) emission only adopts the interface and the
+    /// ceiling, so a broadcast still STARTS at the configured full bitrate.
+    func setPathProfile(ceiling: Int,
+                        interface: NetworkPathSnapshot.Interface,
+                        isBaseline: Bool,
+                        applyingTo stream: some StreamConvertible) async {
+        let clamped = max(minimumVideoBitRate, min(ceiling, mamimumVideoBitRate))
+        if isBaseline || currentInterface == nil {
+            currentInterface = interface
+        } else if let current = currentInterface, interface != current {
+            lastGoodTarget[current] = targetBitRate
+            currentInterface = interface
+            let seed = lastGoodTarget[interface] ?? Int(Double(clamped) * 0.6)
+            targetBitRate = max(minimumVideoBitRate, min(seed, clamped))
+            healthySeconds = 0
+            zeroOutputSeconds = 0
+        }
+        let raised = clamped > pathCeiling
+        pathCeiling = clamped
+        targetBitRate = min(targetBitRate, pathCeiling)
+        if raised { healthySeconds = 0 }   // restart the upward probe cleanly
+        await applyTarget(to: stream)      // apply NOW, not at the next 1 Hz event
+    }
+
+    func currentTargetBitRate() -> Int { targetBitRate }
+
+    /// Applies the learned bitrate and an adaptive frame-rate ceiling together.
+    /// On a requested 60 fps stream, using 30 fps while congested gives each frame
+    /// enough bits to remain legible and reduces encoder pressure. The configured
+    /// frame rate returns only after the uplink has proven stable.
+    private func applyTarget(to stream: some StreamConvertible,
+                             severe: Bool = false) async {
+        var video = await stream.videoSettings
+        video.bitRate = targetBitRate
+        if severe {
+            video.frameInterval = VideoCodecSettings.frameInterval10
+        } else if congestionActive, configuredFrameRate > 30 {
+            video.frameInterval = VideoCodecSettings.frameInterval30
+        } else {
+            video.frameInterval = preferredFrameInterval
+        }
+        try? await stream.setVideoSettings(video)
+    }
+
+    func healthSnapshot() -> BroadcastNetworkHealth {
+        let now = DispatchTime.now().uptimeNanoseconds
+        return BroadcastNetworkHealth(
+            queueBytes: queueBytes,
+            zeroOutputSeconds: zeroOutputSeconds,
+            eventAgeSeconds: Int((now &- lastEventAt) / 1_000_000_000),
+            targetBitRate: targetBitRate
+        )
+    }
+}
+
+private enum MediaTimelineKind: Hashable {
+    case video
+    case mic
+    case app
+}
+
+/// Removes capture/reconnect wall-clock gaps before samples reach HaishinKit.
+/// Without this, its audio ring buffer materializes a long pause as thousands of
+/// silence buffers and its RTMP timestamp accumulator sends a large first delta.
+private struct MediaTimelineNormalizer {
+    private var accumulatedOffset = CMTime.zero
+    private var lastPresentationTime: [MediaTimelineKind: CMTime] = [:]
+    private var needsRebase = false
+
+    mutating func markDiscontinuity() {
+        needsRebase = true
+    }
+
+    mutating func normalize(_ sampleBuffer: CMSampleBuffer,
+                            kind: MediaTimelineKind,
+                            fallbackDuration: CMTime) -> CMSampleBuffer {
+        let sourcePTS = sampleBuffer.presentationTimeStamp
+        guard sourcePTS.isValid, sourcePTS.isNumeric else { return sampleBuffer }
+
+        let sampleDuration = sampleBuffer.duration.isValid && sampleBuffer.duration.isNumeric && sampleBuffer.duration > .zero
+            ? sampleBuffer.duration
+            : fallbackDuration
+
+        if needsRebase {
+            let prior = lastPresentationTime[kind]
+                ?? lastPresentationTime.values.max(by: { CMTimeCompare($0, $1) < 0 })
+            if let prior {
+                let prospective = CMTimeSubtract(sourcePTS, accumulatedOffset)
+                let desired = CMTimeAdd(prior, sampleDuration)
+                let gap = CMTimeSubtract(prospective, desired)
+                if CMTimeCompare(gap, .zero) > 0 {
+                    accumulatedOffset = CMTimeAdd(accumulatedOffset, gap)
+                }
+            }
+            needsRebase = false
+        }
+
+        var entryCount: CMItemCount = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(
+            sampleBuffer,
+            entryCount: 0,
+            arrayToFill: nil,
+            entriesNeededOut: &entryCount
+        ) == noErr, entryCount > 0 else {
+            return sampleBuffer
+        }
+
+        var timings = [CMSampleTimingInfo](
+            repeating: CMSampleTimingInfo(duration: .invalid,
+                                          presentationTimeStamp: .invalid,
+                                          decodeTimeStamp: .invalid),
+            count: entryCount
+        )
+        let status = timings.withUnsafeMutableBufferPointer { buffer in
+            CMSampleBufferGetSampleTimingInfoArray(
+                sampleBuffer,
+                entryCount: entryCount,
+                arrayToFill: buffer.baseAddress,
+                entriesNeededOut: nil
+            )
+        }
+        guard status == noErr else { return sampleBuffer }
+
+        for index in timings.indices {
+            if timings[index].presentationTimeStamp.isValid {
+                timings[index].presentationTimeStamp = CMTimeSubtract(
+                    timings[index].presentationTimeStamp,
+                    accumulatedOffset
+                )
+            }
+            if timings[index].decodeTimeStamp.isValid {
+                timings[index].decodeTimeStamp = CMTimeSubtract(
+                    timings[index].decodeTimeStamp,
+                    accumulatedOffset
+                )
+            }
+        }
+
+        var adjusted: CMSampleBuffer?
+        let copyStatus = timings.withUnsafeMutableBufferPointer { buffer in
+            CMSampleBufferCreateCopyWithNewTiming(
+                allocator: kCFAllocatorDefault,
+                sampleBuffer: sampleBuffer,
+                sampleTimingEntryCount: entryCount,
+                sampleTimingArray: buffer.baseAddress!,
+                sampleBufferOut: &adjusted
+            )
+        }
+        guard copyStatus == noErr, let adjusted else { return sampleBuffer }
+        lastPresentationTime[kind] = adjusted.presentationTimeStamp
+        return adjusted
     }
 }

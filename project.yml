@@ -18,7 +18,9 @@ settings:
 packages:
   HaishinKit:
     url: https://github.com/HaishinKit/HaishinKit.swift
-    from: 2.2.5
+    # Includes ordered mixer-output delivery; 2.2.5 can reorder frames and then
+    # silently drop them as invalid RTMP timestamp sequences.
+    revision: 23838718b33aa68dfc71afd069ecb3277bfd12fa
 
 targets:
 
@@ -57,6 +59,7 @@ targets:
         CFBundleVersion: "1"
         NSCameraUsageDescription: Stream uses the camera for the optional facecam picture-in-picture overlay on your broadcast.
         NSMicrophoneUsageDescription: Stream uses the microphone (including connected Bluetooth mics) to capture audio for your broadcast.
+        NSPhotoLibraryAddUsageDescription: Stream saves your local HD broadcast backups to Photos so you can repost them if a stream drops.
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -113,3 +116,17 @@ targets:
         product: HaishinKit
       - package: HaishinKit
         product: RTMPHaishinKit
+
+# ---------------------------------------------------------------
+# Shared scheme so `xcodegen generate` produces a deterministic,
+# CLI/CI-buildable scheme (Xcode otherwise auto-creates a local one).
+# ---------------------------------------------------------------
+schemes:
+  Stream:
+    build:
+      targets:
+        Stream: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -33,13 +33,9 @@ final class AudioInputProvider {
     /// Current microphone permission state.
     private(set) var permission: Permission = .undetermined
 
-    init() {
-        syncPermissionState()
-    }
-
     /// Requests mic permission if needed, configures a record-capable session
     /// with Bluetooth options so BT inputs appear, then enumerates inputs.
-    func refresh() {
+    func refresh(requestPermission: Bool = true) {
         switch AVAudioApplication.shared.recordPermission {
         case .granted:
             permission = .granted
@@ -49,6 +45,8 @@ final class AudioInputProvider {
             inputs = []
         case .undetermined:
             permission = .undetermined
+            inputs = []
+            guard requestPermission else { return }
             AVAudioApplication.requestRecordPermission { [weak self] granted in
                 Task { @MainActor in
                     guard let self else { return }
@@ -58,6 +56,7 @@ final class AudioInputProvider {
             }
         @unknown default:
             permission = .undetermined
+            inputs = []
         }
     }
 
@@ -74,19 +73,33 @@ final class AudioInputProvider {
 
     // MARK: - Private
 
-    private func syncPermissionState() {
-        switch AVAudioApplication.shared.recordPermission {
-        case .granted: permission = .granted
-        case .denied: permission = .denied
-        case .undetermined: permission = .undetermined
-        @unknown default: permission = .undetermined
-        }
-    }
-
     private func configureAndEnumerate() {
         let session = AVAudioSession.sharedInstance()
+        // Never ACTIVATE a second .playAndRecord session while a broadcast is
+        // live — activation can interrupt the extension's session and steal the
+        // Bluetooth HFP route mid-stream. Setting the category alone (without
+        // setActive) is enough to surface BT ports in availableInputs, so the
+        // picker still works while live. (isLive has heartbeat granularity, so
+        // a broadcast started milliseconds ago may enumerate the old way once —
+        // an accepted trade-off versus stealing the extension's route.)
+        guard !BroadcastStateStore.isLive() else {
+            for options in Self.bluetoothOptionLadder() {
+                do {
+                    try session.setCategory(.playAndRecord, mode: .default, options: options)
+                    break
+                } catch {
+                    continue
+                }
+            }
+            enumerate(from: session)
+            return
+        }
         Self.activateBluetoothRecording(session)
         enumerate(from: session)
+        // Enumeration captured — release the route immediately. Holding an
+        // activated record session for the app's entire lifetime competed with
+        // the extension's session across broadcast restarts.
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     private func enumerate(from session: AVAudioSession) {

@@ -1,49 +1,98 @@
 import Foundation
 
-/// Value-semantics helper that round-trips StreamSettings as JSON into the
-/// shared App Group UserDefaults suite. Safe to use from both the app and the
-/// broadcast extension (separate processes, same suite).
+/// Value-semantics helper that persists `StreamSettings` for sharing between the
+/// app and the broadcast extension (separate processes, same App Group).
 ///
-/// `@unchecked Sendable`: the only stored property is a `UserDefaults`, which is
-/// documented thread-safe; Swift can't prove that, so we vouch for it.
-public struct SettingsStore: @unchecked Sendable {
-    private let defaults: UserDefaults
+/// Non-secret settings are stored as a JSON file inside the shared App Group
+/// **container**, NOT the App Group `UserDefaults` **suite**. Reading a
+/// shared-container preferences domain makes `cfprefsd` log a noisy
+/// "Using kCFPreferencesAnyUser with a container is only allowed for System
+/// Containers, detaching from cfprefsd" warning whenever the domain is set up.
+/// A plain file in the container bypasses `cfprefsd` entirely, so that warning
+/// never fires. The sensitive URL + stream key continue to live in the Keychain.
+///
+/// `Sendable`: the only stored property is a `Sendable` `KeychainStore`; all file
+/// access goes through the thread-safe `FileManager.default`.
+public struct SettingsStore: Sendable {
     private let keychain: KeychainStore
 
-    /// Uses the shared App Group suite. Falls back to .standard only if the
-    /// suite cannot be created (misconfigured entitlement) so calls never crash.
-    public init(defaults: UserDefaults? = UserDefaults(suiteName: AppGroup.identifier),
-                keychain: KeychainStore = KeychainStore()) {
-        self.defaults = defaults ?? .standard
+    public init(keychain: KeychainStore = KeychainStore()) {
         self.keychain = keychain
     }
 
-    /// Loads the non-sensitive settings from the App Group suite and overlays the
-    /// connection URL + stream key from the Keychain. A legacy build that stored
-    /// the secrets inside the UserDefaults blob still works: those values survive
-    /// in the decoded struct and are promoted to the Keychain on the next `save`.
+    /// Loads the non-sensitive settings from the container file and overlays the
+    /// connection URL + stream key from the Keychain.
+    ///
+    /// On the first run after upgrading from the previous UserDefaults-backed
+    /// store, the old non-secret blob is migrated forward ONCE and written to the
+    /// file; the suite is never read again afterwards, so the `cfprefsd` warning
+    /// stops recurring.
     public func load() -> StreamSettings {
         var settings = StreamSettings.default
-        if let data = defaults.data(forKey: AppGroup.settingsKey),
+
+        if let url = settingsFileURL(),
+           let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode(StreamSettings.self, from: data) {
             settings = decoded
+        } else {
+            // No file yet: migrate from the legacy suite (once), then persist so
+            // the suite is never touched again.
+            settings = migrateLegacySettings() ?? .default
+            persistNonSecret(settings)
         }
+
         if let url = keychain.string(for: .rtmpURL) { settings.rtmpURL = url }
         if let key = keychain.string(for: .streamKey) { settings.streamKey = key }
+        // A local video backup requires a second encoder in the upload extension
+        // and can exceed ReplayKit's jetsam budget. Keep the persisted field for
+        // backward compatibility, but do not allow stale opt-ins to re-enable it.
+        settings.backupEnabled = false
         return settings
     }
 
     /// Writes the connection URL + stream key to the Keychain (shared with the
-    /// broadcast extension) and the remaining settings to the App Group suite with
+    /// broadcast extension) and the remaining settings to the container file with
     /// the secrets blanked, so they are never persisted in plaintext.
     public func save(_ settings: StreamSettings) {
         keychain.set(settings.rtmpURL, for: .rtmpURL)
         keychain.set(settings.streamKey, for: .streamKey)
+        persistNonSecret(settings)
+    }
 
+    // MARK: - File storage
+
+    /// `<App Group container>/stream.settings.v1.json`.
+    private func settingsFileURL() -> URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: AppGroup.identifier)?
+            .appendingPathComponent("\(AppGroup.settingsKey).json")
+    }
+
+    /// Atomically writes the settings to the container file with the secrets
+    /// redacted (those live only in the Keychain).
+    private func persistNonSecret(_ settings: StreamSettings) {
+        guard let url = settingsFileURL() else { return }
         var redacted = settings
         redacted.rtmpURL = ""
         redacted.streamKey = ""
         guard let data = try? JSONEncoder().encode(redacted) else { return }
-        defaults.set(data, forKey: AppGroup.settingsKey)
+        try? data.write(to: url, options: .atomic)
+    }
+
+    // MARK: - One-time legacy migration
+
+    /// Reads the legacy App Group `UserDefaults` blob exactly once — only when the
+    /// container file is absent — and clears the old key. Returns nil on a fresh
+    /// install or when there is nothing to migrate. This is the only place the
+    /// suite is ever instantiated, so the `cfprefsd` warning appears at most once
+    /// (first launch after this update) and never again.
+    private func migrateLegacySettings() -> StreamSettings? {
+        guard let defaults = UserDefaults(suiteName: AppGroup.identifier),
+              let data = defaults.data(forKey: AppGroup.settingsKey),
+              let decoded = try? JSONDecoder().decode(StreamSettings.self, from: data) else {
+            return nil
+        }
+        defaults.removeObject(forKey: AppGroup.settingsKey)
+        return decoded
     }
 }
