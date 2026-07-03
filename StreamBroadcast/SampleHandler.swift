@@ -27,8 +27,6 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     private let audioSession = AudioSessionController()
     private let admission = SampleAdmissionState()
     private let videoGate = InFlightSampleGate()
-    private let micGate = InFlightSampleGate()
-    private let appAudioGate = InFlightSampleGate()
     private let memoryMonitor = MemoryPressureMonitor()
 
     /// Encode dimensions, locked once from the first screen frame so the stream
@@ -226,24 +224,19 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
             if let level = micLevelMeter.measure(sampleBuffer) {
                 micLevelChannel.publish(level)
             }
-            if sampleBuffer.dataReadiness == .ready, micGate.tryAcquire() {
+            // NEVER drop audio. Audio buffers are a few KB — the one-slot gate was
+            // discarding a mic buffer whenever the mixer was mid-video-encode (i.e.
+            // constantly), which is exactly what made the audio choppy. Only video
+            // (multi-MB IOSurfaces) needs the memory gate.
+            if sampleBuffer.dataReadiness == .ready {
                 let publisher = self.publisher
-                let gate = self.micGate
-                Task {
-                    await publisher.appendMic(sampleBuffer)
-                    gate.release()
-                }
+                Task { await publisher.appendMic(sampleBuffer) }
             }
 
         case .audioApp:
-            if settings.includeAppAudio, sampleBuffer.dataReadiness == .ready,
-               appAudioGate.tryAcquire() {
+            if settings.includeAppAudio, sampleBuffer.dataReadiness == .ready {
                 let publisher = self.publisher
-                let gate = self.appAudioGate
-                Task {
-                    await publisher.appendApp(sampleBuffer)
-                    gate.release()
-                }
+                Task { await publisher.appendApp(sampleBuffer) }
             }
 
         @unknown default:
