@@ -242,7 +242,7 @@ can't run the camera during a broadcast.
 - **~50 MB hard memory limit.** Broadcast upload extensions are killed by jetsam
   past ~50 MB. ReplayKit alone can hold several large in-flight IOSurfaces, leaving
   little headroom. Mitigations baked in: 720p default, passthrough video mixing
-  when PIP is off, `setVideoInputBufferCounts(5)`, one reused `CIContext` + pool,
+  when PIP is off, `setVideoInputBufferCounts(1)`, one reused `CIContext` + pool,
   and dropping all but the latest camera frame.
 - **RTMP lives in `RTMPHaishinKit`.** In HaishinKit 2.x, `RTMPConnection` /
   `RTMPStream` are **not** in the core module — the extension depends on both

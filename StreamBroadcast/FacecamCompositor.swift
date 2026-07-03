@@ -111,8 +111,20 @@ final class FacecamCompositor {
         }
 
         guard let pool = ensurePool(width: outWidth, height: outHeight) else { return nil }
+        // Never let a slow encoder turn the pool into an unbounded collection of
+        // BGRA surfaces. One buffer may be in the publisher while this frame is
+        // rendered, so allow at most two outstanding allocations and drop beyond
+        // that. At 720p portrait each surface is several megabytes.
+        let allocationLimit = [
+            kCVPixelBufferPoolAllocationThresholdKey as String: 2
+        ] as CFDictionary
         var out: CVPixelBuffer?
-        guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &out) == kCVReturnSuccess,
+        guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+            kCFAllocatorDefault,
+            pool,
+            allocationLimit,
+            &out
+        ) == kCVReturnSuccess,
               let outBuffer = out else { return nil }
 
         ciContext.render(screenImage,

@@ -8,7 +8,8 @@ import StreamCore
 /// The entire camera body is guarded by `#if targetEnvironment(simulator)` so
 /// the type still compiles and no-ops cleanly on the Simulator (no camera HW),
 /// while doing real capture on device.
-final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
+                            @unchecked Sendable {
 
     /// Thread-safe holder for the most recent camera frame.
     let latest = LatestCameraFrame()

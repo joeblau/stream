@@ -1,5 +1,8 @@
 import SwiftUI
+import Observation
+import AVFAudio
 import StreamCore
+import os
 
 /// SwiftUI form bound to `StreamSettings`. Every field edit mutates the bound
 /// `settings` and then calls `onChange()` so the parent persists the snapshot
@@ -15,6 +18,12 @@ struct SettingsView: View {
 
     /// Camera permission + device-capability helper for the facecam.
     @State private var camera = CameraSupport()
+
+    /// Photos add-only permission helper for the Local Backup feature.
+    @State private var photos = PhotosSupport()
+
+    /// Smoothed live level published by the ReplayKit extension.
+    @State private var micLevel = MicrophoneLevelMonitor()
 
     // MARK: - Quality presets
 
@@ -52,13 +61,19 @@ struct SettingsView: View {
         Form {
             connectionSection
             videoSection
+            backupSection
             audioSection
             pipSection
         }
         .onAppear {
-            audio.refresh()
+            audio.refresh(requestPermission: false)
             camera.refresh()
+            photos.refresh()
+            micLevel.setGain(settings.micVolume)
+            micLevel.setPreferredInput(settings.preferredAudioInputUID)
+            micLevel.start()
         }
+        .onDisappear { micLevel.stop() }
     }
 
     // MARK: - Connection
@@ -66,20 +81,28 @@ struct SettingsView: View {
     @ViewBuilder
     private var connectionSection: some View {
         Section {
-            TextField("rtmps://live.restream.io/live", text: Binding(
-                get: { settings.rtmpURL },
-                set: { settings.rtmpURL = $0; onChange() }
-            ))
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled(true)
-            .keyboardType(.URL)
+            HStack {
+                TextField("rtmps://live.restream.io/live", text: Binding(
+                    get: { settings.rtmpURL },
+                    set: { settings.rtmpURL = $0; onChange() }
+                ))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .keyboardType(.URL)
 
-            SecureField("Stream key", text: Binding(
-                get: { settings.streamKey },
-                set: { settings.streamKey = $0; onChange() }
-            ))
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled(true)
+                clearButton(for: \.rtmpURL, label: "Clear RTMP URL")
+            }
+
+            HStack {
+                SecureField("Stream key", text: Binding(
+                    get: { settings.streamKey },
+                    set: { settings.streamKey = $0; onChange() }
+                ))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+
+                clearButton(for: \.streamKey, label: "Clear stream key")
+            }
         } header: {
             Text("Connection")
         } footer: {
@@ -97,6 +120,22 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private func clearButton(for value: WritableKeyPath<StreamSettings, String>,
+                             label: String) -> some View {
+        if !settings[keyPath: value].isEmpty {
+            Button {
+                settings[keyPath: value] = ""
+                onChange()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+        }
+    }
+
     // MARK: - Video
 
     @ViewBuilder
@@ -111,7 +150,7 @@ struct SettingsView: View {
                 }
             }
 
-            Picker("Video Bitrate", selection: Binding(
+            Picker("Maximum Bitrate", selection: Binding(
                 get: { settings.videoBitrate },
                 set: { settings.videoBitrate = $0; onChange() }
             )) {
@@ -131,7 +170,30 @@ struct SettingsView: View {
         } header: {
             Text("Video")
         } footer: {
-            Text("Orientation and aspect ratio follow your screen at broadcast start — begin in portrait to stream portrait. Quality sets the short edge; the long edge matches your screen.")
+            Text("Bitrate is a maximum and automatically drops when the uplink is congested. A 60 fps stream temporarily uses 30 fps when needed to keep the connection stable.")
+        }
+    }
+
+    // MARK: - Local Backup
+
+    private func backupQualityLabel(_ quality: BackupQuality) -> String {
+        switch quality {
+        case .matchStream: return "Match Stream"
+        case .hd720:       return "720p"
+        case .hd1080:      return "1080p"
+        case .native:      return "Native (full screen)"
+        }
+    }
+
+    @ViewBuilder
+    private var backupSection: some View {
+        Section {
+            Toggle("Record Local Backup", isOn: .constant(false))
+                .disabled(true)
+        } header: {
+            Text("Local Backup")
+        } footer: {
+            Text("Disabled for streaming stability. A second H.264 encoder can exceed the ReplayKit upload extension's memory limit and cause iOS to terminate the broadcast.")
         }
     }
 
@@ -155,9 +217,10 @@ struct SettingsView: View {
             ))
 
             // Audio input picker. A nil tag means "Default (system)".
-            Picker("Microphone Input", selection: Binding<String?>(
-                get: { settings.preferredAudioInputUID },
+            Picker("Mic Input", selection: Binding<String?>(
+                get: { selectedAudioInputUID },
                 set: { newUID in
+                    micLevel.setPreferredInput(newUID)
                     audio.select(uid: newUID, into: &settings)
                     onChange()
                 }
@@ -174,15 +237,91 @@ struct SettingsView: View {
                 }
             }
 
-            Button {
-                audio.refresh()
-            } label: {
-                Label("Refresh Inputs", systemImage: "arrow.clockwise")
+            microphoneLevelMeter
+
+            VStack(alignment: .leading) {
+                HStack {
+                    Text("Mic Volume")
+                    Spacer()
+                    Text(settings.micVolume <= 0.0001
+                         ? "Muted"
+                         : "\(Int((settings.micVolume * 100).rounded()))%")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: Binding(
+                        get: { settings.micVolume },
+                        set: {
+                            settings.micVolume = $0
+                            micLevel.setGain($0)
+                            onChange()
+                        }
+                    ),
+                    in: 0.0...2.0,
+                    step: 0.05,
+                    onEditingChanged: { editing in
+                        // Apply live to a running broadcast once the drag settles.
+                        if !editing {
+                            BroadcastControl.post(BroadcastControl.micVolumeSignal)
+                        }
+                    }
+                )
             }
+
         } header: {
-            Text("Audio")
+            HStack {
+                Text("Audio")
+                Spacer()
+                Button {
+                    micLevel.restartLocalCapture()
+                    audio.refresh(requestPermission: true)
+                } label: {
+                    Label("Refresh Inputs", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .textCase(nil)
+            }
         } footer: {
             audioFooter
+        }
+    }
+
+    private var microphoneLevelMeter: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Mic Level")
+                Spacer()
+                Text(micLevel.isReceiving ? "Live" : "No signal")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
+                    // Gradient is FIXED across the full track (green at 0% → red at
+                    // 100%); the fill just reveals it up to the current level, so a
+                    // quiet signal shows only green, not a shrunk green→red bar.
+                    LinearGradient(
+                        colors: [.green, .yellow, .red],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: geometry.size.width)
+                    .mask(alignment: .leading) {
+                        Capsule()
+                            .frame(width: geometry.size.width * micLevel.level)
+                    }
+                }
+            }
+            .frame(height: 10)
+            .animation(.linear(duration: 0.05), value: micLevel.level)
+            .accessibilityLabel("Microphone level")
+            .accessibilityValue(micLevel.isReceiving
+                                ? "\(Int((micLevel.level * 100).rounded())) percent"
+                                : "No signal")
         }
     }
 
@@ -199,6 +338,17 @@ struct SettingsView: View {
         case .undetermined:
             Text("Tap Refresh to grant microphone access and list inputs.")
         }
+    }
+
+    /// SwiftUI requires the picker selection to match one of its tags. Persisted
+    /// audio route UIDs can become stale when a Bluetooth mic disconnects, so the
+    /// picker falls back to the default tag until the input appears again.
+    private var selectedAudioInputUID: String? {
+        guard let uid = settings.preferredAudioInputUID,
+              audio.inputs.contains(where: { $0.uid == uid }) else {
+            return nil
+        }
+        return uid
     }
 
     // MARK: - Picture in Picture
@@ -295,6 +445,175 @@ struct SettingsView: View {
         case .bottomLeft: return "Bottom Left"
         case .bottomRight: return "Bottom Right"
         }
+    }
+}
+
+@MainActor
+@Observable
+private final class MicrophoneLevelMonitor {
+    private(set) var level = 0.0
+    private(set) var isReceiving = false
+
+    private static let log = Logger(subsystem: "com.joeblau.Stream", category: "mic-meter")
+    @ObservationIgnored private let channel = MicrophoneLevelChannel()
+    @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var engine: AVAudioEngine?
+    @ObservationIgnored private let meterLevel = OSAllocatedUnfairLock<Float>(initialState: 0)
+    @ObservationIgnored private var gain = 1.0
+    @ObservationIgnored private var preferredInputUID: String?
+    @ObservationIgnored private var nextRecorderAttemptAt: UInt64 = 0
+    @ObservationIgnored private var lastBroadcastCheckAt: UInt64 = 0
+    @ObservationIgnored private var broadcastIsLive = false
+
+    func start() {
+        guard task == nil else { return }
+        task = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                refreshBroadcastStateIfNeeded()
+                let target: Double
+                if let extensionLevel = channel.read() {
+                    stopLocalCapture()
+                    isReceiving = true
+                    target = Double(extensionLevel)
+                } else if broadcastIsLive {
+                    // Never compete with ReplayKit for the mic when its mic is
+                    // paused/off and therefore not publishing meter samples.
+                    stopLocalCapture()
+                    isReceiving = false
+                    target = 0
+                } else if let localLevel = readLocalLevel() {
+                    isReceiving = true
+                    target = localLevel
+                } else {
+                    isReceiving = false
+                    target = 0
+                }
+                if target >= level {
+                    level = level * 0.3 + target * 0.7
+                } else {
+                    level = max(target, level * 0.82)
+                }
+                if level < 0.005 { level = 0 }
+            }
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+        stopLocalCapture()
+        level = 0
+        isReceiving = false
+    }
+
+    func setGain(_ gain: Double) {
+        self.gain = max(0, min(gain, 2))
+    }
+
+    /// Routes the local meter to the user's selected input (incl. Bluetooth/DJI).
+    /// Without this the recorder captures the built-in mic, so a selected DJI/BT
+    /// mic never registers on the meter.
+    func setPreferredInput(_ uid: String?) {
+        guard uid != preferredInputUID else { return }
+        preferredInputUID = uid
+        restartLocalCapture()
+    }
+
+    func restartLocalCapture() {
+        stopLocalCapture()
+        nextRecorderAttemptAt = 0
+    }
+
+    private func refreshBroadcastStateIfNeeded() {
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now &- lastBroadcastCheckAt >= 500_000_000 else { return }
+        lastBroadcastCheckAt = now
+        broadcastIsLive = BroadcastStateStore.isLive()
+    }
+
+    private func readLocalLevel() -> Double? {
+        if engine == nil { startLocalCaptureIfAvailable() }
+        guard let engine, engine.isRunning else { return nil }
+        // RMS captured on the audio render thread by the input tap.
+        let rms = Double(meterLevel.withLock { $0 })
+        let postGain = max(0.000_001, min(1, rms * gain))
+        let decibels = 20 * log10(postGain)
+        return max(0, min(1, (decibels + 60) / 60))
+    }
+
+    private func startLocalCaptureIfAvailable() {
+        guard AVAudioApplication.shared.recordPermission == .granted else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now >= nextRecorderAttemptAt else { return }
+        nextRecorderAttemptAt = now + 1_000_000_000
+
+        // Route the meter to the SAME input the user picked. Without activating a
+        // Bluetooth-capable record session and setting the preferred input, the
+        // recorder silently captures the built-in mic — so a selected DJI/BT mic
+        // never registers on the meter. (Only reached when NOT broadcasting, so it
+        // never competes with the extension's session.)
+        let session = AVAudioSession.sharedInstance()
+        guard AudioInputProvider.activateBluetoothRecording(session) else { return }
+        if let uid = preferredInputUID,
+           let port = session.availableInputs?.first(where: { $0.uid == uid }) {
+            try? session.setPreferredInput(port)
+        }
+
+        // Meter from the engine's input node — it reflects the ACTIVE input route
+        // (the DJI once it's the preferred input) and gives real PCM buffers, unlike
+        // the /dev/null AVAudioRecorder metering trick which can read nothing.
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else { return }
+        let level = meterLevel
+        // @Sendable so the tap runs on the audio render thread — WITHOUT it the
+        // closure inherits this @MainActor class's isolation and iOS crashes with
+        // a libdispatch queue assertion when the render thread invokes it.
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { @Sendable buffer, _ in
+            guard let channel = buffer.floatChannelData?[0] else { return }
+            let count = Int(buffer.frameLength)
+            guard count > 0 else { return }
+            var sumOfSquares: Float = 0
+            for i in 0..<count {
+                let sample = channel[i]
+                sumOfSquares += sample * sample
+            }
+            let rms = (sumOfSquares / Float(count)).squareRoot()
+            level.withLock { $0 = rms }
+        }
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            return
+        }
+        self.engine = engine
+
+        let route = session.currentRoute.inputs
+            .map { "\($0.portName)/\($0.portType.rawValue)" }
+            .joined(separator: ",")
+        Self.log.info("Mic meter started: route=[\(route, privacy: .public)] format=\(format.sampleRate, privacy: .public)Hz/\(format.channelCount, privacy: .public)ch pref=\(self.preferredInputUID ?? "nil", privacy: .public)")
+    }
+
+    private func stopLocalCapture() {
+        if let engine {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
+        engine = nil
+        meterLevel.withLock { $0 = 0 }
+        // Release the route so the app doesn't hold the mic when the meter isn't
+        // showing a local level (e.g. once the broadcast extension takes over).
+        try? AVAudioSession.sharedInstance()
+            .setActive(false, options: .notifyOthersOnDeactivation)
     }
 }
 
