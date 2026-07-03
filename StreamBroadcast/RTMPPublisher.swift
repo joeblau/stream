@@ -59,6 +59,16 @@ actor RTMPPublisher: Publisher {
     private let appCont: AsyncStream<CMSampleBuffer>.Continuation
     private var audioConsumers: [Task<Void, Never>] = []
 
+    // Frame-repeat: ReplayKit only delivers on screen CHANGE, so a static screen
+    // stalls at ~1 fps and the keyframe cadence drifts. Re-send the last frame at
+    // the target rate to hold a steady fps + regular keyframes (unchanged content
+    // encodes to near-zero bytes).
+    private var lastVideoBuffer: CMSampleBuffer?
+    private var lastVideoAppendAt: UInt64 = 0
+    private var lastVideoPTS: CMTime = .negativeInfinity   // monotonic guard for frame-repeat
+    private var frameRepeatTask: Task<Void, Never>?
+    private var lastQueueBytes: Int = 0                    // watchdog: detect a draining queue
+
     init() {
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
         (appStream, appCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
@@ -74,6 +84,30 @@ actor RTMPPublisher: Publisher {
             Task { [weak self] in for await sb in mic { await self?.appendMic(sb) } },
             Task { [weak self] in for await sb in app { await self?.appendApp(sb) } }
         ]
+    }
+
+    private func startFrameRepeat() {
+        frameRepeatTask?.cancel()
+        let fps = UInt64(max(1, min(settings.frameRate, 30)))
+        let interval = 1_000_000_000 / fps
+        frameRepeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: interval)
+                await self?.repeatLastFrameIfIdle(interval: interval)
+            }
+        }
+    }
+
+    /// Re-sends the last frame if ReplayKit hasn't delivered one within the target
+    /// interval — holding a steady fps and keyframe cadence on a static screen.
+    private func repeatLastFrameIfIdle(interval: UInt64) async {
+        guard outputSizeConfigured, isRunning, !isPaused, streamAttached,
+              let last = lastVideoBuffer else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now &- lastVideoAppendAt >= interval else { return }
+        if let dupe = duplicateVideoBufferWithCurrentTiming(last) {
+            await appendVideo(dupe)
+        }
     }
 
     /// Set to true ONLY by `stop()`, when the user (or the system) ends the
@@ -138,6 +172,7 @@ actor RTMPPublisher: Publisher {
         // of calling finishBroadcastWithError and ending ReplayKit.
         isRunning = true
         startAudioConsumers()
+        startFrameRepeat()
         // 4th long-lived task, spawned BEFORE the first connect so path gating
         // covers it. NWPathMonitor is Sendable + AsyncSequence on this target;
         // the first element is the CURRENT path (baseline), then one per change.
@@ -296,8 +331,13 @@ actor RTMPPublisher: Publisher {
     /// A server may retire only the publishing NetStream while leaving the TCP
     /// connection alive. Those events never appear on RTMPConnection.status.
     private func superviseStream(_ statuses: AsyncStream<RTMPStatus>) async {
+        // NOTE: publishIdle ("NetStream.Publish.Idle") is deliberately NOT here.
+        // It's a benign, resumable "no media for a moment" notice (HaishinKit marks
+        // it level "status") — it fires exactly when outbound media goes briefly
+        // sparse (leaving the app to a static screen), and reconnecting can't fix
+        // idleness, only sending media can. Treating it as fatal recycled a healthy
+        // socket → "Connection lost… reconnecting".
         let fatalCodes: Set<String> = [
-            RTMPStream.Code.publishIdle.rawValue,
             RTMPStream.Code.publishBadName.rawValue,
             RTMPStream.Code.failed.rawValue,
             RTMPStream.Code.connectClosed.rawValue,
@@ -326,6 +366,7 @@ actor RTMPPublisher: Publisher {
         // The fresh connection starts admitting every frame; shedding only
         // re-raises via checkNetworkHealth if congestion actually returns.
         videoAdmission.reset()
+        lastQueueBytes = 0
         if streamAttached {
             await mixer.removeOutput(stream)
             streamAttached = false
@@ -365,7 +406,11 @@ actor RTMPPublisher: Publisher {
             attempt += 1
             do {
                 try await connectAndPublish()
-                nextRecoveryDelay = min(nextRecoveryDelay * 2, maxDelay)
+                // A reconnect that SUCCEEDS costs ~1s next time; backoff grows only
+                // across consecutive FAILED attempts (catch branch). Escalating on
+                // success turned a burst of (individually recoverable) false recycles
+                // into progressively longer 2→4→8→…→30s dead-air windows.
+                nextRecoveryDelay = 1_000_000_000
                 streamLog.info("RTMP reconnected after \(attempt) attempt(s)")
                 stableConnectionTask?.cancel()
                 stableConnectionTask = Task { [weak self] in
@@ -445,7 +490,14 @@ actor RTMPPublisher: Publisher {
 
         guard let previous, snapshot != previous else { return }  // baseline / no-op
         let now = DispatchTime.now().uptimeNanoseconds
-        lastPathChangeAt = now
+        // Only a reachability or interface change should tighten the watchdog's
+        // stall tolerance (recentPathChange halves the queue budget). isExpensive/
+        // isConstrained/linkQuality flips are benign metadata — radios waking as
+        // other apps run — and must NOT halve the budget, or ordinary app-switch
+        // uplink contention trips a false recycle.
+        if snapshot.isSatisfied != previous.isSatisfied || snapshot.linkIdentity != previous.linkIdentity {
+            lastPathChangeAt = now
+        }
         handoffDebounceTask?.cancel()
         pathLossDebounceTask?.cancel()
         streamLog.info("Network path: \(previous.linkIdentity, privacy: .public) -> \(snapshot.linkIdentity, privacy: .public), satisfied=\(snapshot.isSatisfied), expensive=\(snapshot.isExpensive), constrained=\(snapshot.isConstrained)")
@@ -456,7 +508,10 @@ actor RTMPPublisher: Publisher {
             // a TCP flow that survives them.
             lastPathLostAt = now
             pathLossDebounceTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                // 1.5s: ordinary app-switch / AP-roam / VPN-agent flaps pass through
+                // unsatisfied for well under a second and must not detach a TCP flow
+                // that survives them.
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
                 guard !Task.isCancelled else { return }
                 await self?.confirmPathLost()
             }
@@ -472,14 +527,17 @@ actor RTMPPublisher: Publisher {
             if recoveryInProgress {
                 _ = try? await connection.close()
             } else if !isPaused {
-                let outage = now &- lastPathLostAt
                 let connected = await connection.connected
-                if !streamAttached || !connected || outage > 1_000_000_000 {
+                // Recycle only if the flow is actually gone. If the socket is still
+                // connected AND the output is still attached, the TCP flow rode
+                // through the blip — do NOT tear down a healthy connection (the
+                // supervisors + watchdog own any latent failure). Detaching only
+                // happens after the 1.5s confirmPathLost debounce, so a survived
+                // blip keeps streamAttached==true here.
+                if !streamAttached || !connected {
                     await requestRecovery(reason: "network path restored (\(snapshot.linkIdentity))",
                                           immediately: true)
                 }
-                // else: the TCP flow survived a sub-second blip untouched — the
-                // supervisors and watchdog own any latent failure.
             }
             return
         }
@@ -597,7 +655,20 @@ actor RTMPPublisher: Publisher {
         let recentPathChange = lastPathChangeAt > 0 && now &- lastPathChangeAt < 10_000_000_000
         let queueLimit = recentPathChange ? 2_000_000 : 4_000_000
         let zeroLimit = recentPathChange ? 2 : 4
-        if health.queueBytes >= queueLimit || health.zeroOutputSeconds >= zeroLimit || health.eventAgeSeconds >= 10 {
+        // A deep queue is only a recycle reason if it is NOT draining — a transient
+        // backlog that is already shrinking clears on its own once the ABR lowers
+        // the encoder rate. zeroOutputSeconds independently catches a truly stalled
+        // (bytesOut==0) queue.
+        let queueStuck = health.queueBytes >= queueLimit && health.queueBytes >= lastQueueBytes
+        lastQueueBytes = health.queueBytes
+        // eventAgeSeconds is intentionally NOT a recycle condition. It is the age of
+        // HaishinKit's ~1Hz ABR callback (a wall-clock timer, default QoS), which the
+        // OS starves when the container app is backgrounded behind another app — it
+        // is NOT a probe of the socket. The connection.connected + readyState guards
+        // above already detect a genuinely dead socket, and queue/zeroOutput cover
+        // real stalls. Recycling on it tore down healthy connections on every
+        // app-switch — the primary cause of the "Connection lost" dropouts.
+        if queueStuck || health.zeroOutputSeconds >= zeroLimit {
             streamLog.error("RTMP socket stalled: queue=\(health.queueBytes) bytes, zeroOut=\(health.zeroOutputSeconds)s, target=\(health.targetBitRate) bps")
             await requestRecovery(reason: "outbound queue stalled")
         }
@@ -660,14 +731,33 @@ actor RTMPPublisher: Publisher {
     /// size is locked, so the encoder never starts at the wrong dimensions.
     func appendVideo(_ sb: CMSampleBuffer) async {
         guard outputSizeConfigured, isRunning, !isPaused, streamAttached else { return }
-        lastMediaAt = DispatchTime.now().uptimeNanoseconds
+        let now = DispatchTime.now().uptimeNanoseconds
+        lastMediaAt = now
+        lastVideoAppendAt = now
+        lastVideoBuffer = sb
         // Under outbound congestion, drop a proportion of video frames (audio is
         // never dropped) so latency stays bounded instead of the queue growing.
         guard videoAdmission.admit() else { return }
         let duration = CMTime(value: 1,
                               timescale: CMTimeScale(min(max(settings.frameRate, 1), 30)))
-        await mixer.append(timeline.normalize(sb, kind: .video,
-                                              fallbackDuration: duration))
+        let normalized = timeline.normalize(sb, kind: .video, fallbackDuration: duration)
+        await mixer.append(enforceMonotonicVideo(normalized, minStep: duration))
+    }
+
+    /// Frame-repeat dupes are stamped at host-`now`, but a real ReplayKit frame
+    /// carries its slightly-earlier capture PTS — so a real frame arriving just
+    /// after a repeat would move the video timeline BACKWARDS, which some RTMP
+    /// muxers/ingests reject (a wrapped ~49-day timestamp jump) and drop the
+    /// publisher. Nudge any non-monotonic frame forward by one interval.
+    private func enforceMonotonicVideo(_ sb: CMSampleBuffer, minStep: CMTime) -> CMSampleBuffer {
+        let pts = sb.presentationTimeStamp
+        if lastVideoPTS.isValid, pts <= lastVideoPTS {
+            let bumped = lastVideoPTS + minStep
+            lastVideoPTS = bumped
+            return restampVideoBuffer(sb, pts: bumped) ?? sb
+        }
+        lastVideoPTS = pts
+        return sb
     }
 
     /// Appends microphone audio on track 0.
@@ -735,6 +825,9 @@ actor RTMPPublisher: Publisher {
         appCont.finish()
         audioConsumers.forEach { $0.cancel() }
         audioConsumers = []
+        frameRepeatTask?.cancel()
+        frameRepeatTask = nil
+        lastVideoBuffer = nil
         connectionSupervisorTask?.cancel()
         connectionSupervisorTask = nil
         streamSupervisorTask?.cancel()
@@ -809,6 +902,26 @@ final class VideoFrameAdmission: @unchecked Sendable {
     func reset() {
         lock.withLock { $0 = State() }
     }
+}
+
+/// Re-timestamps a video sample buffer to an explicit PTS.
+func restampVideoBuffer(_ sb: CMSampleBuffer, pts: CMTime) -> CMSampleBuffer? {
+    var timing = CMSampleTimingInfo(duration: .invalid,
+                                    presentationTimeStamp: pts,
+                                    decodeTimeStamp: .invalid)
+    var out: CMSampleBuffer?
+    guard CMSampleBufferCreateCopyWithNewTiming(
+        allocator: kCFAllocatorDefault,
+        sampleBuffer: sb,
+        sampleTimingEntryCount: 1,
+        sampleTimingArray: &timing,
+        sampleBufferOut: &out) == noErr else { return nil }
+    return out
+}
+
+/// Re-timestamps a video sample buffer to the current host time (frame-repeat).
+func duplicateVideoBufferWithCurrentTiming(_ sb: CMSampleBuffer) -> CMSampleBuffer? {
+    restampVideoBuffer(sb, pts: CMClockGetTime(CMClockGetHostTimeClock()))
 }
 
 struct BroadcastNetworkHealth: Sendable {

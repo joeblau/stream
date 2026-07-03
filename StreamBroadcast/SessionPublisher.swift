@@ -63,6 +63,10 @@ actor SessionPublisher: Publisher {
     private let appStream: AsyncStream<CMSampleBuffer>
     private let appCont: AsyncStream<CMSampleBuffer>.Continuation
     private var audioConsumers: [Task<Void, Never>] = []
+    private var lastVideoBuffer: CMSampleBuffer?
+    private var lastVideoAppendAt: UInt64 = 0
+    private var lastVideoPTS: CMTime = .negativeInfinity
+    private var frameRepeatTask: Task<Void, Never>?
 
     init(protocol streamProtocol: StreamCore.StreamProtocol) {
         self.transport = streamProtocol
@@ -80,6 +84,30 @@ actor SessionPublisher: Publisher {
             Task { [weak self] in for await sb in mic { await self?.appendMic(sb) } },
             Task { [weak self] in for await sb in app { await self?.appendApp(sb) } }
         ]
+    }
+
+    private func startFrameRepeat() {
+        frameRepeatTask?.cancel()
+        let fps = UInt64(max(1, min(settings.frameRate, 30)))
+        let interval = 1_000_000_000 / fps
+        frameRepeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: interval)
+                await self?.repeatLastFrameIfIdle(interval: interval)
+            }
+        }
+    }
+
+    /// Re-sends the last frame if ReplayKit hasn't delivered one within the target
+    /// interval — a steady fps + keyframe cadence on a static screen.
+    private func repeatLastFrameIfIdle(interval: UInt64) async {
+        guard outputSizeConfigured, isRunning, !isPaused, stream != nil,
+              let last = lastVideoBuffer else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now &- lastVideoAppendAt >= interval else { return }
+        if let dupe = duplicateVideoBufferWithCurrentTiming(last) {
+            await appendVideo(dupe)
+        }
     }
 
     /// WHIP needs Opus; SRT carries AAC.
@@ -100,6 +128,7 @@ actor SessionPublisher: Publisher {
 
         isRunning = true
         startAudioConsumers()
+        startFrameRepeat()
         try await connectAndPublish()
     }
 
@@ -203,9 +232,25 @@ actor SessionPublisher: Publisher {
 
     func appendVideo(_ sb: CMSampleBuffer) async {
         guard outputSizeConfigured, isRunning, !isPaused, stream != nil else { return }
+        lastVideoAppendAt = DispatchTime.now().uptimeNanoseconds
+        lastVideoBuffer = sb
         guard videoAdmission.admit() else { return }
         let duration = CMTime(value: 1, timescale: CMTimeScale(min(max(settings.frameRate, 1), 30)))
-        await mixer.append(timeline.normalize(sb, kind: .video, fallbackDuration: duration))
+        let normalized = timeline.normalize(sb, kind: .video, fallbackDuration: duration)
+        await mixer.append(enforceMonotonicVideo(normalized, minStep: duration))
+    }
+
+    /// See RTMPPublisher.enforceMonotonicVideo — a real frame arriving just after a
+    /// host-clock-stamped repeat must not move the video timeline backwards.
+    private func enforceMonotonicVideo(_ sb: CMSampleBuffer, minStep: CMTime) -> CMSampleBuffer {
+        let pts = sb.presentationTimeStamp
+        if lastVideoPTS.isValid, pts <= lastVideoPTS {
+            let bumped = lastVideoPTS + minStep
+            lastVideoPTS = bumped
+            return restampVideoBuffer(sb, pts: bumped) ?? sb
+        }
+        lastVideoPTS = pts
+        return sb
     }
 
     func appendMic(_ sb: CMSampleBuffer) async {
@@ -258,6 +303,9 @@ actor SessionPublisher: Publisher {
         appCont.finish()
         audioConsumers.forEach { $0.cancel() }
         audioConsumers = []
+        frameRepeatTask?.cancel()
+        frameRepeatTask = nil
+        lastVideoBuffer = nil
         guard isRunning else {
             await mixer.stopRunning()
             return

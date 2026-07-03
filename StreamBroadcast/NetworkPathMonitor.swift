@@ -26,18 +26,26 @@ struct NetworkPathSnapshot: Sendable, Equatable {
 
     init(_ path: NWPath) {
         isSatisfied = path.status == .satisfied
+        let usedType: NWInterface.InterfaceType?
         if path.usesInterfaceType(.wifi) {
-            interface = .wifi
+            interface = .wifi; usedType = .wifi
         } else if path.usesInterfaceType(.cellular) {
-            interface = .cellular
+            interface = .cellular; usedType = .cellular
         } else if path.usesInterfaceType(.wiredEthernet) {
-            interface = .wiredEthernet
+            interface = .wiredEthernet; usedType = .wiredEthernet
         } else if path.status == .satisfied {
-            interface = .other
+            interface = .other; usedType = nil
         } else {
-            interface = .none
+            interface = .none; usedType = nil
         }
-        interfaceName = path.availableInterfaces.first?.name ?? ""
+        // Name of the interface actually CARRYING the path (matching the used
+        // type) — NOT availableInterfaces.first. That list reorders/adds pdp_ip0
+        // when OTHER apps wake the cellular radio, which flipped the identity and
+        // triggered a false Wi-Fi→Wi-Fi "handoff" recycle even though the live
+        // Wi-Fi link never changed.
+        interfaceName = usedType.flatMap { type in
+            path.availableInterfaces.first(where: { $0.type == type })?.name
+        } ?? ""
         isExpensive = path.isExpensive
         isConstrained = path.isConstrained
         isUltraConstrained = path.isUltraConstrained

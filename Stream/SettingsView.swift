@@ -109,15 +109,19 @@ struct SettingsView: View {
                 clearButton(for: \.rtmpURL, label: "Clear URL")
             }
 
-            HStack {
-                SecureField(settings.selectedProtocol.keyFieldLabel, text: Binding(
-                    get: { settings.streamKey },
-                    set: { settings.streamKey = $0; onChange() }
-                ))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
+            // RTMP/RTMPS need a separate stream key; SRT/WHIP embed everything
+            // (streamid, passphrase, token) in the URL query — so just one field.
+            if settings.selectedProtocol.requiresKey {
+                HStack {
+                    SecureField(settings.selectedProtocol.keyFieldLabel, text: Binding(
+                        get: { settings.streamKey },
+                        set: { settings.streamKey = $0; onChange() }
+                    ))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
 
-                clearButton(for: \.streamKey, label: "Clear key")
+                    clearButton(for: \.streamKey, label: "Clear key")
+                }
             }
         } header: {
             Text("Connection")

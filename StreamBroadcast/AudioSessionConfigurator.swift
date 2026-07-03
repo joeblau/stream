@@ -20,18 +20,22 @@ enum AudioSessionConfigurator {
     /// Bluetooth-capable record options, richest first. `.allowBluetoothHFP` is the
     /// iOS 26 replacement for the deprecated `.allowBluetooth`.
     static func bluetoothOptionLadder() -> [AVAudioSession.CategoryOptions] {
+        // .mixWithOthers is in EVERY rung so it is never dropped by ladder
+        // degradation: without it, opening another app that plays audio is more
+        // likely to hard-interrupt the extension's record session (killing the
+        // mic route mid-broadcast). It governs how WE coexist with others; combine
+        // with the interruption recovery below for full resilience.
         #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             return [
                 [.allowBluetoothHFP, .bluetoothHighQualityRecording, .mixWithOthers],
                 [.allowBluetoothHFP, .mixWithOthers],
-                [.allowBluetoothHFP],
-                []
+                [.mixWithOthers]
             ]
         }
-        return [[.allowBluetoothHFP, .mixWithOthers], [.allowBluetoothHFP], []]
+        return [[.allowBluetoothHFP, .mixWithOthers], [.mixWithOthers]]
         #else
-        return [[.allowBluetooth, .mixWithOthers], [.allowBluetooth], []]
+        return [[.allowBluetooth, .mixWithOthers], [.mixWithOthers]]
         #endif
     }
 
