@@ -20,14 +20,40 @@ struct ContentView: View {
 
     @State private var showingSettings = false
 
+    /// The mic gain to restore when the user un-mutes from the FAB. Captured the
+    /// moment they mute so toggling back returns to their chosen level, not unity.
+    @State private var preMuteVolume: Double = 1.0
+
     /// Persists `settings` into the shared App Group suite. Called on every edit.
     private func persist() {
         SettingsStore().save(settings)
     }
 
+    /// A gain at/below this reads as muted — matches the Settings "Muted" label.
+    private var isMicMuted: Bool { settings.micVolume <= 0.0001 }
+
+    /// Toggles the microphone between muted (gain 0) and the last chosen level.
+    /// Persists and posts the live-apply signal so a running broadcast responds
+    /// immediately, exactly like the Settings mic-volume slider does.
+    private func toggleMicMute() {
+        Haptics.tap()
+        if isMicMuted {
+            settings.micVolume = preMuteVolume > 0.0001 ? preMuteVolume : 1.0
+        } else {
+            preMuteVolume = settings.micVolume
+            settings.micVolume = 0
+        }
+        persist()
+        BroadcastControl.post(BroadcastControl.micVolumeSignal)
+    }
+
     var body: some View {
         NavigationStack {
             ChatFeedView(chat: chat)
+                .overlay(alignment: .bottomTrailing) {
+                    if capture.isLive { micFAB }
+                }
+                .animation(.spring(duration: 0.3, bounce: 0.2), value: capture.isLive)
                 .navigationTitle("Stream")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -77,6 +103,26 @@ struct ContentView: View {
         }
         .tint(capture.isLive ? .red : .primary)
         .accessibilityLabel(capture.isLive ? "Stop broadcast" : "Start broadcast")
+    }
+
+    // MARK: - Mute FAB
+
+    /// Floating mic mute/unmute control, pinned to the bottom-trailing corner while
+    /// a broadcast is live. Uses the platform glass so it reads as a control sitting
+    /// above the chat feed; turns red-tinted and swaps to `mic.slash` when muted.
+    private var micFAB: some View {
+        Button(action: toggleMicMute) {
+            Image(systemName: isMicMuted ? "mic.slash.fill" : "mic.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(isMicMuted ? Color.red : Color.primary)
+                .frame(width: 60, height: 60)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .glassEffect(.regular.interactive(), in: .circle)
+        .padding(.trailing, 20)
+        .padding(.bottom, 20)
+        .accessibilityLabel(isMicMuted ? "Unmute microphone" : "Mute microphone")
+        .transition(.scale.combined(with: .opacity))
     }
 
     // MARK: - Setup banner
