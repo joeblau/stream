@@ -30,12 +30,20 @@ actor RTMPPublisher: Publisher {
                                             requestTimeout: 5_000,
                                             qualityOfService: .userInteractive)
     private lazy var stream = RTMPStream(connection: connection)
+    /// Device resolution/fps ceiling (1080p60 on capable hardware, else 720p30),
+    /// computed once. The thermal governor + ABR cap the live rate below it.
+    private let capability = StreamCapability.current
     private lazy var networkController = BroadcastAdaptiveBitRateController(
         maximumBitRate: settings.videoBitrate,
-        frameRate: settings.frameRate
+        frameRate: settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate)
     )
     private var isRunning = false
     private var settings: StreamSettings = .default
+
+    /// The frame rate this device can encode: the user's chosen rate clamped to
+    /// the device capability ceiling. Replaces the old hard `min(frameRate, 30)`
+    /// scattered across the encode/repeat paths.
+    private var encodeFrameRate: Int { settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate) }
     /// The encode dimensions are locked once, from the first screen frame, so the
     /// stream matches the device orientation/aspect. Until set, video is dropped.
     private var outputSizeConfigured = false
@@ -89,7 +97,7 @@ actor RTMPPublisher: Publisher {
 
     private func startFrameRepeat() {
         frameRepeatTask?.cancel()
-        let fps = UInt64(max(1, min(settings.frameRate, 30)))
+        let fps = UInt64(encodeFrameRate)
         let interval = 1_000_000_000 / fps
         frameRepeatTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -728,7 +736,7 @@ actor RTMPPublisher: Publisher {
     /// Idempotent — only the first call takes effect.
     func setOutputSize(_ size: CGSize, nativeShortEdge _: Int) async {
         guard !outputSizeConfigured else { return }
-        let frameRate = min(max(settings.frameRate, 1), 30)
+        let frameRate = encodeFrameRate
         var v = await stream.videoSettings
         v.videoSize = size
         v.scalingMode = .letterbox
@@ -772,7 +780,7 @@ actor RTMPPublisher: Publisher {
         // never dropped) so latency stays bounded instead of the queue growing.
         guard videoAdmission.admit() else { return }
         let duration = CMTime(value: 1,
-                              timescale: CMTimeScale(min(max(settings.frameRate, 1), 30)))
+                              timescale: CMTimeScale(encodeFrameRate))
         let normalized = timeline.normalize(sb, kind: .video, fallbackDuration: duration)
         await mixer.append(enforceMonotonicVideo(normalized, minStep: duration))
     }
@@ -1006,7 +1014,11 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
         minimumVideoBitRate = max(300_000, maximumBitRate / 10)
         targetBitRate = maximumBitRate
         pathCeiling = maximumBitRate
-        let clampedFrameRate = min(max(frameRate, 1), 30)
+        // Clamp only to a sane hardware maximum, NOT 30. The caller already passes
+        // a capability-resolved rate (≤60 on capable devices); keeping the real
+        // value here is what makes the `configuredFrameRate > 30` congestion tier
+        // in `frameInterval` reachable — it was dead code while this pinned to ≤30.
+        let clampedFrameRate = min(max(frameRate, 1), 120)
         configuredFrameRate = clampedFrameRate
         preferredFrameInterval = max(0, (1.0 / Double(clampedFrameRate)) - 0.001)
     }
