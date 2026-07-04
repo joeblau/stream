@@ -19,8 +19,15 @@ final class ScreenCaptureController: NSObject {
     private(set) var isLive = false
     private(set) var errorMessage: String?
     /// A user-facing note when the device's thermal/power state is forcing a
-    /// quality reduction, or nil when unrestricted. Read by the (future) stats HUD.
+    /// quality reduction, or nil when unrestricted. Shown in the live stats HUD.
     private(set) var thermalNotice: String?
+    /// The latest live telemetry snapshot (bitrate / fps / queue health) for the
+    /// stats HUD, or nil when nothing is publishing yet. Polled ~1s while live.
+    private(set) var liveStats: LiveStats?
+    /// When the current broadcast went live, for the elapsed-time display; nil when
+    /// not live. Uptime is ticked in the UI (TimelineView) off this Date, not off
+    /// the encoder's `eventAgeSeconds`, which freezes when the app is backgrounded.
+    private(set) var broadcastStartedAt: Date?
 
     @ObservationIgnored private let picker = SCContentSharingPicker.shared
     @ObservationIgnored private var pendingSettings: StreamSettings?
@@ -32,6 +39,9 @@ final class ScreenCaptureController: NSObject {
     @ObservationIgnored private var micVolumeObserver: DarwinSignalObserver?
     @ObservationIgnored private var lastAppliedCeiling: ThermalPowerCeiling?
     @ObservationIgnored private var thermalApplyTask: Task<Void, Never>?
+    /// ~1s telemetry poll, live only. Cancelled on every teardown path (they all
+    /// funnel through `stopCapture`).
+    @ObservationIgnored private var statsTask: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -96,6 +106,33 @@ final class ScreenCaptureController: NSObject {
         errorMessage = nil
     }
 
+    /// Polls the publisher's telemetry ~1s into `liveStats` for the stats HUD.
+    /// Sleeps AFTER the await so the cadence is (poll latency + 1s), and re-reads
+    /// `publisher` each turn so teardown — which nils it and cancels this task —
+    /// ends the loop cleanly with no stale write (statsSnapshot self-guards to nil).
+    private func startStatsPolling() {
+        statsTask?.cancel()
+        statsTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let snapshot = await self?.publisher?.statsSnapshot()
+                // Re-check after the await: teardown may have cancelled us and
+                // cleared liveStats while this poll was in flight — don't write back.
+                if Task.isCancelled { return }
+                // Write through INCLUDING nil: the publishers return nil during a
+                // reconnect, which must clear the card to its "—" placeholders rather
+                // than freezing on stale last-good telemetry while the stream is down.
+                self?.updateLiveStats(snapshot)
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    /// Assigns the latest telemetry, skipping a redundant write (and the 1 Hz leaf
+    /// re-render it would otherwise trigger) when the snapshot is unchanged.
+    private func updateLiveStats(_ stats: LiveStats?) {
+        if liveStats != stats { liveStats = stats }
+    }
+
     private func makePublisher(for transport: StreamCore.StreamProtocol) -> any Publisher {
         switch transport {
         case .rtmp, .rtmps:
@@ -156,6 +193,9 @@ final class ScreenCaptureController: NSObject {
 
             try await stream.startCapture()
             isLive = true
+            broadcastStartedAt = Date()
+            liveStats = nil
+            startStatsPolling()
             publishState(true)
             lastAppliedCeiling = nil
             applyThermalCeiling()
@@ -186,8 +226,12 @@ final class ScreenCaptureController: NSObject {
         publisherTask = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
+        statsTask?.cancel()
+        statsTask = nil
         isLive = false
         thermalNotice = nil
+        liveStats = nil
+        broadcastStartedAt = nil
         lastAppliedCeiling = nil
         thermalApplyTask = nil
         output?.finish()
@@ -614,6 +658,8 @@ final class ScreenCaptureController {
     private(set) var isLive = false
     private(set) var errorMessage: String?
     private(set) var thermalNotice: String?
+    private(set) var liveStats: LiveStats?
+    private(set) var broadcastStartedAt: Date?
 
     func presentPicker(settings: StreamSettings) {
         errorMessage = "Screen capture requires a physical iOS 27 device."

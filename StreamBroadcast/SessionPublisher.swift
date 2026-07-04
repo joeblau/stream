@@ -30,6 +30,9 @@ protocol Publisher: Actor {
     /// Applies a device thermal / Low-Power ceiling (bitrate scale + fps cap) to
     /// the encoder, composed with the network ceiling by the adaptive controller.
     func setThermalCeiling(bitRateScale: Double, frameRateCap: Int) async
+    /// A snapshot of the live encode/uplink metrics for the stats HUD, or `nil`
+    /// when nothing is being published yet (pre-connect / torn down).
+    func statsSnapshot() async -> LiveStats?
 }
 
 /// Publishes over SRT or WHIP via HaishinKit's protocol-agnostic `StreamSession`
@@ -246,6 +249,18 @@ actor SessionPublisher: Publisher {
             await networkController.storeThermalCeiling(bitRateScale: bitRateScale,
                                                         frameRateCap: frameRateCap)
         }
+    }
+
+    /// Live encode/uplink metrics for the stats HUD. `nil` until a session stream
+    /// exists (pre-connect / mid-reconnect), so the UI shows "connecting…".
+    func statsSnapshot() async -> LiveStats? {
+        guard isRunning, stream != nil else { return nil }
+        let health = await networkController.healthSnapshot()
+        let fps = await networkController.currentFrameRate()
+        return LiveStats(bitRate: health.targetBitRate,
+                         frameRate: fps,
+                         queueBytes: health.queueBytes,
+                         zeroOutputSeconds: health.zeroOutputSeconds)
     }
 
     private func makeVideoSettings(_ current: VideoCodecSettings, size: CGSize? = nil) async -> VideoCodecSettings {
