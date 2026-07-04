@@ -60,7 +60,14 @@ struct ContentView: View {
         .onAppear { broadcast.start() }
         .onDisappear { broadcast.stop() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { broadcast.refresh() }
+            if phase == .active {
+                broadcast.refresh()
+                // If we're back in the app and NOT live, release any keepalive we
+                // asserted proactively for a broadcast that never started (the
+                // user cancelled the picker). A real live broadcast keeps it; if
+                // this races ahead of isLive, the isLive handler restarts it.
+                if !broadcast.isLive { keepAlive.stop() }
+            }
         }
         // Hold a background-audio assertion for the whole broadcast so iOS does
         // not suspend this host app on app-switch (a suspended host makes
@@ -77,7 +84,12 @@ struct ContentView: View {
     /// ReplayKit's native recording control. It presents the system start/stop
     /// sheet and targets this app's broadcast upload extension.
     private var broadcastButton: some View {
-        BroadcastPickerView()
+        // Assert the keepalive the instant the user taps Start (before the
+        // extension reports live), so a very fast app-switch can't suspend the
+        // host in the gap. A cancelled picker is cleaned up on the next
+        // foreground (see scenePhase handler); a real start is confirmed by the
+        // broadcast.isLive handler.
+        BroadcastPickerView(onStartTap: { keepAlive.start() })
             .frame(width: 44, height: 44)
             .accessibilityLabel(broadcast.isLive ? "Stop broadcast" : "Start broadcast")
     }
