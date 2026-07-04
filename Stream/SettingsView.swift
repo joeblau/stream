@@ -57,6 +57,11 @@ struct SettingsView: View {
     /// root view so the connection survives the settings sheet being dismissed.
     var chat: RestreamChat
 
+    /// The live capture controller, so the launcher can show a live stats/uptime
+    /// card while broadcasting. Read-only here; its `@Observable` telemetry drives
+    /// the card's updates.
+    var capture: ScreenCaptureController
+
     /// Called after any field mutation so the parent can persist immediately.
     var onChange: () -> Void
 
@@ -216,6 +221,16 @@ struct SettingsView: View {
 
     private var launcherPane: some View {
         List {
+            // Live stats/uptime card, shown atop the launcher only while broadcasting.
+            // A fixed-height leaf subview so its ~1s telemetry ticks never re-measure
+            // the launcher and spring the drawer height (see LiveStatsCard).
+            if capture.isLive {
+                Section {
+                    LiveStatsCard(capture: capture)
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            }
             Section {
                 ForEach(SettingsSection.allCases) { section in
                     Button { open(section) } label: {
@@ -1003,9 +1018,97 @@ private final class MicrophoneLevelMonitor {
     }
 }
 
+/// The live stats/uptime card shown atop the settings launcher while broadcasting.
+/// A leaf view so its ~1s telemetry ticks invalidate only this subtree (not the
+/// whole launcher List), and every value is monospaced + single-line so the card's
+/// height is invariant per tick — the content-sized drawer detent never springs on
+/// a number change (only an occasional thermal-notice appearance resizes it).
+private struct LiveStatsCard: View {
+    var capture: ScreenCaptureController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            metricsRow
+            if let notice = capture.thermalNotice {
+                Label(notice, systemImage: "thermometer.medium")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    /// Red LIVE marker + the elapsed timer. The clock ticks inside its own
+    /// `TimelineView` off `broadcastStartedAt` (a Date), so it survives backgrounding
+    /// and invalidates only this line.
+    private var header: some View {
+        HStack(spacing: 8) {
+            Circle().fill(.red).frame(width: 8, height: 8)
+            Text("LIVE")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.red)
+            Spacer()
+            if let start = capture.broadcastStartedAt {
+                TimelineView(.periodic(from: start, by: 1)) { context in
+                    Text(LiveStats.uptimeLabel(seconds: Int(context.date.timeIntervalSince(start))))
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                }
+            }
+        }
+    }
+
+    /// Bitrate (ABR target) · effective fps · uplink health. Values are the
+    /// encoder's applied targets, not measured throughput (measured fps needs M8).
+    private var metricsRow: some View {
+        HStack(spacing: 0) {
+            metric("Bitrate", value: capture.liveStats?.bitRateLabel ?? "—")
+            divider
+            metric("FPS", value: capture.liveStats.map { "\($0.frameRate)" } ?? "—")
+            divider
+            metric("Uplink", value: capture.liveStats?.linkHealth.label ?? "—", tint: uplinkTint)
+        }
+    }
+
+    private var divider: some View { Divider().frame(height: 26) }
+
+    private var uplinkTint: Color {
+        switch capture.liveStats?.linkHealth {
+        case .good:      return .green
+        case .fair:      return .yellow
+        case .congested: return .red
+        case .none:      return .secondary
+        }
+    }
+
+    private func metric(_ label: String, value: String, tint: Color = .primary) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.callout.weight(.semibold).monospacedDigit())
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        // One element per metric read as "Bitrate: 2.4 Mbps", not the raw
+        // value-then-label order the VStack would otherwise expose.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
+    }
+}
+
 #Preview {
     @Previewable @State var settings = StreamSettings.default
     return NavigationStack {
-        SettingsView(settings: $settings, chat: RestreamChat(), onChange: {})
+        SettingsView(settings: $settings, chat: RestreamChat(),
+                     capture: ScreenCaptureController(), onChange: {})
     }
 }

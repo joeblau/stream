@@ -58,6 +58,9 @@ struct ContentView: View {
                 .overlay(alignment: .bottomTrailing) {
                     if capture.isLive { micFAB }
                 }
+                .overlay(alignment: .top) {
+                    if capture.isLive { livePill }
+                }
                 .animation(.spring(duration: 0.3, bounce: 0.2), value: capture.isLive)
                 .navigationTitle("Stream")
                 .navigationBarTitleDisplayMode(.inline)
@@ -143,6 +146,39 @@ struct ContentView: View {
         .transition(.scale.combined(with: .opacity))
     }
 
+    // MARK: - Live pill
+
+    /// Persistent LIVE indicator + elapsed timer, pinned to the top while a broadcast
+    /// is live. A glass capsule matching the micFAB; the timer ticks in its own
+    /// `TimelineView` off `broadcastStartedAt` (a Date) so it keeps counting across
+    /// backgrounding and only the label — not the whole feed — refreshes each second.
+    private var livePill: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(.red)
+                .frame(width: 8, height: 8)
+            Text("LIVE")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.red)
+            if let start = capture.broadcastStartedAt {
+                TimelineView(.periodic(from: start, by: 1)) { context in
+                    Text(LiveStats.uptimeLabel(seconds: Int(context.date.timeIntervalSince(start))))
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .glassEffect(.regular, in: .capsule)
+        .padding(.top, 8)
+        .transition(.scale.combined(with: .opacity))
+        // Purely informational: never intercept taps/scroll on the chat beneath it.
+        .allowsHitTesting(false)
+        // Combine into one element but keep the elapsed time in the label (a static
+        // override would drop it) — VoiceOver reads e.g. "LIVE, 12:34".
+        .accessibilityElement(children: .combine)
+    }
+
     // MARK: - Setup banner
 
     /// Slim call-to-action shown when the connection isn't ready to publish. Tapping
@@ -188,7 +224,7 @@ struct ContentView: View {
     /// the sheet to the exact height of whatever content is on screen (measured
     /// from the scroll view's real content size), resizing as sections are pushed.
     private var settingsSheet: some View {
-        SettingsView(settings: $settings, chat: chat, onChange: persist)
+        SettingsView(settings: $settings, chat: chat, capture: capture, onChange: persist)
     }
 }
 

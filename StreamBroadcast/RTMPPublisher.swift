@@ -768,6 +768,19 @@ actor RTMPPublisher: Publisher {
                                                   applyingTo: stream)
     }
 
+    /// Live encode/uplink metrics for the stats HUD. `nil` until the stream is
+    /// actually attached and has published, so the UI shows "connecting…" rather
+    /// than stale zeros during the initial connect/reconnect windows.
+    func statsSnapshot() async -> LiveStats? {
+        guard isRunning, streamAttached else { return nil }
+        let health = await networkController.healthSnapshot()
+        let fps = await networkController.currentFrameRate()
+        return LiveStats(bitRate: health.targetBitRate,
+                         frameRate: fps,
+                         queueBytes: health.queueBytes,
+                         zeroOutputSeconds: health.zeroOutputSeconds)
+    }
+
     /// Appends a (raw or composited) screen video buffer. Dropped until the output
     /// size is locked, so the encoder never starts at the wrong dimensions.
     func appendVideo(_ sb: CMSampleBuffer) async {
@@ -1183,6 +1196,17 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     }
 
     func currentFrameInterval() -> Double { frameInterval(severe: false) }
+
+    /// The effective encode frame rate the ABR is currently targeting (fps), folding
+    /// in the same congestion + thermal caps as `frameInterval()` (most-restrictive
+    /// wins). Used by the live stats HUD; not a measured output rate (measured fps
+    /// needs M8). Mirrors `frameInterval`'s steady-state branches directly rather
+    /// than lossily inverting the interval Double.
+    func currentFrameRate() -> Int {
+        let congestionFps = (congestionActive && configuredFrameRate > 30) ? 30 : configuredFrameRate
+        let thermalFps = max(1, min(configuredFrameRate, thermalFrameRateCap))
+        return min(congestionFps, thermalFps)
+    }
 
     /// Applies the current (possibly thermally-clamped) target + frame interval to
     /// a freshly-connected stream. SRT/WHIP emit no `.reset` event, so the
