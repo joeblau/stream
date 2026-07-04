@@ -75,6 +75,22 @@ import StreamCore
         #expect(size.height == 1280)
     }
 
+    @Test("Zero-dimension fallback honors a 1080 ceiling (true 1080×1920 canvas)")
+    func zeroFallbackAt1080Ceiling() {
+        let size = settings(videoQuality: 1080).encodeSize(forOrientedWidth: 0, height: 0, maxShortEdge: 1080)
+        #expect(size.width == 1080)
+        #expect(size.height == 1920)
+    }
+
+    @Test("Zero-dimension fallback still clamps to the device ceiling")
+    func zeroFallbackClampsToCeiling() {
+        // A 1080p pick on a 720-ceiling device must fall back to 720×1280, proving
+        // the ceiling clamps the fallback branch too (not just the scaled path).
+        let size = settings(videoQuality: 1080).encodeSize(forOrientedWidth: 0, height: 0, maxShortEdge: 720)
+        #expect(size.width == 720)
+        #expect(size.height == 1280)
+    }
+
     @Test("Aspect ratio is preserved within a pixel of rounding")
     func preservesAspectRatio() {
         let size = settings().encodeSize(forOrientedWidth: 1170, height: 2532, maxShortEdge: 1080)
@@ -149,6 +165,14 @@ import StreamCore
     func lowCoreCountGatesFrameRate() {
         // Ample memory but a fictional low core count: 1080p allowed, 60 fps not.
         let cap = StreamCapability.device(processorCount: 4, physicalMemory: 8_000_000_000)
+        #expect(cap.maxShortEdge == 1080)
+        #expect(cap.maxFrameRate == 30)
+    }
+
+    @Test("The core-count boundary sits exactly at 6 (5 cores + ample RAM → 30 fps)")
+    func coreCountBoundaryPinnedAtSix() {
+        // Pins the >= 6 gate to the exact edge so a regression to >= 5 is caught.
+        let cap = StreamCapability.device(processorCount: 5, physicalMemory: 8_000_000_000)
         #expect(cap.maxShortEdge == 1080)
         #expect(cap.maxFrameRate == 30)
     }

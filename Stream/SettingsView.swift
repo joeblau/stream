@@ -325,7 +325,13 @@ struct SettingsView: View {
                 ? "\(settings.selectedProtocol.displayName) · \(settings.isSecure ? "Secure" : "Unencrypted")"
                 : "\(settings.selectedProtocol.displayName) · Not configured"
         case .video:
-            return "\(settings.videoQuality)p · \(bitrateLabel(settings.videoBitrate)) · \(settings.frameRate) fps"
+            // Show the EFFECTIVE (device-capped) values, matching the Quality and
+            // Frame Rate pickers — so the collapsed row never over-promises a
+            // resolution/fps the device won't actually stream (e.g. a settings blob
+            // restored from a more capable phone).
+            let quality = min(settings.videoQuality, capability.maxShortEdge)
+            let fps = min(settings.frameRate, capability.maxFrameRate)
+            return "\(quality)p · \(bitrateLabel(settings.videoBitrate)) · \(fps) fps"
         case .backup:
             return "Off"
         case .audio:
