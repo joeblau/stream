@@ -17,6 +17,9 @@ struct ContentView: View {
     /// stop signal to it.
     @State private var broadcast = BroadcastMonitor()
 
+    /// Holds the host app's background-audio assertion while a broadcast is live.
+    @State private var keepAlive = BroadcastKeepAlive()
+
     /// Restream unified-chat controller, shared by the main feed and the Settings
     /// sheet's chat section so both observe one connection.
     @State private var chat = RestreamChat()
@@ -58,6 +61,14 @@ struct ContentView: View {
         .onDisappear { broadcast.stop() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { broadcast.refresh() }
+        }
+        // Hold a background-audio assertion for the whole broadcast so iOS does
+        // not suspend this host app on app-switch (a suspended host makes
+        // CoreMedia stop the tied broadcast session, freezing the extension).
+        // Fires while foreground — the instant the extension reports live — so
+        // the session is active before the user can switch away.
+        .onChange(of: broadcast.isLive) { _, live in
+            if live { keepAlive.start() } else { keepAlive.stop() }
         }
     }
 
