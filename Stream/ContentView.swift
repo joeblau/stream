@@ -20,6 +20,11 @@ struct ContentView: View {
 
     @State private var showingSettings = false
 
+    /// Gates the "Stop Broadcast" confirmation. A live stream is easy to kill by a
+    /// stray tap on the toolbar's stop button, so tapping it while live asks first
+    /// instead of tearing the broadcast down immediately.
+    @State private var showingStopConfirmation = false
+
     /// The mic gain to restore when the user un-mutes from the FAB. Captured the
     /// moment they mute so toggling back returns to their chosen level, not unity.
     @State private var preMuteVolume: Double = 1.0
@@ -76,6 +81,19 @@ struct ContentView: View {
                 .sheet(isPresented: $showingSettings) { settingsSheet }
         }
         .task { chat.autoConnect() }
+        .confirmationDialog(
+            "Stop the broadcast?",
+            isPresented: $showingStopConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Stop Broadcast", role: .destructive) {
+                Haptics.tap()
+                capture.stop()
+            }
+            Button("Keep Streaming", role: .cancel) { }
+        } message: {
+            Text("You're live. Stopping ends the stream for everyone watching.")
+        }
         .alert("Screen Capture", isPresented: Binding(
             get: { capture.errorMessage != nil },
             set: { if !$0 { capture.clearError() } }
@@ -93,7 +111,7 @@ struct ContentView: View {
         Button {
             Haptics.tap()
             if capture.isLive {
-                capture.stop()
+                showingStopConfirmation = true
             } else {
                 persist()
                 capture.presentPicker(settings: settings)
