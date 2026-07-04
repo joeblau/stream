@@ -44,6 +44,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamCore
         GENERATE_INFOPLIST_FILE: YES
+        # Pure Foundation/Security logic with no iOS-26/27 APIs. A low, stable
+        # floor decouples this framework and its tests from the app's iOS 27
+        # requirement, so CI can build and run the suite on whatever iOS
+        # simulator the runner ships — not only an (unavailable) iOS 27 sim.
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
       configs:
         # Lets StreamCoreTests use `@testable import StreamCore` to pin internal
         # cross-process contracts (e.g. the per-protocol Keychain account keys).
@@ -61,6 +66,8 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+        # Match StreamCore's low floor so the suite runs on any iOS simulator.
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
     dependencies:
       - target: StreamCore
 
@@ -143,3 +150,19 @@ schemes:
         - StreamCoreTests
     archive:
       config: Release
+
+  # ---------------------------------------------------------------
+  # Tests-only scheme for CI. Builds just StreamCore + StreamCoreTests
+  # (pure logic; no HaishinKit / ScreenCaptureKit), so it compiles on
+  # GitHub runners that ship only the iOS 26 SDK. The full app target
+  # needs the iOS 27 SDK (Xcode 27) and is verified on a physical
+  # device — ScreenCaptureKit is device-only regardless.
+  # ---------------------------------------------------------------
+  StreamCoreTests:
+    build:
+      targets:
+        StreamCoreTests: [test, build]
+    test:
+      config: Debug
+      targets:
+        - StreamCoreTests
