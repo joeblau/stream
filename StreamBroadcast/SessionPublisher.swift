@@ -27,6 +27,9 @@ protocol Publisher: Actor {
     nonisolated func enqueueMic(_ sb: CMSampleBuffer)
     nonisolated func enqueueApp(_ sb: CMSampleBuffer)
     func setMicVolume(_ volume: Double) async
+    /// Applies a device thermal / Low-Power ceiling (bitrate scale + fps cap) to
+    /// the encoder, composed with the network ceiling by the adaptive controller.
+    func setThermalCeiling(bitRateScale: Double, frameRateCap: Int) async
 }
 
 /// Publishes over SRT or WHIP via HaishinKit's protocol-agnostic `StreamSession`
@@ -162,13 +165,18 @@ actor SessionPublisher: Publisher {
         // Re-apply the locked encoder size to the fresh stream (across reconnects).
         if let outputSize {
             try? await stream.setVideoSettings(
-                makeVideoSettings(await stream.videoSettings, size: outputSize)
+                await makeVideoSettings(await stream.videoSettings, size: outputSize)
             )
         }
 
         await mixer.addOutput(stream)
         self.session = session
         self.stream = stream
+
+        // Land any thermal ceiling stored before the stream existed. SRT/WHIP emit
+        // no `.reset` event, so no adaptive event would otherwise apply a hot-at-
+        // go-live ceiling to this fresh encoder until congestion or a state change.
+        await networkController.applyCurrentTarget(to: stream)
 
         try await session.connect { [weak self] in
             guard let self else { return }
@@ -214,20 +222,36 @@ actor SessionPublisher: Publisher {
         outputSizeConfigured = true
         guard let stream else { return }
         do {
-            try await stream.setVideoSettings(makeVideoSettings(await stream.videoSettings, size: size))
+            try await stream.setVideoSettings(await makeVideoSettings(await stream.videoSettings, size: size))
         } catch {
             sessionLog.error("Video encoder configuration failed: \(String(describing: error), privacy: .public)")
         }
     }
 
-    private func makeVideoSettings(_ current: VideoCodecSettings, size: CGSize? = nil) -> VideoCodecSettings {
+    func setThermalCeiling(bitRateScale: Double, frameRateCap: Int) async {
+        // Apply immediately when connected; otherwise store the ceiling so the
+        // first adaptive event after connect (the `.reset`) picks it up.
+        if let stream {
+            await networkController.setThermalCeiling(bitRateScale: bitRateScale,
+                                                      frameRateCap: frameRateCap,
+                                                      applyingTo: stream)
+        } else {
+            await networkController.storeThermalCeiling(bitRateScale: bitRateScale,
+                                                        frameRateCap: frameRateCap)
+        }
+    }
+
+    private func makeVideoSettings(_ current: VideoCodecSettings, size: CGSize? = nil) async -> VideoCodecSettings {
         let frameRate = min(max(settings.frameRate, 1), 30)
         var v = current
         if let size { v.videoSize = size }
         v.scalingMode = .letterbox
-        v.bitRate = settings.videoBitrate
+        // Seed from the adaptive controller's current target + frame interval so a
+        // path or thermal ceiling learned before this (re)configuration is honored
+        // immediately, instead of starting the fresh encoder at the full rate.
+        v.bitRate = min(settings.videoBitrate, await networkController.currentTargetBitRate())
         v.expectedFrameRate = Double(frameRate)
-        v.frameInterval = max(0, (1.0 / Double(frameRate)) - 0.001)
+        v.frameInterval = await networkController.currentFrameInterval()
         v.maxKeyFrameIntervalDuration = 2
         v.bitRateMode = .average
         v.profileLevel = kVTProfileLevel_H264_Main_AutoLevel as String
