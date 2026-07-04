@@ -75,31 +75,18 @@ final class AudioInputProvider {
 
     private func configureAndEnumerate() {
         let session = AVAudioSession.sharedInstance()
-        // Never ACTIVATE a second .playAndRecord session while a broadcast is
-        // live — activation can interrupt the extension's session and steal the
-        // Bluetooth HFP route mid-stream. Setting the category alone (without
-        // setActive) is enough to surface BT ports in availableInputs, so the
-        // picker still works while live. (isLive has heartbeat granularity, so
-        // a broadcast started milliseconds ago may enumerate the old way once —
-        // an accepted trade-off versus stealing the extension's route.)
-        guard !BroadcastStateStore.isLive() else {
-            for options in Self.bluetoothOptionLadder() {
-                do {
-                    try session.setCategory(.playAndRecord, mode: .default, options: options)
-                    break
-                } catch {
-                    continue
-                }
+        // Setting the category is sufficient to enumerate Bluetooth inputs. Do
+        // not activate merely for enumeration; activation is asynchronous on
+        // iOS 27 and can disturb ScreenCaptureKit's microphone session.
+        for options in Self.bluetoothOptionLadder() {
+            do {
+                try session.setCategory(.playAndRecord, mode: .default, options: options)
+                break
+            } catch {
+                continue
             }
-            enumerate(from: session)
-            return
         }
-        Self.activateBluetoothRecording(session)
         enumerate(from: session)
-        // Enumeration captured — release the route immediately. Holding an
-        // activated record session for the app's entire lifetime competed with
-        // the extension's session across broadcast restarts.
-        try? session.setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     private func enumerate(from session: AVAudioSession) {
@@ -121,11 +108,11 @@ final class AudioInputProvider {
     /// mics weren't selectable). Tries the richest Bluetooth option set first and
     /// degrades, so one unsupported option never blocks enumeration.
     @discardableResult
-    static func activateBluetoothRecording(_ session: AVAudioSession) -> Bool {
+    static func activateBluetoothRecording(_ session: AVAudioSession) async -> Bool {
         for options in bluetoothOptionLadder() {
             do {
                 try session.setCategory(.playAndRecord, mode: .default, options: options)
-                try session.setActive(true)
+                try await session.activate(options: [])
                 return true
             } catch {
                 continue

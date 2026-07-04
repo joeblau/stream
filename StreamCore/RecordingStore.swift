@@ -1,7 +1,7 @@
 import Foundation
 
-/// Shared access to the local HD backup recordings that the broadcast extension
-/// writes into the App Group container and the app later imports into Photos.
+/// Access to legacy local HD backup recordings in the App Group container so the
+/// app can still import files created by earlier versions.
 ///
 /// The extension and the app are separate processes that never run at the same
 /// time in normal use (you leave the app to broadcast, then return). They

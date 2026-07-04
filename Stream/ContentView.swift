@@ -1,32 +1,24 @@
 import SwiftUI
-import UIKit
 import StreamCore
 
 /// Root view. The main page shows the live chat feed; the toolbar carries a "Live"
-/// recording button (top right) that starts/stops the broadcast and a gear button that
+/// recording button (top right) that starts/stops capture and a gear button that
 /// presents every setting — connection, video, backup, audio, and chat — in a
 /// sheet. Settings are owned here and threaded into `SettingsView`; every edit is
-/// persisted via `SettingsStore` so the broadcast extension can read the latest
-/// snapshot the instant the user goes live.
+/// persisted via `SettingsStore` before ScreenCaptureKit starts the stream.
 struct ContentView: View {
     /// The single source of truth for the editable settings, loaded from the
     /// shared App Group suite on launch.
     @State private var settings: StreamSettings = SettingsStore().load()
 
-    /// Reflects whether the broadcast extension is live, and carries the app's
-    /// stop signal to it.
-    @State private var broadcast = BroadcastMonitor()
-
-    /// Holds the host app's background-audio assertion while a broadcast is live.
-    @State private var keepAlive = BroadcastKeepAlive()
+    /// Owns ScreenCaptureKit selection/capture and the network publisher.
+    @State private var capture = ScreenCaptureController()
 
     /// Restream unified-chat controller, shared by the main feed and the Settings
     /// sheet's chat section so both observe one connection.
     @State private var chat = RestreamChat()
 
     @State private var showingSettings = false
-
-    @Environment(\.scenePhase) private var scenePhase
 
     /// Persists `settings` into the shared App Group suite. Called on every edit.
     private func persist() {
@@ -41,6 +33,7 @@ struct ContentView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
+                            Haptics.tap()
                             showingSettings = true
                         } label: {
                             Image(systemName: "gearshape")
@@ -50,48 +43,40 @@ struct ContentView: View {
                     ToolbarItem(placement: .topBarTrailing) { broadcastButton }
                 }
                 .safeAreaInset(edge: .bottom) {
-                    if !settings.isPublishable && !broadcast.isLive {
+                    if !settings.isPublishable && !capture.isLive {
                         setupBanner
                     }
                 }
                 .sheet(isPresented: $showingSettings) { settingsSheet }
         }
         .task { chat.autoConnect() }
-        .onAppear { broadcast.start() }
-        .onDisappear { broadcast.stop() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                broadcast.refresh()
-                // If we're back in the app and NOT live, release any keepalive we
-                // asserted proactively for a broadcast that never started (the
-                // user cancelled the picker). A real live broadcast keeps it; if
-                // this races ahead of isLive, the isLive handler restarts it.
-                if !broadcast.isLive { keepAlive.stop() }
-            }
-        }
-        // Hold a background-audio assertion for the whole broadcast so iOS does
-        // not suspend this host app on app-switch (a suspended host makes
-        // CoreMedia stop the tied broadcast session, freezing the extension).
-        // Fires while foreground — the instant the extension reports live — so
-        // the session is active before the user can switch away.
-        .onChange(of: broadcast.isLive) { _, live in
-            if live { keepAlive.start() } else { keepAlive.stop() }
+        .alert("Screen Capture", isPresented: Binding(
+            get: { capture.errorMessage != nil },
+            set: { if !$0 { capture.clearError() } }
+        )) {
+            Button("OK") { Haptics.tap(); capture.clearError() }
+        } message: {
+            Text(capture.errorMessage ?? "Screen capture failed.")
         }
     }
 
     // MARK: - Broadcast control
 
-    /// ReplayKit's native recording control. It presents the system start/stop
-    /// sheet and targets this app's broadcast upload extension.
+    /// A normal toolbar button backed by ScreenCaptureKit's system content picker.
     private var broadcastButton: some View {
-        // Assert the keepalive the instant the user taps Start (before the
-        // extension reports live), so a very fast app-switch can't suspend the
-        // host in the gap. A cancelled picker is cleaned up on the next
-        // foreground (see scenePhase handler); a real start is confirmed by the
-        // broadcast.isLive handler.
-        BroadcastPickerView(onStartTap: { keepAlive.start() })
-            .frame(width: 44, height: 44)
-            .accessibilityLabel(broadcast.isLive ? "Stop broadcast" : "Start broadcast")
+        Button {
+            Haptics.tap()
+            if capture.isLive {
+                capture.stop()
+            } else {
+                persist()
+                capture.presentPicker(settings: settings)
+            }
+        } label: {
+            Image(systemName: capture.isLive ? "stop.circle" : "record.circle")
+        }
+        .tint(capture.isLive ? .red : .primary)
+        .accessibilityLabel(capture.isLive ? "Stop broadcast" : "Start broadcast")
     }
 
     // MARK: - Setup banner
@@ -100,6 +85,7 @@ struct ContentView: View {
     /// it opens the settings sheet at the connection fields.
     private var setupBanner: some View {
         Button {
+            Haptics.tap()
             showingSettings = true
         } label: {
             HStack(spacing: 8) {
@@ -134,17 +120,11 @@ struct ContentView: View {
 
     // MARK: - Settings sheet
 
+    /// One Vaul-style drawer. `SettingsView` owns the navigation stack and sizes
+    /// the sheet to the exact height of whatever content is on screen (measured
+    /// from the scroll view's real content size), resizing as sections are pushed.
     private var settingsSheet: some View {
-        NavigationStack {
-            SettingsView(settings: $settings, chat: chat, onChange: persist)
-                .navigationTitle("Settings")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { showingSettings = false }
-                    }
-                }
-        }
+        SettingsView(settings: $settings, chat: chat, onChange: persist)
     }
 }
 

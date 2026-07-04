@@ -5,7 +5,7 @@ import CoreMedia
 import Network          // NWPathMonitor drives proactive Wi-Fi <-> 5G handoff
 import VideoToolbox
 import StreamCore
-import os                // filterable diagnostics for the opaque broadcast extension
+import os
 
 /// Connection, congestion, and recovery diagnostics. Filter with:
 /// subsystem:com.joeblau.Stream category:rtmp
@@ -13,7 +13,7 @@ private let streamLog = Logger(subsystem: "com.joeblau.Stream", category: "rtmp"
 
 /// Actor wrapping the HaishinKit pipeline: a `MediaMixer` in manual capture mode
 /// wired to an `RTMPStream` over an `RTMPConnection`. All HaishinKit access is
-/// serialized through this actor; the `SampleHandler` dispatches each buffer in.
+/// serialized through this actor; `ScreenCaptureController` dispatches each buffer in.
 ///
 /// rtmps:// URLs auto-negotiate TLS on port 443; rtmp:// uses 1935 — the scheme
 /// alone drives the decision, no extra flag required.
@@ -50,7 +50,7 @@ actor RTMPPublisher: Publisher {
     /// (HaishinKit's send queue is otherwise unbounded). Refreshed by checkNetworkHealth.
     private let videoAdmission = VideoFrameAdmission()
 
-    // Ordered, lossless audio ingress: ReplayKit yields synchronously (FIFO), a
+    // Ordered, lossless audio ingress: ScreenCaptureKit yields synchronously, a
     // single consumer per track awaits each append — preserving PTS order so
     // HaishinKit's ring buffer never silence-fills or swaps out-of-order PCM.
     private let micStream: AsyncStream<CMSampleBuffer>
@@ -59,8 +59,8 @@ actor RTMPPublisher: Publisher {
     private let appCont: AsyncStream<CMSampleBuffer>.Continuation
     private var audioConsumers: [Task<Void, Never>] = []
 
-    // Frame-repeat: ReplayKit only delivers on screen CHANGE, so a static screen
-    // stalls at ~1 fps and the keyframe cadence drifts. Re-send the last frame at
+    // Frame-repeat: screen capture may emit no complete frame for static content,
+    // so the observed rate stalls and keyframe cadence drifts. Re-send the frame at
     // the target rate to hold a steady fps + regular keyframes (unchanged content
     // encodes to near-zero bytes).
     private var lastVideoBuffer: CMSampleBuffer?
@@ -99,7 +99,7 @@ actor RTMPPublisher: Publisher {
         }
     }
 
-    /// Re-sends the last frame if ReplayKit hasn't delivered one within the target
+    /// Re-sends the last frame if capture hasn't delivered one within the target
     /// interval — holding a steady fps and keyframe cadence on a static screen.
     private func repeatLastFrameIfIdle(interval: UInt64) async {
         guard outputSizeConfigured, isRunning, !isPaused, streamAttached,
@@ -154,8 +154,8 @@ actor RTMPPublisher: Publisher {
         try await stream.setAudioSettings(a)
         await applyAudioMixerSettings()
 
-        // Latest-only raw video buffering is mandatory inside the extension's
-        // tight jetsam budget. Admission is also bounded in SampleHandler.
+        // Latest-only raw video buffering keeps memory bounded under sustained
+        // capture. Admission is also bounded in the capture output.
         var vm = await mixer.videoMixerSettings
         vm.mode = .passthrough
         await mixer.setVideoMixerSettings(vm)
@@ -165,12 +165,12 @@ actor RTMPPublisher: Publisher {
         await mixer.startRunning()
 
         if settings.backupEnabled {
-            streamLog.warning("Local backup disabled: a second video encoder is unsafe in the ReplayKit extension memory budget")
+            streamLog.warning("Local backup disabled: a second real-time video encoder is not enabled")
         }
 
         // A broadcast is user-owned, not network-owned. Initial DNS, TLS, RTMP,
         // and publish failures therefore retry just like a mid-stream drop instead
-        // of calling finishBroadcastWithError and ending ReplayKit.
+        // of ending the user-owned capture session.
         isRunning = true
         startAudioConsumers()
         startFrameRepeat()
@@ -627,7 +627,7 @@ actor RTMPPublisher: Publisher {
             await requestRecovery(reason: "publisher state is not publishing")
             return
         }
-        // No queue-health conclusion can be drawn while ReplayKit is paused or
+        // No queue-health conclusion can be drawn while capture is paused or
         // the device is showing static content and no recent samples arrived.
         // Reset the stall streak too — a gap in these ticks is not a stall.
         guard !isPaused else { stalledTicks = 0; return }
@@ -718,7 +718,7 @@ actor RTMPPublisher: Publisher {
         // `!streamAttached` covers a path loss during the pause that detached
         // the mixer output while the TCP session itself survived.
         if !isConnected || publishState != .publishing || !streamAttached {
-            await requestRecovery(reason: "ReplayKit resumed without an active publisher")
+            await requestRecovery(reason: "Capture resumed without an active publisher")
         }
     }
 
@@ -771,7 +771,7 @@ actor RTMPPublisher: Publisher {
         await mixer.append(enforceMonotonicVideo(normalized, minStep: duration))
     }
 
-    /// Frame-repeat dupes are stamped at host-`now`, but a real ReplayKit frame
+    /// Frame-repeat dupes are stamped at host-`now`, but a real capture frame
     /// carries its slightly-earlier capture PTS — so a real frame arriving just
     /// after a repeat would move the video timeline BACKWARDS, which some RTMP
     /// muxers/ingests reject (a wrapped ~49-day timestamp jump) and drop the
@@ -795,7 +795,7 @@ actor RTMPPublisher: Publisher {
         lastMicAppendAt = now
         if micTrackStalled {
             // The mic route came back: hand the mix clock straight back to it.
-            // Mic samples share ReplayKit's host clock with the still-continuous
+            // Mic samples share the capture host clock with the still-continuous
             // video/app timeline, so no discontinuity rebase is needed (or safe).
             micTrackStalled = false
             await applyAudioMixerSettings()

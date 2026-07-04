@@ -57,8 +57,8 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         session.beginConfiguration()
         session.sessionPreset = .vga640x480
 
-        // REQUIRED for the camera to run inside a broadcast extension: the
-        // extension is not the foreground app, so without this the session is
+        // Required for the camera to continue after the app backgrounds: without
+        // multitasking camera access the session is
         // interrupted with .videoDeviceNotAvailableWithMultipleForegroundApps and
         // delivers no frames. Settable only where supported (iPad Pro/Air and other
         // multitasking-camera devices; most iPhones report false — there the

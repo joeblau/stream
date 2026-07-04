@@ -10,7 +10,7 @@ import os
 
 private let sessionLog = Logger(subsystem: "com.joeblau.Stream", category: "session")
 
-/// The broadcast-facing publisher surface, so `SampleHandler` can drive either the
+/// The publisher surface, so `ScreenCaptureController` can drive either the
 /// dedicated `RTMPPublisher` or the unified-transport `SessionPublisher` behind one
 /// type. Both are actors sharing the same encode pipeline (mixer, ABR, timeline
 /// normalizer, frame admission).
@@ -21,7 +21,7 @@ protocol Publisher: Actor {
     func resume() async
     func setOutputSize(_ size: CGSize, nativeShortEdge: Int) async
     func appendVideo(_ sb: CMSampleBuffer) async
-    /// Audio is enqueued SYNCHRONOUSLY (thread-safe, FIFO) from ReplayKit's serial
+    /// Audio is enqueued synchronously (thread-safe, FIFO) from the capture serial
     /// callback and drained by a single ordered consumer — NOT one Task per buffer,
     /// which reorders mic PTS and makes HaishinKit's ring buffer chop the audio.
     nonisolated func enqueueMic(_ sb: CMSampleBuffer)
@@ -34,8 +34,8 @@ protocol Publisher: Actor {
 /// pipeline is identical to the RTMP path; only the transport differs.
 ///
 /// WHIP note: WebRTC (libdatachannel + DTLS/ICE/SRTP) adds real memory to the
-/// ~50MB broadcast-extension budget — treat WHIP as EXPERIMENTAL and validate the
-/// footprint on device against a real endpoint.
+/// publishing overhead — treat WHIP as experimental and validate its footprint
+/// on device against a real endpoint.
 actor SessionPublisher: Publisher {
     private let transport: StreamCore.StreamProtocol
     private let mixer = MediaMixer(captureSessionMode: .manual,
@@ -50,13 +50,14 @@ actor SessionPublisher: Publisher {
     private var isRunning = false
     private var isPaused = false
     private var outputSizeConfigured = false
+    private var outputSize: CGSize?
     private var userInitiatedStop = false
     private var reconnectTask: Task<Void, Never>?
 
     private var timeline = MediaTimelineNormalizer()
     private let videoAdmission = VideoFrameAdmission()
 
-    // Ordered, lossless audio ingress: ReplayKit yields synchronously (FIFO), a
+    // Ordered, lossless audio ingress: ScreenCaptureKit yields synchronously, a
     // single consumer per track awaits each append — preserving PTS order.
     private let micStream: AsyncStream<CMSampleBuffer>
     private let micCont: AsyncStream<CMSampleBuffer>.Continuation
@@ -98,7 +99,7 @@ actor SessionPublisher: Publisher {
         }
     }
 
-    /// Re-sends the last frame if ReplayKit hasn't delivered one within the target
+    /// Re-sends the last frame if capture hasn't delivered one within the target
     /// interval — a steady fps + keyframe cadence on a static screen.
     private func repeatLastFrameIfIdle(interval: UInt64) async {
         guard outputSizeConfigured, isRunning, !isPaused, stream != nil,
@@ -159,8 +160,10 @@ actor SessionPublisher: Publisher {
         await stream.setBitRateStrategy(networkController)
 
         // Re-apply the locked encoder size to the fresh stream (across reconnects).
-        if outputSizeConfigured {
-            try? await stream.setVideoSettings(makeVideoSettings(await stream.videoSettings))
+        if let outputSize {
+            try? await stream.setVideoSettings(
+                makeVideoSettings(await stream.videoSettings, size: outputSize)
+            )
         }
 
         await mixer.addOutput(stream)
@@ -206,10 +209,12 @@ actor SessionPublisher: Publisher {
     }
 
     func setOutputSize(_ size: CGSize, nativeShortEdge _: Int) async {
-        guard !outputSizeConfigured, let stream else { return }
+        guard !outputSizeConfigured else { return }
+        outputSize = size
+        outputSizeConfigured = true
+        guard let stream else { return }
         do {
             try await stream.setVideoSettings(makeVideoSettings(await stream.videoSettings, size: size))
-            outputSizeConfigured = true
         } catch {
             sessionLog.error("Video encoder configuration failed: \(String(describing: error), privacy: .public)")
         }

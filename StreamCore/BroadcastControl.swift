@@ -1,23 +1,11 @@
 import Foundation
 import notify
 
-/// Cross-process control channel between the app and the broadcast upload
-/// extension. They run as SEPARATE PROCESSES, so the app cannot call into the
-/// extension directly. Two mechanisms bridge them, both already permitted by the
-/// shared App Group:
-///  - Darwin notifications (system-wide, no payload) carry the two live signals.
-///  - A tiny JSON file in the App Group container carries the observable state.
-///
-/// The only public way for a ReplayKit upload extension to stop itself is
-/// `finishBroadcastWithError`, so an in-app "End Stream" button works by posting
-/// `stopSignal`; the extension observes it and finishes — which flows through
-/// `broadcastFinished`/`stop()` and therefore cannot auto-reconnect.
+/// Lightweight signals shared by the ScreenCaptureKit controller and settings UI.
 public enum BroadcastControl {
-    /// App → extension: end the running broadcast now (no auto-reconnect).
-    public static let stopSignal = "com.joeblau.Stream.broadcast.stop"
-    /// Extension → app: broadcasting state changed (started / finished).
+    /// Screen capture state changed (started / finished).
     public static let stateSignal = "com.joeblau.Stream.broadcast.state"
-    /// App → extension: mic volume changed — re-read settings and apply it live.
+    /// Mic volume changed — re-read settings and apply it live.
     public static let micVolumeSignal = "com.joeblau.Stream.broadcast.micVolume"
     /// Extension → app: compact live microphone meter state (notify state payload).
     public static let micLevelState = "com.joeblau.Stream.broadcast.micLevel"
@@ -35,9 +23,9 @@ public enum BroadcastControl {
     }
 }
 
-/// Low-overhead cross-process transport for the live microphone meter. A notifyd
-/// state value carries a Float32 level and a monotonic timestamp in one UInt64, so
-/// the broadcast extension can update at 10 Hz without file I/O or notifications.
+/// Low-overhead transport for the live microphone meter. A notifyd state value
+/// carries a Float32 level and monotonic timestamp in one UInt64, allowing 10 Hz
+/// updates without file I/O or notification delivery.
 public final class MicrophoneLevelChannel: @unchecked Sendable {
     private static let tickNanoseconds: UInt64 = 100_000_000
     private var token: Int32 = 0
@@ -120,12 +108,11 @@ public final class DarwinSignalObserver {
     }
 }
 
-/// The broadcast liveness snapshot the extension publishes and the app reads.
+/// The broadcast liveness snapshot the capture controller publishes.
 public struct BroadcastState: Codable, Sendable {
     public var isBroadcasting: Bool
     /// `Date().timeIntervalSince1970` of the extension's last write. A recent
-    /// value is the app's proof the extension is still alive — a jetsam kill
-    /// leaves it stale, so the app can tell "live" from "silently died".
+    /// value proves the capture pipeline is still alive.
     public var heartbeat: TimeInterval
 
     public init(isBroadcasting: Bool, heartbeat: TimeInterval) {
@@ -152,9 +139,7 @@ public enum BroadcastStateStore {
         return try? JSONDecoder().decode(BroadcastState.self, from: data)
     }
 
-    /// True only when broadcasting AND the heartbeat is recent — so a jetsam-killed
-    /// extension (which never gets to write `false`) reads as not-live once its
-    /// heartbeat goes stale, instead of leaving the app stuck showing "Live".
+    /// True only when broadcasting and the heartbeat is recent.
     public static func isLive(staleAfter: TimeInterval = 8) -> Bool {
         guard let state = read(), state.isBroadcasting else { return false }
         return Date().timeIntervalSince1970 - state.heartbeat < staleAfter

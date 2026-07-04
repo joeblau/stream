@@ -7,14 +7,11 @@ import Security
 ///
 /// Items are written as generic passwords. No explicit `kSecAttrAccessGroup` is
 /// passed: the access group defaults to the FIRST entry of each target's
-/// `keychain-access-groups` entitlement — which is the shared
-/// `$(AppIdentifierPrefix)com.joeblau.Stream` group on both the app and the
-/// broadcast extension — so both processes read/write the same items. On the
-/// Simulator (no entitlements) it falls back to the default test group, which
-/// still round-trips within the app.
+/// `keychain-access-groups` entitlement, preserving access to credentials stored
+/// by earlier versions. On the Simulator it falls back to the default test group.
 ///
-/// `kSecAttrAccessibleAfterFirstUnlock` lets the broadcast extension read the
-/// secrets while running in the background after the device has been unlocked once.
+/// `kSecAttrAccessibleAfterFirstUnlock` keeps secrets available during a
+/// background capture after the device has been unlocked once.
 public struct KeychainStore: Sendable {
 
     /// The secrets this store manages, keyed per transport protocol so each of

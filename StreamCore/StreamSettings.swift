@@ -8,8 +8,6 @@ public enum AppGroup {
     /// Base name for the JSON-encoded StreamSettings blob: the container file is
     /// `<settingsKey>.json`. Also the legacy UserDefaults key migrated from once.
     public static let settingsKey = "stream.settings.v1"
-    /// Bundle id of the broadcast upload extension (picker preferredExtension).
-    public static let broadcastExtensionBundleID = "com.joeblau.Stream.Broadcast"
     /// Keychain `kSecAttrService` for the shared connection secrets.
     public static let keychainService = "com.joeblau.Stream.connection"
 }
@@ -92,7 +90,7 @@ public enum StreamProtocol: String, Codable, CaseIterable, Sendable {
     /// Whether the broadcast publisher can currently stream this protocol.
     /// All four are wired: RTMP/RTMPS via RTMPPublisher, SRT/WHIP via the unified
     /// StreamSession publisher. WHIP (WebRTC) is experimental — validate memory on
-    /// device, as libdatachannel adds to the tight extension budget.
+    /// device, as libdatachannel adds meaningful memory and CPU overhead.
     public var isPublishingSupported: Bool { true }
 }
 
@@ -134,8 +132,8 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         videoQuality: Int = 720,
         videoBitrate: Int = 3_000_000,
         audioBitrate: Int = 128_000,
-        // 24 fps: lighter encode load / lower per-frame allocation in the ~50 MB
-        // extension budget than 30, still smooth for screencast content.
+        // 24 fps: lighter encode and thermal load than 30 while remaining smooth
+        // for screencast content.
         frameRate: Int = 24,
         pipEnabled: Bool = false,
         pipCorner: PIPCorner = .bottomRight,
@@ -212,11 +210,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         }
     }
 
-    /// Hard ceiling on the encoded stream's SHORT edge, enforced regardless of the
-    /// user's `videoQuality` setting. The broadcast upload extension runs under a
-    /// ~50 MB jetsam budget; encoding above 720p (per PRISM's screencast guidance)
-    /// risks killing the extension when capturing heavier off-app content. This is
-    /// defense-in-depth: even a stored/UI value above 720 can never blow the budget.
+    /// Conservative ceiling on the encoded stream's short edge. Screen capture,
+    /// facecam composition, encoding, chat, and publishing now share the app
+    /// process, so 720p remains the stable default across supported devices.
     public static let maxStreamShortEdge = 720
 
     /// Derives the encode dimensions from the live (already upright-oriented)

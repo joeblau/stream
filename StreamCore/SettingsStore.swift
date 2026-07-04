@@ -1,7 +1,6 @@
 import Foundation
 
-/// Value-semantics helper that persists `StreamSettings` for sharing between the
-/// app and the broadcast extension (separate processes, same App Group).
+/// Value-semantics helper that persists `StreamSettings` in the app's container.
 ///
 /// Non-secret settings are stored as a JSON file inside the shared App Group
 /// **container**, NOT the App Group `UserDefaults` **suite**. Reading a
@@ -50,16 +49,16 @@ public struct SettingsStore: Sendable {
 
         settings.rtmpURL = keychain.string(for: .url(settings.selectedProtocol)) ?? ""
         settings.streamKey = keychain.string(for: .key(settings.selectedProtocol)) ?? ""
-        // A local video backup requires a second encoder in the upload extension
-        // and can exceed ReplayKit's jetsam budget. Keep the persisted field for
-        // backward compatibility, but do not allow stale opt-ins to re-enable it.
+        // A local video backup requires a second real-time encoder. Keep the
+        // persisted field for compatibility, but do not let stale opt-ins trade
+        // streaming stability for a feature that is currently unavailable.
         settings.backupEnabled = false
         return settings
     }
 
-    /// Writes the connection URL + stream key to the Keychain (shared with the
-    /// broadcast extension) and the remaining settings to the container file with
-    /// the secrets blanked, so they are never persisted in plaintext.
+    /// Writes the connection URL + stream key to the Keychain and the remaining
+    /// settings to the container file with the secrets blanked, so they are never
+    /// persisted in plaintext.
     public func save(_ settings: StreamSettings) {
         keychain.set(settings.rtmpURL, for: .url(settings.selectedProtocol))
         keychain.set(settings.streamKey, for: .key(settings.selectedProtocol))
