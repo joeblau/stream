@@ -68,6 +68,7 @@ actor RTMPPublisher: Publisher {
     private var lastVideoPTS: CMTime = .negativeInfinity   // monotonic guard for frame-repeat
     private var frameRepeatTask: Task<Void, Never>?
     private var lastQueueBytes: Int = 0                    // watchdog: detect a draining queue
+    private var stalledTicks: Int = 0                      // watchdog: consecutive stalled checks
 
     init() {
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
@@ -367,6 +368,7 @@ actor RTMPPublisher: Publisher {
         // re-raises via checkNetworkHealth if congestion actually returns.
         videoAdmission.reset()
         lastQueueBytes = 0
+        stalledTicks = 0
         if streamAttached {
             await mixer.removeOutput(stream)
             streamAttached = false
@@ -627,9 +629,10 @@ actor RTMPPublisher: Publisher {
         }
         // No queue-health conclusion can be drawn while ReplayKit is paused or
         // the device is showing static content and no recent samples arrived.
-        guard !isPaused else { return }
+        // Reset the stall streak too — a gap in these ticks is not a stall.
+        guard !isPaused else { stalledTicks = 0; return }
         let now = DispatchTime.now().uptimeNanoseconds
-        guard now &- lastMediaAt < 10_000_000_000 else { return }
+        guard now &- lastMediaAt < 10_000_000_000 else { stalledTicks = 0; return }
         // Mic-stall fallback (control plane only): HaishinKit's multitrack mixer
         // renders the mix only when the MAIN track appends, so a dead mic route
         // would silence app audio too. If app audio is flowing but the mic went
@@ -659,7 +662,14 @@ actor RTMPPublisher: Publisher {
         // backlog that is already shrinking clears on its own once the ABR lowers
         // the encoder rate. zeroOutputSeconds independently catches a truly stalled
         // (bytesOut==0) queue.
-        let queueStuck = health.queueBytes >= queueLimit && health.queueBytes >= lastQueueBytes
+        //
+        // Require the backlog to be strictly GROWING (`>`), not merely frozen (`>=`):
+        // when the container app is backgrounded the OS starves the ~1Hz ABR timer
+        // that feeds queueBytes/zeroOutputSeconds, so those figures FREEZE at their
+        // last value. A frozen-equal queue (`>=`) read that as a permanent stall and
+        // recycled a socket the fork deliberately keeps open across `.waiting`. Only
+        // a queue that keeps climbing is genuinely wedged.
+        let queueStuck = health.queueBytes >= queueLimit && health.queueBytes > lastQueueBytes
         lastQueueBytes = health.queueBytes
         // eventAgeSeconds is intentionally NOT a recycle condition. It is the age of
         // HaishinKit's ~1Hz ABR callback (a wall-clock timer, default QoS), which the
@@ -668,8 +678,25 @@ actor RTMPPublisher: Publisher {
         // above already detect a genuinely dead socket, and queue/zeroOutput cover
         // real stalls. Recycling on it tore down healthy connections on every
         // app-switch — the primary cause of the "Connection lost" dropouts.
+        //
+        // Even a real stall must PERSIST before we recycle: an app-switch drives the
+        // socket into a transient `.waiting` that the RTMPSocket fork keeps open and
+        // that recovers on the SAME session (no reconnect) once a usable path returns
+        // — often the instant the app is foregrounded. Tearing it down after a single
+        // 2 s tick converted that survivable blip into a hard, destination-visible
+        // RTMP disconnect. Require several consecutive stalled ticks (~12 s, or ~6 s
+        // right after a path change when the flow is already suspect) so the socket
+        // layer's keep-open policy is honoured instead of fought.
         if queueStuck || health.zeroOutputSeconds >= zeroLimit {
-            streamLog.error("RTMP socket stalled: queue=\(health.queueBytes) bytes, zeroOut=\(health.zeroOutputSeconds)s, target=\(health.targetBitRate) bps")
+            stalledTicks += 1
+        } else {
+            stalledTicks = 0
+        }
+        let ticksToRecycle = recentPathChange ? 3 : 6
+        if stalledTicks >= ticksToRecycle {
+            let ticks = stalledTicks
+            streamLog.error("RTMP socket stalled \(ticks) ticks: queue=\(health.queueBytes) bytes, zeroOut=\(health.zeroOutputSeconds)s, target=\(health.targetBitRate) bps")
+            stalledTicks = 0
             await requestRecovery(reason: "outbound queue stalled")
         }
     }
