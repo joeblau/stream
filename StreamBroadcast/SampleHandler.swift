@@ -8,6 +8,11 @@ import os.lock
 
 /// Filterable in Console.app / `log stream` with: subsystem:com.joeblau.Stream
 private let broadcastLog = Logger(subsystem: "com.joeblau.Stream", category: "broadcast")
+/// 1 Hz diagnostic: video frame throughput + memory headroom, to pin down on
+/// device whether a stall is ReplayKit not delivering (received flat), our code
+/// dropping (gateDrop climbs), or a jetsam-proximity memory crater (avail → 0).
+/// Filter: subsystem:com.joeblau.Stream category:frame-stats
+private let frameStatsLog = Logger(subsystem: "com.joeblau.Stream", category: "frame-stats")
 
 /// Principal class of the broadcast upload extension. Loads settings from the
 /// App Group, configures the audio session (incl. the persisted Bluetooth mic),
@@ -28,6 +33,18 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     private let admission = SampleAdmissionState()
     private let videoGate = InFlightSampleGate()
     private let memoryMonitor = MemoryPressureMonitor()
+
+    /// Per-second video-throughput counters (reset each 1 Hz log tick).
+    private struct FrameCounters { var received = 0; var appended = 0; var gateDropped = 0; var noImage = 0; var pressureDropped = 0 }
+    private let frameCounters = OSAllocatedUnfairLock<FrameCounters>(initialState: .init())
+    private var frameStatsTask: Task<Void, Never>?
+
+    /// Under memory pressure, cap video intake to relieve the encode/buffer load a
+    /// constantly-animating heavy app (e.g. a PWA) piles up toward the ~50 MB
+    /// jetsam limit. Dropping frames is far cheaper than encoding them; full rate
+    /// returns automatically once headroom recovers.
+    private var lastAcceptedVideoAt: UInt64 = 0
+    private static let pressureFrameInterval: UInt64 = 1_000_000_000 / 12  // ~12 fps ceiling under pressure
 
     /// Encode dimensions, locked once from the first screen frame so the stream
     /// matches the device's real orientation/aspect. Touched only on the serial
@@ -66,6 +83,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         admission.setAccepting(true)
         micLevelChannel.publish(0)
         memoryMonitor.start()
+        startFrameStats()
 
         // Publish live state and let the app's "End Stream" button reach us — the
         // extension is the only process that can stop itself. The heartbeat lets
@@ -124,6 +142,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         micLevelChannel.publish(0)
         facecam.stop()
         memoryMonitor.stop()
+        frameStatsTask?.cancel()
         let publisher = self.publisher
         Task { await publisher.pause() }
     }
@@ -154,6 +173,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         micLevelChannel.publish(0)
         facecam.stop()
         memoryMonitor.stop()
+        frameStatsTask?.cancel()
         // Release the mic/HFP route deterministically BEFORE the async network
         // teardown: iOS may suspend the extension the moment this callback
         // returns, and a deferred stop often never ran, leaving the session
@@ -182,6 +202,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         micLevelChannel.publish(0)
         facecam.stop()
         memoryMonitor.stop()
+        frameStatsTask?.cancel()
         // Deterministic mic release, same rationale as broadcastFinished().
         audioSession.stop()
         let publisher = self.publisher
@@ -214,6 +235,30 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
         Task { await publisher.setMicVolume(volume) }
     }
 
+    /// Logs one line per second: video frames RECEIVED from ReplayKit vs
+    /// APPENDED (real submits, excluding frame-repeat), gate/no-image drops, and
+    /// remaining memory headroom. On a static Home Screen, expect received→0 with
+    /// no drops (inherent ReplayKit on-change delivery). A connection death on a
+    /// heavy app shows either avail cratering toward 0 just before the drop
+    /// (jetsam) or steady received/avail (then it is audio-interruption/suspension —
+    /// cross-check the broadcast-keepalive log).
+    private func startFrameStats() {
+        frameStatsTask?.cancel()
+        frameStatsTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self else { return }
+                let c = self.frameCounters.withLock { current -> FrameCounters in
+                    let snapshot = current
+                    current = FrameCounters()
+                    return snapshot
+                }
+                let availMB = UInt(os_proc_available_memory()) / (1024 * 1024)
+                frameStatsLog.info("video/s received=\(c.received, privacy: .public) appended=\(c.appended, privacy: .public) gateDrop=\(c.gateDropped, privacy: .public) pressureDrop=\(c.pressureDropped, privacy: .public) noImg=\(c.noImage, privacy: .public) | avail=\(availMB, privacy: .public)MB")
+            }
+        }
+    }
+
     // MARK: - Sample routing
 
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer,
@@ -222,6 +267,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
 
         switch sampleBufferType {
         case .video:
+            frameCounters.withLock { $0.received += 1 }
             // Drain the CoreImage/CoreMedia compositing transients immediately: in
             // the ~50 MB extension budget, autoreleased CIImages and pixel/sample
             // buffers piling up across frames until the run loop drains its pool is
@@ -256,10 +302,28 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     private func handleVideo(_ sampleBuffer: CMSampleBuffer) {
         // This bound sits before compositing and before actor submission, so at
         // most one ReplayKit IOSurface is retained outside the pipeline.
-        guard videoGate.tryAcquire() else { return }
+        guard videoGate.tryAcquire() else {
+            frameCounters.withLock { $0.gateDropped += 1 }
+            return
+        }
         guard let screen = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            frameCounters.withLock { $0.noImage += 1 }
             videoGate.release()
             return
+        }
+
+        // Memory-adaptive intake throttle: while the extension is near the jetsam
+        // limit, cap the frame rate so a heavy, constantly-animating source can't
+        // flood the encoder into a memory kill. Skipped frames still hold the last
+        // picture via the publisher's frame-repeat, so the stream stays live.
+        if memoryMonitor.isUnderPressure {
+            let now = DispatchTime.now().uptimeNanoseconds
+            if lastAcceptedVideoAt != 0, now &- lastAcceptedVideoAt < Self.pressureFrameInterval {
+                frameCounters.withLock { $0.pressureDropped += 1 }
+                videoGate.release()
+                return
+            }
+            lastAcceptedVideoAt = now
         }
 
         // Read ReplayKit orientation metadata so the output is upright.
@@ -315,6 +379,7 @@ final class SampleHandler: RPBroadcastSampleHandler, @unchecked Sendable {
     /// append share a task so actor scheduling cannot drop/reorder the first frame.
     private func submitVideo(_ sampleBuffer: CMSampleBuffer,
                              configuration: (CGSize, Int)? = nil) {
+        frameCounters.withLock { $0.appended += 1 }
         let publisher = self.publisher
         let gate = self.videoGate
         Task {
