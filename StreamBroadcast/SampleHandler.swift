@@ -505,9 +505,13 @@ private final class InFlightSampleGate: @unchecked Sendable {
 final class MemoryPressureMonitor: @unchecked Sendable {
     private static let log = Logger(subsystem: "com.joeblau.Stream", category: "memory")
     /// Shed load when fewer than this many bytes remain before the jetsam limit.
-    private static let shedBelow: UInt = 12 * 1024 * 1024
+    /// Raised from 12→16 MB to shed EARLIER: capturing a heavier off-app screen
+    /// (Safari video, a game) spikes per-frame allocation fast, so start shedding
+    /// with more headroom to spare before the ~50 MB jetsam kill.
+    private static let shedBelow: UInt = 16 * 1024 * 1024
     /// Restore load only after headroom climbs back above this (hysteresis).
-    private static let recoverAbove: UInt = 20 * 1024 * 1024
+    /// Kept a wide gap above `shedBelow` so shedding does not flap frame to frame.
+    private static let recoverAbove: UInt = 24 * 1024 * 1024
 
     private var lock = os_unfair_lock_s()
     private var underPressure = false
