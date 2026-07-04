@@ -99,10 +99,15 @@ struct SettingsView: View {
     // MARK: - Bitrate / fps presets
 
     private static let videoBitrates: [Int] = [
-        1_000_000, 2_000_000, 3_000_000, 4_500_000, 6_000_000, 8_000_000
+        1_000_000, 2_000_000, 3_000_000, 4_500_000, 6_000_000, 8_000_000, 10_000_000, 12_000_000
     ]
     private static let audioBitrates: [Int] = [64_000, 96_000, 128_000, 192_000, 256_000]
-    private static let frameRates: [Int] = [24, 30]
+    private static let frameRates: [Int] = [24, 30, 60]
+
+    /// This device's resolution/fps ceiling. Gates the Quality and Frame Rate
+    /// menus below so they never offer more than the hardware can actually stream
+    /// (1080p60 on capable devices, 720p30 on older ones).
+    private var capability: StreamCapability { .current }
 
     private func bitrateLabel(_ bps: Int) -> String {
         String(format: "%.1f Mbps", Double(bps) / 1_000_000)
@@ -451,10 +456,13 @@ struct SettingsView: View {
     private var videoSection: some View {
         Section {
             Picker("Quality", selection: Binding(
-                get: { settings.videoQuality },
+                // Show the EFFECTIVE value: a stored pick above this device's
+                // ceiling displays (and streams) as the capped value rather than
+                // leaving the picker with no matching selection.
+                get: { min(settings.videoQuality, capability.maxShortEdge) },
                 set: { settings.videoQuality = $0; onChange() }
             )) {
-                ForEach(Self.qualities, id: \.self) { q in
+                ForEach(Self.qualities.filter { $0 <= capability.maxShortEdge }, id: \.self) { q in
                     Text(qualityLabel(q)).tag(q)
                 }
             }
@@ -469,17 +477,17 @@ struct SettingsView: View {
             }
 
             Picker("Frame Rate", selection: Binding(
-                get: { settings.frameRate },
+                get: { min(settings.frameRate, capability.maxFrameRate) },
                 set: { settings.frameRate = $0; onChange() }
             )) {
-                ForEach(Self.frameRates, id: \.self) { fps in
+                ForEach(Self.frameRates.filter { $0 <= capability.maxFrameRate }, id: \.self) { fps in
                     Text("\(fps) fps").tag(fps)
                 }
             }
         } header: {
             Text("Video")
         } footer: {
-            Text("Bitrate is a maximum and automatically drops when the uplink is congested. Frame rate is capped at 30 fps for stable capture and encoding.")
+            Text("Bitrate is a maximum and drops automatically when the uplink is congested. Resolution and frame rate are limited to what this device can sustain, and are reduced automatically when it runs warm or low on power.")
         }
     }
 

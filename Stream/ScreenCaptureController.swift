@@ -360,6 +360,10 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
 
     private let publisher: any Publisher
     private let settings: StreamSettings
+    /// Device resolution/fps ceiling. Caps both the encode size (short edge) and
+    /// the capture pacing so a 1080p60 pick never asks a device for more than it
+    /// can sustain. The thermal governor tightens this further at runtime.
+    private let capability = StreamCapability.current
     private let onStopped: @Sendable (Error) -> Void
     private let micLevelMeter: ScreenCaptureMicrophoneMeter
     private let micLevelChannel = MicrophoneLevelChannel()
@@ -384,14 +388,15 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
         self.settings = settings
         self.onStopped = onStopped
         micLevelMeter = ScreenCaptureMicrophoneMeter(gain: settings.micVolume)
-        targetFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, settings.frameRate)))
+        targetFrameInterval = CMTime(value: 1,
+                                     timescale: CMTimeScale(settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate)))
         (videoSamples, videoContinuation) = AsyncStream.makeStream(
             of: CMSampleBuffer.self,
             bufferingPolicy: .bufferingNewest(1)
         )
         super.init()
         if settings.pipEnabled { facecam.start(with: settings) }
-        videoConsumer = Task { [videoSamples, publisher, settings] in
+        videoConsumer = Task { [videoSamples, publisher, settings, capability] in
             var targetSize: CGSize?
             for await sampleBuffer in videoSamples {
                 guard sampleBuffer.isValid,
@@ -400,7 +405,8 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
                 if targetSize == nil {
                     let width = CVPixelBufferGetWidth(image)
                     let height = CVPixelBufferGetHeight(image)
-                    let target = settings.encodeSize(forOrientedWidth: width, height: height)
+                    let target = settings.encodeSize(forOrientedWidth: width, height: height,
+                                                     maxShortEdge: capability.maxShortEdge)
                     await publisher.setOutputSize(target, nativeShortEdge: min(width, height))
                     targetSize = target
                 }
@@ -484,7 +490,9 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
     func applyThermalProfile(frameRateCap: Int, allowPiP: Bool) {
         sampleQueue.async { [weak self] in
             guard let self else { return }
-            let fps = max(1, min(self.settings.frameRate, frameRateCap))
+            // Cap to the device ceiling first, then the thermal frame-rate cap.
+            let deviceRate = self.settings.encodeFrameRate(maxFrameRate: self.capability.maxFrameRate)
+            let fps = max(1, min(deviceRate, frameRateCap))
             self.targetFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         }
         guard settings.pipEnabled else { return }

@@ -43,10 +43,17 @@ actor SessionPublisher: Publisher {
     private let transport: StreamCore.StreamProtocol
     private let mixer = MediaMixer(captureSessionMode: .manual,
                                    multiTrackAudioMixingEnabled: true)
+    /// Device resolution/fps ceiling (1080p60 on capable hardware, else 720p30),
+    /// computed once. The thermal governor + ABR cap the live rate below it.
+    private let capability = StreamCapability.current
     private lazy var networkController = BroadcastAdaptiveBitRateController(
         maximumBitRate: settings.videoBitrate,
-        frameRate: settings.frameRate)
+        frameRate: settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate))
     private var settings: StreamSettings = .default
+
+    /// The frame rate this device can encode: the user's chosen rate clamped to
+    /// the device capability ceiling. Replaces the old hard `min(frameRate, 30)`.
+    private var encodeFrameRate: Int { settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate) }
 
     private var session: (any StreamSession)?
     private var stream: (any StreamConvertible)?
@@ -92,7 +99,7 @@ actor SessionPublisher: Publisher {
 
     private func startFrameRepeat() {
         frameRepeatTask?.cancel()
-        let fps = UInt64(max(1, min(settings.frameRate, 30)))
+        let fps = UInt64(encodeFrameRate)
         let interval = 1_000_000_000 / fps
         frameRepeatTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -242,7 +249,7 @@ actor SessionPublisher: Publisher {
     }
 
     private func makeVideoSettings(_ current: VideoCodecSettings, size: CGSize? = nil) async -> VideoCodecSettings {
-        let frameRate = min(max(settings.frameRate, 1), 30)
+        let frameRate = encodeFrameRate
         var v = current
         if let size { v.videoSize = size }
         v.scalingMode = .letterbox
@@ -264,7 +271,7 @@ actor SessionPublisher: Publisher {
         lastVideoAppendAt = DispatchTime.now().uptimeNanoseconds
         lastVideoBuffer = sb
         guard videoAdmission.admit() else { return }
-        let duration = CMTime(value: 1, timescale: CMTimeScale(min(max(settings.frameRate, 1), 30)))
+        let duration = CMTime(value: 1, timescale: CMTimeScale(encodeFrameRate))
         let normalized = timeline.normalize(sb, kind: .video, fallbackDuration: duration)
         await mixer.append(enforceMonotonicVideo(normalized, minStep: duration))
     }

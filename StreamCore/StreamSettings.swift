@@ -210,18 +210,15 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         }
     }
 
-    /// Conservative ceiling on the encoded stream's short edge. Screen capture,
-    /// facecam composition, encoding, chat, and publishing now share the app
-    /// process, so 720p remains the stable default across supported devices.
-    public static let maxStreamShortEdge = 720
-
     /// Derives the encode dimensions from the live (already upright-oriented)
     /// screen size, preserving the real aspect ratio. The short edge is clamped to
-    /// `videoQuality` (never upscaled above the source) AND to `maxStreamShortEdge`,
-    /// and both edges are rounded to even numbers as required by H.264/HEVC. Locking
-    /// this at broadcast start keeps the RTMP resolution stable for the whole session.
-    public func encodeSize(forOrientedWidth width: Int, height: Int) -> CGSize {
-        let targetShortEdge = min(videoQuality, Self.maxStreamShortEdge)
+    /// `videoQuality` (never upscaled above the source) AND to `maxShortEdge` — the
+    /// device-capability ceiling from `StreamCapability` (1080 on capable hardware,
+    /// 720 otherwise) that replaced the old hard-coded 720 cap. Both edges are
+    /// rounded to even numbers as required by H.264/HEVC. Locking this at broadcast
+    /// start keeps the stream resolution stable for the whole session.
+    public func encodeSize(forOrientedWidth width: Int, height: Int, maxShortEdge: Int) -> CGSize {
+        let targetShortEdge = max(2, min(videoQuality, maxShortEdge))
         guard width > 0, height > 0 else {
             // Fallback to a portrait 9:16 canvas at the (capped) chosen quality.
             return CGSize(width: even(targetShortEdge), height: even(targetShortEdge * 16 / 9))
@@ -231,6 +228,15 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         let w = even(Int((Double(width) * scale).rounded()))
         let h = even(Int((Double(height) * scale).rounded()))
         return CGSize(width: max(2, w), height: max(2, h))
+    }
+
+    /// The encode frame rate for a device capability: the user's chosen rate
+    /// clamped to `[1, maxFrameRate]`. `maxFrameRate` is `StreamCapability`'s
+    /// device ceiling (60 on capable hardware, else 30); this replaced the hard
+    /// `min(frameRate, 30)` scattered across the encode/repeat paths. The thermal
+    /// governor and adaptive controller cap the live rate further at runtime.
+    public func encodeFrameRate(maxFrameRate: Int) -> Int {
+        min(max(frameRate, 1), max(1, maxFrameRate))
     }
 
     /// Derives the local backup's encode dimensions. `streamSize` is the locked
