@@ -211,7 +211,7 @@ final class ScreenCaptureController: NSObject {
         for options in AudioInputProvider.bluetoothOptionLadder() {
             do {
                 try session.setCategory(.playAndRecord, mode: .default, options: options)
-                try await session.activate(options: [])
+                try session.setActive(true, options: [])
                 activated = true
                 break
             } catch {
@@ -233,7 +233,8 @@ final class ScreenCaptureController: NSObject {
 
     private func deactivateAudioSession() async {
         do {
-            try await AVAudioSession.sharedInstance().deactivate(
+            try AVAudioSession.sharedInstance().setActive(
+                false,
                 options: [.notifyOthersOnDeactivation]
             )
         } catch {

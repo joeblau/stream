@@ -921,7 +921,8 @@ private final class MicrophoneLevelMonitor {
         self.engine = nil
         meterLevel.withLock { $0 = 0 }
         Task {
-            try? await AVAudioSession.sharedInstance().deactivate(
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
                 options: [.notifyOthersOnDeactivation]
             )
         }

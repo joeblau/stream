@@ -112,7 +112,7 @@ final class AudioInputProvider {
         for options in bluetoothOptionLadder() {
             do {
                 try session.setCategory(.playAndRecord, mode: .default, options: options)
-                try await session.activate(options: [])
+                try session.setActive(true, options: [])
                 return true
             } catch {
                 continue
