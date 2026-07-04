@@ -7,7 +7,7 @@ import StreamCore
 /// Composites the facecam `CVPixelBuffer` into a rounded corner box over the
 /// screen `CVPixelBuffer`, using ONE reused Metal-backed `CIContext` and ONE
 /// `CVPixelBufferPool` sized to the screen frame. Designed for minimal
-/// per-frame allocations to respect the ~50MB extension budget.
+/// per-frame allocations during simultaneous capture and encoding.
 final class FacecamCompositor {
 
     private let ciContext: CIContext

@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build (iOS Simulator)
+  test:
+    name: StreamCore tests (iOS Simulator)
     runs-on: macos-26
     steps:
       - name: Checkout
@@ -30,10 +30,17 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build
+      # The full Stream app requires the iOS 27 SDK (ScreenCaptureKit + the
+      # AVAudioInputNode throwing-tap API), which GitHub runners do not ship
+      # yet — the newest hosted Xcode (26.x) only carries the iOS 26 SDK. Until
+      # runners gain Xcode 27, CI validates the pure StreamCore logic and its
+      # test suite (both pinned to an iOS 18 floor in project.yml, so they build
+      # and run on the runner's iOS 26 simulators). The app itself is verified
+      # on a physical iOS 27 device.
+      - name: Test StreamCore
         run: |
-          xcodebuild build \
-            -scheme Stream \
-            -destination 'generic/platform=iOS Simulator' \
+          xcodebuild test \
+            -scheme StreamCoreTests \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17' \
             CODE_SIGNING_ALLOWED=NO \
             -skipPackagePluginValidation

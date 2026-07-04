@@ -2,8 +2,8 @@ import CoreVideo
 import os.lock
 
 /// Holds only the single most recent camera pixel buffer. Older frames are
-/// dropped (never queued) to respect the broadcast extension's ~50MB memory
-/// budget. Access is serialized with an `os_unfair_lock`, which is why the
+/// dropped rather than queued to bound memory. Access is serialized with an
+/// `os_unfair_lock`, which is why the
 /// class can safely be marked `@unchecked Sendable`.
 final class LatestCameraFrame: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
@@ -19,7 +19,7 @@ final class LatestCameraFrame: @unchecked Sendable {
         os_unfair_lock_unlock(&lock)
     }
 
-    /// Called from the ReplayKit `processSampleBuffer` queue. Returns the most
+    /// Called from the ScreenCaptureKit sample consumer. Returns the most
     /// recent frame (retained reference) and clears the slot so a stale frame is
     /// not reused on the next screen frame if the camera has stalled.
     func take() -> CVPixelBuffer? {

@@ -4,9 +4,51 @@ import AVFAudio
 import StreamCore
 import os
 
-/// SwiftUI form bound to `StreamSettings`. Every field edit mutates the bound
-/// `settings` and then calls `onChange()` so the parent persists the snapshot
-/// via `SettingsStore` BEFORE the user can tap the broadcast picker.
+/// The settings sections. Each is launched from the settings list into its own
+/// Vaul-style, content-sized sheet holding exactly that section's controls.
+private enum SettingsSection: String, Identifiable, CaseIterable {
+    case connection, video, backup, audio, pip, chat
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .connection: "Connection"
+        case .video:      "Video"
+        case .backup:     "Local Backup"
+        case .audio:      "Audio"
+        case .pip:        "Picture in Picture"
+        case .chat:       "Chat"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .connection: "antenna.radiowaves.left.and.right"
+        case .video:      "video.fill"
+        case .backup:     "internaldrive.fill"
+        case .audio:      "mic.fill"
+        case .pip:        "person.crop.rectangle"
+        case .chat:       "bubble.left.and.bubble.right.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .connection: .blue
+        case .video:      .purple
+        case .backup:     .gray
+        case .audio:      .pink
+        case .pip:        .orange
+        case .chat:       .green
+        }
+    }
+}
+
+/// The settings launcher: a list of sections, each of which opens a dynamic,
+/// content-sized sheet holding exactly that section's controls. Every field edit
+/// mutates the bound `settings` and calls `onChange()` so the parent persists the
+/// snapshot via `SettingsStore` BEFORE the user can start a broadcast.
 struct SettingsView: View {
     @Binding var settings: StreamSettings
 
@@ -26,7 +68,7 @@ struct SettingsView: View {
     /// Photos add-only permission helper for the Local Backup feature.
     @State private var photos = PhotosSupport()
 
-    /// Smoothed live level published by the ReplayKit extension.
+    /// Smoothed live level published by the ScreenCaptureKit sample router.
     @State private var micLevel = MicrophoneLevelMonitor()
 
     // MARK: - Chat credential fields
@@ -40,8 +82,8 @@ struct SettingsView: View {
     // MARK: - Quality presets
 
     /// Target SHORT edge (px). The long edge follows the live screen aspect, so
-    /// the stream is portrait when the screen is portrait. 720 fits the broadcast
-    /// extension's ~50 MB memory budget comfortably.
+    /// the stream is portrait when the screen is portrait. 720 is the stable
+    /// default for simultaneous capture, encoding, and publishing.
     private static let qualities: [Int] = [480, 720, 1080]
 
     private func qualityLabel(_ shortEdge: Int) -> String {
@@ -69,24 +111,188 @@ struct SettingsView: View {
         "\(bps / 1000) kbps"
     }
 
+    /// Dismisses the whole settings drawer (the "Done" affordance).
+    @Environment(\.dismiss) private var dismiss
+
+    /// Navigation stack path, tracked so the sheet height can follow the view on
+    /// top (the launcher, or a pushed section).
+    @State private var path: [SettingsSection] = []
+    /// Real content height of the launcher list, read from its scroll geometry.
+    @State private var launcherHeight: CGFloat = 300
+    /// Real content height of each pushed section's form, keyed by section.
+    @State private var sectionHeights: [SettingsSection: CGFloat] = [:]
+    /// The live detent height. Animated toward `targetHeight` on every push/pop or
+    /// in-section content change so the drawer glides between sizes instead of
+    /// snapping. Driving the `.height()` detent from state changed inside
+    /// `withAnimation` is what makes the sheet resize animate.
+    @State private var sheetHeight: CGFloat = 420
+
+    /// Chrome around the scrolling content: the inline nav bar + grabber on top
+    /// and the home-indicator safe area on the bottom. Added to the measured
+    /// content height so the drawer is exactly tall enough and never clips.
+    private static let sheetChrome: CGFloat = 92
+
+    /// The height the drawer should settle at: the on-top view's measured content
+    /// height (clamped to a sane floor) plus chrome. `.height()` caps it at the
+    /// available space, so unusually tall sections simply scroll.
+    private var targetHeight: CGFloat {
+        let content = path.last.flatMap { sectionHeights[$0] } ?? launcherHeight
+        return max(160, content) + Self.sheetChrome
+    }
+
     var body: some View {
-        Form {
-            connectionSection
-            videoSection
-            backupSection
-            audioSection
-            pipSection
-            chatSection
+        NavigationStack(path: $path) {
+            List {
+                Section {
+                    ForEach(SettingsSection.allCases) { section in
+                        NavigationLink(value: section) {
+                            sectionRow(section)
+                        }
+                    }
+                } footer: {
+                    Text("Tap a section to adjust it. Changes save automatically.")
+                }
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
+                let rounded = height.rounded()
+                if abs(rounded - launcherHeight) >= 1 { launcherHeight = rounded }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: SettingsSection.self) { section in
+                sectionDetail(section)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { Haptics.tap(); dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.height(sheetHeight)])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(55)
+        // Haptic when a section row is tapped (push) or dismissed (pop).
+        .sensoryFeedback(.impact(weight: .light), trigger: path)
+        .onChange(of: targetHeight) { _, newHeight in
+            guard abs(newHeight - sheetHeight) >= 1 else { return }
+            // Defer to the next runloop tick so the animated detent change doesn't
+            // re-enter layout within the same frame (which SwiftUI flags as
+            // "tried to update multiple times per frame").
+            Task { @MainActor in
+                withAnimation(.snappy(duration: 0.32, extraBounce: 0.04)) {
+                    sheetHeight = newHeight
+                }
+            }
         }
         .onAppear {
+            // Enumerate inputs/capabilities so the launcher summaries are accurate;
+            // the live mic meter only runs while the Audio detail is open.
             audio.refresh(requestPermission: false)
             camera.refresh()
             photos.refresh()
+        }
+    }
+
+    // MARK: - Launcher rows
+
+    @ViewBuilder
+    private func sectionRow(_ section: SettingsSection) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: section.icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 29, height: 29)
+                .background(section.tint, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(section.title)
+                    .foregroundStyle(.primary)
+                Text(summary(for: section))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Pushed section detail
+
+    /// One section's controls, pushed onto the settings navigation stack. The
+    /// single enclosing sheet (`presentationSizing(.form)` in `ContentView`)
+    /// resizes to fit whichever section's Form is on screen, and re-sizes as
+    /// fields appear/hide within it.
+    @ViewBuilder
+    private func sectionDetail(_ section: SettingsSection) -> some View {
+        Form {
+            switch section {
+            case .connection: connectionSection
+            case .video:      videoSection
+            case .backup:     backupSection
+            case .audio:      audioSection
+            case .pip:        pipSection
+            case .chat:       chatSection
+            }
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
+            let rounded = height.rounded()
+            if abs(rounded - (sectionHeights[section] ?? 0)) >= 1 { sectionHeights[section] = rounded }
+        }
+        .navigationTitle(section.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .scrollBounceBehavior(.basedOnSize)
+        .onAppear {
+            guard section == .audio else { return }
             micLevel.setGain(settings.micVolume)
             micLevel.setPreferredInput(settings.preferredAudioInputUID)
             micLevel.start()
         }
-        .onDisappear { micLevel.stop() }
+        .onDisappear {
+            if section == .audio { micLevel.stop() }
+        }
+    }
+
+    // MARK: - Launcher summaries
+
+    private func summary(for section: SettingsSection) -> String {
+        switch section {
+        case .connection:
+            return settings.isPublishable
+                ? "\(settings.selectedProtocol.displayName) · \(settings.isSecure ? "Secure" : "Unencrypted")"
+                : "\(settings.selectedProtocol.displayName) · Not configured"
+        case .video:
+            return "\(settings.videoQuality)p · \(bitrateLabel(settings.videoBitrate)) · \(settings.frameRate) fps"
+        case .backup:
+            return "Off"
+        case .audio:
+            return audioSummary
+        case .pip:
+            return settings.pipEnabled ? "On · \(cornerLabel(settings.pipCorner))" : "Off"
+        case .chat:
+            return chatSummary
+        }
+    }
+
+    private var audioSummary: String {
+        let name: String
+        if let uid = selectedAudioInputUID,
+           let input = audio.inputs.first(where: { $0.uid == uid }) {
+            name = input.displayName
+        } else {
+            name = "Default"
+        }
+        let volume = settings.micVolume <= 0.0001
+            ? "Muted"
+            : "\(Int((settings.micVolume * 100).rounded()))% mic"
+        return "\(name) · \(volume)"
+    }
+
+    private var chatSummary: String {
+        switch chat.status {
+        case .connected:  return "Connected to Restream"
+        case .connecting: return "Connecting…"
+        case .needsCredentials, .signedOut, .failed:
+            return chat.hasCredentials ? "Not connected" : "Not set up"
+        }
     }
 
     // MARK: - Connection
@@ -167,6 +373,7 @@ struct SettingsView: View {
                              label: String) -> some View {
         if !settings[keyPath: value].isEmpty {
             Button {
+                Haptics.tap()
                 settings[keyPath: value] = ""
                 onChange()
             } label: {
@@ -212,7 +419,7 @@ struct SettingsView: View {
         } header: {
             Text("Video")
         } footer: {
-            Text("Bitrate is a maximum and automatically drops when the uplink is congested. Capped at 30 fps — best for a stable screen-share within the broadcast extension's memory budget.")
+            Text("Bitrate is a maximum and automatically drops when the uplink is congested. Frame rate is capped at 30 fps for stable capture and encoding.")
         }
     }
 
@@ -235,7 +442,7 @@ struct SettingsView: View {
         } header: {
             Text("Local Backup")
         } footer: {
-            Text("Disabled for streaming stability. A second H.264 encoder can exceed the ReplayKit upload extension's memory limit and cause iOS to terminate the broadcast.")
+            Text("Disabled for streaming stability. A second real-time H.264 encoder substantially increases memory, thermal, and power pressure.")
         }
     }
 
@@ -316,6 +523,7 @@ struct SettingsView: View {
                 Text("Audio")
                 Spacer()
                 Button {
+                    Haptics.tap()
                     micLevel.restartLocalCapture()
                     audio.refresh(requestPermission: true)
                 } label: {
@@ -500,6 +708,7 @@ struct SettingsView: View {
                     .foregroundStyle(.green)
                 Button("Disconnect", systemImage: "rectangle.portrait.and.arrow.right",
                        role: .destructive) {
+                    Haptics.tap()
                     chat.signOut()
                 }
 
@@ -510,14 +719,15 @@ struct SettingsView: View {
 
             case .needsCredentials, .signedOut, .failed:
                 if chat.hasCredentials && !editingChatCredentials {
-                    Button("Connect with Restream") { chat.connect() }
-                    Button("Change Restream App") { editingChatCredentials = true }
+                    Button("Connect with Restream") { Haptics.tap(); chat.connect() }
+                    Button("Change Restream App") { Haptics.tap(); editingChatCredentials = true }
                 } else {
                     TextField("Client ID", text: $clientIDField)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Client Secret", text: $clientSecretField)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Save & Connect") {
+                        Haptics.tap()
                         chat.saveCredentials(clientID: clientIDField, clientSecret: clientSecretField)
                         editingChatCredentials = false
                         chat.connect()
@@ -573,12 +783,12 @@ private final class MicrophoneLevelMonitor {
                     isReceiving = true
                     target = Double(extensionLevel)
                 } else if broadcastIsLive {
-                    // Never compete with ReplayKit for the mic when its mic is
-                    // paused/off and therefore not publishing meter samples.
+                    // Never open a second mic capture while ScreenCaptureKit's
+                    // microphone is paused/off and not publishing meter samples.
                     stopLocalCapture()
                     isReceiving = false
                     target = 0
-                } else if let localLevel = readLocalLevel() {
+                } else if let localLevel = await readLocalLevel() {
                     isReceiving = true
                     target = localLevel
                 } else {
@@ -629,8 +839,8 @@ private final class MicrophoneLevelMonitor {
         broadcastIsLive = BroadcastStateStore.isLive()
     }
 
-    private func readLocalLevel() -> Double? {
-        if engine == nil { startLocalCaptureIfAvailable() }
+    private func readLocalLevel() async -> Double? {
+        if engine == nil { await startLocalCaptureIfAvailable() }
         guard let engine, engine.isRunning else { return nil }
         // RMS captured on the audio render thread by the input tap.
         let rms = Double(meterLevel.withLock { $0 })
@@ -639,7 +849,7 @@ private final class MicrophoneLevelMonitor {
         return max(0, min(1, (decibels + 60) / 60))
     }
 
-    private func startLocalCaptureIfAvailable() {
+    private func startLocalCaptureIfAvailable() async {
         guard AVAudioApplication.shared.recordPermission == .granted else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         guard now >= nextRecorderAttemptAt else { return }
@@ -651,7 +861,7 @@ private final class MicrophoneLevelMonitor {
         // never registers on the meter. (Only reached when NOT broadcasting, so it
         // never competes with the extension's session.)
         let session = AVAudioSession.sharedInstance()
-        guard AudioInputProvider.activateBluetoothRecording(session) else { return }
+        guard await AudioInputProvider.activateBluetoothRecording(session) else { return }
         if let uid = preferredInputUID,
            let port = session.availableInputs?.first(where: { $0.uid == uid }) {
             try? session.setPreferredInput(port)
@@ -668,17 +878,22 @@ private final class MicrophoneLevelMonitor {
         // @Sendable so the tap runs on the audio render thread — WITHOUT it the
         // closure inherits this @MainActor class's isolation and iOS crashes with
         // a libdispatch queue assertion when the render thread invokes it.
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { @Sendable buffer, _ in
-            guard let channel = buffer.floatChannelData?[0] else { return }
-            let count = Int(buffer.frameLength)
-            guard count > 0 else { return }
-            var sumOfSquares: Float = 0
-            for i in 0..<count {
-                let sample = channel[i]
-                sumOfSquares += sample * sample
+        do {
+            try input.__installTap(onBus: 0, bufferSize: 1024, format: format, error: ()) {
+                @Sendable buffer, _ in
+                guard let channel = buffer.floatChannelData?[0] else { return }
+                let count = Int(buffer.frameLength)
+                guard count > 0 else { return }
+                var sumOfSquares: Float = 0
+                for i in 0..<count {
+                    let sample = channel[i]
+                    sumOfSquares += sample * sample
+                }
+                let rms = (sumOfSquares / Float(count)).squareRoot()
+                level.withLock { $0 = rms }
             }
-            let rms = (sumOfSquares / Float(count)).squareRoot()
-            level.withLock { $0 = rms }
+        } catch {
+            return
         }
         engine.prepare()
         do {
@@ -698,15 +913,19 @@ private final class MicrophoneLevelMonitor {
     private func stopLocalCapture() {
         // No-op when nothing was captured. Otherwise the 50ms meter loop fired a
         // blocking setActive(false) + deactivation-notification storm ~20x/s at the
-        // audio server — stalling the app AND interrupting the broadcast extension's
-        // live mic session. Deactivate exactly once, on the real handover.
+        // audio server and interrupting ScreenCaptureKit's live mic session.
+        // Deactivate exactly once, on the real handover.
         guard let engine else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         self.engine = nil
         meterLevel.withLock { $0 = 0 }
-        try? AVAudioSession.sharedInstance()
-            .setActive(false, options: .notifyOthersOnDeactivation)
+        Task {
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: [.notifyOthersOnDeactivation]
+            )
+        }
     }
 }
 

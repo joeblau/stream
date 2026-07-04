@@ -2,7 +2,7 @@ name: Stream
 options:
   bundleIdPrefix: com.joeblau
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "27.0"
   createIntermediateGroups: true
   groupSortPosition: top
 
@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "27.0"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: K78G42H4U2    # Apple Developer Team ID for device builds
     TARGETED_DEVICE_FAMILY: "1,2"
@@ -31,7 +31,9 @@ packages:
 targets:
 
   # ---------------------------------------------------------------
-  # Shared dynamic framework (settings model + store; links HaishinKit core only)
+  # Shared dynamic framework for settings and storage. It intentionally has no
+  # HaishinKit dependency: the publishing libraries must be loaded exactly once,
+  # by the app target, or Objective-C/Swift runtime classes are duplicated.
   # ---------------------------------------------------------------
   StreamCore:
     type: framework
@@ -42,9 +44,32 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamCore
         GENERATE_INFOPLIST_FILE: YES
+        # Pure Foundation/Security logic with no iOS-26/27 APIs. A low, stable
+        # floor decouples this framework and its tests from the app's iOS 27
+        # requirement, so CI can build and run the suite on whatever iOS
+        # simulator the runner ships — not only an (unavailable) iOS 27 sim.
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+      configs:
+        # Lets StreamCoreTests use `@testable import StreamCore` to pin internal
+        # cross-process contracts (e.g. the per-protocol Keychain account keys).
+        Debug:
+          ENABLE_TESTABILITY: YES
+  # ---------------------------------------------------------------
+  # Unit tests for the pure StreamCore logic (Swift Testing). Logic
+  # tests — no host app — so `xcodebuild test` runs them on a sim.
+  # ---------------------------------------------------------------
+  StreamCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - StreamCoreTests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        # Match StreamCore's low floor so the suite runs on any iOS simulator.
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
     dependencies:
-      - package: HaishinKit
-        product: HaishinKit
+      - target: StreamCore
 
   # ---------------------------------------------------------------
   # iOS application (SwiftUI)
@@ -54,6 +79,14 @@ targets:
     platform: iOS
     sources:
       - Stream
+      # The publishers are process-agnostic. ScreenCaptureKit now runs them in
+      # the host app instead of a ReplayKit broadcast upload extension.
+      - StreamBroadcast/RTMPPublisher.swift
+      - StreamBroadcast/SessionPublisher.swift
+      - StreamBroadcast/NetworkPathMonitor.swift
+      - StreamBroadcast/FacecamCapture.swift
+      - StreamBroadcast/FacecamCompositor.swift
+      - StreamBroadcast/LatestCameraFrame.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.Stream
@@ -66,17 +99,20 @@ targets:
         NSCameraUsageDescription: Stream uses the camera for the optional facecam picture-in-picture overlay on your broadcast.
         NSMicrophoneUsageDescription: Stream uses the microphone (including connected Bluetooth mics) to capture audio for your broadcast.
         NSPhotoLibraryAddUsageDescription: Stream saves your local HD broadcast backups to Photos so you can repost them if a stream drops.
-        # The host app holds an active audio session for the whole broadcast so
-        # iOS does not background-suspend it on app-switch — a suspended host
-        # makes CoreMedia stop the tied broadcast media session, which freezes
-        # the upload extension. See BroadcastKeepAlive.
+        NSScreenCaptureUsageDescription: Stream captures the screen and audio you choose so it can publish your live stream.
+        # ScreenCaptureKit requires its dedicated background mode to continue
+        # capturing after the picker sends this app to the background.
         UIBackgroundModes:
           - audio
+          - screen-capture
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     entitlements:
       path: Stream/Stream.entitlements
       properties:
@@ -87,43 +123,6 @@ targets:
     dependencies:
       - target: StreamCore
         embed: true
-      - target: StreamBroadcast
-        embed: true
-
-  # ---------------------------------------------------------------
-  # ReplayKit broadcast upload extension
-  # ---------------------------------------------------------------
-  StreamBroadcast:
-    type: app-extension
-    platform: iOS
-    sources:
-      - StreamBroadcast
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.Stream.Broadcast
-    info:
-      path: StreamBroadcast/Info.plist
-      properties:
-        CFBundleDisplayName: StreamBroadcast
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
-        NSCameraUsageDescription: Stream uses the camera for the optional facecam picture-in-picture overlay on your broadcast.
-        NSMicrophoneUsageDescription: Stream uses the microphone (including connected Bluetooth mics) to capture audio for your broadcast.
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
-          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
-          NSExtensionAttributes:
-            RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
-    entitlements:
-      path: StreamBroadcast/StreamBroadcast.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.com.joeblau.Stream
-        keychain-access-groups:
-          - $(AppIdentifierPrefix)com.joeblau.Stream
-    dependencies:
-      - target: StreamCore
-        embed: false
       - package: HaishinKit
         product: HaishinKit
       - package: HaishinKit
@@ -142,7 +141,28 @@ schemes:
     build:
       targets:
         Stream: all
+        StreamCoreTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - StreamCoreTests
     archive:
       config: Release
+
+  # ---------------------------------------------------------------
+  # Tests-only scheme for CI. Builds just StreamCore + StreamCoreTests
+  # (pure logic; no HaishinKit / ScreenCaptureKit), so it compiles on
+  # GitHub runners that ship only the iOS 26 SDK. The full app target
+  # needs the iOS 27 SDK (Xcode 27) and is verified on a physical
+  # device — ScreenCaptureKit is device-only regardless.
+  # ---------------------------------------------------------------
+  StreamCoreTests:
+    build:
+      targets:
+        StreamCoreTests: [test, build]
+    test:
+      config: Debug
+      targets:
+        - StreamCoreTests
