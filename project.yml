@@ -83,7 +83,6 @@ targets:
       # the host app instead of a ReplayKit broadcast upload extension.
       - StreamBroadcast/RTMPPublisher.swift
       - StreamBroadcast/SessionPublisher.swift
-      - StreamBroadcast/NetworkPathMonitor.swift
       - StreamBroadcast/FacecamCapture.swift
       - StreamBroadcast/FacecamCompositor.swift
       - StreamBroadcast/LatestCameraFrame.swift

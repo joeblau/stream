@@ -50,7 +50,9 @@ actor RTMPPublisher: Publisher {
     private var isPaused = false
     private var streamAttached = false
     private var recoveryInProgress = false
-    private var nextRecoveryDelay: UInt64 = 1_000_000_000
+    /// Shared jittered exponential backoff ladder (1s→30s); reset on a successful
+    /// reconnect, after 30s stable, or when a fresh route appears.
+    private var backoff = ReconnectBackoff()
     private var lastMediaAt = DispatchTime.now().uptimeNanoseconds
     private var timeline = MediaTimelineNormalizer()
     private var hasPublished = false
@@ -75,8 +77,8 @@ actor RTMPPublisher: Publisher {
     private var lastVideoAppendAt: UInt64 = 0
     private var lastVideoPTS: CMTime = .negativeInfinity   // monotonic guard for frame-repeat
     private var frameRepeatTask: Task<Void, Never>?
-    private var lastQueueBytes: Int = 0                    // watchdog: detect a draining queue
-    private var stalledTicks: Int = 0                      // watchdog: consecutive stalled checks
+    /// Shared outbound-queue stall watchdog state (stalledTicks + lastQueueBytes).
+    private var watchdog = WatchdogState()
 
     init() {
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
@@ -375,8 +377,7 @@ actor RTMPPublisher: Publisher {
         // The fresh connection starts admitting every frame; shedding only
         // re-raises via checkNetworkHealth if congestion actually returns.
         videoAdmission.reset()
-        lastQueueBytes = 0
-        stalledTicks = 0
+        watchdog = WatchdogState()
         if streamAttached {
             await mixer.removeOutput(stream)
             streamAttached = false
@@ -392,7 +393,6 @@ actor RTMPPublisher: Publisher {
     /// the loop parks at zero cost instead of burning backoff doublings (each
     /// dead attempt would also eat RTMPSocket's hardcoded 15 s connect timeout).
     private func reconnect(immediately: Bool) async {
-        let maxDelay: UInt64 = 30_000_000_000
         var attempt = 0
         var shouldDelay = !immediately
         while isRunning, !userInitiatedStop {
@@ -403,7 +403,7 @@ actor RTMPPublisher: Publisher {
                 // reset budget; a flapping path costs at most one fast attempt
                 // per transition (RTMPSocket fast-fails on .waiting).
                 shouldDelay = false
-                nextRecoveryDelay = 1_000_000_000
+                backoff.reset()
             }
             if shouldDelay {
                 await interruptibleBackoffSleep()
@@ -420,7 +420,7 @@ actor RTMPPublisher: Publisher {
                 // across consecutive FAILED attempts (catch branch). Escalating on
                 // success turned a burst of (individually recoverable) false recycles
                 // into progressively longer 2→4→8→…→30s dead-air windows.
-                nextRecoveryDelay = 1_000_000_000
+                backoff.reset()
                 streamLog.info("RTMP reconnected after \(attempt) attempt(s)")
                 stableConnectionTask?.cancel()
                 stableConnectionTask = Task { [weak self] in
@@ -440,7 +440,7 @@ actor RTMPPublisher: Publisher {
                 _ = try? await connection.close()
                 let described = describe(error)
                 streamLog.error("RTMP reconnect attempt \(attempt) failed: \(described.localizedDescription, privacy: .public)")
-                nextRecoveryDelay = min(nextRecoveryDelay * 2, maxDelay)
+                backoff.escalate()
             }
         }
     }
@@ -448,8 +448,7 @@ actor RTMPPublisher: Publisher {
     /// Sleeps the current backoff with jitter. A path event (or stop) cancels
     /// `backoffSleepTask` to end the wait early; early wake is progress, not error.
     private func interruptibleBackoffSleep() async {
-        let jitter = Double.random(in: 0.8...1.2)
-        let nanoseconds = UInt64(Double(nextRecoveryDelay) * jitter)
+        let nanoseconds = backoff.jittered()
         let sleeper = Task { try await Task.sleep(nanoseconds: nanoseconds) }
         backoffSleepTask = sleeper
         defer { backoffSleepTask = nil }
@@ -604,7 +603,7 @@ actor RTMPPublisher: Publisher {
     }
 
     private func wakeBackoff(resetDelay: Bool) {
-        if resetDelay { nextRecoveryDelay = 1_000_000_000 }
+        if resetDelay { backoff.reset() }
         backoffSleepTask?.cancel()
     }
 
@@ -617,7 +616,7 @@ actor RTMPPublisher: Publisher {
 
     private func markConnectionStable() {
         guard isRunning, !userInitiatedStop else { return }
-        nextRecoveryDelay = 1_000_000_000
+        backoff.reset()
     }
 
     /// HaishinKit exposes queue telemetry only through StreamBitRateStrategy. A
@@ -638,73 +637,39 @@ actor RTMPPublisher: Publisher {
         // No queue-health conclusion can be drawn while capture is paused or
         // the device is showing static content and no recent samples arrived.
         // Reset the stall streak too — a gap in these ticks is not a stall.
-        guard !isPaused else { stalledTicks = 0; return }
+        guard !isPaused else { watchdog.stalledTicks = 0; return }
         let now = DispatchTime.now().uptimeNanoseconds
-        guard now &- lastMediaAt < 10_000_000_000 else { stalledTicks = 0; return }
+        guard now &- lastMediaAt < 10_000_000_000 else { watchdog.stalledTicks = 0; return }
         // Mic-stall fallback (control plane only): HaishinKit's multitrack mixer
         // renders the mix only when the MAIN track appends, so a dead mic route
         // would silence app audio too. If app audio is flowing but the mic went
         // quiet, promote track 1 to the mix clock; the first mic buffer back
         // flips it home (see appendMic). No timeline rebase on either side —
         // video/app kept flowing, so mic samples re-enter already aligned.
-        if settings.includeAppAudio, !micTrackStalled,
-           lastMicAppendAt > 0,
-           now &- lastAppAppendAt < 2_000_000_000,
-           now &- lastMicAppendAt > 4_000_000_000 {
+        if settings.includeAppAudio, !micTrackStalled, lastMicAppendAt > 0,
+           MicStallEvaluator.shouldPromoteApp(now: now,
+                                              lastMicAppendAt: lastMicAppendAt,
+                                              lastAppAppendAt: lastAppAppendAt) {
             micTrackStalled = true
             await applyAudioMixerSettings()
             streamLog.warning("Mic buffers stalled >4s; app audio is now the mix clock")
         }
         let health = await networkController.healthSnapshot()
         videoAdmission.setQueueDepth(health.queueBytes)
-        // A growing queue by itself means congestion, not a dead connection. The
-        // adaptive controller needs time to lower the encoder rate and drain it.
-        // Reconnect only when progress has stopped, telemetry has stopped, or the
-        // backlog is large enough that viewers would receive several stale seconds.
-        // For 10 s after a network path change the tolerance halves: the old flow
-        // is known-suspect, so a genuine stall should recycle fast.
-        let recentPathChange = lastPathChangeAt > 0 && now &- lastPathChangeAt < 10_000_000_000
-        let queueLimit = recentPathChange ? 2_000_000 : 4_000_000
-        let zeroLimit = recentPathChange ? 2 : 4
-        // A deep queue is only a recycle reason if it is NOT draining — a transient
-        // backlog that is already shrinking clears on its own once the ABR lowers
-        // the encoder rate. zeroOutputSeconds independently catches a truly stalled
-        // (bytesOut==0) queue.
-        //
-        // Require the backlog to be strictly GROWING (`>`), not merely frozen (`>=`):
-        // when the container app is backgrounded the OS starves the ~1Hz ABR timer
-        // that feeds queueBytes/zeroOutputSeconds, so those figures FREEZE at their
-        // last value. A frozen-equal queue (`>=`) read that as a permanent stall and
-        // recycled a socket the fork deliberately keeps open across `.waiting`. Only
-        // a queue that keeps climbing is genuinely wedged.
-        let queueStuck = health.queueBytes >= queueLimit && health.queueBytes > lastQueueBytes
-        lastQueueBytes = health.queueBytes
-        // eventAgeSeconds is intentionally NOT a recycle condition. It is the age of
-        // HaishinKit's ~1Hz ABR callback (a wall-clock timer, default QoS), which the
-        // OS starves when the container app is backgrounded behind another app — it
-        // is NOT a probe of the socket. The connection.connected + readyState guards
-        // above already detect a genuinely dead socket, and queue/zeroOutput cover
-        // real stalls. Recycling on it tore down healthy connections on every
-        // app-switch — the primary cause of the "Connection lost" dropouts.
-        //
-        // Even a real stall must PERSIST before we recycle: an app-switch drives the
-        // socket into a transient `.waiting` that the RTMPSocket fork keeps open and
-        // that recovers on the SAME session (no reconnect) once a usable path returns
-        // — often the instant the app is foregrounded. Tearing it down after a single
-        // 2 s tick converted that survivable blip into a hard, destination-visible
-        // RTMP disconnect. Require several consecutive stalled ticks (~12 s, or ~6 s
-        // right after a path change when the flow is already suspect) so the socket
-        // layer's keep-open policy is honoured instead of fought.
-        if queueStuck || health.zeroOutputSeconds >= zeroLimit {
-            stalledTicks += 1
-        } else {
-            stalledTicks = 0
-        }
-        let ticksToRecycle = recentPathChange ? 3 : 6
-        if stalledTicks >= ticksToRecycle {
-            let ticks = stalledTicks
-            streamLog.error("RTMP socket stalled \(ticks) ticks: queue=\(health.queueBytes) bytes, zeroOut=\(health.zeroOutputSeconds)s, target=\(health.targetBitRate) bps")
-            stalledTicks = 0
+        // The stall math — strictly-GROWING queue (not merely frozen, which happens
+        // when a backgrounded app starves the ~1Hz telemetry), independent zero-output
+        // stall, N-tick persistence, and the halved tolerance for 10s after a path
+        // change — lives in the shared, unit-tested WatchdogEvaluator. eventAgeSeconds
+        // is deliberately NOT an input (it freezes on backgrounding); the
+        // connected/readyState guards above already catch a genuinely dead socket.
+        let recentPathChange = lastPathChangeAt > 0
+            && now &- lastPathChangeAt < PathDebounce.recentPathChangeWindow
+        let decision = WatchdogEvaluator.evaluate(queueBytes: health.queueBytes,
+                                                  zeroOutputSeconds: health.zeroOutputSeconds,
+                                                  recentPathChange: recentPathChange,
+                                                  state: &watchdog)
+        if decision.shouldRecycle {
+            streamLog.error("RTMP socket stalled \(decision.stalledTicks) ticks: queue=\(health.queueBytes) bytes, zeroOut=\(health.zeroOutputSeconds)s, target=\(health.targetBitRate) bps")
             await requestRecovery(reason: "outbound queue stalled")
         }
     }
@@ -913,48 +878,6 @@ actor RTMPPublisher: Publisher {
         _ = try? await stream.close()
         _ = try? await connection.close()
         await mixer.stopRunning()
-    }
-}
-
-/// Bounded video-frame admission under outbound congestion. HaishinKit's RTMP
-/// send queue is unbounded, so when the uplink can't drain it, SHEDDING input
-/// video frames (proportional to how deep the queue is) keeps glass-to-glass
-/// latency bounded instead of letting it grow to seconds and then hard-recycling.
-/// Audio is never dropped. The depth is refreshed ~every 2s from the real socket
-/// queue by checkNetworkHealth; this is the fast, coarse bound that complements
-/// the encoder-level bitrate/frame-rate reductions the ABR already applies.
-final class VideoFrameAdmission: @unchecked Sendable {
-    private struct State { var keep = 1; var period = 1; var counter = 0 }
-    private let lock = OSAllocatedUnfairLock<State>(initialState: State())
-
-    /// Maps outbound queue depth to a keep/period frame-pacing ratio.
-    func setQueueDepth(_ bytes: Int) {
-        let keep: Int, period: Int
-        switch bytes {
-        case ..<524_288:   (keep, period) = (1, 1)  // < 0.5 MB: keep every frame
-        case ..<1_048_576: (keep, period) = (2, 3)  // 0.5-1 MB: drop 1 in 3
-        case ..<2_097_152: (keep, period) = (1, 2)  // 1-2 MB: drop 1 in 2
-        default:           (keep, period) = (1, 3)  // > 2 MB: drop 2 in 3
-        }
-        lock.withLock { state in
-            if state.period != period { state.counter = 0 }
-            state.keep = keep
-            state.period = period
-        }
-    }
-
-    /// True when this video frame should be encoded and sent.
-    func admit() -> Bool {
-        lock.withLock { state in
-            guard state.period > 1 else { return true }
-            let keep = state.counter % state.period < state.keep
-            state.counter &+= 1
-            return keep
-        }
-    }
-
-    func reset() {
-        lock.withLock { $0 = State() }
     }
 }
 
