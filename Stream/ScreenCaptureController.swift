@@ -18,6 +18,9 @@ private let captureLog = Logger(subsystem: "com.joeblau.Stream", category: "scre
 final class ScreenCaptureController: NSObject {
     private(set) var isLive = false
     private(set) var errorMessage: String?
+    /// A user-facing note when the device's thermal/power state is forcing a
+    /// quality reduction, or nil when unrestricted. Read by the (future) stats HUD.
+    private(set) var thermalNotice: String?
 
     @ObservationIgnored private let picker = SCContentSharingPicker.shared
     @ObservationIgnored private var pendingSettings: StreamSettings?
@@ -27,6 +30,8 @@ final class ScreenCaptureController: NSObject {
     @ObservationIgnored private var publisherTask: Task<Void, Never>?
     @ObservationIgnored private var heartbeatTask: Task<Void, Never>?
     @ObservationIgnored private var micVolumeObserver: DarwinSignalObserver?
+    @ObservationIgnored private var lastAppliedCeiling: ThermalPowerCeiling?
+    @ObservationIgnored private var thermalApplyTask: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -35,6 +40,21 @@ final class ScreenCaptureController: NSObject {
         micVolumeObserver = DarwinSignalObserver(name: BroadcastControl.micVolumeSignal) { [weak self] in
             Task { @MainActor [weak self] in self?.applyMicVolume() }
         }
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(thermalOrPowerChanged),
+                           name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        center.addObserver(self, selector: #selector(thermalOrPowerChanged),
+                           name: NSNotification.Name.NSProcessInfoPowerStateDidChange, object: nil)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// Thermal-state and power-state notifications arrive on an arbitrary thread;
+    /// hop to the main actor to re-evaluate the governor.
+    @objc private nonisolated func thermalOrPowerChanged() {
+        Task { @MainActor [weak self] in self?.applyThermalCeiling() }
     }
 
     func presentPicker(settings: StreamSettings) {
@@ -137,6 +157,8 @@ final class ScreenCaptureController: NSObject {
             try await stream.startCapture()
             isLive = true
             publishState(true)
+            lastAppliedCeiling = nil
+            applyThermalCeiling()
             heartbeatTask = Task {
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(3))
@@ -165,6 +187,9 @@ final class ScreenCaptureController: NSObject {
         heartbeatTask?.cancel()
         heartbeatTask = nil
         isLive = false
+        thermalNotice = nil
+        lastAppliedCeiling = nil
+        thermalApplyTask = nil
         output?.finish()
 
         if let stream, stream.isCapturing {
@@ -203,6 +228,34 @@ final class ScreenCaptureController: NSObject {
         let volume = SettingsStore().load().micVolume
         output?.setMicVolume(volume)
         Task { await publisher.setMicVolume(volume) }
+    }
+
+    /// Recomputes the thermal/Low-Power ceiling and pushes it to the encoder (via
+    /// the adaptive controller) and the compositor. Reuses the existing throttle
+    /// path rather than adding a parallel one. No-op while not capturing.
+    private func applyThermalCeiling() {
+        guard let publisher, let output else { return }
+        let ceiling = ThermalPowerGovernor.current()
+        guard ceiling != lastAppliedCeiling else { return }
+        lastAppliedCeiling = ceiling
+        thermalNotice = ceiling.notice
+        output.applyThermalProfile(frameRateCap: ceiling.frameRateCap,
+                                   allowPiP: ceiling.allowPiP)
+        let scale = ceiling.bitRateScale
+        let cap = ceiling.frameRateCap
+        // Serialize applies in submission order so two notifications firing close
+        // together cannot land on the ABR actor out of order and leave a stale
+        // ceiling stored while thermalNotice reports otherwise.
+        let previous = thermalApplyTask
+        thermalApplyTask = Task {
+            await previous?.value
+            await publisher.setThermalCeiling(bitRateScale: scale, frameRateCap: cap)
+        }
+        if ceiling.notice != nil {
+            captureLog.notice("Thermal governor engaged: fpsCap=\(cap, privacy: .public) bitrateScale=\(scale, privacy: .public) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled, privacy: .public)")
+        } else {
+            captureLog.info("Thermal governor cleared; full quality restored")
+        }
     }
 
     private func configurePreferredMicrophone(_ uid: String?) async {
@@ -321,7 +374,7 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
     /// so the screen callback itself must throttle down to `settings.frameRate` —
     /// otherwise the encoder is flooded (irregular pacing + CPU/thermal spikes that
     /// stutter both video and audio). Touched only on the serial `sampleQueue`.
-    private let targetFrameInterval: CMTime
+    private var targetFrameInterval: CMTime
     private var nextVideoDeadline: CMTime = .invalid
 
     init(publisher: any Publisher,
@@ -421,6 +474,25 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
 
     func setMicVolume(_ volume: Double) {
         micLevelMeter.setGain(volume)
+    }
+
+    /// Applies the device thermal/Low-Power profile to the capture side: paces the
+    /// screen callback to the capped frame rate (on the serial sample queue) and
+    /// stops the facecam under pressure so the camera + compositor stop burning
+    /// power. Re-arms the facecam when the device recovers. PiP toggling only
+    /// applies when the user has the facecam enabled.
+    func applyThermalProfile(frameRateCap: Int, allowPiP: Bool) {
+        sampleQueue.async { [weak self] in
+            guard let self else { return }
+            let fps = max(1, min(self.settings.frameRate, frameRateCap))
+            self.targetFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+        }
+        guard settings.pipEnabled else { return }
+        if allowPiP {
+            facecam.start(with: settings)
+        } else {
+            facecam.stop()
+        }
     }
 }
 
@@ -533,6 +605,7 @@ private final class ScreenCaptureMicrophoneMeter: @unchecked Sendable {
 final class ScreenCaptureController {
     private(set) var isLive = false
     private(set) var errorMessage: String?
+    private(set) var thermalNotice: String?
 
     func presentPicker(settings: StreamSettings) {
         errorMessage = "Screen capture requires a physical iOS 27 device."

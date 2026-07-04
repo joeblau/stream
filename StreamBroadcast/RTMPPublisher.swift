@@ -754,6 +754,12 @@ actor RTMPPublisher: Publisher {
         }
     }
 
+    func setThermalCeiling(bitRateScale: Double, frameRateCap: Int) async {
+        await networkController.setThermalCeiling(bitRateScale: bitRateScale,
+                                                  frameRateCap: frameRateCap,
+                                                  applyingTo: stream)
+    }
+
     /// Appends a (raw or composited) screen video buffer. Dropped until the output
     /// size is locked, so the encoder never starts at the wrong dimensions.
     func appendVideo(_ sb: CMSampleBuffer) async {
@@ -983,7 +989,17 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     private var currentInterface: NetworkPathSnapshot.Interface?
     private var lastGoodTarget: [NetworkPathSnapshot.Interface: Int] = [:]
 
-    private var effectiveMaximum: Int { min(mamimumVideoBitRate, pathCeiling) }
+    /// Thermal / Low-Power ceiling from `ThermalPowerGovernor`, composed with the
+    /// network path ceiling. `min()`'d into `effectiveMaximum` so the upward probe
+    /// never climbs past it, and folded into every frame-interval decision.
+    private var thermalBitRateScale: Double = 1.0
+    private var thermalFrameRateCap: Int = .max
+
+    private var effectiveMaximum: Int {
+        let thermalCeiling = Int(Double(mamimumVideoBitRate) * thermalBitRateScale)
+        return max(minimumVideoBitRate,
+                   min(min(mamimumVideoBitRate, pathCeiling), thermalCeiling))
+    }
 
     init(maximumBitRate: Int, frameRate: Int) {
         mamimumVideoBitRate = maximumBitRate
@@ -1103,7 +1119,10 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
         }
         let raised = clamped > pathCeiling
         pathCeiling = clamped
-        targetBitRate = min(targetBitRate, pathCeiling)
+        // Clamp to effectiveMaximum (which folds in the thermal ceiling), not just
+        // pathCeiling: otherwise an interface change re-seeds targetBitRate from a
+        // full-rate last-good value and silently defeats an active thermal cap.
+        targetBitRate = min(targetBitRate, effectiveMaximum)
         if raised { healthySeconds = 0 }   // restart the upward probe cleanly
         await applyTarget(to: stream)      // apply NOW, not at the next 1 Hz event
     }
@@ -1118,13 +1137,62 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
                              severe: Bool = false) async {
         var video = await stream.videoSettings
         video.bitRate = targetBitRate
+        video.frameInterval = frameInterval(severe: severe)
+        try? await stream.setVideoSettings(video)
+    }
+
+    /// The frame interval for the current congestion + thermal state. A larger
+    /// interval is a lower frame rate, so taking `max()` of the congestion and
+    /// thermal intervals always yields the more restrictive of the two.
+    private func frameInterval(severe: Bool) -> Double {
+        let congestionInterval: Double
         if severe {
-            video.frameInterval = VideoCodecSettings.frameInterval10
+            congestionInterval = VideoCodecSettings.frameInterval10
         } else if congestionActive, configuredFrameRate > 30 {
-            video.frameInterval = VideoCodecSettings.frameInterval30
+            congestionInterval = VideoCodecSettings.frameInterval30
         } else {
-            video.frameInterval = preferredFrameInterval
+            congestionInterval = preferredFrameInterval
         }
+        let cappedFrameRate = max(1, min(configuredFrameRate, thermalFrameRateCap))
+        let thermalInterval = max(0, (1.0 / Double(cappedFrameRate)) - 0.001)
+        return max(congestionInterval, thermalInterval)
+    }
+
+    /// Stores a thermal/Low-Power ceiling and clamps the current target to it.
+    /// Used when there is no stream to apply to yet (pre-connect); the value then
+    /// takes effect on the first adaptive event after connect.
+    func storeThermalCeiling(bitRateScale: Double, frameRateCap: Int) {
+        thermalBitRateScale = min(max(bitRateScale, 0.1), 1.0)
+        thermalFrameRateCap = max(1, frameRateCap)
+        // Only lower the target to fit a tightened ceiling. Leave healthySeconds
+        // alone: resetting it on every change would let brief thermal flapping
+        // across a boundary keep restarting the up-probe and starve recovery.
+        targetBitRate = min(targetBitRate, effectiveMaximum)
+    }
+
+    func currentFrameInterval() -> Double { frameInterval(severe: false) }
+
+    /// Applies the current (possibly thermally-clamped) target + frame interval to
+    /// a freshly-connected stream. SRT/WHIP emit no `.reset` event, so the
+    /// pre-connect store path relies on this to land the ceiling on the encoder.
+    func applyCurrentTarget(to stream: any StreamConvertible) async {
+        var video = await stream.videoSettings
+        video.bitRate = targetBitRate
+        video.frameInterval = frameInterval(severe: false)
+        try? await stream.setVideoSettings(video)
+    }
+
+    /// Applies a thermal/Low-Power ceiling to the encoder immediately, instead of
+    /// waiting for the next ~1 Hz adaptive event. Takes `any StreamConvertible` so
+    /// both the concrete RTMPStream and SessionPublisher's existential stream can
+    /// drive it.
+    func setThermalCeiling(bitRateScale: Double,
+                           frameRateCap: Int,
+                           applyingTo stream: any StreamConvertible) async {
+        storeThermalCeiling(bitRateScale: bitRateScale, frameRateCap: frameRateCap)
+        var video = await stream.videoSettings
+        video.bitRate = targetBitRate
+        video.frameInterval = frameInterval(severe: false)
         try? await stream.setVideoSettings(video)
     }
 
