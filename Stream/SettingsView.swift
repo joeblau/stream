@@ -2,6 +2,7 @@ import SwiftUI
 import Observation
 import AVFAudio
 import StreamCore
+import UIKit
 import os
 
 /// The settings sections. Each is launched from the settings list into its own
@@ -114,83 +115,115 @@ struct SettingsView: View {
     /// Dismisses the whole settings drawer (the "Done" affordance).
     @Environment(\.dismiss) private var dismiss
 
-    /// Navigation stack path, tracked so the sheet height can follow the view on
-    /// top (the launcher, or a pushed section).
-    @State private var path: [SettingsSection] = []
-    /// Real content height of the launcher list, read from its scroll geometry.
-    @State private var launcherHeight: CGFloat = 300
-    /// Real content height of each pushed section's form, keyed by section.
-    @State private var sectionHeights: [SettingsSection: CGFloat] = [:]
-    /// The live detent height. Animated toward `targetHeight` on every push/pop or
-    /// in-section content change so the drawer glides between sizes instead of
-    /// snapping. Driving the `.height()` detent from state changed inside
-    /// `withAnimation` is what makes the sheet resize animate.
-    @State private var sheetHeight: CGFloat = 420
+    /// The section currently shown, or `nil` for the launcher. Not a full stack —
+    /// the drawer is exactly two levels deep (launcher → one section), so a single
+    /// optional models it. Owning the level ourselves (instead of a NavigationStack
+    /// push) lets ONE `withAnimation` drive the content morph and the detent resize
+    /// together as a single motion.
+    @State private var selected: SettingsSection?
 
-    /// Chrome around the scrolling content: the inline nav bar + grabber on top
-    /// and the home-indicator safe area on the bottom. Added to the measured
-    /// content height so the drawer is exactly tall enough and never clips.
-    private static let sheetChrome: CGFloat = 92
-
-    /// The height the drawer should settle at: the on-top view's measured content
-    /// height (clamped to a sane floor) plus chrome. `.height()` caps it at the
-    /// available space, so unusually tall sections simply scroll.
-    private var targetHeight: CGFloat {
-        let content = path.last.flatMap { sectionHeights[$0] } ?? launcherHeight
-        return max(160, content) + Self.sheetChrome
-    }
+    /// Owns the content-sized detent and animates every resize with ITS curve, and —
+    /// crucially — guards a late re-measurement from restarting the spring mid-resize
+    /// (the real cause of the height feeling "desynced"). The resize speed lives in
+    /// this one initializer: 0.45s reads as settled where the old 0.3s outran the slide.
+    @State private var detent = DynamicDetentSheetModel(
+        initialHeight: 420,
+        chrome: 100,                 // nav bar + grabber + home-indicator inset
+        minimumContentHeight: 160,   // floor so a short section never collapses
+        animation: .spring(duration: 0.45, bounce: 0.1)
+    )
 
     var body: some View {
-        NavigationStack(path: $path) {
-            List {
-                Section {
-                    ForEach(SettingsSection.allCases) { section in
-                        NavigationLink(value: section) {
-                            sectionRow(section)
-                        }
-                    }
-                } footer: {
-                    Text("Tap a section to adjust it. Changes save automatically.")
+        // A NavigationStack purely for the system Liquid Glass chrome — the glass nav
+        // bar, glass toolbar buttons, and inline title. It does NOT push via the nav
+        // stack: the launcher and section are swapped with a directional slide
+        // (section in from trailing / launcher out to leading = a forward push; the
+        // reverse on back = a pop), driven by our own `withAnimation` so the slide
+        // and the detent resize ride the same transaction.
+        NavigationStack {
+            ZStack(alignment: .top) {
+                if let section = selected {
+                    sectionDetail(section)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .transition(.move(edge: .trailing))
+                } else {
+                    launcherPane
+                        .transition(.move(edge: .leading))
                 }
             }
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
-                let rounded = height.rounded()
-                if abs(rounded - launcherHeight) >= 1 { launcherHeight = rounded }
-            }
-            .navigationTitle("Settings")
+            // Measure every section's height off-screen so the FIRST open resizes
+            // in lockstep with the slide, not a beat after it.
+            .background(sectionHeightPrewarm)
+            .navigationTitle(selected?.title ?? "Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: SettingsSection.self) { section in
-                sectionDetail(section)
-            }
             .toolbar {
+                if selected != nil {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { back() } label: { Image(systemName: "chevron.left") }
+                            .accessibilityLabel("Back")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { Haptics.tap(); dismiss() }
                 }
             }
         }
-        .presentationDetents([.height(sheetHeight)])
-        .presentationDragIndicator(.visible)
+        .dynamicHeightDetents(detent)   // curve-controlled height + drag indicator
         .presentationCornerRadius(55)
-        // Haptic when a section row is tapped (push) or dismissed (pop).
-        .sensoryFeedback(.impact(weight: .light), trigger: path)
-        .onChange(of: targetHeight) { _, newHeight in
-            guard abs(newHeight - sheetHeight) >= 1 else { return }
-            // Defer to the next runloop tick so the animated detent change doesn't
-            // re-enter layout within the same frame (which SwiftUI flags as
-            // "tried to update multiple times per frame").
-            Task { @MainActor in
-                withAnimation(.snappy(duration: 0.32, extraBounce: 0.04)) {
-                    sheetHeight = newHeight
-                }
-            }
-        }
+        // Haptic when a section is opened (push) or closed (pop).
+        .sensoryFeedback(.impact(weight: .light), trigger: selected)
         .onAppear {
+            // Launcher is the active pane on present; in-place field growth then
+            // animates automatically via each pane's measuredDetentHeight report.
+            detent.activate(SettingsSection?.none)
             // Enumerate inputs/capabilities so the launcher summaries are accurate;
             // the live mic meter only runs while the Audio detail is open.
             audio.refresh(requestPermission: false)
             camera.refresh()
             photos.refresh()
         }
+    }
+
+    // MARK: - Drill-in navigation (custom, so the content morph + resize are one motion)
+
+    /// Open a section: it slides in (push) and the drawer resizes to fit — both
+    /// inside ONE `withAnimation`, so they move as a single motion.
+    private func open(_ section: SettingsSection) {
+        // No explicit tap here: `.sensoryFeedback(trigger: selected)` already fires
+        // one light impact whenever `selected` changes. The slide (.transition) and the
+        // detent resize ride ONE transaction (detent.animation), so they move together.
+        detent.animatingResize {
+            selected = section
+            detent.activate(Optional(section))
+        }
+    }
+
+    /// Return to the launcher (the nav-bar back button).
+    private func back() {
+        // Haptic comes from `.sensoryFeedback(trigger: selected)` (see `open`).
+        detent.animatingResize {
+            selected = nil
+            detent.activate(SettingsSection?.none)
+        }
+    }
+
+    // MARK: - Launcher pane
+
+    private var launcherPane: some View {
+        List {
+            Section {
+                ForEach(SettingsSection.allCases) { section in
+                    Button { open(section) } label: {
+                        sectionRow(section)
+                    }
+                    .buttonStyle(.plain)
+                }
+            } footer: {
+                Text("Tap a section to adjust it. Changes save automatically.")
+            }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .measuredDetentHeight(SettingsSection?.none, into: detent)   // launcher's own identity
     }
 
     // MARK: - Launcher rows
@@ -211,18 +244,27 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            Spacer(minLength: 8)
+            // Disclosure affordance the old NavigationLink drew for us.
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 
-    // MARK: - Pushed section detail
+    // MARK: - Section detail body
 
-    /// One section's controls, pushed onto the settings navigation stack. The
-    /// single enclosing sheet (`presentationSizing(.form)` in `ContentView`)
-    /// resizes to fit whichever section's Form is on screen, and re-sizes as
-    /// fields appear/hide within it.
+    /// One section's controls — the Form that fills the section pane below its
+    /// header. The enclosing drawer resizes to fit whichever section is on screen
+    /// (via `sectionHeights` → `currentTarget`), and re-sizes as fields appear/hide
+    /// within it.
+    /// A section's Form (controls only), reused by both the visible detail and the
+    /// hidden height pre-warm — so measuring it off-screen triggers no side effects.
     @ViewBuilder
-    private func sectionDetail(_ section: SettingsSection) -> some View {
+    private func sectionForm(_ section: SettingsSection) -> some View {
         Form {
             switch section {
             case .connection: connectionSection
@@ -233,22 +275,40 @@ struct SettingsView: View {
             case .chat:       chatSection
             }
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
-            let rounded = height.rounded()
-            if abs(rounded - (sectionHeights[section] ?? 0)) >= 1 { sectionHeights[section] = rounded }
-        }
-        .navigationTitle(section.title)
-        .navigationBarTitleDisplayMode(.inline)
         .scrollBounceBehavior(.basedOnSize)
-        .onAppear {
-            guard section == .audio else { return }
-            micLevel.setGain(settings.micVolume)
-            micLevel.setPreferredInput(settings.preferredAudioInputUID)
-            micLevel.start()
+    }
+
+    /// One section's controls, shown in the detail pane: reports its height under its
+    /// own identity and runs the live mic meter only while the Audio detail is open.
+    private func sectionDetail(_ section: SettingsSection) -> some View {
+        sectionForm(section)
+            .measuredDetentHeight(Optional(section), into: detent)   // this section's own identity
+            .onAppear {
+                guard section == .audio else { return }
+                micLevel.setGain(settings.micVolume)
+                micLevel.setPreferredInput(settings.preferredAudioInputUID)
+                micLevel.start()
+            }
+            .onDisappear {
+                if section == .audio { micLevel.stop() }
+            }
+    }
+
+    /// Renders every section's Form once, hidden, so its content height is measured
+    /// and cached BEFORE its first open — then `open` resizes in lockstep with the
+    /// slide instead of a two-step (height jumping after the push). `report` only
+    /// CACHES for non-active panes (never resizes the sheet), and a `.background`
+    /// never affects the foreground's size.
+    private var sectionHeightPrewarm: some View {
+        ZStack {
+            ForEach(SettingsSection.allCases) { section in
+                sectionForm(section)
+                    .measuredDetentHeight(Optional(section), into: detent)
+            }
         }
-        .onDisappear {
-            if section == .audio { micLevel.stop() }
-        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     // MARK: - Launcher summaries
