@@ -926,51 +926,20 @@ struct BroadcastNetworkHealth: Sendable {
 /// congestion reduction but does not apply it. This implementation applies every
 /// reduction immediately and exposes the socket telemetry needed by the watchdog.
 actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
+    // `StreamBitRateStrategy` requires a synchronous get-only `mamimumVideoBitRate`,
+    // which on an actor must stay a nonisolated `let` (sic misspelling is HaishinKit's).
     let mamimumVideoBitRate: Int
     let mamimumAudioBitRate = 0
 
-    private let minimumVideoBitRate: Int
-    private let configuredFrameRate: Int
-    private let preferredFrameInterval: Double
-    private var targetBitRate: Int
-    private var healthySeconds = 0
-    private var zeroOutputSeconds = 0
-    private var queueBytes = 0
-    private var congestionActive = false
-    private var capturePaused = false
-    private var lastEventAt = DispatchTime.now().uptimeNanoseconds
-
-    /// Per-network-path ceiling and seeding. The protocol requires a
-    /// synchronous get-only `mamimumVideoBitRate`, which on an actor must stay
-    /// a nonisolated `let`; the dynamic per-path ceiling therefore lives here.
-    private var pathCeiling: Int
-    private var currentInterface: NetworkPathSnapshot.Interface?
-    private var lastGoodTarget: [NetworkPathSnapshot.Interface: Int] = [:]
-
-    /// Thermal / Low-Power ceiling from `ThermalPowerGovernor`, composed with the
-    /// network path ceiling. `min()`'d into `effectiveMaximum` so the upward probe
-    /// never climbs past it, and folded into every frame-interval decision.
-    private var thermalBitRateScale: Double = 1.0
-    private var thermalFrameRateCap: Int = .max
-
-    private var effectiveMaximum: Int {
-        let thermalCeiling = Int(Double(mamimumVideoBitRate) * thermalBitRateScale)
-        return max(minimumVideoBitRate,
-                   min(min(mamimumVideoBitRate, pathCeiling), thermalCeiling))
-    }
+    /// All the numeric decision math now lives in the pure, unit-tested StreamCore
+    /// `AdaptiveBitRateState` (issue #21); this actor is a thin wrapper that reads/
+    /// writes HaishinKit's encoder around it.
+    private var abr: AdaptiveBitRateState
+    private var lastEventAt = DispatchTime.now().uptimeNanoseconds   // telemetry only
 
     init(maximumBitRate: Int, frameRate: Int) {
         mamimumVideoBitRate = maximumBitRate
-        minimumVideoBitRate = max(300_000, maximumBitRate / 10)
-        targetBitRate = maximumBitRate
-        pathCeiling = maximumBitRate
-        // Clamp only to a sane hardware maximum, NOT 30. The caller already passes
-        // a capability-resolved rate (≤60 on capable devices); keeping the real
-        // value here is what makes the `configuredFrameRate > 30` congestion tier
-        // in `frameInterval` reachable — it was dead code while this pinned to ≤30.
-        let clampedFrameRate = min(max(frameRate, 1), 120)
-        configuredFrameRate = clampedFrameRate
-        preferredFrameInterval = max(0, (1.0 / Double(clampedFrameRate)) - 0.001)
+        abr = AdaptiveBitRateState(maximumBitRate: maximumBitRate, frameRate: frameRate)
     }
 
     func adjustBitrate(_ event: NetworkMonitorEvent,
@@ -978,85 +947,49 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
         lastEventAt = DispatchTime.now().uptimeNanoseconds
         switch event {
         case .reset:
-            // Keep the bitrate learned from the previous socket. Returning to the
-            // configured maximum here caused a congestion/reconnect feedback loop
-            // on constrained Wi-Fi links.
-            healthySeconds = 0
-            zeroOutputSeconds = 0
-            queueBytes = 0
-            await applyTarget(to: stream)
+            let decision = abr.onReset()
+            if decision.shouldApply { await applyDecision(decision, to: stream) }
 
         case .publishInsufficientBWOccured(let report):
-            queueBytes = report.currentQueueBytesOut
-            guard !capturePaused else {
-                zeroOutputSeconds = 0
-                healthySeconds = 0
-                return
+            // Read the LIVE audio bitrate only when not paused — the original
+            // returned before touching stream.audioSettings on the paused path, so
+            // this adds no `await` it lacked.
+            let audioBitRate = abr.capturePaused ? 0 : await stream.audioSettings.bitRate
+            let decision = abr.onInsufficientBandwidth(
+                bytesOutPerSecond: report.currentBytesOutPerSecond,
+                queueBytesOut: report.currentQueueBytesOut,
+                audioBitRate: audioBitRate)
+            if decision.shouldApply {
+                await applyDecision(decision, to: stream)
+                streamLog.warning("ABR reduced video to \(self.abr.targetBitRate) bps; queue=\(self.abr.queueBytes) bytes")
             }
-            healthySeconds = 0
-            congestionActive = true
-            let audio = await stream.audioSettings
-            if report.currentBytesOutPerSecond > 0 {
-                zeroOutputSeconds = 0
-                let available = max(0, report.currentBytesOutPerSecond * 8 - audio.bitRate)
-                // Leave substantial headroom for Wi-Fi variance, RTMP overhead,
-                // and keyframes instead of targeting the measured ceiling.
-                let reduced = Int(Double(available) * 0.65)
-                targetBitRate = max(minimumVideoBitRate,
-                                    min(targetBitRate, reduced))
-            } else {
-                zeroOutputSeconds += 1
-                targetBitRate = max(minimumVideoBitRate, targetBitRate / 2)
-            }
-            await applyTarget(to: stream,
-                              severe: report.currentBytesOutPerSecond == 0)
-            streamLog.warning("ABR reduced video to \(self.targetBitRate) bps; queue=\(self.queueBytes) bytes")
 
         case .status(let report):
-            queueBytes = report.currentQueueBytesOut
-            guard !capturePaused else {
-                zeroOutputSeconds = 0
-                healthySeconds = 0
-                return
-            }
-            // Zero output with an empty queue is normal for a paused/static
-            // capture. It is a stall only when bytes are waiting to be sent.
-            if report.currentBytesOutPerSecond == 0, queueBytes > 0 {
-                zeroOutputSeconds += 1
-                if zeroOutputSeconds >= 2 {
-                    congestionActive = true
-                    healthySeconds = 0
-                    targetBitRate = max(minimumVideoBitRate, targetBitRate / 2)
-                    await applyTarget(to: stream, severe: true)
+            let decision = abr.onStatus(bytesOutPerSecond: report.currentBytesOutPerSecond,
+                                        queueBytesOut: report.currentQueueBytesOut)
+            if decision.shouldApply {
+                await applyDecision(decision, to: stream)
+                // Match the original: only the upward-PROBE apply logs "recovered".
+                // The severe stall-halving apply (decision.severe) logged nothing —
+                // logging "recovered" there would misread as recovery during a cut.
+                if !decision.severe {
+                    streamLog.info("ABR recovered video to \(self.abr.targetBitRate) bps")
                 }
-            } else {
-                zeroOutputSeconds = 0
             }
-            if queueBytes <= 32 * 1_024, report.currentBytesOutPerSecond > 0 {
-                healthySeconds += 1
-            } else {
-                healthySeconds = 0
-            }
-            // Probe upward only after a sustained clean queue and in small steps.
-            // A fast 10%-every-10s ramp repeatedly overshot variable Wi-Fi uplinks.
-            guard healthySeconds >= 30 else { return }
-            healthySeconds = 0
-            if targetBitRate < effectiveMaximum {
-                targetBitRate = min(effectiveMaximum,
-                                    targetBitRate + max(75_000, effectiveMaximum / 20))
-            } else {
-                congestionActive = false
-            }
-            await applyTarget(to: stream)
-            streamLog.info("ABR recovered video to \(self.targetBitRate) bps")
         }
     }
 
-    func setCapturePaused(_ paused: Bool) {
-        capturePaused = paused
-        healthySeconds = 0
-        zeroOutputSeconds = 0
+    /// Applies the pure decision's target bitrate + frame interval to the encoder.
+    /// `abr.frameInterval` uses constants bit-identical to VideoCodecSettings's, so
+    /// the encoder value is byte-identical to the pre-extraction controller.
+    private func applyDecision(_ decision: ABRDecision, to stream: some StreamConvertible) async {
+        var video = await stream.videoSettings
+        video.bitRate = abr.targetBitRate
+        video.frameInterval = abr.frameInterval(severe: decision.severe)
+        try? await stream.setVideoSettings(video)
     }
+
+    func setCapturePaused(_ paused: Bool) { abr.onCapturePaused(paused) }
 
     /// Called from RTMPPublisher.handlePathUpdate on every path emission.
     /// Remembers the last achieved target per interface so Wi-Fi -> 5G does not
@@ -1068,90 +1001,30 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
                         interface: NetworkPathSnapshot.Interface,
                         isBaseline: Bool,
                         applyingTo stream: some StreamConvertible) async {
-        let clamped = max(minimumVideoBitRate, min(ceiling, mamimumVideoBitRate))
-        if isBaseline || currentInterface == nil {
-            currentInterface = interface
-        } else if let current = currentInterface, interface != current {
-            lastGoodTarget[current] = targetBitRate
-            currentInterface = interface
-            let seed = lastGoodTarget[interface] ?? Int(Double(clamped) * 0.6)
-            targetBitRate = max(minimumVideoBitRate, min(seed, clamped))
-            healthySeconds = 0
-            zeroOutputSeconds = 0
-        }
-        let raised = clamped > pathCeiling
-        pathCeiling = clamped
-        // Clamp to effectiveMaximum (which folds in the thermal ceiling), not just
-        // pathCeiling: otherwise an interface change re-seeds targetBitRate from a
-        // full-rate last-good value and silently defeats an active thermal cap.
-        targetBitRate = min(targetBitRate, effectiveMaximum)
-        if raised { healthySeconds = 0 }   // restart the upward probe cleanly
-        await applyTarget(to: stream)      // apply NOW, not at the next 1 Hz event
+        let decision = abr.onPathProfile(ceiling: ceiling, interface: interface, isBaseline: isBaseline)
+        if decision.shouldApply { await applyDecision(decision, to: stream) }
     }
 
-    func currentTargetBitRate() -> Int { targetBitRate }
-
-    /// Applies the learned bitrate and an adaptive frame-rate ceiling together.
-    /// On a requested 60 fps stream, using 30 fps while congested gives each frame
-    /// enough bits to remain legible and reduces encoder pressure. The configured
-    /// frame rate returns only after the uplink has proven stable.
-    private func applyTarget(to stream: some StreamConvertible,
-                             severe: Bool = false) async {
-        var video = await stream.videoSettings
-        video.bitRate = targetBitRate
-        video.frameInterval = frameInterval(severe: severe)
-        try? await stream.setVideoSettings(video)
-    }
-
-    /// The frame interval for the current congestion + thermal state. A larger
-    /// interval is a lower frame rate, so taking `max()` of the congestion and
-    /// thermal intervals always yields the more restrictive of the two.
-    private func frameInterval(severe: Bool) -> Double {
-        let congestionInterval: Double
-        if severe {
-            congestionInterval = VideoCodecSettings.frameInterval10
-        } else if congestionActive, configuredFrameRate > 30 {
-            congestionInterval = VideoCodecSettings.frameInterval30
-        } else {
-            congestionInterval = preferredFrameInterval
-        }
-        let cappedFrameRate = max(1, min(configuredFrameRate, thermalFrameRateCap))
-        let thermalInterval = max(0, (1.0 / Double(cappedFrameRate)) - 0.001)
-        return max(congestionInterval, thermalInterval)
-    }
+    func currentTargetBitRate() -> Int { abr.targetBitRate }
 
     /// Stores a thermal/Low-Power ceiling and clamps the current target to it.
     /// Used when there is no stream to apply to yet (pre-connect); the value then
     /// takes effect on the first adaptive event after connect.
     func storeThermalCeiling(bitRateScale: Double, frameRateCap: Int) {
-        thermalBitRateScale = min(max(bitRateScale, 0.1), 1.0)
-        thermalFrameRateCap = max(1, frameRateCap)
-        // Only lower the target to fit a tightened ceiling. Leave healthySeconds
-        // alone: resetting it on every change would let brief thermal flapping
-        // across a boundary keep restarting the up-probe and starve recovery.
-        targetBitRate = min(targetBitRate, effectiveMaximum)
+        abr.onThermalCeiling(bitRateScale: bitRateScale, frameRateCap: frameRateCap)
     }
 
-    func currentFrameInterval() -> Double { frameInterval(severe: false) }
+    func currentFrameInterval() -> Double { abr.frameInterval(severe: false) }
 
-    /// The effective encode frame rate the ABR is currently targeting (fps), folding
-    /// in the same congestion + thermal caps as `frameInterval()` (most-restrictive
-    /// wins). Used by the live stats HUD; not a measured output rate (measured fps
-    /// needs M8). Mirrors `frameInterval`'s steady-state branches directly rather
-    /// than lossily inverting the interval Double.
-    func currentFrameRate() -> Int {
-        let congestionFps = (congestionActive && configuredFrameRate > 30) ? 30 : configuredFrameRate
-        let thermalFps = max(1, min(configuredFrameRate, thermalFrameRateCap))
-        return min(congestionFps, thermalFps)
-    }
+    func currentFrameRate() -> Int { abr.currentFrameRate() }
 
     /// Applies the current (possibly thermally-clamped) target + frame interval to
     /// a freshly-connected stream. SRT/WHIP emit no `.reset` event, so the
     /// pre-connect store path relies on this to land the ceiling on the encoder.
     func applyCurrentTarget(to stream: any StreamConvertible) async {
         var video = await stream.videoSettings
-        video.bitRate = targetBitRate
-        video.frameInterval = frameInterval(severe: false)
+        video.bitRate = abr.targetBitRate
+        video.frameInterval = abr.frameInterval(severe: false)
         try? await stream.setVideoSettings(video)
     }
 
@@ -1162,129 +1035,20 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     func setThermalCeiling(bitRateScale: Double,
                            frameRateCap: Int,
                            applyingTo stream: any StreamConvertible) async {
-        storeThermalCeiling(bitRateScale: bitRateScale, frameRateCap: frameRateCap)
+        abr.onThermalCeiling(bitRateScale: bitRateScale, frameRateCap: frameRateCap)
         var video = await stream.videoSettings
-        video.bitRate = targetBitRate
-        video.frameInterval = frameInterval(severe: false)
+        video.bitRate = abr.targetBitRate
+        video.frameInterval = abr.frameInterval(severe: false)
         try? await stream.setVideoSettings(video)
     }
 
     func healthSnapshot() -> BroadcastNetworkHealth {
         let now = DispatchTime.now().uptimeNanoseconds
         return BroadcastNetworkHealth(
-            queueBytes: queueBytes,
-            zeroOutputSeconds: zeroOutputSeconds,
+            queueBytes: abr.queueBytes,
+            zeroOutputSeconds: abr.zeroOutputSeconds,
             eventAgeSeconds: Int((now &- lastEventAt) / 1_000_000_000),
-            targetBitRate: targetBitRate
+            targetBitRate: abr.targetBitRate
         )
-    }
-}
-
-enum MediaTimelineKind: Hashable {
-    case video
-    case mic
-    case app
-}
-
-/// Removes capture/reconnect wall-clock gaps before samples reach HaishinKit.
-/// Without this, its audio ring buffer materializes a long pause as thousands of
-/// silence buffers and its RTMP timestamp accumulator sends a large first delta.
-struct MediaTimelineNormalizer {
-    private var accumulatedOffset = CMTime.zero
-    private var lastPresentationTime: [MediaTimelineKind: CMTime] = [:]
-    private var needsRebase = false
-
-    mutating func markDiscontinuity() {
-        needsRebase = true
-    }
-
-    mutating func normalize(_ sampleBuffer: CMSampleBuffer,
-                            kind: MediaTimelineKind,
-                            fallbackDuration: CMTime) -> CMSampleBuffer {
-        let sourcePTS = sampleBuffer.presentationTimeStamp
-        guard sourcePTS.isValid, sourcePTS.isNumeric else { return sampleBuffer }
-
-        let sampleDuration = sampleBuffer.duration.isValid && sampleBuffer.duration.isNumeric && sampleBuffer.duration > .zero
-            ? sampleBuffer.duration
-            : fallbackDuration
-
-        if needsRebase {
-            let prior = lastPresentationTime[kind]
-                ?? lastPresentationTime.values.max(by: { CMTimeCompare($0, $1) < 0 })
-            if let prior {
-                let prospective = CMTimeSubtract(sourcePTS, accumulatedOffset)
-                let desired = CMTimeAdd(prior, sampleDuration)
-                let gap = CMTimeSubtract(prospective, desired)
-                if CMTimeCompare(gap, .zero) > 0 {
-                    accumulatedOffset = CMTimeAdd(accumulatedOffset, gap)
-                }
-            }
-            needsRebase = false
-        }
-
-        // Steady-state fast path: with no accumulated offset the copy below would
-        // produce a bit-identical buffer (PTS − 0 == PTS), so skip the per-buffer
-        // heap alloc + CMSampleBuffer copy entirely. This is the state for the
-        // whole broadcast until the first pause/reconnect sets an offset — at
-        // ~150 buffers/s it was pure waste on the gated real-time append path.
-        if accumulatedOffset == .zero {
-            lastPresentationTime[kind] = sourcePTS
-            return sampleBuffer
-        }
-
-        var entryCount: CMItemCount = 0
-        guard CMSampleBufferGetSampleTimingInfoArray(
-            sampleBuffer,
-            entryCount: 0,
-            arrayToFill: nil,
-            entriesNeededOut: &entryCount
-        ) == noErr, entryCount > 0 else {
-            return sampleBuffer
-        }
-
-        var timings = [CMSampleTimingInfo](
-            repeating: CMSampleTimingInfo(duration: .invalid,
-                                          presentationTimeStamp: .invalid,
-                                          decodeTimeStamp: .invalid),
-            count: entryCount
-        )
-        let status = timings.withUnsafeMutableBufferPointer { buffer in
-            CMSampleBufferGetSampleTimingInfoArray(
-                sampleBuffer,
-                entryCount: entryCount,
-                arrayToFill: buffer.baseAddress,
-                entriesNeededOut: nil
-            )
-        }
-        guard status == noErr else { return sampleBuffer }
-
-        for index in timings.indices {
-            if timings[index].presentationTimeStamp.isValid {
-                timings[index].presentationTimeStamp = CMTimeSubtract(
-                    timings[index].presentationTimeStamp,
-                    accumulatedOffset
-                )
-            }
-            if timings[index].decodeTimeStamp.isValid {
-                timings[index].decodeTimeStamp = CMTimeSubtract(
-                    timings[index].decodeTimeStamp,
-                    accumulatedOffset
-                )
-            }
-        }
-
-        var adjusted: CMSampleBuffer?
-        let copyStatus = timings.withUnsafeMutableBufferPointer { buffer in
-            CMSampleBufferCreateCopyWithNewTiming(
-                allocator: kCFAllocatorDefault,
-                sampleBuffer: sampleBuffer,
-                sampleTimingEntryCount: entryCount,
-                sampleTimingArray: buffer.baseAddress!,
-                sampleBufferOut: &adjusted
-            )
-        }
-        guard copyStatus == noErr, let adjusted else { return sampleBuffer }
-        lastPresentationTime[kind] = adjusted.presentationTimeStamp
-        return adjusted
     }
 }
