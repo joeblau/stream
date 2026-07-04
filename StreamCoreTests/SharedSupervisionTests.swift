@@ -173,25 +173,32 @@ import StreamCore
 }
 
 @Suite struct MicStallEvaluatorTests {
+    // startedAt is irrelevant once the mic has appended at least once (micReference
+    // = lastMicAppendAt); a fixed early value keeps these focused on the stall path.
+    private let started: UInt64 = 1_000_000_000
+
     @Test("App audio fresh + mic silent past 4s promotes app to the mix clock")
     func promotesWhenMicStalls() {
         #expect(MicStallEvaluator.shouldPromoteApp(now: 10_000_000_000,
                                                    lastMicAppendAt: 5_000_000_000,   // 5s ago
-                                                   lastAppAppendAt: 9_000_000_000))  // 1s ago
+                                                   lastAppAppendAt: 9_000_000_000,   // 1s ago
+                                                   startedAt: started))
     }
 
     @Test("A mic quiet for under 4s does not promote")
     func micNotYetStalled() {
         #expect(!MicStallEvaluator.shouldPromoteApp(now: 10_000_000_000,
                                                     lastMicAppendAt: 7_000_000_000,   // 3s ago
-                                                    lastAppAppendAt: 9_000_000_000))
+                                                    lastAppAppendAt: 9_000_000_000,
+                                                    startedAt: started))
     }
 
     @Test("Stale app audio does not promote (nothing to promote to)")
     func appNotFresh() {
         #expect(!MicStallEvaluator.shouldPromoteApp(now: 10_000_000_000,
                                                     lastMicAppendAt: 5_000_000_000,
-                                                    lastAppAppendAt: 7_000_000_000))  // 3s ago > 2s
+                                                    lastAppAppendAt: 7_000_000_000,   // 3s ago > 2s
+                                                    startedAt: started))
     }
 
     @Test("Thresholds are exclusive at the exact boundary")
@@ -199,10 +206,37 @@ import StreamCore
         // micAge exactly 4s -> not stalled (strict >); appAge exactly 2s -> not fresh (strict <).
         #expect(!MicStallEvaluator.shouldPromoteApp(now: 10_000_000_000,
                                                     lastMicAppendAt: 6_000_000_000,   // exactly 4s
-                                                    lastAppAppendAt: 9_000_000_000))
+                                                    lastAppAppendAt: 9_000_000_000,
+                                                    startedAt: started))
         #expect(!MicStallEvaluator.shouldPromoteApp(now: 10_000_000_000,
                                                     lastMicAppendAt: 5_000_000_000,
-                                                    lastAppAppendAt: 8_000_000_000))  // exactly 2s
+                                                    lastAppAppendAt: 8_000_000_000,   // exactly 2s
+                                                    startedAt: started))
+    }
+
+    @Test("A mic dead from go-live still promotes app audio once past the grace window")
+    func promotesWhenMicNeverAppeared() {
+        // lastMicAppendAt == 0: silence is measured from startedAt (go-live).
+        #expect(MicStallEvaluator.shouldPromoteApp(now: 10_000_000_000,
+                                                   lastMicAppendAt: 0,               // never appeared
+                                                   lastAppAppendAt: 9_000_000_000,   // app flowing
+                                                   startedAt: 1_000_000_000))        // 9s since go-live
+    }
+
+    @Test("A mic dead from go-live does not promote within the grace window")
+    func withinGraceAfterGoLive() {
+        #expect(!MicStallEvaluator.shouldPromoteApp(now: 5_000_000_000,
+                                                    lastMicAppendAt: 0,
+                                                    lastAppAppendAt: 4_500_000_000,  // app fresh
+                                                    startedAt: 2_000_000_000))       // only 3s since go-live
+    }
+
+    @Test("A mic dead from go-live with no app audio does not promote")
+    func neverAppearedButNoAppAudio() {
+        #expect(!MicStallEvaluator.shouldPromoteApp(now: 10_000_000_000,
+                                                    lastMicAppendAt: 0,
+                                                    lastAppAppendAt: 0,              // app never flowed
+                                                    startedAt: 1_000_000_000))
     }
 }
 

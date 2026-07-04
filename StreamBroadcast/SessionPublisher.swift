@@ -100,6 +100,9 @@ actor SessionPublisher: Publisher {
     private var micTrackStalled = false
     private var lastMicAppendAt: UInt64 = 0
     private var lastAppAppendAt: UInt64 = 0
+    /// When the broadcast went live, so a mic route dead from the START (no buffer
+    /// ever) still trips the failover — its silence is measured from here.
+    private var startedAt: UInt64 = 0
     /// Proactive network-path supervision (Wi-Fi <-> 5G handoffs, dead zones).
     private var currentPath: NetworkPathSnapshot?
     private var lastPathChangeAt: UInt64 = 0
@@ -178,7 +181,13 @@ actor SessionPublisher: Publisher {
         await mixer.setVideoMixerSettings(vm)
         await mixer.startRunning()
 
+        // stop() may have interleaved during the setup awaits above (actor reentrancy)
+        // and early-returned via its `guard isRunning` branch before we set isRunning.
+        // Bail out cleanly rather than spawn long-lived tasks it could never cancel.
+        guard !userInitiatedStop else { await mixer.stopRunning(); return }
+
         isRunning = true
+        startedAt = DispatchTime.now().uptimeNanoseconds
         startAudioConsumers()
         startFrameRepeat()
         // Path supervision spawned BEFORE the first connect so path gating covers it.
@@ -551,10 +560,11 @@ actor SessionPublisher: Publisher {
         guard now &- lastMediaAt < 10_000_000_000 else { watchdog.stalledTicks = 0; return }
         // Mic-stall failover: app audio flowing but the mic gone quiet -> promote
         // track 1 to the mix clock; the first mic buffer back flips it home.
-        if settings.includeAppAudio, !micTrackStalled, lastMicAppendAt > 0,
+        if settings.includeAppAudio, !micTrackStalled, startedAt > 0,
            MicStallEvaluator.shouldPromoteApp(now: now,
                                               lastMicAppendAt: lastMicAppendAt,
-                                              lastAppAppendAt: lastAppAppendAt) {
+                                              lastAppAppendAt: lastAppAppendAt,
+                                              startedAt: startedAt) {
             micTrackStalled = true
             await applyAudioMixerSettings()
             sessionLog.warning("Mic buffers stalled >4s; app audio is now the mix clock")

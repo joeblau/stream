@@ -151,6 +151,9 @@ actor RTMPPublisher: Publisher {
     private var lastMicAppendAt: UInt64 = 0
     private var lastAppAppendAt: UInt64 = 0
     private var micTrackStalled = false
+    /// When the broadcast went live, so a mic route that is dead from the START (no
+    /// buffer ever) still trips the failover — its silence is measured from here.
+    private var startedAt: UInt64 = 0
 
     /// Builds + starts the pipeline, connects, and begins publishing. The video
     /// size is NOT set here — it is locked from the first frame via `setOutputSize`.
@@ -174,6 +177,11 @@ actor RTMPPublisher: Publisher {
 
         await mixer.startRunning()
 
+        // stop() may have interleaved during the setup awaits above (actor reentrancy)
+        // and early-returned via its `guard isRunning` branch before we set isRunning.
+        // Bail out cleanly rather than spawn long-lived tasks it could never cancel.
+        guard !userInitiatedStop else { await mixer.stopRunning(); return }
+
         if settings.backupEnabled {
             streamLog.warning("Local backup disabled: a second real-time video encoder is not enabled")
         }
@@ -182,6 +190,7 @@ actor RTMPPublisher: Publisher {
         // and publish failures therefore retry just like a mid-stream drop instead
         // of ending the user-owned capture session.
         isRunning = true
+        startedAt = DispatchTime.now().uptimeNanoseconds
         startAudioConsumers()
         startFrameRepeat()
         // 4th long-lived task, spawned BEFORE the first connect so path gating
@@ -209,6 +218,10 @@ actor RTMPPublisher: Publisher {
         // attempts cannot be replayed as stale recovery events.
         let connectionStatuses = await connection.status
         let streamStatuses = await stream.status
+        // stop() can interleave during the two status awaits above (actor reentrancy)
+        // after passing its own `guard isRunning`; re-check so the supervisors and the
+        // watchdog timer aren't spawned — and then leaked, uncancellable — post-teardown.
+        guard isRunning, !userInitiatedStop else { return }
 
         connectionSupervisorTask = Task { [weak self] in
             await self?.superviseConnection(connectionStatuses)
@@ -646,10 +659,11 @@ actor RTMPPublisher: Publisher {
         // quiet, promote track 1 to the mix clock; the first mic buffer back
         // flips it home (see appendMic). No timeline rebase on either side —
         // video/app kept flowing, so mic samples re-enter already aligned.
-        if settings.includeAppAudio, !micTrackStalled, lastMicAppendAt > 0,
+        if settings.includeAppAudio, !micTrackStalled, startedAt > 0,
            MicStallEvaluator.shouldPromoteApp(now: now,
                                               lastMicAppendAt: lastMicAppendAt,
-                                              lastAppAppendAt: lastAppAppendAt) {
+                                              lastAppAppendAt: lastAppAppendAt,
+                                              startedAt: startedAt) {
             micTrackStalled = true
             await applyAudioMixerSettings()
             streamLog.warning("Mic buffers stalled >4s; app audio is now the mix clock")
