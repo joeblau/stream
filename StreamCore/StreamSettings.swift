@@ -134,7 +134,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         videoQuality: Int = 720,
         videoBitrate: Int = 3_000_000,
         audioBitrate: Int = 128_000,
-        frameRate: Int = 30,
+        // 24 fps: lighter encode load / lower per-frame allocation in the ~50 MB
+        // extension budget than 30, still smooth for screencast content.
+        frameRate: Int = 24,
         pipEnabled: Bool = false,
         pipCorner: PIPCorner = .bottomRight,
         pipScale: Double = 0.28,
@@ -210,18 +212,26 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         }
     }
 
+    /// Hard ceiling on the encoded stream's SHORT edge, enforced regardless of the
+    /// user's `videoQuality` setting. The broadcast upload extension runs under a
+    /// ~50 MB jetsam budget; encoding above 720p (per PRISM's screencast guidance)
+    /// risks killing the extension when capturing heavier off-app content. This is
+    /// defense-in-depth: even a stored/UI value above 720 can never blow the budget.
+    public static let maxStreamShortEdge = 720
+
     /// Derives the encode dimensions from the live (already upright-oriented)
     /// screen size, preserving the real aspect ratio. The short edge is clamped to
-    /// `videoQuality` (never upscaled above the source), and both edges are rounded
-    /// to even numbers as required by H.264/HEVC. Locking this at broadcast start
-    /// keeps the RTMP resolution stable for the whole session.
+    /// `videoQuality` (never upscaled above the source) AND to `maxStreamShortEdge`,
+    /// and both edges are rounded to even numbers as required by H.264/HEVC. Locking
+    /// this at broadcast start keeps the RTMP resolution stable for the whole session.
     public func encodeSize(forOrientedWidth width: Int, height: Int) -> CGSize {
+        let targetShortEdge = min(videoQuality, Self.maxStreamShortEdge)
         guard width > 0, height > 0 else {
-            // Fallback to a portrait 9:16 canvas at the chosen quality.
-            return CGSize(width: even(videoQuality), height: even(videoQuality * 16 / 9))
+            // Fallback to a portrait 9:16 canvas at the (capped) chosen quality.
+            return CGSize(width: even(targetShortEdge), height: even(targetShortEdge * 16 / 9))
         }
         let shortEdge = min(width, height)
-        let scale = min(1.0, Double(videoQuality) / Double(shortEdge))
+        let scale = min(1.0, Double(targetShortEdge) / Double(shortEdge))
         let w = even(Int((Double(width) * scale).rounded()))
         let h = even(Int((Double(height) * scale).rounded()))
         return CGSize(width: max(2, w), height: max(2, h))

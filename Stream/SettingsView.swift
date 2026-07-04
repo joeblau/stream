@@ -10,6 +10,10 @@ import os
 struct SettingsView: View {
     @Binding var settings: StreamSettings
 
+    /// Restream unified-chat controller, shared with the main feed. Owned by the
+    /// root view so the connection survives the settings sheet being dismissed.
+    var chat: RestreamChat
+
     /// Called after any field mutation so the parent can persist immediately.
     var onChange: () -> Void
 
@@ -24,6 +28,14 @@ struct SettingsView: View {
 
     /// Smoothed live level published by the ReplayKit extension.
     @State private var micLevel = MicrophoneLevelMonitor()
+
+    // MARK: - Chat credential fields
+
+    @State private var clientIDField = ""
+    @State private var clientSecretField = ""
+    /// Forces the credential fields to show even when a Restream app is already
+    /// stored, so the user can replace it.
+    @State private var editingChatCredentials = false
 
     // MARK: - Quality presets
 
@@ -64,6 +76,7 @@ struct SettingsView: View {
             backupSection
             audioSection
             pipSection
+            chatSection
         }
         .onAppear {
             audio.refresh(requestPermission: false)
@@ -475,6 +488,55 @@ struct SettingsView: View {
         case .bottomRight: return "Bottom Right"
         }
     }
+
+    // MARK: - Chat
+
+    @ViewBuilder
+    private var chatSection: some View {
+        Section {
+            switch chat.status {
+            case .connected:
+                Label("Connected to Restream", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                Button("Disconnect", systemImage: "rectangle.portrait.and.arrow.right",
+                       role: .destructive) {
+                    chat.signOut()
+                }
+
+            case .connecting:
+                Label { Text("Connecting to Restream…") } icon: {
+                    ProgressView().controlSize(.mini)
+                }
+
+            case .needsCredentials, .signedOut, .failed:
+                if chat.hasCredentials && !editingChatCredentials {
+                    Button("Connect with Restream") { chat.connect() }
+                    Button("Change Restream App") { editingChatCredentials = true }
+                } else {
+                    TextField("Client ID", text: $clientIDField)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField("Client Secret", text: $clientSecretField)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button("Save & Connect") {
+                        chat.saveCredentials(clientID: clientIDField, clientSecret: clientSecretField)
+                        editingChatCredentials = false
+                        chat.connect()
+                    }
+                    .disabled(clientIDField.isEmpty || clientSecretField.isEmpty)
+                }
+
+                if case .failed(let message) = chat.status {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                }
+            }
+        } header: {
+            Text("Chat")
+        } footer: {
+            Text("Register an app at dashboard.restream.io, set its redirect URI to \(RestreamAPI.redirectURI), then paste the Client ID + Secret here and sign in. Chat from every connected platform appears on the main screen.")
+        }
+    }
 }
 
 @MainActor
@@ -651,6 +713,6 @@ private final class MicrophoneLevelMonitor {
 #Preview {
     @Previewable @State var settings = StreamSettings.default
     return NavigationStack {
-        SettingsView(settings: $settings, onChange: {})
+        SettingsView(settings: $settings, chat: RestreamChat(), onChange: {})
     }
 }
