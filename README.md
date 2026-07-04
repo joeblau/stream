@@ -257,8 +257,8 @@ can't run the camera during a broadcast.
   the facecam no-ops; both are handled gracefully so the app still builds and runs.
 - **The broadcast picker is the only supported start.** `RPSystemBroadcastPickerView`
   is not deprecated in iOS 26 and remains the App Store-safe entry point.
-  Auto-tapping its internal button is unsupported and risky — Stream shows the real
-  button.
+  Auto-tapping its internal button is unsupported and risky — Stream displays the
+  native picker control in the top-right toolbar.
 
 ---
 

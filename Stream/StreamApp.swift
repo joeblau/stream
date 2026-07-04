@@ -12,12 +12,7 @@ import SwiftUI
 struct StreamApp: App {
     var body: some Scene {
         WindowGroup {
-            TabView {
-                ContentView()
-                    .tabItem { Label("Settings", systemImage: "gearshape") }
-                ChatView()
-                    .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
-            }
+            ContentView()
         }
     }
 }

@@ -1,66 +1,43 @@
 import SwiftUI
 
-/// The Chat tab: Restream unified chat over OAuth2. Aggregates chat from every
-/// platform connected to the user's Restream account.
-struct ChatView: View {
-    @State private var chat = RestreamChat()
-    @State private var clientIDField = ""
-    @State private var clientSecretField = ""
+/// Main-page chat feed: Restream unified chat over OAuth2, aggregated across every
+/// platform connected to the user's Restream account. Connection setup lives in the
+/// Settings sheet (`SettingsView.chatSection`); this view only renders the feed.
+struct ChatFeedView: View {
+    var chat: RestreamChat
 
     var body: some View {
-        NavigationStack {
-            Group {
-                switch chat.status {
-                case .needsCredentials: credentialsForm
-                case .signedOut:        connectPrompt
-                case .connecting:       ProgressView("Connecting to Restream…")
-                case .connected:        messageList
-                case .failed(let message): failure(message)
-                }
-            }
-            .navigationTitle("Chat")
-            .toolbar {
-                if chat.status == .connected {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button("Disconnect", systemImage: "rectangle.portrait.and.arrow.right",
-                                   role: .destructive) { chat.signOut() }
-                        } label: { Image(systemName: "ellipsis.circle") }
-                    }
-                }
-            }
-            .task { chat.autoConnect() }
-        }
-    }
-
-    private var credentialsForm: some View {
-        Form {
-            Section {
-                TextField("Client ID", text: $clientIDField)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                SecureField("Client Secret", text: $clientSecretField)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button("Save & Connect") {
-                    chat.saveCredentials(clientID: clientIDField, clientSecret: clientSecretField)
-                    chat.connect()
-                }
-                .disabled(clientIDField.isEmpty || clientSecretField.isEmpty)
-            } header: {
-                Text("Restream Application")
-            } footer: {
-                Text("Register an app at dashboard.restream.io, set its redirect URI to \(RestreamAPI.redirectURI), then paste the Client ID + Secret here and sign in with Restream.")
+        Group {
+            switch chat.status {
+            case .connected:
+                messageList
+            case .connecting:
+                ProgressView("Connecting to Restream…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .needsCredentials, .signedOut, .failed:
+                waitingForChat
             }
         }
     }
 
-    private var connectPrompt: some View {
+    /// Shown until the chat socket is connected. Points the user at Settings, where
+    /// the Restream connection now lives.
+    private var waitingForChat: some View {
         ContentUnavailableView {
-            Label("Restream Chat", systemImage: "bubble.left.and.bubble.right")
+            Label("Waiting for chat…", systemImage: "bubble.left.and.bubble.right")
         } description: {
-            Text("Sign in with Restream to see chat from all your connected platforms in one place.")
-        } actions: {
-            Button("Connect with Restream") { chat.connect() }
-                .buttonStyle(.borderedProminent)
+            Text(waitingDescription)
+        }
+    }
+
+    private var waitingDescription: String {
+        switch chat.status {
+        case .failed(let message):
+            return message
+        case .signedOut:
+            return "Tap the gear to connect with Restream and see chat from all your platforms here."
+        default:
+            return "Add your Restream app in Settings to see chat from all your connected platforms in one place."
         }
     }
 
@@ -98,16 +75,6 @@ struct ChatView: View {
                     withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
-        }
-    }
-
-    private func failure(_ message: String) -> some View {
-        ContentUnavailableView {
-            Label("Chat Error", systemImage: "exclamationmark.triangle")
-        } description: {
-            Text(message)
-        } actions: {
-            Button("Retry") { chat.connect() }.buttonStyle(.borderedProminent)
         }
     }
 }
