@@ -66,6 +66,12 @@ targets:
         NSCameraUsageDescription: Stream uses the camera for the optional facecam picture-in-picture overlay on your broadcast.
         NSMicrophoneUsageDescription: Stream uses the microphone (including connected Bluetooth mics) to capture audio for your broadcast.
         NSPhotoLibraryAddUsageDescription: Stream saves your local HD broadcast backups to Photos so you can repost them if a stream drops.
+        # The host app holds an active audio session for the whole broadcast so
+        # iOS does not background-suspend it on app-switch — a suspended host
+        # makes CoreMedia stop the tied broadcast media session, which freezes
+        # the upload extension. See BroadcastKeepAlive.
+        UIBackgroundModes:
+          - audio
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
