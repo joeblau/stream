@@ -189,6 +189,17 @@ struct SettingsView: View {
             // Enumerate inputs/capabilities so the launcher summaries are accurate;
             // the live mic meter only runs while the Audio detail is open.
             audio.refresh(requestPermission: false)
+            // When a mic is (dis)connected mid-session, the provider re-enumerates
+            // and calls this back: re-apply the persisted input to the session and
+            // re-route the meter so a headset plugged in now is immediately live —
+            // no app restart. Skipped while broadcasting (extension owns the route).
+            audio.onInputsChanged = {
+                guard !BroadcastStateStore.isLive() else { return }
+                let uid = settings.preferredAudioInputUID
+                audio.select(uid: uid, into: &settings)
+                micLevel.setPreferredInput(uid)
+                micLevel.restartLocalCapture()
+            }
             camera.refresh()
             photos.refresh()
         }

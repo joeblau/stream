@@ -33,9 +33,29 @@ final class AudioInputProvider {
     /// Current microphone permission state.
     private(set) var permission: Permission = .undetermined
 
+    /// Fired after a live route change re-enumerates `inputs`, so the owning view
+    /// can re-apply the persisted preferred input and restart the level meter on
+    /// the new route. Not fired for a manual `refresh()` (the caller already knows).
+    var onInputsChanged: (() -> Void)?
+
+    /// Observer token for `AVAudioSession.routeChangeNotification`. Marked
+    /// `nonisolated(unsafe)` so `deinit` (which is nonisolated on a `@MainActor`
+    /// type) can remove it; an `NSObjectProtocol` token is safe to touch there.
+    private nonisolated(unsafe) var routeChangeObserver: NSObjectProtocol?
+
+    deinit {
+        if let routeChangeObserver {
+            NotificationCenter.default.removeObserver(routeChangeObserver)
+        }
+    }
+
     /// Requests mic permission if needed, configures a record-capable session
     /// with Bluetooth options so BT inputs appear, then enumerates inputs.
     func refresh(requestPermission: Bool = true) {
+        // Start listening for hardware route changes so a Bluetooth/DJI mic
+        // connected while the app is already running is picked up immediately
+        // rather than only on the next launch or a manual Refresh. Idempotent.
+        startMonitoringRouteChanges()
         switch AVAudioApplication.shared.recordPermission {
         case .granted:
             permission = .granted
@@ -68,6 +88,39 @@ final class AudioInputProvider {
         let session = AVAudioSession.sharedInstance()
         if let port = session.availableInputs?.first(where: { $0.uid == uid }) {
             try? session.setPreferredInput(port)
+        }
+    }
+
+    // MARK: - Live route changes
+
+    /// Registers a single `AVAudioSession.routeChangeNotification` observer.
+    /// Idempotent — safe to call from every `refresh()`.
+    func startMonitoringRouteChanges() {
+        guard routeChangeObserver == nil else { return }
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            // Extract the reason off-actor (Notification isn't Sendable); the
+            // reason enum is a plain Sendable value we can hop to the main actor.
+            let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            let reason = raw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+            Task { @MainActor in self?.handleRouteChange(reason) }
+        }
+    }
+
+    private func handleRouteChange(_ reason: AVAudioSession.RouteChangeReason?) {
+        // React only to hardware appearing/disappearing. We deliberately ignore
+        // `.categoryChange` / `.override`, which we provoke ourselves by setting
+        // the category and the preferred input — reacting to those would loop.
+        switch reason {
+        case .newDeviceAvailable, .oldDeviceUnavailable:
+            guard permission == .granted else { return }
+            configureAndEnumerate()
+            onInputsChanged?()
+        default:
+            break
         }
     }
 
