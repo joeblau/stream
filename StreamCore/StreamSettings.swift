@@ -36,6 +36,25 @@ public enum BackupQuality: String, Codable, CaseIterable, Sendable {
     case native
 }
 
+/// The video codec the encoder targets. HEVC (H.265) yields roughly a 40%
+/// quality-per-bit gain over H.264 on text-heavy screen content in the 2–8 Mbps
+/// band, at the cost of ingest compatibility: it rides SRT (MPEG-TS), WHIP, and
+/// *enhanced*-RTMP (E-RTMP `hvc1` negotiation) but NOT traditional RTMP ingests
+/// such as Restream, which speak H.264 only. H.264 Main is therefore the safe,
+/// universally-decodable default; HEVC is an opt-in the user validates against
+/// their real endpoint (see the encoder wiring in RTMPPublisher/SessionPublisher).
+public enum VideoCodec: String, Codable, CaseIterable, Sendable {
+    case h264
+    case hevc
+
+    public var displayName: String {
+        switch self {
+        case .h264: return "H.264"
+        case .hevc: return "HEVC"
+        }
+    }
+}
+
 /// The transport protocol the user is publishing with. Each protocol's URL and
 /// key are stored SEPARATELY in the Keychain, so switching the segmented control
 /// recalls that protocol's own credentials.
@@ -107,6 +126,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     public var videoBitrate: Int        // bits per second
     public var audioBitrate: Int        // bits per second
     public var frameRate: Int           // fps hint
+    /// The encoder's target video codec. HEVC is honored on SRT/WHIP and
+    /// enhanced-RTMP; traditional RTMP ingests fall back to H.264 (see `VideoCodec`).
+    public var videoCodec: VideoCodec
     public var pipEnabled: Bool
     public var pipCorner: PIPCorner
     public var pipScale: Double          // fraction of frame width, 0.10...0.40
@@ -135,6 +157,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         // 24 fps: lighter encode and thermal load than 30 while remaining smooth
         // for screencast content.
         frameRate: Int = 24,
+        // H.264 Main by default: universally decodable, and the only codec
+        // traditional RTMP ingests (Restream) accept. HEVC is an explicit opt-in.
+        videoCodec: VideoCodec = .h264,
         pipEnabled: Bool = false,
         pipCorner: PIPCorner = .bottomRight,
         pipScale: Double = 0.28,
@@ -152,6 +177,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.videoBitrate = videoBitrate
         self.audioBitrate = audioBitrate
         self.frameRate = frameRate
+        self.videoCodec = videoCodec
         self.pipEnabled = pipEnabled
         self.pipCorner = pipCorner
         self.pipScale = pipScale
@@ -177,6 +203,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         videoBitrate = try c.decodeIfPresent(Int.self, forKey: .videoBitrate) ?? d.videoBitrate
         audioBitrate = try c.decodeIfPresent(Int.self, forKey: .audioBitrate) ?? d.audioBitrate
         frameRate = try c.decodeIfPresent(Int.self, forKey: .frameRate) ?? d.frameRate
+        videoCodec = try c.decodeIfPresent(VideoCodec.self, forKey: .videoCodec) ?? d.videoCodec
         pipEnabled = try c.decodeIfPresent(Bool.self, forKey: .pipEnabled) ?? d.pipEnabled
         pipCorner = try c.decodeIfPresent(PIPCorner.self, forKey: .pipCorner) ?? d.pipCorner
         pipScale = try c.decodeIfPresent(Double.self, forKey: .pipScale) ?? d.pipScale
