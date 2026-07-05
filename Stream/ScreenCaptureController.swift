@@ -42,6 +42,15 @@ final class ScreenCaptureController: NSObject {
     /// ~1s telemetry poll, live only. Cancelled on every teardown path (they all
     /// funnel through `stopCapture`).
     @ObservationIgnored private var statsTask: Task<Void, Never>?
+    /// Shared frame-drop / achieved-fps counters (issue #23 / M8), created per
+    /// broadcast and handed to BOTH the capture output and the publisher so the four
+    /// shed sites and the encoded rate land in one place. Read once per stats poll to
+    /// fold measured fps + congestion drops into `liveStats`.
+    @ObservationIgnored private var frameTelemetry: FrameTelemetry?
+    /// The previous telemetry snapshot + its capture time, so each poll derives
+    /// achieved fps from the delta over the real elapsed window.
+    @ObservationIgnored private var lastTelemetrySnapshot: FrameTelemetrySnapshot?
+    @ObservationIgnored private var lastTelemetryAt: UInt64 = 0
 
     override init() {
         super.init()
@@ -121,10 +130,41 @@ final class ScreenCaptureController: NSObject {
                 // Write through INCLUDING nil: the publishers return nil during a
                 // reconnect, which must clear the card to its "—" placeholders rather
                 // than freezing on stale last-good telemetry while the stream is down.
-                self?.updateLiveStats(snapshot)
+                self?.applyPolledStats(snapshot)
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    /// One stats tick: fold the measured frame telemetry (achieved fps + cumulative
+    /// congestion drops) into the publisher's target-based snapshot, then store it.
+    /// Advances the achieved-fps delta baseline as a side effect, so it must run
+    /// exactly once per poll.
+    private func applyPolledStats(_ base: LiveStats?) {
+        updateLiveStats(enrichWithTelemetry(base))
+    }
+
+    /// Merges the shared `FrameTelemetry` into the publisher's snapshot: the measured
+    /// achieved fps (from the encoded-frame delta over the real elapsed window) and
+    /// the cumulative congestion drops. Returns `base` untouched when telemetry isn't
+    /// available (pre-live / torn down). Mutates the delta baseline.
+    private func enrichWithTelemetry(_ base: LiveStats?) -> LiveStats? {
+        guard let telemetry = frameTelemetry else { return base }
+        let current = telemetry.snapshot()
+        let now = DispatchTime.now().uptimeNanoseconds
+        var achieved = 0
+        if let previous = lastTelemetrySnapshot, lastTelemetryAt > 0, now > lastTelemetryAt {
+            let elapsed = Double(now &- lastTelemetryAt) / 1_000_000_000
+            achieved = FrameTelemetry.rate(from: previous, to: current, elapsed: elapsed).achievedFrameRate
+        }
+        // Advance the baseline every tick — even when `base` is nil (reconnecting) —
+        // so the next window measures against a fresh, ~1s-old sample.
+        lastTelemetrySnapshot = current
+        lastTelemetryAt = now
+        guard var stats = base else { return nil }
+        stats.achievedFrameRate = achieved
+        stats.droppedFrames = current.congestionDrops
+        return stats
     }
 
     /// Assigns the latest telemetry, skipping a redundant write (and the 1 Hz leaf
@@ -133,12 +173,13 @@ final class ScreenCaptureController: NSObject {
         if liveStats != stats { liveStats = stats }
     }
 
-    private func makePublisher(for transport: StreamCore.StreamProtocol) -> any Publisher {
+    private func makePublisher(for transport: StreamCore.StreamProtocol,
+                               telemetry: FrameTelemetry) -> any Publisher {
         switch transport {
         case .rtmp, .rtmps:
-            RTMPPublisher()
+            RTMPPublisher(telemetry: telemetry)
         case .srt, .whip:
-            SessionPublisher(protocol: transport)
+            SessionPublisher(protocol: transport, telemetry: telemetry)
         }
     }
 
@@ -152,8 +193,15 @@ final class ScreenCaptureController: NSObject {
             return
         }
 
-        let publisher = makePublisher(for: settings.selectedProtocol)
-        let output = ScreenCaptureOutput(publisher: publisher, settings: settings) { [weak self] error in
+        // One telemetry instance per broadcast, shared by the capture output (the
+        // four shed sites) and the publisher (admission + encoded rate).
+        let telemetry = FrameTelemetry()
+        frameTelemetry = telemetry
+        lastTelemetrySnapshot = nil
+        lastTelemetryAt = 0
+        let publisher = makePublisher(for: settings.selectedProtocol, telemetry: telemetry)
+        let output = ScreenCaptureOutput(publisher: publisher, settings: settings,
+                                         telemetry: telemetry) { [weak self] error in
             Task { @MainActor [weak self] in await self?.captureDidStop(error: error) }
         }
 
@@ -228,6 +276,9 @@ final class ScreenCaptureController: NSObject {
         heartbeatTask = nil
         statsTask?.cancel()
         statsTask = nil
+        frameTelemetry = nil
+        lastTelemetrySnapshot = nil
+        lastTelemetryAt = 0
         isLive = false
         thermalNotice = nil
         liveStats = nil
@@ -408,6 +459,10 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
     /// the capture pacing so a 1080p60 pick never asks a device for more than it
     /// can sustain. The thermal governor tightens this further at runtime.
     private let capability = StreamCapability.current
+    /// Shared frame telemetry (issue #23 / M8): this output records the capture,
+    /// pacing (PTS-deadline), backpressure (`bufferingNewest(1)`), and compositor
+    /// (pool-exhaustion) sites on the serial sample queue.
+    private let telemetry: FrameTelemetry
     private let onStopped: @Sendable (Error) -> Void
     private let micLevelMeter: ScreenCaptureMicrophoneMeter
     private let micLevelChannel = MicrophoneLevelChannel()
@@ -427,9 +482,11 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
 
     init(publisher: any Publisher,
          settings: StreamSettings,
+         telemetry: FrameTelemetry,
          onStopped: @escaping @Sendable (Error) -> Void) {
         self.publisher = publisher
         self.settings = settings
+        self.telemetry = telemetry
         self.onStopped = onStopped
         micLevelMeter = ScreenCaptureMicrophoneMeter(gain: settings.micVolume)
         targetFrameInterval = CMTime(value: 1,
@@ -454,22 +511,28 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
                     await publisher.setOutputSize(target, nativeShortEdge: min(width, height))
                     targetSize = target
                 }
-                if settings.pipEnabled, let targetSize,
-                   let camera = self.facecam.latest.take(),
-                   let composited = self.compositor.composite(
-                       screen: image,
-                       camera: camera,
-                       targetSize: targetSize,
-                       orientation: .up,
-                       corner: settings.pipCorner,
-                       scale: settings.pipScale,
-                       cameraPosition: settings.cameraPosition
-                   ),
-                   let output = self.compositor.makeSampleBuffer(
-                       from: composited,
-                       timingSource: sampleBuffer
-                   ) {
-                    await publisher.appendVideo(output)
+                if settings.pipEnabled, let targetSize, let camera = self.facecam.latest.take() {
+                    if let composited = self.compositor.composite(
+                           screen: image,
+                           camera: camera,
+                           targetSize: targetSize,
+                           orientation: .up,
+                           corner: settings.pipCorner,
+                           scale: settings.pipScale,
+                           cameraPosition: settings.cameraPosition
+                       ),
+                       let output = self.compositor.makeSampleBuffer(
+                           from: composited,
+                           timingSource: sampleBuffer
+                       ) {
+                        await publisher.appendVideo(output)
+                    } else {
+                        // Pool exhausted (a slow encoder holding surfaces) or the wrap
+                        // failed: skip the overlay for this frame and send the raw
+                        // screen. The frame itself is NOT lost — the overlay is.
+                        self.telemetry.recordDrop(.compositor)
+                        await publisher.appendVideo(sampleBuffer)
+                    }
                 } else {
                     await publisher.appendVideo(sampleBuffer)
                 }
@@ -491,12 +554,16 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
         guard sampleBuffer.isValid, sampleBuffer.dataReadiness == .ready else { return }
         switch type {
         case .screen:
+            telemetry.recordCaptured()
             // Downsample the native-refresh feed to the target frame rate by PTS
             // deadline: emit the first frame at/after each deadline, then advance
             // by one interval; re-anchor after a stall so a gap doesn't burst.
             let pts = sampleBuffer.presentationTimeStamp
             if pts.isValid {
                 if nextVideoDeadline.isValid, CMTimeCompare(pts, nextVideoDeadline) < 0 {
+                    // Intentional pacing shed (e.g. 120 Hz → 30 fps), not a fault —
+                    // counted separately from the congestion drops the HUD surfaces.
+                    telemetry.recordDrop(.pacing)
                     return   // arrived before the next target-fps slot — drop it
                 }
                 let advanced = CMTimeAdd(nextVideoDeadline.isValid ? nextVideoDeadline : pts,
@@ -505,7 +572,12 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
                     ? advanced
                     : CMTimeAdd(pts, targetFrameInterval)
             }
-            videoContinuation.yield(sampleBuffer)
+            // `bufferingNewest(1)`: if the consumer (compositor/append) hasn't drained
+            // the previous frame, this yield evicts it — a backpressure shed the
+            // pipeline couldn't keep up with. `.dropped` carries that evicted frame.
+            if case .dropped = videoContinuation.yield(sampleBuffer) {
+                telemetry.recordDrop(.backpressure)
+            }
         case .audio:
             if settings.includeAppAudio { publisher.enqueueApp(sampleBuffer) }
         case .microphone:

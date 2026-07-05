@@ -5,9 +5,10 @@ import Foundation
 /// `BroadcastState`, which is the coarse cross-process *liveness* heartbeat — this
 /// is the fine-grained *metrics* the stats HUD renders while a stream is running.
 ///
-/// The numbers are the encoder's current TARGETS after adaptive/thermal/path
-/// clamping (the real, applied rate), not independently measured throughput —
-/// measured fps/dropped-frame telemetry depends on M8, which is not yet built.
+/// `bitRate`/`frameRate` are the encoder's current TARGETS after adaptive/thermal/
+/// path clamping (the real, applied rate); `achievedFrameRate`/`droppedFrames` are
+/// the independently MEASURED pipeline telemetry (M8, issue #23) — the achieved
+/// output rate and the frames congestion actually shed.
 ///
 /// Pure value type with no iOS dependencies, so the health classification and the
 /// display formatting are unit-tested in StreamCore on CI.
@@ -22,12 +23,27 @@ public struct LiveStats: Equatable, Sendable {
     /// Consecutive ~1s ticks the socket sent zero bytes while data was queued — the
     /// stall signal the watchdog uses.
     public var zeroOutputSeconds: Int
+    /// Measured frames/sec actually reaching the encoder over the last poll window
+    /// (`FrameTelemetry`), distinct from the `frameRate` target. 0 before the first
+    /// rate is available (initial connect); the HUD falls back to `frameRate` then.
+    public var achievedFrameRate: Int
+    /// Cumulative frames congestion shed this session (backpressure + admission) —
+    /// the frames the pipeline wanted to encode but couldn't. Intentional pacing
+    /// downsampling is excluded, so this stays 0 on a healthy uplink.
+    public var droppedFrames: Int
 
-    public init(bitRate: Int, frameRate: Int, queueBytes: Int, zeroOutputSeconds: Int) {
+    public init(bitRate: Int,
+                frameRate: Int,
+                queueBytes: Int,
+                zeroOutputSeconds: Int,
+                achievedFrameRate: Int = 0,
+                droppedFrames: Int = 0) {
         self.bitRate = bitRate
         self.frameRate = frameRate
         self.queueBytes = queueBytes
         self.zeroOutputSeconds = zeroOutputSeconds
+        self.achievedFrameRate = achievedFrameRate
+        self.droppedFrames = droppedFrames
     }
 
     /// Uplink health, classified from the outbound backlog + stall signal. The
@@ -75,6 +91,23 @@ public struct LiveStats: Equatable, Sendable {
             return String(format: "%.1f MB", Double(bytes) / 1_048_576)
         }
         return "\(bytes / 1024) KB"
+    }
+
+    /// The fps to show in the HUD: the measured `achievedFrameRate` once it is
+    /// available, falling back to the `frameRate` target for the first second (and
+    /// any window with no encoded frames) so the card never flashes a bare "0".
+    public var displayFrameRate: Int {
+        achievedFrameRate > 0 ? achievedFrameRate : frameRate
+    }
+
+    /// A compact dropped-frame count for the card's congestion notice: "42", or
+    /// "1.2k" once it passes a thousand. Only shown when non-zero.
+    public var droppedLabel: String {
+        let dropped = max(0, droppedFrames)
+        if dropped >= 1000 {
+            return String(format: "%.1fk", Double(dropped) / 1000)
+        }
+        return "\(dropped)"
     }
 
     /// Formats an elapsed broadcast duration: "MM:SS" under an hour, "H:MM:SS" past

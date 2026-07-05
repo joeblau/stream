@@ -77,3 +77,46 @@ import StreamCore
         #expect(LiveStats.uptimeLabel(seconds: -5) == "00:00")
     }
 }
+
+/// The M8 telemetry fields folded into the HUD snapshot: the measured achieved fps
+/// (with its target fallback) and the compact dropped-frame count.
+@Suite struct LiveStatsTelemetryTests {
+    private func stats(frameRate: Int = 30, achieved: Int = 0, dropped: Int = 0) -> LiveStats {
+        LiveStats(bitRate: 3_000_000, frameRate: frameRate, queueBytes: 0, zeroOutputSeconds: 0,
+                  achievedFrameRate: achieved, droppedFrames: dropped)
+    }
+
+    @Test("displayFrameRate shows the measured rate, falling back to the target at zero")
+    func displayFrameRateFallback() {
+        // No measured rate yet (first second / an idle window) → show the target.
+        #expect(stats(frameRate: 60, achieved: 0).displayFrameRate == 60)
+        // A measured rate takes over once available — even when it differs from target.
+        #expect(stats(frameRate: 60, achieved: 52).displayFrameRate == 52)
+        #expect(stats(frameRate: 30, achieved: 30).displayFrameRate == 30)
+    }
+
+    @Test("droppedLabel is a bare count under 1000 and abbreviates above it")
+    func droppedLabelFormatting() {
+        #expect(stats(dropped: 0).droppedLabel == "0")
+        #expect(stats(dropped: 42).droppedLabel == "42")
+        #expect(stats(dropped: 999).droppedLabel == "999")
+        #expect(stats(dropped: 1000).droppedLabel == "1.0k")
+        #expect(stats(dropped: 1500).droppedLabel == "1.5k")
+        #expect(stats(dropped: -5).droppedLabel == "0")   // clamps
+    }
+
+    @Test("The new telemetry fields participate in equality")
+    func equalityIncludesTelemetry() {
+        #expect(stats(achieved: 30, dropped: 0) != stats(achieved: 29, dropped: 0))
+        #expect(stats(achieved: 30, dropped: 0) != stats(achieved: 30, dropped: 4))
+        #expect(stats(achieved: 30, dropped: 4) == stats(achieved: 30, dropped: 4))
+    }
+
+    @Test("The telemetry fields default to zero for existing call sites")
+    func defaultsAreZero() {
+        let base = LiveStats(bitRate: 1_000_000, frameRate: 30, queueBytes: 0, zeroOutputSeconds: 0)
+        #expect(base.achievedFrameRate == 0)
+        #expect(base.droppedFrames == 0)
+        #expect(base.displayFrameRate == 30)   // falls back to the target
+    }
+}
