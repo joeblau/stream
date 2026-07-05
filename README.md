@@ -10,7 +10,8 @@ used.
 - System screen selection through `SCContentSharingPicker`.
 - Screen, app-audio, and microphone samples through `SCStream`.
 - RTMP/RTMPS publishing with HaishinKit, plus SRT and experimental WHIP support.
-- Configurable resolution, bitrate, frame rate, audio mix, and microphone gain.
+- Configurable resolution, bitrate, frame rate, codec, audio mix, and microphone gain.
+- H.264 or HEVC encoding with VideoToolbox low-latency rate control.
 - Optional facecam composited into the outgoing video.
 - Restream unified chat.
 - Connection credentials stored in the Keychain.
@@ -81,6 +82,16 @@ ScreenCaptureKit's system camera effect only supports current-application captur
 Stream captures the full display, so it retains its own low-resolution camera input
 and composites that frame into the selected corner before encoding. Devices that
 cannot keep a camera session active during multitasking fall back to screen-only.
+
+## Codec selection
+
+The Video settings offer H.264 (default) or HEVC. HEVC gives roughly a 40%
+quality-per-bit gain on text-heavy screen content in the 2–8 Mbps band, but needs
+a compatible ingest: it rides SRT (MPEG-TS), WHIP, and *enhanced*-RTMP (the
+publisher advertises the `hvc1` FourCC in the E-RTMP connect command). Traditional
+RTMP services such as Restream speak H.264 only, so leave the codec on H.264 for
+them — HEVC over RTMP should be verified against the specific endpoint on a real
+device. Low-latency VideoToolbox rate control is enabled for both codecs.
 
 ## Notes
 

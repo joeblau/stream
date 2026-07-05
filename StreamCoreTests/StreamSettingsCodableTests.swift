@@ -28,6 +28,22 @@ import StreamCore
         #expect(s.audioBitrate == 128_000)
     }
 
+    @Test("A blob written before the codec setting existed defaults to H.264")
+    func missingVideoCodecDefaultsToH264() throws {
+        // The upgrade path that matters: a snapshot from a build that predates
+        // `videoCodec` must decode to the safe, universally-decodable H.264 rather
+        // than throw and wipe the user's other saved settings.
+        let s = try decode(#"{"videoBitrate": 6000000}"#)
+        #expect(s.videoCodec == .h264)
+        #expect(s.videoBitrate == 6_000_000)
+    }
+
+    @Test("An explicit HEVC codec decodes back to HEVC")
+    func explicitHEVCDecodes() throws {
+        #expect(try decode(#"{"videoCodec": "hevc"}"#).videoCodec == .hevc)
+        #expect(try decode(#"{"videoCodec": "h264"}"#).videoCodec == .h264)
+    }
+
     @Test("Explicit JSON null falls back to the default (not a decode failure)")
     func nullFallsBackToDefault() throws {
         let s = try decode(#"{"selectedProtocol": null, "videoQuality": null}"#)
@@ -51,6 +67,7 @@ import StreamCore
             videoBitrate: 6_000_000,
             audioBitrate: 192_000,
             frameRate: 30,
+            videoCodec: .hevc,
             pipEnabled: true,
             pipCorner: .topLeft,
             pipScale: 0.33,

@@ -639,7 +639,13 @@ actor SessionPublisher: Publisher {
         v.frameInterval = await networkController.currentFrameInterval()
         v.maxKeyFrameIntervalDuration = 2
         v.bitRateMode = .average
-        v.profileLevel = kVTProfileLevel_H264_Main_AutoLevel as String
+        // HEVC when the user opted in — SRT (MPEG-TS) and WHIP both carry it — else
+        // H.264 Main. The profileLevel string also switches the encoder's codec
+        // (VideoCodecSettings flips to HEVC on the "HEVC" substring).
+        v.profileLevel = settings.videoCodec.videoToolboxProfileLevel
+        // Low-latency VideoToolbox rate control: tightens encoder queuing latency
+        // (makeEncoderSpecification enables EnableLowLatencyRateControl).
+        v.isLowLatencyRateControlEnabled = true
         v.allowFrameReordering = false
         return v
     }
