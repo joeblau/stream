@@ -299,10 +299,17 @@ import StreamCore
         #expect(snap(satisfied: false).videoBitRateCeiling(configuredMaximum: 5_000_000) == 5_000_000)
     }
 
-    @Test("Cellular and expensive links cap at 2.5 Mbps")
-    func cellularCap() {
-        #expect(snap(.cellular, name: "pdp_ip0").videoBitRateCeiling(configuredMaximum: 5_000_000) == 2_500_000)
-        #expect(snap(expensive: true).videoBitRateCeiling(configuredMaximum: 5_000_000) == 2_500_000)
+    @Test("Cellular and expensive links SEED at 2.5 Mbps but no longer hard-cap the ceiling")
+    func cellularSeed() {
+        // The hard ceiling is now the configured max — the probe may climb there with
+        // measured throughput + a clean queue (issue #24).
+        #expect(snap(.cellular, name: "pdp_ip0").videoBitRateCeiling(configuredMaximum: 5_000_000) == 5_000_000)
+        #expect(snap(expensive: true).videoBitRateCeiling(configuredMaximum: 5_000_000) == 5_000_000)
+        // The conservative OPENING bid stays 2.5 Mbps.
+        #expect(snap(.cellular, name: "pdp_ip0").videoBitRateSeed(configuredMaximum: 5_000_000) == 2_500_000)
+        #expect(snap(expensive: true).videoBitRateSeed(configuredMaximum: 5_000_000) == 2_500_000)
+        // Wi-Fi seeds at its full ceiling (starts full, no conservative bid).
+        #expect(snap(.wifi).videoBitRateSeed(configuredMaximum: 5_000_000) == 5_000_000)
     }
 
     @Test("Low Data Mode and iOS 26 link signals cap harder")
