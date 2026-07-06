@@ -69,6 +69,10 @@ actor SessionPublisher: Publisher {
 
     private var timeline = MediaTimelineNormalizer()
     private let videoAdmission = VideoFrameAdmission()
+    /// Shared frame-drop / achieved-fps counters (issue #23 / M8). See RTMPPublisher:
+    /// records the admission shed + every encoded append into the same instance the
+    /// capture side and controller share.
+    private let telemetry: FrameTelemetry
 
     // Ordered, lossless audio ingress: ScreenCaptureKit yields synchronously, a
     // single consumer per track awaits each append — preserving PTS order.
@@ -123,8 +127,10 @@ actor SessionPublisher: Publisher {
     /// The reconnect loop's currently-sleeping backoff; cancelling = "retry now".
     private var backoffSleepTask: Task<Void, any Error>?
 
-    init(protocol streamProtocol: StreamCore.StreamProtocol) {
+    init(protocol streamProtocol: StreamCore.StreamProtocol,
+         telemetry: FrameTelemetry = FrameTelemetry()) {
         self.transport = streamProtocol
+        self.telemetry = telemetry
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
         (appStream, appCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
     }
@@ -644,9 +650,13 @@ actor SessionPublisher: Publisher {
         lastMediaAt = now
         lastVideoAppendAt = now
         lastVideoBuffer = sb
-        guard videoAdmission.admit() else { return }
+        guard videoAdmission.admit() else {
+            telemetry.recordDrop(.admission)
+            return
+        }
         let duration = CMTime(value: 1, timescale: CMTimeScale(encodeFrameRate))
         let normalized = timeline.normalize(sb, kind: .video, fallbackDuration: duration)
+        telemetry.recordEncoded()
         await mixer.append(enforceMonotonicVideo(normalized, minStep: duration))
     }
 

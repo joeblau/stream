@@ -59,6 +59,12 @@ actor RTMPPublisher: Publisher {
     /// Sheds input video frames when the outbound queue is deep, to bound latency
     /// (HaishinKit's send queue is otherwise unbounded). Refreshed by checkNetworkHealth.
     private let videoAdmission = VideoFrameAdmission()
+    /// Shared frame-drop / achieved-fps counters (issue #23 / M8). This actor records
+    /// the admission shed + every encoded append; the capture side records the
+    /// capture/pacing/backpressure/compositor sites into the same instance, and the
+    /// controller reads one snapshot per telemetry poll. Reachable here so the
+    /// adaptive logic (M9) can consume the congestion-drop signal.
+    private let telemetry: FrameTelemetry
 
     // Ordered, lossless audio ingress: ScreenCaptureKit yields synchronously, a
     // single consumer per track awaits each append — preserving PTS order so
@@ -80,7 +86,8 @@ actor RTMPPublisher: Publisher {
     /// Shared outbound-queue stall watchdog state (stalledTicks + lastQueueBytes).
     private var watchdog = WatchdogState()
 
-    init() {
+    init(telemetry: FrameTelemetry = FrameTelemetry()) {
+        self.telemetry = telemetry
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
         (appStream, appCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
     }
@@ -770,10 +777,14 @@ actor RTMPPublisher: Publisher {
         lastVideoBuffer = sb
         // Under outbound congestion, drop a proportion of video frames (audio is
         // never dropped) so latency stays bounded instead of the queue growing.
-        guard videoAdmission.admit() else { return }
+        guard videoAdmission.admit() else {
+            telemetry.recordDrop(.admission)
+            return
+        }
         let duration = CMTime(value: 1,
                               timescale: CMTimeScale(encodeFrameRate))
         let normalized = timeline.normalize(sb, kind: .video, fallbackDuration: duration)
+        telemetry.recordEncoded()
         await mixer.append(enforceMonotonicVideo(normalized, minStep: duration))
     }
 

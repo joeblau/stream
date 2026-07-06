@@ -1022,7 +1022,8 @@ private final class MicrophoneLevelMonitor {
 /// A leaf view so its ~1s telemetry ticks invalidate only this subtree (not the
 /// whole launcher List), and every value is monospaced + single-line so the card's
 /// height is invariant per tick — the content-sized drawer detent never springs on
-/// a number change (only an occasional thermal-notice appearance resizes it).
+/// a number change (only an occasional thermal- or dropped-frames notice appearing
+/// resizes it).
 private struct LiveStatsCard: View {
     var capture: ScreenCaptureController
 
@@ -1037,6 +1038,7 @@ private struct LiveStatsCard: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
+            droppedNotice
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1062,15 +1064,29 @@ private struct LiveStatsCard: View {
         }
     }
 
-    /// Bitrate (ABR target) · effective fps · uplink health. Values are the
-    /// encoder's applied targets, not measured throughput (measured fps needs M8).
+    /// Bitrate (ABR target) · achieved fps · uplink health. Bitrate is the encoder's
+    /// applied target; FPS is the MEASURED achieved rate (M8), falling back to the
+    /// target for the first second before a rate is available.
     private var metricsRow: some View {
         HStack(spacing: 0) {
             metric("Bitrate", value: capture.liveStats?.bitRateLabel ?? "—")
             divider
-            metric("FPS", value: capture.liveStats.map { "\($0.frameRate)" } ?? "—")
+            metric("FPS", value: capture.liveStats.map { "\($0.displayFrameRate)" } ?? "—")
             divider
             metric("Uplink", value: capture.liveStats?.linkHealth.label ?? "—", tint: uplinkTint)
+        }
+    }
+
+    /// A subtle count of the frames congestion has shed this session (backpressure +
+    /// admission). Hidden until the first drop, so a healthy stream shows nothing;
+    /// the coloured Uplink metric already carries the live severity signal.
+    @ViewBuilder private var droppedNotice: some View {
+        if let stats = capture.liveStats, stats.droppedFrames > 0 {
+            Label("\(stats.droppedLabel) frames dropped", systemImage: "square.stack.3d.up.slash")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
     }
 
