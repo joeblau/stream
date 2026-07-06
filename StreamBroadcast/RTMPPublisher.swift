@@ -20,15 +20,10 @@ private let streamLog = Logger(subsystem: "com.joeblau.Stream", category: "rtmp"
 actor RTMPPublisher: Publisher {
     private let mixer = MediaMixer(captureSessionMode: .manual,
                                    multiTrackAudioMixingEnabled: true)
-    /// Use the conservative RTMP connect payload understood by traditional
-    /// ingests such as Restream. The enhanced-codec fields are unnecessary for
-    /// this H.264/AAC publisher and some RTMP frontends reject them.
-    private let connection = RTMPConnection(fourCcList: nil,
-                                            videoFourCcInfoMap: nil,
-                                            audioFourCcInfoMap: nil,
-                                            capsEx: 0,
-                                            requestTimeout: 5_000,
-                                            qualityOfService: .userInteractive)
+    /// Built lazily on the first `stream` access — which happens inside `start`,
+    /// AFTER `settings` is assigned — so its connect payload can depend on the
+    /// chosen codec. See `makeConnection`.
+    private lazy var connection = makeConnection()
     private lazy var stream = RTMPStream(connection: connection)
     /// Device resolution/fps ceiling (1080p60 on capable hardware, else 720p30),
     /// computed once. The thermal governor + ABR cap the live rate below it.
@@ -94,6 +89,27 @@ actor RTMPPublisher: Publisher {
 
     nonisolated func enqueueMic(_ sb: CMSampleBuffer) { micCont.yield(sb) }
     nonisolated func enqueueApp(_ sb: CMSampleBuffer) { appCont.yield(sb) }
+
+    /// Builds the RTMP connection for the current `settings`.
+    ///
+    /// HEVC over RTMP requires *enhanced* RTMP (E-RTMP): the connect command must
+    /// advertise the `hvc1` FourCC so the ingest accepts the HEVC bitstream (the
+    /// RTMP video tags are then framed with the E-RTMP exHeader automatically). We
+    /// send that enhanced payload ONLY when the user selected HEVC — traditional
+    /// ingests such as Restream speak H.264 and some reject the enhanced connect
+    /// fields, so the H.264 path keeps the conservative nil payload. AAC audio is
+    /// still what's published in both cases (set via `setAudioSettings`); the audio
+    /// FourCc advert is a capability, not an obligation.
+    private func makeConnection() -> RTMPConnection {
+        let enhanced = settings.videoCodec == .hevc
+        return RTMPConnection(
+            fourCcList: enhanced ? RTMPConnection.supportedFourCcList : nil,
+            videoFourCcInfoMap: enhanced ? RTMPConnection.supportedVideoFourCcInfoMap : nil,
+            audioFourCcInfoMap: enhanced ? RTMPConnection.supportedAudioFourCcInfoMap : nil,
+            capsEx: 0,
+            requestTimeout: 5_000,
+            qualityOfService: .userInteractive)
+    }
 
     private func startAudioConsumers() {
         guard audioConsumers.isEmpty else { return }
@@ -738,7 +754,14 @@ actor RTMPPublisher: Publisher {
         // AverageBitRate changes are reliably applied so the ABR actually takes
         // effect. HaishinKit auto-derives a ~1.5x burst cap (dataRateLimits).
         v.bitRateMode = .average
-        v.profileLevel = kVTProfileLevel_H264_Main_AutoLevel as String
+        // HEVC (enhanced-RTMP) when the user opted in, else H.264 Main. The
+        // profileLevel string also flips the encoder's codec — VideoCodecSettings
+        // switches to HEVC on the "HEVC" substring — which drives the hvc1 RTMP
+        // packet framing. makeConnection negotiated the matching E-RTMP payload.
+        v.profileLevel = settings.videoCodec.videoToolboxProfileLevel
+        // Low-latency VideoToolbox rate control: tightens encoder queuing latency
+        // (makeEncoderSpecification enables EnableLowLatencyRateControl).
+        v.isLowLatencyRateControlEnabled = true
         v.allowFrameReordering = false
         do {
             try await stream.setVideoSettings(v)
@@ -903,6 +926,20 @@ actor RTMPPublisher: Publisher {
         _ = try? await stream.close()
         _ = try? await connection.close()
         await mixer.stopRunning()
+    }
+}
+
+extension VideoCodec {
+    /// The VideoToolbox profile-level string for this codec, shared by both
+    /// publishers. Assigning it to `VideoCodecSettings.profileLevel` also flips the
+    /// encoder's internal `format` to HEVC (its `didSet` keys off the "HEVC"
+    /// substring), so the encoded bitstream, the RTMP `hvc1` exHeader framing, and
+    /// the SRT/WHIP payload all follow from this one property.
+    var videoToolboxProfileLevel: String {
+        switch self {
+        case .h264: return kVTProfileLevel_H264_Main_AutoLevel as String
+        case .hevc: return kVTProfileLevel_HEVC_Main_AutoLevel as String
+        }
     }
 }
 

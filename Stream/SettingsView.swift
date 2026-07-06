@@ -357,7 +357,9 @@ struct SettingsView: View {
             // restored from a more capable phone).
             let quality = min(settings.videoQuality, capability.maxShortEdge)
             let fps = min(settings.frameRate, capability.maxFrameRate)
-            return "\(quality)p · \(bitrateLabel(settings.videoBitrate)) · \(fps) fps"
+            // Surface HEVC (the opt-in) in the collapsed row; H.264 stays implicit.
+            let codec = settings.videoCodec == .hevc ? " · HEVC" : ""
+            return "\(quality)p · \(bitrateLabel(settings.videoBitrate)) · \(fps) fps\(codec)"
         case .backup:
             return "Off"
         case .audio:
@@ -516,10 +518,31 @@ struct SettingsView: View {
                     Text("\(fps) fps").tag(fps)
                 }
             }
+
+            Picker("Codec", selection: Binding(
+                get: { settings.videoCodec },
+                set: { settings.videoCodec = $0; onChange() }
+            )) {
+                ForEach(VideoCodec.allCases, id: \.self) { codec in
+                    Text(codec.displayName).tag(codec)
+                }
+            }
         } header: {
             Text("Video")
         } footer: {
+            videoFooter
+        }
+    }
+
+    @ViewBuilder
+    private var videoFooter: some View {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Bitrate is a maximum and drops automatically when the uplink is congested. Resolution and frame rate are limited to what this device can sustain, and are reduced automatically when it runs warm or low on power.")
+            if settings.videoCodec == .hevc {
+                Label("HEVC saves roughly 40% bitrate on screen content, but needs a compatible ingest — SRT, WHIP, or an enhanced-RTMP server. Traditional RTMP services (e.g. Restream) require H.264.",
+                      systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
