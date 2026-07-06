@@ -85,17 +85,31 @@ public struct NetworkPathSnapshot: Sendable, Equatable {
     /// What "a different link" means for reconnect purposes.
     public var linkIdentity: String { "\(interface.rawValue)/\(interfaceName)" }
 
-    /// Per-path video bitrate ceiling policy. Cellular caps the max so a 3 Mbps
-    /// Wi-Fi target is never re-attempted verbatim on a weak cell; Low Data
-    /// Mode and iOS 26 link-quality signals cap harder. Numbers are policy,
-    /// tunable on device.
+    /// Per-path video bitrate ceiling — the HARD cap the upward probe may never
+    /// exceed. Low Data Mode and the iOS 26 link-quality signals are genuine
+    /// hardware/policy limits and stay hard here. Cellular is deliberately NOT a
+    /// hard cap any more: a real 5G uplink often exceeds the old 2.5 Mbps clamp, so
+    /// that value moved to `videoBitRateSeed` as a conservative starting bid the
+    /// probe can climb above with measured evidence (issue #24). Numbers are
+    /// policy, tunable on device.
     public func videoBitRateCeiling(configuredMaximum maximum: Int) -> Int {
         guard isSatisfied else { return maximum }
         var ceiling = maximum
-        if interface == .cellular || isExpensive { ceiling = min(ceiling, 2_500_000) }
         if isConstrained { ceiling = min(ceiling, 1_200_000) }
         if isUltraConstrained { ceiling = min(ceiling, 800_000) }
         if linkQualityIsMinimal { ceiling = Swift.max(300_000, ceiling / 2) }
+        return ceiling
+    }
+
+    /// The conservative INITIAL bitrate for this path — where a fresh connection or
+    /// a post-handoff reseed opens before the EWMA probe measures real capacity.
+    /// Cellular/expensive links seed at 2.5 Mbps (a safe 5G/LTE opening bid); every
+    /// other link seeds at its hard ceiling (i.e. starts full). Never above the
+    /// hard ceiling, so Low Data Mode still wins.
+    public func videoBitRateSeed(configuredMaximum maximum: Int) -> Int {
+        let ceiling = videoBitRateCeiling(configuredMaximum: maximum)
+        guard isSatisfied else { return ceiling }
+        if interface == .cellular || isExpensive { return min(ceiling, 2_500_000) }
         return ceiling
     }
 }

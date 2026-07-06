@@ -528,6 +528,7 @@ actor RTMPPublisher: Publisher {
         if previous == nil || snapshot != previous {
             await networkController.setPathProfile(
                 ceiling: snapshot.videoBitRateCeiling(configuredMaximum: settings.videoBitrate),
+                seed: snapshot.videoBitRateSeed(configuredMaximum: settings.videoBitrate),
                 interface: snapshot.interface,
                 isBaseline: previous == nil,
                 applyingTo: stream)
@@ -1013,8 +1014,13 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
             }
 
         case .status(let report):
+            // Pass live audio bitrate so the upward-probe's throughput gate compares
+            // video-vs-video (the estimate carries total socket egress). Paused → 0,
+            // mirroring the insufficient-bandwidth path's guard.
+            let audioBitRate = abr.capturePaused ? 0 : await stream.audioSettings.bitRate
             let decision = abr.onStatus(bytesOutPerSecond: report.currentBytesOutPerSecond,
-                                        queueBytesOut: report.currentQueueBytesOut)
+                                        queueBytesOut: report.currentQueueBytesOut,
+                                        audioBitRate: audioBitRate)
             if decision.shouldApply {
                 await applyDecision(decision, to: stream)
                 // Match the original: only the upward-PROBE apply logs "recovered".
@@ -1046,10 +1052,12 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     /// seed. The baseline (first) emission only adopts the interface and the
     /// ceiling, so a broadcast still STARTS at the configured full bitrate.
     func setPathProfile(ceiling: Int,
+                        seed: Int,
                         interface: NetworkPathSnapshot.Interface,
                         isBaseline: Bool,
                         applyingTo stream: some StreamConvertible) async {
-        let decision = abr.onPathProfile(ceiling: ceiling, interface: interface, isBaseline: isBaseline)
+        let decision = abr.onPathProfile(ceiling: ceiling, seed: seed,
+                                         interface: interface, isBaseline: isBaseline)
         if decision.shouldApply { await applyDecision(decision, to: stream) }
     }
 

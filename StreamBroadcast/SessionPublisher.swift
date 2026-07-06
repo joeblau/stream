@@ -284,6 +284,7 @@ actor SessionPublisher: Publisher {
         if let path = currentPath {
             await networkController.setPathProfile(
                 ceiling: path.videoBitRateCeiling(configuredMaximum: settings.videoBitrate),
+                seed: path.videoBitRateSeed(configuredMaximum: settings.videoBitrate),
                 interface: path.interface,
                 isBaseline: false,
                 applyingTo: stream)
@@ -468,6 +469,7 @@ actor SessionPublisher: Publisher {
         if result.shouldUpdateCeiling, let stream {
             await networkController.setPathProfile(
                 ceiling: snapshot.videoBitRateCeiling(configuredMaximum: settings.videoBitrate),
+                seed: snapshot.videoBitRateSeed(configuredMaximum: settings.videoBitrate),
                 interface: snapshot.interface,
                 isBaseline: result.isBaseline,
                 applyingTo: stream)
