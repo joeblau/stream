@@ -66,7 +66,9 @@ struct SettingsView: View {
     var onChange: () -> Void
 
     /// Audio input enumeration helper (AVAudioSession-backed, Simulator-safe).
-    @State private var audio = AudioInputProvider()
+    /// Owned by the root view so route-change monitoring (and the Bluetooth-connect
+    /// banner it drives) runs continuously, not only while this sheet is open.
+    var audio: AudioInputProvider
 
     /// Camera permission + device-capability helper for the facecam.
     @State private var camera = CameraSupport()
@@ -889,6 +891,13 @@ private final class MicrophoneLevelMonitor {
     @ObservationIgnored private var lastBroadcastCheckAt: UInt64 = 0
     @ObservationIgnored private var broadcastIsLive = false
 
+    /// Observer for `AVAudioEngineConfigurationChange`. The engine posts it when its
+    /// I/O format changes underneath the running graph — most importantly when a
+    /// Bluetooth HFP link finishes its asynchronous handoff after `setPreferredInput`.
+    /// The tap was installed at the pre-switch format, so without rebuilding it on
+    /// this notification the meter goes silent once the route lands on the BT mic.
+    @ObservationIgnored private nonisolated(unsafe) var configChangeObserver: NSObjectProtocol?
+
     func start() {
         guard task == nil else { return }
         task = Task { [weak self] in
@@ -995,8 +1004,44 @@ private final class MicrophoneLevelMonitor {
         // the /dev/null AVAudioRecorder metering trick which can read nothing.
         let engine = AVAudioEngine()
         let input = engine.inputNode
+        let inputFormat = input.inputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { return }
+        // A tap alone does NOT reliably pull a Bluetooth HFP input — the engine only
+        // renders its input when the graph drives an output, so an unconnected
+        // input node hands the tap silent buffers (the "DJI selected, meter flat"
+        // bug). Route input → main mixer to force a full I/O cycle, and mute the
+        // mixer output so nothing is monitored back to the speaker/HFP earpiece.
+        engine.connect(input, to: engine.mainMixerNode, format: inputFormat)
+        engine.mainMixerNode.outputVolume = 0
+        guard installMeterTap(on: engine) else { return }
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            engine.inputNode.removeTap(onBus: 0)
+            return
+        }
+        self.engine = engine
+
+        // A Bluetooth HFP link settles asynchronously AFTER setPreferredInput, so the
+        // format above may still be the built-in mic's. Rebuild the tap on the new
+        // format when the engine reconfigures, else the BT meter reads flat forever.
+        observeConfigChanges(of: engine)
+
+        let route = session.currentRoute.inputs
+            .map { "\($0.portName)/\($0.portType.rawValue)" }
+            .joined(separator: ",")
+        let format = engine.inputNode.inputFormat(forBus: 0)
+        Self.log.info("Mic meter started: route=[\(route, privacy: .public)] format=\(format.sampleRate, privacy: .public)Hz/\(format.channelCount, privacy: .public)ch pref=\(self.preferredInputUID ?? "nil", privacy: .public)")
+    }
+
+    /// Reads the input node's CURRENT format and installs the metering tap. Split out
+    /// so it can be re-run on a configuration change (when the live route/format has
+    /// changed). Returns false when the route has no usable input yet.
+    private func installMeterTap(on engine: AVAudioEngine) -> Bool {
+        let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { return }
+        guard format.sampleRate > 0, format.channelCount > 0 else { return false }
         let level = meterLevel
         // @Sendable so the tap runs on the audio render thread — WITHOUT it the
         // closure inherits this @MainActor class's isolation and iOS crashes with
@@ -1016,21 +1061,42 @@ private final class MicrophoneLevelMonitor {
                 level.withLock { $0 = rms }
             }
         } catch {
-            return
+            return false
         }
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            input.removeTap(onBus: 0)
-            return
-        }
-        self.engine = engine
+        return true
+    }
 
-        let route = session.currentRoute.inputs
+    /// Registers the configuration-change observer for `engine`, replacing any prior
+    /// one. Fires on the main queue; hops back onto the actor to rebuild the tap.
+    private func observeConfigChanges(of engine: AVAudioEngine) {
+        if let configChangeObserver {
+            NotificationCenter.default.removeObserver(configChangeObserver)
+        }
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleEngineConfigChange() }
+        }
+    }
+
+    /// The engine's I/O reconfigured (typically the BT route finishing its handoff).
+    /// Reinstall the tap at the new input format and make sure the engine is running;
+    /// a config change stops the engine, and the old tap's format no longer matches.
+    private func handleEngineConfigChange() {
+        guard let engine else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        guard installMeterTap(on: engine) else { return }
+        if !engine.isRunning {
+            engine.prepare()
+            try? engine.start()
+        }
+        let route = AVAudioSession.sharedInstance().currentRoute.inputs
             .map { "\($0.portName)/\($0.portType.rawValue)" }
             .joined(separator: ",")
-        Self.log.info("Mic meter started: route=[\(route, privacy: .public)] format=\(format.sampleRate, privacy: .public)Hz/\(format.channelCount, privacy: .public)ch pref=\(self.preferredInputUID ?? "nil", privacy: .public)")
+        let format = engine.inputNode.inputFormat(forBus: 0)
+        Self.log.info("Mic meter reconfigured: route=[\(route, privacy: .public)] format=\(format.sampleRate, privacy: .public)Hz/\(format.channelCount, privacy: .public)ch")
     }
 
     private func stopLocalCapture() {
@@ -1039,6 +1105,10 @@ private final class MicrophoneLevelMonitor {
         // audio server and interrupting ScreenCaptureKit's live mic session.
         // Deactivate exactly once, on the real handover.
         guard let engine else { return }
+        if let configChangeObserver {
+            NotificationCenter.default.removeObserver(configChangeObserver)
+            self.configChangeObserver = nil
+        }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         self.engine = nil
@@ -1159,6 +1229,6 @@ private struct LiveStatsCard: View {
     @Previewable @State var settings = StreamSettings.default
     return NavigationStack {
         SettingsView(settings: $settings, chat: RestreamChat(),
-                     capture: ScreenCaptureController(), onChange: {})
+                     capture: ScreenCaptureController(), onChange: {}, audio: AudioInputProvider())
     }
 }

@@ -38,6 +38,18 @@ final class AudioInputProvider {
     /// the new route. Not fired for a manual `refresh()` (the caller already knows).
     var onInputsChanged: (() -> Void)?
 
+    /// Fired when a Bluetooth audio input appears that wasn't present on the
+    /// previous enumeration — i.e. a device paired/connected mid-session. Carries
+    /// the new device's display name so the UI can surface a "<name> connected"
+    /// banner. Deliberately NOT fired for devices already connected when monitoring
+    /// starts (the first `refresh()` only seeds the baseline), only for arrivals.
+    var onBluetoothConnected: ((String) -> Void)?
+
+    /// UIDs of the Bluetooth inputs seen on the most recent enumeration. A later
+    /// route change diffs against this to tell which device is *newly* connected
+    /// (fire the banner) versus one that was already present (stay quiet).
+    private var knownBluetoothUIDs: Set<String> = []
+
     /// Observer token for `AVAudioSession.routeChangeNotification`. Marked
     /// `nonisolated(unsafe)` so `deinit` (which is nonisolated on a `@MainActor`
     /// type) can remove it; an `NSObjectProtocol` token is safe to touch there.
@@ -117,7 +129,7 @@ final class AudioInputProvider {
         switch reason {
         case .newDeviceAvailable, .oldDeviceUnavailable:
             guard permission == .granted else { return }
-            configureAndEnumerate()
+            configureAndEnumerate(announceNewBluetooth: true)
             onInputsChanged?()
         default:
             break
@@ -126,7 +138,10 @@ final class AudioInputProvider {
 
     // MARK: - Private
 
-    private func configureAndEnumerate() {
+    /// - Parameter announceNewBluetooth: when true, fire `onBluetoothConnected`
+    ///   for each Bluetooth input not seen on the previous enumeration. False for
+    ///   the initial `refresh()`, which only seeds the baseline set.
+    private func configureAndEnumerate(announceNewBluetooth: Bool = false) {
         let session = AVAudioSession.sharedInstance()
         // Setting the category is sufficient to enumerate Bluetooth inputs. Do
         // not activate merely for enumeration; activation is asynchronous on
@@ -139,10 +154,10 @@ final class AudioInputProvider {
                 continue
             }
         }
-        enumerate(from: session)
+        enumerate(from: session, announceNewBluetooth: announceNewBluetooth)
     }
 
-    private func enumerate(from session: AVAudioSession) {
+    private func enumerate(from session: AVAudioSession, announceNewBluetooth: Bool) {
         let available = session.availableInputs ?? []
         inputs = available.map { port in
             let isBT = port.portType == .bluetoothHFP || port.portType == .bluetoothLE
@@ -152,6 +167,15 @@ final class AudioInputProvider {
                 isBluetooth: isBT
             )
         }
+        // Diff the Bluetooth set against the previous enumeration so a device that
+        // paired mid-session surfaces once; already-connected devices stay quiet.
+        let bluetooth = inputs.filter(\.isBluetooth)
+        if announceNewBluetooth {
+            for input in bluetooth where !knownBluetoothUIDs.contains(input.uid) {
+                onBluetoothConnected?(input.displayName)
+            }
+        }
+        knownBluetoothUIDs = Set(bluetooth.map(\.uid))
     }
 
     /// Activates a record-capable session that surfaces Bluetooth inputs.
