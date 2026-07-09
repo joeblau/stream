@@ -1,6 +1,14 @@
 import SwiftUI
 import StreamCore
 
+/// A Bluetooth audio device that paired mid-session, backing the transient
+/// "connected" banner. The `id` is fresh per arrival so replacing the banner
+/// restarts its dismiss timer even when the same device reconnects.
+private struct BluetoothConnection: Equatable, Identifiable {
+    let id = UUID()
+    let name: String
+}
+
 /// Root view. The main page shows the live chat feed; the toolbar carries a "Live"
 /// recording button (top right) that starts/stops capture and a gear button that
 /// presents every setting — connection, video, backup, audio, and chat — in a
@@ -17,6 +25,17 @@ struct ContentView: View {
     /// Restream unified-chat controller, shared by the main feed and the Settings
     /// sheet's chat section so both observe one connection.
     @State private var chat = RestreamChat()
+
+    /// Audio input helper, owned here so its `AVAudioSession` route-change monitor
+    /// runs for the whole app lifetime. Drives the Bluetooth-connect banner below
+    /// and is threaded into the Settings sheet so both share one instance/observer.
+    @State private var audio = AudioInputProvider()
+
+    /// The Bluetooth device that most recently paired mid-session, shown as a
+    /// transient banner. Set from `audio.onBluetoothConnected`; auto-cleared after
+    /// a few seconds by a `.task` keyed on its `id` (a fresh `id` restarts the
+    /// timer, so a second device replaces the banner cleanly).
+    @State private var bluetoothBanner: BluetoothConnection?
 
     @State private var showingSettings = false
 
@@ -59,9 +78,16 @@ struct ContentView: View {
                     if capture.isLive { micFAB }
                 }
                 .overlay(alignment: .top) {
-                    if capture.isLive { livePill }
+                    VStack(spacing: 8) {
+                        if capture.isLive { livePill }
+                        if let banner = bluetoothBanner {
+                            bluetoothBannerView(name: banner.name)
+                        }
+                    }
+                    .padding(.top, 8)
                 }
                 .animation(.spring(duration: 0.3, bounce: 0.2), value: capture.isLive)
+                .animation(.spring(duration: 0.35, bounce: 0.25), value: bluetoothBanner)
                 .navigationTitle("Stream")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -83,7 +109,27 @@ struct ContentView: View {
                 }
                 .sheet(isPresented: $showingSettings) { settingsSheet }
         }
-        .task { chat.autoConnect() }
+        .task {
+            chat.autoConnect()
+            // Surface a banner when a Bluetooth audio device pairs mid-session.
+            audio.onBluetoothConnected = { name in
+                bluetoothBanner = BluetoothConnection(name: name)
+                Haptics.tap()
+            }
+            // Seed the baseline set + start the route-change observer without
+            // prompting for mic access here (Settings owns the permission ask).
+            // Already-connected devices only populate the baseline; they don't
+            // trigger a banner — only devices that arrive afterward do.
+            audio.refresh(requestPermission: false)
+        }
+        // Auto-dismiss the Bluetooth banner. Keyed on the connection id so a new
+        // device restarts the timer; cancellation (id change) skips the stale clear.
+        .task(id: bluetoothBanner?.id) {
+            guard bluetoothBanner != nil else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            bluetoothBanner = nil
+        }
         .confirmationDialog(
             "Stop the broadcast?",
             isPresented: $showingStopConfirmation,
@@ -170,13 +216,35 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .glassEffect(.regular, in: .capsule)
-        .padding(.top, 8)
         .transition(.scale.combined(with: .opacity))
         // Purely informational: never intercept taps/scroll on the chat beneath it.
         .allowsHitTesting(false)
         // Combine into one element but keep the elapsed time in the label (a static
         // override would drop it) — VoiceOver reads e.g. "LIVE, 12:34".
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Bluetooth-connected banner
+
+    /// Transient glass capsule announcing a Bluetooth audio device that just
+    /// paired. Sits below the LIVE pill (same top overlay stack) and auto-dismisses
+    /// via the `.task(id:)` timer; purely informational, so it never eats taps.
+    private func bluetoothBannerView(name: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wave.3.right.circle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.blue)
+            Text("\(name) connected")
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .glassEffect(.regular, in: .capsule)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(name) connected")
     }
 
     // MARK: - Setup banner
@@ -224,7 +292,7 @@ struct ContentView: View {
     /// the sheet to the exact height of whatever content is on screen (measured
     /// from the scroll view's real content size), resizing as sections are pushed.
     private var settingsSheet: some View {
-        SettingsView(settings: $settings, chat: chat, capture: capture, onChange: persist)
+        SettingsView(settings: $settings, chat: chat, capture: capture, onChange: persist, audio: audio)
     }
 }
 
