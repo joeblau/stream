@@ -6,7 +6,7 @@ import UIKit
 import os
 
 /// The settings sections. Each is launched from the settings list into its own
-/// Vaul-style, content-sized sheet holding exactly that section's controls.
+/// Vaul-style sheet holding exactly that section's controls.
 private enum SettingsSection: String, Identifiable, CaseIterable {
     case connection, video, backup, audio, pip, chat
 
@@ -46,8 +46,8 @@ private enum SettingsSection: String, Identifiable, CaseIterable {
     }
 }
 
-/// The settings launcher: a list of sections, each of which opens a dynamic,
-/// content-sized sheet holding exactly that section's controls. Every field edit
+/// The settings launcher: a list of sections, each of which opens its controls in
+/// the same content-hugging sheet. Every field edit
 /// mutates the bound `settings` and calls `onChange()` so the parent persists the
 /// snapshot via `SettingsStore` BEFORE the user can start a broadcast.
 struct SettingsView: View {
@@ -76,8 +76,10 @@ struct SettingsView: View {
     /// Photos add-only permission helper for the Local Backup feature.
     @State private var photos = PhotosSupport()
 
-    /// Smoothed live level published by the ScreenCaptureKit sample router.
-    @State private var micLevel = MicrophoneLevelMonitor()
+    /// Smoothed live level published by the ScreenCaptureKit sample router. Owned by
+    /// the root view and shared with the toolbar's status meter — two instances would
+    /// open competing record sessions when the meter falls back to local capture.
+    var micLevel: MicrophoneLevelMonitor
 
     // MARK: - Chat credential fields
 
@@ -130,18 +132,16 @@ struct SettingsView: View {
     /// The section currently shown, or `nil` for the launcher. Not a full stack —
     /// the drawer is exactly two levels deep (launcher → one section), so a single
     /// optional models it. Owning the level ourselves (instead of a NavigationStack
-    /// push) lets ONE `withAnimation` drive the content morph and the detent resize
-    /// together as a single motion.
+    /// push) lets one animation drive the content morph and sheet resize together.
     @State private var selected: SettingsSection?
 
-    /// Owns the content-sized detent and animates every resize with ITS curve, and —
-    /// crucially — guards a late re-measurement from restarting the spring mid-resize
-    /// (the real cause of the height feeling "desynced"). The resize speed lives in
-    /// this one initializer: 0.45s reads as settled where the old 0.3s outran the slide.
+    /// Vaul-style content-hugging detent. Only the pane currently on screen reports
+    /// a height; previously visited panes are cached by the model. This preserves
+    /// the dynamic drawer without rebuilding six hidden Forms behind every update.
     @State private var detent = DynamicDetentSheetModel(
         initialHeight: 420,
-        chrome: 100,                 // nav bar + grabber + home-indicator inset
-        minimumContentHeight: 160,   // floor so a short section never collapses
+        chrome: 100,
+        minimumContentHeight: 160,
         animation: .spring(duration: 0.45, bounce: 0.1)
     )
 
@@ -150,8 +150,7 @@ struct SettingsView: View {
         // bar, glass toolbar buttons, and inline title. It does NOT push via the nav
         // stack: the launcher and section are swapped with a directional slide
         // (section in from trailing / launcher out to leading = a forward push; the
-        // reverse on back = a pop), driven by our own `withAnimation` so the slide
-        // and the detent resize ride the same transaction.
+        // reverse on back = a pop), driven by our own `withAnimation`.
         NavigationStack {
             ZStack(alignment: .top) {
                 if let section = selected {
@@ -163,9 +162,6 @@ struct SettingsView: View {
                         .transition(.move(edge: .leading))
                 }
             }
-            // Measure every section's height off-screen so the FIRST open resizes
-            // in lockstep with the slide, not a beat after it.
-            .background(sectionHeightPrewarm)
             .navigationTitle(selected?.title ?? "Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -180,53 +176,63 @@ struct SettingsView: View {
                 }
             }
         }
-        .dynamicHeightDetents(detent)   // curve-controlled height + drag indicator
+        .dynamicHeightDetents(detent)
         .presentationCornerRadius(55)
         // Haptic when a section is opened (push) or closed (pop).
         .sensoryFeedback(.impact(weight: .light), trigger: selected)
-        .onAppear {
-            // Launcher is the active pane on present; in-place field growth then
-            // animates automatically via each pane's measuredDetentHeight report.
+        .onAppear { [audio, micLevel, capture] in
             detent.activate(SettingsSection?.none)
-            // Enumerate inputs/capabilities so the launcher summaries are accurate;
-            // the live mic meter only runs while the Audio detail is open.
-            audio.refresh(requestPermission: false)
             // When a mic is (dis)connected mid-session, the provider re-enumerates
             // and calls this back: re-apply the persisted input to the session and
             // re-route the meter so a headset plugged in now is immediately live —
             // no app restart. Skipped while broadcasting (extension owns the route).
-            audio.onInputsChanged = {
-                guard !BroadcastStateStore.isLive() else { return }
+            audio.onInputsChanged = { [weak audio, weak micLevel, weak capture] in
+                guard let audio, let micLevel else { return }
+                guard capture?.isLive != true else { return }
                 let uid = settings.preferredAudioInputUID
                 audio.select(uid: uid, into: &settings)
                 micLevel.setPreferredInput(uid)
                 micLevel.restartLocalCapture()
             }
-            camera.refresh()
-            photos.refresh()
+        }
+        .onDisappear {
+            // `audio` outlives this sheet. Clear its callback so it cannot retain
+            // the sheet's Binding/state graph or restart a meter after dismissal.
+            audio.onInputsChanged = nil
+            micLevel.stop(for: .settings)
         }
     }
 
-    // MARK: - Drill-in navigation (custom, so the content morph + resize are one motion)
+    // MARK: - Drill-in navigation
 
-    /// Open a section: it slides in (push) and the drawer resizes to fit — both
-    /// inside ONE `withAnimation`, so they move as a single motion.
+    /// Open a section and resize the drawer under the same spring transaction.
     private func open(_ section: SettingsSection) {
         // No explicit tap here: `.sensoryFeedback(trigger: selected)` already fires
-        // one light impact whenever `selected` changes. The slide (.transition) and the
-        // detent resize ride ONE transaction (detent.animation), so they move together.
-        detent.animatingResize {
-            selected = section
-            detent.activate(Optional(section))
-        }
+        // one light impact whenever `selected` changes.
+        navigate(to: section)
     }
 
     /// Return to the launcher (the nav-bar back button).
     private func back() {
         // Haptic comes from `.sensoryFeedback(trigger: selected)` (see `open`).
-        detent.animatingResize {
-            selected = nil
-            detent.activate(SettingsSection?.none)
+        navigate(to: nil)
+    }
+
+    /// Cached panes resize in exact lockstep with the directional transition. On a
+    /// first visit there is intentionally no hidden prewarm tree; activate the key
+    /// first, then let its visible geometry report start the height spring while the
+    /// slide is already moving.
+    private func navigate(to destination: SettingsSection?) {
+        if detent.hasMeasurement(for: destination) {
+            detent.animatingResize {
+                selected = destination
+                detent.activate(destination)
+            }
+        } else {
+            detent.activate(destination)
+            withAnimation(detent.animation) {
+                selected = destination
+            }
         }
     }
 
@@ -256,7 +262,7 @@ struct SettingsView: View {
             }
         }
         .scrollBounceBehavior(.basedOnSize)
-        .measuredDetentHeight(SettingsSection?.none, into: detent)   // launcher's own identity
+        .measuredDetentHeight(SettingsSection?.none, into: detent)
     }
 
     // MARK: - Launcher rows
@@ -290,12 +296,8 @@ struct SettingsView: View {
 
     // MARK: - Section detail body
 
-    /// One section's controls — the Form that fills the section pane below its
-    /// header. The enclosing drawer resizes to fit whichever section is on screen
-    /// (via `sectionHeights` → `currentTarget`), and re-sizes as fields appear/hide
-    /// within it.
-    /// A section's Form (controls only), reused by both the visible detail and the
-    /// hidden height pre-warm — so measuring it off-screen triggers no side effects.
+    /// One section's controls — the Form that fills the section pane and scrolls
+    /// when its content is taller than the current content-hugging detent.
     @ViewBuilder
     private func sectionForm(_ section: SettingsSection) -> some View {
         Form {
@@ -315,33 +317,29 @@ struct SettingsView: View {
     /// own identity and runs the live mic meter only while the Audio detail is open.
     private func sectionDetail(_ section: SettingsSection) -> some View {
         sectionForm(section)
-            .measuredDetentHeight(Optional(section), into: detent)   // this section's own identity
+            .measuredDetentHeight(Optional(section), into: detent)
             .onAppear {
+                switch section {
+                case .audio:
+                    micLevel.setGain(settings.micVolume)
+                    micLevel.setPreferredInput(settings.preferredAudioInputUID)
+                    micLevel.setBroadcasting(capture.isLive)
+                    micLevel.start(for: .settings)
+                case .pip:
+                    camera.refresh()
+                case .backup:
+                    photos.refresh()
+                default:
+                    break
+                }
+            }
+            .onChange(of: capture.isLive) { _, isLive in
                 guard section == .audio else { return }
-                micLevel.setGain(settings.micVolume)
-                micLevel.setPreferredInput(settings.preferredAudioInputUID)
-                micLevel.start()
+                micLevel.setBroadcasting(isLive)
             }
             .onDisappear {
-                if section == .audio { micLevel.stop() }
+                if section == .audio { micLevel.stop(for: .settings) }
             }
-    }
-
-    /// Renders every section's Form once, hidden, so its content height is measured
-    /// and cached BEFORE its first open — then `open` resizes in lockstep with the
-    /// slide instead of a two-step (height jumping after the push). `report` only
-    /// CACHES for non-active panes (never resizes the sheet), and a `.background`
-    /// never affects the foreground's size.
-    private var sectionHeightPrewarm: some View {
-        ZStack {
-            ForEach(SettingsSection.allCases) { section in
-                sectionForm(section)
-                    .measuredDetentHeight(Optional(section), into: detent)
-            }
-        }
-        .opacity(0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 
     // MARK: - Launcher summaries
@@ -360,7 +358,7 @@ struct SettingsView: View {
             let quality = min(settings.videoQuality, capability.maxShortEdge)
             let fps = min(settings.frameRate, capability.maxFrameRate)
             // Surface HEVC (the opt-in) in the collapsed row; H.264 stays implicit.
-            let codec = settings.videoCodec == .hevc ? " · HEVC" : ""
+            let codec = settings.effectiveVideoCodec == .hevc ? " · HEVC" : ""
             return "\(quality)p · \(bitrateLabel(settings.videoBitrate)) · \(fps) fps\(codec)"
         case .backup:
             return "Off"
@@ -409,6 +407,9 @@ struct SettingsView: View {
                     var updated = settings
                     SettingsStore().switchProtocol(to: newProtocol, in: &updated)
                     settings = updated
+                    // Cancels any pending snapshot for the previous protocol and
+                    // queues this switched state behind the serial writer.
+                    onChange()
                 }
             )) {
                 ForEach(StreamProtocol.allCases, id: \.self) { proto in
@@ -522,10 +523,10 @@ struct SettingsView: View {
             }
 
             Picker("Codec", selection: Binding(
-                get: { settings.videoCodec },
+                get: { settings.effectiveVideoCodec },
                 set: { settings.videoCodec = $0; onChange() }
             )) {
-                ForEach(VideoCodec.allCases, id: \.self) { codec in
+                ForEach(settings.selectedProtocol.supportedVideoCodecs, id: \.self) { codec in
                     Text(codec.displayName).tag(codec)
                 }
             }
@@ -540,8 +541,8 @@ struct SettingsView: View {
     private var videoFooter: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Bitrate is a maximum and drops automatically when the uplink is congested. Resolution and frame rate are limited to what this device can sustain, and are reduced automatically when it runs warm or low on power.")
-            if settings.videoCodec == .hevc {
-                Label("HEVC saves roughly 40% bitrate on screen content, but needs a compatible ingest — SRT, WHIP, or an enhanced-RTMP server. Traditional RTMP services (e.g. Restream) require H.264.",
+            if settings.effectiveVideoCodec == .hevc {
+                Label("HEVC saves roughly 40% bitrate on screen content, but needs a compatible ingest — SRT or an enhanced-RTMP server. WHIP and traditional RTMP services (e.g. Restream) require H.264.",
                       systemImage: "info.circle")
                     .foregroundStyle(.secondary)
             }
@@ -611,7 +612,7 @@ struct SettingsView: View {
                 }
             }
 
-            microphoneLevelMeter
+            MicrophoneLevelMeterView(monitor: micLevel)
 
             VStack(alignment: .leading) {
                 HStack {
@@ -637,7 +638,7 @@ struct SettingsView: View {
                     onEditingChanged: { editing in
                         // Apply live to a running broadcast once the drag settles.
                         if !editing {
-                            BroadcastControl.post(BroadcastControl.micVolumeSignal)
+                            capture.setMicVolume(settings.micVolume)
                         }
                     }
                 )
@@ -649,8 +650,10 @@ struct SettingsView: View {
                 Spacer()
                 Button {
                     Haptics.tap()
-                    micLevel.restartLocalCapture()
                     audio.refresh(requestPermission: true)
+                    // Session enumeration and the meter restart share one serial
+                    // audio queue, so repeated refreshes cannot overlap handoffs.
+                    micLevel.restartLocalCapture()
                 } label: {
                     Label("Refresh Inputs", systemImage: "arrow.clockwise")
                 }
@@ -660,43 +663,6 @@ struct SettingsView: View {
             }
         } footer: {
             audioFooter
-        }
-    }
-
-    private var microphoneLevelMeter: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Mic Level")
-                Spacer()
-                Text(micLevel.isReceiving ? "Live" : "No signal")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.quaternary)
-                    // Gradient is FIXED across the full track (green at 0% → red at
-                    // 100%); the fill just reveals it up to the current level, so a
-                    // quiet signal shows only green, not a shrunk green→red bar.
-                    LinearGradient(
-                        colors: [.green, .yellow, .red],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: geometry.size.width)
-                    .mask(alignment: .leading) {
-                        Capsule()
-                            .frame(width: geometry.size.width * micLevel.level)
-                    }
-                }
-            }
-            .frame(height: 10)
-            .animation(.linear(duration: 0.05), value: micLevel.level)
-            .accessibilityLabel("Microphone level")
-            .accessibilityValue(micLevel.isReceiving
-                                ? "\(Int((micLevel.level * 100).rounded())) percent"
-                                : "No signal")
         }
     }
 
@@ -874,260 +840,10 @@ struct SettingsView: View {
     }
 }
 
-@MainActor
-@Observable
-private final class MicrophoneLevelMonitor {
-    private(set) var level = 0.0
-    private(set) var isReceiving = false
-
-    private static let log = Logger(subsystem: "com.joeblau.Stream", category: "mic-meter")
-    @ObservationIgnored private let channel = MicrophoneLevelChannel()
-    @ObservationIgnored private var task: Task<Void, Never>?
-    @ObservationIgnored private var engine: AVAudioEngine?
-    @ObservationIgnored private let meterLevel = OSAllocatedUnfairLock<Float>(initialState: 0)
-    @ObservationIgnored private var gain = 1.0
-    @ObservationIgnored private var preferredInputUID: String?
-    @ObservationIgnored private var nextRecorderAttemptAt: UInt64 = 0
-    @ObservationIgnored private var lastBroadcastCheckAt: UInt64 = 0
-    @ObservationIgnored private var broadcastIsLive = false
-
-    /// Observer for `AVAudioEngineConfigurationChange`. The engine posts it when its
-    /// I/O format changes underneath the running graph — most importantly when a
-    /// Bluetooth HFP link finishes its asynchronous handoff after `setPreferredInput`.
-    /// The tap was installed at the pre-switch format, so without rebuilding it on
-    /// this notification the meter goes silent once the route lands on the BT mic.
-    @ObservationIgnored private nonisolated(unsafe) var configChangeObserver: NSObjectProtocol?
-
-    func start() {
-        guard task == nil else { return }
-        task = Task { [weak self] in
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(nanoseconds: 50_000_000)
-                } catch {
-                    return
-                }
-                guard let self else { return }
-                refreshBroadcastStateIfNeeded()
-                let target: Double
-                if let extensionLevel = channel.read() {
-                    stopLocalCapture()
-                    isReceiving = true
-                    target = Double(extensionLevel)
-                } else if broadcastIsLive {
-                    // Never open a second mic capture while ScreenCaptureKit's
-                    // microphone is paused/off and not publishing meter samples.
-                    stopLocalCapture()
-                    isReceiving = false
-                    target = 0
-                } else if let localLevel = await readLocalLevel() {
-                    isReceiving = true
-                    target = localLevel
-                } else {
-                    isReceiving = false
-                    target = 0
-                }
-                var next = target >= level
-                    ? level * 0.3 + target * 0.7
-                    : max(target, level * 0.82)
-                if next < 0.005 { next = 0 }
-                // Only publish on change — @Observable fires on every set, so an
-                // idle meter otherwise re-renders the view 20x/s for nothing.
-                if next != level { level = next }
-            }
-        }
-    }
-
-    func stop() {
-        task?.cancel()
-        task = nil
-        stopLocalCapture()
-        level = 0
-        isReceiving = false
-    }
-
-    func setGain(_ gain: Double) {
-        self.gain = max(0, min(gain, 2))
-    }
-
-    /// Routes the local meter to the user's selected input (incl. Bluetooth/DJI).
-    /// Without this the recorder captures the built-in mic, so a selected DJI/BT
-    /// mic never registers on the meter.
-    func setPreferredInput(_ uid: String?) {
-        guard uid != preferredInputUID else { return }
-        preferredInputUID = uid
-        restartLocalCapture()
-    }
-
-    func restartLocalCapture() {
-        stopLocalCapture()
-        nextRecorderAttemptAt = 0
-    }
-
-    private func refreshBroadcastStateIfNeeded() {
-        let now = DispatchTime.now().uptimeNanoseconds
-        guard now &- lastBroadcastCheckAt >= 500_000_000 else { return }
-        lastBroadcastCheckAt = now
-        broadcastIsLive = BroadcastStateStore.isLive()
-    }
-
-    private func readLocalLevel() async -> Double? {
-        if engine == nil { await startLocalCaptureIfAvailable() }
-        guard let engine, engine.isRunning else { return nil }
-        // RMS captured on the audio render thread by the input tap.
-        let rms = Double(meterLevel.withLock { $0 })
-        let postGain = max(0.000_001, min(1, rms * gain))
-        let decibels = 20 * log10(postGain)
-        return max(0, min(1, (decibels + 60) / 60))
-    }
-
-    private func startLocalCaptureIfAvailable() async {
-        guard AVAudioApplication.shared.recordPermission == .granted else { return }
-        let now = DispatchTime.now().uptimeNanoseconds
-        guard now >= nextRecorderAttemptAt else { return }
-        nextRecorderAttemptAt = now + 1_000_000_000
-
-        // Route the meter to the SAME input the user picked. Without activating a
-        // Bluetooth-capable record session and setting the preferred input, the
-        // recorder silently captures the built-in mic — so a selected DJI/BT mic
-        // never registers on the meter. (Only reached when NOT broadcasting, so it
-        // never competes with the extension's session.)
-        let session = AVAudioSession.sharedInstance()
-        guard await AudioInputProvider.activateBluetoothRecording(session) else { return }
-        if let uid = preferredInputUID,
-           let port = session.availableInputs?.first(where: { $0.uid == uid }) {
-            try? session.setPreferredInput(port)
-        }
-
-        // Meter from the engine's input node — it reflects the ACTIVE input route
-        // (the DJI once it's the preferred input) and gives real PCM buffers, unlike
-        // the /dev/null AVAudioRecorder metering trick which can read nothing.
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        let inputFormat = input.inputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { return }
-        // A tap alone does NOT reliably pull a Bluetooth HFP input — the engine only
-        // renders its input when the graph drives an output, so an unconnected
-        // input node hands the tap silent buffers (the "DJI selected, meter flat"
-        // bug). Route input → main mixer to force a full I/O cycle, and mute the
-        // mixer output so nothing is monitored back to the speaker/HFP earpiece.
-        engine.connect(input, to: engine.mainMixerNode, format: inputFormat)
-        engine.mainMixerNode.outputVolume = 0
-        guard installMeterTap(on: engine) else { return }
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            engine.inputNode.removeTap(onBus: 0)
-            return
-        }
-        self.engine = engine
-
-        // A Bluetooth HFP link settles asynchronously AFTER setPreferredInput, so the
-        // format above may still be the built-in mic's. Rebuild the tap on the new
-        // format when the engine reconfigures, else the BT meter reads flat forever.
-        observeConfigChanges(of: engine)
-
-        let route = session.currentRoute.inputs
-            .map { "\($0.portName)/\($0.portType.rawValue)" }
-            .joined(separator: ",")
-        let format = engine.inputNode.inputFormat(forBus: 0)
-        Self.log.info("Mic meter started: route=[\(route, privacy: .public)] format=\(format.sampleRate, privacy: .public)Hz/\(format.channelCount, privacy: .public)ch pref=\(self.preferredInputUID ?? "nil", privacy: .public)")
-    }
-
-    /// Reads the input node's CURRENT format and installs the metering tap. Split out
-    /// so it can be re-run on a configuration change (when the live route/format has
-    /// changed). Returns false when the route has no usable input yet.
-    private func installMeterTap(on engine: AVAudioEngine) -> Bool {
-        let input = engine.inputNode
-        let format = input.inputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { return false }
-        let level = meterLevel
-        // @Sendable so the tap runs on the audio render thread — WITHOUT it the
-        // closure inherits this @MainActor class's isolation and iOS crashes with
-        // a libdispatch queue assertion when the render thread invokes it.
-        do {
-            try input.__installTap(onBus: 0, bufferSize: 1024, format: format, error: ()) {
-                @Sendable buffer, _ in
-                guard let channel = buffer.floatChannelData?[0] else { return }
-                let count = Int(buffer.frameLength)
-                guard count > 0 else { return }
-                var sumOfSquares: Float = 0
-                for i in 0..<count {
-                    let sample = channel[i]
-                    sumOfSquares += sample * sample
-                }
-                let rms = (sumOfSquares / Float(count)).squareRoot()
-                level.withLock { $0 = rms }
-            }
-        } catch {
-            return false
-        }
-        return true
-    }
-
-    /// Registers the configuration-change observer for `engine`, replacing any prior
-    /// one. Fires on the main queue; hops back onto the actor to rebuild the tap.
-    private func observeConfigChanges(of engine: AVAudioEngine) {
-        if let configChangeObserver {
-            NotificationCenter.default.removeObserver(configChangeObserver)
-        }
-        configChangeObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: engine,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.handleEngineConfigChange() }
-        }
-    }
-
-    /// The engine's I/O reconfigured (typically the BT route finishing its handoff).
-    /// Reinstall the tap at the new input format and make sure the engine is running;
-    /// a config change stops the engine, and the old tap's format no longer matches.
-    private func handleEngineConfigChange() {
-        guard let engine else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        guard installMeterTap(on: engine) else { return }
-        if !engine.isRunning {
-            engine.prepare()
-            try? engine.start()
-        }
-        let route = AVAudioSession.sharedInstance().currentRoute.inputs
-            .map { "\($0.portName)/\($0.portType.rawValue)" }
-            .joined(separator: ",")
-        let format = engine.inputNode.inputFormat(forBus: 0)
-        Self.log.info("Mic meter reconfigured: route=[\(route, privacy: .public)] format=\(format.sampleRate, privacy: .public)Hz/\(format.channelCount, privacy: .public)ch")
-    }
-
-    private func stopLocalCapture() {
-        // No-op when nothing was captured. Otherwise the 50ms meter loop fired a
-        // blocking setActive(false) + deactivation-notification storm ~20x/s at the
-        // audio server and interrupting ScreenCaptureKit's live mic session.
-        // Deactivate exactly once, on the real handover.
-        guard let engine else { return }
-        if let configChangeObserver {
-            NotificationCenter.default.removeObserver(configChangeObserver)
-            self.configChangeObserver = nil
-        }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        self.engine = nil
-        meterLevel.withLock { $0 = 0 }
-        Task {
-            try? AVAudioSession.sharedInstance().setActive(
-                false,
-                options: [.notifyOthersOnDeactivation]
-            )
-        }
-    }
-}
-
 /// The live stats/uptime card shown atop the settings launcher while broadcasting.
 /// A leaf view so its ~1s telemetry ticks invalidate only this subtree (not the
 /// whole launcher List), and every value is monospaced + single-line so the card's
-/// height is invariant per tick — the content-sized drawer detent never springs on
-/// a number change (only an occasional thermal- or dropped-frames notice appearing
-/// resizes it).
+/// height is invariant per tick, avoiding needless list relayout as values change.
 private struct LiveStatsCard: View {
     var capture: ScreenCaptureController
 
@@ -1229,6 +945,7 @@ private struct LiveStatsCard: View {
     @Previewable @State var settings = StreamSettings.default
     return NavigationStack {
         SettingsView(settings: $settings, chat: RestreamChat(),
-                     capture: ScreenCaptureController(), onChange: {}, audio: AudioInputProvider())
+                     capture: ScreenCaptureController(), onChange: {},
+                     audio: AudioInputProvider(), micLevel: MicrophoneLevelMonitor())
     }
 }

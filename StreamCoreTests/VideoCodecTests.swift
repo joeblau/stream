@@ -34,6 +34,16 @@ import StreamCore
         #expect(StreamSettings.default.videoCodec == .h264)
     }
 
+    @Test("Effective codec safely falls back for an incompatible transport")
+    func effectiveCodecHonorsTransport() {
+        var settings = StreamSettings.default
+        settings.videoCodec = .hevc
+        settings.selectedProtocol = .srt
+        #expect(settings.effectiveVideoCodec == .hevc)
+        settings.selectedProtocol = .whip
+        #expect(settings.effectiveVideoCodec == .h264)
+    }
+
     @Test("Each codec round-trips through Codable")
     func codableRoundTrip() throws {
         for codec in VideoCodec.allCases {

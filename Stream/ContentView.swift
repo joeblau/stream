@@ -15,9 +15,11 @@ private struct BluetoothConnection: Equatable, Identifiable {
 /// sheet. Settings are owned here and threaded into `SettingsView`; every edit is
 /// persisted via `SettingsStore` before ScreenCaptureKit starts the stream.
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     /// The single source of truth for the editable settings, loaded from the
     /// shared App Group suite on launch.
-    @State private var settings: StreamSettings = SettingsStore().load()
+    @State private var settings: StreamSettings
 
     /// Owns ScreenCaptureKit selection/capture and the network publisher.
     @State private var capture = ScreenCaptureController()
@@ -31,6 +33,11 @@ struct ContentView: View {
     /// and is threaded into the Settings sheet so both share one instance/observer.
     @State private var audio = AudioInputProvider()
 
+    /// The single mic level monitor, driving both the toolbar's status meter and the
+    /// Audio settings pane. Owned here so one instance serves both — a second would
+    /// open a competing record session whenever the meter falls back to local capture.
+    @State private var micLevel = MicrophoneLevelMonitor()
+
     /// The Bluetooth device that most recently paired mid-session, shown as a
     /// transient banner. Set from `audio.onBluetoothConnected`; auto-cleared after
     /// a few seconds by a `.task` keyed on its `id` (a fresh `id` restarts the
@@ -38,6 +45,16 @@ struct ContentView: View {
     @State private var bluetoothBanner: BluetoothConnection?
 
     @State private var showingSettings = false
+
+    /// Coalesces rapid UI edits and performs Keychain/file writes away from the
+    /// main actor. Text fields and sliders can update dozens of times per second;
+    /// synchronously persisting each intermediate value made sheet navigation and
+    /// control drags contend with Security.framework and atomic file I/O.
+    @State private var settingsPersistence: SettingsPersistenceCoordinator
+
+    /// Prevents a second go-live tap while the final settings snapshot is being
+    /// flushed. Capture never starts before the latest scheduled save completes.
+    @State private var isPreparingBroadcast = false
 
     /// Gates the "Stop Broadcast" confirmation. A live stream is easy to kill by a
     /// stray tap on the toolbar's stop button, so tapping it while live asks first
@@ -48,17 +65,31 @@ struct ContentView: View {
     /// moment they mute so toggling back returns to their chosen level, not unity.
     @State private var preMuteVolume: Double = 1.0
 
-    /// Persists `settings` into the shared App Group suite. Called on every edit.
+    init() {
+        let loaded = SettingsStore().load()
+        _settings = State(initialValue: loaded)
+        _settingsPersistence = State(
+            initialValue: SettingsPersistenceCoordinator(initialSettings: loaded)
+        )
+    }
+
+    /// Schedules a coalesced background save. `startBroadcast()` and sheet dismissal
+    /// explicitly flush the latest snapshot, so debounce never weakens durability.
     private func persist() {
-        SettingsStore().save(settings)
+        settingsPersistence.schedule(settings)
+    }
+
+    private func flushSettings() {
+        let snapshot = settings
+        Task { await settingsPersistence.flush(snapshot) }
     }
 
     /// A gain at/below this reads as muted — matches the Settings "Muted" label.
     private var isMicMuted: Bool { settings.micVolume <= 0.0001 }
 
     /// Toggles the microphone between muted (gain 0) and the last chosen level.
-    /// Persists and posts the live-apply signal so a running broadcast responds
-    /// immediately, exactly like the Settings mic-volume slider does.
+    /// Persists and applies directly so a running broadcast responds immediately,
+    /// exactly like the Settings mic-volume slider does.
     private func toggleMicMute() {
         Haptics.tap()
         if isMicMuted {
@@ -68,7 +99,30 @@ struct ContentView: View {
             settings.micVolume = 0
         }
         persist()
-        BroadcastControl.post(BroadcastControl.micVolumeSignal)
+        capture.setMicVolume(settings.micVolume)
+        // The idle meter applies gain itself, so the toolbar bars have to be told
+        // about a mute that didn't come from the Settings slider.
+        micLevel.setGain(settings.micVolume)
+    }
+
+    /// Keeps the toolbar meter live whenever the app is foregrounded, so the mic can
+    /// be verified before going live and not only during a broadcast. While live the
+    /// level arrives free over `MicrophoneLevelChannel`; when idle the monitor opens
+    /// its own input tap, which is why this releases it the moment the app leaves the
+    /// foreground rather than holding the mic (and the orange privacy indicator) open
+    /// behind other apps.
+    ///
+    /// - Parameter phase: the incoming phase when called from `onChange`, whose
+    ///   closure still sees the pre-change `scenePhase`.
+    private func syncStatusMeter(phase: ScenePhase? = nil) {
+        micLevel.setBroadcasting(capture.isLive)
+        micLevel.setGain(settings.micVolume)
+        micLevel.setPreferredInput(settings.preferredAudioInputUID)
+        if (phase ?? scenePhase) == .active {
+            micLevel.start(for: .statusBar)
+        } else {
+            micLevel.stop(for: .statusBar)
+        }
     }
 
     var body: some View {
@@ -89,6 +143,8 @@ struct ContentView: View {
                 .animation(.spring(duration: 0.3, bounce: 0.2), value: capture.isLive)
                 .animation(.spring(duration: 0.35, bounce: 0.25), value: bluetoothBanner)
                 .navigationTitle("Stream")
+                // Kept for VoiceOver/system context only — the principal toolbar
+                // item above replaces the visible title with the mic meter.
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -100,6 +156,12 @@ struct ContentView: View {
                         }
                         .accessibilityLabel("Settings")
                     }
+                    // Takes the title's slot: "Stream" is redundant on the app's own
+                    // root screen, and the mic meter is the one thing worth a glance
+                    // every time you look up here.
+                    ToolbarItem(placement: .principal) {
+                        MicrophoneStatusMeter(monitor: micLevel, isMuted: isMicMuted)
+                    }
                     ToolbarItem(placement: .topBarTrailing) { broadcastButton }
                 }
                 .safeAreaInset(edge: .bottom) {
@@ -107,7 +169,9 @@ struct ContentView: View {
                         setupBanner
                     }
                 }
-                .sheet(isPresented: $showingSettings) { settingsSheet }
+                .sheet(isPresented: $showingSettings, onDismiss: flushSettings) {
+                    settingsSheet
+                }
         }
         .task {
             chat.autoConnect()
@@ -116,12 +180,16 @@ struct ContentView: View {
                 bluetoothBanner = BluetoothConnection(name: name)
                 Haptics.tap()
             }
-            // Seed the baseline set + start the route-change observer without
-            // prompting for mic access here (Settings owns the permission ask).
-            // Already-connected devices only populate the baseline; they don't
-            // trigger a banner — only devices that arrive afterward do.
-            audio.refresh(requestPermission: false)
+            Haptics.warmUp()
+            // Seed the baseline set + start the route-change observer. The ask has
+            // to happen here now that the toolbar meter is always on screen —
+            // without permission it can only ever read "no signal", with nothing on
+            // the main screen to explain why. Already-connected devices only
+            // populate the baseline; they don't trigger a banner — only arrivals do.
+            audio.refresh(requestPermission: true)
+            syncStatusMeter()
         }
+        .onChange(of: capture.isLive) { _, _ in syncStatusMeter() }
         // Auto-dismiss the Bluetooth banner. Keyed on the connection id so a new
         // device restarts the timer; cancellation (id change) skips the stale clear.
         .task(id: bluetoothBanner?.id) {
@@ -129,6 +197,10 @@ struct ContentView: View {
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
             bluetoothBanner = nil
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { flushSettings() }
+            syncStatusMeter(phase: phase)
         }
         .confirmationDialog(
             "Stop the broadcast?",
@@ -162,14 +234,28 @@ struct ContentView: View {
             if capture.isLive {
                 showingStopConfirmation = true
             } else {
-                persist()
-                capture.presentPicker(settings: settings)
+                startBroadcast()
             }
         } label: {
             Image(systemName: capture.isLive ? "stop.circle" : "record.circle")
         }
         .tint(capture.isLive ? .red : .primary)
+        .disabled(isPreparingBroadcast || capture.isStopping)
         .accessibilityLabel(capture.isLive ? "Stop broadcast" : "Start broadcast")
+    }
+
+    /// Flushes through the serial writer before handing the immutable snapshot to
+    /// ScreenCaptureKit. This preserves the existing "saved before live" contract
+    /// without doing Keychain or disk work in the toolbar button's main-actor turn.
+    private func startBroadcast() {
+        guard !isPreparingBroadcast, !capture.isStopping else { return }
+        isPreparingBroadcast = true
+        let snapshot = settings
+        Task {
+            await settingsPersistence.flush(snapshot)
+            isPreparingBroadcast = false
+            capture.presentPicker(settings: snapshot)
+        }
     }
 
     // MARK: - Mute FAB
@@ -288,11 +374,74 @@ struct ContentView: View {
 
     // MARK: - Settings sheet
 
-    /// One Vaul-style drawer. `SettingsView` owns the navigation stack and sizes
-    /// the sheet to the exact height of whatever content is on screen (measured
-    /// from the scroll view's real content size), resizing as sections are pushed.
+    /// One Vaul-style drawer. `SettingsView` owns its two-level navigation and
+    /// measures only the visible pane to drive its content-hugging detent.
     private var settingsSheet: some View {
-        SettingsView(settings: $settings, chat: chat, capture: capture, onChange: persist, audio: audio)
+        SettingsView(settings: $settings, chat: chat, capture: capture,
+                     onChange: persist, audio: audio, micLevel: micLevel)
+    }
+}
+
+/// Serializes settings writes so an older debounced snapshot can never finish
+/// after a newer flush and overwrite it. Actor isolation also keeps the synchronous
+/// Keychain + atomic-file implementation off the main actor.
+private actor SettingsWriter {
+    private let store = SettingsStore()
+    private var lastSaved: StreamSettings
+
+    init(lastSaved: StreamSettings) {
+        self.lastSaved = lastSaved
+    }
+
+    func save(_ settings: StreamSettings) {
+        if settings.selectedProtocol != lastSaved.selectedProtocol
+            || settings.rtmpURL != lastSaved.rtmpURL
+            || settings.streamKey != lastSaved.streamKey {
+            store.saveConnection(settings)
+        }
+
+        var redacted = settings
+        redacted.rtmpURL = ""
+        redacted.streamKey = ""
+        var previousRedacted = lastSaved
+        previousRedacted.rtmpURL = ""
+        previousRedacted.streamKey = ""
+        if redacted != previousRedacted {
+            store.saveNonSecret(settings)
+        }
+        lastSaved = settings
+    }
+}
+
+/// Main-actor scheduler owned by `ContentView`. Cancellation is cheap while the
+/// task is sleeping; once a write reaches `SettingsWriter`, subsequent writes queue
+/// behind it and therefore retain strict snapshot order.
+@MainActor
+private final class SettingsPersistenceCoordinator {
+    private let writer: SettingsWriter
+    private var pending: Task<Void, Never>?
+
+    init(initialSettings: StreamSettings) {
+        writer = SettingsWriter(lastSaved: initialSettings)
+    }
+
+    func schedule(_ settings: StreamSettings) {
+        pending?.cancel()
+        pending = Task { [writer] in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await writer.save(settings)
+        }
+    }
+
+    func flush(_ settings: StreamSettings) async {
+        pending?.cancel()
+        pending = nil
+        await writer.save(settings)
     }
 }
 

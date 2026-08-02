@@ -87,11 +87,12 @@ cannot keep a camera session active during multitasking fall back to screen-only
 
 The Video settings offer H.264 (default) or HEVC. HEVC gives roughly a 40%
 quality-per-bit gain on text-heavy screen content in the 2–8 Mbps band, but needs
-a compatible ingest: it rides SRT (MPEG-TS), WHIP, and *enhanced*-RTMP (the
+a compatible ingest: it rides SRT (MPEG-TS) and *enhanced*-RTMP (the
 publisher advertises the `hvc1` FourCC in the E-RTMP connect command). Traditional
-RTMP services such as Restream speak H.264 only, so leave the codec on H.264 for
-them — HEVC over RTMP should be verified against the specific endpoint on a real
-device. Low-latency VideoToolbox rate control is enabled for both codecs.
+RTMP services such as Restream and the current WHIP transport speak H.264 only, so
+leave the codec on H.264 for them — HEVC over RTMP should be verified against the
+specific endpoint on a real device. Low-latency VideoToolbox rate control is enabled
+for both codecs.
 
 ## Notes
 
