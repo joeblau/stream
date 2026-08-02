@@ -69,6 +69,13 @@ final class DynamicDetentSheetModel {
         max(minimumContentHeight, content) + chrome
     }
 
+    /// Whether a pane already has a cached intrinsic height. Callers can use this
+    /// to choose between a fully synchronized cached resize and a lazy first-open
+    /// transition whose visible measurement starts the resize a frame later.
+    func hasMeasurement<Key: Hashable>(for key: Key) -> Bool {
+        measured[AnyHashable(key)] != nil
+    }
+
     /// Raw measurement from a pane's scroll/intrinsic geometry. Cheap + idempotent:
     /// rounded, thresholded, cached under the pane's key, and it only commits an
     /// ANIMATED resize when the reporting pane is the ACTIVE one. A late measurement

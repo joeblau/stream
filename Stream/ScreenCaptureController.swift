@@ -17,6 +17,10 @@ private let captureLog = Logger(subsystem: "com.joeblau.Stream", category: "scre
 @Observable
 final class ScreenCaptureController: NSObject {
     private(set) var isLive = false
+    /// Remains true until capture, publisher, and audio-session teardown all finish.
+    /// The record button stays disabled so a new activation cannot race the old
+    /// broadcast's final deactivation.
+    private(set) var isStopping = false
     private(set) var errorMessage: String?
     /// A user-facing note when the device's thermal/power state is forcing a
     /// quality reduction, or nil when unrestricted. Shown in the live stats HUD.
@@ -77,7 +81,10 @@ final class ScreenCaptureController: NSObject {
     }
 
     func presentPicker(settings: StreamSettings) {
-        guard stream == nil else { return }
+        // `pendingSettings` is set before the serialized audio activation awaits.
+        // Reject a second toolbar tap during that window so only one activation and
+        // one system-picker presentation can be queued.
+        guard stream == nil, pendingSettings == nil, !isStopping else { return }
         guard settings.isPublishable else {
             errorMessage = "Complete the connection settings before starting a stream."
             return
@@ -95,7 +102,7 @@ final class ScreenCaptureController: NSObject {
     }
 
     private func presentSystemPicker(settings: StreamSettings) {
-        guard pendingSettings != nil, stream == nil else { return }
+        guard pendingSettings != nil, stream == nil, !isStopping else { return }
         var configuration = SCContentSharingPickerConfiguration()
         configuration.showsMicrophoneControl = true
         // ScreenCaptureKit's system camera effect only supports current-app
@@ -208,8 +215,18 @@ final class ScreenCaptureController: NSObject {
         let configuration = SCStreamConfiguration()
         let nativeWidth = max(2, Int((filter.contentRect.width * CGFloat(filter.pointPixelScale)).rounded()))
         let nativeHeight = max(2, Int((filter.contentRect.height * CGFloat(filter.pointPixelScale)).rounded()))
-        configuration.width = nativeWidth
-        configuration.height = nativeHeight
+        // Ask ScreenCaptureKit for the actual encode dimensions up front. Capturing
+        // a native 3x display only to downscale it in VideoToolbox wastes memory
+        // bandwidth and GPU/encoder work (often 2–3x the pixels for a 720p stream).
+        // `encodeSize` preserves orientation/aspect, clamps to the device ceiling,
+        // and returns the even dimensions required by H.264/HEVC.
+        let captureSize = settings.encodeSize(
+            forOrientedWidth: nativeWidth,
+            height: nativeHeight,
+            maxShortEdge: StreamCapability.current.maxShortEdge
+        )
+        configuration.width = Int(captureSize.width)
+        configuration.height = Int(captureSize.height)
         configuration.capturesAudio = settings.includeAppAudio
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
@@ -263,6 +280,10 @@ final class ScreenCaptureController: NSObject {
     }
 
     private func stopCapture() async {
+        guard !isStopping else { return }
+        isStopping = true
+        defer { isStopping = false }
+
         let stream = self.stream
         let publisher = self.publisher
         let output = self.output
@@ -319,9 +340,16 @@ final class ScreenCaptureController: NSObject {
     }
 
     private func applyMicVolume() {
-        guard let publisher else { return }
         let volume = SettingsStore().load().micVolume
+        setMicVolume(volume)
+    }
+
+    /// Applies an in-memory UI edit directly to the live pipeline. This avoids a
+    /// synchronous settings reload (and a race with debounced persistence) for the
+    /// Settings slider and mute button; the Darwin observer remains as a fallback.
+    func setMicVolume(_ volume: Double) {
         output?.setMicVolume(volume)
+        guard let publisher else { return }
         Task { await publisher.setMicVolume(volume) }
     }
 
@@ -354,40 +382,17 @@ final class ScreenCaptureController: NSObject {
     }
 
     private func configurePreferredMicrophone(_ uid: String?) async {
-        let session = AVAudioSession.sharedInstance()
-        var activated = false
-        for options in AudioInputProvider.bluetoothOptionLadder() {
-            do {
-                try session.setCategory(.playAndRecord, mode: .default, options: options)
-                try session.setActive(true, options: [])
-                activated = true
-                break
-            } catch {
-                continue
-            }
-        }
+        let activated = await AudioSessionCoordinator.shared.activate(
+            preferredInputUID: uid
+        )
         guard activated else {
             captureLog.warning("Could not preconfigure the preferred microphone; ScreenCaptureKit will use the system default")
             return
         }
-        guard let uid,
-              let input = session.availableInputs?.first(where: { $0.uid == uid }) else { return }
-        do {
-            try session.setPreferredInput(input)
-        } catch {
-            captureLog.warning("Preferred microphone route failed: \(String(describing: error), privacy: .public)")
-        }
     }
 
     private func deactivateAudioSession() async {
-        do {
-            try AVAudioSession.sharedInstance().setActive(
-                false,
-                options: [.notifyOthersOnDeactivation]
-            )
-        } catch {
-            captureLog.warning("Audio-session deactivation failed: \(String(describing: error), privacy: .public)")
-        }
+        await AudioSessionCoordinator.shared.deactivateAndWait()
     }
 
     private func publishState(_ live: Bool) {
@@ -451,7 +456,7 @@ private final class UncheckedSendableBox<Value>: @unchecked Sendable {
 private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDelegate,
                                          @unchecked Sendable {
     let sampleQueue = DispatchQueue(label: "com.joeblau.Stream.screen-capture.samples",
-                                    qos: .userInteractive)
+                                    qos: .userInitiated)
 
     private let publisher: any Publisher
     private let settings: StreamSettings
@@ -468,6 +473,10 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
     private let micLevelChannel = MicrophoneLevelChannel()
     private let facecam = FacecamCapture()
     private let compositor = FacecamCompositor()
+    /// Runtime thermal/Low-Power gate. The user setting is immutable for a live
+    /// session, but the governor can disable PiP without rebuilding the output.
+    /// The video consumer and governor run on different executors, so guard it.
+    private let pipAllowed: OSAllocatedUnfairLock<Bool>
     private let videoSamples: AsyncStream<CMSampleBuffer>
     private let videoContinuation: AsyncStream<CMSampleBuffer>.Continuation
     private var videoConsumer: Task<Void, Never>?
@@ -489,6 +498,7 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
         self.telemetry = telemetry
         self.onStopped = onStopped
         micLevelMeter = ScreenCaptureMicrophoneMeter(gain: settings.micVolume)
+        pipAllowed = OSAllocatedUnfairLock(initialState: settings.pipEnabled)
         targetFrameInterval = CMTime(value: 1,
                                      timescale: CMTimeScale(settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate)))
         (videoSamples, videoContinuation) = AsyncStream.makeStream(
@@ -511,10 +521,11 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
                     await publisher.setOutputSize(target, nativeShortEdge: min(width, height))
                     targetSize = target
                 }
-                if settings.pipEnabled, let targetSize, let camera = self.facecam.latest.take() {
+                let shouldComposite = self.pipAllowed.withLock { $0 }
+                if shouldComposite, let targetSize {
                     if let composited = self.compositor.composite(
                            screen: image,
-                           camera: camera,
+                           camera: self.facecam.latest.freshest(),
                            targetSize: targetSize,
                            orientation: .up,
                            corner: settings.pipCorner,
@@ -527,11 +538,10 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
                        ) {
                         await publisher.appendVideo(output)
                     } else {
-                        // Pool exhausted (a slow encoder holding surfaces) or the wrap
-                        // failed: skip the overlay for this frame and send the raw
-                        // screen. The frame itself is NOT lost — the overlay is.
+                        // A raw native-size fallback would change the encoder's input
+                        // format and force a VideoToolbox session rebuild. Drop this
+                        // frame instead; the next pooled target-size frame stays stable.
                         self.telemetry.recordDrop(.compositor)
-                        await publisher.appendVideo(sampleBuffer)
                     }
                 } else {
                     await publisher.appendVideo(sampleBuffer)
@@ -541,6 +551,7 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
     }
 
     func finish() {
+        pipAllowed.withLock { $0 = false }
         micLevelChannel.publish(0)
         facecam.stop()
         videoContinuation.finish()
@@ -604,6 +615,8 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
     /// power. Re-arms the facecam when the device recovers. PiP toggling only
     /// applies when the user has the facecam enabled.
     func applyThermalProfile(frameRateCap: Int, allowPiP: Bool) {
+        let shouldAllowPiP = settings.pipEnabled && allowPiP
+        pipAllowed.withLock { $0 = shouldAllowPiP }
         sampleQueue.async { [weak self] in
             guard let self else { return }
             // Cap to the device ceiling first, then the thermal frame-rate cap.
@@ -612,7 +625,7 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
             self.targetFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         }
         guard settings.pipEnabled else { return }
-        if allowPiP {
+        if shouldAllowPiP {
             facecam.start(with: settings)
         } else {
             facecam.stop()
@@ -728,6 +741,7 @@ private final class ScreenCaptureMicrophoneMeter: @unchecked Sendable {
 @Observable
 final class ScreenCaptureController {
     private(set) var isLive = false
+    private(set) var isStopping = false
     private(set) var errorMessage: String?
     private(set) var thermalNotice: String?
     private(set) var liveStats: LiveStats?
@@ -738,6 +752,8 @@ final class ScreenCaptureController {
     }
 
     func stop() {}
+
+    func setMicVolume(_ volume: Double) {}
 
     func clearError() {
         errorMessage = nil

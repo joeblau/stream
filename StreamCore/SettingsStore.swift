@@ -60,8 +60,19 @@ public struct SettingsStore: Sendable {
     /// settings to the container file with the secrets blanked, so they are never
     /// persisted in plaintext.
     public func save(_ settings: StreamSettings) {
+        saveConnection(settings)
+        saveNonSecret(settings)
+    }
+
+    /// Writes only the selected protocol's sensitive fields. UI persistence can
+    /// skip this Security.framework round-trip for video/audio/PiP-only edits.
+    public func saveConnection(_ settings: StreamSettings) {
         keychain.set(settings.rtmpURL, for: .url(settings.selectedProtocol))
         keychain.set(settings.streamKey, for: .key(settings.selectedProtocol))
+    }
+
+    /// Writes only the redacted JSON settings snapshot.
+    public func saveNonSecret(_ settings: StreamSettings) {
         persistNonSecret(settings)
     }
 
@@ -72,6 +83,9 @@ public struct SettingsStore: Sendable {
         keychain.set(settings.rtmpURL, for: .url(settings.selectedProtocol))
         keychain.set(settings.streamKey, for: .key(settings.selectedProtocol))
         settings.selectedProtocol = newProtocol
+        if !newProtocol.supports(settings.videoCodec) {
+            settings.videoCodec = .h264
+        }
         settings.rtmpURL = keychain.string(for: .url(newProtocol)) ?? ""
         settings.streamKey = keychain.string(for: .key(newProtocol)) ?? ""
         persistNonSecret(settings)

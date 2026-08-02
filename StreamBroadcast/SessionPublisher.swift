@@ -261,7 +261,7 @@ actor SessionPublisher: Publisher {
 
         // Re-apply the locked encoder size to the fresh stream (across reconnects).
         if let outputSize {
-            try? await stream.setVideoSettings(
+            try await stream.setVideoSettings(
                 await makeVideoSettings(await stream.videoSettings, size: outputSize)
             )
         }
@@ -641,10 +641,10 @@ actor SessionPublisher: Publisher {
         v.frameInterval = await networkController.currentFrameInterval()
         v.maxKeyFrameIntervalDuration = 2
         v.bitRateMode = .average
-        // HEVC when the user opted in — SRT (MPEG-TS) and WHIP both carry it — else
-        // H.264 Main. The profileLevel string also switches the encoder's codec
+        // HEVC when the user opted in and the transport can packetize it (SRT);
+        // WHIP is currently H.264-only. The profileLevel string also switches the encoder's codec
         // (VideoCodecSettings flips to HEVC on the "HEVC" substring).
-        v.profileLevel = settings.videoCodec.videoToolboxProfileLevel
+        v.profileLevel = settings.effectiveVideoCodec.videoToolboxProfileLevel
         // Low-latency VideoToolbox rate control: tightens encoder queuing latency
         // (makeEncoderSpecification enables EnableLowLatencyRateControl).
         v.isLowLatencyRateControlEnabled = true

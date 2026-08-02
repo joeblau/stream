@@ -44,6 +44,16 @@ import StreamCore
         }
     }
 
+    @Test("WHIP is H.264-only while the other transports expose both codecs")
+    func codecCompatibility() {
+        #expect(StreamProtocol.whip.supportedVideoCodecs == [.h264])
+        #expect(!StreamProtocol.whip.supports(.hevc))
+        for proto in [StreamProtocol.rtmp, .rtmps, .srt] {
+            #expect(proto.supportedVideoCodecs == [.h264, .hevc])
+            #expect(proto.supports(.hevc))
+        }
+    }
+
     @Test("Placeholders and key-field labels are always populated for the UI")
     func uiStringsNonEmpty() {
         for proto in StreamProtocol.allCases {

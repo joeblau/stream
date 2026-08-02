@@ -22,16 +22,23 @@ final class CameraSupport {
     private(set) var permission: Permission = .undetermined
 
     /// Whether the camera can run during a system broadcast on this device.
-    let multitaskingSupported: Bool
+    private(set) var multitaskingSupported = false
 
     init() {
-        // Reading the capability off a non-running session reflects the hardware.
-        multitaskingSupported = AVCaptureSession().isMultitaskingCameraAccessSupported
         syncPermission()
     }
 
     func refresh() {
         syncPermission()
+        // Constructing an AVCaptureSession can synchronously consult media-server
+        // state. Do it only when PiP is opened and never in the sheet's main-actor
+        // presentation turn.
+        Task {
+            let supported = await Task.detached(priority: .utility) {
+                AVCaptureSession().isMultitaskingCameraAccessSupported
+            }.value
+            multitaskingSupported = supported
+        }
     }
 
     /// Requests camera permission when the user enables the facecam.

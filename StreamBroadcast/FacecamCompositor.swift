@@ -14,6 +14,7 @@ final class FacecamCompositor {
     private var pool: CVPixelBufferPool?
     private var poolWidth = 0
     private var poolHeight = 0
+    private var outputFormatDescription: CMVideoFormatDescription?
     private let workingColorSpace = CGColorSpaceCreateDeviceRGB()
 
     init() {
@@ -141,12 +142,19 @@ final class FacecamCompositor {
         var timing = CMSampleTimingInfo()
         CMSampleBufferGetSampleTimingInfo(timingSource, at: 0, timingInfoOut: &timing)
 
-        var formatDescription: CMVideoFormatDescription?
-        guard CMVideoFormatDescriptionCreateForImageBuffer(
-            allocator: kCFAllocatorDefault,
-            imageBuffer: pixelBuffer,
-            formatDescriptionOut: &formatDescription) == noErr,
-              let format = formatDescription else { return nil }
+        let format: CMVideoFormatDescription
+        if let outputFormatDescription {
+            format = outputFormatDescription
+        } else {
+            var created: CMVideoFormatDescription?
+            guard CMVideoFormatDescriptionCreateForImageBuffer(
+                allocator: kCFAllocatorDefault,
+                imageBuffer: pixelBuffer,
+                formatDescriptionOut: &created) == noErr,
+                  let created else { return nil }
+            outputFormatDescription = created
+            format = created
+        }
 
         var sampleBuffer: CMSampleBuffer?
         guard CMSampleBufferCreateReadyWithImageBuffer(
@@ -180,6 +188,7 @@ final class FacecamCompositor {
         pool = newPool
         poolWidth = width
         poolHeight = height
+        outputFormatDescription = nil
         return newPool
     }
 

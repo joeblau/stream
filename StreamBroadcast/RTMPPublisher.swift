@@ -108,7 +108,8 @@ actor RTMPPublisher: Publisher {
             audioFourCcInfoMap: enhanced ? RTMPConnection.supportedAudioFourCcInfoMap : nil,
             capsEx: 0,
             requestTimeout: 5_000,
-            qualityOfService: .userInteractive)
+            // Continuous socket work must not outrank touch/animation delivery.
+            qualityOfService: .userInitiated)
     }
 
     private func startAudioConsumers() {
@@ -935,7 +936,7 @@ extension VideoCodec {
     /// publishers. Assigning it to `VideoCodecSettings.profileLevel` also flips the
     /// encoder's internal `format` to HEVC (its `didSet` keys off the "HEVC"
     /// substring), so the encoded bitstream, the RTMP `hvc1` exHeader framing, and
-    /// the SRT/WHIP payload all follow from this one property.
+    /// the transport payload all follow from this one property.
     var videoToolboxProfileLevel: String {
         switch self {
         case .h264: return kVTProfileLevel_H264_Main_AutoLevel as String

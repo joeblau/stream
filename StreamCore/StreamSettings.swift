@@ -38,8 +38,9 @@ public enum BackupQuality: String, Codable, CaseIterable, Sendable {
 
 /// The video codec the encoder targets. HEVC (H.265) yields roughly a 40%
 /// quality-per-bit gain over H.264 on text-heavy screen content in the 2–8 Mbps
-/// band, at the cost of ingest compatibility: it rides SRT (MPEG-TS), WHIP, and
-/// *enhanced*-RTMP (E-RTMP `hvc1` negotiation) but NOT traditional RTMP ingests
+/// band, at the cost of ingest compatibility: it rides SRT (MPEG-TS) and
+/// *enhanced*-RTMP (E-RTMP `hvc1` negotiation) but NOT WHIP in the current RTC
+/// transport or traditional RTMP ingests
 /// such as Restream, which speak H.264 only. H.264 Main is therefore the safe,
 /// universally-decodable default; HEVC is an opt-in the user validates against
 /// their real endpoint (see the encoder wiring in RTMPPublisher/SessionPublisher).
@@ -111,6 +112,20 @@ public enum StreamProtocol: String, Codable, CaseIterable, Sendable {
     /// StreamSession publisher. WHIP (WebRTC) is experimental — validate memory on
     /// device, as libdatachannel adds meaningful memory and CPU overhead.
     public var isPublishingSupported: Bool { true }
+
+    /// Codecs the bundled transport can actually packetize. RTCHaishinKit's WHIP
+    /// stream currently has an H.264 RTP packetizer only; advertising HEVC there
+    /// silently left the encoder at a default/fallback configuration.
+    public var supportedVideoCodecs: [VideoCodec] {
+        switch self {
+        case .whip: return [.h264]
+        case .rtmp, .rtmps, .srt: return VideoCodec.allCases
+        }
+    }
+
+    public func supports(_ codec: VideoCodec) -> Bool {
+        supportedVideoCodecs.contains(codec)
+    }
 }
 
 // MARK: - StreamSettings (the ONLY shared persisted model)
@@ -126,7 +141,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     public var videoBitrate: Int        // bits per second
     public var audioBitrate: Int        // bits per second
     public var frameRate: Int           // fps hint
-    /// The encoder's target video codec. HEVC is honored on SRT/WHIP and
+    /// The encoder's target video codec. HEVC is honored on SRT and
     /// enhanced-RTMP; traditional RTMP ingests fall back to H.264 (see `VideoCodec`).
     public var videoCodec: VideoCodec
     public var pipEnabled: Bool
@@ -216,6 +231,12 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     }
 
     public static let `default` = StreamSettings()
+
+    /// Defense-in-depth for restored/legacy settings: never hand a codec to a
+    /// transport that cannot packetize it, even if the UI has not normalized yet.
+    public var effectiveVideoCodec: VideoCodec {
+        selectedProtocol.supports(videoCodec) ? videoCodec : .h264
+    }
 
     /// True only when the selected protocol can currently publish AND its URL
     /// (plus its key, where the protocol requires one) are present and valid.
