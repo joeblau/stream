@@ -1,0 +1,7 @@
+{
+  "name": "stream-ios",
+  "private": true,
+  "scripts": {
+    "stream": "zsh scripts/stream.zsh"
+  }
+}
