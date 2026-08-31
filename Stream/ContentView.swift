@@ -1,5 +1,6 @@
 import SwiftUI
 import StreamCore
+import WebKit
 
 /// A Bluetooth audio device that paired mid-session, backing the transient
 /// "connected" banner. The `id` is fresh per arrival so replacing the banner
@@ -126,53 +127,68 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ChatFeedView(chat: chat)
-                .overlay(alignment: .bottomTrailing) {
-                    if capture.isLive { micFAB }
-                }
-                .overlay(alignment: .top) {
-                    VStack(spacing: 8) {
-                        if capture.isLive { livePill }
-                        if let banner = bluetoothBanner {
-                            bluetoothBannerView(name: banner.name)
+        TabView {
+            NavigationStack {
+                ChatFeedView(chat: chat)
+                    .overlay(alignment: .bottomTrailing) {
+                        if capture.isLive { micFAB }
+                    }
+                    .overlay(alignment: .top) {
+                        VStack(spacing: 8) {
+                            if capture.isLive { livePill }
+                            if let banner = bluetoothBanner {
+                                bluetoothBannerView(name: banner.name)
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    .animation(.spring(duration: 0.3, bounce: 0.2), value: capture.isLive)
+                    .animation(.spring(duration: 0.35, bounce: 0.25), value: bluetoothBanner)
+                    .navigationTitle("Stream")
+                    // Kept for VoiceOver/system context only — the principal toolbar
+                    // item above replaces the visible title with the mic meter.
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                Haptics.tap()
+                                showingSettings = true
+                            } label: {
+                                Image(systemName: "gearshape")
+                            }
+                            .accessibilityLabel("Settings")
+                        }
+                        // Takes the title's slot: "Stream" is redundant on the app's own
+                        // root screen, and the mic meter is the one thing worth a glance
+                        // every time you look up here.
+                        ToolbarItem(placement: .principal) {
+                            MicrophoneStatusMeter(monitor: micLevel, isMuted: isMicMuted)
+                        }
+                        ToolbarItem(placement: .topBarTrailing) { broadcastButton }
+                    }
+                    .safeAreaInset(edge: .bottom) {
+                        if !settings.isPublishable && !capture.isLive {
+                            setupBanner
                         }
                     }
-                    .padding(.top, 8)
-                }
-                .animation(.spring(duration: 0.3, bounce: 0.2), value: capture.isLive)
-                .animation(.spring(duration: 0.35, bounce: 0.25), value: bluetoothBanner)
-                .navigationTitle("Stream")
-                // Kept for VoiceOver/system context only — the principal toolbar
-                // item above replaces the visible title with the mic meter.
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            Haptics.tap()
-                            showingSettings = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                        }
-                        .accessibilityLabel("Settings")
+                    .sheet(isPresented: $showingSettings, onDismiss: flushSettings) {
+                        settingsSheet
                     }
-                    // Takes the title's slot: "Stream" is redundant on the app's own
-                    // root screen, and the mic meter is the one thing worth a glance
-                    // every time you look up here.
-                    ToolbarItem(placement: .principal) {
-                        MicrophoneStatusMeter(monitor: micLevel, isMuted: isMicMuted)
-                    }
-                    ToolbarItem(placement: .topBarTrailing) { broadcastButton }
-                }
-                .safeAreaInset(edge: .bottom) {
-                    if !settings.isPublishable && !capture.isLive {
-                        setupBanner
-                    }
-                }
-                .sheet(isPresented: $showingSettings, onDismiss: flushSettings) {
-                    settingsSheet
-                }
+            }
+
+            BloxwapWebView()
+                // Page-style TabView gives each child its own safe-area proposal.
+                // Opt the web page out as well as the pager below, otherwise a
+                // narrow strip of the pager can remain visible at the top/bottom.
+                .ignoresSafeArea(.container, edges: .all)
         }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        // The pager itself must own the full window. Ignoring the safe area only
+        // on the web-view page leaves UIPageViewController's page frame inset.
+        .ignoresSafeArea(.container, edges: .all)
+        // Unlike statusBarHidden, this also asks iOS to auto-hide the home
+        // indicator so the web page can use the complete physical display.
+        .persistentSystemOverlays(.hidden)
         .task {
             chat.autoConnect()
             // Surface a banner when a Bluetooth audio device pairs mid-session.
@@ -380,6 +396,31 @@ struct ContentView: View {
         SettingsView(settings: $settings, chat: chat, capture: capture,
                      onChange: persist, audio: audio, micLevel: micLevel)
     }
+}
+
+/// The second page in the root pager. The web view is created once and retains its
+/// navigation and scroll position while the user swipes back to the main screen.
+private struct BloxwapWebView: UIViewRepresentable {
+    private static let url = URL(string: "https://bloxwap.com")!
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.allowsBackForwardNavigationGestures = false
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.backgroundColor = .black
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.contentInset = .zero
+        webView.scrollView.scrollIndicatorInsets = .zero
+        webView.scrollView.automaticallyAdjustsScrollIndicatorInsets = false
+        webView.load(URLRequest(url: Self.url))
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) { }
 }
 
 /// Serializes settings writes so an older debounced snapshot can never finish
