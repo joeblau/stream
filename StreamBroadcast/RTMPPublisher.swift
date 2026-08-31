@@ -81,6 +81,11 @@ actor RTMPPublisher: Publisher {
     /// Shared outbound-queue stall watchdog state (stalledTicks + lastQueueBytes).
     private var watchdog = WatchdogState()
 
+    /// Broadcast vocal chain on the mic (StreamCore). Created lazily on the first
+    /// mic buffer when enabled, so its EQ/compressor state then carries continuously
+    /// across the whole broadcast; torn down in `stop()`.
+    private var voicePolish: VoicePolishProcessor?
+
     init(telemetry: FrameTelemetry = FrameTelemetry()) {
         self.telemetry = telemetry
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
@@ -832,6 +837,8 @@ actor RTMPPublisher: Publisher {
     /// Appends microphone audio on track 0.
     func appendMic(_ sb: CMSampleBuffer) async {
         guard isRunning, !isPaused, streamAttached else { return }
+        if settings.voicePolishEnabled, voicePolish == nil { voicePolish = VoicePolishProcessor() }
+        let sb = voicePolish?.process(sb) ?? sb
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastMicAppendAt = now
@@ -897,6 +904,7 @@ actor RTMPPublisher: Publisher {
         frameRepeatTask?.cancel()
         frameRepeatTask = nil
         lastVideoBuffer = nil
+        voicePolish = nil
         connectionSupervisorTask?.cancel()
         connectionSupervisorTask = nil
         streamSupervisorTask?.cancel()

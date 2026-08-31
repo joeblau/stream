@@ -50,7 +50,14 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         // The host app must have already granted camera permission — a broadcast
         // extension cannot present the permission prompt itself. Bail cleanly if
         // not authorized (the stream continues screen-only).
-        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
+        let authorization = AVCaptureDevice.authorizationStatus(for: .video)
+        if authorization == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                if granted { self?.start(with: settings) }
+            }
+            return
+        }
+        guard authorization == .authorized else {
             return
         }
 
@@ -87,6 +94,21 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         output.setSampleBufferDelegate(self, queue: queue)
         if session.canAddOutput(output) {
             session.addOutput(output)
+
+            // AVCaptureVideoDataOutput otherwise delivers buffers in the camera
+            // sensor's native landscape orientation. Ask AVFoundation for the
+            // camera-specific angle (front/back sensors can differ) and have the
+            // output physically rotate each buffer before it reaches Core Image.
+            // Configure this before startRunning(): changing it live rebuilds the
+            // capture render pipeline and can stall an active broadcast.
+            let rotation = AVCaptureDevice.RotationCoordinator(
+                device: device,
+                previewLayer: nil
+            ).videoRotationAngleForHorizonLevelCapture
+            if let connection = output.connection(with: .video),
+               connection.isVideoRotationAngleSupported(rotation) {
+                connection.videoRotationAngle = rotation
+            }
         }
 
         session.commitConfiguration()

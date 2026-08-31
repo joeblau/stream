@@ -155,6 +155,10 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// set most external mics' hardware input gain, so this scales the captured
     /// mic in the mix — the practical way to balance a DJI/Bluetooth mic.
     public var micVolume: Double
+    /// When true, mic audio runs through the VoicePolishProcessor chain (broadcast
+    /// EQ, two-stage compression, −1.5 dBFS limiting) before mixing/encoding.
+    /// Applied at broadcast start; toggling mid-stream takes effect next broadcast.
+    public var voicePolishEnabled: Bool
     /// When true, every broadcast is also recorded locally to an HD .mp4 in the
     /// shared App Group container (independent of the RTMP connection, so it
     /// survives a dropped/failed stream). The app auto-saves it to Photos.
@@ -182,6 +186,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         preferredAudioInputUID: String? = nil,
         includeAppAudio: Bool = true,
         micVolume: Double = 1.0,
+        voicePolishEnabled: Bool = true,
         backupEnabled: Bool = false,
         backupQuality: BackupQuality = .hd1080
     ) {
@@ -200,6 +205,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.preferredAudioInputUID = preferredAudioInputUID
         self.includeAppAudio = includeAppAudio
         self.micVolume = micVolume
+        self.voicePolishEnabled = voicePolishEnabled
         self.backupEnabled = backupEnabled
         self.backupQuality = backupQuality
     }
@@ -226,6 +232,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         preferredAudioInputUID = try c.decodeIfPresent(String.self, forKey: .preferredAudioInputUID) ?? d.preferredAudioInputUID
         includeAppAudio = try c.decodeIfPresent(Bool.self, forKey: .includeAppAudio) ?? d.includeAppAudio
         micVolume = try c.decodeIfPresent(Double.self, forKey: .micVolume) ?? d.micVolume
+        voicePolishEnabled = try c.decodeIfPresent(Bool.self, forKey: .voicePolishEnabled) ?? d.voicePolishEnabled
         backupEnabled = try c.decodeIfPresent(Bool.self, forKey: .backupEnabled) ?? d.backupEnabled
         backupQuality = try c.decodeIfPresent(BackupQuality.self, forKey: .backupQuality) ?? d.backupQuality
     }

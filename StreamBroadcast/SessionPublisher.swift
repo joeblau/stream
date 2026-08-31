@@ -102,6 +102,10 @@ actor SessionPublisher: Publisher {
     /// Mic-stall failover: promote app audio (track 1) to the mix clock if the mic
     /// route goes silent while app audio still flows; the first mic buffer flips home.
     private var micTrackStalled = false
+    /// Broadcast vocal chain on the mic (StreamCore). Created lazily on the first
+    /// mic buffer when enabled, so its EQ/compressor state then carries continuously
+    /// across the whole broadcast; torn down in `stop()`.
+    private var voicePolish: VoicePolishProcessor?
     private var lastMicAppendAt: UInt64 = 0
     private var lastAppAppendAt: UInt64 = 0
     /// When the broadcast went live, so a mic route dead from the START (no buffer
@@ -683,6 +687,8 @@ actor SessionPublisher: Publisher {
 
     func appendMic(_ sb: CMSampleBuffer) async {
         guard isRunning, !isPaused, stream != nil else { return }
+        if settings.voicePolishEnabled, voicePolish == nil { voicePolish = VoicePolishProcessor() }
+        let sb = voicePolish?.process(sb) ?? sb
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastMicAppendAt = now
@@ -772,6 +778,7 @@ actor SessionPublisher: Publisher {
         frameRepeatTask?.cancel()
         frameRepeatTask = nil
         lastVideoBuffer = nil
+        voicePolish = nil
         guard isRunning else {
             await mixer.stopRunning()
             return

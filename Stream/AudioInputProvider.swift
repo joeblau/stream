@@ -17,10 +17,53 @@ final class AudioInputProvider {
 
     /// A selectable audio input surfaced from the audio session.
     struct Input: Identifiable, Hashable {
+        /// How the input is attached. Drives the picker icon and whether a
+        /// mid-session arrival is worth announcing.
+        enum Kind: Hashable {
+            case builtIn
+            case bluetooth
+            /// Wired external: a USB-C audio interface (the DJI/Rode-style wireless
+            /// receivers land here), a headset mic, or line-in.
+            case wired
+        }
+
         let uid: String
         let displayName: String
-        let isBluetooth: Bool
+        let kind: Kind
         var id: String { uid }
+
+        var isBluetooth: Bool { kind == .bluetooth }
+
+        /// Anything that isn't the device's own mic — the inputs worth flagging in
+        /// the picker and announcing when they appear mid-session.
+        var isExternal: Bool { kind != .builtIn }
+
+        var icon: String {
+            switch kind {
+            case .builtIn:   "iphone"
+            case .bluetooth: "wave.3.right.circle.fill"
+            case .wired:     "cable.connector"
+            }
+        }
+
+        /// Compact "name[kind]" for the route log — the fastest way to confirm
+        /// whether a plugged-in receiver actually reached the audio session.
+        var debugLabel: String { "\(displayName)[\(kind)]" }
+    }
+
+    /// Classifies a port. Unknown/new port types are treated as wired rather than
+    /// built-in: a port type we don't recognize is far more likely to be an
+    /// accessory someone just plugged in than the device's own microphone, and
+    /// guessing that way means a new class of USB-C receiver still gets flagged.
+    private static func kind(for portType: AVAudioSession.Port) -> Input.Kind {
+        switch portType {
+        case .builtInMic:
+            return .builtIn
+        case .bluetoothHFP, .bluetoothLE, .bluetoothA2DP:
+            return .bluetooth
+        default:
+            return .wired
+        }
     }
 
     /// Microphone permission state, mirrored for the UI.
@@ -41,17 +84,20 @@ final class AudioInputProvider {
     /// the new route. Not fired for a manual `refresh()` (the caller already knows).
     var onInputsChanged: (() -> Void)?
 
-    /// Fired when a Bluetooth audio input appears that wasn't present on the
-    /// previous enumeration — i.e. a device paired/connected mid-session. Carries
-    /// the new device's display name so the UI can surface a "<name> connected"
-    /// banner. Deliberately NOT fired for devices already connected when monitoring
-    /// starts (the first `refresh()` only seeds the baseline), only for arrivals.
-    var onBluetoothConnected: ((String) -> Void)?
+    /// Fired when an external audio input appears that wasn't present on the
+    /// previous enumeration — a Bluetooth device that paired, or a USB-C receiver
+    /// that was plugged in, mid-session. Carries the input so the UI can surface a
+    /// "<name> connected" banner with the right icon. Deliberately NOT fired for
+    /// devices already connected when monitoring starts (the first `refresh()` only
+    /// seeds the baseline), only for arrivals.
+    var onExternalMicConnected: ((Input) -> Void)?
 
-    /// UIDs of the Bluetooth inputs seen on the most recent enumeration. A later
+    /// UIDs of the external inputs seen on the most recent enumeration. A later
     /// route change diffs against this to tell which device is *newly* connected
     /// (fire the banner) versus one that was already present (stay quiet).
-    private var knownBluetoothUIDs: Set<String> = []
+    private var knownExternalUIDs: Set<String> = []
+
+    private static let log = Logger(subsystem: "com.joeblau.Stream", category: "audio-inputs")
 
     /// Observer token for `AVAudioSession.routeChangeNotification`. Marked
     /// `nonisolated(unsafe)` so `deinit` (which is nonisolated on a `@MainActor`
@@ -129,7 +175,7 @@ final class AudioInputProvider {
         switch reason {
         case .newDeviceAvailable, .oldDeviceUnavailable:
             guard permission == .granted else { return }
-            configureAndEnumerate(announceNewBluetooth: true, notifyInputsChanged: true)
+            configureAndEnumerate(announceNewExternal: true, notifyInputsChanged: true)
         default:
             break
         }
@@ -137,10 +183,10 @@ final class AudioInputProvider {
 
     // MARK: - Private
 
-    /// - Parameter announceNewBluetooth: when true, fire `onBluetoothConnected`
+    /// - Parameter announceNewExternal: when true, fire `onExternalMicConnected`
     ///   for each Bluetooth input not seen on the previous enumeration. False for
     ///   the initial `refresh()`, which only seeds the baseline set.
-    private func configureAndEnumerate(announceNewBluetooth: Bool = false,
+    private func configureAndEnumerate(announceNewExternal: Bool = false,
                                        notifyInputsChanged: Bool = false) {
         Task { [weak self] in
             // Category negotiation may consult media-server synchronously. Keep it
@@ -148,30 +194,30 @@ final class AudioInputProvider {
             await AudioSessionCoordinator.shared.prepareForEnumeration()
             guard let self else { return }
             enumerate(from: AVAudioSession.sharedInstance(),
-                      announceNewBluetooth: announceNewBluetooth)
+                      announceNewExternal: announceNewExternal)
             if notifyInputsChanged { onInputsChanged?() }
         }
     }
 
-    private func enumerate(from session: AVAudioSession, announceNewBluetooth: Bool) {
+    private func enumerate(from session: AVAudioSession, announceNewExternal: Bool) {
         let available = session.availableInputs ?? []
         inputs = available.map { port in
-            let isBT = port.portType == .bluetoothHFP || port.portType == .bluetoothLE
-            return Input(
+            Input(
                 uid: port.uid,
                 displayName: port.portName,
-                isBluetooth: isBT
+                kind: Self.kind(for: port.portType)
             )
         }
-        // Diff the Bluetooth set against the previous enumeration so a device that
-        // paired mid-session surfaces once; already-connected devices stay quiet.
-        let bluetooth = inputs.filter(\.isBluetooth)
-        if announceNewBluetooth {
-            for input in bluetooth where !knownBluetoothUIDs.contains(input.uid) {
-                onBluetoothConnected?(input.displayName)
+        Self.log.info("Inputs: \(self.inputs.map(\.debugLabel).joined(separator: ", "), privacy: .public)")
+        // Diff the external set against the previous enumeration so a device that
+        // arrived mid-session surfaces once; already-connected devices stay quiet.
+        let external = inputs.filter(\.isExternal)
+        if announceNewExternal {
+            for input in external where !knownExternalUIDs.contains(input.uid) {
+                onExternalMicConnected?(input)
             }
         }
-        knownBluetoothUIDs = Set(bluetooth.map(\.uid))
+        knownExternalUIDs = Set(external.map(\.uid))
     }
 
     /// Activates a record-capable session that surfaces Bluetooth inputs.
@@ -541,16 +587,29 @@ final class MicrophoneLevelMonitor {
         do {
             try input.__installTap(onBus: 0, bufferSize: 1024, format: format, error: ()) {
                 @Sendable buffer, _ in
-                guard let channel = buffer.floatChannelData?[0] else { return }
+                guard let channels = buffer.floatChannelData else { return }
                 let count = Int(buffer.frameLength)
                 guard count > 0 else { return }
-                var sumOfSquares: Float = 0
-                for i in 0..<count {
-                    let sample = channel[i]
-                    sumOfSquares += sample * sample
+                // Measure EVERY channel and keep the loudest, rather than reading
+                // channel 0. A multi-track USB-C receiver (DJI/Rode) puts each
+                // wireless transmitter on its own channel — TX1 left, TX2 right —
+                // so a channel-0-only meter reads dead flat while the person is
+                // talking into the transmitter mapped to the right channel. The
+                // live ScreenCaptureKit meter already sums the whole buffer list;
+                // this keeps the pre-flight meter honest in the same way.
+                var loudest: Float = 0
+                for channel in 0..<Int(buffer.format.channelCount) {
+                    let samples = channels[channel]
+                    var sumOfSquares: Float = 0
+                    for i in 0..<count {
+                        let sample = samples[i]
+                        sumOfSquares += sample * sample
+                    }
+                    loudest = max(loudest, (sumOfSquares / Float(count)).squareRoot())
                 }
-                let rms = (sumOfSquares / Float(count)).squareRoot()
-                level.withLock { $0 = rms }
+                // `withLock`'s closure is @Sendable, which cannot capture a var.
+                let peak = loudest
+                level.withLock { $0 = peak }
             }
         } catch {
             return false

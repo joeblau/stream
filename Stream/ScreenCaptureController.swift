@@ -35,6 +35,10 @@ final class ScreenCaptureController: NSObject {
 
     @ObservationIgnored private let picker = SCContentSharingPicker.shared
     @ObservationIgnored private var pendingSettings: StreamSettings?
+    /// Camera session started while the system picker is onscreen. Warming it here
+    /// hides AVCaptureSession's cold-start latency behind content selection instead
+    /// of showing an empty PiP after the broadcast has already gone live.
+    @ObservationIgnored private var pendingFacecam: FacecamCapture?
     @ObservationIgnored private var stream: SCStream?
     @ObservationIgnored private var output: ScreenCaptureOutput?
     @ObservationIgnored private var publisher: (any Publisher)?
@@ -95,6 +99,11 @@ final class ScreenCaptureController: NSObject {
         }
 
         pendingSettings = settings
+        if settings.pipEnabled {
+            let facecam = FacecamCapture()
+            pendingFacecam = facecam
+            facecam.start(with: settings)
+        }
         Task {
             await configurePreferredMicrophone(settings.preferredAudioInputUID)
             presentSystemPicker(settings: settings)
@@ -207,7 +216,10 @@ final class ScreenCaptureController: NSObject {
         lastTelemetrySnapshot = nil
         lastTelemetryAt = 0
         let publisher = makePublisher(for: settings.selectedProtocol, telemetry: telemetry)
+        let facecam = pendingFacecam ?? FacecamCapture()
+        pendingFacecam = nil
         let output = ScreenCaptureOutput(publisher: publisher, settings: settings,
+                                         facecam: facecam,
                                          telemetry: telemetry) { [weak self] error in
             Task { @MainActor [weak self] in await self?.captureDidStop(error: error) }
         }
@@ -272,6 +284,7 @@ final class ScreenCaptureController: NSObject {
             }
             captureLog.info("ScreenCaptureKit stream started")
         } catch {
+            facecam.stop()
             await stopCapture()
             let nsError = error as NSError
             errorMessage = "\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))"
@@ -353,6 +366,32 @@ final class ScreenCaptureController: NSObject {
         Task { await publisher.setMicVolume(volume) }
     }
 
+    /// The same latest-frame holder feeding the compositor. The UI renders from it
+    /// without opening a second camera session.
+    var facecamPreviewFrames: LatestCameraFrame? {
+        output?.facecamPreviewFrames
+    }
+
+    /// Keeps drag-to-corner UI changes synchronized with the live compositor.
+    func setPIPCorner(_ corner: PIPCorner) {
+        output?.setPIPCorner(corner)
+    }
+
+    func setPIPScale(_ scale: Double) {
+        output?.setPIPScale(scale)
+    }
+
+    /// Applies the toolbar/settings facecam toggle to an active broadcast.
+    func setPIPEnabled(_ enabled: Bool) {
+        output?.setPIPEnabled(enabled)
+    }
+
+    /// Once the software preview has produced its first capturable frame, the
+    /// foreground screen already contains PiP and the compositor copy is disabled.
+    func setPIPRenderedInApp(_ isRenderedInApp: Bool) {
+        output?.setPIPRenderedInApp(isRenderedInApp)
+    }
+
     /// Recomputes the thermal/Low-Power ceiling and pushes it to the encoder (via
     /// the adaptive controller) and the compositor. Reuses the existing throttle
     /// path rather than adding a parallel one. No-op while not capturing.
@@ -410,6 +449,8 @@ extension ScreenCaptureController: SCContentSharingPickerObserver {
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.pendingSettings = nil
+            self.pendingFacecam?.stop()
+            self.pendingFacecam = nil
             captureLog.info("ScreenCaptureKit picker cancelled")
             await self.deactivateAudioSession()
         }
@@ -432,6 +473,8 @@ extension ScreenCaptureController: SCContentSharingPickerObserver {
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.pendingSettings = nil
+            self.pendingFacecam?.stop()
+            self.pendingFacecam = nil
             let nsError = error.value
             captureLog.error("Picker failed: domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) message=\(nsError.localizedDescription, privacy: .public)")
             await self.deactivateAudioSession()
@@ -471,12 +514,17 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
     private let onStopped: @Sendable (Error) -> Void
     private let micLevelMeter: ScreenCaptureMicrophoneMeter
     private let micLevelChannel = MicrophoneLevelChannel()
-    private let facecam = FacecamCapture()
+    private let facecam: FacecamCapture
     private let compositor = FacecamCompositor()
     /// Runtime thermal/Low-Power gate. The user setting is immutable for a live
     /// session, but the governor can disable PiP without rebuilding the output.
     /// The video consumer and governor run on different executors, so guard it.
     private let pipAllowed: OSAllocatedUnfairLock<Bool>
+    private let pipUserEnabled: OSAllocatedUnfairLock<Bool>
+    private let pipThermallyAllowed: OSAllocatedUnfairLock<Bool>
+    private let pipRenderedInApp: OSAllocatedUnfairLock<Bool>
+    private let pipCorner: OSAllocatedUnfairLock<PIPCorner>
+    private let pipScale: OSAllocatedUnfairLock<Double>
     private let videoSamples: AsyncStream<CMSampleBuffer>
     private let videoContinuation: AsyncStream<CMSampleBuffer>.Continuation
     private var videoConsumer: Task<Void, Never>?
@@ -491,14 +539,21 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
 
     init(publisher: any Publisher,
          settings: StreamSettings,
+         facecam: FacecamCapture,
          telemetry: FrameTelemetry,
          onStopped: @escaping @Sendable (Error) -> Void) {
         self.publisher = publisher
         self.settings = settings
+        self.facecam = facecam
         self.telemetry = telemetry
         self.onStopped = onStopped
         micLevelMeter = ScreenCaptureMicrophoneMeter(gain: settings.micVolume)
         pipAllowed = OSAllocatedUnfairLock(initialState: settings.pipEnabled)
+        pipUserEnabled = OSAllocatedUnfairLock(initialState: settings.pipEnabled)
+        pipThermallyAllowed = OSAllocatedUnfairLock(initialState: true)
+        pipRenderedInApp = OSAllocatedUnfairLock(initialState: false)
+        pipCorner = OSAllocatedUnfairLock(initialState: settings.pipCorner)
+        pipScale = OSAllocatedUnfairLock(initialState: settings.pipScale)
         targetFrameInterval = CMTime(value: 1,
                                      timescale: CMTimeScale(settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate)))
         (videoSamples, videoContinuation) = AsyncStream.makeStream(
@@ -522,14 +577,17 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
                     targetSize = target
                 }
                 let shouldComposite = self.pipAllowed.withLock { $0 }
+                    && !self.pipRenderedInApp.withLock { $0 }
                 if shouldComposite, let targetSize {
+                    let corner = self.pipCorner.withLock { $0 }
+                    let scale = self.pipScale.withLock { $0 }
                     if let composited = self.compositor.composite(
                            screen: image,
                            camera: self.facecam.latest.freshest(),
                            targetSize: targetSize,
                            orientation: .up,
-                           corner: settings.pipCorner,
-                           scale: settings.pipScale,
+                           corner: corner,
+                           scale: scale,
                            cameraPosition: settings.cameraPosition
                        ),
                        let output = self.compositor.makeSampleBuffer(
@@ -609,13 +667,42 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
         micLevelMeter.setGain(volume)
     }
 
+    var facecamPreviewFrames: LatestCameraFrame {
+        facecam.latest
+    }
+
+    func setPIPCorner(_ corner: PIPCorner) {
+        pipCorner.withLock { $0 = corner }
+    }
+
+    func setPIPScale(_ scale: Double) {
+        pipScale.withLock { $0 = scale }
+    }
+
+    func setPIPEnabled(_ enabled: Bool) {
+        pipUserEnabled.withLock { $0 = enabled }
+        let allowed = enabled && pipThermallyAllowed.withLock { $0 }
+        pipAllowed.withLock { $0 = allowed }
+        if allowed {
+            facecam.start(with: settings)
+        } else {
+            pipRenderedInApp.withLock { $0 = false }
+            facecam.stop()
+        }
+    }
+
+    func setPIPRenderedInApp(_ isRenderedInApp: Bool) {
+        pipRenderedInApp.withLock { $0 = isRenderedInApp }
+    }
+
     /// Applies the device thermal/Low-Power profile to the capture side: paces the
     /// screen callback to the capped frame rate (on the serial sample queue) and
     /// stops the facecam under pressure so the camera + compositor stop burning
     /// power. Re-arms the facecam when the device recovers. PiP toggling only
     /// applies when the user has the facecam enabled.
     func applyThermalProfile(frameRateCap: Int, allowPiP: Bool) {
-        let shouldAllowPiP = settings.pipEnabled && allowPiP
+        pipThermallyAllowed.withLock { $0 = allowPiP }
+        let shouldAllowPiP = pipUserEnabled.withLock { $0 } && allowPiP
         pipAllowed.withLock { $0 = shouldAllowPiP }
         sampleQueue.async { [weak self] in
             guard let self else { return }
@@ -624,7 +711,6 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
             let fps = max(1, min(deviceRate, frameRateCap))
             self.targetFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         }
-        guard settings.pipEnabled else { return }
         if shouldAllowPiP {
             facecam.start(with: settings)
         } else {
@@ -746,6 +832,7 @@ final class ScreenCaptureController {
     private(set) var thermalNotice: String?
     private(set) var liveStats: LiveStats?
     private(set) var broadcastStartedAt: Date?
+    var facecamPreviewFrames: LatestCameraFrame? { nil }
 
     func presentPicker(settings: StreamSettings) {
         errorMessage = "Screen capture requires a physical iOS 27 device."
@@ -754,6 +841,14 @@ final class ScreenCaptureController {
     func stop() {}
 
     func setMicVolume(_ volume: Double) {}
+
+    func setPIPCorner(_ corner: PIPCorner) {}
+
+    func setPIPScale(_ scale: Double) {}
+
+    func setPIPEnabled(_ enabled: Bool) {}
+
+    func setPIPRenderedInApp(_ isRenderedInApp: Bool) {}
 
     func clearError() {
         errorMessage = nil

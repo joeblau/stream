@@ -180,25 +180,10 @@ struct SettingsView: View {
         .presentationCornerRadius(55)
         // Haptic when a section is opened (push) or closed (pop).
         .sensoryFeedback(.impact(weight: .light), trigger: selected)
-        .onAppear { [audio, micLevel, capture] in
+        .onAppear {
             detent.activate(SettingsSection?.none)
-            // When a mic is (dis)connected mid-session, the provider re-enumerates
-            // and calls this back: re-apply the persisted input to the session and
-            // re-route the meter so a headset plugged in now is immediately live —
-            // no app restart. Skipped while broadcasting (extension owns the route).
-            audio.onInputsChanged = { [weak audio, weak micLevel, weak capture] in
-                guard let audio, let micLevel else { return }
-                guard capture?.isLive != true else { return }
-                let uid = settings.preferredAudioInputUID
-                audio.select(uid: uid, into: &settings)
-                micLevel.setPreferredInput(uid)
-                micLevel.restartLocalCapture()
-            }
         }
         .onDisappear {
-            // `audio` outlives this sheet. Clear its callback so it cannot retain
-            // the sheet's Binding/state graph or restart a meter after dismissal.
-            audio.onInputsChanged = nil
             micLevel.stop(for: .settings)
         }
     }
@@ -603,8 +588,10 @@ struct SettingsView: View {
                 Text("Default (system)").tag(String?.none)
                 ForEach(audio.inputs, id: \.uid) { input in
                     HStack {
-                        if input.isBluetooth {
-                            Image(systemName: "wave.3.right.circle.fill")
+                        // Flag every external input, not just Bluetooth — a USB-C
+                        // receiver is exactly the row the user is hunting for.
+                        if input.isExternal {
+                            Image(systemName: input.icon)
                         }
                         Text(input.displayName)
                     }
@@ -643,6 +630,14 @@ struct SettingsView: View {
                     }
                 )
             }
+
+            Toggle("Voice Polish", isOn: Binding(
+                get: { settings.voicePolishEnabled },
+                set: { settings.voicePolishEnabled = $0; onChange() }
+            ))
+            Text("Broadcast-style EQ, compression and limiting on the mic. Applies from the next broadcast.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
         } header: {
             HStack {
@@ -702,6 +697,7 @@ struct SettingsView: View {
                 set: { newValue in
                     settings.pipEnabled = newValue
                     if newValue { camera.request() }
+                    capture.setPIPEnabled(newValue)
                     onChange()
                 }
             ))
@@ -709,7 +705,11 @@ struct SettingsView: View {
             if settings.pipEnabled {
                 Picker("Corner", selection: Binding(
                     get: { settings.pipCorner },
-                    set: { settings.pipCorner = $0; onChange() }
+                    set: {
+                        settings.pipCorner = $0
+                        capture.setPIPCorner($0)
+                        onChange()
+                    }
                 )) {
                     ForEach(PIPCorner.allCases, id: \.self) { corner in
                         Text(cornerLabel(corner)).tag(corner)
@@ -736,7 +736,11 @@ struct SettingsView: View {
                     Slider(
                         value: Binding(
                             get: { settings.pipScale },
-                            set: { settings.pipScale = $0; onChange() }
+                            set: {
+                                settings.pipScale = $0
+                                capture.setPIPScale($0)
+                                onChange()
+                            }
                         ),
                         in: 0.10...0.40
                     )
