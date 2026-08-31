@@ -2,12 +2,14 @@ import SwiftUI
 import StreamCore
 import WebKit
 
-/// A Bluetooth audio device that paired mid-session, backing the transient
-/// "connected" banner. The `id` is fresh per arrival so replacing the banner
-/// restarts its dismiss timer even when the same device reconnects.
-private struct BluetoothConnection: Equatable, Identifiable {
+/// An external mic that arrived mid-session — a Bluetooth device that paired or a
+/// USB-C receiver that was plugged in — backing the transient "connected" banner.
+/// The `id` is fresh per arrival so replacing the banner restarts its dismiss timer
+/// even when the same device reconnects.
+private struct ExternalMicConnection: Equatable, Identifiable {
     let id = UUID()
     let name: String
+    let icon: String
 }
 
 /// Root view. The main page shows the live chat feed; the toolbar carries a "Live"
@@ -30,7 +32,7 @@ struct ContentView: View {
     @State private var chat = RestreamChat()
 
     /// Audio input helper, owned here so its `AVAudioSession` route-change monitor
-    /// runs for the whole app lifetime. Drives the Bluetooth-connect banner below
+    /// runs for the whole app lifetime. Drives the external-mic banner below
     /// and is threaded into the Settings sheet so both share one instance/observer.
     @State private var audio = AudioInputProvider()
 
@@ -39,11 +41,16 @@ struct ContentView: View {
     /// open a competing record session whenever the meter falls back to local capture.
     @State private var micLevel = MicrophoneLevelMonitor()
 
-    /// The Bluetooth device that most recently paired mid-session, shown as a
-    /// transient banner. Set from `audio.onBluetoothConnected`; auto-cleared after
+    /// Permission helper used by the toolbar facecam toggle. Settings owns its own
+    /// copy because it has additional capability messaging, while this one keeps
+    /// the always-visible control lightweight.
+    @State private var camera = CameraSupport()
+
+    /// The external mic that most recently arrived mid-session, shown as a
+    /// transient banner. Set from `audio.onExternalMicConnected`; auto-cleared after
     /// a few seconds by a `.task` keyed on its `id` (a fresh `id` restarts the
     /// timer, so a second device replaces the banner cleanly).
-    @State private var bluetoothBanner: BluetoothConnection?
+    @State private var externalMicBanner: ExternalMicConnection?
 
     @State private var showingSettings = false
 
@@ -65,6 +72,10 @@ struct ContentView: View {
     /// The mic gain to restore when the user un-mutes from the FAB. Captured the
     /// moment they mute so toggling back returns to their chosen level, not unity.
     @State private var preMuteVolume: Double = 1.0
+
+    /// The compositor remains active until the local software preview has actually
+    /// drawn a frame. This prevents both a startup gap and a duplicate foreground PiP.
+    @State private var isPIPPreviewReady = false
 
     init() {
         let loaded = SettingsStore().load()
@@ -106,6 +117,34 @@ struct ContentView: View {
         micLevel.setGain(settings.micVolume)
     }
 
+    /// Shows or hides the facecam immediately in both the local preview and the
+    /// outgoing stream. The choice is persisted for the next broadcast too.
+    private func toggleCameraVisibility() {
+        Haptics.tap()
+        let enabled = !settings.pipEnabled
+        settings.pipEnabled = enabled
+        if enabled { camera.request() }
+        if !enabled { isPIPPreviewReady = false }
+        persist()
+        capture.setPIPEnabled(enabled)
+        syncPIPRendering()
+    }
+
+    /// Persists a drag-to-corner edit and pushes it into the running compositor
+    /// immediately, so the local preview and outgoing stream never disagree.
+    private var livePIPCorner: Binding<PIPCorner> {
+        Binding(
+            get: { settings.pipCorner },
+            set: { newCorner in
+                guard settings.pipCorner != newCorner else { return }
+                Haptics.tap()
+                settings.pipCorner = newCorner
+                persist()
+                capture.setPIPCorner(newCorner)
+            }
+        )
+    }
+
     /// Keeps the toolbar meter live whenever the app is foregrounded, so the mic can
     /// be verified before going live and not only during a broadcast. While live the
     /// level arrives free over `MicrophoneLevelChannel`; when idle the monitor opens
@@ -126,6 +165,15 @@ struct ContentView: View {
         }
     }
 
+    private func syncPIPRendering(phase: ScenePhase? = nil) {
+        capture.setPIPRenderedInApp(
+            capture.isLive
+                && settings.pipEnabled
+                && isPIPPreviewReady
+                && (phase ?? scenePhase) == .active
+        )
+    }
+
     var body: some View {
         TabView {
             NavigationStack {
@@ -136,14 +184,14 @@ struct ContentView: View {
                     .overlay(alignment: .top) {
                         VStack(spacing: 8) {
                             if capture.isLive { livePill }
-                            if let banner = bluetoothBanner {
-                                bluetoothBannerView(name: banner.name)
+                            if let banner = externalMicBanner {
+                                externalMicBannerView(banner)
                             }
                         }
                         .padding(.top, 8)
                     }
                     .animation(.spring(duration: 0.3, bounce: 0.2), value: capture.isLive)
-                    .animation(.spring(duration: 0.35, bounce: 0.25), value: bluetoothBanner)
+                    .animation(.spring(duration: 0.35, bounce: 0.25), value: externalMicBanner)
                     .navigationTitle("Stream")
                     // Kept for VoiceOver/system context only — the principal toolbar
                     // item above replaces the visible title with the mic meter.
@@ -162,7 +210,24 @@ struct ContentView: View {
                         // root screen, and the mic meter is the one thing worth a glance
                         // every time you look up here.
                         ToolbarItem(placement: .principal) {
-                            MicrophoneStatusMeter(monitor: micLevel, isMuted: isMicMuted)
+                            HStack(spacing: 10) {
+                                Button(action: toggleCameraVisibility) {
+                                    Image(systemName: settings.pipEnabled
+                                          ? "video.fill"
+                                          : "video.slash.fill")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .contentTransition(.symbolEffect(.replace))
+                                }
+                                .tint(settings.pipEnabled ? .green : .secondary)
+                                .accessibilityLabel(settings.pipEnabled
+                                                    ? "Hide camera"
+                                                    : "Show camera")
+
+                                MicrophoneStatusMeter(monitor: micLevel,
+                                                      isMuted: isMicMuted)
+                            }
+                            .animation(.easeInOut(duration: 0.2),
+                                       value: settings.pipEnabled)
                         }
                         ToolbarItem(placement: .topBarTrailing) { broadcastButton }
                     }
@@ -189,12 +254,47 @@ struct ContentView: View {
         // Unlike statusBarHidden, this also asks iOS to auto-hide the home
         // indicator so the web page can use the complete physical display.
         .persistentSystemOverlays(.hidden)
+        .overlay {
+            if capture.isLive,
+               settings.pipEnabled,
+               let previewFrames = capture.facecamPreviewFrames {
+                DraggableFacecamView(
+                    frames: previewFrames,
+                    cameraPosition: settings.cameraPosition,
+                    scale: settings.pipScale,
+                    corner: livePIPCorner,
+                    onFirstFrame: {
+                        guard !isPIPPreviewReady else { return }
+                        isPIPPreviewReady = true
+                        syncPIPRendering()
+                    }
+                )
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.3, bounce: 0.2),
+                   value: capture.isLive && settings.pipEnabled)
         .task {
             chat.autoConnect()
-            // Surface a banner when a Bluetooth audio device pairs mid-session.
-            audio.onBluetoothConnected = { name in
-                bluetoothBanner = BluetoothConnection(name: name)
+            // Surface a banner when an external mic arrives mid-session (a
+            // Bluetooth device pairing, or a USB-C receiver being plugged in).
+            audio.onExternalMicConnected = { input in
+                externalMicBanner = ExternalMicConnection(name: input.displayName,
+                                                          icon: input.icon)
                 Haptics.tap()
+            }
+            // A mic arriving or leaving mid-session re-enumerates, then lands here:
+            // re-apply the persisted input to the session and re-route the meter, so
+            // a receiver plugged in right now is immediately live with no restart.
+            // Owned here rather than in the Settings sheet — that only ran while the
+            // sheet was open, which is exactly when you are NOT plugging something
+            // in. Skipped while broadcasting, where capture owns the route.
+            audio.onInputsChanged = {
+                guard !capture.isLive else { return }
+                let uid = settings.preferredAudioInputUID
+                audio.select(uid: uid, into: &settings)
+                micLevel.setPreferredInput(uid)
+                micLevel.restartLocalCapture()
             }
             Haptics.warmUp()
             // Seed the baseline set + start the route-change observer. The ask has
@@ -204,19 +304,30 @@ struct ContentView: View {
             // populate the baseline; they don't trigger a banner — only arrivals do.
             audio.refresh(requestPermission: true)
             syncStatusMeter()
+            syncPIPRendering()
         }
-        .onChange(of: capture.isLive) { _, _ in syncStatusMeter() }
-        // Auto-dismiss the Bluetooth banner. Keyed on the connection id so a new
+        .onChange(of: capture.isLive) { _, _ in
+            if !capture.isLive { isPIPPreviewReady = false }
+            syncStatusMeter()
+            syncPIPRendering()
+        }
+        .onChange(of: settings.pipEnabled) { _, enabled in
+            if !enabled { isPIPPreviewReady = false }
+            capture.setPIPEnabled(enabled)
+            syncPIPRendering()
+        }
+        // Auto-dismiss the banner. Keyed on the connection id so a new
         // device restarts the timer; cancellation (id change) skips the stale clear.
-        .task(id: bluetoothBanner?.id) {
-            guard bluetoothBanner != nil else { return }
+        .task(id: externalMicBanner?.id) {
+            guard externalMicBanner != nil else { return }
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
-            bluetoothBanner = nil
+            externalMicBanner = nil
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { flushSettings() }
             syncStatusMeter(phase: phase)
+            syncPIPRendering(phase: phase)
         }
         .confirmationDialog(
             "Stop the broadcast?",
@@ -326,14 +437,16 @@ struct ContentView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Bluetooth-connected banner
+    // MARK: - External-mic-connected banner
 
-    /// Transient glass capsule announcing a Bluetooth audio device that just
-    /// paired. Sits below the LIVE pill (same top overlay stack) and auto-dismisses
-    /// via the `.task(id:)` timer; purely informational, so it never eats taps.
-    private func bluetoothBannerView(name: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "wave.3.right.circle.fill")
+    /// Transient glass capsule announcing an external mic that just arrived — a
+    /// Bluetooth device that paired or a USB-C receiver that was plugged in. Sits
+    /// below the LIVE pill (same top overlay stack) and auto-dismisses via the
+    /// `.task(id:)` timer; purely informational, so it never eats taps.
+    private func externalMicBannerView(_ connection: ExternalMicConnection) -> some View {
+        let name = connection.name
+        return HStack(spacing: 8) {
+            Image(systemName: connection.icon)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.blue)
             Text("\(name) connected")
