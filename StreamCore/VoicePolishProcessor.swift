@@ -3,6 +3,33 @@ import AVFAudio
 import CoreMedia
 import os
 
+/// `AVAudioConverterInputBlock` is `@Sendable` in the iOS 26 SDK. Keep its
+/// one-shot input state behind a lock instead of capturing a mutable local, and
+/// explicitly carry the non-Sendable AVAudioPCMBuffer inside this confined box.
+private final class ConverterInputState: @unchecked Sendable {
+    private let buffer: AVAudioPCMBuffer
+    private var lock = os_unfair_lock_s()
+    private var consumed = false
+
+    init(buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
+    }
+
+    func next(status: UnsafeMutablePointer<AVAudioConverterInputStatus>) -> AVAudioBuffer? {
+        os_unfair_lock_lock(&lock)
+        let hasData = !consumed
+        consumed = true
+        os_unfair_lock_unlock(&lock)
+
+        if hasData {
+            status.pointee = .haveData
+            return buffer
+        }
+        status.pointee = .endOfStream
+        return nil
+    }
+}
+
 /// Broadcast-style vocal chain applied to live mic buffers, ported from sludge's
 /// `VOICE_POLISH` ffmpeg graph onto Apple-native audio units — no FFmpeg, no
 /// third-party DSP. Runs inside an `AVAudioEngine` in manual (offline) rendering
@@ -123,12 +150,10 @@ public final class VoicePolishProcessor {
         }
         input.frameLength = AVAudioFrameCount(frameCount)
         do {
-            var consumed = false
+            let inputState = ConverterInputState(buffer: sourcePCM)
             var converterError: NSError?
             let status = converter.convert(to: input, error: &converterError) { _, outStatus in
-                outStatus.pointee = consumed ? .endOfStream : .haveData
-                defer { consumed = true }
-                return consumed ? nil : sourcePCM
+                inputState.next(status: outStatus)
             }
             guard status != .error, converterError == nil else {
                 return fail(sampleBuffer, "format conversion failed")
