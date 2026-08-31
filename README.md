@@ -54,6 +54,18 @@ xcodebuild \
   build
 ```
 
+## Deploy to a paired iPhone
+
+With one paired physical iPhone connected and unlocked, build, install, and
+launch the app with:
+
+```bash
+bun stream
+```
+
+If more than one iPhone is available, select one explicitly with
+`STREAM_DEVICE_ID=<UDID> bun stream`.
+
 ## Configure a stream
 
 Open Settings and choose the transport:
