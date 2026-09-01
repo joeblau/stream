@@ -697,7 +697,7 @@ struct SettingsView: View {
                 set: { newValue in
                     settings.pipEnabled = newValue
                     if newValue { camera.request() }
-                    capture.setPIPEnabled(newValue)
+                    capture.setPIPEnabled(newValue, settings: settings)
                     onChange()
                 }
             ))
@@ -761,7 +761,7 @@ struct SettingsView: View {
             if settings.pipEnabled {
                 if !camera.multitaskingSupported {
                     Label(
-                        "This device can't run the camera during a system broadcast, so the facecam won't appear — the stream stays screen-only. Camera-while-broadcasting needs a device that supports multitasking camera access (e.g. iPad Pro / iPad Air).",
+                        "This build doesn't have multitasking camera access, so iOS will stop the facecam when Stream leaves the foreground. Enable the Multitasking Camera Access capability for this App ID and reinstall the app.",
                         systemImage: "exclamationmark.triangle.fill"
                     )
                     .foregroundStyle(.orange)

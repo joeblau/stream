@@ -35,6 +35,8 @@ process, as required by ScreenCaptureKit on iOS 27.
 - iOS 27 or newer on a physical device.
 - XcodeGen (`brew install xcodegen`).
 - An Apple Developer team for device signing.
+- Apple's Multitasking Camera Access capability enabled for the Stream App ID so
+  the facecam remains active during full-display capture.
 
 The current Xcode 27 beta does not ship ScreenCaptureKit in the iOS Simulator SDK.
 The app provides a simulator stub for previews and non-capture UI, but actual
@@ -92,8 +94,11 @@ configured in Settings.
 
 ScreenCaptureKit's system camera effect only supports current-application capture.
 Stream captures the full display, so it retains its own low-resolution camera input
-and composites that frame into the selected corner before encoding. Devices that
-cannot keep a camera session active during multitasking fall back to screen-only.
+and composites that frame into the selected corner before encoding. The app uses
+Apple's Multitasking Camera Access entitlement to keep that camera session active
+after full-display sharing moves Stream into the background. If the installed
+provisioning profile does not grant the capability, Settings reports that the
+signed build cannot keep the facecam active.
 
 ## Codec selection
 

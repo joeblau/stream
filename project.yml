@@ -117,6 +117,10 @@ targets:
     entitlements:
       path: Stream/Stream.entitlements
       properties:
+        # Keeps AVCaptureSession alive after full-display sharing moves Stream to
+        # the background. This capability must also be enabled for the App ID in
+        # the Apple Developer portal so its provisioning profile carries the key.
+        com.apple.developer.avfoundation.multitasking-camera-access: true
         com.apple.security.application-groups:
           - group.com.joeblau.Stream
         keychain-access-groups:
