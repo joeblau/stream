@@ -39,6 +39,16 @@ final class ScreenCaptureController: NSObject {
     /// hides AVCaptureSession's cold-start latency behind content selection instead
     /// of showing an empty PiP after the broadcast has already gone live.
     @ObservationIgnored private var pendingFacecam: FacecamCapture?
+    /// Foreground preview session used before and after a broadcast. It is handed
+    /// directly to `ScreenCaptureOutput` at go-live so previewing never opens a
+    /// second, competing camera session.
+    @ObservationIgnored private var previewFacecam: FacecamCapture?
+    @ObservationIgnored private var previewSettings: StreamSettings?
+    @ObservationIgnored private var isPIPPreviewActive = true
+    /// The latest-frame holder currently available to the SwiftUI preview. Stored
+    /// (rather than computed from `output`) so enabling PiP while idle invalidates
+    /// the view immediately and displays the camera before a broadcast starts.
+    private(set) var facecamPreviewFrames: LatestCameraFrame?
     @ObservationIgnored private var stream: SCStream?
     @ObservationIgnored private var output: ScreenCaptureOutput?
     @ObservationIgnored private var publisher: (any Publisher)?
@@ -100,8 +110,11 @@ final class ScreenCaptureController: NSObject {
 
         pendingSettings = settings
         if settings.pipEnabled {
-            let facecam = FacecamCapture()
+            previewSettings = settings
+            let facecam = previewFacecam ?? FacecamCapture()
+            previewFacecam = nil
             pendingFacecam = facecam
+            facecamPreviewFrames = facecam.latest
             facecam.start(with: settings)
         }
         Task {
@@ -259,6 +272,9 @@ final class ScreenCaptureController: NSObject {
 
             self.publisher = publisher
             self.output = output
+            self.facecamPreviewFrames = settings.pipEnabled
+                ? output.facecamPreviewFrames
+                : nil
             self.stream = stream
             publisherTask = Task { [weak self] in
                 do {
@@ -326,6 +342,17 @@ final class ScreenCaptureController: NSObject {
         }
         if let publisher { await publisher.stop() }
         await deactivateAudioSession()
+        if let output, previewSettings?.pipEnabled == true, isPIPPreviewActive {
+            // `finish()` queued a stop on the facecam's serial queue. Reusing the
+            // same instance queues this restart after it, preserving one camera
+            // session while returning seamlessly to the idle preview.
+            let facecam = output.facecamCapture
+            previewFacecam = facecam
+            facecamPreviewFrames = facecam.latest
+            if let previewSettings { facecam.start(with: previewSettings) }
+        } else {
+            facecamPreviewFrames = nil
+        }
         publishState(false)
         captureLog.info("ScreenCaptureKit stream stopped")
     }
@@ -366,12 +393,6 @@ final class ScreenCaptureController: NSObject {
         Task { await publisher.setMicVolume(volume) }
     }
 
-    /// The same latest-frame holder feeding the compositor. The UI renders from it
-    /// without opening a second camera session.
-    var facecamPreviewFrames: LatestCameraFrame? {
-        output?.facecamPreviewFrames
-    }
-
     /// Keeps drag-to-corner UI changes synchronized with the live compositor.
     func setPIPCorner(_ corner: PIPCorner) {
         output?.setPIPCorner(corner)
@@ -381,9 +402,41 @@ final class ScreenCaptureController: NSObject {
         output?.setPIPScale(scale)
     }
 
-    /// Applies the toolbar/settings facecam toggle to an active broadcast.
-    func setPIPEnabled(_ enabled: Bool) {
-        output?.setPIPEnabled(enabled)
+    /// Applies the toolbar/settings facecam toggle to the live compositor and to
+    /// the local preview. While idle, enabling starts the preview immediately.
+    func setPIPEnabled(_ enabled: Bool, settings: StreamSettings? = nil) {
+        if let settings { previewSettings = settings }
+        if let output {
+            output.setPIPEnabled(enabled)
+            facecamPreviewFrames = enabled ? output.facecamPreviewFrames : nil
+        } else {
+            refreshIdleFacecam()
+        }
+    }
+
+    /// Suspends only the idle preview when Stream leaves the foreground. A live
+    /// broadcast continues using its facecam through the compositor.
+    func setPIPPreviewActive(_ active: Bool, settings: StreamSettings) {
+        isPIPPreviewActive = active
+        previewSettings = settings
+        guard output == nil, pendingFacecam == nil else { return }
+        refreshIdleFacecam()
+    }
+
+    private func refreshIdleFacecam() {
+        guard output == nil, pendingFacecam == nil else { return }
+        guard isPIPPreviewActive,
+              let settings = previewSettings,
+              settings.pipEnabled else {
+            previewFacecam?.stop()
+            previewFacecam = nil
+            facecamPreviewFrames = nil
+            return
+        }
+        let facecam = previewFacecam ?? FacecamCapture()
+        previewFacecam = facecam
+        facecamPreviewFrames = facecam.latest
+        facecam.start(with: settings)
     }
 
     /// Once the software preview has produced its first capturable frame, the
@@ -451,6 +504,8 @@ extension ScreenCaptureController: SCContentSharingPickerObserver {
             self.pendingSettings = nil
             self.pendingFacecam?.stop()
             self.pendingFacecam = nil
+            self.facecamPreviewFrames = nil
+            self.refreshIdleFacecam()
             captureLog.info("ScreenCaptureKit picker cancelled")
             await self.deactivateAudioSession()
         }
@@ -475,6 +530,8 @@ extension ScreenCaptureController: SCContentSharingPickerObserver {
             self.pendingSettings = nil
             self.pendingFacecam?.stop()
             self.pendingFacecam = nil
+            self.facecamPreviewFrames = nil
+            self.refreshIdleFacecam()
             let nsError = error.value
             captureLog.error("Picker failed: domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) message=\(nsError.localizedDescription, privacy: .public)")
             await self.deactivateAudioSession()
@@ -671,6 +728,10 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
         facecam.latest
     }
 
+    var facecamCapture: FacecamCapture {
+        facecam
+    }
+
     func setPIPCorner(_ corner: PIPCorner) {
         pipCorner.withLock { $0 = corner }
     }
@@ -846,7 +907,9 @@ final class ScreenCaptureController {
 
     func setPIPScale(_ scale: Double) {}
 
-    func setPIPEnabled(_ enabled: Bool) {}
+    func setPIPEnabled(_ enabled: Bool, settings: StreamSettings? = nil) {}
+
+    func setPIPPreviewActive(_ active: Bool, settings: StreamSettings) {}
 
     func setPIPRenderedInApp(_ isRenderedInApp: Bool) {}
 

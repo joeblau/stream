@@ -65,11 +65,11 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         session.sessionPreset = .vga640x480
 
         // Required for the camera to continue after the app backgrounds: without
-        // multitasking camera access the session is
-        // interrupted with .videoDeviceNotAvailableWithMultipleForegroundApps and
-        // delivers no frames. Settable only where supported (iPad Pro/Air and other
-        // multitasking-camera devices; most iPhones report false — there the
-        // facecam can't run and the stream stays screen-only).
+        // multitasking camera access the session is interrupted with
+        // .videoDeviceNotAvailableWithMultipleForegroundApps and delivers no frames.
+        // Stream's signed target carries Apple's multitasking-camera entitlement;
+        // keep the runtime guard so an incorrectly provisioned build still degrades
+        // safely to screen-only instead of attempting an unsupported property set.
         if session.isMultitaskingCameraAccessSupported {
             session.isMultitaskingCameraAccessEnabled = true
         }

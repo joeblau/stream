@@ -37,13 +37,16 @@ enum ThermalPowerGovernor {
                                        notice: "Cooling down — quality reduced")
         case .serious:
             return ThermalPowerCeiling(bitRateScale: 0.6, frameRateCap: 24,
-                                       allowPiP: false,
+                                       allowPiP: true,
                                        notice: "Device warm — quality reduced")
         case .fair, .nominal:
-            // Mild thermals are fine; only Low Power Mode pulls the rate back.
+            // Low Power Mode pulls encoder/network cost back, but must not silently
+            // remove the user's facecam. Camera shedding remains reserved for a
+            // critical thermal emergency, where keeping it alive risks an
+            // OS-level capture interruption or termination.
             return lowPowerMode
                 ? ThermalPowerCeiling(bitRateScale: 0.75, frameRateCap: 30,
-                                      allowPiP: false,
+                                      allowPiP: true,
                                       notice: "Low Power Mode — quality reduced")
                 : .unrestricted
         @unknown default:

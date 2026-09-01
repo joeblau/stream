@@ -6,9 +6,9 @@ import AVFoundation
 ///
 /// The facecam is composited into ScreenCaptureKit frames in the host app. iOS
 /// only allows its camera session to continue in the background when
-/// `AVCaptureSession.isMultitaskingCameraAccessSupported` is true — historically
-/// iPad Pro / iPad Air and other multitasking-camera devices; most iPhones report
-/// false, in which case the facecam cannot run and the stream stays screen-only.
+/// `AVCaptureSession.isMultitaskingCameraAccessSupported` is true. Stream requests
+/// Apple's multitasking-camera entitlement; this runtime value confirms that the
+/// installed provisioning profile and current device actually grant the capability.
 @MainActor
 @Observable
 final class CameraSupport {
@@ -21,7 +21,7 @@ final class CameraSupport {
 
     private(set) var permission: Permission = .undetermined
 
-    /// Whether the camera can run during a system broadcast on this device.
+    /// Whether this signed build can run the camera during a system broadcast.
     private(set) var multitaskingSupported = false
 
     init() {
