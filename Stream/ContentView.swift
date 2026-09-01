@@ -69,7 +69,7 @@ struct ContentView: View {
     /// instead of tearing the broadcast down immediately.
     @State private var showingStopConfirmation = false
 
-    /// The mic gain to restore when the user un-mutes from the FAB. Captured the
+    /// The mic gain to restore when the user un-mutes from the toolbar. Captured the
     /// moment they mute so toggling back returns to their chosen level, not unity.
     @State private var preMuteVolume: Double = 1.0
 
@@ -178,9 +178,6 @@ struct ContentView: View {
         TabView {
             NavigationStack {
                 ChatFeedView(chat: chat)
-                    .overlay(alignment: .bottomTrailing) {
-                        if capture.isLive { micFAB }
-                    }
                     .overlay(alignment: .top) {
                         VStack(spacing: 8) {
                             if capture.isLive { livePill }
@@ -223,8 +220,14 @@ struct ContentView: View {
                                                     ? "Hide camera"
                                                     : "Show camera")
 
-                                MicrophoneStatusMeter(monitor: micLevel,
-                                                      isMuted: isMicMuted)
+                                Button(action: toggleMicMute) {
+                                    MicrophoneStatusMeter(monitor: micLevel,
+                                                          isMuted: isMicMuted)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(isMicMuted
+                                                    ? "Unmute microphone"
+                                                    : "Mute microphone")
                             }
                             .animation(.easeInOut(duration: 0.2),
                                        value: settings.pipEnabled)
@@ -385,30 +388,10 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Mute FAB
-
-    /// Floating mic mute/unmute control, pinned to the bottom-trailing corner while
-    /// a broadcast is live. Uses the platform glass so it reads as a control sitting
-    /// above the chat feed; turns red-tinted and swaps to `mic.slash` when muted.
-    private var micFAB: some View {
-        Button(action: toggleMicMute) {
-            Image(systemName: isMicMuted ? "mic.slash.fill" : "mic.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(isMicMuted ? Color.red : Color.primary)
-                .frame(width: 60, height: 60)
-                .contentTransition(.symbolEffect(.replace))
-        }
-        .glassEffect(.regular.interactive(), in: .circle)
-        .padding(.trailing, 20)
-        .padding(.bottom, 20)
-        .accessibilityLabel(isMicMuted ? "Unmute microphone" : "Mute microphone")
-        .transition(.scale.combined(with: .opacity))
-    }
-
     // MARK: - Live pill
 
     /// Persistent LIVE indicator + elapsed timer, pinned to the top while a broadcast
-    /// is live. A glass capsule matching the micFAB; the timer ticks in its own
+    /// is live. The timer ticks in its own
     /// `TimelineView` off `broadcastStartedAt` (a Date) so it keeps counting across
     /// backgrounding and only the label — not the whole feed — refreshes each second.
     private var livePill: some View {
