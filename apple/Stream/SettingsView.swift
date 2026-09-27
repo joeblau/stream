@@ -718,7 +718,14 @@ struct SettingsView: View {
 
                 Picker("Camera", selection: Binding(
                     get: { settings.cameraPosition },
-                    set: { settings.cameraPosition = $0; onChange() }
+                    set: {
+                        settings.cameraPosition = $0
+                        // Without this the picker only changed the *mirroring* —
+                        // the capture session kept running whichever camera it was
+                        // configured with at start.
+                        capture.setCameraPosition($0, settings: settings)
+                        onChange()
+                    }
                 )) {
                     ForEach(CameraPosition.allCases, id: \.self) { pos in
                         Text(pos == .front ? "Front" : "Back").tag(pos)

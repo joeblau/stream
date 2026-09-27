@@ -255,7 +255,10 @@ final class ScreenCaptureController: NSObject {
         configuration.capturesAudio = settings.includeAppAudio
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
-        configuration.excludesCurrentProcessAudio = true
+        // Bloxwap runs inside Stream's WKWebView, so its effects are current-process
+        // audio. Keep them in the ScreenCaptureKit app-audio track; the microphone
+        // remains a separate track and can still be muted independently.
+        configuration.excludesCurrentProcessAudio = false
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: output)
         do {
@@ -300,6 +303,13 @@ final class ScreenCaptureController: NSObject {
             }
             captureLog.info("ScreenCaptureKit stream started")
         } catch {
+            // `self.output` is only assigned after `addStreamOutput` succeeds, so a
+            // throw here leaves `stopCapture`'s `output?.finish()` with nothing to
+            // call. Without this the output's video-consumer task stays parked on an
+            // AsyncStream that is never finished, holding the compositor's Metal
+            // context and pixel-buffer pool alive for the life of the process — one
+            // leak per failed go-live attempt.
+            output.finish()
             facecam.stop()
             await stopCapture()
             let nsError = error as NSError
@@ -443,6 +453,24 @@ final class ScreenCaptureController: NSObject {
     /// foreground screen already contains PiP and the compositor copy is disabled.
     func setPIPRenderedInApp(_ isRenderedInApp: Bool) {
         output?.setPIPRenderedInApp(isRenderedInApp)
+    }
+
+    /// Flips the facecam between the front and back camera, live. Exactly one of
+    /// these three references holds the camera session at any time — the live
+    /// broadcast's, the one warming behind the system picker, or the idle preview's
+    /// — and the swap is a session reconfiguration rather than a restart, so it
+    /// lands in a few hundred milliseconds with no gap in the outgoing stream.
+    func setCameraPosition(_ position: CameraPosition, settings: StreamSettings? = nil) {
+        if var previewSettings {
+            previewSettings.cameraPosition = position
+            self.previewSettings = previewSettings
+        } else if var settings {
+            settings.cameraPosition = position
+            previewSettings = settings
+        }
+        output?.facecamCapture.setCameraPosition(position)
+        pendingFacecam?.setCameraPosition(position)
+        previewFacecam?.setCameraPosition(position)
     }
 
     /// Recomputes the thermal/Low-Power ceiling and pushes it to the encoder (via
@@ -619,6 +647,11 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
         )
         super.init()
         if settings.pipEnabled { facecam.start(with: settings) }
+        // This task retains `self` and is retained by it. The cycle is deliberate —
+        // the consumer IS this output's engine — and `finish()` breaks it by
+        // finishing the stream and dropping the task. Every teardown path must
+        // therefore reach `finish()`, including the failed-start path in
+        // `startCapture`'s catch block.
         videoConsumer = Task { [videoSamples, publisher, settings, capability] in
             var targetSize: CGSize?
             for await sampleBuffer in videoSamples {
@@ -638,14 +671,18 @@ private final class ScreenCaptureOutput: NSObject, SCStreamOutput, SCStreamDeleg
                 if shouldComposite, let targetSize {
                     let corner = self.pipCorner.withLock { $0 }
                     let scale = self.pipScale.withLock { $0 }
+                    // Mirror by the camera that produced these pixels, not by the
+                    // current setting: across a flip the two disagree for as long as
+                    // the last frame from the outgoing camera is still on hand.
+                    let cameraFrame = self.facecam.latest.freshest()
                     if let composited = self.compositor.composite(
                            screen: image,
-                           camera: self.facecam.latest.freshest(),
+                           camera: cameraFrame?.buffer,
                            targetSize: targetSize,
                            orientation: .up,
                            corner: corner,
                            scale: scale,
-                           cameraPosition: settings.cameraPosition
+                           cameraPosition: cameraFrame?.position ?? settings.cameraPosition
                        ),
                        let output = self.compositor.makeSampleBuffer(
                            from: composited,
@@ -912,6 +949,8 @@ final class ScreenCaptureController {
     func setPIPPreviewActive(_ active: Bool, settings: StreamSettings) {}
 
     func setPIPRenderedInApp(_ isRenderedInApp: Bool) {}
+
+    func setCameraPosition(_ position: CameraPosition, settings: StreamSettings? = nil) {}
 
     func clearError() {
         errorMessage = nil

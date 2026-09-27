@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+# Resolve app paths relative to this script, including when called from the repo root.
+cd "${0:A:h:h}"
+xcodegen generate
+
 if [[ -z "${STREAM_DEVICE_ID:-}" ]]; then
     typeset -a available_iphones
     available_iphones=("${(@f)$(xcrun devicectl list devices \

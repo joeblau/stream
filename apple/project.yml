@@ -49,6 +49,13 @@ targets:
         # requirement, so CI can build and run the suite on whatever iOS
         # simulator the runner ships — not only an (unavailable) iOS 27 sim.
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        # The framework also builds for macOS (StreamMac). SDKROOT auto +
+        # explicit SUPPORTED_PLATFORMS let one target serve both platforms;
+        # the only version-gated API is NetworkPathSnapshot's iOS 26/macOS 26
+        # link-quality probe, guarded by #available in source.
+        SDKROOT: auto
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator macosx"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
       configs:
         # Lets StreamCoreTests use `@testable import StreamCore` to pin internal
         # cross-process contracts (e.g. the per-protocol Keychain account keys).
@@ -68,6 +75,11 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         # Match StreamCore's low floor so the suite runs on any iOS simulator.
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        # Same multi-platform setup as StreamCore so the suite also runs on
+        # macOS (logic tests, no host app needed).
+        SDKROOT: auto
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator macosx"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
     dependencies:
       - target: StreamCore
 
@@ -137,6 +149,59 @@ targets:
       - package: HaishinKit
         product: RTCHaishinKit
 
+  # ---------------------------------------------------------------
+  # macOS application (SwiftUI). Shares StreamCore with the iOS app and,
+  # like it, links the HaishinKit products directly — the publishing
+  # libraries must be loaded exactly once, into the app target only.
+  # Swift 6 + strict concurrency come from the project base settings.
+  # ---------------------------------------------------------------
+  StreamMac:
+    type: application
+    platform: macOS
+    sources:
+      - StreamMac
+      # The publishers + facecam pipeline are process-agnostic and shared with
+      # the iOS app (FacecamCapture carries #if os(iOS) shims); the publishing
+      # libraries must be loaded exactly once, into the app target only.
+      - StreamBroadcast/RTMPPublisher.swift
+      - StreamBroadcast/SessionPublisher.swift
+      - StreamBroadcast/FacecamCapture.swift
+      - StreamBroadcast/FacecamCompositor.swift
+      - StreamBroadcast/LatestCameraFrame.swift
+      # Restream chat, shared with the iOS app (macOS-adapted).
+      - Stream/RestreamChat.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamMac
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        # The project base carries iOS-only settings; they do not apply here.
+        TARGETED_DEVICE_FAMILY: ""
+    entitlements:
+      path: StreamMac/StreamMac.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.device.camera: true
+        com.apple.security.device.microphone: true
+        com.apple.security.network.client: true
+        # Same App Group + keychain access group as the iOS app so settings
+        # and stream credentials are shared via StreamCore's stores.
+        com.apple.security.application-groups:
+          - group.com.joeblau.Stream
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.joeblau.Stream
+    dependencies:
+      - target: StreamCore
+        embed: true
+      - package: HaishinKit
+        product: HaishinKit
+      - package: HaishinKit
+        product: RTMPHaishinKit
+      - package: HaishinKit
+        product: SRTHaishinKit
+      - package: HaishinKit
+        product: RTCHaishinKit
+
 # ---------------------------------------------------------------
 # Shared scheme so `xcodegen generate` produces a deterministic,
 # CLI/CI-buildable scheme (Xcode otherwise auto-creates a local one).
@@ -146,6 +211,23 @@ schemes:
     build:
       targets:
         Stream: all
+        StreamCoreTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - StreamCoreTests
+    archive:
+      config: Release
+
+  # ---------------------------------------------------------------
+  # macOS app scheme (deterministic, CLI/CI-buildable like Stream's).
+  # ---------------------------------------------------------------
+  StreamMac:
+    build:
+      targets:
+        StreamMac: all
         StreamCoreTests: [test]
     run:
       config: Debug

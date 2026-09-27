@@ -1,0 +1,47 @@
+:root {
+  color-scheme: dark;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #0a0c10;
+  color: #f4f6fa;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+main {
+  min-height: 100svh;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: clamp(2rem, 8vw, 7rem) clamp(1.5rem, 6vw, 5rem);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+.wordmark { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.02em; }
+.wordmark span {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  background: #5a99ff;
+}
+h1 {
+  margin: 3rem 0 1.5rem;
+  font-size: clamp(3.5rem, 9vw, 7.5rem);
+  line-height: 1;
+  letter-spacing: -0.065em;
+}
+.description { max-width: 31rem; color: #a9b3c3; font-size: 1.2rem; line-height: 1.65; }
+a {
+  margin-top: 1.5rem;
+  padding: 0.9rem 1.25rem;
+  border-radius: 0.5rem;
+  color: #0a0c10;
+  background: #8bb7ff;
+  text-decoration: none;
+  font-weight: 700;
+}
+a:hover { background: #b7d2ff; }
+a:focus-visible { outline: 3px solid white; outline-offset: 5px; }
+.protocols { margin-top: 4rem; color: #8793a7; font-size: 0.85rem; letter-spacing: 0.1em; }

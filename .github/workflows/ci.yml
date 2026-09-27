@@ -13,6 +13,9 @@ jobs:
   test:
     name: StreamCore tests (iOS Simulator)
     runs-on: macos-26
+    defaults:
+      run:
+        working-directory: apple
     steps:
       - name: Checkout
         uses: actions/checkout@v4
