@@ -52,11 +52,12 @@ public struct NetworkPathSnapshot: Sendable, Equatable {
         } ?? ""
         isExpensive = path.isExpensive
         isConstrained = path.isConstrained
-        // isUltraConstrained + linkQuality are iOS 26+. StreamCore's deployment
-        // floor is iOS 18 (so its tests run on any CI simulator); guard the newer
-        // signals and fall back to the unrestricted values below that. The app
-        // itself requires iOS 27, so on-device these always read the real values.
-        if #available(iOS 26.0, *) {
+        // isUltraConstrained + linkQuality are iOS 26/macOS 26+. StreamCore's
+        // deployment floor is iOS 18/macOS 14 (so its tests run on any CI host);
+        // guard the newer signals and fall back to the unrestricted values below
+        // that. The app itself requires iOS 27, so on-device these always read
+        // the real values.
+        if #available(iOS 26.0, macOS 26.0, *) {
             isUltraConstrained = path.isUltraConstrained
             linkQualityIsMinimal = path.linkQuality == .minimal
         } else {

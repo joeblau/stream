@@ -130,6 +130,16 @@ struct ContentView: View {
         syncPIPRendering()
     }
 
+    /// Swaps the facecam between the front and back camera. The capture session is
+    /// reconfigured in place — no restart — so a live broadcast keeps publishing
+    /// through the swap; the card's flip animation covers the couple of hundred
+    /// milliseconds before the new camera's first frame lands.
+    private func flipCamera() {
+        settings.cameraPosition = settings.cameraPosition == .front ? .back : .front
+        persist()
+        capture.setCameraPosition(settings.cameraPosition, settings: settings)
+    }
+
     /// Persists a drag-to-corner edit and pushes it into the running compositor
     /// immediately, so the local preview and outgoing stream never disagree.
     private var livePIPCorner: Binding<PIPCorner> {
@@ -269,7 +279,8 @@ struct ContentView: View {
                         guard !isPIPPreviewReady else { return }
                         isPIPPreviewReady = true
                         syncPIPRendering()
-                    }
+                    },
+                    onFlipCamera: flipCamera
                 )
                 .transition(.scale.combined(with: .opacity))
             }
@@ -498,7 +509,7 @@ struct ContentView: View {
 /// The second page in the root pager. The web view is created once and retains its
 /// navigation and scroll position while the user swipes back to the main screen.
 private struct BloxwapWebView: UIViewRepresentable {
-    private static let url = URL(string: "https://bloxwap.com")!
+    private static let url = URL(string: "https://bloxwap.app")!
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()

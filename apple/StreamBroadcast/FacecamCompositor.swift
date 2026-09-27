@@ -16,15 +16,31 @@ final class FacecamCompositor {
     private var poolHeight = 0
     private var outputFormatDescription: CMVideoFormatDescription?
     private let workingColorSpace = CGColorSpaceCreateDeviceRGB()
+    /// Reused corner-rounding mask generator. `CIFilter(name:)` is a registry
+    /// lookup plus an NSObject allocation; at 60 fps for the life of a broadcast
+    /// that is pure churn, and the filter is stateless between frames.
+    private let roundedRectangleGenerator = CIFilter(name: "CIRoundedRectangleGenerator")
+    /// The last mask produced by `roundedRectangleGenerator`, keyed by the geometry
+    /// that produced it. The facecam box only moves when the user drags it to
+    /// another corner or resizes it, so the mask is otherwise identical every frame.
+    private var cachedMask: CIImage?
+    private var cachedMaskRect: CGRect = .null
+    private var cachedMaskRadius: CGFloat = -1
 
     init() {
+        // `.cacheIntermediates: false` matters more here than in a one-shot render:
+        // this context renders continuously for the length of a broadcast, and the
+        // intermediate cache is memory that never pays off across frames.
+        let options: [CIContextOption: Any] = [
+            .workingColorSpace: NSNull(),
+            .cacheIntermediates: false
+        ]
         if let device = MTLCreateSystemDefaultDevice() {
-            ciContext = CIContext(mtlDevice: device,
-                                  options: [.workingColorSpace: NSNull()])
+            ciContext = CIContext(mtlDevice: device, options: options)
         } else {
             // Simulator / no Metal device: fall back to a software context so
             // the type still functions (and compiles) everywhere.
-            ciContext = CIContext(options: [.workingColorSpace: NSNull()])
+            ciContext = CIContext(options: options)
         }
     }
 
@@ -59,8 +75,13 @@ final class FacecamCompositor {
             .transformed(by: CGAffineTransform(scaleX: fit, y: fit))
             .transformed(by: CGAffineTransform(translationX: tx, y: ty))
 
-        // Composite over black so any letterbox/pillarbox margin is clean.
-        screenImage = screenImage.composited(over: CIImage(color: .black).cropped(to: canvas))
+        // Composite over black so any letterbox/pillarbox margin is clean. The
+        // canvas is derived from this same screen's aspect ratio, so in the normal
+        // case the fitted image covers it exactly and the blend is a full-frame pass
+        // over pixels that are all about to be overwritten — skip it then.
+        if !screenImage.extent.contains(canvas) {
+            screenImage = screenImage.composited(over: CIImage(color: .black).cropped(to: canvas))
+        }
 
         if let camera {
             // Mirror the front camera so the user sees a natural reflection.
@@ -113,11 +134,14 @@ final class FacecamCompositor {
 
         guard let pool = ensurePool(width: outWidth, height: outHeight) else { return nil }
         // Never let a slow encoder turn the pool into an unbounded collection of
-        // BGRA surfaces. One buffer may be in the publisher while this frame is
-        // rendered, so allow at most two outstanding allocations and drop beyond
-        // that. At 720p portrait each surface is several megabytes.
+        // BGRA surfaces — but the steady state genuinely needs four: one being
+        // rendered here, one inside the mixer's single input buffer, one pinned by
+        // the publisher's frame-repeat `lastVideoBuffer`, and one of slack. A
+        // threshold of two put the pipeline permanently one buffer short, so any
+        // encoder hiccup failed the allocation and shed the frame
+        // (`telemetry.recordDrop(.compositor)`) even on a healthy uplink.
         let allocationLimit = [
-            kCVPixelBufferPoolAllocationThresholdKey as String: 2
+            kCVPixelBufferPoolAllocationThresholdKey as String: 4
         ] as CFDictionary
         var out: CVPixelBuffer?
         guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
@@ -195,16 +219,28 @@ final class FacecamCompositor {
     private func applyRoundedCorners(_ image: CIImage,
                                      radius: CGFloat,
                                      rect: CGRect) -> CIImage {
-        guard let generator = CIFilter(name: "CIRoundedRectangleGenerator") else {
-            return image
-        }
-        generator.setValue(CIVector(cgRect: rect), forKey: "inputExtent")
-        generator.setValue(radius, forKey: "inputRadius")
-        generator.setValue(CIColor.white, forKey: "inputColor")
-        guard let mask = generator.outputImage else { return image }
+        guard let mask = roundedCornerMask(radius: radius, rect: rect) else { return image }
         return image.applyingFilter("CIBlendWithAlphaMask", parameters: [
             kCIInputBackgroundImageKey: CIImage.empty(),
             kCIInputMaskImageKey: mask
         ])
+    }
+
+    /// The facecam box's rounded-corner mask. Its geometry only changes when the
+    /// user moves or resizes the overlay, so the generated mask is reused across
+    /// every frame in between.
+    private func roundedCornerMask(radius: CGFloat, rect: CGRect) -> CIImage? {
+        if let cachedMask, cachedMaskRect == rect, cachedMaskRadius == radius {
+            return cachedMask
+        }
+        guard let generator = roundedRectangleGenerator else { return nil }
+        generator.setValue(CIVector(cgRect: rect), forKey: "inputExtent")
+        generator.setValue(radius, forKey: "inputRadius")
+        generator.setValue(CIColor.white, forKey: "inputColor")
+        guard let mask = generator.outputImage else { return nil }
+        cachedMask = mask
+        cachedMaskRect = rect
+        cachedMaskRadius = radius
+        return mask
     }
 }

@@ -1,7 +1,11 @@
 {
-  "name": "stream-ios",
+  "name": "blau-stream-monorepo",
   "private": true,
   "scripts": {
-    "stream": "zsh scripts/stream.zsh"
+    "stream": "zsh apple/scripts/stream.zsh",
+    "web:dev": "npm --prefix workers/web run dev",
+    "web:build": "npm --prefix workers/web run build:worker",
+    "web:preview": "npm --prefix workers/web run preview",
+    "web:deploy": "npm --prefix workers/web run deploy"
   }
 }

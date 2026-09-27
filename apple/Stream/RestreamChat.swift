@@ -1,7 +1,11 @@
 import Foundation
 import AuthenticationServices
 import Observation
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 import os
 
 private let chatLog = Logger(subsystem: "com.joeblau.Stream", category: "chat")
@@ -323,12 +327,18 @@ final class RestreamChat: NSObject {
 extension RestreamChat: ASWebAuthenticationPresentationContextProviding {
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         MainActor.assumeIsolated {
+            #if os(macOS)
+            return NSApplication.shared.keyWindow
+                ?? NSApplication.shared.windows.first
+                ?? NSWindow()
+            #else
             let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             let windows = scenes.flatMap(\.windows)
             if let key = windows.first(where: \.isKeyWindow) { return key }
             if let first = windows.first { return first }
             // OAuth is only started with visible UI, so a scene is guaranteed here.
             return UIWindow(windowScene: scenes.first!)
+            #endif
         }
     }
 }
