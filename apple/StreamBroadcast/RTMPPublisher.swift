@@ -34,6 +34,9 @@ actor RTMPPublisher: Publisher {
     )
     private var isRunning = false
     private var settings: StreamSettings = .default
+    /// Lifecycle events for the controller's streaming state machine (W02).
+    nonisolated let events: AsyncStream<PublisherEvent>
+    private let eventCont: AsyncStream<PublisherEvent>.Continuation
 
     /// The frame rate this device can encode: the user's chosen rate clamped to
     /// the device capability ceiling. Replaces the old hard `min(frameRate, 30)`
@@ -88,6 +91,7 @@ actor RTMPPublisher: Publisher {
 
     init(telemetry: FrameTelemetry = FrameTelemetry()) {
         self.telemetry = telemetry
+        (events, eventCont) = AsyncStream.makeStream(of: PublisherEvent.self, bufferingPolicy: .unbounded)
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
         (appStream, appCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
     }
@@ -415,6 +419,7 @@ actor RTMPPublisher: Publisher {
         recoveryInProgress = true
         defer { recoveryInProgress = false }
 
+        eventCont.yield(.reconnecting(reason: reason))
         streamLog.warning("RTMP recovery requested: \(reason, privacy: .public)")
         // The fresh connection starts admitting every frame; shedding only
         // re-raises via checkNetworkHealth if congestion actually returns.
@@ -456,6 +461,7 @@ actor RTMPPublisher: Publisher {
             }
             shouldDelay = true
             attempt += 1
+            eventCont.yield(.connecting)
             do {
                 try await connectAndPublish()
                 // A reconnect that SUCCEEDS costs ~1s next time; backoff grows only
@@ -463,6 +469,7 @@ actor RTMPPublisher: Publisher {
                 // success turned a burst of (individually recoverable) false recycles
                 // into progressively longer 2→4→8→…→30s dead-air windows.
                 backoff.reset()
+                eventCont.yield(.published)
                 streamLog.info("RTMP reconnected after \(attempt) attempt(s)")
                 stableConnectionTask?.cancel()
                 stableConnectionTask = Task { [weak self] in
@@ -926,6 +933,8 @@ actor RTMPPublisher: Publisher {
 
         guard isRunning else {
             await mixer.stopRunning()
+            eventCont.yield(.stopped)
+            eventCont.finish()
             return
         }
         isRunning = false
@@ -936,6 +945,8 @@ actor RTMPPublisher: Publisher {
         _ = try? await stream.close()
         _ = try? await connection.close()
         await mixer.stopRunning()
+        eventCont.yield(.stopped)
+        eventCont.finish()
     }
 }
 

@@ -11,16 +11,28 @@ import os.lock
 /// composites them per the selected scene on a settings-fps render loop, feeds
 /// the preview, and drives the network `Publisher` while live.
 ///
+/// W02 (issue #62): preview, streaming, and recording are INDEPENDENT session
+/// state machines (see SessionState.swift). The streaming machine is folded
+/// from the publisher's own `PublisherEvent`s — LIVE only on an acknowledged
+/// publish — so stopping preview or closing the window never silently kills an
+/// active output: the render pipeline stays up while ANY output demands frames.
+///
 /// One ordered video consumer serializes `appendVideo` into the publisher (a
 /// `Task` per frame could reorder buffers); audio goes through the publisher's
 /// own ordered, nonisolated ingress exactly like the iOS pipeline.
 @MainActor
 final class StreamController: ObservableObject {
-    @Published private(set) var isLive = false
-    @Published private(set) var isPreviewing = false
+    /// Streaming (publishing) output lifecycle — read `streamState`, never a bool.
+    @Published private(set) var streamState: StreamSessionState = .idle
+    /// On-screen preview lifecycle. Independent from streaming/recording.
+    @Published private(set) var previewState: PreviewSessionState = .idle
     /// The latest composited frame for the SwiftUI preview, throttled to ~30 fps.
     @Published private(set) var previewImage: CGImage?
     @Published var errorMessage: String?
+
+    /// Convenience for UI; `streamState` carries the full picture.
+    var isLive: Bool { streamState.isLive }
+    var isPreviewing: Bool { previewState == .active }
 
     /// Agent C's local recorder taps the composited output here. Invoked for
     /// every composited frame, live or not, on the main actor.
@@ -39,9 +51,16 @@ final class StreamController: ObservableObject {
         didSet { publisherBox.publisher = publisher }
     }
     private var publisherTask: Task<Void, Never>?
+    /// Folds the publisher's lifecycle events into `streamState`.
+    private var eventTask: Task<Void, Never>?
     private var renderTask: Task<Void, Never>?
     private var videoConsumer: Task<Void, Never>?
     private var videoContinuation: AsyncStream<CMSampleBuffer>.Continuation?
+    /// Captures + render loop are up. Independent from preview: an active stream
+    /// or recording keeps the pipeline running with the preview off (W02).
+    private var isPipelineRunning = false
+    /// Count of recording outputs tapping the composited frames (0 or 1 today).
+    private var recordingDemand = 0
 
     private var settings: StreamSettings = .default
     private let capability = StreamCapability.current
@@ -88,55 +107,169 @@ final class StreamController: ObservableObject {
     // MARK: - Preview / stream lifecycle
 
     func startPreview() {
-        guard !isPreviewing else { return }
+        guard previewState == .idle else { return }
         settings = SettingsStore().load()
-        isPreviewing = true
-        audio.start()
-        applySceneSources()
-        startRenderLoop()
+        previewState = .active
+        updatePipelineDemand()
+    }
+
+    /// Stops the on-screen preview ONLY. An active stream or recording keeps
+    /// running (issue #62): the pipeline demand check below keeps captures and
+    /// the render loop alive for the outputs still consuming frames.
+    func stopPreview() {
+        guard previewState == .active else { return }
+        previewState = .idle
+        previewImage = nil
+        updatePipelineDemand()
     }
 
     func goLive() {
-        guard isPreviewing, !isLive else { return }
+        guard streamState.canStart else { return }
         settings = SettingsStore().load()
         guard settings.isPublishable else {
             errorMessage = "Complete the connection settings before going live."
             return
         }
+        // Go Live needs the render pipeline (frames to publish); the demand
+        // check below starts it even if the user never turned the preview on.
         let publisher = makePublisher(for: settings.selectedProtocol)
         self.publisher = publisher
         outputSizeSentToPublisher = false
+        streamState = .connecting
+        updatePipelineDemand()
         let settings = self.settings
         publisherTask = Task { [weak self] in
             do {
                 try await publisher.start(settings)
             } catch {
-                await self?.publisherDidFail(error)
+                self?.publisherDidFail(error)
             }
         }
-        // Capture is already flowing and the publisher supervises its own
-        // connect/reconnect internally, so the UI is live from here.
-        isLive = true
+        eventTask = Task { [weak self] in
+            for await event in publisher.events {
+                self?.handlePublisherEvent(event)
+            }
+        }
         // The encode size may already be locked by the preview; hand it over.
         applyOutputSizeIfPossible()
     }
 
     func stopStream() {
-        guard isLive else { return }
-        isLive = false
+        guard streamState.isActive else { return }
+        streamState = .stopping
         publisherTask?.cancel()
         publisherTask = nil
+        eventTask?.cancel()
+        eventTask = nil
+        outputSizeSentToPublisher = false
         let ending = publisher
         publisher = nil
-        if let ending {
-            Task { await ending.stop() }
+        guard let ending else {
+            streamState = .idle
+            updatePipelineDemand()
+            return
+        }
+        Task { [weak self] in
+            await ending.stop()
+            self?.streamDidStop()
         }
     }
 
-    func stopPreview() {
-        stopStream()
-        guard isPreviewing else { return }
-        isPreviewing = false
+    // MARK: - Streaming state machine (folded from PublisherEvents)
+
+    private func handlePublisherEvent(_ event: PublisherEvent) {
+        switch event {
+        case .connecting:
+            // A retry attempt during .reconnecting keeps that state; only the
+            // acknowledged publish below ends it.
+            if !streamState.isActive {
+                streamState = .connecting
+            }
+        case .published:
+            // The ingest acknowledged the publish — the ONLY path to LIVE.
+            if streamState.isActive {
+                streamState = .live
+                errorMessage = nil
+            }
+        case .reconnecting(let reason):
+            if streamState == .live || streamState == .connecting {
+                streamState = .reconnecting(reason: reason)
+            }
+        case .failed(let message):
+            if streamState.isActive {
+                failStream(message)
+            }
+        case .stopped:
+            streamDidStop()
+        }
+    }
+
+    private func streamDidStop() {
+        guard streamState == .stopping else { return }
+        streamState = .idle
+        updatePipelineDemand()
+    }
+
+    private func publisherDidFail(_ error: Error) {
+        // `.stopping` excluded: a late error from a publisher the user already
+        // stopped must not flip the session to `.failed`.
+        guard streamState.isActive, streamState != .stopping else { return }
+        failStream(error.localizedDescription)
+    }
+
+    /// Ends the session into `.failed`: tears the publisher down and surfaces
+    /// the message. From `.failed` the transport bar offers a fresh Go Live.
+    private func failStream(_ message: String) {
+        publisherTask?.cancel()
+        publisherTask = nil
+        eventTask?.cancel()
+        eventTask = nil
+        outputSizeSentToPublisher = false
+        let ending = publisher
+        publisher = nil
+        streamState = .failed(message)
+        errorMessage = message
+        if let ending {
+            Task { await ending.stop() }
+        }
+        updatePipelineDemand()
+    }
+
+    // MARK: - Pipeline demand (preview / stream / recording independence)
+
+    /// RecordingController taps the composited frames here so its output keeps
+    /// the render pipeline alive even with the preview off (and vice versa).
+    func noteRecordingStarted() {
+        recordingDemand += 1
+        updatePipelineDemand()
+    }
+
+    func noteRecordingStopped() {
+        recordingDemand = max(0, recordingDemand - 1)
+        updatePipelineDemand()
+    }
+
+    private var pipelineNeeded: Bool {
+        previewState == .active || streamState.isActive || recordingDemand > 0
+    }
+
+    private func updatePipelineDemand() {
+        if pipelineNeeded, !isPipelineRunning {
+            startPipeline()
+        } else if !pipelineNeeded, isPipelineRunning {
+            stopPipeline()
+        }
+    }
+
+    private func startPipeline() {
+        isPipelineRunning = true
+        audio.start()
+        applySceneSources()
+        startRenderLoop()
+    }
+
+    private func stopPipeline() {
+        isPipelineRunning = false
         renderTask?.cancel()
         renderTask = nil
         videoContinuation?.finish()
@@ -148,16 +281,9 @@ final class StreamController: ObservableObject {
         let screenCapture = self.screenCapture
         Task { await screenCapture.stop() }
         latestScreen.clear()
-        previewImage = nil
         targetSize = nil
         outputSizeSentToPublisher = false
         cameraFormatDescription = nil
-    }
-
-    private func publisherDidFail(_ error: Error) {
-        guard isLive else { return }
-        stopStream()
-        errorMessage = error.localizedDescription
     }
 
     private func makePublisher(for transport: StreamCore.StreamProtocol) -> any Publisher {
@@ -176,7 +302,7 @@ final class StreamController: ObservableObject {
     /// screen layout may need one user confirmation; a cancel simply leaves the
     /// scene showing its other source until picked.
     private func applySceneSources() {
-        guard isPreviewing, let scene = sceneStore.selected else { return }
+        guard isPipelineRunning, let scene = sceneStore.selected else { return }
         let layout = scene.layout
         let screenCapture = self.screenCapture
         if layout.usesScreen, !screenCapture.isCapturing {
@@ -227,7 +353,7 @@ final class StreamController: ObservableObject {
     /// the locked encode size, then fan out to the publisher (live only), the
     /// recorder hook, and the preview.
     private func renderTick() {
-        guard isPreviewing, let scene = sceneStore.selected else { return }
+        guard isPipelineRunning, let scene = sceneStore.selected else { return }
         let layout = scene.layout
 
         let screenSample = layout.usesScreen ? latestScreen.take() : nil
@@ -274,13 +400,15 @@ final class StreamController: ObservableObject {
 
         videoContinuation?.yield(sample)
         onCompositedSample?(sample)
-        updatePreview(with: composited)
+        if previewState == .active {
+            updatePreview(with: composited)
+        }
     }
 
     /// Hands the locked encode geometry to the publisher exactly once per
     /// broadcast (`setOutputSize` itself also locks after the first call).
     private func applyOutputSizeIfPossible() {
-        guard isLive, !outputSizeSentToPublisher,
+        guard streamState.isActive, !outputSizeSentToPublisher,
               let publisher, let targetSize else { return }
         outputSizeSentToPublisher = true
         Task { await publisher.setOutputSize(targetSize, nativeShortEdge: Int(min(targetSize.width, targetSize.height))) }

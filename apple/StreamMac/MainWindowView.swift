@@ -17,8 +17,10 @@ import StreamCore
 /// `UserDefaults` (`@AppStorage`). Settings is a toolbar-presented sheet on
 /// this window until W04 embeds it as a first-class panel — swap
 /// `settingsSheet` for an inspector tab or dedicated pane then. W02 session
-/// states plug in at the diagnostics strip and the placeholder inspector
-/// tabs (mixer / media / guests / destinations).
+/// states surface in the diagnostics strip (StatsHUD + recording status) and
+/// the transport bar (acknowledged-connection LIVE badge, per-state Go Live
+/// button); window close while an output is active is confirmed in-window via
+/// `WindowCloseGuard`.
 struct MainWindowView: View {
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var controller: StreamController
@@ -71,6 +73,19 @@ struct MainWindowView: View {
                                       modifiers: .command)
                     .hidden()
             }
+        }
+        .background {
+            // W02 session policy: closing the window while streaming/recording
+            // asks in-window instead of silently tearing the outputs down.
+            WindowCloseGuard(
+                hasActiveOutputs: {
+                    controller.streamState.isActive || recorder.state.isActive
+                },
+                stopAllOutputs: {
+                    controller.stopStream()
+                    recorder.stop()
+                },
+                stopPreview: { controller.stopPreview() })
         }
         .toolbar { panelToggles }
         .sheet(isPresented: $showSettings) {
@@ -211,17 +226,21 @@ struct MainWindowView: View {
 
     // MARK: - Diagnostics strip
 
-    /// Live uplink health + recording status. W02 (session states) extends
-    /// this strip; it never opens a separate window.
+    /// Live uplink health + recording status (W02 session states); this strip
+    /// never opens a separate window.
     private var diagnosticsStrip: some View {
         HStack(spacing: 16) {
             StatsHUDView(stream: controller)
 
             Spacer()
 
-            if recorder.isRecording {
+            if recorder.state.isRecording {
                 Label("Recording", systemImage: "record.circle")
                     .foregroundStyle(.red)
+                    .font(.callout.weight(.semibold))
+            } else if recorder.state == .stopping {
+                Label("Stopping…", systemImage: "record.circle")
+                    .foregroundStyle(.orange)
                     .font(.callout.weight(.semibold))
             }
             if let url = recorder.lastRecordingURL {
@@ -350,10 +369,12 @@ struct MainWindowView: View {
             Button {
                 recorder.toggle(stream: controller)
             } label: {
-                Label(recorder.isRecording ? "Stop Recording" : "Record",
-                      systemImage: recorder.isRecording ? "stop.circle.fill" : "record.circle")
+                Label(recorder.state.isRecording ? "Stop Recording"
+                      : recorder.state == .stopping ? "Stopping…" : "Record",
+                      systemImage: recorder.state.isRecording ? "stop.circle.fill" : "record.circle")
             }
-            .tint(recorder.isRecording ? .red : nil)
+            .tint(recorder.state.isRecording ? .red : nil)
+            .disabled(recorder.state == .stopping)
 
             Button {
                 if controller.isPreviewing {
@@ -365,41 +386,94 @@ struct MainWindowView: View {
                 Label(controller.isPreviewing ? "Stop Preview" : "Preview",
                       systemImage: controller.isPreviewing ? "eye.slash" : "eye")
             }
+            .help(controller.isPreviewing
+                  ? "Stop the on-screen preview (an active stream or recording keeps running)"
+                  : "Start the on-screen preview")
 
             Spacer()
 
-            if controller.isLive {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(.red)
-                        .frame(width: 8, height: 8)
-                    Text("LIVE")
-                        .font(.headline)
-                        .foregroundStyle(.red)
-                }
-                .transition(.opacity)
-            }
+            streamStatusBadge
 
-            Button {
-                if controller.isLive {
-                    controller.stopStream()
-                } else {
-                    controller.goLive()
-                }
-            } label: {
-                Text(controller.isLive ? "End Stream" : "Go Live")
-                    .font(.headline)
-                    .frame(minWidth: 120)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(controller.isLive ? .red : .green)
-            .controlSize(.large)
-            .keyboardShortcut("l", modifiers: .command)
-            .disabled(!controller.isPreviewing && !controller.isLive)
+            goLiveButton
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .animation(.default, value: controller.isLive)
+        .animation(.default, value: controller.streamState)
+    }
+
+    /// The streaming session status: LIVE only on an acknowledged publish;
+    /// connecting / reconnecting / stopping / failed are each distinct (W02).
+    @ViewBuilder
+    private var streamStatusBadge: some View {
+        switch controller.streamState {
+        case .idle:
+            EmptyView()
+        case .live:
+            badge("LIVE", color: .red)
+        case .connecting:
+            badge("CONNECTING", color: .yellow)
+        case .reconnecting(let reason):
+            badge("RECONNECTING", color: .orange)
+                .help("Connection lost — \(reason)")
+        case .stopping:
+            badge("STOPPING", color: .secondary)
+        case .failed(let message):
+            badge("FAILED", color: .red)
+                .help(message)
+        }
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text(text)
+                .font(.headline)
+                .foregroundStyle(color)
+        }
+        .transition(.opacity)
+    }
+
+    /// One button per streaming session state: Go Live from idle/failed,
+    /// cancel while connecting, End Stream while live/reconnecting.
+    @ViewBuilder
+    private var goLiveButton: some View {
+        Group {
+            switch controller.streamState {
+            case .idle, .failed:
+                Button {
+                    controller.goLive()
+                } label: {
+                    Text(controller.streamState == .idle ? "Go Live" : "Retry Go Live")
+                }
+                .tint(.green)
+            case .connecting:
+                Button {
+                    controller.stopStream()
+                } label: {
+                    Text("Cancel")
+                }
+                .tint(.orange)
+            case .live, .reconnecting:
+                Button {
+                    controller.stopStream()
+                } label: {
+                    Text("End Stream")
+                }
+                .tint(.red)
+            case .stopping:
+                Button {} label: {
+                    Text("Stopping…")
+                }
+                .disabled(true)
+            }
+        }
+        .font(.headline)
+        .frame(minWidth: 120)
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .keyboardShortcut("l", modifiers: .command)
     }
 }
 

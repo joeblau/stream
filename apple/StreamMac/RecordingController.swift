@@ -21,10 +21,14 @@ private struct SendableSampleBuffer: @unchecked Sendable {
 /// disk-space guard. The finished file's path is published on `lastRecordingURL`.
 @MainActor
 final class RecordingController: ObservableObject {
-    @Published private(set) var isRecording = false
+    /// Independent recording lifecycle (W02, issue #62) — drives the transport
+    /// bar and the diagnostics strip; `isRecording` is the computed convenience.
+    @Published private(set) var state: RecordingSessionState = .idle
     /// Path of the most recent cleanly-finished recording; nil until one exists.
     @Published private(set) var lastRecordingURL: URL?
     @Published private(set) var lastError: String?
+
+    var isRecording: Bool { state.isRecording }
 
     private let store = RecordingStore()
     /// Serializes every touch of the `AVAssetWriter` (appends, finish) against the
@@ -35,18 +39,20 @@ final class RecordingController: ObservableObject {
 
     /// Start if idle, stop (and finish the .mp4) if recording.
     func toggle(stream: StreamController) {
-        isRecording ? stop() : start(stream: stream)
+        state.isRecording ? stop() : start(stream: stream)
     }
 
     func start(stream: StreamController) {
-        guard !isRecording else { return }
+        guard !state.isActive else { return }
         lastError = nil
         guard store.hasSufficientSpace() else {
             lastError = "Not enough disk space to record (1 GB minimum)."
+            state = .failed(lastError!)
             return
         }
         guard let url = store.makeRecordingURL(date: Date()) else {
             lastError = "The recordings folder is unavailable (App Group container missing)."
+            state = .failed(lastError!)
             return
         }
         let session = RecordingSession(outputURL: url)
@@ -58,15 +64,22 @@ final class RecordingController: ObservableObject {
             let box = SendableSampleBuffer(buffer: sample)
             queue.async { session.append(box.buffer) }
         }
-        isRecording = true
+        // The recording output keeps the render pipeline alive on its own, so
+        // stopping the preview mid-recording cannot starve the writer.
+        stream.noteRecordingStarted()
+        state = .recording
     }
 
     func stop() {
-        guard isRecording else { return }
-        isRecording = false
+        guard state.isRecording else { return }
+        state = .stopping
         stream?.onCompositedSample = nil
+        stream?.noteRecordingStopped()
         stream = nil
-        guard let session else { return }
+        guard let session else {
+            state = .idle
+            return
+        }
         self.session = nil
         queue.async { [weak self, store] in
             session.finish { url in
@@ -75,8 +88,10 @@ final class RecordingController: ObservableObject {
                     if let url {
                         store.markComplete(url)
                         self.lastRecordingURL = url
+                        self.state = .idle
                     } else {
                         self.lastError = "Recording could not be written."
+                        self.state = .failed(self.lastError!)
                     }
                 }
             }
