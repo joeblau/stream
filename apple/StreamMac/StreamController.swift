@@ -8,8 +8,13 @@ import os
 import os.lock
 
 /// The heart of the macOS app: owns the capture sources (screen, camera, mic),
-/// composites them per the selected scene on a settings-fps render loop, feeds
-/// the preview, and drives the network `Publisher` while live.
+/// composites them per the selected scene onto the output-profile canvas on a
+/// profile-fps render loop, feeds the preview, and drives the network
+/// `Publisher` while live.
+///
+/// W07 (issue #64): the canvas is owned by the persisted `OutputProfile`, not
+/// by the first arriving source frame — see `activeProfile`/`stagedProfile`
+/// for the staged-vs-active application rules.
 ///
 /// W02 (issue #62): preview, streaming, and recording are INDEPENDENT session
 /// state machines (see SessionState.swift). The streaming machine is folded
@@ -63,10 +68,18 @@ final class StreamController: ObservableObject {
     private var recordingDemand = 0
 
     private var settings: StreamSettings = .default
-    private let capability = StreamCapability.current
-    /// Encode geometry, locked from the first source frame of a preview session
-    /// (like the iOS pipeline) so the encoder size stays stable for the session.
-    private var targetSize: CGSize?
+    /// Hardware + destination gating for the output profile (W07); the single
+    /// auditable capability place lives in StreamCore's OutputCapabilities.
+    private let capabilities = OutputCapabilities.current
+    /// The canvas + fps the pipeline renders at RIGHT NOW (W07, issue #64).
+    /// Owned by the persisted `StreamSettings.outputProfile`, never derived
+    /// from the first source frame: sources are aspect-fit into this fixed
+    /// canvas, so a source's native size changing mid-program never resizes
+    /// the output. Changes apply only at a compatible output (re)start.
+    @Published private(set) var activeProfile: OutputProfile
+    /// A profile edit waiting for the active stream/recording to end; non-nil
+    /// means "applies on next session". The settings UI marks this state.
+    @Published private(set) var stagedProfile: OutputProfile?
     private var outputSizeSentToPublisher = false
     private var cameraFormatDescription: CMVideoFormatDescription?
     private let previewContext = CIContext(options: [.cacheIntermediates: false])
@@ -75,6 +88,12 @@ final class StreamController: ObservableObject {
 
     init(sceneStore: SceneStore) {
         self.sceneStore = sceneStore
+        // The persisted profile is the canvas authority from launch, so the
+        // preview opens at the configured geometry before any source frame
+        // ever arrives.
+        let persisted = SettingsStore().load()
+        self.settings = persisted
+        self.activeProfile = persisted.outputProfile
 
         // Scene selection or edits apply to the live pipeline immediately.
         sceneStore.$scenes
@@ -109,6 +128,7 @@ final class StreamController: ObservableObject {
     func startPreview() {
         guard previewState == .idle else { return }
         settings = SettingsStore().load()
+        applyOutputProfile(settings.outputProfile)
         previewState = .active
         updatePipelineDemand()
     }
@@ -130,6 +150,7 @@ final class StreamController: ObservableObject {
             errorMessage = "Complete the connection settings before going live."
             return
         }
+        applyOutputProfile(settings.outputProfile)
         // Go Live needs the render pipeline (frames to publish); the demand
         // check below starts it even if the user never turned the preview on.
         let publisher = makePublisher(for: settings.selectedProtocol)
@@ -150,7 +171,8 @@ final class StreamController: ObservableObject {
                 self?.handlePublisherEvent(event)
             }
         }
-        // The encode size may already be locked by the preview; hand it over.
+        // The canvas is known up front (profile-owned), so hand the encoder
+        // its output size immediately instead of waiting for a first frame.
         applyOutputSizeIfPossible()
     }
 
@@ -207,6 +229,7 @@ final class StreamController: ObservableObject {
     private func streamDidStop() {
         guard streamState == .stopping else { return }
         streamState = .idle
+        promoteStagedProfileIfOutputsIdle()
         updatePipelineDemand()
     }
 
@@ -232,6 +255,7 @@ final class StreamController: ObservableObject {
         if let ending {
             Task { await ending.stop() }
         }
+        promoteStagedProfileIfOutputsIdle()
         updatePipelineDemand()
     }
 
@@ -246,6 +270,7 @@ final class StreamController: ObservableObject {
 
     func noteRecordingStopped() {
         recordingDemand = max(0, recordingDemand - 1)
+        promoteStagedProfileIfOutputsIdle()
         updatePipelineDemand()
     }
 
@@ -259,6 +284,54 @@ final class StreamController: ObservableObject {
         } else if !pipelineNeeded, isPipelineRunning {
             stopPipeline()
         }
+    }
+
+    // MARK: - Output profile (staged vs active, W07)
+
+    /// True when an output owns the encode geometry: resolution/fps edits made
+    /// now must wait for the next session (encoders can't be re-dimensioned
+    /// mid-program, and the recording writer's input is locked to the size of
+    /// its first frame).
+    private var outputsOwnProfile: Bool {
+        streamState.isActive || recordingDemand > 0
+    }
+
+    /// Entry point for settings edits (the settings sheet calls this after
+    /// persisting, passing its current protocol — the controller's own
+    /// `settings` snapshot is only refreshed at session start). With a stream
+    /// or recording active the edit is STAGED and surfaces via `stagedProfile`
+    /// ("applies on next session"); otherwise it applies immediately,
+    /// reconfiguring the preview pipeline in place.
+    func applyOutputProfile(_ profile: OutputProfile,
+                            destination proto: StreamCore.StreamProtocol? = nil) {
+        let clamped = capabilities.clamped(profile, destination: proto ?? settings.selectedProtocol)
+        if outputsOwnProfile {
+            stagedProfile = clamped == activeProfile ? nil : clamped
+            return
+        }
+        setActiveProfile(clamped)
+    }
+
+    private func setActiveProfile(_ profile: OutputProfile) {
+        let changed = profile != activeProfile
+        activeProfile = profile
+        stagedProfile = nil
+        // Align the scene graph's canvas reference (S01) with the output
+        // canvas; transforms are normalized, so layers are not repositioned.
+        sceneStore.setCanvasSize(profile.canvasSize)
+        guard changed, isPipelineRunning else { return }
+        // The cached camera-solo format description carries the old dims.
+        cameraFormatDescription = nil
+        // Restart the loop for the new fps interval; the compositor's pool
+        // re-creates itself on the next frame at the new canvas size.
+        startRenderLoop()
+    }
+
+    /// Applies a staged profile once no stream/recording owns the geometry.
+    /// Safe to call from every session-end path; a no-op unless staged + idle.
+    private func promoteStagedProfileIfOutputsIdle() {
+        guard let stagedProfile, !outputsOwnProfile else { return }
+        setActiveProfile(stagedProfile)
     }
 
     private func startPipeline() {
@@ -281,9 +354,9 @@ final class StreamController: ObservableObject {
         let screenCapture = self.screenCapture
         Task { await screenCapture.stop() }
         latestScreen.clear()
-        targetSize = nil
         outputSizeSentToPublisher = false
         cameraFormatDescription = nil
+        promoteStagedProfileIfOutputsIdle()
     }
 
     private func makePublisher(for transport: StreamCore.StreamProtocol) -> any Publisher {
@@ -320,11 +393,21 @@ final class StreamController: ObservableObject {
     // MARK: - Render loop
 
     private var encodeFrameRate: Int {
-        settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate)
+        // The profile's rate, defensively clamped to the hardware ceiling —
+        // the settings UI gates on the same `OutputCapabilities`, so this only
+        // fires for hand-edited or migrated settings files.
+        min(max(activeProfile.frameRate, 1), max(1, capabilities.hardwareMaxFrameRate))
     }
 
     private func startRenderLoop() {
         renderTask?.cancel()
+        // A restart (profile applied while previewing) must retire the old
+        // ordered consumer too, or each restart leaves a dangling Task waiting
+        // on a stream nothing yields to anymore.
+        videoContinuation?.finish()
+        videoContinuation = nil
+        videoConsumer?.cancel()
+        videoConsumer = nil
         let intervalNanoseconds = UInt64(1_000_000_000) / UInt64(max(1, encodeFrameRate))
         renderTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -349,9 +432,9 @@ final class StreamController: ObservableObject {
         }
     }
 
-    /// One frame of the output pipeline: pull the current sources, composite at
-    /// the locked encode size, then fan out to the publisher (live only), the
-    /// recorder hook, and the preview.
+    /// One frame of the output pipeline: pull the current sources, aspect-fit
+    /// them into the profile-owned canvas, then fan out to the publisher (live
+    /// only), the recorder hook, and the preview.
     private func renderTick() {
         guard isPipelineRunning, let scene = sceneStore.selected else { return }
         let layout = scene.layout
@@ -368,14 +451,11 @@ final class StreamController: ObservableObject {
         guard let source = screenSample.flatMap(CMSampleBufferGetImageBuffer)
                 ?? cameraFrame?.buffer else { return }
 
-        if targetSize == nil {
-            let width = CVPixelBufferGetWidth(source)
-            let height = CVPixelBufferGetHeight(source)
-            targetSize = settings.encodeSize(forOrientedWidth: width, height: height,
-                                             maxShortEdge: capability.maxShortEdge)
-            applyOutputSizeIfPossible()
-        }
-        guard let targetSize else { return }
+        // The canvas comes from the output profile (settings), NOT from this
+        // source frame: the compositor aspect-fits whatever arrives into the
+        // fixed canvas, so a source whose native size changes mid-program
+        // never resizes the output (W07, issue #64).
+        let targetSize = activeProfile.canvasSize
 
         // Mirror by the camera that produced the pixels on hand; on macOS that
         // is always `.front` (see FacecamCapture.effectivePosition).
@@ -405,13 +485,16 @@ final class StreamController: ObservableObject {
         }
     }
 
-    /// Hands the locked encode geometry to the publisher exactly once per
-    /// broadcast (`setOutputSize` itself also locks after the first call).
+    /// Hands the profile's canvas to the publisher exactly once per broadcast
+    /// (`setOutputSize` itself also locks after the first call). The size is
+    /// known at Go Live — no first-frame wait — so the encoder never starts at
+    /// a source-derived size.
     private func applyOutputSizeIfPossible() {
         guard streamState.isActive, !outputSizeSentToPublisher,
-              let publisher, let targetSize else { return }
+              let publisher else { return }
         outputSizeSentToPublisher = true
-        Task { await publisher.setOutputSize(targetSize, nativeShortEdge: Int(min(targetSize.width, targetSize.height))) }
+        let canvasSize = activeProfile.canvasSize
+        Task { await publisher.setOutputSize(canvasSize, nativeShortEdge: Int(min(canvasSize.width, canvasSize.height))) }
     }
 
     /// Throttled (~30 fps) CGImage for the SwiftUI preview.

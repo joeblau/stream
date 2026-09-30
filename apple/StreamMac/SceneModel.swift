@@ -187,6 +187,19 @@ final class SceneStore: ObservableObject {
         scenes[index] = scene
     }
 
+    /// Aligns every scene's canvas reference size with the output profile's
+    /// canvas (W07): transforms are normalized to the canvas, so this records
+    /// the new aspect/resolution intent only — no layer is repositioned.
+    func setCanvasSize(_ size: CGSize) {
+        let reference = GraphSize(width: Double(size.width), height: Double(size.height))
+        guard scenes.contains(where: { $0.canvas.referenceSize != reference }) else { return }
+        scenes = scenes.map { scene in
+            var scene = scene
+            scene.canvas.referenceSize = reference
+            return scene
+        }
+    }
+
     /// Selects the scene at 1-based position `number` (⌘1…⌘9), if it exists.
     func select(number: Int) {
         let index = number - 1

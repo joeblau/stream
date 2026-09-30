@@ -165,6 +165,12 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     public var backupEnabled: Bool
     /// Target resolution for the local backup recording.
     public var backupQuality: BackupQuality
+    /// The output canvas + frame rate the macOS studio composes and encodes at
+    /// (W07, issue #64). Owned here in settings — never derived from the first
+    /// source frame — so a source's native size changing mid-program never
+    /// resizes the output. Decoded from the legacy `videoQuality`/`frameRate`
+    /// pair when absent; the iOS app still uses those fields directly.
+    public var outputProfile: OutputProfile
 
     public init(
         selectedProtocol: StreamProtocol = .rtmps,
@@ -188,7 +194,8 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         micVolume: Double = 1.0,
         voicePolishEnabled: Bool = true,
         backupEnabled: Bool = false,
-        backupQuality: BackupQuality = .hd1080
+        backupQuality: BackupQuality = .hd1080,
+        outputProfile: OutputProfile = .default
     ) {
         self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
@@ -208,6 +215,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.voicePolishEnabled = voicePolishEnabled
         self.backupEnabled = backupEnabled
         self.backupQuality = backupQuality
+        self.outputProfile = outputProfile
     }
 
     /// Backward-compatible decode: every field falls back to its default when the
@@ -235,6 +243,10 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         voicePolishEnabled = try c.decodeIfPresent(Bool.self, forKey: .voicePolishEnabled) ?? d.voicePolishEnabled
         backupEnabled = try c.decodeIfPresent(Bool.self, forKey: .backupEnabled) ?? d.backupEnabled
         backupQuality = try c.decodeIfPresent(BackupQuality.self, forKey: .backupQuality) ?? d.backupQuality
+        // Blobs written before W07 carry no profile: derive the equivalent
+        // landscape 16:9 canvas from the legacy short-edge quality + fps picks.
+        outputProfile = try c.decodeIfPresent(OutputProfile.self, forKey: .outputProfile)
+            ?? OutputProfile(legacyVideoQuality: videoQuality, frameRate: frameRate)
     }
 
     public static let `default` = StreamSettings()

@@ -14,15 +14,21 @@ struct SettingsView: View {
     /// Called after any field mutation so the host can persist immediately.
     var onChange: () -> Void
 
+    /// True while a stream or recording owns the encode geometry: canvas/fps
+    /// edits are staged by the controller and apply on the next session (W07).
+    var outputActive: Bool
+
     /// Restream chat controller. Pass the shared instance so credentials entered
     /// here light up the chat sidebar; a private one is created otherwise.
     @State private var chat: RestreamChat
 
     init(settings: Binding<StreamSettings>,
          chat: RestreamChat? = nil,
+         outputActive: Bool = false,
          onChange: @escaping () -> Void = {}) {
         _settings = settings
         self.onChange = onChange
+        self.outputActive = outputActive
         _chat = State(initialValue: chat ?? RestreamChat())
     }
 
@@ -34,14 +40,20 @@ struct SettingsView: View {
     /// stored, so the user can replace it.
     @State private var editingChatCredentials = false
 
-    // MARK: - Presets
+    // MARK: - Output profile state
 
-    /// Target SHORT edge (px). Gated by the device ceiling, same as iOS.
-    private static let qualities: [Int] = [720, 1080]
-    private static let frameRates: [Int] = [30, 60]
+    /// This Mac's hardware + destination gating (StreamCore's single auditable
+    /// capability place). Disabled options show its reason strings.
+    private let capabilities = OutputCapabilities.current
 
-    /// This Mac's resolution/fps ceiling (StreamCore, same derivation as iOS).
-    private var capability: StreamCapability { .current }
+    /// The canvas preset list covers fixed sizes only; "Custom…" is a selection
+    /// in its own right (it has no size to apply), so it needs this override —
+    /// otherwise picking it would snap straight back to the matching preset.
+    @State private var presetOverride: CanvasPreset?
+
+    private var selectedPreset: CanvasPreset {
+        presetOverride ?? CanvasPreset(matching: settings.outputProfile)
+    }
 
     var body: some View {
         Form {
@@ -67,6 +79,10 @@ struct SettingsView: View {
                     // slot. Persists the new selection itself.
                     var updated = settings
                     SettingsStore().switchProtocol(to: newProtocol, in: &updated)
+                    // The new destination may carry less than the old one
+                    // (e.g. 4K over SRT → RTMP): reduce the profile honestly.
+                    updated.outputProfile = capabilities.clamped(updated.outputProfile,
+                                                                 destination: newProtocol)
                     settings = updated
                     onChange()
                 }
@@ -111,24 +127,71 @@ struct SettingsView: View {
 
     // MARK: - Video
 
+    /// Writes a new profile, keeping the legacy short-edge/fps fields the iOS
+    /// app still reads in sync with the shared settings snapshot.
+    private func setProfile(_ profile: OutputProfile) {
+        settings.outputProfile = profile
+        settings.videoQuality = min(profile.canvasWidth, profile.canvasHeight)
+        settings.frameRate = profile.frameRate
+        onChange()
+    }
+
     @ViewBuilder
     private var videoSection: some View {
         Section {
-            Picker("Quality", selection: Binding(
-                get: { min(settings.videoQuality, capability.maxShortEdge) },
-                set: { settings.videoQuality = $0; onChange() }
+            Picker("Canvas", selection: Binding(
+                get: { selectedPreset },
+                set: { preset in
+                    presetOverride = preset
+                    if let size = preset.size {
+                        setProfile(settings.outputProfile.with(canvasWidth: size.width,
+                                                               canvasHeight: size.height))
+                    }
+                }
             )) {
-                ForEach(Self.qualities.filter { $0 <= capability.maxShortEdge }, id: \.self) { q in
-                    Text(q == 720 ? "720p (HD)" : "1080p (Full HD)").tag(q)
+                ForEach(CanvasPreset.allCases, id: \.self) { preset in
+                    if let size = preset.size {
+                        let profile = OutputProfile(canvasWidth: size.width, canvasHeight: size.height,
+                                                    frameRate: settings.outputProfile.frameRate)
+                        Text(preset.displayName)
+                            .tag(preset)
+                            .disabled(capabilities.gateReason(for: profile,
+                                                              destination: settings.selectedProtocol) != nil)
+                    } else {
+                        Text(preset.displayName).tag(preset)
+                    }
+                }
+            }
+
+            if selectedPreset == .custom {
+                HStack {
+                    TextField("Width", value: Binding(
+                        get: { settings.outputProfile.canvasWidth },
+                        set: { setProfile(settings.outputProfile.with(canvasWidth: $0)) }
+                    ), format: .number)
+                    .frame(maxWidth: 90)
+                    Text("×")
+                        .foregroundStyle(.secondary)
+                    TextField("Height", value: Binding(
+                        get: { settings.outputProfile.canvasHeight },
+                        set: { setProfile(settings.outputProfile.with(canvasHeight: $0)) }
+                    ), format: .number)
+                    .frame(maxWidth: 90)
+                    Text("px, even values only")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
             Picker("Frame Rate", selection: Binding(
-                get: { min(settings.frameRate, capability.maxFrameRate) },
-                set: { settings.frameRate = $0; onChange() }
+                get: { min(settings.outputProfile.frameRate,
+                           capabilities.maxFrameRate(for: settings.selectedProtocol)) },
+                set: { setProfile(settings.outputProfile.with(frameRate: $0)) }
             )) {
-                ForEach(Self.frameRates.filter { $0 <= capability.maxFrameRate }, id: \.self) { fps in
-                    Text("\(fps) fps").tag(fps)
+                ForEach(OutputCapabilities.supportedFrameRates, id: \.self) { fps in
+                    Text("\(fps) fps")
+                        .tag(fps)
+                        .disabled(fps > capabilities.maxFrameRate(for: settings.selectedProtocol))
                 }
             }
 
@@ -162,7 +225,16 @@ struct SettingsView: View {
             Text("Video")
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Bitrate is a maximum and drops automatically when the uplink is congested. H.264 is recommended for Restream — traditional RTMP ingests do not accept HEVC.")
+                if outputActive {
+                    Label("Canvas and frame-rate changes are staged and apply on the next session — an output is live or recording.",
+                          systemImage: "clock.badge.exclamationmark")
+                }
+                if let reason = capabilities.gateReason(for: settings.outputProfile,
+                                                        destination: settings.selectedProtocol) {
+                    Label("The current profile exceeds this \(settings.selectedProtocol.displayName) destination: \(reason). It will be reduced when the next session starts.",
+                          systemImage: "exclamationmark.triangle")
+                }
+                Text("The canvas is fixed by this profile — a camera or screen source changing size never resizes the program; sources are fit into the canvas. Bitrate is a maximum and drops automatically when the uplink is congested. H.264 is recommended for Restream — traditional RTMP ingests do not accept HEVC.")
                 if settings.effectiveVideoCodec == .hevc {
                     Label("HEVC saves roughly 40% bitrate, but needs a compatible ingest (SRT or enhanced-RTMP). Restream requires H.264.",
                           systemImage: "info.circle")

@@ -89,8 +89,13 @@ struct MainWindowView: View {
         }
         .toolbar { panelToggles }
         .sheet(isPresented: $showSettings) {
-            SettingsView(settings: $settings) {
+            SettingsView(settings: $settings,
+                         outputActive: controller.streamState.isActive || recorder.state.isActive) {
                 SettingsStore().save(settings)
+                // Applies immediately when idle; staged ("next session") while
+                // a stream or recording owns the encode geometry (W07).
+                controller.applyOutputProfile(settings.outputProfile,
+                                              destination: settings.selectedProtocol)
             }
         }
         .onAppear { controller.startPreview() }
