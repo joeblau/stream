@@ -1,40 +1,83 @@
+import AppKit
 import SwiftUI
 import StreamCore
 
-/// Ecamm Live-style main window: scene bar on top, program monitor center,
-/// tabbed inspector on the right (Sources / Chat / Stats), transport controls
-/// along the bottom.
+/// The persistent studio shell (W01): one window holding every production
+/// control in dedicated, collapsible panels —
+///
+///     ┌──────────┬───────────────────────────┬──────────┬────────────┐
+///     │  Scenes  │  Canvas (program preview) │   Chat   │ Inspector  │
+///     │  column  │  ──────────────────────── │  column  │  column    │
+///     │          │  Diagnostics strip        │          │            │
+///     │          │  Transport bar            │          │            │
+///     └──────────┴───────────────────────────┴──────────┴────────────┘
+///
+/// The columns are `HSplitView` panes, so they resize by dragging and
+/// collapse/restore from the toolbar toggles; pane visibility persists in
+/// `UserDefaults` (`@AppStorage`). Settings is a toolbar-presented sheet on
+/// this window until W04 embeds it as a first-class panel — swap
+/// `settingsSheet` for an inspector tab or dedicated pane then. W02 session
+/// states plug in at the diagnostics strip and the placeholder inspector
+/// tabs (mixer / media / guests / destinations).
 struct MainWindowView: View {
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var controller: StreamController
     @StateObject private var recorder = RecordingController()
+
+    // Panel visibility, persisted so the layout restores across launches.
+    @AppStorage("studio.showScenesPanel") private var showScenesPanel = true
+    @AppStorage("studio.showChatPanel") private var showChatPanel = true
+    @AppStorage("studio.showInspectorPanel") private var showInspectorPanel = true
+    @AppStorage("studio.showDiagnostics") private var showDiagnostics = true
+
     @State private var inspectorTab: InspectorTab = .sources
+    @State private var showSettings = false
+    @State private var settings = SettingsStore().load()
     @State private var renamingScene: Scene?
     @State private var draftName = ""
 
     private enum InspectorTab: String, CaseIterable {
         case sources = "Sources"
-        case chat = "Chat"
-        case stats = "Stats"
+        case mixer = "Mixer"
+        case media = "Media"
+        case guests = "Guests"
+        case destinations = "Destinations"
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            sceneBar
-            Divider()
-            HStack(spacing: 0) {
-                PreviewView(controller: controller)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
-                inspector
-                    .frame(width: 300)
+        HSplitView {
+            if showScenesPanel {
+                scenesPanel
+                    .frame(minWidth: 180, idealWidth: 220, maxWidth: 320)
             }
-            .frame(maxHeight: .infinity)
-            Divider()
-            bottomBar
+            canvasPanel
+                .frame(minWidth: 320)
+                .layoutPriority(1)
+            if showChatPanel {
+                ChatSidebarView()
+                    .frame(maxWidth: 420)
+            }
+            if showInspectorPanel {
+                inspectorPanel
+                    .frame(minWidth: 240, idealWidth: 300, maxWidth: 420)
+            }
         }
-        .frame(minWidth: 1280, minHeight: 800)
+        .background {
+            // ⌘1…⌘9 jump straight to a scene from anywhere in the window; the
+            // hidden buttons only carry the shortcuts.
+            ForEach(1...9, id: \.self) { number in
+                Button("") { sceneStore.select(number: number) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(number)")),
+                                      modifiers: .command)
+                    .hidden()
+            }
+        }
+        .toolbar { panelToggles }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(settings: $settings) {
+                SettingsStore().save(settings)
+            }
+        }
         .onAppear { controller.startPreview() }
         .alert("Rename Scene", isPresented: renameBinding) {
             TextField("Scene name", text: $draftName)
@@ -56,58 +99,154 @@ struct MainWindowView: View {
         }
     }
 
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var panelToggles: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Toggle(isOn: $showScenesPanel) {
+                Label("Scenes", systemImage: "rectangle.on.rectangle")
+            }
+            .toggleStyle(.button)
+            .help("Show or hide the scenes panel")
+
+            Toggle(isOn: $showDiagnostics) {
+                Label("Diagnostics", systemImage: "waveform.path.ecg")
+            }
+            .toggleStyle(.button)
+            .help("Show or hide the diagnostics strip")
+
+            Toggle(isOn: $showChatPanel) {
+                Label("Chat", systemImage: "bubble.left.and.bubble.right")
+            }
+            .toggleStyle(.button)
+            .help("Show or hide the chat panel")
+
+            Toggle(isOn: $showInspectorPanel) {
+                Label("Inspector", systemImage: "sidebar.right")
+            }
+            .toggleStyle(.button)
+            .help("Show or hide the inspector panel")
+
+            Button {
+                showSettings = true
+            } label: {
+                Label("Settings", systemImage: "gear")
+            }
+            .help("Open settings")
+        }
+    }
+
     private var renameBinding: Binding<Bool> {
         Binding(
             get: { renamingScene != nil },
             set: { if !$0 { renamingScene = nil } })
     }
 
-    // MARK: - Scene bar
+    // MARK: - Scenes panel
 
-    private var sceneBar: some View {
-        HStack(spacing: 8) {
-            ForEach(Array(sceneStore.scenes.enumerated()), id: \.element.id) { index, scene in
-                let pill = ScenePill(scene: scene, isSelected: scene.id == sceneStore.selectedID) {
-                    sceneStore.selectedID = scene.id
-                }
-                Group {
-                    if index < 9 {
-                        pill.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")),
-                                              modifiers: .command)
-                    } else {
-                        pill
-                    }
-                }
-                .contextMenu {
-                    Button("Rename…") {
-                        draftName = scene.name
-                        renamingScene = scene
-                    }
-                    Button("Delete", role: .destructive) {
-                        sceneStore.delete(scene.id)
-                    }
-                    .disabled(sceneStore.scenes.count <= 1)
-                }
-                .onTapGesture(count: 2) {
-                    draftName = scene.name
-                    renamingScene = scene
+    /// `List` wants an optional selection; the store never leaves zero scenes,
+    /// so a deselect is ignored and a select writes straight through.
+    private var sceneSelection: Binding<Scene.ID?> {
+        Binding(
+            get: { sceneStore.selectedID },
+            set: { if let id = $0 { sceneStore.selectedID = id } })
+    }
+
+    private var scenesPanel: some View {
+        VStack(spacing: 0) {
+            Text("Scenes")
+                .font(.callout.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+
+            List(selection: sceneSelection) {
+                ForEach(sceneStore.scenes) { scene in
+                    SceneRow(scene: scene)
+                        .tag(scene.id)
+                        .contextMenu {
+                            Button("Rename…") {
+                                draftName = scene.name
+                                renamingScene = scene
+                            }
+                            Button("Delete", role: .destructive) {
+                                sceneStore.delete(scene.id)
+                            }
+                            .disabled(sceneStore.scenes.count <= 1)
+                        }
                 }
             }
-            Spacer()
+
+            Divider()
             Button {
                 sceneStore.addScene()
             } label: {
-                Image(systemName: "plus")
+                Label("Add Scene", systemImage: "plus")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .help("Add scene")
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: - Canvas panel
+
+    private var canvasPanel: some View {
+        VStack(spacing: 0) {
+            PreviewView(controller: controller)
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
+            if showDiagnostics {
+                Divider()
+                diagnosticsStrip
+            }
+            Divider()
+            transportBar
+        }
+    }
+
+    // MARK: - Diagnostics strip
+
+    /// Live uplink health + recording status. W02 (session states) extends
+    /// this strip; it never opens a separate window.
+    private var diagnosticsStrip: some View {
+        HStack(spacing: 16) {
+            StatsHUDView(stream: controller)
+
+            Spacer()
+
+            if recorder.isRecording {
+                Label("Recording", systemImage: "record.circle")
+                    .foregroundStyle(.red)
+                    .font(.callout.weight(.semibold))
+            }
+            if let url = recorder.lastRecordingURL {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Label(url.lastPathComponent, systemImage: "film")
+                        .lineLimit(1)
+                }
+                .help("Reveal the finished recording in Finder")
+            }
+            if let error = recorder.lastError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 
-    // MARK: - Inspector
+    // MARK: - Inspector panel
 
-    private var inspector: some View {
+    private var inspectorPanel: some View {
         VStack(spacing: 0) {
             Picker("Inspector", selection: $inspectorTab) {
                 ForEach(InspectorTab.allCases, id: \.self) { tab in
@@ -115,20 +254,38 @@ struct MainWindowView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .padding(8)
 
             switch inspectorTab {
             case .sources:
-                sourcesTab
-            case .chat:
-                ChatSidebarView()
-            case .stats:
-                StatsHUDView(stream: controller)
+                sourcesInspector
+            case .mixer:
+                placeholder("Mixer", systemImage: "slider.vertical.3",
+                            message: "Per-source audio levels land here in a later workstream.")
+            case .media:
+                placeholder("Media", systemImage: "photo.on.rectangle",
+                            message: "Overlays, videos and images land here in a later workstream.")
+            case .guests:
+                placeholder("Guests", systemImage: "person.2",
+                            message: "Remote guest management lands here in a later workstream.")
+            case .destinations:
+                placeholder("Destinations", systemImage: "paperplane",
+                            message: "Multi-destination output lands here in a later workstream.")
             }
         }
     }
 
-    private var sourcesTab: some View {
+    private func placeholder(_ title: String, systemImage: String, message: String) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+        } description: {
+            Text(message)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var sourcesInspector: some View {
         Form {
             if let scene = sceneStore.selected {
                 Picker("Layout", selection: layoutBinding(for: scene)) {
@@ -186,9 +343,9 @@ struct MainWindowView: View {
             })
     }
 
-    // MARK: - Bottom bar
+    // MARK: - Transport bar
 
-    private var bottomBar: some View {
+    private var transportBar: some View {
         HStack(spacing: 16) {
             Button {
                 recorder.toggle(stream: controller)
@@ -246,21 +403,20 @@ struct MainWindowView: View {
     }
 }
 
-/// A single selectable scene in the top bar.
-private struct ScenePill: View {
+/// A single scene row in the scenes panel.
+private struct SceneRow: View {
     let scene: Scene
-    let isSelected: Bool
-    let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Text(scene.name)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.15),
-                            in: Capsule())
-                .foregroundStyle(isSelected ? .white : .primary)
+        Label(scene.name, systemImage: icon)
+            .lineLimit(1)
+    }
+
+    private var icon: String {
+        switch scene.layout {
+        case .cameraSolo: return "person.fill"
+        case .screenSolo: return "display"
+        case .screenPlusCam: return "rectangle.inset.bottomright.filled"
         }
-        .buttonStyle(.plain)
     }
 }
