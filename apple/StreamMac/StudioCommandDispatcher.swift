@@ -243,6 +243,15 @@ enum StudioCommand: Equatable, Sendable {
     /// an unplugged mic.
     case relinkAudioInput(from: String, to: String)
 
+    // A08 per-channel FX (issue #120): one channel's whole effect chain —
+    // preset picks, per-section bypass/reset, and parameter scrubs all edit
+    // the same `ChannelFXChain` value and dispatch through here. Live
+    // session state persisted in `StreamSettings.channelFX` via
+    // SettingsSession (like the mixer document) — NOT scene content, NOT
+    // undoable, never staged — and applied as parameter updates on the
+    // channel's running insert (no capture restart).
+    case setChannelFXChain(AudioChannelID, ChannelFXChain)
+
     // A07 headphone monitoring (issue #119): enable/disable the monitor-bus
     // playback and choose the monitor output device (nil UID = the system
     // default). Live session state persisted in StreamSettings via
@@ -394,6 +403,7 @@ enum StudioCommand: Equatable, Sendable {
             return "\(enabled ? "Enable" : "Disable") Audio Input"
         case .setAudioInputMapping: return "Set Audio Input Channels"
         case .relinkAudioInput: return "Relink Audio Input"
+        case .setChannelFXChain(let id, _): return "Set \(id.label) FX Chain"
         case .setMonitoringEnabled(let enabled):
             return "\(enabled ? "Enable" : "Disable") Monitoring"
         case .setMonitorOutputDevice: return "Set Monitor Output"
@@ -517,6 +527,21 @@ struct StudioState: Equatable, Sendable {
     var mixer = MixerSettings()
     /// The live mic fader (mirrors `StreamSettings.micVolume`).
     var micVolume: Double = 1
+    /// A08 (issue #120): the persisted per-channel FX chains, keyed by
+    /// `AudioChannelID.label` (mirrors `StreamSettings.channelFX`). Live
+    /// session state, not scene content (never undoable, never staged).
+    var channelFX: [String: ChannelFXChain] = [:]
+    /// A08: the legacy global voice-polish toggle (mirrors
+    /// `StreamSettings.voicePolishEnabled`) — the fallback chain source for
+    /// channels with no persisted chain (see `fxChain(forLabel:)`).
+    var voicePolishEnabled: Bool = true
+
+    /// A08: the EFFECTIVE chain a channel runs — its persisted chain when
+    /// present, else the legacy voice-polish mapping (same back-compat rule
+    /// as `StreamSettings.fxChain(forChannelLabel:)`).
+    func fxChain(forLabel label: String) -> ChannelFXChain {
+        channelFX[label] ?? (voicePolishEnabled ? .preset(.voice) : .preset(.off))
+    }
     /// A07 (issue #119): headphone-monitoring state for the command
     /// interface — on/off, the selected output (nil = system default),
     /// whether the selection is unplugged and the monitor is honestly
@@ -1040,6 +1065,11 @@ final class StudioCommandDispatcher: ObservableObject {
             return controller.deviceMonitor.audioDevices.contains(where: { $0.uniqueID == to })
                 ? nil : .invalidTarget("The relink target device is not connected.")
 
+        // A08 FX validation: the chain model owns its ranges (the rack's
+        // sliders clamp to the same values, so this guards automation input).
+        case .setChannelFXChain(_, let chain):
+            return chain.validationError.map { .invalidValue($0) }
+
         // A07 monitoring validation: enabling is always acceptable; an
         // explicit output device must be CONNECTED (nil = system default is
         // always valid). Selecting a device while it is unplugged is
@@ -1430,6 +1460,14 @@ final class StudioCommandDispatcher: ObservableObject {
                 inputs.append(entry)
             }
             session.persistAudioInputs(inputs)
+
+        // A08 FX execution: persist the channel's chain through
+        // SettingsSession (single truth, live surface like the mixer); its
+        // apply pushes the chain onto the channel's running insert as
+        // parameter updates — no capture restart, no audio gap.
+        case .setChannelFXChain(let id, let chain):
+            channelIDsByLabel[id.label] = id
+            session.persistChannelFX(chain, forChannelLabel: id.label)
 
         // A07 monitoring execution: persist through SettingsSession (single
         // truth); its apply retargets the live monitor player in place.
@@ -1955,6 +1993,8 @@ final class StudioCommandDispatcher: ObservableObject {
             settingsDirty: session.isDirty,
             mixer: session.activeSettings.mixer,
             micVolume: session.activeSettings.micVolume,
+            channelFX: session.activeSettings.channelFX,
+            voicePolishEnabled: session.activeSettings.voicePolishEnabled,
             monitoringEnabled: session.activeSettings.monitoringEnabled,
             monitorOutputDeviceUID: session.activeSettings.monitorOutputDeviceUID,
             monitorOutputFallback: controller.monitorOutput.isFallbackActive,
@@ -2087,6 +2127,7 @@ private extension StudioCommand {
              .setChannelVolume, .setChannelMuted, .setChannelSolo,
              .setChannelAuxSend, .setBusGain, .setBusMuted,
              .setAudioInputEnabled, .setAudioInputMapping, .relinkAudioInput,
+             .setChannelFXChain,
              .setMonitoringEnabled, .setMonitorOutputDevice,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .addSoundPad, .updateSoundPad, .removeSoundPad,

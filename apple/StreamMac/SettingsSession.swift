@@ -157,6 +157,21 @@ final class SettingsSession: ObservableObject {
         scheduleLiveSettingsSave()
     }
 
+    /// A08 (issue #120): persists one channel's effect chain (preset pick,
+    /// section toggle, parameter scrub, reset) straight into the APPLIED
+    /// settings — the FX rack is a live performance surface like the mixer,
+    /// not a draft/Apply editor. Mirroring keeps `draft.channelFX` fresh so a
+    /// later settings Apply can't roll chains back, and `isDirty` is
+    /// unaffected. The controller's `applySavedSettings` diff pushes the new
+    /// chain onto the channel's RUNNING insert as parameter updates — no
+    /// capture restart, no ring reset, no audio gap.
+    func persistChannelFX(_ chain: ChannelFXChain, forChannelLabel label: String) {
+        activeSettings.channelFX[label] = chain
+        draft.channelFX = activeSettings.channelFX
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
     /// A07 (issue #119): persists the headphone-monitoring configuration
     /// (enable + monitor output device) straight into the APPLIED settings
     /// and applies it live — like the mixer and the input list, this is a

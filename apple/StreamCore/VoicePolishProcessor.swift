@@ -142,7 +142,7 @@ public final class VoicePolishProcessor {
         }
 
         // 1. Source AudioBufferList → render-format AVAudioPCMBuffer.
-        guard let sourcePCM = extractPCM(sampleBuffer, asbd: asbd, frameCount: AVAudioFrameCount(frameCount)) else {
+        guard let sourcePCM = Self.extractPCM(sampleBuffer, asbd: asbd, frameCount: AVAudioFrameCount(frameCount)) else {
             return fail(sampleBuffer, "could not read source PCM")
         }
         guard let input = AVAudioPCMBuffer(pcmFormat: renderFormat, frameCapacity: AVAudioFrameCount(frameCount)) else {
@@ -244,11 +244,11 @@ public final class VoicePolishProcessor {
         let slow = Self.effect(kAudioUnitSubType_DynamicsProcessor)
         let limiter = Self.effect(kAudioUnitSubType_PeakLimiter)
         // Fast compressor: evens out syllables (−22 dB / 3:1, 12 ms / 160 ms, +2).
-        configureDynamics(fast, threshold: -22, headRoom: 22 / 3,
-                          attack: 0.012, release: 0.160, makeup: 2)
+        Self.configureDynamics(fast, threshold: -22, headRoom: 22 / 3,
+                               attack: 0.012, release: 0.160, makeup: 2)
         // Slow compressor: evens out the take (−26 dB / 2.5:1, 200 ms / 1.5 s, +2).
-        configureDynamics(slow, threshold: -26, headRoom: 26 / 2.5,
-                          attack: 0.200, release: 1.5, makeup: 2)
+        Self.configureDynamics(slow, threshold: -26, headRoom: 26 / 2.5,
+                               attack: 0.200, release: 1.5, makeup: 2)
         // −1.5 dBFS ceiling (alimiter=limit=-1.5dB).
         Self.setParameter(limiter, address: AUParameterAddress(kLimiterParam_PreGain), value: -1.5)
 
@@ -316,9 +316,12 @@ public final class VoicePolishProcessor {
         for band in bands { band.bypass = false }
     }
 
-    private func configureDynamics(_ unit: AVAudioUnitEffect, threshold: Float,
-                                   headRoom: Float, attack: Float, release: Float,
-                                   makeup: Float) {
+    /// A08: shared with `ChannelFXProcessor` — the AUDynamicsProcessor
+    /// threshold/headRoom/attack/release/makeup mapping (headRoom =
+    /// |threshold| / ratio gives the effective ratio; see the class docs).
+    static func configureDynamics(_ unit: AVAudioUnitEffect, threshold: Float,
+                                  headRoom: Float, attack: Float, release: Float,
+                                  makeup: Float) {
         Self.setParameter(unit, address: AUParameterAddress(kDynamicsProcessorParam_Threshold), value: threshold)
         Self.setParameter(unit, address: AUParameterAddress(kDynamicsProcessorParam_HeadRoom), value: headRoom)
         Self.setParameter(unit, address: AUParameterAddress(kDynamicsProcessorParam_AttackTime), value: attack)
@@ -328,7 +331,8 @@ public final class VoicePolishProcessor {
 
     /// Instantiates an Apple system effect AU. An unavailable subtype surfaces as a
     /// `start()` throw (→ passthrough), not here — the init is non-failable.
-    private static func effect(_ subType: OSType) -> AVAudioUnitEffect {
+    /// A08: shared with `ChannelFXProcessor`.
+    static func effect(_ subType: OSType) -> AVAudioUnitEffect {
         AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
             componentType: kAudioUnitType_Effect,
             componentSubType: subType,
@@ -338,8 +342,9 @@ public final class VoicePolishProcessor {
         ))
     }
 
-    private static func setParameter(_ unit: AVAudioUnitEffect,
-                                     address: AUParameterAddress, value: Float) {
+    /// A08: shared with `ChannelFXProcessor`.
+    static func setParameter(_ unit: AVAudioUnitEffect,
+                             address: AUParameterAddress, value: Float) {
         unit.auAudioUnit.parameterTree?.parameter(withAddress: address)?.setValue(value, originator: nil)
     }
 
@@ -348,9 +353,10 @@ public final class VoicePolishProcessor {
     /// Copies the sample buffer's LPCM out of its AudioBufferList into an
     /// `AVAudioPCMBuffer` described by the buffer's own ASBD (any bit depth /
     /// interleave). `AVAudioConverter` does the rest on the way to the render format.
-    private func extractPCM(_ sampleBuffer: CMSampleBuffer,
-                            asbd: AudioStreamBasicDescription,
-                            frameCount: AVAudioFrameCount) -> AVAudioPCMBuffer? {
+    /// A08: shared with `ChannelFXProcessor`.
+    static func extractPCM(_ sampleBuffer: CMSampleBuffer,
+                           asbd: AudioStreamBasicDescription,
+                           frameCount: AVAudioFrameCount) -> AVAudioPCMBuffer? {
         var mutableASBD = asbd
         guard let format = AVAudioFormat(streamDescription: &mutableASBD),
               let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {

@@ -190,6 +190,13 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// list carries only ADDITIONAL devices, so a pre-A05 single-mic setup
     /// decodes to an empty list and keeps working exactly as before.
     public var audioInputs: [AudioInputSelection]
+    /// A08 (issue #120): per-channel effect chains (high-pass, noise gate,
+    /// EQ, compressor, limiter) keyed by `AudioChannelID.label`. Additive
+    /// `decodeIfPresent`, so a pre-A08 blob decodes to an empty map and every
+    /// channel falls back to the legacy voice-polish mapping (see
+    /// `fxChain(forChannelLabel:)`). Edits apply live as parameter updates on
+    /// the channel's running insert — no capture restart.
+    public var channelFX: [String: ChannelFXChain]
     /// A07 (issue #119): headphone monitoring of the studio's MONITOR bus
     /// (macOS). Off by default — no unexpected audio output on first launch.
     public var monitoringEnabled: Bool
@@ -228,6 +235,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         captureExcludedBundleIDs: [String] = [],
         mixer: MixerSettings = MixerSettings(),
         audioInputs: [AudioInputSelection] = [],
+        channelFX: [String: ChannelFXChain] = [:],
         monitoringEnabled: Bool = false,
         monitorOutputDeviceUID: String? = nil
     ) {
@@ -255,6 +263,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.captureExcludedBundleIDs = captureExcludedBundleIDs
         self.mixer = mixer
         self.audioInputs = audioInputs
+        self.channelFX = channelFX
         self.monitoringEnabled = monitoringEnabled
         self.monitorOutputDeviceUID = monitorOutputDeviceUID
     }
@@ -298,6 +307,10 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         // inputs — the legacy `preferredAudioInputUID` default-mic behavior
         // above is untouched, so that mic stays enabled exactly as before.
         audioInputs = try c.decodeIfPresent([AudioInputSelection].self, forKey: .audioInputs) ?? d.audioInputs
+        // A08: blobs written before per-channel FX existed decode to an empty
+        // chain map — every channel then follows the legacy voice-polish
+        // mapping below, so behavior is identical to before the upgrade.
+        channelFX = try c.decodeIfPresent([String: ChannelFXChain].self, forKey: .channelFX) ?? d.channelFX
         // A07: blobs written before monitoring existed decode to monitoring
         // OFF on the system default output (no surprise audio on upgrade).
         monitoringEnabled = try c.decodeIfPresent(Bool.self, forKey: .monitoringEnabled) ?? d.monitoringEnabled
@@ -305,6 +318,18 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     }
 
     public static let `default` = StreamSettings()
+
+    /// A08 (issue #120): the effect chain one channel runs — its persisted
+    /// per-channel chain when present, else the legacy voice-polish mapping
+    /// (`voicePolishEnabled` ⇒ the `.voice` preset, which voices the same
+    /// broadcast curve the fixed `VoicePolishProcessor` runs). A channel
+    /// whose chain the user has touched through the FX rack is keyed in
+    /// `channelFX` and no longer follows the global toggle; `label` is the
+    /// channel's `AudioChannelID.label` (the shared model never names that
+    /// macOS type, same rule as the mixer document).
+    public func fxChain(forChannelLabel label: String) -> ChannelFXChain {
+        channelFX[label] ?? (voicePolishEnabled ? .preset(.voice) : .preset(.off))
+    }
 
     /// Defense-in-depth for restored/legacy settings: never hand a codec to a
     /// transport that cannot packetize it, even if the UI has not normalized yet.

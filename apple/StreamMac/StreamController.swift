@@ -456,6 +456,11 @@ final class StreamController: ObservableObject {
     /// registered on the audio engine, so settings applies can diff and
     /// sync them without tearing down channels that keep running.
     private var additionalMicChannelIDs: Set<AudioChannelID> = []
+    /// A08 (issue #120): each mic channel's FX insert box, keyed by channel
+    /// ID. Boxes outlive settings applies so a chain edit lands as a
+    /// parameter update on the RUNNING processor (no capture restart);
+    /// they rebuild only when the engine (re)starts or the channel leaves.
+    private var channelFXBoxes: [AudioChannelID: ChannelFXInsertBox] = [:]
 
     /// Live mixer channel gain (ramped). The dispatcher owns mixer state;
     /// this is its write path for non-scene-bound channels (the mic today,
@@ -766,6 +771,15 @@ final class StreamController: ObservableObject {
                 syncAdditionalMicChannels()
             }
         }
+        // A08 (issue #120): per-channel FX chain edits (and the legacy
+        // voice-polish toggle they fall back to) are a LIVE surface — the
+        // new chain lands on each channel's RUNNING insert as parameter
+        // updates, so a rack edit or a settings Apply never restarts
+        // capture, resets a ring, or gaps the audio.
+        if newSettings.channelFX != previous.channelFX
+            || newSettings.voicePolishEnabled != previous.voicePolishEnabled {
+            syncChannelFXChains()
+        }
         // A07 (issue #119): monitoring enable/device are LIVE session state —
         // the player retargets in place (engine restart on a real device
         // change), independent of the encode-geometry ownership rules above.
@@ -834,27 +848,29 @@ final class StreamController: ObservableObject {
     }
 
     /// Starts the A01 audio engine and routes the microphone channel: the
-    /// mic's `VoicePolishProcessor` runs as the channel's INSERT (its position
-    /// moved here from the publisher's per-track path, so the mix is polished
+    /// mic's A08 FX chain runs as the channel's INSERT (its position moved
+    /// here from the publisher's per-track path, so the mix is processed
     /// exactly once — the A08 FX seam), and the settings mic volume becomes
-    /// the channel's program gain. Capture-source channels self-register on
-    /// their first audio buffer and get their S05 binding gains from
-    /// `applyProgramAudioBindings`.
+    /// the channel's program gain. The insert box ALWAYS registers, even
+    /// with the chain Off (zero-cost passthrough), so a rack edit can enable
+    /// FX live without an engine restart. Capture-source channels
+    /// self-register on their first audio buffer and get their S05 binding
+    /// gains from `applyProgramAudioBindings`.
     private func startAudioEngine() {
         let audioEngine = self.audioEngine
         let settings = self.settings
         // A04: the dispatcher's mixer gain for the mic (fader + mute) wins
         // over the raw settings volume once one has been pushed.
         let micMixerGain = mixerGains[.microphone(deviceUID: nil)]
+        let micID = AudioChannelID.microphone(deviceUID: nil)
+        // A08: the engine (re)start wiped every channel, so all insert boxes
+        // are rebuilt fresh from settings.
+        channelFXBoxes = [micID: ChannelFXInsertBox(chain: settings.fxChain(forChannelLabel: micID.label))]
+        let micBox = channelFXBoxes[micID]!
         Task {
             await audioEngine.run()
-            if settings.voicePolishEnabled {
-                let polish = VoicePolishInsertBox()
-                await audioEngine.addChannel(.microphone(deviceUID: nil)) { sample in
-                    polish.process(sample)
-                }
-            } else {
-                await audioEngine.addChannel(.microphone(deviceUID: nil))
+            await audioEngine.addChannel(micID) { sample in
+                micBox.process(sample)
             }
             await audioEngine.setChannelGain(.microphone(deviceUID: nil),
                                              volume: micMixerGain?.volume
@@ -882,8 +898,8 @@ final class StreamController: ObservableObject {
 
     /// A05 (issue #84): diffs the enabled additional mic channels against
     /// the engine registration and syncs it — newly enabled devices get a
-    /// channel with their OWN VoicePolish insert instance (per-channel
-    /// processing state; the A08 FX seam) and their mirrored mixer gain;
+    /// channel with their OWN A08 FX insert instance (per-channel processing
+    /// state; the A08 FX seam) and their mirrored mixer gain;
     /// disabled/relinked-away channels are torn down. Channels that keep
     /// running are untouched (no ring/FX reset on an unrelated edit).
     private func syncAdditionalMicChannels() {
@@ -893,25 +909,39 @@ final class StreamController: ObservableObject {
         guard !added.isEmpty || !removed.isEmpty else { return }
         additionalMicChannelIDs = wanted
         let audioEngine = self.audioEngine
-        let polishEnabled = settings.voicePolishEnabled
+        let settings = self.settings
         let gains = mixerGains
+        for id in removed {
+            channelFXBoxes[id] = nil
+        }
+        for id in added {
+            channelFXBoxes[id] = ChannelFXInsertBox(chain: settings.fxChain(forChannelLabel: id.label))
+        }
+        let boxes = channelFXBoxes
         Task {
             for id in removed {
                 await audioEngine.removeChannel(id)
             }
             for id in added {
-                if polishEnabled {
-                    let polish = VoicePolishInsertBox()
-                    await audioEngine.addChannel(id) { sample in
-                        polish.process(sample)
-                    }
-                } else {
-                    await audioEngine.addChannel(id)
+                let box = boxes[id]!
+                await audioEngine.addChannel(id) { sample in
+                    box.process(sample)
                 }
                 await audioEngine.setChannelGain(id,
                                                  volume: gains[id]?.volume ?? 1,
                                                  isMuted: gains[id]?.isMuted ?? false)
             }
+        }
+    }
+
+    /// A08 (issue #120): pushes each channel's CURRENT effective chain (the
+    /// persisted per-channel chain, else the legacy voice-polish mapping)
+    /// onto its running insert box — a live parameter update, never a
+    /// capture restart or ring reset. Called from `applySavedSettings` when
+    /// `channelFX` or the legacy `voicePolishEnabled` toggle changed.
+    private func syncChannelFXChains() {
+        for (id, box) in channelFXBoxes {
+            box.update(settings.fxChain(forChannelLabel: id.label))
         }
     }
 
@@ -1156,16 +1186,37 @@ final class StreamController: ObservableObject {
     }
 }
 
-/// Carries the non-Sendable `VoicePolishProcessor` into the mic channel's
-/// `@Sendable` insert closure. `@unchecked Sendable` is sound here: the
-/// processor is only ever called under the channel's ingest lock (one thread
-/// at a time, off the main actor), which is the same confinement the
-/// publishers gave their per-actor instances.
-private final class VoicePolishInsertBox: @unchecked Sendable {
-    private let processor = VoicePolishProcessor()
+/// A08 (issue #120): carries the non-Sendable `ChannelFXProcessor` into a
+/// mic channel's `@Sendable` insert closure, and hands chain updates from
+/// the main actor to the capture thread. `@unchecked Sendable` is sound
+/// here: `process` is only ever called under the channel's ingest lock (one
+/// thread at a time, off the main actor — the same confinement the
+/// publishers gave their `VoicePolishProcessor` instances), and the chain
+/// value crosses threads only through the unfair lock. The processor
+/// re-applies a changed chain onto its running graph itself, so updates are
+/// lock-free for the audio path apart from the tiny value hand-off.
+private final class ChannelFXInsertBox: @unchecked Sendable {
+    private let processor = ChannelFXProcessor()
+    private var lock = os_unfair_lock_s()
+    private var chain: ChannelFXChain
 
+    init(chain: ChannelFXChain) {
+        self.chain = chain
+    }
+
+    /// Main-actor write: swap the chain the next processed buffer will run.
+    func update(_ chain: ChannelFXChain) {
+        os_unfair_lock_lock(&lock)
+        self.chain = chain
+        os_unfair_lock_unlock(&lock)
+    }
+
+    /// Capture-thread read + process (under the channel's ingest lock).
     func process(_ sample: CMSampleBuffer) -> CMSampleBuffer {
-        processor.process(sample)
+        os_unfair_lock_lock(&lock)
+        let chain = self.chain
+        os_unfair_lock_unlock(&lock)
+        return processor.process(sample, chain: chain)
     }
 }
 

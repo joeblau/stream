@@ -47,6 +47,8 @@ struct MixerPanelView: View {
     /// the mic first, then capture channels in source-registry order, then
     /// anything else the engine reports (media/app/guest as they land).
     @State private var channelOrder: [AudioChannelID] = [Self.micID]
+    /// A08 (issue #120): the channel whose FX rack sheet is open, if any.
+    @State private var fxRack: FXRackTarget?
 
     private static let micID = AudioChannelID.microphone(deviceUID: nil)
     /// Vertical fader travel in points.
@@ -67,6 +69,9 @@ struct MixerPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { await pollLevels() }
+        .sheet(item: $fxRack) { target in
+            ChannelFXRackView(channel: target.channel, title: name(for: target.channel))
+        }
         .onAppear {
             mergeExpectedCaptureChannels()
             mergeExpectedMicChannels()
@@ -143,18 +148,22 @@ struct MixerPanelView: View {
                           onMute: { dispatcher.execute(.setChannelMuted(id, $0)) },
                           onSolo: { dispatcher.execute(.setChannelSolo(id, $0)) },
                           onAux: { dispatcher.execute(.setChannelAuxSend(id, $0 ? 1 : 0)) })
+                    fxButton(for: id)
                     if missing { relinkMenu(for: uid) }
                 }
             } else {
-                strip(title: "Microphone",
-                      meterLevels: meterLevels,
-                      volume: dispatcher.state.micVolume, range: 0...2,
-                      isMuted: mixer.channelMutes[id.label] ?? false,
-                      isSoloed: isSoloed, auxOn: auxOn, controlsEnabled: true,
-                      onVolume: { dispatcher.execute(.setChannelVolume(id, $0)) },
-                      onMute: { dispatcher.execute(.setChannelMuted(id, $0)) },
-                      onSolo: { dispatcher.execute(.setChannelSolo(id, $0)) },
-                      onAux: { dispatcher.execute(.setChannelAuxSend(id, $0 ? 1 : 0)) })
+                VStack(spacing: 2) {
+                    strip(title: "Microphone",
+                          meterLevels: meterLevels,
+                          volume: dispatcher.state.micVolume, range: 0...2,
+                          isMuted: mixer.channelMutes[id.label] ?? false,
+                          isSoloed: isSoloed, auxOn: auxOn, controlsEnabled: true,
+                          onVolume: { dispatcher.execute(.setChannelVolume(id, $0)) },
+                          onMute: { dispatcher.execute(.setChannelMuted(id, $0)) },
+                          onSolo: { dispatcher.execute(.setChannelSolo(id, $0)) },
+                          onAux: { dispatcher.execute(.setChannelAuxSend(id, $0 ? 1 : 0)) })
+                    fxButton(for: id)
+                }
             }
         case .capture(let key):
             let binding = captureBinding(for: key)
@@ -207,6 +216,20 @@ struct MixerPanelView: View {
             return (layer.id, layer.audio)
         }
         return nil
+    }
+
+    /// A08 (issue #120): opens the channel's FX rack sheet (preset, per-
+    /// section bypass/reset, live parameters). Tinted while any section is
+    /// active so the strip shows processing at a glance. Mic channels only —
+    /// capture/media/app/guest channels have no native insert chain yet
+    /// (their processing modes arrive through A11 Audio Unit hosting).
+    private func fxButton(for id: AudioChannelID) -> some View {
+        let active = dispatcher.state.fxChain(forLabel: id.label).isActive
+        return Button("FX") { fxRack = FXRackTarget(channel: id) }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .tint(active ? .purple : nil)
+            .help("Per-channel effects: high-pass, noise gate, EQ, compressor, limiter — applied live")
     }
 
     /// A05: the explicit relink path for an unplugged input device — pick a

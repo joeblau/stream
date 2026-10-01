@@ -440,7 +440,7 @@ struct SettingsView: View {
             }
 
             Toggle("Voice Polish", isOn: $session.draft.voicePolishEnabled)
-            Text("Broadcast-style EQ, compression and limiting on the mic.")
+            Text("Broadcast-style EQ, compression and limiting on the mic. Voice Polish is the default chain for every mic channel without its own; per-channel effect chains (high-pass, gate, EQ, compressor, limiter) are edited live from each mixer strip's FX button.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -453,7 +453,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Label("Mic volume applies immediately, even while live.", systemImage: "bolt.fill")
                 effectBadge(.nextSession)
-                Text("Microphone choice and Voice Polish are read when a session starts. Additional inputs and their channel mappings apply immediately, each as its own mixer channel. Monitoring is heard while the studio pipeline is running (Preview, stream, or recording); its level is the mixer's Monitor fader, and soloing a channel auditions it on the monitor output only.")
+                Text("Microphone choice is read when a session starts; Voice Polish and per-channel FX apply live. Additional inputs and their channel mappings apply immediately, each as its own mixer channel. Monitoring is heard while the studio pipeline is running (Preview, stream, or recording); its level is the mixer's Monitor fader, and soloing a channel auditions it on the monitor output only.")
             }
         }
     }
