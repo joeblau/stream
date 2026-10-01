@@ -186,11 +186,8 @@ public enum BrowserOverlaySceneEntryRefresh: String, Hashable, Codable, Sendable
 /// The G07 prototype established (see the issue comment for the measurement
 /// notes) what each route can and cannot promise under the app sandbox:
 public enum BrowserWidgetAudioRoute: String, Hashable, Codable, Sendable, CaseIterable {
-    /// Widget media never plays sound. The default, and the only mode with
-    /// zero capture risk — alert widgets that ship their own audio are muted
-    /// in-page (autoplay with audio is blocked and every media element is
-    /// force-muted by the injected script), so nothing reaches the system
-    /// output or any capture.
+    /// Native WebKit media suspension prevents playback/resume. CSS/DOM
+    /// animation continues, but video elements are also suspended. Default.
     case muted
     /// The widget runs inside the studio's own WKWebView; its audio plays
     /// from the WebKit WebContent process to the system output and reaches
@@ -202,14 +199,9 @@ public enum BrowserWidgetAudioRoute: String, Hashable, Codable, Sendable, CaseIt
     /// Program output never double-captures: the monitor bus plays from the
     /// studio process itself, which IS excluded.
     case systemMix
-    /// The widget runs in a dedicated helper app with its own bundle ID, so
-    /// the existing A06 per-app ScreenCaptureKit path captures exactly its
-    /// audio with an independent mixer channel — and the A06 system mix
-    /// already excludes every app carrying its own per-app source, so
-    /// helper + system mix can never double up. G08 NOTE: the helper target
-    /// is NOT implemented (see `BrowserOverlayHost`); the in-app host runs
-    /// a helperApp-routed widget with systemMix behavior and a published
-    /// warning until the helper ships.
+    /// Reserved for the independently capturable helper route. Until its
+    /// audio attribution and PCM path are verified, the native host suspends
+    /// playback and reports unavailable; it never substitutes system mix.
     case helperApp
 
     /// Whether the route yields an independently gain/mute-controllable
