@@ -256,6 +256,36 @@ enum StudioCommand: Equatable, Sendable {
     /// default honestly and re-applies when the device returns (C10 rules).
     case setMonitorOutputDevice(uid: String?)
 
+    // A03 soundboard + music playlists (issue #98): pads and playlists are a
+    // project-level performance surface persisted in the soundboard document
+    // (SoundboardStore — the mixer-document precedent), NOT scene content:
+    // structural edits are immediate and never undoable scene edits, and
+    // transport is session state (the media-transport precedent). Every
+    // trigger routes through the studio engine's `.media(id)` channels, so
+    // hardware/automation triggers (D-series) are audible in the broadcast.
+    case addSoundPad(SoundPad)
+    case updateSoundPad(SoundPad)
+    case removeSoundPad(SourceDefinitionID)
+    /// Fire the pad (its trigger policy decides restart vs overlap).
+    case triggerSoundPad(SourceDefinitionID)
+    case stopSoundPad(SourceDefinitionID)
+    /// The panic button: stop every pad and in-flight scene stinger.
+    case stopAllSoundEffects
+    case addMusicPlaylist(MusicPlaylist)
+    case updateMusicPlaylist(MusicPlaylist)
+    case removeMusicPlaylist(SourceDefinitionID)
+    case playlistPlay(SourceDefinitionID)
+    case playlistPause(SourceDefinitionID)
+    /// Rewind to the start of the current track, parked.
+    case playlistStop(SourceDefinitionID)
+    case playlistNext(SourceDefinitionID)
+    case playlistPrevious(SourceDefinitionID)
+    /// A03 scene sounds (issue #98): replaces the STAGED scene's sound
+    /// bindings (enter/exit stingers, continue beds). Scene content —
+    /// staged, Taken, reverted, and UNDOABLE like layer edits; the Take path
+    /// fires the rules as scenes enter/leave program.
+    case setSceneSoundBindings([SceneSoundBinding], in: SceneID?)
+
     // Settings session (W04).
     case openSettings(SettingsSession.Section?)
     case closeSettings
@@ -367,6 +397,21 @@ enum StudioCommand: Equatable, Sendable {
         case .setMonitoringEnabled(let enabled):
             return "\(enabled ? "Enable" : "Disable") Monitoring"
         case .setMonitorOutputDevice: return "Set Monitor Output"
+        case .addSoundPad: return "Add Sound Pad"
+        case .updateSoundPad: return "Edit Sound Pad"
+        case .removeSoundPad: return "Remove Sound Pad"
+        case .triggerSoundPad: return "Trigger Sound Pad"
+        case .stopSoundPad: return "Stop Sound Pad"
+        case .stopAllSoundEffects: return "Stop All Sound Effects"
+        case .addMusicPlaylist: return "Add Playlist"
+        case .updateMusicPlaylist: return "Edit Playlist"
+        case .removeMusicPlaylist: return "Remove Playlist"
+        case .playlistPlay: return "Play Playlist"
+        case .playlistPause: return "Pause Playlist"
+        case .playlistStop: return "Stop Playlist"
+        case .playlistNext: return "Next Track"
+        case .playlistPrevious: return "Previous Track"
+        case .setSceneSoundBindings: return "Scene Sounds"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
         case .applySettings: return "Apply Settings"
@@ -533,6 +578,12 @@ final class StudioCommandDispatcher: ObservableObject {
     /// only on change (self-healing: the controller mirrors mixer gains, so
     /// engine restarts and settings applies re-apply them without help).
     private var lastPushedMixer: (mixer: MixerSettings, micVolume: Double)?
+    /// A03 (issue #98): the soundboard document (pads + music playlists,
+    /// persisted beside the scene documents) and its playback runtime (pad
+    /// triggers, playlist transport, scene-sound rules). Owned here so the
+    /// panel, keyboard, and hardware/automation triggers share one instance.
+    let soundboardStore: SoundboardStore
+    let soundboard: SoundboardController
 
     init(controller: StreamController,
          sceneStore: SceneStore,
@@ -544,6 +595,10 @@ final class StudioCommandDispatcher: ObservableObject {
         self.session = session
         self.recorder = recorder
         self.previewProgram = previewProgram
+        let soundboardStore = SoundboardStore()
+        self.soundboardStore = soundboardStore
+        self.soundboard = SoundboardController(store: soundboardStore,
+                                               controller: controller)
         self.state = StudioState()
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
@@ -996,6 +1051,69 @@ final class StudioCommandDispatcher: ObservableObject {
             return controller.monitorOutput.devices.contains(where: { $0.uid == uid })
                 ? nil : .invalidTarget("That output device is not connected.")
 
+        // A03 soundboard/playlist validation (issue #98): transport and
+        // structural commands address the soundboard document's stable IDs
+        // (locks and staging never apply — the media-transport precedent).
+        case .addSoundPad(let pad):
+            return pad.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A pad name can't be empty.") : nil
+        case .updateSoundPad(let pad):
+            guard soundboardStore.pad(withID: pad.id) != nil else {
+                return .invalidTarget("Sound pad \(pad.id) does not exist.")
+            }
+            return pad.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A pad name can't be empty.") : nil
+        case .removeSoundPad(let id),
+             .triggerSoundPad(let id),
+             .stopSoundPad(let id):
+            return soundboardStore.pad(withID: id) != nil
+                ? nil : .invalidTarget("Sound pad \(id) does not exist.")
+        case .stopAllSoundEffects:
+            return nil
+        case .addMusicPlaylist(let playlist):
+            return playlist.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A playlist name can't be empty.") : nil
+        case .updateMusicPlaylist(let playlist):
+            guard soundboardStore.playlist(withID: playlist.id) != nil else {
+                return .invalidTarget("Playlist \(playlist.id) does not exist.")
+            }
+            return playlist.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A playlist name can't be empty.") : nil
+        case .removeMusicPlaylist(let id):
+            return soundboardStore.playlist(withID: id) != nil
+                ? nil : .invalidTarget("Playlist \(id) does not exist.")
+        case .playlistPlay(let id):
+            guard let playlist = soundboardStore.playlist(withID: id) else {
+                return .invalidTarget("Playlist \(id) does not exist.")
+            }
+            return playlist.tracks.isEmpty
+                ? .unavailable("Playlist \"\(playlist.name)\" has no tracks — add audio files first.")
+                : nil
+        case .playlistPause(let id), .playlistStop(let id):
+            return soundboardStore.playlist(withID: id) != nil
+                ? nil : .invalidTarget("Playlist \(id) does not exist.")
+        case .playlistNext(let id), .playlistPrevious(let id):
+            guard let playlist = soundboardStore.playlist(withID: id) else {
+                return .invalidTarget("Playlist \(id) does not exist.")
+            }
+            return playlist.tracks.isEmpty
+                ? .unavailable("Playlist \"\(playlist.name)\" has no tracks.")
+                : nil
+        case .setSceneSoundBindings(let bindings, let sceneID):
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success:
+                for binding in bindings {
+                    if binding.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return .invalidValue("A scene sound name can't be empty.")
+                    }
+                    if !(0...2).contains(binding.volume) {
+                        return .invalidValue("Scene sound volume must be between 0 and 2.")
+                    }
+                }
+                return nil
+            }
+
         case .openSettings, .closeSettings:
             return nil
         case .applySettings:
@@ -1028,9 +1146,18 @@ final class StudioCommandDispatcher: ObservableObject {
 
     private func perform(_ command: StudioCommand) {
         switch command {
-        case .startStream: controller.goLive()
+        case .startStream:
+            controller.goLive()
+            // A03 (issue #98): the pipeline is up — fire the restored program
+            // scene's enter rules once (idempotent; a Take already synced
+            // the scene is a no-op).
+            soundboard.syncProgramScene(previewProgram.programScene)
         case .stopStream: controller.stopStream()
-        case .startPreview: controller.startPreview()
+        case .startPreview:
+            controller.startPreview()
+            // A03: same launch restore as startStream — the program scene's
+            // ambient beds and enter stingers start with the pipeline.
+            soundboard.syncProgramScene(previewProgram.programScene)
         case .stopPreview: controller.stopPreview()
         case .startRecording: recorder.start(stream: controller)
         case .stopRecording: recorder.stop()
@@ -1313,6 +1440,58 @@ final class StudioCommandDispatcher: ObservableObject {
             session.persistMonitoring(enabled: session.activeSettings.monitoringEnabled,
                                       deviceUID: uid)
 
+        // A03 soundboard/playlist execution (issue #98): structural edits
+        // write the soundboard document (the controller's store observation
+        // hot-applies payload relinks and gains); transport acts on the ONE
+        // shared playback instance per pad/playlist, so a UI button and a
+        // hardware trigger can never fork playback.
+        case .addSoundPad(let pad):
+            soundboardStore.addPad(pad)
+        case .updateSoundPad(let pad):
+            soundboardStore.updatePad(pad)
+        case .removeSoundPad(let id):
+            soundboardStore.removePad(id)
+        case .triggerSoundPad(let id):
+            if let pad = soundboardStore.pad(withID: id) {
+                soundboard.triggerPad(pad)
+            }
+        case .stopSoundPad(let id):
+            if let pad = soundboardStore.pad(withID: id) {
+                soundboard.stopPad(pad)
+            }
+        case .stopAllSoundEffects:
+            soundboard.stopAllSoundEffects()
+        case .addMusicPlaylist(let playlist):
+            soundboardStore.addPlaylist(playlist)
+        case .updateMusicPlaylist(let playlist):
+            soundboardStore.updatePlaylist(playlist)
+        case .removeMusicPlaylist(let id):
+            soundboardStore.removePlaylist(id)
+        case .playlistPlay(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.playPlaylist(playlist)
+            }
+        case .playlistPause(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.pausePlaylist(playlist)
+            }
+        case .playlistStop(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.stopPlaylist(playlist)
+            }
+        case .playlistNext(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.nextTrack(playlist)
+            }
+        case .playlistPrevious(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.previousTrack(playlist)
+            }
+        case .setSceneSoundBindings(let bindings, let sceneID):
+            // Scene content: stages (and implicitly takes in direct-live)
+            // like any other scene edit; the Take path fires the rules.
+            editStagedScene(sceneID) { $0.soundBindings = bindings }
+
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
         case .applySettings: session.apply()
@@ -1325,6 +1504,11 @@ final class StudioCommandDispatcher: ObservableObject {
             // the source of truth for the PUBLISHED composition only.
             guard let published = previewProgram.take() else { return }
             sceneStore.update(published)
+            // A03 (issue #98): entering the scene fires its bound sounds
+            // (enter stingers + ambient beds; the outgoing scene's exit
+            // stingers fire and its beds stop). Idempotent re-sync, so
+            // direct-live's implicit takes can't double-fire.
+            soundboard.syncProgramScene(published)
         case .revert:
             previewProgram.revert()
         case .setDirectLiveEditing(let on):
@@ -1384,6 +1568,8 @@ final class StudioCommandDispatcher: ObservableObject {
         guard previewProgram.directLiveEditing,
               let published = previewProgram.take() else { return }
         sceneStore.update(published)
+        // A03 (issue #98): direct-live's implicit takes fire scene sounds too.
+        soundboard.syncProgramScene(published)
     }
 
     // MARK: Layer helpers
@@ -1622,7 +1808,8 @@ final class StudioCommandDispatcher: ObservableObject {
              .alignLayers(_, let id),
              .distributeLayers(_, let id),
              .setOverlayHiddenInScene(_, _, let id),
-             .setSceneBackground(_, let id):
+             .setSceneBackground(_, let id),
+             .setSceneSoundBindings(_, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
         default:
             return nil
@@ -1890,7 +2077,8 @@ private extension StudioCommand {
              .alignLayers, .distributeLayers,
              .addOverlay, .removeOverlay, .renameOverlay, .setOverlayVisibility,
              .setOverlayLocked, .setOverlayTransform, .setOverlayEffects, .moveOverlay,
-             .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground:
+             .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground,
+             .setSceneSoundBindings:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording,
@@ -1901,6 +2089,11 @@ private extension StudioCommand {
              .setAudioInputEnabled, .setAudioInputMapping, .relinkAudioInput,
              .setMonitoringEnabled, .setMonitorOutputDevice,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
+             .addSoundPad, .updateSoundPad, .removeSoundPad,
+             .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,
+             .addMusicPlaylist, .updateMusicPlaylist, .removeMusicPlaylist,
+             .playlistPlay, .playlistPause, .playlistStop,
+             .playlistNext, .playlistPrevious,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
              .undo, .redo:
@@ -1937,6 +2130,8 @@ private extension StudioCommand {
             return "overlay-effects.\(id)"
         case .setSceneBackground(_, let sceneID):
             return "scene-background.\(sceneID?.description ?? "staged")"
+        case .setSceneSoundBindings(_, let sceneID):
+            return "scene-sound-bindings.\(sceneID?.description ?? "staged")"
         case .setDefaultBackground:
             return "default-background"
         default:

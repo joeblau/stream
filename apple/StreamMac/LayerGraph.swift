@@ -1094,6 +1094,83 @@ enum HexColor {
     }
 }
 
+// MARK: - Scene sounds (A03, issue #98)
+
+/// When a scene-sound binding fires. Enter/exit are one-shot stingers (they
+/// play through to the end even across a following scene change); `continue`
+/// is an ambient bed that loops while the scene is on program.
+enum SceneSoundRule: String, Codable, CaseIterable, Sendable {
+    case enter
+    case exit
+    case `continue`
+
+    var displayName: String {
+        switch self {
+        case .enter: return "On Enter (Stinger)"
+        case .exit: return "On Exit (Stinger)"
+        case .continue: return "Continue (Ambient Bed)"
+        }
+    }
+}
+
+/// A03 (issue #98): one sound bound to a scene — an enter/exit stinger or a
+/// looping ambient bed. Scene CONTENT: bindings stage, Take, revert, and undo
+/// exactly like layers, and the Take path (W05 dispatcher →
+/// `SoundboardController.syncProgramScene`) fires the rules as the scene
+/// enters/leaves program. The binding carries its own security-scoped
+/// bookmark (self-contained, the soundboard pattern), and its `id` doubles as
+/// the `.media(id)` mix-channel identity, so a relinked clip keeps its
+/// channel (and level) — hardware triggers route through the studio engine
+/// and are audible in the broadcast, as the issue requires.
+struct SceneSoundBinding: Identifiable, Hashable, Codable, Sendable {
+    /// Stable identity — also the `.media(id)` mix-channel key.
+    var id: SourceDefinitionID
+    var rule: SceneSoundRule
+    var name: String
+    /// Security-scoped bookmark for the picked audio file (the access grant).
+    var bookmarkData: Data?
+    /// The picked file's display name (bookmarks don't round-trip one).
+    var fileName: String?
+    /// Linear program gain, 0...2 (1 = unity).
+    var volume: Double
+
+    init(id: SourceDefinitionID = SourceDefinitionID(),
+         rule: SceneSoundRule = .enter,
+         name: String,
+         bookmarkData: Data? = nil,
+         fileName: String? = nil,
+         volume: Double = 1) {
+        self.id = id
+        self.rule = rule
+        self.name = name
+        self.bookmarkData = bookmarkData
+        self.fileName = fileName
+        self.volume = volume
+    }
+
+    /// Decode every field with a default so documents written before later
+    /// A03 refinements keep loading (the established additive-wire pattern).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(SourceDefinitionID.self, forKey: .id) ?? SourceDefinitionID()
+        rule = try container.decodeIfPresent(SceneSoundRule.self, forKey: .rule) ?? .enter
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Sound"
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 1
+    }
+
+    /// Builds a binding from a user-picked audio file (nil when the bookmark
+    /// can't be created).
+    static func make(pickedFile url: URL, rule: SceneSoundRule) -> SceneSoundBinding? {
+        guard let payload = MediaSourceFactory.payload(forPickedFile: url) else { return nil }
+        return SceneSoundBinding(rule: rule,
+                                 name: url.deletingPathExtension().lastPathComponent,
+                                 bookmarkData: payload.bookmarkData,
+                                 fileName: payload.fileName)
+    }
+}
+
 // MARK: - Scene
 
 /// One switchable scene: an ordered layer graph on a canvas. `layers` is
@@ -1112,6 +1189,10 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
     /// stable LayerIDs of `SceneDocument.overlays` entries this scene hides.
     /// Scene-local content, so overrides stage and Take like any scene edit.
     var hiddenOverlayIDs: Set<LayerID>
+    /// A03 (issue #98): the scene's bound sounds (enter/exit stingers,
+    /// continue ambient beds). Scene content — staged, Taken, reverted, and
+    /// undone like layers; the Take path fires their rules.
+    var soundBindings: [SceneSoundBinding]
 
     init(id: SceneID = SceneID(),
          name: String,
@@ -1119,7 +1200,8 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
          groups: [LayerGroup] = [],
          layers: [LayerNode],
          background: SceneBackground? = nil,
-         hiddenOverlayIDs: Set<LayerID> = []) {
+         hiddenOverlayIDs: Set<LayerID> = [],
+         soundBindings: [SceneSoundBinding] = []) {
         self.id = id
         self.name = name
         self.canvas = canvas
@@ -1127,11 +1209,13 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         self.layers = layers
         self.background = background
         self.hiddenOverlayIDs = hiddenOverlayIDs
+        self.soundBindings = soundBindings
     }
 
     /// `background`/`hiddenOverlayIDs` were added after v2 shipped; decode
     /// them with defaults so older persisted documents keep loading
     /// (additive wire change, same pattern as `LayerNode.isLocked`).
+    /// A03's `soundBindings` follows the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(SceneID.self, forKey: .id)
@@ -1141,6 +1225,7 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         layers = try container.decode([LayerNode].self, forKey: .layers)
         background = try container.decodeIfPresent(SceneBackground.self, forKey: .background)
         hiddenOverlayIDs = try container.decodeIfPresent(Set<LayerID>.self, forKey: .hiddenOverlayIDs) ?? []
+        soundBindings = try container.decodeIfPresent([SceneSoundBinding].self, forKey: .soundBindings) ?? []
     }
 }
 

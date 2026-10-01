@@ -77,7 +77,8 @@ struct MainWindowView: View {
         case layers = "Layers"
         case sources = "Sources"
         case mixer = "Mixer"
-        case media = "Media"
+        // A03 (issue #98): the sound panel (soundboard, music, scene sounds).
+        case media = "Sound"
         case guests = "Guests"
         case destinations = "Destinations"
     }
@@ -456,8 +457,11 @@ struct MainWindowView: View {
                 // audio channel plus program/monitor masters.
                 MixerPanelView()
             case .media:
-                placeholder("Media", systemImage: "photo.on.rectangle",
-                            message: "Overlays, videos and images land here in a later workstream.")
+                // A03 (issue #98): the embedded sound panel — soundboard
+                // pads, music playlists, and the staged scene's sounds.
+                SoundboardPanelView()
+                    .environmentObject(dispatcher.soundboardStore)
+                    .environmentObject(dispatcher.soundboard)
             case .guests:
                 placeholder("Guests", systemImage: "person.2",
                             message: "Remote guest management lands here in a later workstream.")

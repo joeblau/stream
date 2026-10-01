@@ -191,8 +191,12 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             let tracks = try await asset.load(.tracks)
             let hasVideo = tracks.contains { $0.mediaType == .video }
             let hasAudio = tracks.contains { $0.mediaType == .audio }
-            guard hasVideo else {
-                fail("\"\(url.lastPathComponent)\" has no video track — media sources need AVFoundation-readable video (MP4/MOV/ProRes).")
+            // A03 (issue #98): audio-only assets load too — the soundboard,
+            // music playlists, and scene sounds reuse this engine for
+            // clips that have no video track (the frame pull simply never
+            // produces pixels; the audio path is unchanged).
+            guard hasVideo || hasAudio else {
+                fail("\"\(url.lastPathComponent)\" has no audio or video track — sources need an AVFoundation-readable media file (MP4/MOV/ProRes/MP3/AAC/WAV/AIFF).")
                 return
             }
             // `AVPlayerItem.init(asset:)` is MainActor-isolated, so the
