@@ -162,6 +162,7 @@ enum SceneThumbnailRenderer {
         case .pdf: return CIColor(red: 0.85, green: 0.30, blue: 0.30)
         case .web: return CIColor(red: 0.35, green: 0.40, blue: 0.85)
         case .guest: return CIColor(red: 0.25, green: 0.70, blue: 0.40)
+        case .syphon: return CIColor(red: 0.60, green: 0.30, blue: 0.90)
         case .scene: return CIColor(red: 0.60, green: 0.45, blue: 0.35)
         }
     }

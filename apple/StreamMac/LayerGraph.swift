@@ -445,6 +445,30 @@ struct GuestSourcePayload: Hashable, Codable, Sendable {
     var sessionIdentifier: String? = nil
 }
 
+/// C09 (issue #163): a Syphon feed published by a local creative/titling
+/// app (OBS, MadMapper, Resolume, VDMX, …). The persisted identity is the
+/// server name + owning app name pair — what a relaunch of the same app
+/// restores — so a saved source survives server app restarts. The server's
+/// instance UUID is volatile (a new one per launch) and is deliberately NOT
+/// part of the payload: matching by it would defeat C10 auto-recovery.
+struct SyphonSourcePayload: Hashable, Codable, Sendable {
+    /// `SyphonServerDescriptionNameKey` at registration; may be empty (some
+    /// servers publish no name — the app name alone identifies them).
+    var serverName: String = ""
+    /// `SyphonServerDescriptionAppNameKey` at registration.
+    var appName: String = ""
+
+    /// The display title for source rows and discovery lists.
+    var displayTitle: String {
+        switch (serverName.isEmpty, appName.isEmpty) {
+        case (false, false): return "\(appName) — \(serverName)"
+        case (false, true): return serverName
+        case (true, false): return appName
+        case (true, true): return "Unnamed Syphon Server"
+        }
+    }
+}
+
 struct SceneReferencePayload: Hashable, Codable, Sendable {
     /// The scene this layer nests (cycles are rejected at edit time).
     var sceneID: SceneID
@@ -463,6 +487,7 @@ enum LayerPayload: Hashable, Sendable {
     case pdf(PDFSourcePayload)
     case web(WebSourcePayload)
     case guest(GuestSourcePayload)
+    case syphon(SyphonSourcePayload)
     case scene(SceneReferencePayload)
 
     /// Stable discriminator used on the wire.
@@ -477,6 +502,7 @@ enum LayerPayload: Hashable, Sendable {
         case .pdf: return "pdf"
         case .web: return "web"
         case .guest: return "guest"
+        case .syphon: return "syphon"
         case .scene: return "scene"
         }
     }
@@ -488,6 +514,11 @@ enum LayerPayload: Hashable, Sendable {
 
     var isScreen: Bool {
         if case .screen = self { return true }
+        return false
+    }
+
+    var isSyphon: Bool {
+        if case .syphon = self { return true }
         return false
     }
 
@@ -513,7 +544,7 @@ enum LayerPayload: Hashable, Sendable {
     /// composition engine grows source support. UI must mark non-renderable
     /// kinds rather than implying they show on output.
     var isRenderable: Bool {
-        isCamera || isScreen || isText || isShape || isScene
+        isCamera || isScreen || isText || isShape || isScene || isSyphon
     }
 
     /// Short human name for layer-panel rows and add-layer menus.
@@ -528,6 +559,7 @@ enum LayerPayload: Hashable, Sendable {
         case .pdf: return "PDF"
         case .web: return "Web"
         case .guest: return "Guest"
+        case .syphon: return "Syphon"
         case .scene: return "Scene"
         }
     }
@@ -544,6 +576,7 @@ enum LayerPayload: Hashable, Sendable {
         case .pdf: return "doc.fill"
         case .web: return "globe"
         case .guest: return "person.2.fill"
+        case .syphon: return "app.connected.to.app.below.fill"
         case .scene: return "rectangle.on.rectangle"
         }
     }
@@ -551,7 +584,7 @@ enum LayerPayload: Hashable, Sendable {
 
 extension LayerPayload: Codable {
     private enum Kind: String, Codable {
-        case camera, screen, image, text, shape, media, pdf, web, guest, scene
+        case camera, screen, image, text, shape, media, pdf, web, guest, syphon, scene
     }
     private enum CodingKeys: String, CodingKey {
         case kind, payload
@@ -578,6 +611,8 @@ extension LayerPayload: Codable {
             self = .web(try container.decode(WebSourcePayload.self, forKey: .payload))
         case .guest:
             self = .guest(try container.decode(GuestSourcePayload.self, forKey: .payload))
+        case .syphon:
+            self = .syphon(try container.decode(SyphonSourcePayload.self, forKey: .payload))
         case .scene:
             self = .scene(try container.decode(SceneReferencePayload.self, forKey: .payload))
         }
@@ -612,6 +647,9 @@ extension LayerPayload: Codable {
             try container.encode(payload, forKey: .payload)
         case .guest(let payload):
             try container.encode(Kind.guest, forKey: .kind)
+            try container.encode(payload, forKey: .payload)
+        case .syphon(let payload):
+            try container.encode(Kind.syphon, forKey: .kind)
             try container.encode(payload, forKey: .payload)
         case .scene(let payload):
             try container.encode(Kind.scene, forKey: .kind)

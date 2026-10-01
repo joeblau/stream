@@ -27,6 +27,12 @@ packages:
     # reorder frames and then silently drop them as invalid RTMP timestamps).
     # Update by advancing the submodule pointer, not an SPM revision.
     path: Vendor/HaishinKit.swift
+  Syphon:
+    # C09 (issue #163): Syphon inter-app video, vendored as a prebuilt
+    # xcframework with a local binary-target package (upstream ships no
+    # Package.swift, so remote SPM resolution is impossible). See
+    # Vendor/Syphon/Package.swift for the pinned commit and rebuild steps.
+    path: Vendor/Syphon
 
 targets:
 
@@ -210,6 +216,10 @@ targets:
         product: SRTHaishinKit
       - package: HaishinKit
         product: RTCHaishinKit
+      # C09 (issue #163): Syphon client (server discovery + Metal frame
+      # receive). macOS-only — the iOS target never links it.
+      - package: Syphon
+        product: Syphon
 
 # ---------------------------------------------------------------
 # Shared scheme so `xcodegen generate` produces a deterministic,

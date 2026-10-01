@@ -14,6 +14,10 @@ import os.lock
 enum CaptureSourceKey: Hashable, Sendable {
     case camera(CameraSourcePayload)
     case screen(ScreenSourcePayload)
+    /// C09 (issue #163): a Syphon feed, keyed by the payload's stable
+    /// name+app identity (the server instance UUID is volatile and never
+    /// part of the key, so an app relaunch re-keys onto the SAME capture).
+    case syphon(SyphonSourcePayload)
 
     /// The system-default camera (no pinned device).
     static let defaultCamera = CaptureSourceKey.camera(CameraSourcePayload())
@@ -25,6 +29,7 @@ enum CaptureSourceKey: Hashable, Sendable {
         switch self {
         case .camera(let payload): return payload.deviceID == nil
         case .screen(let payload): return payload.targetIdentifier == nil
+        case .syphon: return false
         }
     }
 }
@@ -63,6 +68,7 @@ extension CaptureSourceKey {
             switch payload {
             case .camera(let camera): keys.insert(.camera(camera))
             case .screen(let screen): keys.insert(.screen(screen))
+            case .syphon(let syphon): keys.insert(.syphon(syphon))
             default: break
             }
         }
@@ -279,6 +285,15 @@ final class CaptureSourcePool: ObservableObject {
     private var cameras: [CaptureSourceKey: FacecamCapture] = [:]
     private var screens: [CaptureSourceKey: ScreenSourceCapture] = [:]
     private var screenFrames: [CaptureSourceKey: LatestScreenFrame] = [:]
+    /// C09 (issue #163): one Syphon client per requested syphon key. The
+    /// capture owns its frame holder; `publishFrameHolders` folds those
+    /// holders into the keyed SCREEN holder map, so the renderer's existing
+    /// C01 read path (`frames.screen(key)`) serves syphon layers unchanged.
+    private var syphonCaptures: [CaptureSourceKey: SyphonSourceCapture] = [:]
+    /// C09: the live Syphon server directory — both the Sources tab's
+    /// addable-server list and the missing/recovery signal for syphon
+    /// sources (servers appear/disappear like hot-plugged devices, C10).
+    let syphonDiscovery = SyphonServerDiscovery()
     private var cancellables: Set<AnyCancellable> = []
     /// C10: the physical camera each camera key's capture is actually using —
     /// the pinned device ID, or the system default resolved at start — so a
@@ -292,6 +307,17 @@ final class CaptureSourcePool: ObservableObject {
     /// The settings from the most recent reconcile, reused by hot-plug
     /// recovery and permission-grant retries to restart captures.
     private var lastReconcileSettings: StreamSettings?
+
+    init() {
+        // C09: Syphon servers announce/retire independently of demand —
+        // reconcile syphon sources against every directory change (server
+        // quit → MISSING; the same name+app reappearing → auto-recovery).
+        syphonDiscovery.$servers.sink { [weak self] servers in
+            Task { @MainActor [weak self] in
+                self?.handleSyphonServersChanged(servers)
+            }
+        }.store(in: &cancellables)
+    }
 
     // MARK: - Demand reconciliation
 
@@ -425,6 +451,8 @@ final class CaptureSourcePool: ObservableObject {
                     await capture.pickAndStart(defaults: settings)
                 }
             }
+        case .syphon(let payload):
+            startSyphon(key, payload: payload)
         }
     }
 
@@ -442,6 +470,9 @@ final class CaptureSourcePool: ObservableObject {
             if let capture = screens[key] {
                 Task { await capture.stop() }
             }
+        case .syphon:
+            // Synchronous disconnect; clears its frame holder.
+            syphonCaptures[key]?.stop()
         }
     }
 
@@ -459,9 +490,50 @@ final class CaptureSourcePool: ObservableObject {
         frames.update(
             screenHolders: orderedScreens.compactMap { screenFrames[$0] },
             cameraHolders: orderedCameras.compactMap { cameras[$0]?.latest })
+        // C09: syphon holders join the KEYED screen map only (never the
+        // legacy default-first arrays — the single-source legacy behavior
+        // stays bit-identical), so `frames.screen(key)` resolves `.syphon`
+        // keys with the same known-key/never-substitute semantics.
         frames.updateKeyed(
-            screenHolders: screenFrames,
+            screenHolders: screenFrames.merging(syphonCaptures.mapValues(\.frames)) { current, _ in current },
             cameraHolders: cameras.mapValues(\.latest))
+    }
+
+    /// The capture instance for a syphon key, created (and wired) on first
+    /// use and stable thereafter. Mirrors the screen factory's sinks so
+    /// per-source active/error state lands in the same published surfaces.
+    private func syphonCapture(for key: CaptureSourceKey) -> SyphonSourceCapture {
+        if let existing = syphonCaptures[key] { return existing }
+        let capture = SyphonSourceCapture()
+        syphonCaptures[key] = capture
+        capture.$isCapturing.sink { [weak self, weak capture] _ in
+            Task { @MainActor [weak self, weak capture] in
+                guard let self, let capture else { return }
+                if capture.isCapturing {
+                    self.activeSources.insert(key)
+                    self.sourceErrors[key] = nil
+                    self.missingSources.remove(key)
+                } else {
+                    self.activeSources.remove(key)
+                    if let message = capture.errorMessage {
+                        self.sourceErrors[key] = message
+                    }
+                }
+            }
+        }.store(in: &cancellables)
+        // A start that fails before connecting never flips `isCapturing` —
+        // mirror terminal error messages too, or the sources UI would read
+        // "idle" instead of "error" (the C02 screen pattern).
+        capture.$errorMessage.sink { [weak self, weak capture] _ in
+            Task { @MainActor [weak self, weak capture] in
+                guard let self, let capture,
+                      let message = capture.errorMessage,
+                      !capture.isCapturing else { return }
+                self.sourceErrors[key] = message
+            }
+        }.store(in: &cancellables)
+        publishFrameHolders()
+        return capture
     }
 
     // MARK: - Device hot-plug and permission recovery (C10, issue #79)
@@ -566,6 +638,9 @@ final class CaptureSourcePool: ObservableObject {
                         await capture.pickAndStart(defaults: settings)
                     }
                 }
+            case .syphon(let payload):
+                missingSources.remove(key)
+                startSyphon(key, payload: payload)
             }
         }
     }
@@ -659,6 +734,8 @@ final class CaptureSourcePool: ObservableObject {
             if let capture = screens[key] {
                 Task { await capture.stop() }
             }
+        case .syphon:
+            syphonCaptures[key]?.stop()
         }
     }
 
@@ -694,6 +771,48 @@ final class CaptureSourcePool: ObservableObject {
             } else if missingSources.contains(key)
                         || (!activeSources.contains(key) && sourceErrors[key] != nil) {
                 recoverScreen(key, payload: payload)
+            }
+        }
+    }
+
+    // MARK: - Syphon server lifecycle (C09, issue #163)
+
+    /// Starts (or restarts) a syphon source: connects to the live server
+    /// matching the payload's stable name+app identity. A server that isn't
+    /// publishing right now is MISSING, never an error — creative/titling
+    /// apps come and go, and the discovery reconciliation below restarts
+    /// capture automatically when the same identity reappears (the C10
+    /// pattern, with the server directory as the hot-plug signal).
+    private func startSyphon(_ key: CaptureSourceKey, payload: SyphonSourcePayload) {
+        sourceErrors[key] = nil
+        let capture = syphonCapture(for: key)
+        guard capture.start(matching: payload) else {
+            markMissing(key, message: "The Syphon server \"\(payload.displayTitle)\" is not running. Launch it — capture resumes automatically when it appears, or relink the source to another server.")
+            return
+        }
+    }
+
+    /// The server directory changed (announce/update/retire). Requested
+    /// syphon sources whose server vanished move to MISSING — registry
+    /// entry, demand, and layer bindings survive, the frame holder clears
+    /// (the renderer's documented fallback paints nothing), and unrelated
+    /// sources and every output keep running. Missing sources whose
+    /// name+app pair reappears restart by stable identity: an app relaunch
+    /// recovers exactly like a device hot-plug, and a DIFFERENT server never
+    /// substitutes (that is what the relink action is for).
+    private func handleSyphonServersChanged(_ servers: [DiscoveredSyphonServer]) {
+        // Builds without the Syphon package never publish servers; the
+        // capture's honest unavailable error owns that state instead.
+        guard SyphonServerDiscovery.isSupported else { return }
+        for key in requested {
+            guard case .syphon(let payload) = key else { continue }
+            let available = servers.contains { $0.matches(payload) }
+            if !available, !missingSources.contains(key) {
+                markMissing(key, message: "The Syphon server \"\(payload.displayTitle)\" stopped publishing. Relaunch it — capture resumes automatically when it returns, or relink the source to another server.")
+            } else if available, missingSources.contains(key) {
+                missingSources.remove(key)
+                sourceErrors[key] = nil
+                startSyphon(key, payload: payload)
             }
         }
     }

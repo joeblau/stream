@@ -195,6 +195,15 @@ final class SceneRenderer {
                   let screen = frames.screen(key) else { return nil }
             return place(source: CIImage(cvPixelBuffer: screen),
                          layer: layer, canvas: canvas, isCamera: false)
+        case .syphon:
+            // C09 (issue #163): syphon frames ride the keyed screen-frame
+            // map the pool publishes (the C01 read path needs no syphon
+            //-specific branch); premultiplied alpha composites through
+            // `place` like any source.
+            guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
+                  let syphon = frames.screen(key) else { return nil }
+            return place(source: CIImage(cvPixelBuffer: syphon),
+                         layer: layer, canvas: canvas, isCamera: false)
         case .camera:
             guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
                   let camera = frames.camera(key) else { return nil }
@@ -227,6 +236,7 @@ final class SceneRenderer {
         switch payload {
         case .camera(let camera): return .camera(camera)
         case .screen(let screen): return .screen(screen)
+        case .syphon(let syphon): return .syphon(syphon)
         default: return nil
         }
     }
@@ -470,14 +480,14 @@ final class SceneRenderer {
 
     /// True when every visible layer of the scene (transitively, through
     /// nested references) paints without a live source — text/shape and
-    /// unpainted model-only kinds only. Camera/screen layers make the scene
-    /// dynamic: its content changes per frame and must not be cached.
+    /// unpainted model-only kinds only. Camera/screen/syphon layers make the
+    /// scene dynamic: its content changes per frame and must not be cached.
     private func isStaticContent(_ scene: Scene,
                                  scenes: [SceneID: Scene],
                                  visited: Set<SceneID>) -> Bool {
         for layer in scene.layers where layer.isVisible {
             switch layer.payload {
-            case .camera, .screen:
+            case .camera, .screen, .syphon:
                 return false
             case .scene(let reference):
                 guard !visited.contains(reference.sceneID),
