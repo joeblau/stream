@@ -182,4 +182,24 @@ import StreamCore
         #expect(s.audioInputs == [AudioInputSelection(deviceUID: "usb-mic-3",
                                                       isEnabled: true, mapping: .all)])
     }
+
+    @Test("A blob written before A07 monitoring existed decodes to monitoring off on the system default")
+    func missingMonitoringDefaults() throws {
+        // A07 (issue #119): snapshots from builds predating monitoring must
+        // never surprise the user with audio output on upgrade.
+        let s = try decode(#"{"micVolume": 1.2}"#)
+        #expect(s.monitoringEnabled == false)
+        #expect(s.monitorOutputDeviceUID == nil)
+    }
+
+    @Test("The A07 monitoring settings round-trip through encode/decode")
+    func monitoringRoundTrip() throws {
+        let original = StreamSettings(monitoringEnabled: true,
+                                      monitorOutputDeviceUID: "AppleUSBAudioEngine:Focusrite:Scarlett")
+        let data = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(StreamSettings.self, from: data)
+        #expect(restored == original)
+        #expect(restored.monitoringEnabled == true)
+        #expect(restored.monitorOutputDeviceUID == "AppleUSBAudioEngine:Focusrite:Scarlett")
+    }
 }

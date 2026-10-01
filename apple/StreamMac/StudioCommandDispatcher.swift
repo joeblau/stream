@@ -243,6 +243,19 @@ enum StudioCommand: Equatable, Sendable {
     /// an unplugged mic.
     case relinkAudioInput(from: String, to: String)
 
+    // A07 headphone monitoring (issue #119): enable/disable the monitor-bus
+    // playback and choose the monitor output device (nil UID = the system
+    // default). Live session state persisted in StreamSettings via
+    // SettingsSession — NOT scene content, NOT undoable, and never staged.
+    // Monitor LEVEL stays on the A04 mixer surface (`.setBusGain(.monitor,…)`
+    // / `.setBusMuted(.monitor,…)`); per-channel audition is the existing
+    // monitor-only solo (`.setChannelSolo`).
+    case setMonitoringEnabled(Bool)
+    /// Selects the monitor output by stable CoreAudio device UID (nil =
+    /// follow the system default). An unplugged selection falls back to the
+    /// default honestly and re-applies when the device returns (C10 rules).
+    case setMonitorOutputDevice(uid: String?)
+
     // Settings session (W04).
     case openSettings(SettingsSession.Section?)
     case closeSettings
@@ -351,6 +364,9 @@ enum StudioCommand: Equatable, Sendable {
             return "\(enabled ? "Enable" : "Disable") Audio Input"
         case .setAudioInputMapping: return "Set Audio Input Channels"
         case .relinkAudioInput: return "Relink Audio Input"
+        case .setMonitoringEnabled(let enabled):
+            return "\(enabled ? "Enable" : "Disable") Monitoring"
+        case .setMonitorOutputDevice: return "Set Monitor Output"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
         case .applySettings: return "Apply Settings"
@@ -456,6 +472,15 @@ struct StudioState: Equatable, Sendable {
     var mixer = MixerSettings()
     /// The live mic fader (mirrors `StreamSettings.micVolume`).
     var micVolume: Double = 1
+    /// A07 (issue #119): headphone-monitoring state for the command
+    /// interface — on/off, the selected output (nil = system default),
+    /// whether the selection is unplugged and the monitor is honestly
+    /// falling back to the default, and the feedback-risk input UID (the
+    /// monitor device is also an enabled capture input).
+    var monitoringEnabled = false
+    var monitorOutputDeviceUID: String?
+    var monitorOutputFallback = false
+    var monitorFeedbackRiskDeviceUID: String?
     /// S12 undo/redo availability and the labels of the edits ⌘Z / ⇧⌘Z would
     /// apply (the Edit menu shows "Undo <label>").
     var canUndo = false
@@ -960,6 +985,17 @@ final class StudioCommandDispatcher: ObservableObject {
             return controller.deviceMonitor.audioDevices.contains(where: { $0.uniqueID == to })
                 ? nil : .invalidTarget("The relink target device is not connected.")
 
+        // A07 monitoring validation: enabling is always acceptable; an
+        // explicit output device must be CONNECTED (nil = system default is
+        // always valid). Selecting a device while it is unplugged is
+        // rejected rather than silently pinning a fallback.
+        case .setMonitoringEnabled:
+            return nil
+        case .setMonitorOutputDevice(let uid):
+            guard let uid else { return nil }
+            return controller.monitorOutput.devices.contains(where: { $0.uid == uid })
+                ? nil : .invalidTarget("That output device is not connected.")
+
         case .openSettings, .closeSettings:
             return nil
         case .applySettings:
@@ -1267,6 +1303,15 @@ final class StudioCommandDispatcher: ObservableObject {
                 inputs.append(entry)
             }
             session.persistAudioInputs(inputs)
+
+        // A07 monitoring execution: persist through SettingsSession (single
+        // truth); its apply retargets the live monitor player in place.
+        case .setMonitoringEnabled(let enabled):
+            session.persistMonitoring(enabled: enabled,
+                                      deviceUID: session.activeSettings.monitorOutputDeviceUID)
+        case .setMonitorOutputDevice(let uid):
+            session.persistMonitoring(enabled: session.activeSettings.monitoringEnabled,
+                                      deviceUID: uid)
 
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
@@ -1723,6 +1768,10 @@ final class StudioCommandDispatcher: ObservableObject {
             settingsDirty: session.isDirty,
             mixer: session.activeSettings.mixer,
             micVolume: session.activeSettings.micVolume,
+            monitoringEnabled: session.activeSettings.monitoringEnabled,
+            monitorOutputDeviceUID: session.activeSettings.monitorOutputDeviceUID,
+            monitorOutputFallback: controller.monitorOutput.isFallbackActive,
+            monitorFeedbackRiskDeviceUID: controller.monitorFeedbackRiskDeviceUID,
             canUndo: undoStack.canUndo,
             canRedo: undoStack.canRedo,
             undoLabel: undoStack.undoLabel,
@@ -1850,6 +1899,7 @@ private extension StudioCommand {
              .setChannelVolume, .setChannelMuted, .setChannelSolo,
              .setChannelAuxSend, .setBusGain, .setBusMuted,
              .setAudioInputEnabled, .setAudioInputMapping, .relinkAudioInput,
+             .setMonitoringEnabled, .setMonitorOutputDevice,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,

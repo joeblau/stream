@@ -190,6 +190,14 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// list carries only ADDITIONAL devices, so a pre-A05 single-mic setup
     /// decodes to an empty list and keeps working exactly as before.
     public var audioInputs: [AudioInputSelection]
+    /// A07 (issue #119): headphone monitoring of the studio's MONITOR bus
+    /// (macOS). Off by default — no unexpected audio output on first launch.
+    public var monitoringEnabled: Bool
+    /// A07 (issue #119): the CoreAudio device UID of the chosen monitor
+    /// OUTPUT (nil = follow the system default output). Pinned by stable UID
+    /// (C10 rules): an unplugged device falls back to the system default
+    /// honestly and the selection resumes when the same device returns.
+    public var monitorOutputDeviceUID: String?
 
     public init(
         selectedProtocol: StreamProtocol = .rtmps,
@@ -219,7 +227,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         captureIncludesAudio: Bool = true,
         captureExcludedBundleIDs: [String] = [],
         mixer: MixerSettings = MixerSettings(),
-        audioInputs: [AudioInputSelection] = []
+        audioInputs: [AudioInputSelection] = [],
+        monitoringEnabled: Bool = false,
+        monitorOutputDeviceUID: String? = nil
     ) {
         self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
@@ -245,6 +255,8 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.captureExcludedBundleIDs = captureExcludedBundleIDs
         self.mixer = mixer
         self.audioInputs = audioInputs
+        self.monitoringEnabled = monitoringEnabled
+        self.monitorOutputDeviceUID = monitorOutputDeviceUID
     }
 
     /// Backward-compatible decode: every field falls back to its default when the
@@ -286,6 +298,10 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         // inputs — the legacy `preferredAudioInputUID` default-mic behavior
         // above is untouched, so that mic stays enabled exactly as before.
         audioInputs = try c.decodeIfPresent([AudioInputSelection].self, forKey: .audioInputs) ?? d.audioInputs
+        // A07: blobs written before monitoring existed decode to monitoring
+        // OFF on the system default output (no surprise audio on upgrade).
+        monitoringEnabled = try c.decodeIfPresent(Bool.self, forKey: .monitoringEnabled) ?? d.monitoringEnabled
+        monitorOutputDeviceUID = try c.decodeIfPresent(String.self, forKey: .monitorOutputDeviceUID) ?? d.monitorOutputDeviceUID
     }
 
     public static let `default` = StreamSettings()

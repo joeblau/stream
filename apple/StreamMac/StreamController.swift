@@ -100,6 +100,16 @@ final class StreamController: ObservableObject {
     /// mix out to the publisher and the recorder through independent bounded
     /// taps. Runs with the W02 pipeline demand.
     private let audioEngine = AudioMixEngine()
+    /// A07 (issue #119): headphone monitoring — plays the engine's MONITOR
+    /// bus (same routing as program, own master gain, A04 solo-in-place) to
+    /// the selected output device. Read by the settings UI for the device
+    /// list and monitor state; driven by `applySavedSettings`.
+    let monitorOutput = MonitorOutput()
+    /// A07: the UID of the enabled INPUT device that is also the current
+    /// monitor OUTPUT (feedback risk — the monitor signal would be re-captured
+    /// electrically). Nil when monitoring is safe or off. Surfaced in the
+    /// settings Audio section and the StudioState snapshot.
+    @Published private(set) var monitorFeedbackRiskDeviceUID: String?
 
     /// The W08 program composition engine: composites the program snapshot and
     /// fans frames out to the publisher, the recording, and the PROGRAM
@@ -315,6 +325,23 @@ final class StreamController: ObservableObject {
         addProgramAudioTap { [publisherBox] sample in
             publisherBox.publisher?.enqueueProgram(sample)
         }
+        // A07 (issue #119): the monitor output taps the MONITOR bus once for
+        // the controller's lifetime, the same way — while monitoring is off
+        // the player sheds chunks at negligible cost, so enabling/disabling
+        // never re-keys the engine's tap table. The monitor path is a
+        // read-only tap: it can never feed back into the mix by construction.
+        addMonitorAudioTap { [monitorOutput] sample in
+            monitorOutput.play(sample)
+        }
+        monitorOutput.applyConfiguration(enabled: persisted.monitoringEnabled,
+                                         deviceUID: persisted.monitorOutputDeviceUID)
+        monitorOutput.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.updateMonitorFeedbackRisk()
+                }
+            }
+            .store(in: &cancellables)
 
         // The publisher output subscribes once for the controller's lifetime:
         // the sink never blocks the engine (newest-only stream), and the
@@ -391,6 +418,19 @@ final class StreamController: ObservableObject {
         return subscription
     }
 
+    /// A07 (issue #119): taps the audio engine's MONITOR bus — the same
+    /// channel routing as program with its own master gain and the A04
+    /// monitor-only solo applied. Used by the headphone-monitoring output;
+    /// same bounded, drop-oldest, race-safe contract as the program taps.
+    @discardableResult
+    func addMonitorAudioTap(capacity: Int = 8,
+                            sink: @escaping @Sendable (CMSampleBuffer) -> Void) -> AudioTapSubscription {
+        let subscription = AudioTapSubscription()
+        Task { await audioEngine.addTap(bus: .monitor, token: subscription.token,
+                                        capacity: capacity, sink: sink) }
+        return subscription
+    }
+
     func removeAudioTap(_ subscription: AudioTapSubscription) {
         Task { await audioEngine.removeTap(subscription.token) }
     }
@@ -400,6 +440,10 @@ final class StreamController: ObservableObject {
     func audioStatsSnapshot() async -> AudioEngineStatistics {
         await audioEngine.statsSnapshot()
     }
+
+    /// A07/A09: monitor playback counters (scheduled/played/dropped/queue
+    /// depth) — the feedback-diagnostics attach point for the monitor path.
+    var monitorStatistics: MonitorPlaybackStatistics { monitorOutput.statistics }
 
     // MARK: - A04 mixer surface (issue #83)
 
@@ -722,6 +766,15 @@ final class StreamController: ObservableObject {
                 syncAdditionalMicChannels()
             }
         }
+        // A07 (issue #119): monitoring enable/device are LIVE session state —
+        // the player retargets in place (engine restart on a real device
+        // change), independent of the encode-geometry ownership rules above.
+        if newSettings.monitoringEnabled != previous.monitoringEnabled
+            || newSettings.monitorOutputDeviceUID != previous.monitorOutputDeviceUID {
+            monitorOutput.applyConfiguration(enabled: newSettings.monitoringEnabled,
+                                             deviceUID: newSettings.monitorOutputDeviceUID)
+        }
+        updateMonitorFeedbackRisk()
         capturePool.applyPrivacyDefaults(newSettings)
     }
 
@@ -890,6 +943,26 @@ final class StreamController: ObservableObject {
         audio.stop()
         outputSizeSentToPublisher = false
         promoteStagedProfileIfOutputsIdle()
+    }
+
+    /// A07 (issue #119): flags the feedback-risk routing combination — the
+    /// device the monitor is ACTUALLY playing through is also an enabled
+    /// capture input (the preferred mic or an enabled A05 additional input).
+    /// The monitor signal would be re-captured electrically and loop into the
+    /// program mix. CoreAudio device UIDs and `AVCaptureDevice.uniqueID`s are
+    /// the same strings on macOS, so the comparison is direct. Runs on
+    /// settings applies and on every monitor-state change.
+    private func updateMonitorFeedbackRisk() {
+        guard monitorOutput.isEnabled,
+              let effectiveUID = monitorOutput.effectiveDeviceUID else {
+            monitorFeedbackRiskDeviceUID = nil
+            return
+        }
+        var inputUIDs = Set(settings.audioInputs.filter(\.isEnabled).map(\.deviceUID))
+        if let preferred = settings.preferredAudioInputUID {
+            inputUIDs.insert(preferred)
+        }
+        monitorFeedbackRiskDeviceUID = inputUIDs.contains(effectiveUID) ? effectiveUID : nil
     }
 
     private func makePublisher(for transport: StreamCore.StreamProtocol) -> any Publisher {

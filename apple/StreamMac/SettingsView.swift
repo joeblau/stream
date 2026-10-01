@@ -445,14 +445,63 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
 
             additionalInputsBlock
+
+            monitoringBlock
         } header: {
             Text("Audio")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Label("Mic volume applies immediately, even while live.", systemImage: "bolt.fill")
                 effectBadge(.nextSession)
-                Text("Microphone choice and Voice Polish are read when a session starts. Additional inputs and their channel mappings apply immediately, each as its own mixer channel.")
+                Text("Microphone choice and Voice Polish are read when a session starts. Additional inputs and their channel mappings apply immediately, each as its own mixer channel. Monitoring is heard while the studio pipeline is running (Preview, stream, or recording); its level is the mixer's Monitor fader, and soloing a channel auditions it on the monitor output only.")
             }
+        }
+    }
+
+    // MARK: - A07 headphone monitoring (issue #119)
+
+    /// The monitor output plays the mixer's MONITOR bus (same routing as
+    /// program, independent level, monitor-only solo for per-channel
+    /// audition) through a chosen output device. Edits are live session
+    /// state (like the mixer): they persist and apply immediately through
+    /// the W05 dispatcher. A pinned device that unplugs falls back to the
+    /// system default honestly and re-pins when it returns; a monitor
+    /// device that is also an enabled input is flagged as a feedback risk.
+    @ViewBuilder
+    private var monitoringBlock: some View {
+        Text("Headphone Monitoring")
+            .font(.callout.weight(.semibold))
+        Toggle("Enable Monitoring", isOn: Binding(
+            get: { session.activeSettings.monitoringEnabled },
+            set: { dispatcher.execute(.setMonitoringEnabled($0)) }
+        ))
+        Picker("Monitor Output", selection: Binding(
+            get: { session.activeSettings.monitorOutputDeviceUID ?? "" },
+            set: { dispatcher.execute(.setMonitorOutputDevice(uid: $0.isEmpty ? nil : $0)) }
+        )) {
+            Text("System Default").tag("")
+            ForEach(controller.monitorOutput.devices) { device in
+                Text(device.name).tag(device.uid)
+            }
+        }
+        .disabled(!session.activeSettings.monitoringEnabled)
+        if controller.monitorOutput.isFallbackActive {
+            Label("The selected output is disconnected — monitoring through the System Default until it returns.",
+                  systemImage: "cable.connector.slash")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+        if let error = controller.monitorOutput.errorMessage {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+        if let riskUID = controller.monitorFeedbackRiskDeviceUID {
+            let name = controller.audio.deviceNamesByUID[riskUID] ?? riskUID
+            Label("Feedback risk: \"\(name)\" is both the monitor output and an enabled input — the monitor signal can loop into the program mix. Disable that input or pick another output.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
         }
     }
 
