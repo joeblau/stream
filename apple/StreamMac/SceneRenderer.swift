@@ -138,6 +138,7 @@ struct SceneBlend: Sendable {
 final class SceneRenderer {
 
     private let ciContext: CIContext
+    private let usesSoftwareRendering: Bool
     private let workingColorSpace = CGColorSpaceCreateDeviceRGB()
     private var pool: CVPixelBufferPool?
     private var poolWidth = 0
@@ -215,6 +216,9 @@ final class SceneRenderer {
     }
     private var generatedCache: [GeneratedKey: CIImage] = [:]
     private let generatedCacheLimit = 64
+    private var generatedCacheBytes = 0
+    private let generatedCacheByteLimit = 64 * 1_024 * 1_024
+    private var tickerLines: [String: CTLine] = [:]
 
     /// S06 raster cache for STATIC nested scenes (transitively text/shape
     /// only): keyed by the transitive content fingerprint + pixel size, with
@@ -222,22 +226,33 @@ final class SceneRenderer {
     /// Shares the generated cache's bound and clear-on-cap policy.
     private var nestedCache: [GeneratedKey: CIImage] = [:]
 
+    #if DEBUG
+    /// Direct Core Text raster inspection when CI/Metal services are unavailable.
+    func debugGeneratedRasters() -> [CGImage] {
+        generatedCache.sorted { $0.key.descriptor < $1.key.descriptor }.compactMap { $0.value.cgImage }
+    }
+    var debugNestedCacheCount: Int { nestedCache.count }
+    #endif
+
     init(sourceEffectsProvider: @escaping () -> [SourceDefinitionID: SourceEffects] =
             { SourceEffectsStore.shared.snapshot() },
          segmentation: PersonSegmentationCoordinator = .shared,
          tokenProvider: @escaping () -> [String: String] =
             { TitleTokenStore.shared.snapshot() },
          imageProvider: @escaping (ImageSourcePayload) -> CIImage? =
-            { ImageLayerImageStore.shared.image(for: $0) }) {
+            { ImageLayerImageStore.shared.image(for: $0) },
+         usesSoftwareRendering: Bool = false) {
         self.sourceEffectsProvider = sourceEffectsProvider
         self.segmentation = segmentation
         self.tokenProvider = tokenProvider
         self.imageProvider = imageProvider
-        let options: [CIContextOption: Any] = [
+        self.usesSoftwareRendering = usesSoftwareRendering
+        var options: [CIContextOption: Any] = [
             .workingColorSpace: NSNull(),
             .cacheIntermediates: false
         ]
-        if let device = MTLCreateSystemDefaultDevice() {
+        if usesSoftwareRendering { options[.useSoftwareRenderer] = true }
+        if !usesSoftwareRendering, let device = MTLCreateSystemDefaultDevice() {
             ciContext = CIContext(mtlDevice: device, options: options)
         } else {
             ciContext = CIContext(options: options)
@@ -513,7 +528,17 @@ final class SceneRenderer {
             kCFAllocatorDefault, pool, allocationLimit, &out
         ) == kCVReturnSuccess, let outBuffer = out else { return nil }
 
-        ciContext.render(output, to: outBuffer, bounds: canvas, colorSpace: workingColorSpace)
+        if usesSoftwareRendering {
+            CVPixelBufferLockBaseAddress(outBuffer, [])
+            if let bytes = CVPixelBufferGetBaseAddress(outBuffer) {
+                ciContext.render(output, toBitmap: bytes,
+                                 rowBytes: CVPixelBufferGetBytesPerRow(outBuffer),
+                                 bounds: canvas, format: .BGRA8, colorSpace: workingColorSpace)
+            }
+            CVPixelBufferUnlockBaseAddress(outBuffer, [])
+        } else {
+            ciContext.render(output, to: outBuffer, bounds: canvas, colorSpace: workingColorSpace)
+        }
 
         guard let sample = makeSampleBuffer(from: outBuffer,
                                             presentationTime: presentationTime,
@@ -779,9 +804,19 @@ final class SceneRenderer {
     /// applies the renderer-side timed/fly-in visibility pass. Nil — paint
     /// nothing — for an empty string or an expired timed title.
     private func placeText(_ text: TextSourcePayload, layer: LayerNode, canvas: CGRect) -> CIImage? {
-        let resolvedText = TitleTemplate.resolve(text.text, with: tokenProvider())
+        let resolvedText: String
+        if let timer = text.timer {
+            guard let value = DynamicOverlayStore.shared.timer(timer, at: currentPresentationSeconds).text
+            else { return nil }
+            resolvedText = value
+        } else {
+            resolvedText = TitleTemplate.resolve(text.text, with: tokenProvider())
+        }
         guard !resolvedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
+        }
+        if let ticker = text.ticker {
+            return placeTicker(resolvedText, text: text, config: ticker, layer: layer, canvas: canvas)
         }
         // Reference-canvas scale: fontSize/padding are 1080p reference units
         // (the standing text/style precedent).
@@ -950,8 +985,11 @@ final class SceneRenderer {
     private func generated(key: GeneratedKey,
                            draw: (CGContext, CGRect) -> Void) -> CIImage? {
         if let cached = generatedCache[key] { return cached }
-        if generatedCache.count >= generatedCacheLimit {
+        let rasterBytes = key.width * key.height * 4
+        if generatedCache.count >= generatedCacheLimit
+            || generatedCacheBytes + rasterBytes > generatedCacheByteLimit {
             generatedCache.removeAll()
+            generatedCacheBytes = 0
         }
         let rect = CGRect(x: 0, y: 0, width: key.width, height: key.height)
         guard let context = CGContext(data: nil,
@@ -965,7 +1003,10 @@ final class SceneRenderer {
         draw(context, rect)
         guard let cgImage = context.makeImage() else { return nil }
         let image = CIImage(cgImage: cgImage)
-        generatedCache[key] = image
+        if rasterBytes <= generatedCacheByteLimit {
+            generatedCache[key] = image
+            generatedCacheBytes += rasterBytes
+        }
         return image
     }
 
@@ -1018,16 +1059,88 @@ final class SceneRenderer {
                               width: inset.width, height: blockHeight)
         context.saveGState()
         context.textMatrix = .identity
-        context.translateBy(x: 0, y: rect.height)
-        context.scaleBy(x: 1, y: -1)
-        let path = CGPath(rect: CGRect(x: textRect.minX,
-                                       y: rect.height - textRect.maxY,
-                                       width: textRect.width,
-                                       height: textRect.height),
-                          transform: nil)
+        // Bitmap contexts already use Core Text's bottom-left coordinates.
+        // Flipping here mirrors glyphs vertically and clips their descenders.
+        let path = CGPath(rect: textRect, transform: nil)
         let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
         CTFrameDraw(frame, context)
         context.restoreGState()
+    }
+
+    /// Rasterize only visible tiles of one shaped Unicode line. Tiles never
+    /// depend on the scrolling offset, so motion only changes CI transforms.
+    /// Long lines don't require a full-line bitmap or per-frame text layout.
+    private func placeTicker(_ string: String, text: TextSourcePayload,
+                             config: TickerOverlayConfiguration,
+                             layer: LayerNode, canvas: CGRect) -> CIImage? {
+        guard TickerOverlayConfiguration.textValidationError(string) == nil else { return nil }
+        let scale = styleScale(canvas)
+        let width = Int(max(1, layer.transform.size.width * canvas.width).rounded(.up))
+        let height = Int(max(1, layer.transform.size.height * canvas.height).rounded(.up))
+        guard width <= 16_384, height <= 2_048 else { return nil }
+        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        let padding = CGFloat(text.padding) * scale
+        let viewport = rect.insetBy(dx: padding, dy: padding)
+        guard viewport.width > 0, viewport.height > 0 else { return nil }
+        let font = TitleFontFallback.makeFont(requested: text.fontName,
+                                             size: max(1, CGFloat(text.fontSize) * scale))
+        let descriptor = ["ticker", string, CTFontCopyPostScriptName(font) as String,
+                          String(Double(CTFontGetSize(font))), text.colorHex].joined(separator: "|")
+        let line: CTLine
+        if let cached = tickerLines[descriptor] { line = cached }
+        else {
+            let attributes: [CFString: Any] = [kCTFontAttributeName: font,
+                                               kCTForegroundColorAttributeName: cgColor(text.colorHex)]
+            guard let value = CFAttributedStringCreate(nil, string as CFString,
+                                                       attributes as CFDictionary) else { return nil }
+            line = CTLineCreateWithAttributedString(value)
+            if tickerLines.count >= 16 { tickerLines.removeAll(keepingCapacity: true) }
+            tickerLines[descriptor] = line
+        }
+        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+        let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        let textWidth = max(1, lineWidth.rounded(.up) + 2)
+        let cycle = max(1, textWidth + CGFloat(config.clamped().gap) * scale)
+        let elapsed = DynamicOverlayStore.shared.state(for: config.runtimeID, autoplay: true,
+                                                       at: currentPresentationSeconds)
+            .elapsed(at: currentPresentationSeconds)
+        let origin = viewport.minX + CGFloat(config.offset(elapsed: elapsed,
+            textWidth: Double(textWidth), viewportWidth: Double(viewport.width), scale: Double(scale)))
+        let baseline: CGFloat
+        switch text.verticalAlignment {
+        case .top: baseline = viewport.maxY - ascent
+        case .center: baseline = viewport.midY - (ascent - descent) / 2
+        case .bottom: baseline = viewport.minY + descent
+        }
+        var output = CIImage(color: text.backgroundColorHex.map(ciColor) ?? .clear).cropped(to: rect)
+        let first = Int(ceil((viewport.minX - origin - textWidth) / cycle))
+        let last = Int(floor((viewport.maxX - origin) / cycle))
+        guard last >= first, last - first < 16_384 else { return nil }
+        let tileSize: CGFloat = 1_024
+        for copy in first...last {
+            let x = origin + CGFloat(copy) * cycle
+            let visibleMin = max(0, viewport.minX - x)
+            let visibleMax = min(textWidth, viewport.maxX - x)
+            guard visibleMax > visibleMin else { continue }
+            let firstTile = Int(floor(visibleMin / tileSize))
+            let lastTile = Int(floor((visibleMax - 0.001) / tileSize))
+            for tile in firstTile...max(firstTile, lastTile) {
+                let tileX = CGFloat(tile) * tileSize
+                let tileWidth = Int(min(tileSize, textWidth - tileX).rounded(.up))
+                let key = GeneratedKey(descriptor: descriptor + "|\(tile)|\(baseline)",
+                                       width: tileWidth, height: height)
+                guard let image = generated(key: key, draw: { context, _ in
+                    context.textMatrix = .identity
+                    context.textPosition = CGPoint(x: 1 - tileX, y: baseline)
+                    CTLineDraw(line, context)
+                }) else { continue }
+                let placed = image.transformed(by: CGAffineTransform(translationX: x + tileX, y: 0))
+                    .cropped(to: viewport)
+                output = placed.composited(over: output)
+            }
+        }
+        return stylePlaced(content: output.cropped(to: rect), layer: layer, canvas: canvas,
+                           pixelWidth: width, pixelHeight: height)
     }
 
     // MARK: - Nested scenes (S06, issue #96)
@@ -1124,7 +1237,8 @@ final class SceneRenderer {
             case .text(let text):
                 // G02 (issue #110): a timed/fly-in title animates per tick —
                 // it must never bake into the static nested-scene cache.
-                if text.timing?.isActive == true { return false }
+                if text.timing?.isActive == true || text.timer != nil || text.ticker != nil
+                    || TitleTemplate.containsToken(text.text) { return false }
             case .scene(let reference):
                 guard !visited.contains(reference.sceneID),
                       let child = scenes[reference.sceneID] else { continue }
@@ -1705,13 +1819,15 @@ final class SceneRenderer {
         if let pool, width == poolWidth, height == poolHeight {
             return pool
         }
-        let attrs: [String: Any] = [
+        var attrs: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: width,
-            kCVPixelBufferHeightKey as String: height,
-            kCVPixelBufferMetalCompatibilityKey as String: true,
-            kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()
+            kCVPixelBufferHeightKey as String: height
         ]
+        if !usesSoftwareRendering {
+            attrs[kCVPixelBufferMetalCompatibilityKey as String] = true
+            attrs[kCVPixelBufferIOSurfacePropertiesKey as String] = [String: Any]()
+        }
         var newPool: CVPixelBufferPool?
         guard CVPixelBufferPoolCreate(kCFAllocatorDefault, nil,
                                       attrs as CFDictionary, &newPool) == kCVReturnSuccess else {

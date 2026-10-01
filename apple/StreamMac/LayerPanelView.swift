@@ -626,6 +626,13 @@ struct LayerPanelView: View {
                 Button("Text") {
                     dispatcher.execute(.addLayer(.text(TextSourcePayload(text: "Text")), in: nil))
                 }
+                Button("Timer") {
+                    dispatcher.execute(.addLayer(.text(TextSourcePayload(timer: TimerOverlayConfiguration())), in: nil))
+                }
+                Button("Ticker") {
+                    dispatcher.execute(.addLayer(.text(TextSourcePayload(text: "Announcements",
+                        ticker: TickerOverlayConfiguration())), in: nil))
+                }
                 Button("Shape") {
                     dispatcher.execute(.addLayer(.shape(ShapeSourcePayload()), in: nil))
                 }

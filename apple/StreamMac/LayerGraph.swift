@@ -505,11 +505,15 @@ struct ImageSourcePayload: Hashable, Codable, Sendable {
 /// chain (`TitleFontFallback`) makes a reopened/exported document render
 /// deterministically on a machine missing the requested font.
 ///
-/// SEAM for G04 (countdown/clock) and G05 (ticker): both build on THIS
-/// payload and the generated-content render path — a per-tick text provider
-/// keyed by layer ID (the `TitleTokenStore` pattern) feeds dynamic strings
-/// without new layer kinds; the raster cache already re-renders only when
-/// the resolved string changes.
+/// SEAM for G05 (ticker): builds on THIS payload and the generated-content
+/// render path — a per-tick text provider keyed by layer ID (the
+/// `TitleTokenStore` pattern) feeds dynamic strings without new layer kinds;
+/// the raster cache already re-renders only when the resolved string
+/// changes. G04 (issue #111) landed the first provider of that shape: the
+/// `timer` field below turns the layer into a countdown/stopwatch/clock/
+/// scheduled-start overlay, resolved per tick by the StreamMac
+/// `TimerOverlayStore` (runtime state keyed by layer ID, shared by preview
+/// and program — never in this payload, never undoable scene content).
 struct TextSourcePayload: Hashable, Codable, Sendable {
     var text: String = ""
     var fontName: String? = nil
@@ -524,6 +528,12 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
     var wraps: Bool = true
     var overflow: TextOverflow = .clip
     var timing: TitleTiming? = nil
+    /// G04 (issue #111): when set, the layer renders a live timer string
+    /// (resolved per tick) instead of the static `text`. Config is durable
+    /// scene content (stages/Takes/undoes with the payload); transport state
+    /// lives in the shared `DynamicOverlayStore` keyed by playback ID.
+    var timer: TimerOverlayConfiguration? = nil
+    var ticker: TickerOverlayConfiguration? = nil
 
     init(text: String = "",
          fontName: String? = nil,
@@ -536,7 +546,9 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
          boxSizing: TextBoxSizing = .fixed,
          wraps: Bool = true,
          overflow: TextOverflow = .clip,
-         timing: TitleTiming? = nil) {
+         timing: TitleTiming? = nil,
+         timer: TimerOverlayConfiguration? = nil,
+         ticker: TickerOverlayConfiguration? = nil) {
         self.text = text
         self.fontName = fontName
         self.fontSize = fontSize
@@ -549,6 +561,8 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
         self.wraps = wraps
         self.overflow = overflow
         self.timing = timing
+        self.timer = timer
+        self.ticker = ticker
     }
 
     /// Every G02 field was added after v2 shipped; decode each with its
@@ -570,6 +584,8 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
         wraps = try container.decodeIfPresent(Bool.self, forKey: .wraps) ?? true
         overflow = try container.decodeIfPresent(TextOverflow.self, forKey: .overflow) ?? .clip
         timing = try container.decodeIfPresent(TitleTiming.self, forKey: .timing)
+        timer = try container.decodeIfPresent(TimerOverlayConfiguration.self, forKey: .timer)
+        ticker = try container.decodeIfPresent(TickerOverlayConfiguration.self, forKey: .ticker)
     }
 
     /// The payload's styling fields as one `TextTitleStyle` value — what a
@@ -606,12 +622,19 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
         }
     }
 
-    /// The style model owns the ranges.
-    var validationError: String? { style.validationError }
+    /// The style model owns the style ranges; the timer model owns the
+    /// timer ranges.
+    var validationError: String? {
+        if timer != nil && ticker != nil { return "Choose either a timer or a ticker for this layer." }
+        return style.validationError ?? timer?.validationError ?? ticker?.validationError
+            ?? (ticker != nil ? TickerOverlayConfiguration.textValidationError(text) : nil)
+    }
 
     func clamped() -> TextSourcePayload {
         var copy = self
         copy.style = style.clamped()
+        copy.timer = timer?.clamped()
+        copy.ticker = ticker?.clamped()
         return copy
     }
 }

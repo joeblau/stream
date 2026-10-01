@@ -319,9 +319,15 @@ public enum TitleFontFallback {
     /// glyphs the primary lacks — emoji within a Helvetica string, CJK, …).
     public static func makeFont(requested: String?, size: CGFloat) -> CTFont {
         let primary = resolvedPostScriptName(for: requested)
-        let cascade = chain
-            .filter { $0.caseInsensitiveCompare(primary) != .orderedSame }
+        var cascade = chain
+            .filter { $0 != "LastResort" && $0.caseInsensitiveCompare(primary) != .orderedSame }
             .map { CTFontDescriptorCreateWithNameAndSize($0 as CFString, 0) }
+        // Preserve script-specific system fallback before LastResort. A
+        // Latin/emoji-only explicit cascade otherwise turns CJK and Arabic
+        // into missing-glyph boxes even when their fonts are installed.
+        let base = CTFontCreateWithName(primary as CFString, max(1, size), nil)
+        cascade += CTFontCopyDefaultCascadeListForLanguages(base, nil) as? [CTFontDescriptor] ?? []
+        cascade.append(CTFontDescriptorCreateWithNameAndSize("LastResort" as CFString, 0))
         let attributes: [CFString: Any] = [
             kCTFontNameAttribute: primary as CFString,
             kCTFontCascadeListAttribute: cascade

@@ -285,6 +285,8 @@ enum StudioCommand: Equatable, Sendable {
     /// Replaces a STAGED-scene text layer's payload (the string + the whole
     /// style surface; a complete value). The target must be a text layer.
     case setLayerText(LayerID, TextSourcePayload, in: SceneID?)
+    /// Session transport: doesn't alter staged content or create undo entries.
+    case setDynamicOverlayTransport(LayerID, OverlayTransportAction, in: SceneID?)
     /// Replaces a project text overlay's payload (applies immediately, like
     /// `.setOverlayStyle`). The target must be a text overlay.
     case setOverlayText(LayerID, TextSourcePayload)
@@ -660,6 +662,7 @@ enum StudioCommand: Equatable, Sendable {
         case .updateStylePreset: return "Update Style Preset"
         case .removeStylePreset: return "Remove Style Preset"
         case .setLayerText(let id, _, _): return "Layer \(id) Text"
+        case .setDynamicOverlayTransport(_, let action, _): return "Overlay \(action.rawValue)"
         case .setOverlayText: return "Overlay Text"
         case .setLayerImage(let id, _, _): return "Layer \(id) Image"
         case .setOverlayImage: return "Overlay Image"
@@ -1573,6 +1576,11 @@ final class StudioCommandDispatcher: ObservableObject {
         // stay a TEXT edit on a text layer — never a kind change), with range
         // validation the style model owns; title-style presets mirror the
         // G03 preset rules.
+        case .setDynamicOverlayTransport(let layerID, _, let sceneID):
+            switch resolveDynamicOverlay(layerID, in: sceneID) {
+            case .success: return nil
+            case .failure(let error): return error
+            }
         case .setLayerText(let layerID, let payload, let sceneID):
             switch resolveLayer(layerID, in: sceneID) {
             case .success(let (scene, index)):
@@ -2270,6 +2278,10 @@ final class StudioCommandDispatcher: ObservableObject {
         // implicitly takes in direct-live) like any layer edit; overlay
         // payloads write the project overlay list (immediate, live-safe);
         // presets write the project document directly.
+        case .setDynamicOverlayTransport(let layerID, let action, let sceneID):
+            if case .success(let id) = resolveDynamicOverlay(layerID, in: sceneID) {
+                DynamicOverlayStore.shared.perform(action, id: id)
+            }
         case .setLayerText(let layerID, let payload, let sceneID):
             editLayer(layerID, in: sceneID) { $0.payload = .text(payload) }
         case .setOverlayText(let overlayID, let payload):
@@ -2814,6 +2826,25 @@ final class StudioCommandDispatcher: ObservableObject {
             }
             return .success((scene, index))
         }
+    }
+
+    private func resolveDynamicOverlay(_ id: LayerID, in sceneID: SceneID?)
+        -> Result<UUID, StudioCommandError> {
+        let scene: Scene?
+        if sceneID == nil || sceneID == previewProgram.stagedScene?.id {
+            scene = previewProgram.stagedScene
+        } else if sceneID == previewProgram.programScene?.id {
+            scene = previewProgram.programScene
+        } else {
+            scene = sceneStore.scenes.first { $0.id == sceneID }
+        }
+        guard let layer = scene?.layers.first(where: { $0.id == id }),
+              case .text(let text) = layer.payload else {
+            return .failure(.invalidTarget("Select a timer or ticker text layer."))
+        }
+        if let timer = text.timer, timer.kind.usesTransport { return .success(timer.runtimeID) }
+        if let ticker = text.ticker { return .success(ticker.runtimeID) }
+        return .failure(.invalidTarget("This text layer has no elapsed timer or ticker transport."))
     }
 
     private func resolveGroup(_ groupID: GroupID,
@@ -3470,6 +3501,7 @@ private extension StudioCommand {
              .setCameraControls, .triggerCameraReaction,
              .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
+             .setDynamicOverlayTransport,
              .pdfNextPage, .pdfPreviousPage, .pdfGoToPage, .pdfSetFraming,
              .addSoundPad, .updateSoundPad, .removeSoundPad,
              .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,

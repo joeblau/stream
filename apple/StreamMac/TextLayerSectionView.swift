@@ -37,6 +37,7 @@ struct TextLayerSectionView: View {
     var body: some View {
         if let (layer, payload) = selectedTextLayer {
             textSection(layer: layer, payload: payload)
+            DynamicOverlaySectionView(layer: layer, payload: payload)
             styleSection(layer: layer, payload: payload)
             timingSection(layer: layer, payload: payload)
             templatesSection(layer: layer, payload: payload)

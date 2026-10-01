@@ -17,9 +17,9 @@ import os.lock
 //   carrying `{token}` templates re-resolves on the next tick. Until a
 //   publisher exists the tokens render literally (the documented honest
 //   preview).
-// - G04 (countdown/clock, issue #107) and G05 (ticker): both are dynamic
+// - G04 (countdown/clock, issue #111) and G05 (ticker): both are dynamic
 //   TEXT on top of `TextSourcePayload`, not new layer kinds — a per-tick
-//   text provider keyed by layer ID (this store's pattern) feeds the
+//   text provider keyed by playback ID (this store's pattern) feeds the
 //   resolved string, and the renderer's content-keyed raster cache already
 //   re-renders only when the string changes. Timed/fly-in visibility and
 //   the fixed/auto box semantics come free from the G02 render path.
