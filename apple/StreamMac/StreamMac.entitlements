@@ -24,7 +24,11 @@
 	<true/>
 	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
-	<key>com.apple.security.files.user-selected.read-only</key>
+	<!-- P03 (issue #80): the asset library imports by copy AND by linked
+	     reference; linked folders/files need read-write so consumers can
+	     persist refreshed bookmarks and write sidecar data next to
+	     user-picked files (supersedes the A02 read-only grant). -->
+	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
