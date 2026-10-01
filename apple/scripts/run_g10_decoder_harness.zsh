@@ -11,7 +11,15 @@ ffmpeg -v error -f lavfi -i "$FILTER" -c:v libvpx-vp9 -pix_fmt yuva420p -g 30 -a
 ffmpeg -v error -f lavfi -i "$FILTER" -c:v libvpx -pix_fmt yuva420p -g 30 -auto-alt-ref 0 -b:v 400k -threads 1 -y "$G10_DIR/fixtures/vp8-alpha.webm"
 ffmpeg -v error -f lavfi -i "$FILTER" -c:v libvpx-vp9 -pix_fmt yuv420p -g 30 -crf 20 -b:v 0 -threads 1 -y "$G10_DIR/fixtures/vp9-opaque.webm"
 ffmpeg -v error -f lavfi -i "$FILTER" -f lavfi -i "sine=frequency=440:duration=2" -c:v libvpx-vp9 -pix_fmt yuv420p -g 30 -crf 20 -b:v 0 -c:a libopus -threads 1 -y "$G10_DIR/fixtures/vp9-opus.webm"
-ffmpeg -v error -f lavfi -i "$FILTER" -c:v libaom-av1 -pix_fmt yuv420p -cpu-used 8 -crf 40 -b:v 0 -threads 1 -y "$G10_DIR/fixtures/av1-opaque.webm"
+readonly available_encoders="$(ffmpeg -v error -encoders)"
+if [[ "$available_encoders" == *libaom-av1* ]]; then
+    ffmpeg -v error -f lavfi -i "$FILTER" -c:v libaom-av1 -pix_fmt yuv420p -cpu-used 8 -crf 40 -b:v 0 -threads 1 -y "$G10_DIR/fixtures/av1-opaque.webm"
+elif [[ "$available_encoders" == *libsvtav1* ]]; then
+    ffmpeg -v error -f lavfi -i "$FILTER" -c:v libsvtav1 -pix_fmt yuv420p -preset 12 -svtav1-params lp=1 -crf 40 -b:v 0 -threads 1 -y "$G10_DIR/fixtures/av1-opaque.webm"
+else
+    print -u2 "An AV1 fixture requires FFmpeg with libaom-av1 or libsvtav1."
+    exit 1
+fi
 ffmpeg -v error -f lavfi -i "$FILTER" -c:v libx264 -pix_fmt yuv420p -threads 1 -y "$G10_DIR/fixtures/h264-opaque.mp4"
 ffmpeg -v error -f lavfi -i "$FILTER" -c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le -threads 1 -y "$G10_DIR/fixtures/prores4444-alpha.mov"
 
