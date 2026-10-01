@@ -293,6 +293,22 @@ enum StudioCommand: Equatable, Sendable {
     case updateTextStylePreset(TextStylePreset)
     case removeTextStylePreset(TextStylePresetID)
 
+    // G08 browser overlay widgets (issue #115): the web payload is a
+    // complete value (widget URL/local HTML plus the whole
+    // BrowserOverlayConfiguration surface — viewport, fps, interaction,
+    // audio route, CSS overrides, scene-entry refresh). LAYER payloads are
+    // staged scene content (same targeting, lock, Take/revert/undo rules as
+    // `.setLayerText`); OVERLAY payloads are project-level and apply
+    // immediately to staged AND program (the `.setOverlayText` precedent).
+    // Every edit re-keys the capture pool (payload identity = capture
+    // identity, the C03 pattern), so the widget reloads deliberately.
+    /// Replaces a STAGED-scene web layer's payload. The target must be a
+    /// web layer.
+    case setLayerWeb(LayerID, WebSourcePayload, in: SceneID?)
+    /// Replaces a project web overlay's payload (applies immediately, like
+    /// `.setOverlayText`). The target must be a web overlay.
+    case setOverlayWeb(LayerID, WebSourcePayload)
+
     // A02 media transport (issue #97): play/pause/stop/restart/seek for a
     // registry media source. These are SESSION state — playback position is
     // never part of a scene document — so they are not undoable scene edits,
@@ -632,6 +648,8 @@ enum StudioCommand: Equatable, Sendable {
         case .removeStylePreset: return "Remove Style Preset"
         case .setLayerText(let id, _, _): return "Layer \(id) Text"
         case .setOverlayText: return "Overlay Text"
+        case .setLayerWeb(let id, _, _): return "Layer \(id) Browser Source"
+        case .setOverlayWeb: return "Overlay Browser Source"
         case .addTextStylePreset: return "Save Title Style Preset"
         case .updateTextStylePreset: return "Update Title Style Preset"
         case .removeTextStylePreset: return "Remove Title Style Preset"
@@ -1539,6 +1557,29 @@ final class StudioCommandDispatcher: ObservableObject {
                 return payload.validationError.map { .invalidValue($0) }
             case .failure(let error): return error
             }
+        case .setLayerWeb(let layerID, _, let sceneID):
+            // G08: the payload normalizes fail-closed (unsupported URL
+            // schemes clear; fps/viewport clamp), so an "invalid" widget
+            // config can never be written — only the target checks apply.
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                guard scene.layers[index].payload.isWeb else {
+                    return .invalidTarget("Layer \"\(scene.layers[index].name)\" is not a browser source.")
+                }
+                return nil
+            case .failure(let error): return error
+            }
+        case .setOverlayWeb(let overlayID, _):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay):
+                if let error = overlayLockError(for: overlay) { return error }
+                guard overlay.payload.isWeb else {
+                    return .invalidTarget("Overlay \"\(overlay.name)\" is not a browser source.")
+                }
+                return nil
+            case .failure(let error): return error
+            }
         case .addTextStylePreset(let preset):
             if preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return .invalidValue("A preset name can't be empty.")
@@ -2176,6 +2217,13 @@ final class StudioCommandDispatcher: ObservableObject {
             editLayer(layerID, in: sceneID) { $0.payload = .text(payload) }
         case .setOverlayText(let overlayID, let payload):
             editOverlay(overlayID) { $0.payload = .text(payload) }
+        case .setLayerWeb(let layerID, let payload, let sceneID):
+            // G08: normalization is fail-closed (the payload shim clamps
+            // fps/viewport and clears unsupported URL schemes), so the
+            // stored value is always within the renderer's contract.
+            editLayer(layerID, in: sceneID) { $0.payload = .web(payload.normalizedWebPayload) }
+        case .setOverlayWeb(let overlayID, let payload):
+            editOverlay(overlayID) { $0.payload = .web(payload.normalizedWebPayload) }
         case .addTextStylePreset(let preset):
             sceneStore.addTextStylePreset(preset)
         case .updateTextStylePreset(let preset):
@@ -3320,7 +3368,7 @@ private extension StudioCommand {
              .setSceneAudioSnapshot, .captureSceneAudioSnapshot, .setSceneMediaBehavior,
              .setLayerSourceEffects,
              .setLayerStyle, .setOverlayStyle,
-             .setLayerText, .setOverlayText:
+             .setLayerWeb, .setOverlayWeb,
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording,
@@ -3381,6 +3429,10 @@ private extension StudioCommand {
             return "layer-text.\(id)"
         case .setOverlayText(let id, _):
             return "overlay-text.\(id)"
+        case .setLayerWeb(let id, _, _):
+            return "layer-web.\(id)"
+        case .setOverlayWeb(let id, _):
+            return "overlay-web.\(id)"
         case .setOverlayStyle(let id, _):
             return "overlay-style.\(id)"
         case .setLayerAudio(let id, _, _):

@@ -30,6 +30,11 @@ enum CaptureSourceKey: Hashable, Sendable {
     /// privacy-edit pattern). Demand comes from the REGISTRY
     /// (`demandedAppAudio`), never from scene layers.
     case appAudio(AppAudioSourcePayload)
+    /// G08 (issue #115): a browser-overlay widget (WKWebView snapshot
+    /// capture), keyed by its payload — every field is identity, so a
+    /// configuration edit (URL, viewport, fps, CSS, audio route) re-keys the
+    /// capture deliberately (the C03 pattern) and the widget reloads.
+    case web(WebSourcePayload)
 
     /// The system-default camera (no pinned device).
     static let defaultCamera = CaptureSourceKey.camera(CameraSourcePayload())
@@ -41,7 +46,7 @@ enum CaptureSourceKey: Hashable, Sendable {
         switch self {
         case .camera(let payload): return payload.deviceID == nil
         case .screen(let payload): return payload.targetIdentifier == nil
-        case .syphon, .media, .appAudio: return false
+        case .syphon, .media, .appAudio, .web: return false
         }
     }
 }
@@ -53,9 +58,10 @@ extension CaptureSourceKey {
     /// the registry is the identity authority, so reconfiguring a source
     /// re-keys its capture — while unbound layers fall back to their inline
     /// payload (the render authority). Payload kinds without a physical
-    /// capture (image/text/web/guest/…) produce no key. A02: media layers
+    /// capture (image/text/guest/…) produce no key. A02: media layers
     /// demand playout by their registry source ID; an UNBOUND media layer
-    /// has no file to play and demands nothing.
+    /// has no file to play and demands nothing. G08 (issue #115): configured
+    /// web layers demand a browser-overlay widget capture.
     ///
     /// S06: callers flatten nested-scene references first
     /// (`SceneGraph.flattenedVisibleLayers` — cycle-guarded), so a camera
@@ -88,6 +94,11 @@ extension CaptureSourceKey {
                 // source (the bookmark lives there); unbound media layers
                 // paint the documented fallback instead.
                 if let sourceID = layer.sourceID { keys.insert(.media(sourceID)) }
+            case .web(let web):
+                // G08 (issue #115): a configured widget demands its snapshot
+                // capture; an unconfigured one (no URL, no local HTML asset)
+                // renders the documented nothing fallback and captures nothing.
+                if web.browserOverlay.hasWidgetContent { keys.insert(.web(web)) }
             default: break
             }
         }
@@ -378,6 +389,22 @@ final class CaptureSourcePool: ObservableObject {
     /// Instances persist across demand loss (like screen captures), so a
     /// re-enabled source restarts without re-resolving anything.
     private var appAudioCaptures: [CaptureSourceKey: AppAudioCapture] = [:]
+    /// G08 (issue #115): one browser-overlay widget host per demanded web
+    /// key. Unlike screen captures, hosts do NOT persist across demand loss:
+    /// an unreferenced widget's page unloads (freeing its WebContent work)
+    /// and reloads deterministically on re-entry — there is no remembered
+    /// selection to preserve. A Take between scenes sharing a widget never
+    /// drops the key from demand, so its page rides through untouched.
+    private var webHosts: [CaptureSourceKey: BrowserOverlayHost] = [:]
+    /// G08: per-key state-mirror subscriptions, torn down with the host.
+    private var webHostCancellables: [CaptureSourceKey: AnyCancellable] = [:]
+    /// G08: the per-widget load/error state for the inspector's web section
+    /// (badges, failure reasons) — mirrored from each host on the sink.
+    @Published private(set) var webStates: [CaptureSourceKey: BrowserOverlayLoadState] = [:]
+    /// G08: the program scene identity the scene-entry refresh policy last
+    /// evaluated against — a widget "enters" when the program scene changes
+    /// while the widget is in it, even though its capture never restarted.
+    private var lastProgramWebSceneID: SceneID?
     /// A06: the running-app directory — the Sources tab's app picker AND the
     /// missing/recovery signal for app-audio sources (apps terminate and
     /// relaunch like hot-plugged devices, C10). No TCC permission needed.
@@ -607,6 +634,8 @@ final class CaptureSourcePool: ObservableObject {
             startMedia(key, id: id)
         case .appAudio(let payload):
             startAppAudio(key, payload: payload, settings: settings)
+        case .web(let payload):
+            startWeb(key, payload: payload)
         }
     }
 
@@ -639,6 +668,13 @@ final class CaptureSourcePool: ObservableObject {
             if let capture = appAudioCaptures[key] {
                 Task { await capture.stop() }
             }
+        case .web:
+            // G08: last reference removed — the widget page unloads with the
+            // host (no remembered selection to preserve); re-entry reloads.
+            webHostCancellables[key] = nil
+            webStates[key] = nil
+            webHosts[key]?.dispose()
+            webHosts[key] = nil
         }
     }
 
@@ -818,6 +854,10 @@ final class CaptureSourcePool: ObservableObject {
                 missingSources.remove(key)
                 sourceErrors[key] = nil
                 startAppAudio(key, payload: payload, settings: settings)
+            case .web(let payload):
+                missingSources.remove(key)
+                sourceErrors[key] = nil
+                startWeb(key, payload: payload)
             }
         }
     }
@@ -941,6 +981,11 @@ final class CaptureSourcePool: ObservableObject {
             if let capture = appAudioCaptures[key] {
                 Task { await capture.stop() }
             }
+        case .web:
+            // G08: no physical device/display ever marks a widget missing,
+            // but halt the snapshot clock if one lands here — the frame
+            // store keeps the last frame until its freshness window lapses.
+            webHosts[key]?.stopCaptureClock()
         }
     }
 
@@ -1232,6 +1277,75 @@ final class CaptureSourcePool: ObservableObject {
                 startAppAudio(key, payload: payload,
                               settings: lastReconcileSettings ?? .default)
             }
+        }
+    }
+
+    // MARK: - Browser overlay widgets (G08, issue #115)
+    //
+    // Web sources follow the pool's demand model exactly like captures: the
+    // widget's WKWebView loads on its first scene/overlay reference and
+    // unloads when the last reference goes away. Frames flow through
+    // `BrowserOverlayFrameStore` (latest-wins, freshness-windowed), never the
+    // keyed holder maps — the renderer's `.web` branch pulls by the payload's
+    // `browserOverlayStoreKey` (see WebOverlayIntegration.swift). Web keys
+    // carry no audio channel: widget audio is the G07-documented systemMix/
+    // helperApp story, not a capture the A01 engine pulls samples from.
+
+    /// Starts (or restarts) a widget host. A payload edit re-keys the demand
+    /// (the C03 deliberate re-key pattern), so this always builds a FRESH
+    /// host on the new key — the old key's host is torn down by `stop(_:)`.
+    private func startWeb(_ key: CaptureSourceKey, payload: WebSourcePayload) {
+        sourceErrors[key] = nil
+        let configuration = payload.browserOverlay
+        guard let storeKey = payload.browserOverlayStoreKey else {
+            sourceErrors[key] = "The web source has no widget URL or local HTML asset."
+            return
+        }
+        webHostCancellables[key] = nil
+        webHosts[key]?.dispose()
+        let host = BrowserOverlayHost(configuration: configuration, storeKey: storeKey)
+        webHosts[key] = host
+        webHostCancellables[key] = host.$loadState.sink { [weak self] state in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.webStates[key] = state
+                switch state {
+                case .ready:
+                    self.activeSources.insert(key)
+                    self.sourceErrors[key] = nil
+                case .failed(let message):
+                    self.activeSources.remove(key)
+                    self.sourceErrors[key] = message
+                case .loading, .idle:
+                    self.activeSources.remove(key)
+                }
+            }
+        }
+        host.start()
+    }
+
+    /// The widget host for a demanded web key (nil while unreferenced) — the
+    /// inspector's runtime controls (Reload, Replay Alert, live metrics)
+    /// reach through here.
+    func webHost(for key: CaptureSourceKey) -> BrowserOverlayHost? {
+        webHosts[key]
+    }
+
+    /// The scene-entry refresh signal — wired from
+    /// `StreamController.publishSceneToProgram` (orchestrator hook 3 in
+    /// WebOverlayIntegration.swift). When the PROGRAM scene's identity
+    /// changes, every web widget in it applies its `sceneEntryRefresh`
+    /// policy. The capture itself never restarts across a Take (demand is
+    /// unchanged); this is the deliberate content-level refresh on top.
+    /// `layers` must be the already S06-flattened visible program layers.
+    func noteWebWidgetSceneEntries(sceneID: SceneID,
+                                   layers: [LayerNode],
+                                   sources: [SourceDefinition]) {
+        defer { lastProgramWebSceneID = sceneID }
+        guard lastProgramWebSceneID != sceneID else { return }
+        for key in CaptureSourceKey.demanded(layers: layers, sources: sources) {
+            guard case .web = key else { continue }
+            webHosts[key]?.noteSceneEntry()
         }
     }
 

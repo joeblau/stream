@@ -18,6 +18,11 @@ private let browserOverlayLog = Logger(subsystem: "com.joeblau.StreamMac", categ
 /// `SceneRenderer` `.web` branch consult `BrowserOverlayFrameStore`.
 /// When disabled — the shipping state — `.web` layers render exactly the
 /// documented nothing fallback they always have.
+///
+/// G08 (issue #115) NOTE: the production path is `BrowserOverlayHost`
+/// (capture-pool-driven per demanded web payload); this flag still gates the
+/// renderer branch until orchestrator hook 2 in `WebOverlayIntegration.swift`
+/// replaces the guard with the unconditional `browserOverlayStoreKey` read.
 enum BrowserOverlayPrototypeFlag {
     static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: "prototype.browserOverlay.enabled")
@@ -127,6 +132,14 @@ struct BrowserOverlayAlphaReport: Sendable {
 // MARK: - Prototype host
 
 /// G07 (issue #114) EXPERIMENTAL PROTOTYPE — not wired into the studio UI.
+///
+/// G08 (issue #115) NOTE: the production runtime is `BrowserOverlayHost`
+/// (per-widget lifecycle, load/error state, CSS overrides, deliberate
+/// interaction mode, in-page mute) driven by `CaptureSourcePool`. This
+/// prototype remains the measurement harness's entry point
+/// (`scripts/run_g07_browser_overlay_harness.zsh` compiles this file
+/// standalone) and owns the shared renderer seam (`BrowserOverlayFrameStore`,
+/// `BrowserOverlayMetrics`) the production host publishes into.
 ///
 /// Hosts one WKWebView as a browser-overlay frame source: the webview loads a
 /// bundled fixture or widget URL with a transparent page background, and a

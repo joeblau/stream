@@ -81,4 +81,93 @@ struct BrowserOverlayConfigTests {
         #expect(BrowserWidgetAudioRoute.helperApp.hasIndependentMixChannel == true)
         #expect(BrowserWidgetAudioRoute.allCases.count == 3)
     }
+
+    // MARK: - G08 (issue #115)
+
+    @Test("G08 defaults: no local HTML, no CSS overrides, reload on scene entry")
+    func g08Defaults() {
+        let config = BrowserOverlayConfiguration()
+        #expect(config.localHTMLAssetIdentifier == nil)
+        #expect(config.cssOverrides.isEmpty)
+        #expect(config.sceneEntryRefresh == .reload)
+        #expect(!config.hasWidgetContent)
+    }
+
+    @Test("hasWidgetContent: supported URL or local HTML asset counts; junk does not")
+    func widgetContent() {
+        #expect(BrowserOverlayConfiguration(urlString: "https://example.com/w").hasWidgetContent)
+        #expect(BrowserOverlayConfiguration(localHTMLAssetIdentifier: "asset-1").hasWidgetContent)
+        #expect(!BrowserOverlayConfiguration(urlString: "javascript:alert(1)").hasWidgetContent)
+        #expect(!BrowserOverlayConfiguration(urlString: "not a url").hasWidgetContent)
+        #expect(!BrowserOverlayConfiguration().hasWidgetContent)
+    }
+
+    @Test("Normalization: a local HTML asset wins over a URL set alongside it")
+    func localHTMLWinsOverURL() {
+        let config = BrowserOverlayConfiguration(
+            urlString: "https://example.com/widget",
+            localHTMLAssetIdentifier: "asset-42").normalized()
+        #expect(config.localHTMLAssetIdentifier == "asset-42")
+        #expect(config.urlString == nil)
+        #expect(config.hasWidgetContent)
+    }
+
+    @Test("CSS overrides truncate at the 16 KiB bound, preferring a rule boundary")
+    func cssOverridesBounded() {
+        let rule = ".a { color: red; }" // 19 bytes
+        let oversized = String(repeating: rule, count: BrowserOverlayConfiguration.cssOverridesLimit / 10)
+        let config = BrowserOverlayConfiguration(cssOverrides: oversized).normalized()
+        #expect(config.cssOverrides.utf8.count <= BrowserOverlayConfiguration.cssOverridesLimit)
+        #expect(config.cssOverrides.hasSuffix("}"))
+        let within = BrowserOverlayConfiguration(cssOverrides: rule).normalized()
+        #expect(within.cssOverrides == rule)
+    }
+
+    @Test("Scene-entry refresh round-trips; documents without the key default to reload")
+    func sceneEntryRefreshCodable() throws {
+        let keepAlive = BrowserOverlayConfiguration(
+            urlString: "https://example.com/chat",
+            sceneEntryRefresh: .keepAlive).normalized()
+        let data = try JSONEncoder().encode(keepAlive)
+        #expect(try JSONDecoder().decode(BrowserOverlayConfiguration.self, from: data) == keepAlive)
+
+        // A G07-era document (only the original six keys) decodes onto the
+        // current defaults instead of failing on missing keys.
+        let legacyJSON = """
+        {"urlString":"https://example.com/alert","targetFPS":24,
+         "pixelWidth":1920,"pixelHeight":1080,"allowsInteraction":true,
+         "audioRoute":"systemMix"}
+        """.data(using: .utf8)!
+        let legacy = try JSONDecoder().decode(BrowserOverlayConfiguration.self, from: legacyJSON)
+        #expect(legacy.urlString == "https://example.com/alert")
+        #expect(legacy.targetFPS == 24)
+        #expect(legacy.allowsInteraction)
+        #expect(legacy.audioRoute == .systemMix)
+        #expect(legacy.localHTMLAssetIdentifier == nil)
+        #expect(legacy.cssOverrides.isEmpty)
+        #expect(legacy.sceneEntryRefresh == .reload)
+    }
+
+    @Test("Full round-trip preserves the G08 fields")
+    func g08CodableRoundTrip() throws {
+        let config = BrowserOverlayConfiguration(
+            localHTMLAssetIdentifier: "asset-7",
+            targetFPS: 15,
+            pixelWidth: 800,
+            pixelHeight: 600,
+            allowsInteraction: true,
+            audioRoute: .systemMix,
+            cssOverrides: "body { background: transparent; }",
+            sceneEntryRefresh: .keepAlive).normalized()
+        let data = try JSONEncoder().encode(config)
+        #expect(try JSONDecoder().decode(BrowserOverlayConfiguration.self, from: data) == config)
+    }
+
+    @Test("Scene-entry refresh display names cover every case")
+    func sceneEntryRefreshDisplayNames() {
+        #expect(BrowserOverlaySceneEntryRefresh.allCases.count == 2)
+        for policy in BrowserOverlaySceneEntryRefresh.allCases {
+            #expect(!policy.displayName.isEmpty)
+        }
+    }
 }
