@@ -390,6 +390,8 @@ actor CompositionEngine {
         var dipColorHex: String
         var stingerCutPointSeconds: Double
         var stingerStartedAt: CMTime
+        var motionEasing: MotionEasing = .easeInOut
+        var motionFallback: MotionFallback = .dissolve
     }
 
     /// One layer's in-flight visibility fade. `exitingLayer` holds the OLD
@@ -449,6 +451,7 @@ actor CompositionEngine {
     private func makeBlendTransition(from: Scene, to: Scene,
                                      style: SceneTransitionStyle,
                                      config: SceneTransition, fps: Int) -> ActiveTransition? {
+        guard config.durationSeconds.isFinite, (0...10).contains(config.durationSeconds) else { return nil }
         let durationFrames = Int((config.durationSeconds * Double(fps)).rounded())
         guard durationFrames > 0 else { return nil }
         return ActiveTransition(from: from, to: to, style: style,
@@ -457,7 +460,9 @@ actor CompositionEngine {
                                 direction: config.direction,
                                 dipColorHex: config.dipColorHex,
                                 stingerCutPointSeconds: 0,
-                                stingerStartedAt: .zero)
+                                stingerStartedAt: .zero,
+                                motionEasing: config.motionEasing,
+                                motionFallback: config.motionFallback)
     }
 
     /// One frame of the in-flight transition, or nil when the transition
@@ -500,7 +505,9 @@ actor CompositionEngine {
                                          blend: SceneBlend(style: active.style,
                                                            progress: progress,
                                                            direction: active.direction,
-                                                           dipColorHex: active.dipColorHex),
+                                                           dipColorHex: active.dipColorHex,
+                                                           motionEasing: active.motionEasing,
+                                                           motionFallback: active.motionFallback),
                                          overlayContext: overlayContext,
                                          canvasSize: canvasSize,
                                          frames: delayedFrameLookup,

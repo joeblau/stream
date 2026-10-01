@@ -128,6 +128,8 @@ struct SceneBlend: Sendable {
     var progress: Double
     var direction: TransitionDirection
     var dipColorHex: String
+    var motionEasing: MotionEasing = .easeInOut
+    var motionFallback: MotionFallback = .dissolve
 }
 
 /// S09 (issue #100): `renderTransition` cross-fades/wipes/slides/dips
@@ -219,6 +221,8 @@ final class SceneRenderer {
     private var generatedCacheBytes = 0
     private let generatedCacheByteLimit = 64 * 1_024 * 1_024
     private var tickerLines: [String: CTLine] = [:]
+    private var layerMotionPlan: LayerMotionPlan?
+    private var layerMotionProgress = 0.0
 
     /// S06 raster cache for STATIC nested scenes (transitively text/shape
     /// only): keyed by the transitive content fingerprint + pixel size, with
@@ -300,6 +304,7 @@ final class SceneRenderer {
         // next appearance replays the timing).
         currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
         textTimingSeen.removeAll()
+        layerMotionPlan = nil
 
         var output = sceneComposite(scene, overlayContext: overlayContext, canvas: canvas,
                                     frames: frames, sourcePayloads: sourcePayloads,
@@ -345,14 +350,37 @@ final class SceneRenderer {
         currentFrameIntervalMs = max(1, CMTimeGetSeconds(frameDuration) * 1000)
         currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
         textTimingSeen.removeAll()
+        layerMotionPlan = nil
+        defer { layerMotionPlan = nil }
 
-        let fromImage = sceneComposite(from, overlayContext: overlayContext, canvas: canvas,
-                                       frames: frames, sourcePayloads: sourcePayloads,
-                                       scenes: scenes, layerOpacity: [:], exitingLayers: [])
-        let toImage = sceneComposite(to, overlayContext: overlayContext, canvas: canvas,
-                                     frames: frames, sourcePayloads: sourcePayloads,
-                                     scenes: scenes, layerOpacity: [:], exitingLayers: [])
-        var output = blended(from: fromImage, to: toImage, blend: blend, canvas: canvas)
+        var output: CIImage
+        if blend.style == .layerMotion {
+            let defaults = sourceEffectsProvider()
+            let plan = LayerMotionPlan(from: from, to: to, easing: blend.motionEasing,
+                                       fallback: blend.motionFallback, sourceDefaults: defaults)
+            layerMotionPlan = plan
+            layerMotionProgress = blend.motionEasing.value(at: blend.progress)
+            var moving = plan.scene(at: blend.progress, sourceDefaults: defaults)
+            moving.background = .solid(colorHex: "#00000000")
+            let layers = sceneComposite(moving, overlayContext: .empty, canvas: canvas,
+                frames: frames, sourcePayloads: sourcePayloads, scenes: scenes,
+                layerOpacity: [:], exitingLayers: [])
+            let fromBackground = backgroundImage(overlayContext.background(for: from), canvas: canvas)
+            let toBackground = backgroundImage(overlayContext.background(for: to), canvas: canvas)
+            let background = blend.motionFallback == .cut ? toBackground
+                : blended(from: fromBackground, to: toBackground,
+                    blend: SceneBlend(style: .dissolve, progress: blend.motionEasing.value(at: blend.progress),
+                                      direction: .right, dipColorHex: "#000000"), canvas: canvas)
+            output = layers.composited(over: background)
+        } else {
+            let fromImage = sceneComposite(from, overlayContext: overlayContext, canvas: canvas,
+                frames: frames, sourcePayloads: sourcePayloads,
+                scenes: scenes, layerOpacity: [:], exitingLayers: [])
+            let toImage = sceneComposite(to, overlayContext: overlayContext, canvas: canvas,
+                frames: frames, sourcePayloads: sourcePayloads,
+                scenes: scenes, layerOpacity: [:], exitingLayers: [])
+            output = blended(from: fromImage, to: toImage, blend: blend, canvas: canvas)
+        }
         output = applyingOverlays(output, overlayContext: overlayContext, scene: to,
                                   canvas: canvas, frames: frames,
                                   sourcePayloads: sourcePayloads, scenes: scenes)
@@ -370,7 +398,7 @@ final class SceneRenderer {
     private func blended(from: CIImage, to: CIImage, blend: SceneBlend, canvas: CGRect) -> CIImage {
         let progress = min(1, max(0, blend.progress))
         switch blend.style {
-        case .dissolve, .stinger:
+        case .dissolve, .stinger, .layerMotion:
             // (Stingers never reach this path — the engine renders them as
             // a base swap under the video mask — but a dissolve is the
             // honest fallback if one ever did.)
@@ -1327,7 +1355,27 @@ final class SceneRenderer {
         }.first
 
         let placed: CIImage
-        if isCamera, layer.transform.size.width < 1 {
+        if let pair = layerMotionPlan?.pair(for: layer.id) {
+            let defaults = sourceEffectsProvider()
+            let a = pair.from.effectiveSourceEffects(defaults: defaults).map { applyingFraming($0, to: source) } ?? source
+            let b = pair.to.effectiveSourceEffects(defaults: defaults).map { applyingFraming($0, to: source) } ?? source
+            let from = placementRect(for: pair.from, extent: a.extent, canvas: canvas, isCamera: isCamera)
+            let to = placementRect(for: pair.to, extent: b.extent, canvas: canvas, isCamera: isCamera)
+            let t = CGFloat(layerMotionProgress)
+            let rect = CGRect(x: from.minX + (to.minX - from.minX) * t,
+                              y: from.minY + (to.minY - from.minY) * t,
+                              width: from.width + (to.width - from.width) * t,
+                              height: from.height + (to.height - from.height) * t)
+            var image = framed.transformed(by: CGAffineTransform(scaleX: rect.width / extent.width,
+                                                                 y: rect.height / extent.height))
+            image = image.transformed(by: CGAffineTransform(translationX: rect.minX - image.extent.minX,
+                                                           y: rect.minY - image.extent.minY))
+            let aRadius = legacyRadius(pair.from, isCamera: isCamera)
+            let bRadius = legacyRadius(pair.to, isCamera: isCamera)
+            image = applyRoundedCorners(image, radius: aRadius + (bRadius - aRadius) * t, rect: rect)
+            image = applyingShapeStyle(layer.style, to: image, rect: rect, canvas: canvas)
+            placed = rotated(image, degrees: layer.transform.rotationDegrees, around: rect)
+        } else if isCamera, layer.transform.size.width < 1 {
             placed = placePIP(source: framed, layer: layer, canvas: canvas,
                               cornerRadius: cornerRadius ?? 16)
         } else {
@@ -1340,6 +1388,36 @@ final class SceneRenderer {
     }
 
     // MARK: - E01 source effects (issue #101)
+
+    private func legacyRadius(_ layer: LayerNode, isCamera: Bool) -> CGFloat {
+        let radius = layer.effects.compactMap { effect -> CGFloat? in
+            if case .cornerRadius(let value) = effect { return CGFloat(value) }
+            return nil
+        }.first
+        return radius ?? (isCamera && layer.transform.size.width < 1 ? 16 : 0)
+    }
+
+    private func placementRect(for layer: LayerNode, extent: CGRect, canvas: CGRect,
+                               isCamera: Bool) -> CGRect {
+        if isCamera, layer.transform.size.width < 1 {
+            let width = canvas.width * max(0.10, min(0.40, layer.transform.size.width))
+            var rect = rectInCanvas(for: layer.transform, canvas: canvas,
+                                    width: width, height: width * extent.height / extent.width)
+            let anchor = anchorFraction(layer.transform.anchor)
+            if anchor.x == 0 { rect.origin.x += 24 }
+            if anchor.x == 1 { rect.origin.x -= 24 }
+            if anchor.y == 0 { rect.origin.y += 24 }
+            if anchor.y == 1 { rect.origin.y -= 24 }
+            return rect
+        }
+        let box = rectInCanvas(for: layer.transform, canvas: canvas,
+                              width: layer.transform.size.width * canvas.width,
+                              height: layer.transform.size.height * canvas.height)
+        let fit = min(box.width / extent.width, box.height / extent.height)
+        let size = CGSize(width: extent.width * fit, height: extent.height * fit)
+        return CGRect(x: box.midX - size.width / 2, y: box.midY - size.height / 2,
+                      width: size.width, height: size.height)
+    }
 
     /// The framing half of a source effect stack, applied to the raw source
     /// image BEFORE placement: mirror (horizontal flip about the extent),

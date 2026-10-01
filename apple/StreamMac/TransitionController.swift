@@ -2,6 +2,7 @@ import Combine
 import CoreMedia
 import CoreVideo
 import Foundation
+import StreamCore
 import os.lock
 
 // MARK: - Transition model (S09, issue #100)
@@ -21,6 +22,7 @@ enum SceneTransitionStyle: String, Codable, CaseIterable, Sendable {
     case wipe
     case slide
     case stinger
+    case layerMotion
 
     var displayName: String {
         switch self {
@@ -30,6 +32,7 @@ enum SceneTransitionStyle: String, Codable, CaseIterable, Sendable {
         case .wipe: return "Wipe"
         case .slide: return "Slide"
         case .stinger: return "Stinger"
+        case .layerMotion: return "Layer Motion"
         }
     }
 }
@@ -69,6 +72,8 @@ struct SceneTransition: Hashable, Codable, Sendable {
     var stingerCutPointSeconds: Double
     /// Linear stinger audio gain, 0...2 (1 = unity).
     var stingerVolume: Double
+    var motionEasing: MotionEasing
+    var motionFallback: MotionFallback
 
     init(style: SceneTransitionStyle = .cut,
          durationSeconds: Double = 0.35,
@@ -77,7 +82,9 @@ struct SceneTransition: Hashable, Codable, Sendable {
          stingerBookmarkData: Data? = nil,
          stingerFileName: String? = nil,
          stingerCutPointSeconds: Double = 1.0,
-         stingerVolume: Double = 1) {
+         stingerVolume: Double = 1,
+         motionEasing: MotionEasing = .easeInOut,
+         motionFallback: MotionFallback = .dissolve) {
         self.style = style
         self.durationSeconds = durationSeconds
         self.direction = direction
@@ -86,6 +93,8 @@ struct SceneTransition: Hashable, Codable, Sendable {
         self.stingerFileName = stingerFileName
         self.stingerCutPointSeconds = stingerCutPointSeconds
         self.stingerVolume = stingerVolume
+        self.motionEasing = motionEasing
+        self.motionFallback = motionFallback
     }
 
     /// The factory/persisted fallback: a cut, so upgraded installs keep the
@@ -104,6 +113,19 @@ struct SceneTransition: Hashable, Codable, Sendable {
         stingerFileName = try container.decodeIfPresent(String.self, forKey: .stingerFileName)
         stingerCutPointSeconds = try container.decodeIfPresent(Double.self, forKey: .stingerCutPointSeconds) ?? 1.0
         stingerVolume = try container.decodeIfPresent(Double.self, forKey: .stingerVolume) ?? 1
+        motionEasing = try container.decodeIfPresent(MotionEasing.self, forKey: .motionEasing) ?? .easeInOut
+        motionFallback = try container.decodeIfPresent(MotionFallback.self, forKey: .motionFallback) ?? .dissolve
+    }
+
+    var validationError: String? {
+        guard durationSeconds.isFinite, (0...10).contains(durationSeconds) else {
+            return "Transition duration must be between 0 and 10 seconds."
+        }
+        guard stingerCutPointSeconds.isFinite, (0...600).contains(stingerCutPointSeconds),
+              stingerVolume.isFinite, (0...2).contains(stingerVolume) else {
+            return "Stinger cut point must be 0–600 seconds and volume 0–2."
+        }
+        return nil
     }
 }
 

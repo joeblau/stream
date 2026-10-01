@@ -1103,6 +1103,9 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
     /// through the S07 overlay commands. Non-destructive and
     /// alpha-preserving (see LayerStyle.swift).
     var style: LayerStyle
+    /// Explicit cross-scene motion identity; duplication preserves this value.
+    /// Multiple visible copies with one identity are ambiguous and fall back.
+    var motionID: UUID
 
     init(id: LayerID = LayerID(),
          name: String,
@@ -1115,7 +1118,8 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
          groupID: GroupID? = nil,
          isLocked: Bool = false,
          effectOverrides: SourceEffects? = nil,
-         style: LayerStyle = .identity) {
+         style: LayerStyle = .identity,
+         motionID: UUID = UUID()) {
         self.id = id
         self.name = name
         self.sourceID = sourceID
@@ -1128,6 +1132,7 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
         self.isLocked = isLocked
         self.effectOverrides = effectOverrides
         self.style = style
+        self.motionID = motionID
     }
 
     /// `isLocked` was added after v2 shipped; decode it with a default so
@@ -1147,6 +1152,7 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
         effectOverrides = try container.decodeIfPresent(SourceEffects.self, forKey: .effectOverrides)
         style = try container.decodeIfPresent(LayerStyle.self, forKey: .style) ?? .identity
+        motionID = try container.decodeIfPresent(UUID.self, forKey: .motionID) ?? id.rawValue
     }
 }
 
