@@ -320,6 +320,23 @@ enum StudioCommand: Equatable, Sendable {
     // monitoring / input commands above.
     case setEchoHandlingMode(EchoHandlingMode)
 
+    // E05 (issue #109): hardware camera controls + macOS reaction triggers.
+    // Hardware modes are DEVICE state (one capture feeds the preview and
+    // program engines, so a change lands on both) — live session state
+    // persisted per-device in `StreamSettings.cameraControls` via
+    // SettingsSession (the A07/A09 precedent), NOT scene content, NOT
+    // undoable, never staged. Commands address the camera by its stable
+    // capture-device uniqueID (the C10 identity rule).
+    /// Replaces one camera's hardware control preferences (focus/exposure/
+    /// white-balance modes — the whole per-device value, edited whole like
+    /// `.setDucking`). Capability-gated in validation against the connected
+    /// device's discovered support, then applied to the hardware in place.
+    case setCameraControls(String, CameraDeviceControlSettings)
+    /// Triggers a macOS reaction effect on a camera's feed (macOS 14+,
+    /// per-device support gated — reactions render into the feed before it
+    /// reaches Stream, so preview and program both show them).
+    case triggerCameraReaction(String, CameraReaction)
+
     // A03 soundboard + music playlists (issue #98): pads and playlists are a
     // project-level performance surface persisted in the soundboard document
     // (SoundboardStore — the mixer-document precedent), NOT scene content:
@@ -491,6 +508,9 @@ enum StudioCommand: Equatable, Sendable {
             return "\(ducking.isEnabled ? "Enable" : "Configure") Ducking"
         case .setEchoHandlingMode(let mode):
             return mode == .off ? "Turn Echo Handling Off" : "Enable \(mode.displayName)"
+        case .setCameraControls: return "Set Camera Controls"
+        case .triggerCameraReaction(_, let reaction):
+            return "Trigger \(reaction.displayName) Reaction"
         case .addSoundPad: return "Add Sound Pad"
         case .updateSoundPad: return "Edit Sound Pad"
         case .removeSoundPad: return "Remove Sound Pad"
@@ -716,6 +736,12 @@ final class StudioCommandDispatcher: ObservableObject {
     /// publisher. Owned here so the Take paths, the transition settings UI,
     /// and future automation share one instance.
     let transitions: TransitionController
+    /// E05 (issue #109): the per-device hardware camera control center —
+    /// capability snapshots for the inspector surface and the live
+    /// apply/reaction operations the `.setCameraControls` /
+    /// `.triggerCameraReaction` commands ride. Owned here so UI, and later
+    /// automation/hardware controllers, share one instance.
+    let cameraControls: CameraControlCenter
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
     /// graph, keyed by chain-slot ID (passthrough to the controller — the
@@ -742,6 +768,12 @@ final class StudioCommandDispatcher: ObservableObject {
                                                controller: controller)
         let transitions = TransitionController(controller: controller)
         self.transitions = transitions
+        // E05 (issue #109): the camera control center (capability snapshots +
+        // live hardware/reaction operations for the `.setCameraControls` /
+        // `.triggerCameraReaction` commands).
+        self.cameraControls = CameraControlCenter(deviceMonitor: controller.deviceMonitor,
+                                                  pool: controller.capturePool,
+                                                  session: session)
         self.state = StudioState()
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
@@ -1276,6 +1308,43 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setEchoHandlingMode:
             return nil
 
+        // E05 (issue #109): camera control validation — the target must be a
+        // CONNECTED video device, and every requested mode must be one the
+        // device's discovered capabilities honor (no inert writes). Reaction
+        // triggers gate on the OS/user enablement + per-device/per-format
+        // support folded into `canPerformReactionEffects`, and on the
+        // device's live `availableReactionTypes` list — a rejected trigger
+        // carries the explicit reason.
+        case .setCameraControls(let uid, let controls):
+            guard let device = controller.deviceMonitor.videoDevices
+                    .first(where: { $0.uniqueID == uid }) else {
+                return .invalidTarget("That camera is not connected.")
+            }
+            let capabilities = device.cameraControlCapabilities
+            if let mode = controls.focusMode, !capabilities.focusModes.contains(mode) {
+                return .unavailable("\(device.localizedName) doesn't support \(mode == .locked ? "locking focus" : "auto focus").")
+            }
+            if let mode = controls.exposureMode, !capabilities.exposureModes.contains(mode) {
+                return .unavailable("\(device.localizedName) doesn't support \(mode == .locked ? "locking exposure" : "auto exposure").")
+            }
+            if let mode = controls.whiteBalanceMode, !capabilities.whiteBalanceModes.contains(mode) {
+                return .unavailable("\(device.localizedName) doesn't support \(mode == .locked ? "locking white balance" : "auto white balance").")
+            }
+            return nil
+        case .triggerCameraReaction(let uid, let reaction):
+            guard let device = controller.deviceMonitor.videoDevices
+                    .first(where: { $0.uniqueID == uid }) else {
+                return .invalidTarget("That camera is not connected.")
+            }
+            let capabilities = device.cameraControlCapabilities
+            guard capabilities.reactionsAvailable else {
+                return .unavailable(capabilities.reactionUnavailableReason
+                    ?? "Reactions aren't available on this camera right now.")
+            }
+            return capabilities.supportedReactions.contains(reaction)
+                ? nil
+                : .unavailable("\(reaction.displayName) isn't available on \(device.localizedName) right now.")
+
         // A03 soundboard/playlist validation (issue #98): transport and
         // structural commands address the soundboard document's stable IDs
         // (locks and staging never apply — the media-transport precedent).
@@ -1740,6 +1809,22 @@ final class StudioCommandDispatcher: ObservableObject {
         // voice-isolation state reporting in place.
         case .setEchoHandlingMode(let mode):
             session.persistEchoHandlingMode(mode)
+
+        // E05 (issue #109): camera control execution — persist the per-device
+        // preference through SettingsSession (single truth), then apply it to
+        // the connected hardware in place (device state, shared by preview
+        // and program; no capture restart). A mid-flight hardware failure
+        // surfaces as a transient notice, never silently.
+        case .setCameraControls(let uid, let controls):
+            session.persistCameraControls(controls.isEmpty ? nil : controls,
+                                          forDeviceUID: uid)
+            if let message = cameraControls.apply(controls, toDeviceUID: uid) {
+                postTransientNotice(command: command.label, message: message)
+            }
+        case .triggerCameraReaction(let uid, let reaction):
+            if let message = cameraControls.performReaction(reaction, onDeviceUID: uid) {
+                postTransientNotice(command: command.label, message: message)
+            }
 
         // A03 soundboard/playlist execution (issue #98): structural edits
         // write the soundboard document (the controller's store observation
@@ -2577,6 +2662,7 @@ private extension StudioCommand {
              .setAudioInputEnabled, .setAudioInputMapping, .relinkAudioInput,
              .setChannelFXChain,
              .setMonitoringEnabled, .setMonitorOutputDevice, .setEchoHandlingMode,
+             .setCameraControls, .triggerCameraReaction,
              .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .addSoundPad, .updateSoundPad, .removeSoundPad,

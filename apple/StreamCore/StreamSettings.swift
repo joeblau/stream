@@ -226,6 +226,12 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// usable from Stream's capture architecture; Voice Isolation is the OS
     /// mic mode Stream prefers and reports on).
     public var echoHandlingMode: EchoHandlingMode
+    /// E05 (issue #109): per-device hardware camera control preferences
+    /// (focus/exposure/white-balance modes; macOS), keyed by the capture
+    /// device's stable `uniqueID` so a reconnected camera restores its own
+    /// settings. Additive `decodeIfPresent`: pre-E05 blobs decode to an empty
+    /// map and every camera keeps its device defaults.
+    public var cameraControls: [String: CameraDeviceControlSettings]
 
     public init(
         selectedProtocol: StreamProtocol = .rtmps,
@@ -262,7 +268,8 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         echoHandlingMode: EchoHandlingMode = .off,
         audioDelaysMs: [String: Double] = [:],
         videoDelaysMs: [String: Double] = [:],
-        ducking: DuckingSettings = DuckingSettings()
+        ducking: DuckingSettings = DuckingSettings(),
+        cameraControls: [String: CameraDeviceControlSettings] = [:]
     ) {
         self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
@@ -295,6 +302,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.audioDelaysMs = audioDelaysMs
         self.videoDelaysMs = videoDelaysMs
         self.ducking = ducking
+        self.cameraControls = cameraControls
     }
 
     /// Backward-compatible decode: every field falls back to its default when the
@@ -353,6 +361,10 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         audioDelaysMs = try c.decodeIfPresent([String: Double].self, forKey: .audioDelaysMs) ?? d.audioDelaysMs
         videoDelaysMs = try c.decodeIfPresent([String: Double].self, forKey: .videoDelaysMs) ?? d.videoDelaysMs
         ducking = try c.decodeIfPresent(DuckingSettings.self, forKey: .ducking) ?? d.ducking
+        // E05: blobs written before per-device camera controls existed decode
+        // to an empty map — every camera runs its device defaults, identical
+        // to before the upgrade.
+        cameraControls = try c.decodeIfPresent([String: CameraDeviceControlSettings].self, forKey: .cameraControls) ?? d.cameraControls
     }
 
     public static let `default` = StreamSettings()
