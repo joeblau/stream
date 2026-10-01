@@ -1047,6 +1047,11 @@ struct OverlayContext: Hashable, Sendable {
     /// Back-to-front, exactly like `Scene.layers`.
     var overlays: [LayerNode] = []
     var defaultBackground: SceneBackground? = nil
+    /// S09 (issue #100): the project default transition, read by the program
+    /// engine when an incoming scene carries no per-scene override. Riding
+    /// this existing per-tick snapshot keeps the default live-configurable
+    /// without a new engine seam.
+    var defaultTransition: SceneTransition = .default
 
     static let empty = OverlayContext()
 
@@ -1316,6 +1321,11 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
     /// S08 (issue #99): what the scene's media sources do on program
     /// entry/exit.
     var mediaBehavior: SceneMediaBehavior
+    /// S09 (issue #100): the transition a Take INTO this scene renders
+    /// (dissolve/wipe/stinger/…). Nil = inherit the project default
+    /// (`SceneDocument.defaultTransition`). Scene content: it stages, Takes,
+    /// reverts, and undoes like any scene edit.
+    var transition: SceneTransition?
 
     init(id: SceneID = SceneID(),
          name: String,
@@ -1326,7 +1336,8 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
          hiddenOverlayIDs: Set<LayerID> = [],
          soundBindings: [SceneSoundBinding] = [],
          audioSnapshot: SceneAudioSnapshot? = nil,
-         mediaBehavior: SceneMediaBehavior = .default) {
+         mediaBehavior: SceneMediaBehavior = .default,
+         transition: SceneTransition? = nil) {
         self.id = id
         self.name = name
         self.canvas = canvas
@@ -1337,13 +1348,14 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         self.soundBindings = soundBindings
         self.audioSnapshot = audioSnapshot
         self.mediaBehavior = mediaBehavior
+        self.transition = transition
     }
 
     /// `background`/`hiddenOverlayIDs` were added after v2 shipped; decode
     /// them with defaults so older persisted documents keep loading
     /// (additive wire change, same pattern as `LayerNode.isLocked`).
     /// A03's `soundBindings` and S08's `audioSnapshot`/`mediaBehavior`
-    /// follow the same pattern.
+    /// follow the same pattern, as does S09's `transition`.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(SceneID.self, forKey: .id)
@@ -1356,6 +1368,7 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         soundBindings = try container.decodeIfPresent([SceneSoundBinding].self, forKey: .soundBindings) ?? []
         audioSnapshot = try container.decodeIfPresent(SceneAudioSnapshot.self, forKey: .audioSnapshot)
         mediaBehavior = try container.decodeIfPresent(SceneMediaBehavior.self, forKey: .mediaBehavior) ?? .default
+        transition = try container.decodeIfPresent(SceneTransition.self, forKey: .transition)
     }
 }
 
@@ -1447,6 +1460,10 @@ struct SceneDocument: Hashable, Codable, Sendable {
     /// S07: the project default background, used by every scene whose own
     /// `background` is nil. Nil = the documented implicit black canvas.
     var defaultBackground: SceneBackground?
+    /// S09 (issue #100): the project default transition, used by every Take
+    /// into a scene whose own `transition` is nil. Defaults to cut, so
+    /// upgraded installs keep the pre-S09 Take behavior.
+    var defaultTransition: SceneTransition
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
@@ -1455,7 +1472,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
          scenes: [Scene],
          selectedID: SceneID,
          overlays: [LayerNode] = [],
-         defaultBackground: SceneBackground? = nil) {
+         defaultBackground: SceneBackground? = nil,
+         defaultTransition: SceneTransition = .default) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
@@ -1464,10 +1482,12 @@ struct SceneDocument: Hashable, Codable, Sendable {
         self.selectedID = selectedID
         self.overlays = overlays
         self.defaultBackground = defaultBackground
+        self.defaultTransition = defaultTransition
     }
 
     /// `overlays`/`defaultBackground` were added within v2; decode them with
     /// defaults so pre-S07 v2 documents keep loading (additive wire change).
+    /// S09's `defaultTransition` follows the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
@@ -1478,11 +1498,13 @@ struct SceneDocument: Hashable, Codable, Sendable {
         selectedID = try container.decode(SceneID.self, forKey: .selectedID)
         overlays = try container.decodeIfPresent([LayerNode].self, forKey: .overlays) ?? []
         defaultBackground = try container.decodeIfPresent(SceneBackground.self, forKey: .defaultBackground)
+        defaultTransition = try container.decodeIfPresent(SceneTransition.self, forKey: .defaultTransition) ?? .default
     }
 
     /// The S07 render context the engine composites every scene inside.
     var overlayContext: OverlayContext {
-        OverlayContext(overlays: overlays, defaultBackground: defaultBackground)
+        OverlayContext(overlays: overlays, defaultBackground: defaultBackground,
+                       defaultTransition: defaultTransition)
     }
 }
 

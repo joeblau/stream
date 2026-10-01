@@ -214,6 +214,12 @@ final class SceneStore: ObservableObject {
     @Published private(set) var defaultBackground: SceneBackground? {
         didSet { scheduleSceneAutosave() }
     }
+    /// S09 (issue #100): the project default transition for Takes into
+    /// scenes without their own `transition` override. Project-level:
+    /// applies immediately, like the default background.
+    @Published private(set) var defaultTransition: SceneTransition {
+        didSet { scheduleSceneAutosave() }
+    }
     /// S02 browser metadata: folders, scene → folder membership, and scene
     /// locks. Immediate (never staged), persisted in the browser document.
     @Published private(set) var folders: [SceneFolder] = [] {
@@ -252,6 +258,7 @@ final class SceneStore: ObservableObject {
         sources = document.sources
         overlays = document.overlays
         defaultBackground = document.defaultBackground
+        defaultTransition = document.defaultTransition
         scenes = document.scenes
         selectedID = document.scenes.contains(where: { $0.id == document.selectedID })
             ? document.selectedID
@@ -289,7 +296,8 @@ final class SceneStore: ObservableObject {
                       scenes: scenes,
                       selectedID: selectedID,
                       overlays: overlays,
-                      defaultBackground: defaultBackground)
+                      defaultBackground: defaultBackground,
+                      defaultTransition: defaultTransition)
     }
 
     var selected: Scene? {
@@ -430,6 +438,12 @@ final class SceneStore: ObservableObject {
     /// fallback for scenes without their own background).
     func setDefaultBackground(_ background: SceneBackground?) {
         defaultBackground = background
+    }
+
+    /// S09 (issue #100): sets the project default transition (Takes into
+    /// scenes without their own `transition` override render it).
+    func setDefaultTransition(_ transition: SceneTransition) {
+        defaultTransition = transition
     }
 
     /// Adds a default scene (same template as the scenes panel's + button)
@@ -617,7 +631,10 @@ final class SceneStore: ObservableObject {
                          // behavior are plain values (no channel-identity
                          // aliasing), so they copy verbatim.
                          audioSnapshot: original.audioSnapshot,
-                         mediaBehavior: original.mediaBehavior)
+                         mediaBehavior: original.mediaBehavior,
+                         // S09 (issue #100): the transition override is a
+                         // plain value too — it copies verbatim.
+                         transition: original.transition)
         scenes.insert(copy, at: index + 1)
         if let folderID = sceneMembership[id] {
             sceneMembership[copy.id] = folderID
@@ -697,6 +714,7 @@ final class SceneStore: ObservableObject {
                           selectedID: selectedID,
                           overlays: overlays,
                           defaultBackground: defaultBackground,
+                          defaultTransition: defaultTransition,
                           folders: folders,
                           sceneMembership: sceneMembership,
                           lockedSceneIDs: lockedSceneIDs,
@@ -714,6 +732,7 @@ final class SceneStore: ObservableObject {
             : scenes[0].id
         overlays = snapshot.overlays
         defaultBackground = snapshot.defaultBackground
+        defaultTransition = snapshot.defaultTransition
         folders = snapshot.folders
         sceneMembership = snapshot.sceneMembership
         lockedSceneIDs = snapshot.lockedSceneIDs
@@ -885,6 +904,9 @@ struct SceneUndoSnapshot: Equatable, Sendable {
     var selectedID: SceneID
     var overlays: [LayerNode]
     var defaultBackground: SceneBackground?
+    /// S09 (issue #100): the project default transition — undoable like the
+    /// default background.
+    var defaultTransition: SceneTransition
     var folders: [SceneFolder]
     var sceneMembership: [SceneID: SceneFolderID]
     var lockedSceneIDs: Set<SceneID>
