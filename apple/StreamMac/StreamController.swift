@@ -37,6 +37,14 @@ import os.lock
 /// publish — so stopping preview or closing the window never silently kills an
 /// active output: the engine stays up while ANY output demands frames.
 ///
+/// S05 (issue #73): capture lifetime is registry-driven. Scenes no longer ask
+/// for "the camera"/"the screen" — visible layers resolve through the
+/// `SceneStore` source registry into `CaptureSourceKey`s (one per physical
+/// device/display), and the `CaptureSourcePool` runs exactly one capture per
+/// key while ≥1 layer in the staged OR program scene references it. A Take
+/// between scenes sharing a source leaves that capture running (no flicker),
+/// and a failure to start surfaces in the pool's per-source error state.
+///
 /// One ordered video consumer serializes `appendVideo` into the publisher (a
 /// `Task` per frame could reorder buffers); audio goes through the publisher's
 /// own ordered, nonisolated ingress exactly like the iOS pipeline.
@@ -59,9 +67,16 @@ final class StreamController: ObservableObject {
     var isPreviewing: Bool { previewState == .active }
 
     let sceneStore: SceneStore
-    let screenCapture = ScreenSourceCapture()
+    /// The S05 keyed capture pool (issue #73): one physical capture per
+    /// source identity, started/stopped purely by scene demand. Exposes the
+    /// per-source error state (`sourceErrors`) and the engines' frame read
+    /// path (`frames`).
+    let capturePool = CaptureSourcePool()
+    /// Compatibility read for the diagnostics row: the capture instance behind
+    /// the system-picker screen source. The pool vends a stable instance, so
+    /// existing reads (`controller.screenCapture.isCapturing`) keep working.
+    var screenCapture: ScreenSourceCapture { capturePool.screenCapture(for: .defaultScreen) }
     let audio = MacAudioInput()
-    private let facecam = FacecamCapture()
 
     /// The W08 program composition engine: composites the program snapshot and
     /// fans frames out to the publisher, the recording, and the PROGRAM
@@ -77,7 +92,6 @@ final class StreamController: ObservableObject {
     private let previewProgram: PreviewProgramModel
     /// Reached from the capture callbacks (arbitrary queues) and the main actor.
     private let publisherBox = PublisherBox()
-    private let latestScreen = LatestScreenFrame()
     private var publisher: (any Publisher)? {
         didSet { publisherBox.publisher = publisher }
     }
@@ -129,20 +143,20 @@ final class StreamController: ObservableObject {
         self.settings = persisted
         self.activeProfile = persisted.outputProfile
 
-        // The engines pull source pixels off-main through the holders; they
-        // never touch this controller's MainActor state. Both share the same
-        // read-only latest-frame providers (W03: one capture feeds both the
-        // staged preview and the outgoing program).
-        let latestScreen = self.latestScreen
-        let facecam = self.facecam
+        // The engines pull source pixels off-main through the pool's frame
+        // providers; they never touch this controller's MainActor state. Both
+        // engines share the same read-only providers (W03: one capture feeds
+        // both the staged preview and the outgoing program; S05: the pool
+        // keys those captures by source identity).
+        let frames = capturePool.frames
         self.engine = CompositionEngine(
-            screenProvider: { latestScreen.latest() },
-            cameraProvider: { facecam.latest.freshest() },
+            screenProvider: { frames.latestScreenFrame() },
+            cameraProvider: { frames.freshestCameraFrame() },
             canvasSize: persisted.outputProfile.canvasSize,
             frameRate: persisted.outputProfile.frameRate)
         self.previewEngine = CompositionEngine(
-            screenProvider: { latestScreen.latest() },
-            cameraProvider: { facecam.latest.freshest() },
+            screenProvider: { frames.latestScreenFrame() },
+            cameraProvider: { frames.freshestCameraFrame() },
             canvasSize: persisted.outputProfile.canvasSize,
             frameRate: persisted.outputProfile.frameRate)
 
@@ -153,7 +167,7 @@ final class StreamController: ObservableObject {
             .sink { [weak self] scene in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.applySceneSources()
+                    self.reconcileSourceDemand()
                     let engine = self.previewEngine
                     Task { await engine.updateScene(scene) }
                 }
@@ -163,20 +177,17 @@ final class StreamController: ObservableObject {
             .sink { [weak self] scene in
                 Task { @MainActor [weak self] in
                     guard let self, let scene else { return }
-                    self.applySceneSources()
+                    self.reconcileSourceDemand()
                     self.publishSceneToProgram(scene)
                 }
             }
             .store(in: &cancellables)
 
-        // Capture callbacks may arrive on ScreenCaptureKit / audio queues, so
-        // everything they touch is lock-protected storage, never MainActor state.
-        screenCapture.onVideoSample = { [latestScreen] sample in
-            if let buffer = CMSampleBufferGetImageBuffer(sample) {
-                latestScreen.store(buffer)
-            }
-        }
-        screenCapture.onAudioSample = { [publisherBox] sample in
+        // Capture callbacks may arrive on ScreenCaptureKit / audio queues.
+        // Screen video frames land in the pool's per-source holders (wired
+        // inside the pool); app audio from every screen capture and the mic
+        // route to the publisher's nonisolated, thread-safe audio ingress.
+        capturePool.onScreenAudioSample = { [publisherBox] sample in
             publisherBox.publisher?.enqueueApp(sample)
         }
         audio.onMicSample = { [publisherBox] sample in
@@ -541,7 +552,7 @@ final class StreamController: ObservableObject {
     private func startPipeline() {
         isPipelineRunning = true
         startAudioInput()
-        applySceneSources()
+        reconcileSourceDemand()
         let program = previewProgram.programScene
         let canvasSize = activeProfile.canvasSize
         let fps = encodeFrameRate
@@ -568,11 +579,8 @@ final class StreamController: ObservableObject {
         Task { await engine.stop() }
         let previewEngine = self.previewEngine
         Task { await previewEngine.stop() }
-        facecam.stop()
+        capturePool.stopAll()
         audio.stop()
-        let screenCapture = self.screenCapture
-        Task { await screenCapture.stop() }
-        latestScreen.clear()
         outputSizeSentToPublisher = false
         promoteStagedProfileIfOutputsIdle()
     }
@@ -586,35 +594,32 @@ final class StreamController: ObservableObject {
         }
     }
 
-    // MARK: - Scene → source routing
+    // MARK: - Scene → source routing (S05, issue #73)
 
-    /// Starts/stops the screen capture and camera to match what the two
-    /// compositions actually need: the UNION of the program snapshot and —
-    /// only while the monitors are visible — the staged scene. The union is
-    /// what makes staged work leak-proof at the source level (W03): staging a
-    /// camera-only scene never stops the screen capture the outgoing program
-    /// is still using, and a staged scene's sources don't get picked/started
-    /// while the monitors are off. Screen capture uses the system content
-    /// picker, so a staged switch into a screen layout may need one user
-    /// confirmation; a cancel simply leaves the scene showing its other
-    /// source until picked.
-    private func applySceneSources() {
+    /// Reconciles physical captures with what the two compositions actually
+    /// reference: the UNION of the program snapshot and — only while the
+    /// monitors are visible — the staged scene. Visible layers resolve through
+    /// the `SceneStore` source registry into `CaptureSourceKey`s (the registry
+    /// is the identity authority; unbound layers fall back to their inline
+    /// payload), and the pool starts a capture on its first reference, stops
+    /// it when the last reference goes away, and leaves a capture both scenes
+    /// share running across a Take (no flicker/black frames).
+    ///
+    /// The union is what makes staged work leak-proof at the source level
+    /// (W03): staging a camera-only scene never stops the screen capture the
+    /// outgoing program is still using, and a staged scene's sources don't get
+    /// picked/started while the monitors are off. Screen capture uses the
+    /// system content picker on FIRST use, so a staged switch into a screen
+    /// layout may need one user confirmation; a cancel simply leaves the scene
+    /// showing its other source, and restarts of an unchanged source reuse the
+    /// remembered selection instead of re-prompting.
+    private func reconcileSourceDemand() {
         guard isPipelineRunning else { return }
         let staged = previewState == .active ? previewProgram.stagedScene : nil
-        let scenes = [previewProgram.programScene, staged]
-        let needsScreen = scenes.contains { $0?.layout.usesScreen == true }
-        let needsCamera = scenes.contains { $0?.layout.usesCamera == true }
-        let screenCapture = self.screenCapture
-        if needsScreen, !screenCapture.isCapturing {
-            Task { await screenCapture.pickAndStart() }
-        } else if !needsScreen, screenCapture.isCapturing {
-            Task { await screenCapture.stop() }
-        }
-        if needsCamera {
-            facecam.start(with: settings)
-        } else {
-            facecam.stop()
-        }
+        let demand = CaptureSourceKey.demanded(program: previewProgram.programScene,
+                                               staged: staged,
+                                               sources: sceneStore.sources)
+        capturePool.reconcile(demand: demand, settings: settings)
     }
 
     /// The W03 program seam (W05 Take, issue #68; W08 swap point, issue #65):
@@ -668,34 +673,6 @@ private final class PublisherBox: @unchecked Sendable {
             stored = newValue
             os_unfair_lock_unlock(&lock)
         }
-    }
-}
-
-/// Holds the newest screen frame for the engine's screen provider. Unlike the
-/// pre-W08 destructive take, reads are non-destructive: the composition ticks
-/// at the output fps using the LATEST sample (issue #65), so a static screen
-/// keeps compositing — moving camera overlays included — without
-/// ScreenCaptureKit producing fresh frames.
-private final class LatestScreenFrame: @unchecked Sendable {
-    private var lock = os_unfair_lock_s()
-    private var buffer: CVPixelBuffer?
-
-    func store(_ buffer: CVPixelBuffer) {
-        os_unfair_lock_lock(&lock)
-        self.buffer = buffer
-        os_unfair_lock_unlock(&lock)
-    }
-
-    func latest() -> CVPixelBuffer? {
-        os_unfair_lock_lock(&lock)
-        defer { os_unfair_lock_unlock(&lock) }
-        return buffer
-    }
-
-    func clear() {
-        os_unfair_lock_lock(&lock)
-        buffer = nil
-        os_unfair_lock_unlock(&lock)
     }
 }
 

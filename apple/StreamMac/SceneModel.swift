@@ -166,6 +166,68 @@ final class SceneStore: ObservableObject {
         sources.first(where: { $0.payload.isScreen })?.id
     }
 
+    // MARK: - Source registry (S05, issue #73)
+    //
+    // `sources` is the project-level registry: layers across every scene bind
+    // to a `SourceDefinition` by ID, so a rename or reconfiguration here
+    // reaches every layer that uses the source. Capture lifetime follows from
+    // demand — StreamController's pool resolves visible layers through this
+    // registry and keys physical captures by the definition's payload.
+
+    /// Looks up a reusable source by ID.
+    func source(withID id: SourceDefinitionID) -> SourceDefinition? {
+        sources.first(where: { $0.id == id })
+    }
+
+    /// Every scene containing at least one layer bound to `id` — the
+    /// "referenced by these scenes" list the source UI displays.
+    func scenesReferencing(_ id: SourceDefinitionID) -> [Scene] {
+        scenes.filter { $0.layers.contains(where: { $0.sourceID == id }) }
+    }
+
+    /// Registers a new reusable source (the future source-adding UI's write
+    /// path) and returns it.
+    @discardableResult
+    func addSource(_ source: SourceDefinition) -> SourceDefinition {
+        sources.append(source)
+        return source
+    }
+
+    /// Renames a source. Layers reference sources by ID, so every layer in
+    /// every scene picks the new name up through the registry.
+    func renameSource(_ id: SourceDefinitionID, to name: String) {
+        guard let index = sources.firstIndex(where: { $0.id == id }) else { return }
+        sources[index].name = name
+    }
+
+    /// Reconfigures a source (a different camera device, display, window, …).
+    /// The registry is the identity authority; the new payload is also pushed
+    /// into every bound layer's inline payload (the render authority) so
+    /// self-contained scene documents stay consistent with the registry.
+    func updateSource(_ source: SourceDefinition) {
+        guard let index = sources.firstIndex(where: { $0.id == source.id }) else { return }
+        sources[index] = source
+        for sceneIndex in scenes.indices {
+            for layerIndex in scenes[sceneIndex].layers.indices
+            where scenes[sceneIndex].layers[layerIndex].sourceID == source.id {
+                scenes[sceneIndex].layers[layerIndex].payload = source.payload
+            }
+        }
+    }
+
+    /// Removes a source from the registry. Bound layers keep their inline
+    /// payload (the render authority) and simply become unbound, so their
+    /// rendered content is unchanged until re-pointed.
+    func removeSource(_ id: SourceDefinitionID) {
+        sources.removeAll { $0.id == id }
+        for sceneIndex in scenes.indices {
+            for layerIndex in scenes[sceneIndex].layers.indices
+            where scenes[sceneIndex].layers[layerIndex].sourceID == id {
+                scenes[sceneIndex].layers[layerIndex].sourceID = nil
+            }
+        }
+    }
+
     /// Adds a default scene (same template as the scenes panel's + button)
     /// and selects it.
     @discardableResult
