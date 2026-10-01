@@ -233,26 +233,111 @@ struct ScreenSourcePayload: Hashable, Codable, Sendable {
     /// C02: the window title persisted alongside `targetIdentifier`; the
     /// second half of the window relink key (owning app + title).
     var windowTitle: String? = nil
+    /// C03 (issue #78): per-source capture privacy (cursor/audio overrides
+    /// and app/window exclusions). Part of the payload identity, so editing
+    /// it re-keys the capture pool and restarts the capture with the new
+    /// filter — exclusions apply deliberately, never mid-frame.
+    var privacy: CapturePrivacyOptions = CapturePrivacyOptions()
 
     init(target: Target = .display,
          targetIdentifier: String? = nil,
          applicationBundleID: String? = nil,
-         windowTitle: String? = nil) {
+         windowTitle: String? = nil,
+         privacy: CapturePrivacyOptions = CapturePrivacyOptions()) {
         self.target = target
         self.targetIdentifier = targetIdentifier
         self.applicationBundleID = applicationBundleID
         self.windowTitle = windowTitle
+        self.privacy = privacy
     }
 
     /// The C02 relink fields were added after v2 shipped; decode every field
     /// with a default so older persisted documents keep loading (additive
-    /// wire change, same pattern as `LayerNode.isLocked`).
+    /// wire change, same pattern as `LayerNode.isLocked`). C03's `privacy`
+    /// follows the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         target = try container.decodeIfPresent(Target.self, forKey: .target) ?? .display
         targetIdentifier = try container.decodeIfPresent(String.self, forKey: .targetIdentifier)
         applicationBundleID = try container.decodeIfPresent(String.self, forKey: .applicationBundleID)
         windowTitle = try container.decodeIfPresent(String.self, forKey: .windowTitle)
+        privacy = try container.decodeIfPresent(CapturePrivacyOptions.self, forKey: .privacy)
+            ?? CapturePrivacyOptions()
+    }
+}
+
+/// C03 (issue #78): per-source capture privacy persisted on
+/// `ScreenSourcePayload`. `nil` cursor/audio means "inherit the global
+/// default from settings"; exclusions are additive on top of the global
+/// default exclusion list (a source can always hide MORE than the default,
+/// never less — that is what keeps global "never capture these apps" picks
+/// trustworthy).
+struct CapturePrivacyOptions: Hashable, Codable, Sendable {
+    /// One specific window a display (or application) capture excludes.
+    /// `windowID` is volatile — it changes when the owning app recreates the
+    /// window — so filter resolution falls back to the owning app + title
+    /// relink key, exactly like pinned window targets (C02).
+    struct ExcludedWindow: Hashable, Codable, Sendable {
+        /// Decimal `CGWindowID` string (volatile; see above).
+        var windowID: String
+        var applicationBundleID: String?
+        var windowTitle: String?
+    }
+
+    /// nil = inherit `StreamSettings.captureShowsCursor`.
+    var showsCursor: Bool? = nil
+    /// nil = inherit `StreamSettings.captureIncludesAudio`.
+    var capturesAudio: Bool? = nil
+    /// Additional apps (bundle identifiers) this capture excludes, on top of
+    /// the global `StreamSettings.captureExcludedBundleIDs`.
+    var excludedBundleIDs: [String] = []
+    /// Specific windows this capture excludes (display captures; for
+    /// application targets, windows of the target app).
+    var excludedWindows: [ExcludedWindow] = []
+
+    /// True when any per-source option is set (drives the source-row
+    /// privacy indicator).
+    var hasOverrides: Bool {
+        showsCursor != nil || capturesAudio != nil
+            || !excludedBundleIDs.isEmpty || !excludedWindows.isEmpty
+    }
+}
+
+/// C03: the privacy state one capture start actually applies — the source's
+/// per-source overrides resolved against the global settings defaults.
+struct EffectiveCapturePrivacy: Hashable, Sendable {
+    var showsCursor: Bool
+    var capturesAudio: Bool
+    /// Global defaults ∪ per-source additions, deduplicated and sorted for
+    /// deterministic equality.
+    var excludedBundleIDs: [String]
+    var excludedWindows: [CapturePrivacyOptions.ExcludedWindow]
+
+    /// No privacy configuration at all (cursor shown, audio captured,
+    /// nothing excluded beyond the studio's own windows, which
+    /// `ScreenSourceCapture` always excludes on display captures).
+    static let standard = EffectiveCapturePrivacy(
+        showsCursor: true, capturesAudio: true,
+        excludedBundleIDs: [], excludedWindows: [])
+
+    /// True when anything deviates from a plain capture (drives the
+    /// source-row privacy indicator).
+    var isActive: Bool {
+        !showsCursor || !capturesAudio
+            || !excludedBundleIDs.isEmpty || !excludedWindows.isEmpty
+    }
+}
+
+extension ScreenSourcePayload {
+    /// Resolves this payload's per-source options against the applied global
+    /// settings: cursor/audio inherit when unset; exclusions are the union
+    /// of the global default list and the source's own additions.
+    func effectivePrivacy(defaults: StreamSettings) -> EffectiveCapturePrivacy {
+        EffectiveCapturePrivacy(
+            showsCursor: privacy.showsCursor ?? defaults.captureShowsCursor,
+            capturesAudio: privacy.capturesAudio ?? defaults.captureIncludesAudio,
+            excludedBundleIDs: Array(Set(defaults.captureExcludedBundleIDs + privacy.excludedBundleIDs)).sorted(),
+            excludedWindows: privacy.excludedWindows)
     }
 }
 

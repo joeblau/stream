@@ -1,6 +1,7 @@
 import Combine
 import CoreMedia
 import ScreenCaptureKit
+import StreamCore
 import os
 
 private let screenSourceLog = Logger(subsystem: "com.joeblau.StreamMac", category: "screen-source-capture")
@@ -9,17 +10,30 @@ private let screenSourceLog = Logger(subsystem: "com.joeblau.StreamMac", categor
 /// picker, the SCStream lifecycle, and forwarding of screen/app-audio/mic
 /// sample buffers to the publisher layer.
 ///
-/// `pickAndStart()` presents `SCContentSharingPicker` for the user to choose a
-/// display, window, or application (the DEFAULT, unpinned source path).
-/// `start(matching:)` silently resolves a registry `ScreenSourcePayload`'s
-/// pinned display (`CGDirectDisplayID`), window (`CGWindowID`, with an
-/// owning-app + title relink fallback — window IDs are volatile), or
-/// application (bundle identifier) target. A pinned target that cannot be
-/// resolved surfaces an error and captures NOTHING: it never falls back to
-/// the first display or an arbitrary window, so a missing source can never
-/// expose unrelated desktop content (C02, issue #77).
-/// `start(with:)` accepts a filter directly for callers that already know what
-/// to capture.
+/// `pickAndStart(defaults:)` presents `SCContentSharingPicker` for the user
+/// to choose a display, window, or application (the DEFAULT, unpinned source
+/// path). `start(matching:defaults:)` silently resolves a registry
+/// `ScreenSourcePayload`'s pinned display (`CGDirectDisplayID`), window
+/// (`CGWindowID`, with an owning-app + title relink fallback — window IDs are
+/// volatile), or application (bundle identifier) target. A pinned target that
+/// cannot be resolved surfaces an error and captures NOTHING: it never falls
+/// back to the first display or an arbitrary window, so a missing source can
+/// never expose unrelated desktop content (C02, issue #77).
+/// `start(with:)` accepts a filter directly for callers that already know
+/// what to capture.
+///
+/// C03 (issue #78) privacy: every capture resolves an
+/// `EffectiveCapturePrivacy` (per-source payload overrides over the global
+/// settings defaults). Display filters ALWAYS exclude this app's own windows
+/// (main window, sheets, panels — the app-exclusion filter tracks windows
+/// created after capture start, so the studio can never capture itself, no
+/// infinite mirror) plus the user's excluded apps/windows. Cursor and audio
+/// flags hang off the SCStreamConfiguration built in `start(with:)`.
+/// Over-exclusion fails CLOSED: a source whose privacy options hide its own
+/// target reports an error and captures nothing — it never re-points.
+/// OS limitation: the system content-sharing picker vends an opaque filter,
+/// so the unpinned picker path can only apply cursor/audio options, not
+/// app/window exclusions — pin the source from the Sources tab for those.
 @MainActor
 final class ScreenSourceCapture: ObservableObject {
     @Published private(set) var isCapturing = false
@@ -41,6 +55,9 @@ final class ScreenSourceCapture: ObservableObject {
     /// The filter the user last picked (or a fallback resolved to), reused on
     /// restart so an unchanged source never re-presents the picker (S05).
     private var lastFilter: SCContentFilter?
+    /// C03: the privacy applied to the picker path's next start (the picker
+    /// filter is opaque, so only the configuration flags can carry it).
+    private var pickerPrivacy: EffectiveCapturePrivacy = .standard
     private var stream: SCStream?
     private var output: StreamOutputShim?
     /// Serial queue for all SCStream sample callbacks.
@@ -72,11 +89,20 @@ final class ScreenSourceCapture: ObservableObject {
     /// leaves capture off; a picker that fails to start surfaces an error —
     /// it NEVER silently captures the first display (C02, issue #77), so an
     /// unpinned source can't expose content the user didn't choose.
-    func pickAndStart() async {
+    ///
+    /// C03: the global defaults' cursor/audio options apply to the picked
+    /// stream; app/window exclusions can't — the picker filter is opaque (see
+    /// the type doc).
+    func pickAndStart(defaults: StreamSettings = .default) async {
         guard stream == nil, pickerContinuation == nil else { return }
         errorMessage = nil
+        pickerPrivacy = EffectiveCapturePrivacy(
+            showsCursor: defaults.captureShowsCursor,
+            capturesAudio: defaults.captureIncludesAudio,
+            excludedBundleIDs: defaults.captureExcludedBundleIDs,
+            excludedWindows: [])
         if let lastFilter {
-            await start(with: lastFilter)
+            await start(with: lastFilter, privacy: pickerPrivacy)
             return
         }
         pickerStartFailed = false
@@ -87,7 +113,7 @@ final class ScreenSourceCapture: ObservableObject {
         }
         picker.isActive = false
         if let selection {
-            await start(with: selection.value)
+            await start(with: selection.value, privacy: pickerPrivacy)
         } else if pickerStartFailed {
             errorMessage = "The content-sharing picker could not be presented. Add a screen source from the Sources tab instead, or try again."
         }
@@ -95,7 +121,9 @@ final class ScreenSourceCapture: ObservableObject {
 
     /// Starts capturing the content described by `filter` — display, window, or
     /// application — with audio from the captured apps and the microphone.
-    func start(with filter: SCContentFilter) async {
+    /// C03: `privacy` sets the cursor and app-audio configuration flags.
+    func start(with filter: SCContentFilter,
+               privacy: EffectiveCapturePrivacy = .standard) async {
         if stream != nil { await stop() }
         errorMessage = nil
         lastFilter = filter
@@ -106,8 +134,8 @@ final class ScreenSourceCapture: ObservableObject {
         configuration.width = max(2, Int((filter.contentRect.width * scale).rounded()))
         configuration.height = max(2, Int((filter.contentRect.height * scale).rounded()))
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        configuration.showsCursor = true
-        configuration.capturesAudio = true
+        configuration.showsCursor = privacy.showsCursor
+        configuration.capturesAudio = privacy.capturesAudio
         // Keep StreamMac's own audio out of the stream's app-audio track.
         configuration.excludesCurrentProcessAudio = true
         configuration.sampleRate = 48_000
@@ -167,14 +195,21 @@ final class ScreenSourceCapture: ObservableObject {
     /// captures NOTHING — never the first display, never the picker — so a
     /// disconnected display, closed window, or quit app can't silently expose
     /// unrelated desktop content (C02 acceptance).
-    func start(matching payload: ScreenSourcePayload) async {
+    ///
+    /// C03: `defaults` supplies the global privacy defaults the payload's
+    /// per-source options resolve against; the resulting filter excludes the
+    /// studio's own windows and the user's excluded apps/windows, and the
+    /// configuration carries the effective cursor/audio flags.
+    func start(matching payload: ScreenSourcePayload,
+               defaults: StreamSettings = .default) async {
         guard stream == nil, pickerContinuation == nil else { return }
         errorMessage = nil
+        let privacy = payload.effectivePrivacy(defaults: defaults)
         do {
             let content = try await SCShareableContent.current
-            switch Self.resolve(payload, in: content) {
+            switch Self.resolve(payload, privacy: privacy, in: content) {
             case .filter(let filter):
-                await start(with: filter)
+                await start(with: filter, privacy: privacy)
             case .missing(let reason):
                 errorMessage = reason
                 screenSourceLog.error("Pinned screen source unresolvable: \(reason, privacy: .public)")
@@ -216,19 +251,36 @@ final class ScreenSourceCapture: ObservableObject {
     /// Maps a pinned payload to a live `SCContentFilter`. Pure lookup — no
     /// picker, no fallback to unrelated content. `nonisolated` because it
     /// reads only its arguments, so the picker UI can reuse it for previews.
+    ///
+    /// C03 (issue #78): `privacy` shapes the filter itself, not just the
+    /// stream configuration:
+    /// - DISPLAY filters always exclude this app's own windows (main window,
+    ///   attached sheets, panels) via the app-exclusion filter, which tracks
+    ///   windows created AFTER capture start — the studio can never capture
+    ///   itself, so no infinite mirror. User-excluded apps ride the same
+    ///   filter. Explicit window exclusions force the window-exclusion
+    ///   filter instead (ScreenCaptureKit offers no filter combining app-
+    ///   and window-level exclusion), with excluded apps resolved to their
+    ///   CURRENT windows — a window an excluded app opens after capture
+    ///   start is then captured, which the privacy UI documents;
+    /// - WINDOW targets that the privacy options themselves exclude fail
+    ///   CLOSED (`.missing`, black + error, never a re-point);
+    /// - APPLICATION targets exclude the target's own excepted windows, and
+    ///   excluding the target app itself likewise fails closed.
     nonisolated static func resolve(_ payload: ScreenSourcePayload,
+                                    privacy: EffectiveCapturePrivacy,
                                     in content: SCShareableContent) -> PinnedResolution {
         switch payload.target {
         case .display:
-            if let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
-               let display = content.displays.first(where: { $0.displayID == id }) {
-                return .filter(SCContentFilter(display: display, excludingWindows: []))
+            guard let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
+                  let display = content.displays.first(where: { $0.displayID == id }) else {
+                return .missing("The display this source captures is not connected. Reconnect it, or change the source's target from the Sources tab.")
             }
-            return .missing("The display this source captures is not connected. Reconnect it, or change the source's target from the Sources tab.")
+            return .filter(displayFilter(for: display, privacy: privacy, in: content))
         case .window:
             if let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
                let window = content.windows.first(where: { $0.windowID == id }) {
-                return .filter(SCContentFilter(desktopIndependentWindow: window))
+                return windowFilter(window, privacy: privacy)
             }
             // Relink: `CGWindowID` is volatile, so a stale ID falls back to
             // the persisted owning app + title. The match is intentionally
@@ -245,7 +297,7 @@ final class ScreenSourceCapture: ObservableObject {
                 }
                 if let relinked {
                     screenSourceLog.info("Relinked window source by owning app + title (new windowID=\(relinked.windowID, privacy: .public))")
-                    return .filter(SCContentFilter(desktopIndependentWindow: relinked))
+                    return windowFilter(relinked, privacy: privacy)
                 }
             }
             return .missing("The window this source captures is no longer open. Reopen it, or change the source's target from the Sources tab.")
@@ -255,6 +307,11 @@ final class ScreenSourceCapture: ObservableObject {
             else {
                 return .missing("The application this source captures is not running. Launch it, or change the source's target from the Sources tab.")
             }
+            // C03 fail-closed: excluding the target app itself can only mean
+            // "capture nothing" — error, never a re-point to other content.
+            if privacy.excludedBundleIDs.contains(bundleID) {
+                return .missing("This source's privacy options exclude \(application.applicationName), which is also its target. Remove the exclusion, or change the source's target.")
+            }
             // ScreenCaptureKit has no app-only filter; capture the display
             // the app's windows sit on, filtered down to that app's windows.
             let windows = content.windows.filter {
@@ -263,9 +320,92 @@ final class ScreenSourceCapture: ObservableObject {
             guard let display = displayHosting(windows, in: content) else {
                 return .missing("\(application.applicationName) has no open windows to capture. Open a window, or change the source's target.")
             }
-            return .filter(SCContentFilter(display: display, including: [application], exceptingWindows: []))
+            // C03: explicit window exclusions of the TARGET app become the
+            // filter's excepted windows (exclusions of other apps are moot —
+            // the filter only includes this app's windows in the first place).
+            let excepted = resolveExcludedWindows(privacy.excludedWindows, in: content)
+                .filter { $0.owningApplication?.bundleIdentifier == bundleID }
+            return .filter(SCContentFilter(display: display, including: [application], exceptingWindows: excepted))
         }
     }
+
+    /// The window-target filter, or a fail-closed `.missing` when the
+    /// source's privacy options exclude the very window it pins (C03).
+    nonisolated private static func windowFilter(_ window: SCWindow,
+                                                 privacy: EffectiveCapturePrivacy) -> PinnedResolution {
+        let owner = window.owningApplication?.bundleIdentifier
+        if let owner, privacy.excludedBundleIDs.contains(owner) {
+            return .missing("This source's privacy options exclude the app that owns its pinned window. Remove the exclusion, or change the source's target.")
+        }
+        let excludedIDs = Set(privacy.excludedWindows.compactMap { UInt32($0.windowID) })
+        // Match by ID, or by the owning-app + title relink key — a window
+        // recreated after the exclusion was stored has a new ID.
+        let excludedByIdentity = excludedIDs.contains(window.windowID)
+            || privacy.excludedWindows.contains { exclusion in
+                exclusion.applicationBundleID == owner
+                    && exclusion.windowTitle != nil
+                    && exclusion.windowTitle == window.title
+            }
+        if excludedByIdentity {
+            return .missing("This source's privacy options exclude its pinned window. Remove the exclusion, or change the source's target.")
+        }
+        return .filter(SCContentFilter(desktopIndependentWindow: window))
+    }
+
+    /// The C03 display filter. App-level exclusions (the studio's own app,
+    /// ALWAYS, plus the user's excluded apps) use the app-exclusion filter,
+    /// which keeps excluding windows those apps create AFTER capture start.
+    /// Explicit window exclusions require the window-exclusion filter (no
+    /// SCContentFilter combines both), so excluded apps are then resolved to
+    /// their current windows — see the `resolve` doc for the tradeoff.
+    nonisolated private static func displayFilter(for display: SCDisplay,
+                                                  privacy: EffectiveCapturePrivacy,
+                                                  in content: SCShareableContent) -> SCContentFilter {
+        let excludedBundleIDs = Set(privacy.excludedBundleIDs + [studioBundleID])
+        let excludedApps = content.applications.filter {
+            excludedBundleIDs.contains($0.bundleIdentifier)
+        }
+        let explicitWindows = resolveExcludedWindows(privacy.excludedWindows, in: content)
+        guard !explicitWindows.isEmpty else {
+            return SCContentFilter(display: display,
+                                   excludingApplications: excludedApps,
+                                   exceptingWindows: [])
+        }
+        let excludedWindows = content.windows.filter { window in
+            guard let owner = window.owningApplication?.bundleIdentifier else { return false }
+            return excludedBundleIDs.contains(owner)
+        } + explicitWindows
+        return SCContentFilter(display: display, excludingWindows: excludedWindows)
+    }
+
+    /// Resolves persisted window exclusions against live shareable content:
+    /// by window ID first, then by the owning-app + title relink key (window
+    /// IDs are volatile, same as pinned window targets).
+    nonisolated static func resolveExcludedWindows(
+        _ exclusions: [CapturePrivacyOptions.ExcludedWindow],
+        in content: SCShareableContent) -> [SCWindow] {
+        exclusions.compactMap { exclusion in
+            if let id = UInt32(exclusion.windowID),
+               let window = content.windows.first(where: { $0.windowID == id }) {
+                return window
+            }
+            guard let bundleID = exclusion.applicationBundleID else { return nil }
+            let candidates = content.windows.filter {
+                $0.owningApplication?.bundleIdentifier == bundleID
+            }
+            if let title = exclusion.windowTitle, !title.isEmpty {
+                return candidates.first(where: { $0.title == title })
+            }
+            return nil
+        }
+    }
+
+    /// This app's own bundle identifier. Display filters always exclude it,
+    /// so the studio's main window, sheets, and panels can never be captured
+    /// by a display source (no infinite mirror). Resolved once from the main
+    /// bundle, falling back to the identifier `project.yml` bakes in.
+    nonisolated static let studioBundleID =
+        Bundle.main.bundleIdentifier ?? "com.joeblau.StreamMac"
 
     /// The display with the largest overlap of any of `windows` — where the
     /// app visually "is". Nil when the app has no on-screen windows.

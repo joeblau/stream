@@ -318,6 +318,31 @@ final class CaptureSourcePool: ObservableObject {
         missingSources = []
     }
 
+    /// C03 (issue #78): applies freshly-saved global privacy defaults by
+    /// restarting every ACTIVE screen capture with the new effective
+    /// privacy — settings changes don't re-key payloads, so without this a
+    /// running capture would keep its old cursor/audio flags until it
+    /// happened to restart. Remembered selections are reused, so no picker
+    /// re-appears; idle/errored sources pick the defaults up on their next
+    /// start (every start path reads the latest settings already).
+    /// `StreamController.applySavedSettings` is the intended caller.
+    func applyPrivacyDefaults(_ settings: StreamSettings) {
+        lastReconcileSettings = settings
+        for key in requested where activeSources.contains(key) {
+            guard case .screen(let payload) = key,
+                  let capture = screens[key] else { continue }
+            Task { [weak capture] in
+                guard let capture else { return }
+                await capture.stop()
+                if payload.targetIdentifier != nil {
+                    await capture.start(matching: payload, defaults: settings)
+                } else {
+                    await capture.pickAndStart(defaults: settings)
+                }
+            }
+        }
+    }
+
     /// The capture instance for a screen key, created (and wired) on first
     /// use and stable thereafter — `StreamController.screenCapture` forwards
     /// here so existing reads keep working.
@@ -395,9 +420,9 @@ final class CaptureSourcePool: ObservableObject {
             Task { [weak capture] in
                 guard let capture else { return }
                 if payload.targetIdentifier != nil {
-                    await capture.start(matching: payload)
+                    await capture.start(matching: payload, defaults: settings)
                 } else {
-                    await capture.pickAndStart()
+                    await capture.pickAndStart(defaults: settings)
                 }
             }
         }
@@ -503,7 +528,9 @@ final class CaptureSourcePool: ObservableObject {
            sourceErrors[.defaultScreen] != nil,
            screenHadSelection.contains(.defaultScreen) {
             let capture = screenCapture(for: .defaultScreen)
-            Task { [weak capture] in await capture?.pickAndStart() }
+            Task { [weak capture] in
+                await capture?.pickAndStart(defaults: lastReconcileSettings ?? .default)
+            }
         }
         Task { await reevaluateWindowTargets() }
     }
@@ -525,9 +552,9 @@ final class CaptureSourcePool: ObservableObject {
                 Task { [weak capture] in
                     guard let capture else { return }
                     if payload.targetIdentifier != nil {
-                        await capture.start(matching: payload)
+                        await capture.start(matching: payload, defaults: settings)
                     } else if screenHadSelection.contains(key) {
-                        await capture.pickAndStart()
+                        await capture.pickAndStart(defaults: settings)
                     }
                 }
             }
@@ -624,7 +651,8 @@ final class CaptureSourcePool: ObservableObject {
         sourceErrors[key] = nil
         let capture = screenCapture(for: key)
         Task { [weak capture] in
-            await capture?.start(matching: payload)
+            await capture?.start(matching: payload,
+                                 defaults: lastReconcileSettings ?? .default)
         }
     }
 

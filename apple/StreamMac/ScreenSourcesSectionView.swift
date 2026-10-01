@@ -14,15 +14,27 @@ import SwiftUI
 /// the new one starts by demand, with no canvas-geometry side effects.
 /// Removing a source leaves bound layers rendering their inline payload
 /// (they become unbound), so removal never changes what the canvas shows.
+///
+/// C03 (issue #78): rows also carry a privacy indicator (shown whenever the
+/// source's EFFECTIVE options — per-source over the global defaults — hide
+/// the cursor, app audio, or any apps/windows) and a "Privacy…" editor that
+/// writes the payload back through `updateSource`, re-keying the capture so
+/// exclusions apply by capture restart, never mid-frame.
 struct ScreenSourcesSectionView: View {
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var controller: StreamController
+    /// C03: the applied global privacy defaults the per-source options
+    /// resolve against (drives the privacy indicator and the editor's
+    /// "Default" labels).
+    @EnvironmentObject private var session: SettingsSession
 
     /// Picker sheet mode: registering a new source vs. retargeting an
     /// existing one (intentional reselection).
     @State private var pickerMode: PickerMode?
     @State private var renameTarget: SourceDefinition?
     @State private var draftName = ""
+    /// C03: the source whose privacy options are being edited (sheet).
+    @State private var privacyTarget: SourceDefinition?
 
     private enum PickerMode: Identifiable {
         case add
@@ -82,6 +94,14 @@ struct ScreenSourcesSectionView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        // C03: per-source privacy editor (cursor/audio overrides, app and
+        // window exclusions). Applying re-keys the capture pool, so the
+        // source's capture restarts with the resolved filter.
+        .sheet(item: $privacyTarget) { source in
+            if case .screen(let payload) = source.payload {
+                ScreenSourcePrivacyView(source: source, payload: payload)
+            }
+        }
     }
 
     // MARK: - Rows
@@ -100,6 +120,7 @@ struct ScreenSourcesSectionView: View {
                     .lineLimit(1)
             }
             Spacer()
+            privacyIndicator(for: source)
             statusBadge(for: source)
         }
         .contextMenu {
@@ -111,6 +132,10 @@ struct ScreenSourcesSectionView: View {
                 pickerMode = .retarget(source)
             }
             .help("Re-pick the display, window, or application this source captures")
+            Button("Privacy…") {
+                privacyTarget = source
+            }
+            .help("Cursor, audio, and app/window exclusions for this source")
             Divider()
             Button("Remove Source", role: .destructive) {
                 sceneStore.removeSource(source.id)
@@ -119,6 +144,36 @@ struct ScreenSourcesSectionView: View {
     }
 
     // MARK: - Status
+
+    /// C03: a shield icon when this source's EFFECTIVE privacy (per-source
+    /// options over the global defaults) hides anything — cursor, app audio,
+    /// or excluded apps/windows — so an active exclusion is always visible
+    /// in the row, never silently applied.
+    @ViewBuilder
+    private func privacyIndicator(for source: SourceDefinition) -> some View {
+        if case .screen(let payload) = source.payload {
+            let effective = payload.effectivePrivacy(defaults: session.activeSettings)
+            if effective.isActive {
+                Label(privacySummary(effective), systemImage: "eye.slash.fill")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(.blue)
+                    .help(privacySummary(effective))
+            }
+        }
+    }
+
+    private func privacySummary(_ privacy: EffectiveCapturePrivacy) -> String {
+        var parts: [String] = []
+        if !privacy.showsCursor { parts.append("cursor hidden") }
+        if !privacy.capturesAudio { parts.append("app audio excluded") }
+        if !privacy.excludedBundleIDs.isEmpty {
+            parts.append("\(privacy.excludedBundleIDs.count) app\(privacy.excludedBundleIDs.count == 1 ? "" : "s") excluded")
+        }
+        if !privacy.excludedWindows.isEmpty {
+            parts.append("\(privacy.excludedWindows.count) window\(privacy.excludedWindows.count == 1 ? "" : "s") excluded")
+        }
+        return "Privacy: " + parts.joined(separator: ", ")
+    }
 
     private enum SourceStatus {
         case capturing, idle, error(String)

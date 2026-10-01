@@ -79,6 +79,7 @@ struct SettingsView: View {
                 Form {
                     connectionSection.id(SettingsSession.Section.connection)
                     videoSection.id(SettingsSession.Section.video)
+                    capturePrivacySection.id(SettingsSession.Section.capturePrivacy)
                     audioSection.id(SettingsSession.Section.audio)
                     chatSection.id(SettingsSession.Section.chat)
                     applicationSection.id(SettingsSession.Section.application)
@@ -353,6 +354,59 @@ struct SettingsView: View {
                     Label("HEVC saves roughly 40% bitrate, but needs a compatible ingest (SRT or enhanced-RTMP). Restream requires H.264.",
                           systemImage: "info.circle")
                 }
+            }
+        }
+    }
+
+    // MARK: - Capture privacy (C03, issue #78)
+
+    /// The global privacy defaults every screen capture starts from. The
+    /// per-source editor (Sources tab → Privacy…) can override cursor/audio
+    /// and add exclusions; it can never REMOVE a default exclusion.
+    @ViewBuilder
+    private var capturePrivacySection: some View {
+        Section {
+            Toggle("Show Cursor in Captures", isOn: $session.draft.captureShowsCursor)
+            Toggle("Include App Audio in Captures", isOn: $session.draft.captureIncludesAudio)
+
+            ForEach(session.draft.captureExcludedBundleIDs, id: \.self) { bundleID in
+                HStack {
+                    Label {
+                        Text(RunningAppList.name(for: bundleID))
+                            .lineLimit(1)
+                    } icon: {
+                        Image(systemName: "eye.slash")
+                    }
+                    Spacer()
+                    Button {
+                        session.draft.captureExcludedBundleIDs.removeAll { $0 == bundleID }
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Stop excluding this app by default")
+                }
+            }
+            Menu("Always Exclude an App…") {
+                let candidates = RunningAppList.candidates(
+                    excluding: Set(session.draft.captureExcludedBundleIDs))
+                if candidates.isEmpty {
+                    Text("No other running apps")
+                } else {
+                    ForEach(candidates, id: \.bundleID) { candidate in
+                        Button(candidate.name) {
+                            session.draft.captureExcludedBundleIDs.append(candidate.bundleID)
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("Capture Privacy")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Applies to captures started after Apply.", systemImage: "arrow.triangle.2.circlepath")
+                Text("Defaults for every screen source; a source can override cursor/audio and add its own exclusions from the Sources tab. StreamMac's own windows are always excluded from pinned display captures, including sheets and windows opened later, so the studio never captures itself. Sources chosen through the system content picker are managed by macOS and can't carry app exclusions — pin the source from the Sources tab for full control.")
             }
         }
     }

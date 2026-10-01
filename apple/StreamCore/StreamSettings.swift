@@ -171,6 +171,14 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// resizes the output. Decoded from the legacy `videoQuality`/`frameRate`
     /// pair when absent; the iOS app still uses those fields directly.
     public var outputProfile: OutputProfile
+    /// C03 (issue #78): global capture-privacy defaults for screen sources
+    /// (macOS). Each source's payload can override cursor/audio per source;
+    /// bundle-ID exclusions are additive (global defaults ∪ per-source list).
+    public var captureShowsCursor: Bool
+    public var captureIncludesAudio: Bool
+    /// Bundle identifiers whose windows every screen capture excludes by
+    /// default (e.g. a password manager).
+    public var captureExcludedBundleIDs: [String]
 
     public init(
         selectedProtocol: StreamProtocol = .rtmps,
@@ -195,7 +203,10 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         voicePolishEnabled: Bool = true,
         backupEnabled: Bool = false,
         backupQuality: BackupQuality = .hd1080,
-        outputProfile: OutputProfile = .default
+        outputProfile: OutputProfile = .default,
+        captureShowsCursor: Bool = true,
+        captureIncludesAudio: Bool = true,
+        captureExcludedBundleIDs: [String] = []
     ) {
         self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
@@ -216,6 +227,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.backupEnabled = backupEnabled
         self.backupQuality = backupQuality
         self.outputProfile = outputProfile
+        self.captureShowsCursor = captureShowsCursor
+        self.captureIncludesAudio = captureIncludesAudio
+        self.captureExcludedBundleIDs = captureExcludedBundleIDs
     }
 
     /// Backward-compatible decode: every field falls back to its default when the
@@ -247,6 +261,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         // landscape 16:9 canvas from the legacy short-edge quality + fps picks.
         outputProfile = try c.decodeIfPresent(OutputProfile.self, forKey: .outputProfile)
             ?? OutputProfile(legacyVideoQuality: videoQuality, frameRate: frameRate)
+        captureShowsCursor = try c.decodeIfPresent(Bool.self, forKey: .captureShowsCursor) ?? d.captureShowsCursor
+        captureIncludesAudio = try c.decodeIfPresent(Bool.self, forKey: .captureIncludesAudio) ?? d.captureIncludesAudio
+        captureExcludedBundleIDs = try c.decodeIfPresent([String].self, forKey: .captureExcludedBundleIDs) ?? d.captureExcludedBundleIDs
     }
 
     public static let `default` = StreamSettings()
