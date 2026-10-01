@@ -295,6 +295,12 @@ struct MainWindowView: View {
     /// (selection + edits land here only); PROGRAM renders the outgoing
     /// composition the publisher/recording emit. Selecting a scene stages it
     /// without touching program; Take publishes staged → program.
+    ///
+    /// S04 (issue #72): the PREVIEW monitor carries the canvas-interaction
+    /// overlay — click/marquee selection, drag/resize/rotate handles, snap
+    /// guides, and keyboard nudging — drawn in SwiftUI over the image only,
+    /// so the chrome never reaches the composed output. PROGRAM stays
+    /// read-only (no overlay).
     private var monitorsRow: some View {
         HStack(spacing: 12) {
             PreviewView(
@@ -302,7 +308,12 @@ struct MainWindowView: View {
                 label: "PREVIEW",
                 accent: dispatcher.state.hasPendingStagedEdits ? .yellow : Color.secondary.opacity(0.3),
                 isHighlighted: dispatcher.state.hasPendingStagedEdits,
-                placeholder: controller.isPreviewing ? "Waiting for sources…" : "Preview off")
+                placeholder: controller.isPreviewing ? "Waiting for sources…" : "Preview off"
+            ) { imageRect in
+                CanvasInteractionView(
+                    imageRect: imageRect,
+                    canvasSize: dispatcher.state.activeProfile.canvasSize)
+            }
             PreviewView(
                 image: controller.programImage,
                 label: "PROGRAM",

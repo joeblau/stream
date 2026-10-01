@@ -31,6 +31,36 @@ import StreamCore
 
 // MARK: - Commands
 
+/// S04 canvas alignment (issue #72): which edge/center of the selected
+/// layers' UNROTATED frames line up (against the selection's union bounds).
+enum LayerAlignment: String, CaseIterable, Sendable {
+    case left, horizontalCenter, right, top, verticalCenter, bottom
+
+    var displayName: String {
+        switch self {
+        case .left: return "Left"
+        case .horizontalCenter: return "Horizontal Center"
+        case .right: return "Right"
+        case .top: return "Top"
+        case .verticalCenter: return "Vertical Center"
+        case .bottom: return "Bottom"
+        }
+    }
+}
+
+/// S04 canvas distribution (issue #72): evenly spaces the selected layers'
+/// centers between the outermost two, along one axis.
+enum LayerDistribution: String, CaseIterable, Sendable {
+    case horizontal, vertical
+
+    var displayName: String {
+        switch self {
+        case .horizontal: return "Horizontally"
+        case .vertical: return "Vertically"
+        }
+    }
+}
+
 /// One studio action. Explicit start/stop, show/hide, set-value, and Take
 /// commands — not toggles: a caller states the desired end state, and the
 /// dispatcher rejects it when the system is already there (or can't go).
@@ -112,6 +142,18 @@ enum StudioCommand: Equatable, Sendable {
     /// Non-destructive group lock: members become effectively locked via
     /// composition (`member.isLocked || group.isLocked`) until unlocked.
     case setGroupLocked(GroupID, locked: Bool, in: SceneID?)
+
+    // S04 canvas geometry commands (issue #72, also staged-only). They act
+    // on the layers in `SceneStore.selectedLayerIDs` of the staged scene,
+    // skipping locked ones — the same editable set the canvas interaction
+    // view moves — so a menu item, the context menu, and automation say the
+    // same thing. Unrotated frames are what align/distribute.
+    /// Aligns the selected, editable layers (≥2) to the selection's union
+    /// bounds along one edge/center.
+    case alignLayers(LayerAlignment, in: SceneID?)
+    /// Evenly distributes the centers of the selected, editable layers (≥3)
+    /// between the outermost two along one axis.
+    case distributeLayers(LayerDistribution, in: SceneID?)
 
     // S07 project-wide overlays and backgrounds (issue #74). Overlays are
     // PROJECT-level content — NOT bound to the staged scene: these commands
@@ -208,6 +250,9 @@ enum StudioCommand: Equatable, Sendable {
             return "\(visible ? "Show" : "Hide") Group"
         case .setGroupLocked(_, let locked, _):
             return "\(locked ? "Lock" : "Unlock") Group"
+        case .alignLayers(let alignment, _): return "Align \(alignment.displayName)"
+        case .distributeLayers(let distribution, _):
+            return "Distribute \(distribution.displayName)"
         case .addOverlay(let payload): return "Add \(payload.displayName) Overlay"
         case .removeOverlay: return "Remove Overlay"
         case .renameOverlay: return "Rename Overlay"
@@ -626,6 +671,25 @@ final class StudioCommandDispatcher: ObservableObject {
                 return nil
             }
 
+        // S04: alignment/distribution act on the selected, EDITABLE layers of
+        // the staged scene (locked ones are skipped, like canvas drags).
+        case .alignLayers(_, let sceneID):
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success(let scene):
+                return alignmentTargets(in: scene).count >= 2
+                    ? nil
+                    : .invalidValue("Select at least two unlocked layers to align.")
+            }
+        case .distributeLayers(_, let sceneID):
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success(let scene):
+                return alignmentTargets(in: scene).count >= 3
+                    ? nil
+                    : .invalidValue("Select at least three unlocked layers to distribute.")
+            }
+
         // S07 project overlays: validated against the SceneStore overlay
         // list (project level — never the staged scene).
         case .addOverlay(let payload):
@@ -862,6 +926,11 @@ final class StudioCommandDispatcher: ObservableObject {
                 scene.groups[index].isLocked = locked
             }
 
+        case .alignLayers(let alignment, let sceneID):
+            alignSelectedLayers(alignment, in: sceneID)
+        case .distributeLayers(let distribution, let sceneID):
+            distributeSelectedLayers(distribution, in: sceneID)
+
         // S07 project overlays: project-level edits — SceneStore publishes
         // them to every engine on persist, so staged AND program composite
         // the change on their next tick. No staged edit, no implicit take.
@@ -981,10 +1050,118 @@ final class StudioCommandDispatcher: ObservableObject {
         return nil
     }
 
+    // MARK: Canvas alignment helpers (S04)
+
+    /// The layers align/distribute act on: the selection (shared with the S03
+    /// panel and S04 canvas) intersected with the staged scene, minus
+    /// effectively-locked layers — the same editable set canvas drags move.
+    private func alignmentTargets(in scene: Scene) -> [LayerNode] {
+        scene.layers.filter {
+            sceneStore.selectedLayerIDs.contains($0.id) && !scene.isEffectivelyLocked($0)
+        }
+    }
+
+    /// The transform's UNROTATED frame on the unit canvas (normalized 0…1,
+    /// top-left origin) — the geometry alignment works in, independent of the
+    /// output resolution.
+    private func unitRect(_ transform: LayerTransform) -> CGRect {
+        let anchor = anchorFraction(transform.anchor)
+        return CGRect(x: transform.position.x - anchor.x * transform.size.width,
+                      y: transform.position.y - anchor.y * transform.size.height,
+                      width: transform.size.width,
+                      height: transform.size.height)
+    }
+
+    private func anchorFraction(_ anchor: LayerAnchor) -> CGPoint {
+        switch anchor {
+        case .topLeft: return CGPoint(x: 0, y: 0)
+        case .topRight: return CGPoint(x: 1, y: 0)
+        case .bottomLeft: return CGPoint(x: 0, y: 1)
+        case .bottomRight: return CGPoint(x: 1, y: 1)
+        case .center: return CGPoint(x: 0.5, y: 0.5)
+        }
+    }
+
+    /// S04: aligns the selected, editable layers' unrotated frames to the
+    /// selection's union bounds along one edge/center. Positions shift so the
+    /// layer's ANCHOR point lands where the aligned frame edge requires.
+    private func alignSelectedLayers(_ alignment: LayerAlignment, in sceneID: SceneID?) {
+        editStagedScene(sceneID) { scene in
+            let targets = scene.layers.indices.filter {
+                sceneStore.selectedLayerIDs.contains(scene.layers[$0].id)
+                    && !scene.isEffectivelyLocked(scene.layers[$0])
+            }
+            guard targets.count >= 2 else { return }
+            let rects = targets.map { unitRect(scene.layers[$0].transform) }
+            let union = rects.dropFirst().reduce(rects[0]) { $0.union($1) }
+            for (offset, index) in targets.enumerated() {
+                var transform = scene.layers[index].transform
+                let anchor = anchorFraction(transform.anchor)
+                let rect = rects[offset]
+                switch alignment {
+                case .left:
+                    transform.position.x = union.minX + anchor.x * rect.width
+                case .horizontalCenter:
+                    transform.position.x = union.midX + (anchor.x - 0.5) * rect.width
+                case .right:
+                    transform.position.x = union.maxX + (anchor.x - 1) * rect.width
+                case .top:
+                    transform.position.y = union.minY + anchor.y * rect.height
+                case .verticalCenter:
+                    transform.position.y = union.midY + (anchor.y - 0.5) * rect.height
+                case .bottom:
+                    transform.position.y = union.maxY + (anchor.y - 1) * rect.height
+                }
+                scene.layers[index].transform = transform
+            }
+        }
+    }
+
+    /// S04: evenly spaces the selected, editable layers' centers between the
+    /// outermost two along one axis (the outer layers stay put).
+    private func distributeSelectedLayers(_ distribution: LayerDistribution, in sceneID: SceneID?) {
+        editStagedScene(sceneID) { scene in
+            var pairs = scene.layers.indices.compactMap { index -> (index: Int, rect: CGRect)? in
+                let layer = scene.layers[index]
+                guard sceneStore.selectedLayerIDs.contains(layer.id),
+                      !scene.isEffectivelyLocked(layer) else { return nil }
+                return (index, unitRect(layer.transform))
+            }
+            guard pairs.count >= 3 else { return }
+            switch distribution {
+            case .horizontal:
+                pairs.sort { $0.rect.midX < $1.rect.midX }
+                guard let outermost = pairs.first, let lastOutermost = pairs.last else { return }
+                let start = outermost.rect.midX
+                let end = lastOutermost.rect.midX
+                let step = (end - start) / Double(pairs.count - 1)
+                for (position, pair) in pairs.enumerated() {
+                    var transform = scene.layers[pair.index].transform
+                    let anchor = anchorFraction(transform.anchor)
+                    transform.position.x = start + step * Double(position)
+                        + (anchor.x - 0.5) * pair.rect.width
+                    scene.layers[pair.index].transform = transform
+                }
+            case .vertical:
+                pairs.sort { $0.rect.midY < $1.rect.midY }
+                guard let outermost = pairs.first, let lastOutermost = pairs.last else { return }
+                let start = outermost.rect.midY
+                let end = lastOutermost.rect.midY
+                let step = (end - start) / Double(pairs.count - 1)
+                for (position, pair) in pairs.enumerated() {
+                    var transform = scene.layers[pair.index].transform
+                    let anchor = anchorFraction(transform.anchor)
+                    transform.position.y = start + step * Double(position)
+                        + (anchor.y - 0.5) * pair.rect.height
+                    scene.layers[pair.index].transform = transform
+                }
+            }
+        }
+    }
+
     /// S02: the rejection for touching a locked scene (rename/delete/move).
     /// Nil when the scene is unlocked.
-    private func sceneLockError(for id: SceneID, action: String) -> StudioCommandError? {
-        guard sceneStore.isLocked(id) else { return nil }
+    private func sceneLockError(for id: SceneID, action: String) -> StudioCommandError? {        guard sceneStore.isLocked(id) else { return nil }
         let name = sceneStore.scenes.first(where: { $0.id == id })?.name ?? "\(id)"
         return .unavailable("Scene \"\(name)\" is locked — unlock it to \(action) it.")
     }
@@ -1013,6 +1190,8 @@ final class StudioCommandDispatcher: ObservableObject {
              .renameGroup(_, _, let id),
              .setGroupVisibility(_, _, let id),
              .setGroupLocked(_, _, let id),
+             .alignLayers(_, let id),
+             .distributeLayers(_, let id),
              .setOverlayHiddenInScene(_, _, let id),
              .setSceneBackground(_, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
