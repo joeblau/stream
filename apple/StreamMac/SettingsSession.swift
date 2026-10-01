@@ -234,6 +234,21 @@ final class SettingsSession: ObservableObject {
         scheduleLiveSettingsSave()
     }
 
+    /// E05 (issue #109): persists one camera device's hardware control
+    /// preferences (focus/exposure/white-balance modes) straight into the
+    /// APPLIED settings, keyed by the device's stable uniqueID — a live
+    /// session surface like the mixer, not a draft/Apply edit. Nil removes
+    /// the entry (the device runs its own defaults). Mirroring keeps
+    /// `draft.cameraControls` fresh so a later settings Apply can't roll the
+    /// preferences back, and `isDirty` is unaffected. Applying to the
+    /// hardware itself is the CameraControlCenter's job — no pipeline or
+    /// capture restart is involved, so `applySavedSettings` is not called.
+    func persistCameraControls(_ controls: CameraDeviceControlSettings?, forDeviceUID uid: String) {
+        activeSettings.cameraControls[uid] = controls
+        draft.cameraControls = activeSettings.cameraControls
+        scheduleLiveSettingsSave()
+    }
+
     /// Debounced settings write for live-surface edits (mixer fader scrubs,
     /// A05 input toggles): a scrub dispatches a command per tick, and the
     /// state updates above must stay synchronous (publishers fire, the

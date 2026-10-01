@@ -220,6 +220,12 @@ final class SceneStore: ObservableObject {
     @Published private(set) var defaultTransition: SceneTransition {
         didSet { scheduleSceneAutosave() }
     }
+    /// E01 (issue #101): reusable named framing/picture-adjustment presets,
+    /// persisted in the scene document. Project-level — apply immediately,
+    /// never staged.
+    @Published private(set) var effectPresets: [SourceEffectPreset] {
+        didSet { scheduleSceneAutosave() }
+    }
     /// S02 browser metadata: folders, scene → folder membership, and scene
     /// locks. Immediate (never staged), persisted in the browser document.
     @Published private(set) var folders: [SceneFolder] = [] {
@@ -259,6 +265,7 @@ final class SceneStore: ObservableObject {
         overlays = document.overlays
         defaultBackground = document.defaultBackground
         defaultTransition = document.defaultTransition
+        effectPresets = document.effectPresets
         scenes = document.scenes
         selectedID = document.scenes.contains(where: { $0.id == document.selectedID })
             ? document.selectedID
@@ -271,6 +278,10 @@ final class SceneStore: ObservableObject {
         normalizeOrder()
         ProjectOverlayStore.shared.publish(document.overlayContext)
         SceneRegistryStore.shared.publish(document.scenes)
+        // E01 (issue #101): the per-source effect-default index the renderers
+        // resolve a bound layer's inherited effects against (per-frame read
+        // path, same hand-off pattern as SourcePayloadStore).
+        SourceEffectsStore.shared.publish(document.sources)
         writeSceneDocument()
         writeBrowserDocument()
         // Flush any pending debounced autosave on quit. willTerminate is
@@ -297,7 +308,8 @@ final class SceneStore: ObservableObject {
                       selectedID: selectedID,
                       overlays: overlays,
                       defaultBackground: defaultBackground,
-                      defaultTransition: defaultTransition)
+                      defaultTransition: defaultTransition,
+                      effectPresets: effectPresets)
     }
 
     var selected: Scene? {
@@ -391,6 +403,43 @@ final class SceneStore: ObservableObject {
                 scenes[sceneIndex].layers[layerIndex].sourceID = nil
             }
         }
+    }
+
+    // MARK: - Source effect defaults and presets (E01, issue #101)
+
+    /// Sets a source's framing/picture-adjustment DEFAULTS (nil = identity).
+    /// Writes the registry definition in place — deliberately NOT
+    /// `updateSource`, whose payload push would re-key the capture pool:
+    /// effects are render-side only, so an edit never restarts a capture.
+    /// The `sources` write publishes the new defaults to every engine
+    /// synchronously (see `scheduleSceneAutosave`), so the change applies to
+    /// staged AND program on their next tick.
+    func setSourceEffectDefaults(_ id: SourceDefinitionID, to effects: SourceEffects?) {
+        guard let index = sources.firstIndex(where: { $0.id == id }) else { return }
+        sources[index].effectDefaults = effects
+    }
+
+    func effectPreset(withID id: EffectPresetID) -> SourceEffectPreset? {
+        effectPresets.first(where: { $0.id == id })
+    }
+
+    /// Registers a reusable effect preset (project-level, applies
+    /// immediately, like overlay additions).
+    @discardableResult
+    func addEffectPreset(_ preset: SourceEffectPreset) -> SourceEffectPreset {
+        effectPresets.append(preset)
+        return preset
+    }
+
+    /// Replaces a preset in place (rename/effects edits). Applying a preset
+    /// copies its VALUE, so editing it never re-points existing users.
+    func updateEffectPreset(_ preset: SourceEffectPreset) {
+        guard let index = effectPresets.firstIndex(where: { $0.id == preset.id }) else { return }
+        effectPresets[index] = preset
+    }
+
+    func removeEffectPreset(_ id: EffectPresetID) {
+        effectPresets.removeAll { $0.id == id }
     }
 
     // MARK: - Project overlays and default background (S07, issue #74)
@@ -853,6 +902,10 @@ final class SceneStore: ObservableObject {
         // C01 (issue #76): the source payload index the engines resolve a
         // bound layer's capture identity against (per-source frame routing).
         SourcePayloadStore.shared.publish(sources)
+        // E01 (issue #101): the per-source effect defaults the renderers
+        // resolve a bound layer's inherited effects against (per-frame read
+        // path; project-level edits apply to staged AND program next tick).
+        SourceEffectsStore.shared.publish(sources)
         sceneAutosaveTask?.cancel()
         sceneAutosaveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.autosaveDelay * 1_000_000_000))

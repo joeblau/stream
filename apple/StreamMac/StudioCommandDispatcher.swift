@@ -195,6 +195,25 @@ enum StudioCommand: Equatable, Sendable {
     /// immediately, like the default background.
     case setDefaultTransition(SceneTransition)
 
+    // E01 per-source framing and picture adjustment effects (issue #101).
+    // Layer OVERRIDES are staged scene content (Take/revert/undo like any
+    // layer edit); source DEFAULTS and presets are project-level (apply
+    // immediately to staged AND program, the S07 overlay-edit precedent) —
+    // and neither is undoable-scene-edit state beyond the staged scene (the
+    // source registry and presets live outside the S12 undo snapshot, like
+    // the mixer document).
+    /// Sets/clears a STAGED-scene layer's effect overrides (nil = inherit the
+    /// bound source's defaults). The value is complete — overrides replace
+    /// the source defaults wholesale, bypass included.
+    case setLayerSourceEffects(LayerID, SourceEffects?, in: SceneID?)
+    /// Sets/clears a registry source's effect DEFAULTS (nil = identity).
+    /// Render-side only: never re-keys the capture pool.
+    case setSourceEffectDefaults(SourceDefinitionID, SourceEffects?)
+    /// Saves a reusable named effect preset (project-level).
+    case addEffectPreset(SourceEffectPreset)
+    case updateEffectPreset(SourceEffectPreset)
+    case removeEffectPreset(EffectPresetID)
+
     // A02 media transport (issue #97): play/pause/stop/restart/seek for a
     // registry media source. These are SESSION state — playback position is
     // never part of a scene document — so they are not undoable scene edits,
@@ -301,6 +320,23 @@ enum StudioCommand: Equatable, Sendable {
     // monitoring / input commands above.
     case setEchoHandlingMode(EchoHandlingMode)
 
+    // E05 (issue #109): hardware camera controls + macOS reaction triggers.
+    // Hardware modes are DEVICE state (one capture feeds the preview and
+    // program engines, so a change lands on both) — live session state
+    // persisted per-device in `StreamSettings.cameraControls` via
+    // SettingsSession (the A07/A09 precedent), NOT scene content, NOT
+    // undoable, never staged. Commands address the camera by its stable
+    // capture-device uniqueID (the C10 identity rule).
+    /// Replaces one camera's hardware control preferences (focus/exposure/
+    /// white-balance modes — the whole per-device value, edited whole like
+    /// `.setDucking`). Capability-gated in validation against the connected
+    /// device's discovered support, then applied to the hardware in place.
+    case setCameraControls(String, CameraDeviceControlSettings)
+    /// Triggers a macOS reaction effect on a camera's feed (macOS 14+,
+    /// per-device support gated — reactions render into the feed before it
+    /// reaches Stream, so preview and program both show them).
+    case triggerCameraReaction(String, CameraReaction)
+
     // A03 soundboard + music playlists (issue #98): pads and playlists are a
     // project-level performance surface persisted in the soundboard document
     // (SoundboardStore — the mixer-document precedent), NOT scene content:
@@ -344,6 +380,45 @@ enum StudioCommand: Equatable, Sendable {
     /// The staged scene's media entry/exit policy — restart/resume/continue
     /// when it enters program; keep-playing/pause/stop when it leaves.
     case setSceneMediaBehavior(SceneMediaBehavior, in: SceneID?)
+
+    // E06 PTZ camera control (issue #165): pan/tilt/zoom, speed, stop, and
+    // store/recall preset commands for configured network targets, plus the
+    // explicit scene→preset recall links. These are HARDWARE/session
+    // commands — they edit no scene content, so locks and staging never
+    // apply and they are NOT undoable scene edits (the media-transport
+    // precedent). Targets/presets/links persist in the PTZ document
+    // (PTZPresetStore — the soundboard-document precedent), keyed by target
+    // UUID; a target optionally records a capture device's uniqueID for
+    // display, but never touches the capture pool. Movement is
+    // fire-and-forget (VISCA over IP is best-effort); stop commands exist
+    // for focus loss, release, and disconnect. Scene-linked recall rides
+    // the Take seam: only links with `recallOnProgramEntry` fire, and only
+    // when a scene becomes PROGRAM — previewing never moves a camera.
+    case ptzAddTarget(PTZTarget)
+    case ptzUpdateTarget(PTZTarget)
+    /// Stops motion and tears the transport down, then removes the target's
+    /// presets and recall links with it.
+    case ptzRemoveTarget(UUID)
+    /// Drive pan/tilt (speeds clamp to the pinned VISCA ranges: pan 1…24,
+    /// tilt 1…20). A matching `.ptzStop` ends the drive.
+    case ptzMove(UUID, direction: PTZMoveDirection, panSpeed: Int, tiltSpeed: Int)
+    case ptzZoom(UUID, direction: PTZZoomDirection, speed: Int)
+    /// Stops pan/tilt AND zoom on one target.
+    case ptzStop(UUID)
+    /// The focus-loss/disappear path: stops every target with outstanding
+    /// motion.
+    case ptzStopAll
+    /// Stores the camera's current position into a VISCA slot and names it.
+    case ptzStorePreset(UUID, number: UInt8, name: String?)
+    /// Recalls a slot the document knows about (CAM_Memory recall).
+    case ptzRecallPreset(UUID, number: UInt8)
+    /// Removes the app-side record of a slot (the camera's own memory is
+    /// left intact).
+    case ptzRemovePreset(UUID, number: UInt8)
+    /// Adds/replaces the explicit scene→target recall link (one per
+    /// scene/target pair).
+    case ptzSetSceneRecall(PTZSceneRecallLink)
+    case ptzRemoveSceneRecall(UUID)
 
     // Settings session (W04).
     case openSettings(SettingsSession.Section?)
@@ -436,6 +511,13 @@ enum StudioCommand: Equatable, Sendable {
         case .setDefaultBackground: return "Set Project Background"
         case .setSceneTransition: return "Set Scene Transition"
         case .setDefaultTransition: return "Set Default Transition"
+        case .setLayerSourceEffects(let id, let effects, _):
+            return effects == nil ? "Reset Layer Source Effects" : "Layer \(id) Source Effects"
+        case .setSourceEffectDefaults(_, let effects):
+            return effects == nil ? "Reset Source Effect Defaults" : "Source Effect Defaults"
+        case .addEffectPreset: return "Save Effect Preset"
+        case .updateEffectPreset: return "Update Effect Preset"
+        case .removeEffectPreset: return "Remove Effect Preset"
         case .mediaPlay: return "Play Media"
         case .mediaPause: return "Pause Media"
         case .mediaStop: return "Stop Media"
@@ -465,6 +547,9 @@ enum StudioCommand: Equatable, Sendable {
             return "\(ducking.isEnabled ? "Enable" : "Configure") Ducking"
         case .setEchoHandlingMode(let mode):
             return mode == .off ? "Turn Echo Handling Off" : "Enable \(mode.displayName)"
+        case .setCameraControls: return "Set Camera Controls"
+        case .triggerCameraReaction(_, let reaction):
+            return "Trigger \(reaction.displayName) Reaction"
         case .addSoundPad: return "Add Sound Pad"
         case .updateSoundPad: return "Edit Sound Pad"
         case .removeSoundPad: return "Remove Sound Pad"
@@ -484,6 +569,19 @@ enum StudioCommand: Equatable, Sendable {
             return snapshot == nil ? "Inherit Current Mix" : "Set Scene Audio Snapshot"
         case .captureSceneAudioSnapshot: return "Capture Scene Audio"
         case .setSceneMediaBehavior: return "Scene Media Behavior"
+        case .ptzAddTarget: return "Add PTZ Camera"
+        case .ptzUpdateTarget: return "Edit PTZ Camera"
+        case .ptzRemoveTarget: return "Remove PTZ Camera"
+        case .ptzMove(_, let direction, _, _): return "Pan/Tilt \(direction.displayName)"
+        case .ptzZoom(_, let direction, _): return direction.displayName
+        case .ptzStop: return "Stop PTZ Camera"
+        case .ptzStopAll: return "Stop All PTZ Cameras"
+        case .ptzStorePreset(_, let number, _): return "Store PTZ Preset \(number)"
+        case .ptzRecallPreset(_, let number): return "Recall PTZ Preset \(number)"
+        case .ptzRemovePreset(_, let number): return "Remove PTZ Preset \(number)"
+        case .ptzSetSceneRecall(let link):
+            return link.recallOnProgramEntry ? "Arm Scene PTZ Recall" : "Set Scene PTZ Recall"
+        case .ptzRemoveSceneRecall: return "Remove Scene PTZ Recall"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
         case .applySettings: return "Apply Settings"
@@ -690,6 +788,25 @@ final class StudioCommandDispatcher: ObservableObject {
     /// publisher. Owned here so the Take paths, the transition settings UI,
     /// and future automation share one instance.
     let transitions: TransitionController
+    /// E05 (issue #109): the per-device hardware camera control center —
+    /// capability snapshots for the inspector surface and the live
+    /// apply/reaction operations the `.setCameraControls` /
+    /// `.triggerCameraReaction` commands ride. Owned here so UI, and later
+    /// automation/hardware controllers, share one instance.
+    let cameraControls: CameraControlCenter
+    /// E03 (issue #164): the person-segmentation capability + live per-source
+    /// segmentation status the Background Effects inspector surface reads.
+    /// Read-only — effect settings ride E01's existing source-effect
+    /// commands, so no new command kinds (and no `isUndoableSceneEdit`
+    /// classification) exist for E03.
+    let backgroundEffects: BackgroundEffectsCenter
+    /// E06 (issue #165): the PTZ document (network targets, presets,
+    /// scene recall links — the soundboard-document precedent) and its
+    /// runtime (transports, stop-on-focus-loss discipline, Take-seam recall).
+    /// Owned here so the inspector section, keyboard, and future
+    /// hardware/automation triggers share one instance.
+    let ptzStore: PTZPresetStore
+    let ptz: PTZController
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
     /// graph, keyed by chain-slot ID (passthrough to the controller — the
@@ -716,6 +833,20 @@ final class StudioCommandDispatcher: ObservableObject {
                                                controller: controller)
         let transitions = TransitionController(controller: controller)
         self.transitions = transitions
+        // E05 (issue #109): the camera control center (capability snapshots +
+        // live hardware/reaction operations for the `.setCameraControls` /
+        // `.triggerCameraReaction` commands).
+        self.cameraControls = CameraControlCenter(deviceMonitor: controller.deviceMonitor,
+                                                  pool: controller.capturePool,
+                                                  session: session)
+        // E03 (issue #164): the background-effects status center (capability
+        // matrix + live segmentation state for the inspector; read-only).
+        self.backgroundEffects = BackgroundEffectsCenter()
+        // E06 (issue #165): the PTZ document + runtime (see the property
+        // docs; created like the soundboard pair above).
+        let ptzStore = PTZPresetStore()
+        self.ptzStore = ptzStore
+        self.ptz = PTZController(store: ptzStore)
         self.state = StudioState()
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
@@ -1115,6 +1246,35 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDefaultTransition:
             return nil
 
+        // E01 (issue #101): layer overrides are staged layer edits (same
+        // targeting + lock rules as `.setLayerEffects`, plus range
+        // validation the value model owns); source defaults address the
+        // registry; presets are project-level documents.
+        case .setLayerSourceEffects(let layerID, let effects, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                return effects?.validationError.map { .invalidValue($0) }
+            case .failure(let error): return error
+            }
+        case .setSourceEffectDefaults(let id, let effects):
+            guard sceneStore.source(withID: id) != nil else {
+                return .invalidTarget("Source \(id) does not exist.")
+            }
+            return effects?.validationError.map { .invalidValue($0) }
+        case .addEffectPreset(let preset):
+            return preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A preset name can't be empty.") : nil
+        case .updateEffectPreset(let preset):
+            guard sceneStore.effectPreset(withID: preset.id) != nil else {
+                return .invalidTarget("Effect preset \(preset.id) does not exist.")
+            }
+            return preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A preset name can't be empty.") : nil
+        case .removeEffectPreset(let id):
+            return sceneStore.effectPreset(withID: id) != nil
+                ? nil : .invalidTarget("Effect preset \(id) does not exist.")
+
         // A02 media transport: session state — the target must be a
         // registered media source; locks and staging don't apply.
         case .mediaPlay(let id), .mediaPause(let id),
@@ -1221,6 +1381,43 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setEchoHandlingMode:
             return nil
 
+        // E05 (issue #109): camera control validation — the target must be a
+        // CONNECTED video device, and every requested mode must be one the
+        // device's discovered capabilities honor (no inert writes). Reaction
+        // triggers gate on the OS/user enablement + per-device/per-format
+        // support folded into `canPerformReactionEffects`, and on the
+        // device's live `availableReactionTypes` list — a rejected trigger
+        // carries the explicit reason.
+        case .setCameraControls(let uid, let controls):
+            guard let device = controller.deviceMonitor.videoDevices
+                    .first(where: { $0.uniqueID == uid }) else {
+                return .invalidTarget("That camera is not connected.")
+            }
+            let capabilities = device.cameraControlCapabilities
+            if let mode = controls.focusMode, !capabilities.focusModes.contains(mode) {
+                return .unavailable("\(device.localizedName) doesn't support \(mode == .locked ? "locking focus" : "auto focus").")
+            }
+            if let mode = controls.exposureMode, !capabilities.exposureModes.contains(mode) {
+                return .unavailable("\(device.localizedName) doesn't support \(mode == .locked ? "locking exposure" : "auto exposure").")
+            }
+            if let mode = controls.whiteBalanceMode, !capabilities.whiteBalanceModes.contains(mode) {
+                return .unavailable("\(device.localizedName) doesn't support \(mode == .locked ? "locking white balance" : "auto white balance").")
+            }
+            return nil
+        case .triggerCameraReaction(let uid, let reaction):
+            guard let device = controller.deviceMonitor.videoDevices
+                    .first(where: { $0.uniqueID == uid }) else {
+                return .invalidTarget("That camera is not connected.")
+            }
+            let capabilities = device.cameraControlCapabilities
+            guard capabilities.reactionsAvailable else {
+                return .unavailable(capabilities.reactionUnavailableReason
+                    ?? "Reactions aren't available on this camera right now.")
+            }
+            return capabilities.supportedReactions.contains(reaction)
+                ? nil
+                : .unavailable("\(reaction.displayName) isn't available on \(device.localizedName) right now.")
+
         // A03 soundboard/playlist validation (issue #98): transport and
         // structural commands address the soundboard document's stable IDs
         // (locks and staging never apply — the media-transport precedent).
@@ -1305,6 +1502,64 @@ final class StudioCommandDispatcher: ObservableObject {
             case .failure(let error): return error
             case .success: return nil
             }
+
+        // E06 PTZ validation (issue #165): hardware/session commands —
+        // targets must exist, hosts/ports/addresses must be usable, speeds
+        // stay inside the pinned VISCA ranges, and a recall names a slot the
+        // document knows about (an unstored slot is a silent no-op on most
+        // cameras, so it's rejected instead). Locks and staging never apply.
+        case .ptzAddTarget(let target):
+            return ptzTargetError(for: target, requireNew: true)
+        case .ptzUpdateTarget(let target):
+            return ptzTargetError(for: target, requireNew: false)
+        case .ptzRemoveTarget(let id), .ptzStop(let id):
+            return ptzStore.target(withID: id) != nil
+                ? nil : .invalidTarget("PTZ camera \(id) is not configured.")
+        case .ptzMove(let id, _, let panSpeed, let tiltSpeed):
+            guard ptzStore.target(withID: id) != nil else {
+                return .invalidTarget("PTZ camera \(id) is not configured.")
+            }
+            guard (1...VISCAPacket.maxPanSpeed).contains(panSpeed),
+                  (1...VISCAPacket.maxTiltSpeed).contains(tiltSpeed) else {
+                return .invalidValue("Pan speed must be 1…\(VISCAPacket.maxPanSpeed), tilt speed 1…\(VISCAPacket.maxTiltSpeed).")
+            }
+            return nil
+        case .ptzZoom(let id, _, let speed):
+            guard ptzStore.target(withID: id) != nil else {
+                return .invalidTarget("PTZ camera \(id) is not configured.")
+            }
+            return (0...VISCAPacket.maxZoomSpeed).contains(speed)
+                ? nil : .invalidValue("Zoom speed must be 0…\(VISCAPacket.maxZoomSpeed).")
+        case .ptzStopAll:
+            return nil
+        case .ptzStorePreset(let id, let number, let name):
+            guard ptzStore.target(withID: id) != nil else {
+                return .invalidTarget("PTZ camera \(id) is not configured.")
+            }
+            if let name, name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .invalidValue("A preset name can't be empty.")
+            }
+            return number <= VISCAPacket.maxPresetNumber
+                ? nil : .invalidValue("Preset slots run 0…\(VISCAPacket.maxPresetNumber).")
+        case .ptzRecallPreset(let id, let number),
+             .ptzRemovePreset(let id, let number):
+            guard ptzStore.target(withID: id) != nil else {
+                return .invalidTarget("PTZ camera \(id) is not configured.")
+            }
+            return ptzStore.preset(number: number, forTargetID: id) != nil
+                ? nil : .invalidTarget("Preset \(number) hasn't been stored for that camera.")
+        case .ptzSetSceneRecall(let link):
+            guard sceneStore.scenes.contains(where: { $0.id.rawValue == link.sceneID }) else {
+                return .invalidTarget("Scene \(link.sceneID) does not exist.")
+            }
+            guard ptzStore.target(withID: link.targetID) != nil else {
+                return .invalidTarget("PTZ camera \(link.targetID) is not configured.")
+            }
+            return ptzStore.preset(number: link.presetNumber, forTargetID: link.targetID) != nil
+                ? nil : .invalidTarget("Preset \(link.presetNumber) hasn't been stored for that camera.")
+        case .ptzRemoveSceneRecall(let id):
+            return ptzStore.recallLink(withID: id) != nil
+                ? nil : .invalidTarget("Scene PTZ recall link \(id) does not exist.")
 
         case .openSettings, .closeSettings:
             return nil
@@ -1543,6 +1798,22 @@ final class StudioCommandDispatcher: ObservableObject {
             sceneStore.setDefaultTransition(transition)
             transitions.preloadStinger(for: transition)
 
+        // E01 (issue #101): the layer override is staged scene content (and
+        // implicitly takes in direct-live) like any layer edit; source
+        // defaults and presets write the project registry/documents directly
+        // and publish to every engine on the next tick (render-side only —
+        // no capture re-key).
+        case .setLayerSourceEffects(let layerID, let effects, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.effectOverrides = effects }
+        case .setSourceEffectDefaults(let id, let effects):
+            sceneStore.setSourceEffectDefaults(id, to: effects)
+        case .addEffectPreset(let preset):
+            sceneStore.addEffectPreset(preset)
+        case .updateEffectPreset(let preset):
+            sceneStore.updateEffectPreset(preset)
+        case .removeEffectPreset(let id):
+            sceneStore.removeEffectPreset(id)
+
         case .mediaPlay(let id): controller.capturePool.playMedia(id)
         case .mediaPause(let id): controller.capturePool.pauseMedia(id)
         case .mediaStop(let id): controller.capturePool.stopMedia(id)
@@ -1670,6 +1941,22 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setEchoHandlingMode(let mode):
             session.persistEchoHandlingMode(mode)
 
+        // E05 (issue #109): camera control execution — persist the per-device
+        // preference through SettingsSession (single truth), then apply it to
+        // the connected hardware in place (device state, shared by preview
+        // and program; no capture restart). A mid-flight hardware failure
+        // surfaces as a transient notice, never silently.
+        case .setCameraControls(let uid, let controls):
+            session.persistCameraControls(controls.isEmpty ? nil : controls,
+                                          forDeviceUID: uid)
+            if let message = cameraControls.apply(controls, toDeviceUID: uid) {
+                postTransientNotice(command: command.label, message: message)
+            }
+        case .triggerCameraReaction(let uid, let reaction):
+            if let message = cameraControls.performReaction(reaction, onDeviceUID: uid) {
+                postTransientNotice(command: command.label, message: message)
+            }
+
         // A03 soundboard/playlist execution (issue #98): structural edits
         // write the soundboard document (the controller's store observation
         // hot-applies payload relinks and gains); transport acts on the ONE
@@ -1732,6 +2019,37 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setSceneMediaBehavior(let behavior, let sceneID):
             editStagedScene(sceneID) { $0.mediaBehavior = behavior }
 
+        // E06 PTZ execution (issue #165): the controller turns commands into
+        // VISCA frames (fire-and-forget); configuration writes go through
+        // the PTZ document (single truth). A removed target is stopped and
+        // disconnected before its record disappears.
+        case .ptzAddTarget(let target):
+            ptzStore.addTarget(target)
+        case .ptzUpdateTarget(let target):
+            ptzStore.updateTarget(target)
+        case .ptzRemoveTarget(let id):
+            ptz.disconnectTarget(id)
+            ptzStore.removeTarget(id)
+        case .ptzMove(let id, let direction, let panSpeed, let tiltSpeed):
+            ptz.move(id, direction: direction, panSpeed: panSpeed, tiltSpeed: tiltSpeed)
+        case .ptzZoom(let id, let direction, let speed):
+            ptz.zoom(id, direction: direction, speed: speed)
+        case .ptzStop(let id):
+            ptz.stop(id)
+        case .ptzStopAll:
+            ptz.endInteractiveControl()
+        case .ptzStorePreset(let id, let number, let name):
+            ptz.storePreset(id, number: number,
+                            name: name ?? "Preset \(number)")
+        case .ptzRecallPreset(let id, let number):
+            ptz.recallPreset(id, number: number)
+        case .ptzRemovePreset(let id, let number):
+            ptz.removePreset(id, number: number)
+        case .ptzSetSceneRecall(let link):
+            ptzStore.setRecallLink(link)
+        case .ptzRemoveSceneRecall(let id):
+            ptzStore.removeRecallLink(id)
+
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
         case .applySettings: session.apply()
@@ -1764,6 +2082,10 @@ final class StudioCommandDispatcher: ObservableObject {
                 transitions.handleTake(targetSceneID: published.id,
                                        transition: published.transition
                                            ?? sceneStore.defaultTransition)
+                // E06 (issue #165): opt-in scene→preset PTZ recalls fire on
+                // program entry, on the same seam as scene sounds/media —
+                // previewing a scene never moves a camera.
+                ptz.recallLinkedPresets(forSceneID: published.id.rawValue)
             }
         case .revert:
             previewProgram.revert()
@@ -1840,6 +2162,9 @@ final class StudioCommandDispatcher: ObservableObject {
             transitions.handleTake(targetSceneID: published.id,
                                    transition: published.transition
                                        ?? sceneStore.defaultTransition)
+            // E06 (issue #165): direct-live's implicit takes fire the opt-in
+            // PTZ recalls too (same program-entry seam as the explicit Take).
+            ptz.recallLinkedPresets(forSceneID: published.id.rawValue)
         }
     }
 
@@ -2045,6 +2370,30 @@ final class StudioCommandDispatcher: ObservableObject {
         return nil
     }
 
+    /// E06 (issue #165): the rejection for a PTZ target configuration —
+    /// the identity rules (add = new ID, update = existing ID) plus usable
+    /// name/host/port/address values.
+    private func ptzTargetError(for target: PTZTarget, requireNew: Bool) -> StudioCommandError? {
+        let exists = ptzStore.target(withID: target.id) != nil
+        if requireNew, exists {
+            return .invalidValue("PTZ camera \(target.id) is already configured.")
+        }
+        if !requireNew, !exists {
+            return .invalidTarget("PTZ camera \(target.id) is not configured.")
+        }
+        if target.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .invalidValue("A PTZ camera name can't be empty.")
+        }
+        if target.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .invalidValue("A PTZ camera needs a host (IP or hostname).")
+        }
+        if target.port == 0 {
+            return .invalidValue("A PTZ camera needs a port (VISCA default \(target.kind.defaultPort)).")
+        }
+        return (1...7).contains(target.cameraAddress)
+            ? nil : .invalidValue("The VISCA address must be 1…7.")
+    }
+
     // MARK: Canvas alignment helpers (S04)
 
     /// The layers align/distribute act on: the selection (shared with the S03
@@ -2193,7 +2542,8 @@ final class StudioCommandDispatcher: ObservableObject {
              .setSceneSoundBindings(_, let id),
              .setSceneAudioSnapshot(_, let id),
              .captureSceneAudioSnapshot(let id),
-             .setSceneMediaBehavior(_, let id):
+             .setSceneMediaBehavior(_, let id),
+             .setLayerSourceEffects(_, _, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
         default:
             return nil
@@ -2473,6 +2823,10 @@ private extension StudioCommand {
     /// and folder collapse (transient view state), Take/Revert/direct-live
     /// (publish control, not an edit — undoing an already-Taken edit undoes
     /// the ORIGINAL edit and re-stages it), and undo/redo themselves.
+    /// E01's source effect defaults and effect presets are excluded too:
+    /// the registry and the preset list live outside the undo snapshot (the
+    /// mixer-document precedent), unlike layer effect OVERRIDES, which are
+    /// staged scene content and undo with it.
     var isUndoableSceneEdit: Bool {
         switch self {
         case .addScene, .insertScene, .renameScene, .deleteScene, .updateScene,
@@ -2489,7 +2843,8 @@ private extension StudioCommand {
              .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground,
              .setSceneTransition, .setDefaultTransition,
              .setSceneSoundBindings,
-             .setSceneAudioSnapshot, .captureSceneAudioSnapshot, .setSceneMediaBehavior:
+             .setSceneAudioSnapshot, .captureSceneAudioSnapshot, .setSceneMediaBehavior,
+             .setLayerSourceEffects:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording,
@@ -2500,6 +2855,7 @@ private extension StudioCommand {
              .setAudioInputEnabled, .setAudioInputMapping, .relinkAudioInput,
              .setChannelFXChain,
              .setMonitoringEnabled, .setMonitorOutputDevice, .setEchoHandlingMode,
+             .setCameraControls, .triggerCameraReaction,
              .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .addSoundPad, .updateSoundPad, .removeSoundPad,
@@ -2507,6 +2863,12 @@ private extension StudioCommand {
              .addMusicPlaylist, .updateMusicPlaylist, .removeMusicPlaylist,
              .playlistPlay, .playlistPause, .playlistStop,
              .playlistNext, .playlistPrevious,
+             .ptzAddTarget, .ptzUpdateTarget, .ptzRemoveTarget,
+             .ptzMove, .ptzZoom, .ptzStop, .ptzStopAll,
+             .ptzStorePreset, .ptzRecallPreset, .ptzRemovePreset,
+             .ptzSetSceneRecall, .ptzRemoveSceneRecall,
+             .setSourceEffectDefaults,
+             .addEffectPreset, .updateEffectPreset, .removeEffectPreset,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
              .undo, .redo:
@@ -2529,6 +2891,8 @@ private extension StudioCommand {
             return "layer-transform.\(id)"
         case .setLayerEffects(let id, _, _):
             return "layer-effects.\(id)"
+        case .setLayerSourceEffects(let id, _, _):
+            return "layer-source-effects.\(id)"
         case .setLayerAudio(let id, _, _):
             return "layer-audio.\(id)"
         case .renameLayer(let id, _, _):

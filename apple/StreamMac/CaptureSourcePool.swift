@@ -849,6 +849,18 @@ final class CaptureSourcePool: ObservableObject {
         missingSources.contains(normalized(key))
     }
 
+    /// E05 (issue #109): true while a demanded camera capture is actually
+    /// using this physical device (by stable uniqueID) — the camera controls
+    /// surface badges live devices, and a hardware control change on an
+    /// in-use device lands in preview AND program because the one capture
+    /// feeds both engines.
+    func isCameraDeviceInUse(_ uniqueID: String) -> Bool {
+        requested.contains { key in
+            guard case .camera = key, activeSources.contains(key) else { return false }
+            return cameraDeviceIDs[key] == uniqueID
+        }
+    }
+
     /// Starts (or restarts) a camera capture: pre-flights permission and
     /// device presence — a pinned camera that no longer resolves becomes
     /// MISSING instead of falling back to an unrelated device — then builds
@@ -895,6 +907,16 @@ final class CaptureSourcePool: ObservableObject {
         publishFrameHolders()
         camera.start(with: settings, deviceUniqueID: payload.deviceID)
         activeSources.insert(key)
+        // E05 (issue #109): restore the device's persisted hardware control
+        // preferences (focus/exposure/white-balance modes) — they live on the
+        // physical device and don't survive every capture restart, so each
+        // (re)start re-applies them. Capability-gated by the applier: a
+        // device that doesn't honor a preference keeps its own state.
+        if let uid = cameraDeviceIDs[key],
+           let controls = settings.cameraControls[uid],
+           let device = AVCaptureDevice(uniqueID: uid) {
+            CameraControlApplier.apply(controls, to: device)
+        }
     }
 
     /// Moves a source into the missing state: capture stops, frames clear,

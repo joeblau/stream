@@ -534,6 +534,20 @@ struct MainWindowView: View {
             // staged scene's override — rendered only on Take (program);
             // direct-live uses the same transitions.
             TransitionSettingsSectionView()
+            // E01 (issue #101): per-source framing/picture adjustments for
+            // the selected layer — layer overrides (staged scene content)
+            // versus bound-source defaults (project-level), plus presets.
+            SourceEffectsSectionView()
+            // E03 (issue #164): capability-gated person-segmentation
+            // background blur/replacement for the selected camera layer —
+            // same override/defaults scopes, plus live segmentation status.
+            BackgroundEffectsSectionView()
+            // E05 (issue #109): capability-gated hardware camera controls
+            // (focus/exposure/white-balance modes) and macOS reactions.
+            CameraControlsSectionView()
+            // E06 (issue #165): VISCA-over-IP PTZ targets, presets, and
+            // opt-in recall-on-Take links.
+            PTZControlSectionView()
         }
         .formStyle(.grouped)
     }

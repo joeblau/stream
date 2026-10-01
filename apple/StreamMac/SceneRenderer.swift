@@ -3,6 +3,7 @@ import CoreMedia
 import CoreText
 import CoreVideo
 import Metal
+import StreamCore
 
 /// Composites one scene graph onto the output-profile canvas using a single
 /// reused Metal-backed `CIContext` and a `CVPixelBufferPool` sized to the
@@ -67,7 +68,14 @@ import Metal
 /// box (`size.width` is the classic 0.10…0.40 scale, height derived from the
 /// source aspect, 24 px canvas-edge inset); fullscreen layers aspect-FIT
 /// centered into their rect. `.opacity` and `.cornerRadius` effects are
-/// honored; other effects are ignored per the LayerGraph contract.
+/// honored; other effects are ignored per the LayerGraph contract. E01 (issue
+/// #101) source effects are a separate model (`LayerNode.effectOverrides` /
+/// `SourceDefinition.effectDefaults`): framing reframes the source before
+/// placement, picture adjustments recolor it after, and a bypassed stack is a
+/// render no-op. E03 (issue #164) extends that model with a person-
+/// segmentation background effect on camera layers: the mask is produced off
+/// the render tick (`PersonSegmentationCoordinator`), blended here when
+/// fresh, and falls back to the unmodified source whenever it isn't.
 ///
 /// S09 (issue #100): the per-frame parameters of a scene blend transition
 /// (everything except stingers, which are a base-scene swap under a video
@@ -106,6 +114,26 @@ final class SceneRenderer {
     /// per-frame filter-allocation churn rationale as the PIP mask above.
     private let linearGradientGenerator = CIFilter(name: "CILinearGradient")
 
+    /// E01 (issue #101): where the renderer snapshots the source registry's
+    /// effect-defaults index — the lookup a bound layer WITHOUT its own
+    /// `effectOverrides` inherits its framing/picture adjustments through.
+    /// Defaults to the shared `SourceEffectsStore` (fed by `SceneStore`), so
+    /// existing call sites need no new argument; tests can inject a fixed map.
+    private let sourceEffectsProvider: () -> [SourceDefinitionID: SourceEffects]
+
+    /// E03 (issue #164): the person-segmentation coordinator camera layers
+    /// with a background effect submit to (non-blocking) and pull the latest
+    /// mask from. Defaults to the process-wide shared instance, so the
+    /// preview and program engines share one segmentation per camera instead
+    /// of paying for it twice.
+    private let segmentation: PersonSegmentationCoordinator
+
+    /// E03: the current tick's frame interval in milliseconds, set by
+    /// `render`/`renderTransition` before any layer work so the segmentation
+    /// governor budgets against the real cadence. Renderer state is
+    /// engine-actor-confined, so a per-tick property is safe.
+    private var currentFrameIntervalMs = 33.3
+
     /// S07 raster cache for generated content (shape/text layers): keyed by
     /// the full content + pixel-size descriptor, so a static overlay draws
     /// once and is composited from cache every frame after. Bounded — a
@@ -124,7 +152,11 @@ final class SceneRenderer {
     /// Shares the generated cache's bound and clear-on-cap policy.
     private var nestedCache: [GeneratedKey: CIImage] = [:]
 
-    init() {
+    init(sourceEffectsProvider: @escaping () -> [SourceDefinitionID: SourceEffects] =
+            { SourceEffectsStore.shared.snapshot() },
+         segmentation: PersonSegmentationCoordinator = .shared) {
+        self.sourceEffectsProvider = sourceEffectsProvider
+        self.segmentation = segmentation
         let options: [CIContextOption: Any] = [
             .workingColorSpace: NSNull(),
             .cacheIntermediates: false
@@ -170,6 +202,7 @@ final class SceneRenderer {
         let outHeight = Int(canvasSize.height.rounded())
         guard outWidth > 1, outHeight > 1 else { return nil }
         let canvas = CGRect(x: 0, y: 0, width: outWidth, height: outHeight)
+        currentFrameIntervalMs = max(1, CMTimeGetSeconds(frameDuration) * 1000)
 
         var output = sceneComposite(scene, overlayContext: overlayContext, canvas: canvas,
                                     frames: frames, sourcePayloads: sourcePayloads,
@@ -205,6 +238,7 @@ final class SceneRenderer {
         let outHeight = Int(canvasSize.height.rounded())
         guard outWidth > 1, outHeight > 1 else { return nil }
         let canvas = CGRect(x: 0, y: 0, width: outWidth, height: outHeight)
+        currentFrameIntervalMs = max(1, CMTimeGetSeconds(frameDuration) * 1000)
 
         let fromImage = sceneComposite(from, overlayContext: overlayContext, canvas: canvas,
                                        frames: frames, sourcePayloads: sourcePayloads,
@@ -432,8 +466,17 @@ final class SceneRenderer {
             // Mirror like the legacy path: every macOS camera is `.front`.
             let orientation: CGImagePropertyOrientation =
                 camera.position == .front ? .upMirrored : .up
-            return place(source: CIImage(cvPixelBuffer: camera.buffer).oriented(orientation),
-                         layer: layer, canvas: canvas, isCamera: true)
+            var source = CIImage(cvPixelBuffer: camera.buffer).oriented(orientation)
+            // E03 (issue #164): the person-segmentation background effect
+            // reframes nothing — it recomposites the raw source BEFORE E01
+            // framing/placement, so the mask stays aligned with the pixels.
+            if let effects = layer.effectiveSourceEffects(defaults: sourceEffectsProvider()),
+               !effects.isBypassed, effects.hasBackgroundEffect {
+                source = applyingBackgroundEffect(effects.background, to: source,
+                                                  buffer: camera.buffer, key: key,
+                                                  orientation: orientation)
+            }
+            return place(source: source, layer: layer, canvas: canvas, isCamera: true)
         case .media:
             // A02 (issue #97): media frames are PULLED per tick from the
             // pool's playback engine (the render tick is the cadence — no
@@ -796,12 +839,18 @@ final class SceneRenderer {
     /// Places a source image according to the layer's normalized transform.
     /// Camera layers narrower than the canvas take the classic PIP treatment
     /// (fill-crop, rounded corners, edge inset); everything else aspect-fits
-    /// centered into its anchor-resolved rect.
+    /// centered into its anchor-resolved rect. E01 (issue #101): the layer's
+    /// effective source effects (its override, else the bound source's
+    /// defaults) reframe the source BEFORE placement (zoom/pan crop, mirror,
+    /// rotation) and adjust its picture AFTER (brightness/contrast/saturation/
+    /// temperature/tint/gamma) — a bypassed or identity set is a render no-op.
     private func place(source: CIImage,
                        layer: LayerNode,
                        canvas: CGRect,
                        isCamera: Bool) -> CIImage? {
-        let extent = source.extent
+        let sourceEffects = layer.effectiveSourceEffects(defaults: sourceEffectsProvider())
+        let framed = sourceEffects.map { applyingFraming($0, to: source) } ?? source
+        let extent = framed.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
 
         let cornerRadius = layer.effects.compactMap { effect -> CGFloat? in
@@ -811,14 +860,151 @@ final class SceneRenderer {
 
         let placed: CIImage
         if isCamera, layer.transform.size.width < 1 {
-            placed = placePIP(source: source, layer: layer, canvas: canvas,
+            placed = placePIP(source: framed, layer: layer, canvas: canvas,
                               cornerRadius: cornerRadius ?? 16)
         } else {
-            placed = placeFit(source: source, layer: layer, canvas: canvas,
+            placed = placeFit(source: framed, layer: layer, canvas: canvas,
                               cornerRadius: cornerRadius)
         }
 
-        return applyEffects(placed, layer: layer)
+        let styled = applyEffects(placed, layer: layer)
+        return sourceEffects.map { applyingPictureAdjustments($0, to: styled) } ?? styled
+    }
+
+    // MARK: - E01 source effects (issue #101)
+
+    /// The framing half of a source effect stack, applied to the raw source
+    /// image BEFORE placement: mirror (horizontal flip about the extent),
+    /// rotation (about the extent center — the rotated extent is what
+    /// placement fits into the layer rect, so a 90° turn re-points a sideways
+    /// camera instead of cropping it), then the zoom/pan crop (the extent
+    /// shrunk by `zoom`, panned within the available slack, so the crop never
+    /// leaves the source). All geometry-only — no color work here.
+    private func applyingFraming(_ effects: SourceEffects, to source: CIImage) -> CIImage {
+        guard !effects.isBypassed, effects.hasFraming else { return source }
+        var image = source
+        if effects.isMirrored {
+            image = image.oriented(.upMirrored)
+        }
+        if effects.rotationDegrees != 0 {
+            let extent = image.extent
+            let center = CGPoint(x: extent.midX, y: extent.midY)
+            let radians = -CGFloat(effects.rotationDegrees) * .pi / 180
+            image = image.transformed(by: CGAffineTransform(translationX: center.x, y: center.y)
+                .rotated(by: radians)
+                .translatedBy(x: -center.x, y: -center.y))
+        }
+        let zoom = max(1, effects.zoom)
+        if zoom > 1 {
+            let extent = image.extent
+            let cropWidth = extent.width / zoom
+            let cropHeight = extent.height / zoom
+            // Pan is a -1...1 fraction of the available slack, so every value
+            // keeps the crop inside the source (±1 pins it to that edge).
+            let maxDX = (extent.width - cropWidth) / 2
+            let maxDY = (extent.height - cropHeight) / 2
+            let centerX = extent.midX + CGFloat(effects.panX) * maxDX
+            let centerY = extent.midY + CGFloat(effects.panY) * maxDY
+            image = image.cropped(to: CGRect(x: centerX - cropWidth / 2,
+                                             y: centerY - cropHeight / 2,
+                                             width: cropWidth,
+                                             height: cropHeight))
+        }
+        return image
+    }
+
+    /// The picture-adjustment half of a source effect stack, applied to the
+    /// PLACED layer image (color-only, extent-preserving) through the shared
+    /// Core Image pipeline: brightness/contrast/saturation via
+    /// CIColorControls, white balance via CITemperatureAndTint (neutral
+    /// 6500 K / tint 0 → target), gamma via CIGammaAdjust.
+    private func applyingPictureAdjustments(_ effects: SourceEffects, to image: CIImage) -> CIImage {        guard !effects.isBypassed, effects.hasPictureAdjustments else { return image }
+        var output = image
+        if effects.brightness != 0 || effects.contrast != 1 || effects.saturation != 1 {
+            output = output.applyingFilter("CIColorControls", parameters: [
+                "inputBrightness": effects.brightness,
+                "inputContrast": effects.contrast,
+                "inputSaturation": effects.saturation
+            ])
+        }
+        if effects.temperature != SourceEffects.neutralTemperature || effects.tint != 0 {
+            output = output.applyingFilter("CITemperatureAndTint", parameters: [
+                "inputNeutral": CIVector(x: CGFloat(SourceEffects.neutralTemperature), y: 0),
+                "inputTargetNeutral": CIVector(x: CGFloat(effects.temperature),
+                                               y: CGFloat(effects.tint))
+            ])
+        }
+        if effects.gamma != 1 {
+            output = output.applyingFilter("CIGammaAdjust", parameters: [
+                "inputPower": effects.gamma
+            ])
+        }
+        return output
+    }
+
+    // MARK: - E03 background effects (issue #164)
+
+    /// The blur radius (source-resolution pixels) `strength` = 1 maps to.
+    private static let maxBackgroundBlurRadius: CGFloat = 48
+    /// The mask edge-feather ceiling (pixels) for replacement mode.
+    private static let maxMaskFeatherRadius: CGFloat = 8
+
+    /// Recomposites a camera source for its configured background effect:
+    /// the segmented person over a blurred copy (blur) or a solid-color
+    /// backdrop (replacement). The Vision mask is produced OFF the render
+    /// tick by `PersonSegmentationCoordinator` — this method submits the
+    /// current buffer (non-blocking, deduplicated per capture frame) and
+    /// blends the latest FRESH mask. No fresh mask — unsupported device,
+    /// governor suspension, Vision failure, or simply the first frames —
+    /// composites the source UNMODIFIED: the clean fallback, and the reason
+    /// the output cadence never depends on segmentation.
+    private func applyingBackgroundEffect(_ settings: BackgroundEffectSettings,
+                                          to source: CIImage,
+                                          buffer: CVPixelBuffer,
+                                          key: CaptureSourceKey,
+                                          orientation: CGImagePropertyOrientation) -> CIImage {
+        segmentation.submit(buffer, for: key, settings: settings,
+                            frameIntervalMs: currentFrameIntervalMs)
+        guard let maskBuffer = segmentation.latestMask(for: key) else {
+            return source
+        }
+        let extent = source.extent
+        guard extent.width > 0, extent.height > 0 else { return source }
+        // The mask arrives at the segmentation quality's resolution in the
+        // buffer's orientation: orient it like the source, then scale and
+        // align it to the source extent so the blend matches pixel-for-pixel.
+        var mask = CIImage(cvPixelBuffer: maskBuffer).oriented(orientation)
+        let maskExtent = mask.extent
+        guard maskExtent.width > 0, maskExtent.height > 0 else { return source }
+        mask = mask.transformed(by: CGAffineTransform(
+            scaleX: extent.width / maskExtent.width, y: extent.height / maskExtent.height))
+        mask = mask.transformed(by: CGAffineTransform(
+            translationX: extent.minX - mask.extent.minX, y: extent.minY - mask.extent.minY))
+
+        let background: CIImage
+        switch settings.mode {
+        case .off:
+            return source
+        case .blur:
+            // Clamp before blurring so the blur pulls edge pixels, not
+            // transparent black, from outside the frame; crop back after.
+            let radius = CGFloat(settings.strength) * Self.maxBackgroundBlurRadius
+            background = source.clampedToExtent()
+                .applyingFilter("CIGaussianBlur", parameters: ["inputRadius": radius])
+                .cropped(to: extent)
+        case .replacement:
+            background = CIImage(color: ciColor(settings.replacementColorHex)).cropped(to: extent)
+            let feather = CGFloat(settings.strength) * Self.maxMaskFeatherRadius
+            if feather > 0 {
+                mask = mask.clampedToExtent()
+                    .applyingFilter("CIGaussianBlur", parameters: ["inputRadius": feather])
+                    .cropped(to: extent)
+            }
+        }
+        return source.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: background,
+            kCIInputMaskImageKey: mask
+        ])
     }
 
     /// Aspect-FIT centered in the transform's rect. The rect comes from the
