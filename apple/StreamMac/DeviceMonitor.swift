@@ -28,6 +28,14 @@ final class DeviceMonitor: ObservableObject {
     @Published private(set) var connectedDisplayIDs: Set<CGDirectDisplayID> = []
     /// The connected video devices themselves, for relink pickers.
     @Published private(set) var videoDevices: [AVCaptureDevice] = []
+    /// C05 (issue #105): `uniqueID`s of connected cameras whose feed is
+    /// SUSPENDED — iPhone locked, camera paused in Control Center, notebook
+    /// lid closed. A suspended Continuity Camera stays connected (no
+    /// disconnect notification fires), so suspension is tracked separately
+    /// via KVO on `AVCaptureDevice.isSuspended` and routed through the same
+    /// connect/disconnect hooks below: the pool's C10 missing state and
+    /// auto-recovery then cover lock/unlock exactly like unplug/replug.
+    @Published private(set) var suspendedCameraIDs: Set<String> = []
 
     /// Lifecycle hooks the capture pool subscribes to. All fire on the main
     /// actor with the stable identity of the device that (dis)appeared.
@@ -36,6 +44,10 @@ final class DeviceMonitor: ObservableObject {
     /// Fires only when the active display SET actually changed (a resolution
     /// change alone keeps every ID and stays silent).
     var onDisplaysChanged: ((Set<CGDirectDisplayID>) -> Void)?
+
+    /// Per-device `isSuspended` KVO tokens, keyed by `uniqueID` (C05). Tokens
+    /// invalidate on dealloc; the dictionary is rebuilt by `refreshDevices`.
+    private var suspensionObservers: [String: NSKeyValueObservation] = [:]
 
     /// Notification tokens. `nonisolated(unsafe)` so `deinit` (nonisolated on
     /// a @MainActor type) can remove them; tokens are safe to touch there.
@@ -92,22 +104,66 @@ final class DeviceMonitor: ObservableObject {
     }
 
     private func refreshDevices() {
-        // `.external` covers USB cameras/mics AND Continuity Camera devices
-        // on macOS — phones hot-plug constantly (C05), and these notifications
-        // are what make the pool notice them.
+        // `.external` covers USB cameras/mics AND wired iPhone/iPad screen
+        // devices; `.continuityCamera` (macOS 14+) and `.deskViewCamera`
+        // (macOS 13+) name the wireless Continuity devices explicitly (C05).
+        // A device matching several requested types appears once. Phones
+        // hot-plug constantly, and these notifications are what make the
+        // pool notice them.
         let video = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external],
+            deviceTypes: [.builtInWideAngleCamera, .continuityCamera, .deskViewCamera, .external],
             mediaType: .video,
             position: .unspecified
         ).devices
         videoDevices = video
         connectedCameraIDs = Set(video.map(\.uniqueID))
+        observeSuspension(for: video)
         let audio = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInMicrophone, .external],
             mediaType: .audio,
             position: .unspecified
         ).devices
         connectedAudioDeviceIDs = Set(audio.map(\.uniqueID))
+    }
+
+    // MARK: - Feed suspension (C05, issue #105)
+
+    /// Keeps one `isSuspended` observer per connected camera and re-syncs the
+    /// suspended set. A suspended device (locked iPhone, camera paused in
+    /// Control Center) stays connected but delivers no frames — the pool
+    /// needs the same missing/recovery treatment as an unplug, so suspension
+    /// fires the C10 hooks: suspended → `onCameraDisconnected`, back →
+    /// `onCameraConnected`. The pool reads `isSuspended` itself to phrase the
+    /// missing message honestly.
+    private func observeSuspension(for devices: [AVCaptureDevice]) {
+        let live = Set(devices.map(\.uniqueID))
+        suspensionObservers = suspensionObservers.filter { live.contains($0.key) }
+        for device in devices where suspensionObservers[device.uniqueID] == nil {
+            let uniqueID = device.uniqueID
+            suspensionObservers[uniqueID] = device.observe(\.isSuspended, options: [.new]) { [weak self] _, change in
+                // Only the Bool crosses the isolation boundary (same pattern
+                // as the notification observers above).
+                let suspended = change.newValue ?? false
+                Task { @MainActor in
+                    self?.handleSuspension(uniqueID: uniqueID, suspended: suspended)
+                }
+            }
+        }
+        suspendedCameraIDs = Set(devices.filter(\.isSuspended).map(\.uniqueID))
+    }
+
+    private func handleSuspension(uniqueID: String, suspended: Bool) {
+        // A device that also disconnected is owned by the disconnect path.
+        guard connectedCameraIDs.contains(uniqueID) else { return }
+        if suspended {
+            guard !suspendedCameraIDs.contains(uniqueID) else { return }
+            suspendedCameraIDs.insert(uniqueID)
+            onCameraDisconnected?(uniqueID)
+        } else {
+            guard suspendedCameraIDs.contains(uniqueID) else { return }
+            suspendedCameraIDs.remove(uniqueID)
+            onCameraConnected?(uniqueID)
+        }
     }
 
     /// Re-reads the active display list. With `notify`, fires

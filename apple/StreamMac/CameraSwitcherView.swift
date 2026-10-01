@@ -63,6 +63,7 @@ struct CameraSwitcherView: View {
                     Label("No camera connected", systemImage: "video.slash")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .help(ContinuitySetupGuidance.emptyStateHint)
                         .frame(height: 72)
                 }
             }
@@ -99,15 +100,26 @@ struct CameraSwitcherView: View {
 /// One camera-source tile in the switcher: live thumbnail while capturing,
 /// device icon otherwise, with the C10 per-source health badge (capturing /
 /// idle / error) the capture pool publishes for the source's payload key.
+/// C05: iPhone/iPad devices carry their connection badge (Continuity / Desk
+/// View / USB), a suspended feed shows a paused overlay, and Continuity
+/// devices get the capability-gated effects menu.
 private struct CameraSourceTile: View {
     let source: SourceDefinition
     let onSelect: () -> Void
 
     @EnvironmentObject private var capturePool: CaptureSourcePool
+    @EnvironmentObject private var deviceMonitor: DeviceMonitor
 
     private var key: CaptureSourceKey? {
         guard case .camera(let payload) = source.payload else { return nil }
         return .camera(payload)
+    }
+
+    /// The physical device this source pins (nil for the system default).
+    private var device: AVCaptureDevice? {
+        guard case .camera(let payload) = source.payload,
+              let deviceID = payload.deviceID else { return nil }
+        return AVCaptureDevice(uniqueID: deviceID)
     }
 
     private var problem: String? {
@@ -116,6 +128,13 @@ private struct CameraSourceTile: View {
 
     private var isCapturing: Bool {
         key.map { capturePool.activeSources.contains($0) } ?? false
+    }
+
+    /// C05: the pinned device's feed is suspended (iPhone locked / paused).
+    private var isSuspended: Bool {
+        guard case .camera(let payload) = source.payload,
+              let deviceID = payload.deviceID else { return false }
+        return deviceMonitor.suspendedCameraIDs.contains(deviceID)
     }
 
     var body: some View {
@@ -130,11 +149,24 @@ private struct CameraSourceTile: View {
                     .font(.caption)
                     .lineLimit(1)
                     .frame(maxWidth: 96)
+                if let badge = device?.streamCameraKind.badge {
+                    Text(badge)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .buttonStyle(.plain)
         .help(problem ?? (isCapturing ? "Capturing — click to use \(source.name)"
                                       : "Click to use \(source.name)"))
+        .contextMenu {
+            // Capability gate: effects only exist for Continuity-family
+            // devices (Center Stage / Portrait / Studio Light).
+            if let device, device.streamCameraKind.isAppleMobileDevice {
+                ContinuityEffectsMenuContent(device: device)
+            }
+        }
     }
 
     @ViewBuilder
@@ -142,12 +174,19 @@ private struct CameraSourceTile: View {
         if let key, isCapturing {
             LiveCameraThumbnail(key: key)
         } else {
-            Image(systemName: "video.fill")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-                .frame(width: 96, height: 54)
-                .background(.quaternary)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+            ZStack {
+                Image(systemName: device?.streamCameraKind.iconName ?? "video.fill")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                if isSuspended {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .frame(width: 96, height: 54)
+            .background(.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
         }
     }
 
@@ -167,6 +206,7 @@ private struct CameraSourceTile: View {
 
 /// A tile for a connected camera with no registry source yet: one click
 /// registers it (named after the device) and assigns it like any other tile.
+/// C05: iPhone/iPad devices show the phone icon and their connection badge.
 private struct UnregisteredDeviceTile: View {
     let device: AVCaptureDevice
     let onAdd: () -> Void
@@ -174,23 +214,35 @@ private struct UnregisteredDeviceTile: View {
     var body: some View {
         Button(action: onAdd) {
             VStack(spacing: 4) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
+                ZStack(alignment: .bottomTrailing) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
+                            .foregroundStyle(.secondary)
+                        Image(systemName: device.streamCameraKind.iconName)
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Image(systemName: "plus.circle.fill")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                    Image(systemName: "plus.video")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
+                        .padding(4)
                 }
                 .frame(width: 96, height: 54)
                 Text(device.localizedName)
                     .font(.caption)
                     .lineLimit(1)
                     .frame(maxWidth: 96)
+                if let badge = device.streamCameraKind.badge {
+                    Text(badge)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .buttonStyle(.plain)
-        .help("Add \(device.localizedName) as a camera source — \(device.streamFormatSummary)")
+        .help("Add \(device.streamSourceDisplayName) as a camera source — \(device.streamFormatSummary)")
     }
 }
 
@@ -245,6 +297,13 @@ private struct LiveCameraThumbnail: View {
 /// the pool's live capture status and offer rename, retarget (relink to a
 /// different camera through the S05 registry path, so every bound layer
 /// follows), and remove.
+///
+/// C05 (issue #105): the Add picker groups iPhone/iPad devices (Continuity,
+/// Desk View, wired USB) under their own section with an explicit connection
+/// badge, shows setup guidance when none is connected, rows describe a
+/// suspended Continuity feed honestly, and Continuity devices carry the
+/// capability-gated effects menu (Center Stage toggle; Portrait/Studio Light
+/// state pointing at Control Center).
 struct CameraSourcesSectionView: View {
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var controller: StreamController
@@ -255,6 +314,22 @@ struct CameraSourcesSectionView: View {
 
     private var cameraSources: [SourceDefinition] {
         sceneStore.sources.filter { $0.payload.isCamera }
+    }
+
+    /// C05: connected iPhone/iPad-sourced devices (Continuity, Desk View,
+    /// USB) — the "iPhone & iPad" picker group.
+    private var mobileDevices: [AVCaptureDevice] {
+        deviceMonitor.videoDevices.filter { $0.streamCameraKind.isAppleMobileDevice }
+    }
+
+    private var otherDevices: [AVCaptureDevice] {
+        deviceMonitor.videoDevices.filter { !$0.streamCameraKind.isAppleMobileDevice }
+    }
+
+    private func addSource(for device: AVCaptureDevice) {
+        sceneStore.addSource(SourceDefinition(
+            name: device.localizedName,
+            payload: .camera(CameraSourcePayload(deviceID: device.uniqueID))))
     }
 
     var body: some View {
@@ -272,11 +347,25 @@ struct CameraSourcesSectionView: View {
                     sceneStore.addSource(SourceDefinition(
                         name: "Camera", payload: .camera(CameraSourcePayload())))
                 }
-                ForEach(deviceMonitor.videoDevices, id: \.uniqueID) { device in
-                    Button(device.localizedName) {
-                        sceneStore.addSource(SourceDefinition(
-                            name: device.localizedName,
-                            payload: .camera(CameraSourcePayload(deviceID: device.uniqueID))))
+                // C05 (issue #105): iPhone/iPad devices group first with their
+                // connection badge; when none are connected the section says
+                // HOW to add one instead of vanishing.
+                Section("iPhone & iPad") {
+                    if mobileDevices.isEmpty {
+                        Text(ContinuitySetupGuidance.noDeviceDetected)
+                    } else {
+                        ForEach(mobileDevices, id: \.uniqueID) { device in
+                            Button(device.streamSourceDisplayName) {
+                                addSource(for: device)
+                            }
+                        }
+                    }
+                }
+                Section("Cameras") {
+                    ForEach(otherDevices, id: \.uniqueID) { device in
+                        Button(device.localizedName) {
+                            addSource(for: device)
+                        }
                     }
                 }
             } label: {
@@ -303,7 +392,7 @@ struct CameraSourcesSectionView: View {
 
     private func sourceRow(_ source: SourceDefinition) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: "video.fill")
+            Image(systemName: device(for: source)?.streamCameraKind.iconName ?? "video.fill")
                 .foregroundStyle(.secondary)
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 1) {
@@ -327,13 +416,19 @@ struct CameraSourcesSectionView: View {
                     sceneStore.relinkSource(source.id, to: .camera(CameraSourcePayload()))
                 }
                 ForEach(deviceMonitor.videoDevices, id: \.uniqueID) { device in
-                    Button(device.localizedName) {
+                    Button(device.streamSourceDisplayName) {
                         sceneStore.relinkSource(
                             source.id, to: .camera(CameraSourcePayload(deviceID: device.uniqueID)))
                     }
                 }
             }
             .help("Point \"\(source.name)\" at a different camera — every layer using it follows")
+            // C05: Continuity-family devices expose the capability-gated
+            // effects (Center Stage toggle; Portrait/Studio Light state).
+            if let device = device(for: source), device.streamCameraKind.isAppleMobileDevice {
+                Divider()
+                ContinuityEffectsMenuContent(device: device)
+            }
             Divider()
             Button("Remove Source", role: .destructive) {
                 sceneStore.removeSource(source.id)
@@ -385,6 +480,14 @@ struct CameraSourcesSectionView: View {
 
     // MARK: - Descriptions
 
+    /// The physical device a source pins (nil for the system default or a
+    /// device that no longer resolves).
+    private func device(for source: SourceDefinition) -> AVCaptureDevice? {
+        guard case .camera(let payload) = source.payload,
+              let deviceID = payload.deviceID else { return nil }
+        return AVCaptureDevice(uniqueID: deviceID)
+    }
+
     private func deviceDescription(for source: SourceDefinition) -> String {
         guard case .camera(let payload) = source.payload else { return "" }
         guard let deviceID = payload.deviceID else {
@@ -393,7 +496,13 @@ struct CameraSourcesSectionView: View {
         guard let device = AVCaptureDevice(uniqueID: deviceID) else {
             return "Camera not connected"
         }
-        return "\(device.localizedName) — \(device.streamFormatSummary)"
+        // C05: explicit identity (badge), and an honest paused state for a
+        // suspended Continuity feed (iPhone locked / paused in Control Center).
+        let identity = device.streamSourceDisplayName
+        if device.isSuspended {
+            return "\(identity) — feed paused (unlock the iPhone to resume)"
+        }
+        return "\(identity) — \(device.streamFormatSummary)"
     }
 
     // MARK: - Rename alert

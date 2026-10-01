@@ -479,11 +479,20 @@ final class CaptureSourcePool: ObservableObject {
     /// Camera unplugged: mark every requested camera capture actually using
     /// that device as missing. Unrelated sources keep running.
     func handleCameraDisconnected(_ uniqueID: String) {
+        // C05 (issue #105): the DeviceMonitor ALSO fires this hook when a
+        // connected camera's feed suspends (iPhone locked, camera paused in
+        // Control Center). A suspended device still resolves, so the missing
+        // message can say WHY the feed stopped instead of implying a
+        // physical unplug.
+        let suspended = AVCaptureDevice(uniqueID: uniqueID)?.isSuspended ?? false
+        let message = suspended
+            ? "The camera feed is paused — the iPhone is locked or the camera was paused in Control Center. Capture resumes automatically when it returns."
+            : "The camera was disconnected. Reconnect it, or relink the source to another camera."
         for key in requested {
             guard case .camera = key,
                   cameraDeviceIDs[key] == uniqueID,
                   !missingSources.contains(key) else { continue }
-            markMissing(key, message: "The camera was disconnected. Reconnect it, or relink the source to another camera.")
+            markMissing(key, message: message)
         }
     }
 
@@ -606,8 +615,16 @@ final class CaptureSourcePool: ObservableObject {
         }
         if let deviceID = payload.deviceID {
             cameraDeviceIDs[key] = deviceID
-            guard AVCaptureDevice(uniqueID: deviceID) != nil else {
+            guard let device = AVCaptureDevice(uniqueID: deviceID) else {
                 markMissing(key, message: "The pinned camera is not connected. Reconnect it, or relink the source to another camera.")
+                return
+            }
+            // C05 (issue #105): a suspended device (locked iPhone, paused
+            // camera) opens fine but delivers no frames — go straight to the
+            // missing state with the real reason; the DeviceMonitor's
+            // suspension KVO restarts capture when the feed returns.
+            guard !device.isSuspended else {
+                markMissing(key, message: "The camera feed is paused — the iPhone is locked or the camera was paused in Control Center. Capture resumes automatically when it returns.")
                 return
             }
         } else {

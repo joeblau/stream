@@ -177,6 +177,11 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         # The project base carries iOS-only settings; they do not apply here.
         TARGETED_DEVICE_FAMILY: ""
+        # C05 (issue #105): opt in to the explicit Continuity Camera device
+        # type. Without this key continuity cameras report as
+        # .builtInWideAngleCamera and a DiscoverySession asking for
+        # .continuityCamera finds nothing.
+        INFOPLIST_KEY_NSCameraUseContinuityCameraDeviceType: YES
     entitlements:
       path: StreamMac/StreamMac.entitlements
       properties:
