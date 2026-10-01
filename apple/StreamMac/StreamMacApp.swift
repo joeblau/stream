@@ -5,6 +5,11 @@ import SwiftUI
 @MainActor
 struct StreamMacApp: App {
     @StateObject private var sceneStore: SceneStore
+    /// The W03 preview/program model (issue #66): owns the staged scene (what
+    /// PREVIEW shows and edits mutate) vs the program snapshot (what the
+    /// outputs emit), plus the direct-live editing mode. Both snapshots start
+    /// from the persisted selection.
+    @StateObject private var previewProgram: PreviewProgramModel
     @StateObject private var streamController: StreamController
     /// The shared settings session (W04, issue #67): one object binding the
     /// settings pane's draft, SettingsStore persistence, and the controller's
@@ -31,10 +36,13 @@ struct StreamMacApp: App {
 
     init() {
         let sceneStore = SceneStore()
-        let streamController = StreamController(sceneStore: sceneStore)
+        let previewProgram = PreviewProgramModel(selected: sceneStore.selected)
+        let streamController = StreamController(sceneStore: sceneStore,
+                                                previewProgram: previewProgram)
         let settingsSession = SettingsSession(controller: streamController)
         let recorder = RecordingController()
         _sceneStore = StateObject(wrappedValue: sceneStore)
+        _previewProgram = StateObject(wrappedValue: previewProgram)
         _streamController = StateObject(wrappedValue: streamController)
         _settingsSession = StateObject(wrappedValue: settingsSession)
         _recorder = StateObject(wrappedValue: recorder)
@@ -42,7 +50,8 @@ struct StreamMacApp: App {
             controller: streamController,
             sceneStore: sceneStore,
             session: settingsSession,
-            recorder: recorder))
+            recorder: recorder,
+            previewProgram: previewProgram))
     }
 
     // `SwiftUI.Scene` is qualified because the module also defines a `Scene`
@@ -56,6 +65,7 @@ struct StreamMacApp: App {
         Window("Stream Studio", id: "studio") {
             MainWindowView(firstRunCompleted: $hasCompletedFirstRun)
                 .environmentObject(sceneStore)
+                .environmentObject(previewProgram)
                 .environmentObject(streamController)
                 .environmentObject(settingsSession)
                 .environmentObject(permissions)

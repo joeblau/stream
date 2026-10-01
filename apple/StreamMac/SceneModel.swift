@@ -161,7 +161,10 @@ final class SceneStore: ObservableObject {
         sources.first(where: { $0.payload.isScreen })?.id
     }
 
-    func addScene() {
+    /// Adds a default scene (same template as the scenes panel's + button)
+    /// and selects it.
+    @discardableResult
+    func addScene() -> Scene {
         addScene(Scene.screenPlusCam(name: "Scene \(scenes.count + 1)",
                                      screenSourceID: screenSourceID,
                                      cameraSourceID: cameraSourceID))

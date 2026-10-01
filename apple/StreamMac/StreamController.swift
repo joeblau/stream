@@ -7,16 +7,25 @@ import StreamCore
 import os.lock
 
 /// The heart of the macOS app: owns the capture sources (screen, camera, mic),
-/// drives the `CompositionEngine` that renders the selected scene onto the
+/// drives the `CompositionEngine` that renders the program scene onto the
 /// output-profile canvas, and routes engine frames to the outputs (preview,
 /// publisher, recording) as independent subscribers.
+///
+/// W03 (issue #66): preview and program are separate compositions. This
+/// controller owns TWO engines — the program engine (composites the
+/// `PreviewProgramModel`'s `programScene` snapshot; its frames feed the
+/// publisher, the recording, and the PROGRAM monitor) and a lightweight
+/// preview engine (composites `stagedScene` for the PREVIEW monitor only).
+/// The preview engine ticks independently, so preview rendering work never
+/// touches the program engine's cadence; both pull the same read-only
+/// latest-frame source holders, so a Take restarts no capture and no clock.
 ///
 /// W08 (issue #65): rendering lives in the `CompositionEngine` actor — a
 /// Metal/Core Image compositor ticking at the profile fps on a shared
 /// monotonic clock, broadcasting timestamped frames through bounded,
 /// drop-oldest per-subscriber queues. Nothing on this main-actor controller
-/// renders pixels anymore; it only configures the engine (scene, canvas, fps)
-/// and manages subscriptions.
+/// renders pixels anymore; it only configures the engines (scene, canvas,
+/// fps) and manages subscriptions.
 ///
 /// W07 (issue #64): the canvas is owned by the persisted `OutputProfile`, not
 /// by the first arriving source frame — see `activeProfile`/`stagedProfile`
@@ -35,10 +44,14 @@ import os.lock
 final class StreamController: ObservableObject {
     /// Streaming (publishing) output lifecycle — read `streamState`, never a bool.
     @Published private(set) var streamState: StreamSessionState = .idle
-    /// On-screen preview lifecycle. Independent from streaming/recording.
+    /// On-screen monitor lifecycle (W03: both studio monitors). Independent
+    /// from streaming/recording.
     @Published private(set) var previewState: PreviewSessionState = .idle
-    /// The latest composited frame for the SwiftUI preview, throttled to ~30 fps.
+    /// The latest STAGED composition for the PREVIEW monitor, ~30 fps (W03:
+    /// rendered by the preview engine, so staged edits never touch program).
     @Published private(set) var previewImage: CGImage?
+    /// The latest PROGRAM composition for the PROGRAM monitor, ~30 fps.
+    @Published private(set) var programImage: CGImage?
     @Published var errorMessage: String?
 
     /// Convenience for UI; `streamState` carries the full picture.
@@ -50,10 +63,18 @@ final class StreamController: ObservableObject {
     let audio = MacAudioInput()
     private let facecam = FacecamCapture()
 
-    /// The W08 composition engine. Pulls the latest screen/camera frames
-    /// through the lock-protected holders below; runs only while the W02
-    /// pipeline demand is > 0.
+    /// The W08 program composition engine: composites the program snapshot and
+    /// fans frames out to the publisher, the recording, and the PROGRAM
+    /// monitor. Pulls the latest screen/camera frames through the
+    /// lock-protected holders below; runs only while the W02 pipeline demand
+    /// is > 0.
     private let engine: CompositionEngine
+    /// The W03 preview engine: composites the STAGED scene for the PREVIEW
+    /// monitor only. Same source providers, independent tick — preview work
+    /// can never delay or re-anchor the program engine.
+    private let previewEngine: CompositionEngine
+    /// The W03 staged/program scene model; the engines follow its snapshots.
+    private let previewProgram: PreviewProgramModel
     /// Reached from the capture callbacks (arbitrary queues) and the main actor.
     private let publisherBox = PublisherBox()
     private let latestScreen = LatestScreenFrame()
@@ -72,10 +93,15 @@ final class StreamController: ObservableObject {
     private var isPipelineRunning = false
     /// Count of recording outputs tapping the composited frames (0 or 1 today).
     private var recordingDemand = 0
-    /// The preview output's engine subscription (registered while previewing).
-    private var previewSubscription: FrameSubscription?
-    /// Converts engine frames to CGImages for the preview, off the main actor.
+    /// The PREVIEW monitor's preview-engine subscription (staged composition).
+    private var previewMonitorSubscription: FrameSubscription?
+    /// The PROGRAM monitor's program-engine subscription (registered while the
+    /// monitors are visible; the publisher/recording have their own sinks).
+    private var programMonitorSubscription: FrameSubscription?
+    /// Converts staged-composition frames to CGImages, off the main actor.
     private let previewConverter = PreviewImageConverter()
+    /// Converts program-composition frames to CGImages, off the main actor.
+    private let programConverter = PreviewImageConverter()
 
     private var settings: StreamSettings = .default
     /// Hardware + destination gating for the output profile (W07); the single
@@ -93,8 +119,9 @@ final class StreamController: ObservableObject {
     private var outputSizeSentToPublisher = false
     private var cancellables: Set<AnyCancellable> = []
 
-    init(sceneStore: SceneStore) {
+    init(sceneStore: SceneStore, previewProgram: PreviewProgramModel) {
         self.sceneStore = sceneStore
+        self.previewProgram = previewProgram
         // The persisted profile is the canvas authority from launch, so the
         // preview opens at the configured geometry before any source frame
         // ever arrives.
@@ -102,8 +129,10 @@ final class StreamController: ObservableObject {
         self.settings = persisted
         self.activeProfile = persisted.outputProfile
 
-        // The engine pulls source pixels off-main through the holders; it
-        // never touches this controller's MainActor state.
+        // The engines pull source pixels off-main through the holders; they
+        // never touch this controller's MainActor state. Both share the same
+        // read-only latest-frame providers (W03: one capture feeds both the
+        // staged preview and the outgoing program).
         let latestScreen = self.latestScreen
         let facecam = self.facecam
         self.engine = CompositionEngine(
@@ -111,14 +140,31 @@ final class StreamController: ObservableObject {
             cameraProvider: { facecam.latest.freshest() },
             canvasSize: persisted.outputProfile.canvasSize,
             frameRate: persisted.outputProfile.frameRate)
+        self.previewEngine = CompositionEngine(
+            screenProvider: { latestScreen.latest() },
+            cameraProvider: { facecam.latest.freshest() },
+            canvasSize: persisted.outputProfile.canvasSize,
+            frameRate: persisted.outputProfile.frameRate)
 
-        // Scene selection or edits apply to the live pipeline immediately.
-        sceneStore.$scenes
-            .combineLatest(sceneStore.$selectedID)
-            .sink { [weak self] _, _ in
+        // W03: scene edits and selection changes reach the engines ONLY
+        // through the preview/program model's snapshots — never straight from
+        // SceneStore — so staged work can't leak into the outgoing program.
+        previewProgram.$stagedScene
+            .sink { [weak self] scene in
                 Task { @MainActor [weak self] in
-                    self?.applySceneSources()
-                    self?.pushSceneToEngine()
+                    guard let self else { return }
+                    self.applySceneSources()
+                    let engine = self.previewEngine
+                    Task { await engine.updateScene(scene) }
+                }
+            }
+            .store(in: &cancellables)
+        previewProgram.$programScene
+            .sink { [weak self] scene in
+                Task { @MainActor [weak self] in
+                    guard let self, let scene else { return }
+                    self.applySceneSources()
+                    self.publishSceneToProgram(scene)
                 }
             }
             .store(in: &cancellables)
@@ -191,6 +237,22 @@ final class StreamController: ObservableObject {
         Task { await engine.removeSink(subscription.token) }
     }
 
+    /// Same race-safe register/cancel as `addFrameSink`, but addressed at an
+    /// explicit engine — the W03 studio monitors subscribe to BOTH engines
+    /// (PREVIEW on the preview engine, PROGRAM on the program engine), while
+    /// `addFrameSink` stays the program-engine fan-out for real outputs.
+    private func addMonitorSink(to engine: CompositionEngine,
+                                sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
+        let subscription = FrameSubscription()
+        Task { await engine.addSink(token: subscription.token, capacity: 1, sink: sink) }
+        return subscription
+    }
+
+    private func removeMonitorSink(_ subscription: FrameSubscription,
+                                   from engine: CompositionEngine) {
+        Task { await engine.removeSink(subscription.token) }
+    }
+
     // MARK: - Preview / stream lifecycle
 
     func startPreview() {
@@ -198,30 +260,60 @@ final class StreamController: ObservableObject {
         settings = SettingsStore().load()
         applyOutputProfile(settings.outputProfile)
         previewState = .active
-        let converter = previewConverter
-        previewSubscription = addFrameSink { [weak self] frame in
-            // Conversion runs on the subscription's serial queue, off-main;
-            // the sink self-throttles to ~30 fps before hopping to the UI.
-            guard let image = converter.makeImage(frame, throttleNanoseconds: 33_000_000) else { return }
+        // PREVIEW monitor: the staged composition from the preview engine.
+        // PROGRAM monitor: the outgoing composition from the program engine.
+        // Both conversions run on each subscription's serial queue, off-main;
+        // the sinks self-throttle to ~30 fps before hopping to the UI.
+        let previewConverter = self.previewConverter
+        previewMonitorSubscription = addMonitorSink(to: previewEngine) { [weak self] frame in
+            guard let image = previewConverter.makeImage(frame, throttleNanoseconds: 33_000_000) else { return }
             Task { @MainActor [weak self] in
                 self?.previewImage = image
             }
         }
+        let programConverter = self.programConverter
+        programMonitorSubscription = addMonitorSink(to: engine) { [weak self] frame in
+            guard let image = programConverter.makeImage(frame, throttleNanoseconds: 33_000_000) else { return }
+            Task { @MainActor [weak self] in
+                self?.programImage = image
+            }
+        }
+        if isPipelineRunning {
+            // The pipeline is already up for a stream/recording — join it with
+            // the preview engine (startPipeline covers the 0 → 1 case below).
+            startPreviewEngine()
+        }
         updatePipelineDemand()
     }
 
-    /// Stops the on-screen preview ONLY. An active stream or recording keeps
+    /// Stops the on-screen monitors ONLY. An active stream or recording keeps
     /// running (issue #62): the pipeline demand check below keeps captures and
-    /// the engine alive for the outputs still consuming frames.
+    /// the program engine alive for the outputs still consuming frames.
     func stopPreview() {
         guard previewState == .active else { return }
-        if let previewSubscription {
-            removeFrameSink(previewSubscription)
+        if let previewMonitorSubscription {
+            removeMonitorSink(previewMonitorSubscription, from: previewEngine)
         }
-        previewSubscription = nil
+        previewMonitorSubscription = nil
+        if let programMonitorSubscription {
+            removeMonitorSink(programMonitorSubscription, from: engine)
+        }
+        programMonitorSubscription = nil
         previewState = .idle
         previewImage = nil
+        programImage = nil
+        let previewEngine = self.previewEngine
+        Task { await previewEngine.stop() }
         updatePipelineDemand()
+    }
+
+    /// (Re)starts the preview engine on the current staged composition. Only
+    /// called while the monitors are visible and the pipeline is running.
+    private func startPreviewEngine() {
+        let staged = previewProgram.stagedScene
+        let canvasSize = activeProfile.canvasSize
+        let fps = encodeFrameRate
+        Task { await previewEngine.run(scene: staged, canvasSize: canvasSize, frameRate: fps) }
     }
 
     func goLive() {
@@ -430,11 +522,13 @@ final class StreamController: ObservableObject {
         sceneStore.setCanvasSize(profile.canvasSize)
         guard changed, isPipelineRunning else { return }
         // Live output change (only possible while no stream/recording owns the
-        // geometry): the engine re-anchors its clock and re-pools its buffers
-        // at the new canvas/fps on the next tick.
+        // geometry): the engines re-anchor their clocks and re-pool their
+        // buffers at the new canvas/fps on the next tick.
         let canvasSize = profile.canvasSize
         let fps = encodeFrameRate
         Task { await engine.setOutput(canvasSize: canvasSize, frameRate: fps) }
+        let previewEngine = self.previewEngine
+        Task { await previewEngine.setOutput(canvasSize: canvasSize, frameRate: fps) }
     }
 
     /// Applies a staged profile once no stream/recording owns the geometry.
@@ -448,10 +542,13 @@ final class StreamController: ObservableObject {
         isPipelineRunning = true
         startAudioInput()
         applySceneSources()
-        let scene = sceneStore.selected
+        let program = previewProgram.programScene
         let canvasSize = activeProfile.canvasSize
         let fps = encodeFrameRate
-        Task { await engine.run(scene: scene, canvasSize: canvasSize, frameRate: fps) }
+        Task { await engine.run(scene: program, canvasSize: canvasSize, frameRate: fps) }
+        if previewState == .active {
+            startPreviewEngine()
+        }
     }
 
     /// Starts mic capture on the preferred input from settings, falling back
@@ -469,6 +566,8 @@ final class StreamController: ObservableObject {
         isPipelineRunning = false
         let engine = self.engine
         Task { await engine.stop() }
+        let previewEngine = self.previewEngine
+        Task { await previewEngine.stop() }
         facecam.stop()
         audio.stop()
         let screenCapture = self.screenCapture
@@ -489,39 +588,43 @@ final class StreamController: ObservableObject {
 
     // MARK: - Scene → source routing
 
-    /// Starts/stops the screen capture and camera to match the selected scene's
-    /// layout. Screen capture uses the system content picker, so a switch into a
-    /// screen layout may need one user confirmation; a cancel simply leaves the
-    /// scene showing its other source until picked.
+    /// Starts/stops the screen capture and camera to match what the two
+    /// compositions actually need: the UNION of the program snapshot and —
+    /// only while the monitors are visible — the staged scene. The union is
+    /// what makes staged work leak-proof at the source level (W03): staging a
+    /// camera-only scene never stops the screen capture the outgoing program
+    /// is still using, and a staged scene's sources don't get picked/started
+    /// while the monitors are off. Screen capture uses the system content
+    /// picker, so a staged switch into a screen layout may need one user
+    /// confirmation; a cancel simply leaves the scene showing its other
+    /// source until picked.
     private func applySceneSources() {
-        guard isPipelineRunning, let scene = sceneStore.selected else { return }
-        let layout = scene.layout
+        guard isPipelineRunning else { return }
+        let staged = previewState == .active ? previewProgram.stagedScene : nil
+        let scenes = [previewProgram.programScene, staged]
+        let needsScreen = scenes.contains { $0?.layout.usesScreen == true }
+        let needsCamera = scenes.contains { $0?.layout.usesCamera == true }
         let screenCapture = self.screenCapture
-        if layout.usesScreen, !screenCapture.isCapturing {
+        if needsScreen, !screenCapture.isCapturing {
             Task { await screenCapture.pickAndStart() }
-        } else if !layout.usesScreen, screenCapture.isCapturing {
+        } else if !needsScreen, screenCapture.isCapturing {
             Task { await screenCapture.stop() }
         }
-        if layout.usesCamera {
+        if needsCamera {
             facecam.start(with: settings)
         } else {
             facecam.stop()
         }
     }
 
-    /// W05 Take (issue #68): publishes a scene to the program path. Today the
-    /// engine always composites the selected scene, so Take lands the staged
-    /// selection on that same path; W03's full preview/program model will give
-    /// program its own scene — this entry point is where the two diverge.
+    /// The W03 program seam (W05 Take, issue #68; W08 swap point, issue #65):
+    /// lands the program snapshot on the program engine. The engine swaps its
+    /// scene value between ticks, so the outgoing composition changes
+    /// atomically per frame — the tick loop, the shared clock, and every
+    /// capture source keep running untouched (no program media restart).
+    /// Called from the controller's observation of
+    /// `PreviewProgramModel.programScene`.
     func publishSceneToProgram(_ scene: Scene) {
-        Task { await engine.updateScene(scene) }
-    }
-
-    /// Hands the engine the current scene graph. Called on every scene edit /
-    /// selection change and at pipeline start; the engine composites whatever
-    /// graph it holds at each tick, so edits apply on the very next frame.
-    private func pushSceneToEngine() {
-        let scene = sceneStore.selected
         Task { await engine.updateScene(scene) }
     }
 

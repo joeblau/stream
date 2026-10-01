@@ -20,6 +20,14 @@ import StreamCore
 /// rejected command performs no work. Every result carries the post-command
 /// `StudioState` snapshot, and the dispatcher's published `state` is the
 /// snapshot SwiftUI views (and future subscribers) observe.
+///
+/// W03 (issue #66): scene edits and selection go to the `PreviewProgramModel`'s
+/// STAGED snapshot only — never straight to the program path. `.take`
+/// publishes staged → program (persisting it as the source of truth),
+/// `.revert` discards unpublished staged edits, and
+/// `.setDirectLiveEditing` toggles the explicit mode where every edit and
+/// selection takes immediately (standard single-composition switcher
+/// behavior).
 
 // MARK: - Commands
 
@@ -50,7 +58,8 @@ enum StudioCommand: Equatable, Sendable {
     /// compatibility surface; the graph stays the source of truth).
     case updateScene(Scene)
 
-    // Layer set-value commands. `in: nil` targets the selected scene.
+    // Layer set-value commands (W03: they mutate the STAGED scene; `in: nil`
+    // targets it, an explicit ID must name it).
     case setLayerVisibility(LayerID, visible: Bool, in: SceneID?)
     case setLayerTransform(LayerID, LayerTransform, in: SceneID?)
     case setLayerEffects(LayerID, [LayerEffect], in: SceneID?)
@@ -65,10 +74,17 @@ enum StudioCommand: Equatable, Sendable {
     case applySettings
     case revertSettings
 
-    /// Take: publish the staged (selected) scene to the program path. W03
-    /// completes the full preview/program model; the seam is
-    /// `StreamController.publishSceneToProgram(_:)`.
+    /// Take (W03): atomically publish the staged composition to program —
+    /// the program snapshot becomes an independent copy of the staged scene,
+    /// persists as the SceneStore source of truth, and lands on the program
+    /// engine via `StreamController.publishSceneToProgram(_:)`.
     case take
+    /// Revert (W03): discard unpublished staged edits — the staged scene
+    /// becomes a copy of the program snapshot again.
+    case revert
+    /// Direct-live editing mode (W03, off by default): while on, scene edits
+    /// and selections take immediately, applying straight to program.
+    case setDirectLiveEditing(Bool)
 
     /// Short human label for rejection notices and future automation logs.
     var label: String {
@@ -95,6 +111,9 @@ enum StudioCommand: Equatable, Sendable {
         case .applySettings: return "Apply Settings"
         case .revertSettings: return "Revert Settings"
         case .take: return "Take"
+        case .revert: return "Revert"
+        case .setDirectLiveEditing(let on):
+            return "\(on ? "Enable" : "Disable") Direct-Live Editing"
         }
     }
 }
@@ -162,13 +181,21 @@ struct StudioState: Equatable, Sendable {
     var stagedProfile: OutputProfile?
     var scenes: [SceneRef] = []
     var selectedSceneID: SceneID?
-    /// Visibility of the SELECTED scene's layers, keyed by stable LayerID.
+    /// The scene staged in PREVIEW (W03): what edits mutate and Take
+    /// publishes. Equal to `selectedSceneID` outside transient updates.
+    var stagedSceneID: SceneID?
+    /// The scene on PROGRAM (W03): the independent snapshot the outputs emit.
+    var programSceneID: SceneID?
+    /// True while the staged composition differs from program — a different
+    /// staged scene or unpublished edits (W03). Drives the Take/Revert
+    /// controls and the pending-changes indication.
+    var hasPendingStagedEdits = false
+    /// Direct-live editing mode (W03): edits apply straight to program.
+    var directLiveEditing = false
+    /// Visibility of the STAGED scene's layers, keyed by stable LayerID.
     var layerVisibility: [LayerID: Bool] = [:]
     var settingsPresented = false
     var settingsDirty = false
-    /// The scene last published to the program path by Take. W03 will own
-    /// the full preview/program model; until then this tracks Take's target.
-    var programSceneID: SceneID?
 }
 
 // MARK: - Dispatcher
@@ -197,9 +224,9 @@ final class StudioCommandDispatcher: ObservableObject {
     private let sceneStore: SceneStore
     private let session: SettingsSession
     private let recorder: RecordingController
+    /// The W03 preview/program model: staged vs program scene snapshots.
+    private let previewProgram: PreviewProgramModel
 
-    /// Take's program target (W03 seam — see `StudioState.programSceneID`).
-    private var programSceneID: SceneID?
     private var rejectionSequence = 0
     private var rejectionTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
@@ -207,11 +234,13 @@ final class StudioCommandDispatcher: ObservableObject {
     init(controller: StreamController,
          sceneStore: SceneStore,
          session: SettingsSession,
-         recorder: RecordingController) {
+         recorder: RecordingController,
+         previewProgram: PreviewProgramModel) {
         self.controller = controller
         self.sceneStore = sceneStore
         self.session = session
         self.recorder = recorder
+        self.previewProgram = previewProgram
         self.state = StudioState()
         refreshState()
 
@@ -219,11 +248,13 @@ final class StudioCommandDispatcher: ObservableObject {
         // scene edits) never pass through `execute`, so observe the stores
         // directly. `objectWillChange` fires in willSet — the Task hop lands
         // post-set, so the snapshot reads current values.
-        Publishers.Merge4(
-            controller.objectWillChange,
-            sceneStore.objectWillChange,
-            session.objectWillChange,
-            recorder.objectWillChange)
+        Publishers.Merge(
+            Publishers.Merge4(
+                controller.objectWillChange,
+                sceneStore.objectWillChange,
+                session.objectWillChange,
+                recorder.objectWillChange),
+            previewProgram.objectWillChange)
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.refreshState()
@@ -305,8 +336,13 @@ final class StudioCommandDispatcher: ObservableObject {
             return sceneStore.scenes.count > 1
                 ? nil : .unavailable("The last remaining scene can't be deleted.")
         case .updateScene(let scene):
-            return sceneStore.scenes.contains(where: { $0.id == scene.id })
-                ? nil : .invalidTarget("Scene \(scene.id) does not exist.")
+            guard sceneStore.scenes.contains(where: { $0.id == scene.id }) else {
+                return .invalidTarget("Scene \(scene.id) does not exist.")
+            }
+            // W03: visual edits only ever touch the staged copy, so a whole-
+            // scene edit must address the scene staged in preview.
+            return previewProgram.stagedScene?.id == scene.id
+                ? nil : .invalidTarget("Scene \"\(scene.name)\" is not staged in preview — select it first.")
 
         case .setLayerVisibility(let layerID, _, let sceneID),
              .setLayerTransform(let layerID, _, let sceneID),
@@ -333,8 +369,14 @@ final class StudioCommandDispatcher: ObservableObject {
             return session.isDirty ? nil : .unavailable("There are no unapplied changes.")
 
         case .take:
-            return sceneStore.selected != nil
-                ? nil : .invalidTarget("No scene is selected to take.")
+            return previewProgram.stagedScene != nil
+                ? nil : .invalidTarget("No scene is staged to take.")
+        case .revert:
+            return previewProgram.hasPendingEdits
+                ? nil : .unavailable("There are no unpublished changes to revert.")
+        case .setDirectLiveEditing(let on):
+            return previewProgram.directLiveEditing != on
+                ? nil : .unavailable("Direct-live editing is already \(on ? "on" : "off").")
         }
     }
 
@@ -349,13 +391,39 @@ final class StudioCommandDispatcher: ObservableObject {
         case .startRecording: recorder.start(stream: controller)
         case .stopRecording: recorder.stop()
 
-        case .selectScene(let id): sceneStore.selectedID = id
-        case .selectSceneAt(let position): sceneStore.select(number: position)
-        case .addScene: sceneStore.addScene()
-        case .insertScene(let scene): sceneStore.addScene(scene)
-        case .renameScene(let id, let name): sceneStore.rename(id, to: name)
-        case .deleteScene(let id): sceneStore.delete(id)
-        case .updateScene(let scene): sceneStore.update(scene)
+        case .selectScene(let id):
+            sceneStore.selectedID = id
+            // W03: selection stages in preview; program stays untouched unless
+            // direct-live editing is on (standard switcher behavior).
+            previewProgram.stage(sceneStore.selected)
+            takeStagedIfDirectLive()
+        case .selectSceneAt(let position):
+            sceneStore.select(number: position)
+            previewProgram.stage(sceneStore.selected)
+            takeStagedIfDirectLive()
+        case .addScene:
+            let scene = sceneStore.addScene()
+            previewProgram.stage(scene)
+            takeStagedIfDirectLive()
+        case .insertScene(let scene):
+            let inserted = sceneStore.addScene(scene)
+            previewProgram.stage(inserted)
+            takeStagedIfDirectLive()
+        case .renameScene(let id, let name):
+            sceneStore.rename(id, to: name)
+            previewProgram.noteSceneRenamed(id, to: name)
+        case .deleteScene(let id):
+            sceneStore.delete(id)
+            // The program snapshot survives deletion in memory (the engine
+            // holds its own copy) until the next Take; only re-stage when the
+            // deletion moved the selection.
+            if previewProgram.stagedScene?.id != sceneStore.selectedID {
+                previewProgram.stage(sceneStore.selected)
+                takeStagedIfDirectLive()
+            }
+        case .updateScene(let scene):
+            previewProgram.applyStagedEdit(scene)
+            takeStagedIfDirectLive()
 
         case .setLayerVisibility(let layerID, let visible, let sceneID):
             editLayer(layerID, in: sceneID) { $0.isVisible = visible }
@@ -375,21 +443,43 @@ final class StudioCommandDispatcher: ObservableObject {
         case .revertSettings: session.revert()
 
         case .take:
-            guard let scene = sceneStore.selected else { return }
-            controller.publishSceneToProgram(scene)
-            programSceneID = scene.id
+            // W03: staged → program, atomically. The model swap republishes
+            // the program engine through the controller's observation (no
+            // cadence/media interruption); persisting here keeps SceneStore
+            // the source of truth for the PUBLISHED composition only.
+            guard let published = previewProgram.take() else { return }
+            sceneStore.update(published)
+        case .revert:
+            previewProgram.revert()
+        case .setDirectLiveEditing(let on):
+            previewProgram.setDirectLiveEditing(on)
         }
+    }
+
+    /// Direct-live mode (W03): every edit/selection is an implicit take, so
+    /// preview and program move together and each change persists (the
+    /// explicit mode's save point is the edit itself).
+    private func takeStagedIfDirectLive() {
+        guard previewProgram.directLiveEditing,
+              let published = previewProgram.take() else { return }
+        sceneStore.update(published)
     }
 
     // MARK: Layer helpers
 
+    /// W03: layer edits only ever mutate the STAGED scene. `in: nil` targets
+    /// it directly; an explicit scene ID must name the staged scene — editing
+    /// a background scene is rejected rather than silently bypassing the
+    /// preview/program split.
     private func resolveLayer(_ layerID: LayerID,
                               in sceneID: SceneID?) -> Result<(Scene, Int), StudioCommandError> {
-        let scene = sceneID.flatMap { id in sceneStore.scenes.first(where: { $0.id == id }) }
-            ?? sceneStore.selected
-        guard let scene else {
-            return .failure(.invalidTarget(sceneID.map { "Scene \($0) does not exist." }
-                                           ?? "No scene is selected."))
+        guard let scene = previewProgram.stagedScene else {
+            return .failure(.invalidTarget("No scene is staged in preview."))
+        }
+        if let sceneID, scene.id != sceneID {
+            let name = sceneStore.scenes.first(where: { $0.id == sceneID })?.name
+            return .failure(.invalidTarget(name.map { "Scene \"\($0)\" is not staged in preview — select it first." }
+                                           ?? "Scene \(sceneID) does not exist."))
         }
         guard let index = scene.layers.firstIndex(where: { $0.id == layerID }) else {
             return .failure(.invalidTarget("Layer \(layerID) does not exist in scene \"\(scene.name)\"."))
@@ -403,13 +493,14 @@ final class StudioCommandDispatcher: ObservableObject {
         guard case .success(let (resolved, index)) = resolveLayer(layerID, in: sceneID) else { return }
         var scene = resolved
         edit(&scene.layers[index])
-        sceneStore.update(scene)
+        previewProgram.applyStagedEdit(scene)
+        takeStagedIfDirectLive()
     }
 
     // MARK: State snapshot
 
     private func refreshState() {
-        let selected = sceneStore.selected
+        let staged = previewProgram.stagedScene
         state = StudioState(
             stream: controller.streamState,
             preview: controller.previewState,
@@ -418,11 +509,14 @@ final class StudioCommandDispatcher: ObservableObject {
             stagedProfile: controller.stagedProfile,
             scenes: sceneStore.scenes.map { StudioState.SceneRef(id: $0.id, name: $0.name) },
             selectedSceneID: sceneStore.selectedID,
+            stagedSceneID: staged?.id,
+            programSceneID: previewProgram.programScene?.id,
+            hasPendingStagedEdits: previewProgram.hasPendingEdits,
+            directLiveEditing: previewProgram.directLiveEditing,
             layerVisibility: Dictionary(
-                uniqueKeysWithValues: (selected?.layers ?? []).map { ($0.id, $0.isVisible) }),
+                uniqueKeysWithValues: (staged?.layers ?? []).map { ($0.id, $0.isVisible) }),
             settingsPresented: session.isPresented,
-            settingsDirty: session.isDirty,
-            programSceneID: programSceneID)
+            settingsDirty: session.isDirty)
     }
 
     // MARK: Rejection surfacing

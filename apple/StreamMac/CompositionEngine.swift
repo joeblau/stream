@@ -101,9 +101,12 @@ actor CompositionEngine {
 
     // MARK: - Live reconfiguration
 
-    /// Swaps the composed scene graph mid-program (scene switch/edit). For W03
-    /// (preview/program) this is where a staged-vs-live pair of compositions
-    /// plugs in: one engine per composition, or a composition slot swap here.
+    /// Swaps the composed scene graph mid-program (scene switch/edit). The swap
+    /// is a plain value assignment between ticks — the tick loop and clock keep
+    /// running — so a Take changes the composition atomically per frame without
+    /// interrupting cadence. W03 (preview/program) uses one engine per
+    /// composition: StreamController runs a program engine (this path) plus a
+    /// separate preview engine fed through the same `updateScene` seam.
     func updateScene(_ scene: Scene?) {
         self.scene = scene
     }

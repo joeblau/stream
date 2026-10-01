@@ -6,8 +6,10 @@ import StreamCore
 /// control in dedicated, collapsible panels —
 ///
 ///     ┌──────────┬───────────────────────────┬──────────┬────────────┬───────────┐
-///     │  Scenes  │  Canvas (program preview) │   Chat   │ Inspector  │ Settings  │
-///     │  column  │  ──────────────────────── │  column  │  column    │ (W04, ⌘,) │
+///     │  Scenes  │  PREVIEW + PROGRAM (W03)  │   Chat   │ Inspector  │ Settings  │
+///     │  column  │  Take / Revert / Direct   │  column  │  column    │ (W04, ⌘,) │
+///     │          │  Live controls            │          │            │           │
+///     │          │  ──────────────────────── │          │            │           │
 ///     │          │  Diagnostics strip        │          │            │           │
 ///     │          │  Transport bar            │          │            │           │
 ///     └──────────┴───────────────────────────┴──────────┴────────────┴───────────┘
@@ -18,11 +20,14 @@ import StreamCore
 /// fifth pane — no longer a sheet — editing the shared `SettingsSession`
 /// draft: ⌘, (menu) or the toolbar toggle opens it, Escape/close dismisses it
 /// and returns keyboard focus to the previously focused panel, and edits only
-/// reach the store/pipeline via its explicit Apply. W02 session
-/// states surface in the diagnostics strip (StatsHUD + recording status) and
-/// the transport bar (acknowledged-connection LIVE badge, per-state Go Live
-/// button); window close while an output is active is confirmed in-window via
-/// `WindowCloseGuard`.
+/// reach the store/pipeline via its explicit Apply. W03 (issue #66) splits the
+/// canvas into two always-labeled monitors — PREVIEW stages the selected scene
+/// and every edit, PROGRAM shows the outgoing composition — with Take (⏎),
+/// Revert, a pending-edits indication, and the explicit direct-live toggle.
+/// W02 session states surface in the diagnostics strip (StatsHUD + recording
+/// status) and the transport bar (acknowledged-connection LIVE badge,
+/// per-state Go Live button); window close while an output is active is
+/// confirmed in-window via `WindowCloseGuard`.
 struct MainWindowView: View {
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var controller: StreamController
@@ -33,6 +38,8 @@ struct MainWindowView: View {
     /// The W05 command layer: every studio action below routes through this
     /// dispatcher instead of calling the controllers/stores directly.
     @EnvironmentObject private var dispatcher: StudioCommandDispatcher
+    /// The W03 preview/program model: the inspector edits its staged scene.
+    @EnvironmentObject private var previewProgram: PreviewProgramModel
     /// Shared Restream chat connection: the sidebar shows it and the settings
     /// pane edits its credentials (W04 — one instance, one sign-in).
     @State private var chat = RestreamChat()
@@ -291,7 +298,9 @@ struct MainWindowView: View {
 
             List(selection: sceneSelection) {
                 ForEach(sceneStore.scenes) { scene in
-                    SceneRow(scene: scene)
+                    SceneRow(scene: scene,
+                             isStaged: dispatcher.state.stagedSceneID == scene.id,
+                             isProgram: dispatcher.state.programSceneID == scene.id)
                         .tag(scene.id)
                         .contextMenu {
                             Button("Rename…") {
@@ -324,10 +333,12 @@ struct MainWindowView: View {
 
     private var canvasPanel: some View {
         VStack(spacing: 0) {
-            PreviewView(controller: controller)
+            monitorsRow
                 .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1)
+            Divider()
+            transitionControls
             if showDiagnostics {
                 Divider()
                 diagnosticsStrip
@@ -335,6 +346,81 @@ struct MainWindowView: View {
             Divider()
             transportBar
         }
+    }
+
+    // MARK: - Preview / program monitors (W03)
+
+    /// Two always-labeled monitors. PREVIEW renders the staged composition
+    /// (selection + edits land here only); PROGRAM renders the outgoing
+    /// composition the publisher/recording emit. Selecting a scene stages it
+    /// without touching program; Take publishes staged → program.
+    private var monitorsRow: some View {
+        HStack(spacing: 12) {
+            PreviewView(
+                image: controller.previewImage,
+                label: "PREVIEW",
+                accent: dispatcher.state.hasPendingStagedEdits ? .yellow : Color.secondary.opacity(0.3),
+                isHighlighted: dispatcher.state.hasPendingStagedEdits,
+                placeholder: controller.isPreviewing ? "Waiting for sources…" : "Preview off")
+            PreviewView(
+                image: controller.programImage,
+                label: "PROGRAM",
+                accent: dispatcher.state.stream.isLive ? .red : Color.secondary.opacity(0.3),
+                isHighlighted: dispatcher.state.stream.isLive,
+                placeholder: controller.isPreviewing ? "Waiting for sources…" : "Preview off")
+        }
+    }
+
+    /// The W03 transition controls: Take publishes the staged composition
+    /// atomically (⏎), Revert discards unpublished edits, the pending badge
+    /// marks staged work program doesn't have yet, and the Direct Live toggle
+    /// switches to the explicit edit-straight-to-program mode.
+    private var transitionControls: some View {
+        HStack(spacing: 12) {
+            Button {
+                dispatcher.execute(.take)
+            } label: {
+                Text("Take")
+                    .frame(minWidth: 64)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(dispatcher.state.hasPendingStagedEdits ? .accentColor : nil)
+            .disabled(!dispatcher.canExecute(.take))
+            .keyboardShortcut(.defaultAction)
+            .help("Publish the previewed scene to the program output (⏎)")
+
+            Button("Revert") {
+                dispatcher.execute(.revert)
+            }
+            .disabled(!dispatcher.canExecute(.revert))
+            .help("Discard unpublished edits (preview goes back to the program scene)")
+
+            if dispatcher.state.hasPendingStagedEdits {
+                Label("Unpublished changes", systemImage: "circle.fill")
+                    .foregroundStyle(.yellow)
+                    .font(.caption.weight(.semibold))
+                    .labelStyle(.titleAndIcon)
+            }
+
+            Spacer()
+
+            Toggle(isOn: directLiveBinding) {
+                Text("Direct Live")
+                    .font(.callout)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .help("When on, scene edits and selections apply straight to the program output")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .animation(.default, value: dispatcher.state.hasPendingStagedEdits)
+    }
+
+    private var directLiveBinding: Binding<Bool> {
+        Binding(
+            get: { dispatcher.state.directLiveEditing },
+            set: { dispatcher.execute(.setDirectLiveEditing($0)) })
     }
 
     // MARK: - Diagnostics strip
@@ -431,7 +517,9 @@ struct MainWindowView: View {
 
     private var sourcesInspector: some View {
         Form {
-            if let scene = sceneStore.selected {
+            // W03: the inspector edits the STAGED scene (what PREVIEW shows);
+            // changes reach program only via Take.
+            if let scene = previewProgram.stagedScene {
                 Picker("Layout", selection: layoutBinding(for: scene)) {
                     ForEach(SceneLayout.allCases, id: \.self) { layout in
                         Text(layout.displayName).tag(layout)
@@ -602,13 +690,34 @@ struct MainWindowView: View {
     }
 }
 
-/// A single scene row in the scenes panel.
+/// A single scene row in the scenes panel. W03 markers show which scene is
+/// staged in PREVIEW and which is on PROGRAM — the two are independent.
 private struct SceneRow: View {
     let scene: Scene
+    var isStaged = false
+    var isProgram = false
 
     var body: some View {
-        Label(scene.name, systemImage: icon)
-            .lineLimit(1)
+        HStack {
+            Label(scene.name, systemImage: icon)
+                .lineLimit(1)
+            Spacer()
+            if isStaged {
+                marker("PVW", color: .green)
+            }
+            if isProgram {
+                marker("PGM", color: .red)
+            }
+        }
+    }
+
+    private func marker(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(color.opacity(0.25), in: Capsule())
+            .foregroundStyle(color)
     }
 
     private var icon: String {
