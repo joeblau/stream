@@ -42,8 +42,8 @@ jobs:
       - name: Validate optional decoder and native controls
         run: |
           mkdir -p build
-          VPX_PREFIX="$(brew --prefix libvpx)" G10_REQUIRE_NATIVE_CONTROLS=1 \\
-            zsh scripts/run_g10_decoder_harness.zsh 2>&1 | tee build/native-media-research.log
+          set -euo pipefail
+          VPX_PREFIX="$(brew --prefix libvpx)" G10_REQUIRE_NATIVE_CONTROLS=1 zsh scripts/run_g10_decoder_harness.zsh 2>&1 | tee build/native-media-research.log
       - name: Upload measured results and fixtures
         if: always()
         uses: actions/upload-artifact@v4
