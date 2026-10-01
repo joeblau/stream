@@ -381,6 +381,45 @@ enum StudioCommand: Equatable, Sendable {
     /// when it enters program; keep-playing/pause/stop when it leaves.
     case setSceneMediaBehavior(SceneMediaBehavior, in: SceneID?)
 
+    // E06 PTZ camera control (issue #165): pan/tilt/zoom, speed, stop, and
+    // store/recall preset commands for configured network targets, plus the
+    // explicit scene→preset recall links. These are HARDWARE/session
+    // commands — they edit no scene content, so locks and staging never
+    // apply and they are NOT undoable scene edits (the media-transport
+    // precedent). Targets/presets/links persist in the PTZ document
+    // (PTZPresetStore — the soundboard-document precedent), keyed by target
+    // UUID; a target optionally records a capture device's uniqueID for
+    // display, but never touches the capture pool. Movement is
+    // fire-and-forget (VISCA over IP is best-effort); stop commands exist
+    // for focus loss, release, and disconnect. Scene-linked recall rides
+    // the Take seam: only links with `recallOnProgramEntry` fire, and only
+    // when a scene becomes PROGRAM — previewing never moves a camera.
+    case ptzAddTarget(PTZTarget)
+    case ptzUpdateTarget(PTZTarget)
+    /// Stops motion and tears the transport down, then removes the target's
+    /// presets and recall links with it.
+    case ptzRemoveTarget(UUID)
+    /// Drive pan/tilt (speeds clamp to the pinned VISCA ranges: pan 1…24,
+    /// tilt 1…20). A matching `.ptzStop` ends the drive.
+    case ptzMove(UUID, direction: PTZMoveDirection, panSpeed: Int, tiltSpeed: Int)
+    case ptzZoom(UUID, direction: PTZZoomDirection, speed: Int)
+    /// Stops pan/tilt AND zoom on one target.
+    case ptzStop(UUID)
+    /// The focus-loss/disappear path: stops every target with outstanding
+    /// motion.
+    case ptzStopAll
+    /// Stores the camera's current position into a VISCA slot and names it.
+    case ptzStorePreset(UUID, number: UInt8, name: String?)
+    /// Recalls a slot the document knows about (CAM_Memory recall).
+    case ptzRecallPreset(UUID, number: UInt8)
+    /// Removes the app-side record of a slot (the camera's own memory is
+    /// left intact).
+    case ptzRemovePreset(UUID, number: UInt8)
+    /// Adds/replaces the explicit scene→target recall link (one per
+    /// scene/target pair).
+    case ptzSetSceneRecall(PTZSceneRecallLink)
+    case ptzRemoveSceneRecall(UUID)
+
     // Settings session (W04).
     case openSettings(SettingsSession.Section?)
     case closeSettings
@@ -530,6 +569,19 @@ enum StudioCommand: Equatable, Sendable {
             return snapshot == nil ? "Inherit Current Mix" : "Set Scene Audio Snapshot"
         case .captureSceneAudioSnapshot: return "Capture Scene Audio"
         case .setSceneMediaBehavior: return "Scene Media Behavior"
+        case .ptzAddTarget: return "Add PTZ Camera"
+        case .ptzUpdateTarget: return "Edit PTZ Camera"
+        case .ptzRemoveTarget: return "Remove PTZ Camera"
+        case .ptzMove(_, let direction, _, _): return "Pan/Tilt \(direction.displayName)"
+        case .ptzZoom(_, let direction, _): return direction.displayName
+        case .ptzStop: return "Stop PTZ Camera"
+        case .ptzStopAll: return "Stop All PTZ Cameras"
+        case .ptzStorePreset(_, let number, _): return "Store PTZ Preset \(number)"
+        case .ptzRecallPreset(_, let number): return "Recall PTZ Preset \(number)"
+        case .ptzRemovePreset(_, let number): return "Remove PTZ Preset \(number)"
+        case .ptzSetSceneRecall(let link):
+            return link.recallOnProgramEntry ? "Arm Scene PTZ Recall" : "Set Scene PTZ Recall"
+        case .ptzRemoveSceneRecall: return "Remove Scene PTZ Recall"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
         case .applySettings: return "Apply Settings"
@@ -742,6 +794,13 @@ final class StudioCommandDispatcher: ObservableObject {
     /// `.triggerCameraReaction` commands ride. Owned here so UI, and later
     /// automation/hardware controllers, share one instance.
     let cameraControls: CameraControlCenter
+    /// E06 (issue #165): the PTZ document (network targets, presets,
+    /// scene recall links — the soundboard-document precedent) and its
+    /// runtime (transports, stop-on-focus-loss discipline, Take-seam recall).
+    /// Owned here so the inspector section, keyboard, and future
+    /// hardware/automation triggers share one instance.
+    let ptzStore: PTZPresetStore
+    let ptz: PTZController
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
     /// graph, keyed by chain-slot ID (passthrough to the controller — the
@@ -774,6 +833,11 @@ final class StudioCommandDispatcher: ObservableObject {
         self.cameraControls = CameraControlCenter(deviceMonitor: controller.deviceMonitor,
                                                   pool: controller.capturePool,
                                                   session: session)
+        // E06 (issue #165): the PTZ document + runtime (see the property
+        // docs; created like the soundboard pair above).
+        let ptzStore = PTZPresetStore()
+        self.ptzStore = ptzStore
+        self.ptz = PTZController(store: ptzStore)
         self.state = StudioState()
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
@@ -1430,6 +1494,64 @@ final class StudioCommandDispatcher: ObservableObject {
             case .success: return nil
             }
 
+        // E06 PTZ validation (issue #165): hardware/session commands —
+        // targets must exist, hosts/ports/addresses must be usable, speeds
+        // stay inside the pinned VISCA ranges, and a recall names a slot the
+        // document knows about (an unstored slot is a silent no-op on most
+        // cameras, so it's rejected instead). Locks and staging never apply.
+        case .ptzAddTarget(let target):
+            return ptzTargetError(for: target, requireNew: true)
+        case .ptzUpdateTarget(let target):
+            return ptzTargetError(for: target, requireNew: false)
+        case .ptzRemoveTarget(let id), .ptzStop(let id):
+            return ptzStore.target(withID: id) != nil
+                ? nil : .invalidTarget("PTZ camera \(id) is not configured.")
+        case .ptzMove(let id, _, let panSpeed, let tiltSpeed):
+            guard ptzStore.target(withID: id) != nil else {
+                return .invalidTarget("PTZ camera \(id) is not configured.")
+            }
+            guard (1...VISCAPacket.maxPanSpeed).contains(panSpeed),
+                  (1...VISCAPacket.maxTiltSpeed).contains(tiltSpeed) else {
+                return .invalidValue("Pan speed must be 1…\(VISCAPacket.maxPanSpeed), tilt speed 1…\(VISCAPacket.maxTiltSpeed).")
+            }
+            return nil
+        case .ptzZoom(let id, _, let speed):
+            guard ptzStore.target(withID: id) != nil else {
+                return .invalidTarget("PTZ camera \(id) is not configured.")
+            }
+            return (0...VISCAPacket.maxZoomSpeed).contains(speed)
+                ? nil : .invalidValue("Zoom speed must be 0…\(VISCAPacket.maxZoomSpeed).")
+        case .ptzStopAll:
+            return nil
+        case .ptzStorePreset(let id, let number, let name):
+            guard ptzStore.target(withID: id) != nil else {
+                return .invalidTarget("PTZ camera \(id) is not configured.")
+            }
+            if let name, name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .invalidValue("A preset name can't be empty.")
+            }
+            return number <= VISCAPacket.maxPresetNumber
+                ? nil : .invalidValue("Preset slots run 0…\(VISCAPacket.maxPresetNumber).")
+        case .ptzRecallPreset(let id, let number),
+             .ptzRemovePreset(let id, let number):
+            guard ptzStore.target(withID: id) != nil else {
+                return .invalidTarget("PTZ camera \(id) is not configured.")
+            }
+            return ptzStore.preset(number: number, forTargetID: id) != nil
+                ? nil : .invalidTarget("Preset \(number) hasn't been stored for that camera.")
+        case .ptzSetSceneRecall(let link):
+            guard sceneStore.scenes.contains(where: { $0.id.rawValue == link.sceneID }) else {
+                return .invalidTarget("Scene \(link.sceneID) does not exist.")
+            }
+            guard ptzStore.target(withID: link.targetID) != nil else {
+                return .invalidTarget("PTZ camera \(link.targetID) is not configured.")
+            }
+            return ptzStore.preset(number: link.presetNumber, forTargetID: link.targetID) != nil
+                ? nil : .invalidTarget("Preset \(link.presetNumber) hasn't been stored for that camera.")
+        case .ptzRemoveSceneRecall(let id):
+            return ptzStore.recallLink(withID: id) != nil
+                ? nil : .invalidTarget("Scene PTZ recall link \(id) does not exist.")
+
         case .openSettings, .closeSettings:
             return nil
         case .applySettings:
@@ -1888,6 +2010,37 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setSceneMediaBehavior(let behavior, let sceneID):
             editStagedScene(sceneID) { $0.mediaBehavior = behavior }
 
+        // E06 PTZ execution (issue #165): the controller turns commands into
+        // VISCA frames (fire-and-forget); configuration writes go through
+        // the PTZ document (single truth). A removed target is stopped and
+        // disconnected before its record disappears.
+        case .ptzAddTarget(let target):
+            ptzStore.addTarget(target)
+        case .ptzUpdateTarget(let target):
+            ptzStore.updateTarget(target)
+        case .ptzRemoveTarget(let id):
+            ptz.disconnectTarget(id)
+            ptzStore.removeTarget(id)
+        case .ptzMove(let id, let direction, let panSpeed, let tiltSpeed):
+            ptz.move(id, direction: direction, panSpeed: panSpeed, tiltSpeed: tiltSpeed)
+        case .ptzZoom(let id, let direction, let speed):
+            ptz.zoom(id, direction: direction, speed: speed)
+        case .ptzStop(let id):
+            ptz.stop(id)
+        case .ptzStopAll:
+            ptz.endInteractiveControl()
+        case .ptzStorePreset(let id, let number, let name):
+            ptz.storePreset(id, number: number,
+                            name: name ?? "Preset \(number)")
+        case .ptzRecallPreset(let id, let number):
+            ptz.recallPreset(id, number: number)
+        case .ptzRemovePreset(let id, let number):
+            ptz.removePreset(id, number: number)
+        case .ptzSetSceneRecall(let link):
+            ptzStore.setRecallLink(link)
+        case .ptzRemoveSceneRecall(let id):
+            ptzStore.removeRecallLink(id)
+
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
         case .applySettings: session.apply()
@@ -1920,6 +2073,10 @@ final class StudioCommandDispatcher: ObservableObject {
                 transitions.handleTake(targetSceneID: published.id,
                                        transition: published.transition
                                            ?? sceneStore.defaultTransition)
+                // E06 (issue #165): opt-in scene→preset PTZ recalls fire on
+                // program entry, on the same seam as scene sounds/media —
+                // previewing a scene never moves a camera.
+                ptz.recallLinkedPresets(forSceneID: published.id.rawValue)
             }
         case .revert:
             previewProgram.revert()
@@ -1996,6 +2153,9 @@ final class StudioCommandDispatcher: ObservableObject {
             transitions.handleTake(targetSceneID: published.id,
                                    transition: published.transition
                                        ?? sceneStore.defaultTransition)
+            // E06 (issue #165): direct-live's implicit takes fire the opt-in
+            // PTZ recalls too (same program-entry seam as the explicit Take).
+            ptz.recallLinkedPresets(forSceneID: published.id.rawValue)
         }
     }
 
@@ -2199,6 +2359,30 @@ final class StudioCommandDispatcher: ObservableObject {
             return .invalidTarget("Source \"\(source.name)\" is not a media source.")
         }
         return nil
+    }
+
+    /// E06 (issue #165): the rejection for a PTZ target configuration —
+    /// the identity rules (add = new ID, update = existing ID) plus usable
+    /// name/host/port/address values.
+    private func ptzTargetError(for target: PTZTarget, requireNew: Bool) -> StudioCommandError? {
+        let exists = ptzStore.target(withID: target.id) != nil
+        if requireNew, exists {
+            return .invalidValue("PTZ camera \(target.id) is already configured.")
+        }
+        if !requireNew, !exists {
+            return .invalidTarget("PTZ camera \(target.id) is not configured.")
+        }
+        if target.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .invalidValue("A PTZ camera name can't be empty.")
+        }
+        if target.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .invalidValue("A PTZ camera needs a host (IP or hostname).")
+        }
+        if target.port == 0 {
+            return .invalidValue("A PTZ camera needs a port (VISCA default \(target.kind.defaultPort)).")
+        }
+        return (1...7).contains(target.cameraAddress)
+            ? nil : .invalidValue("The VISCA address must be 1…7.")
     }
 
     // MARK: Canvas alignment helpers (S04)
@@ -2670,6 +2854,10 @@ private extension StudioCommand {
              .addMusicPlaylist, .updateMusicPlaylist, .removeMusicPlaylist,
              .playlistPlay, .playlistPause, .playlistStop,
              .playlistNext, .playlistPrevious,
+             .ptzAddTarget, .ptzUpdateTarget, .ptzRemoveTarget,
+             .ptzMove, .ptzZoom, .ptzStop, .ptzStopAll,
+             .ptzStorePreset, .ptzRecallPreset, .ptzRemovePreset,
+             .ptzSetSceneRecall, .ptzRemoveSceneRecall,
              .setSourceEffectDefaults,
              .addEffectPreset, .updateEffectPreset, .removeEffectPreset,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
