@@ -16,7 +16,18 @@ import UniformTypeIdentifiers
         var error: String?
     }
 
-    static func main() async throws {
+    static func main() async {
+        do { try await run() }
+        catch {
+            print("FAIL: \(error)")
+            // The async throwing entry point aborts before piped stdout is
+            // flushed, losing the measurements that explain a failed gate.
+            fflush(nil)
+            exit(1)
+        }
+    }
+
+    static func run() async throws {
         let folder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         let output = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
