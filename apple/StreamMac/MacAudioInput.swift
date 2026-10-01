@@ -15,6 +15,10 @@ final class MacAudioInput: ObservableObject {
     @Published private(set) var level: Float = 0
     /// Audio capture devices from the most recent `refreshDevices()`.
     @Published private(set) var devices: [AVCaptureDevice] = []
+    /// Human-readable description of the last start failure (missing device,
+    /// permission denial, session configuration failure). Cleared on a
+    /// successful start. Part of the S05 per-source error surface (issue #73).
+    @Published private(set) var errorMessage: String?
 
     /// Called with each microphone sample buffer, hopped to the main actor.
     var onMicSample: ((CMSampleBuffer) -> Void)?
@@ -61,6 +65,7 @@ final class MacAudioInput: ObservableObject {
     /// Starts capture from the system default audio input device.
     func start() {
         guard let device = AVCaptureDevice.default(for: .audio) else {
+            errorMessage = "No audio input device is available."
             audioInputLog.error("No default audio input device")
             return
         }
@@ -72,6 +77,7 @@ final class MacAudioInput: ObservableObject {
         stop()
         Task { [weak self] in
             guard await Self.requestMicrophoneAccess() else {
+                self?.errorMessage = "Microphone access is disabled for StreamMac. Enable it in System Settings > Privacy & Security > Microphone."
                 audioInputLog.error("Microphone permission denied")
                 return
             }
@@ -122,12 +128,14 @@ final class MacAudioInput: ObservableObject {
         do {
             let input = try AVCaptureDeviceInput(device: device)
             guard session.canAddInput(input) else {
+                errorMessage = "Cannot capture audio from \(device.localizedName)."
                 audioInputLog.error("Cannot add audio input for \(device.localizedName, privacy: .public)")
                 session.commitConfiguration()
                 return
             }
             session.addInput(input)
         } catch {
+            errorMessage = "Audio input failed: \(error.localizedDescription)"
             audioInputLog.error("Audio input failed: \(error.localizedDescription, privacy: .public)")
             session.commitConfiguration()
             return
@@ -143,6 +151,7 @@ final class MacAudioInput: ObservableObject {
         }
         output.setSampleBufferDelegate(shim, queue: sampleQueue)
         guard session.canAddOutput(output) else {
+            errorMessage = "Cannot capture audio from \(device.localizedName)."
             audioInputLog.error("Cannot add audio data output")
             session.commitConfiguration()
             return
@@ -153,6 +162,7 @@ final class MacAudioInput: ObservableObject {
         self.session = session
         outputShim = shim
         activeDevice = device
+        errorMessage = nil
 
         let box = UncheckedSendableBox(session)
         sessionQueue.async { box.value.startRunning() }

@@ -23,6 +23,68 @@ struct CompositedFrame: @unchecked Sendable {
     }
 }
 
+/// The process-wide hand-off of S07 project-level composition state (overlays
+/// + default background) from `SceneStore` (main actor, writes on every
+/// persist) to every `CompositionEngine` (its own actor, reads each tick).
+/// This bridge exists because the engines' scene seam (`updateScene`) carries
+/// only the per-scene value, and overlay edits are deliberately NOT part of
+/// any scene's staged snapshot: they are project-level edits that apply
+/// immediately to BOTH the staged and program compositions (live-safe, the
+/// Ecamm-style behavior issue #74 describes), while per-scene overrides
+/// (`Scene.hiddenOverlayIDs`, `Scene.background`) stay on the staged→program
+/// Take path as ordinary scene content. Lock-protected value snapshots, so a
+/// mid-tick publish can never tear a frame.
+final class ProjectOverlayStore: @unchecked Sendable {
+    static let shared = ProjectOverlayStore()
+
+    private var lock = os_unfair_lock_s()
+    private var context = OverlayContext.empty
+
+    func publish(_ context: OverlayContext) {
+        os_unfair_lock_lock(&lock)
+        self.context = context
+        os_unfair_lock_unlock(&lock)
+    }
+
+    func snapshot() -> OverlayContext {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return context
+    }
+}
+
+/// The process-wide hand-off of the scene registry (S06, issue #96) from
+/// `SceneStore` (main actor, publishes on every mutation) to every
+/// `CompositionEngine` (its own actor, snapshots each tick). S06 nested-scene
+/// references resolve LIVE against this registry — never against a copy
+/// baked into the staged/program snapshot — so editing a referenced scene
+/// and Taking it (which persists through `SceneStore`) updates every nesting
+/// site in both the staged and program compositions on their next tick. This
+/// is the Take-policy reading of "shared child-scene edits propagate": a
+/// staged (unpublished) edit to a child scene shows only in that child
+/// scene's own preview; once Taken it propagates everywhere it is nested.
+/// Lock-protected value snapshots, so a mid-tick publish can never tear a
+/// frame.
+final class SceneRegistryStore: @unchecked Sendable {
+    static let shared = SceneRegistryStore()
+
+    private var lock = os_unfair_lock_s()
+    private var scenes: [SceneID: Scene] = [:]
+
+    func publish(_ scenes: [Scene]) {
+        let index = SceneGraph.index(scenes)
+        os_unfair_lock_lock(&lock)
+        self.scenes = index
+        os_unfair_lock_unlock(&lock)
+    }
+
+    func snapshot() -> [SceneID: Scene] {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return scenes
+    }
+}
+
 /// The W08 GPU composition engine (issue #65): renders the current scene graph
 /// ONCE per output tick and broadcasts the result to any number of independent
 /// consumers — preview, recording, publishers, and future virtual/NDI outputs.
@@ -57,6 +119,15 @@ actor CompositionEngine {
     private let renderer = SceneRenderer()
     private let screenProvider: @Sendable () -> CVPixelBuffer?
     private let cameraProvider: @Sendable () -> LatestCameraFrame.Frame?
+    /// S07: where the engine reads the project-level overlay/background
+    /// context each tick. Defaults to the shared `ProjectOverlayStore` (fed
+    /// by `SceneStore`), so existing call sites need no new argument; tests
+    /// and future wiring can inject any source.
+    private let overlayContextProvider: @Sendable () -> OverlayContext
+    /// S06: where the engine snapshots the scene registry each tick — the
+    /// lookup S06 nested-scene references resolve against. Defaults to the
+    /// shared `SceneRegistryStore` (fed by `SceneStore`).
+    private let sceneRegistryProvider: @Sendable () -> [SceneID: Scene]
 
     private var scene: Scene?
     private var canvasSize: CGSize
@@ -73,10 +144,16 @@ actor CompositionEngine {
 
     init(screenProvider: @escaping @Sendable () -> CVPixelBuffer?,
          cameraProvider: @escaping @Sendable () -> LatestCameraFrame.Frame?,
+         overlayContextProvider: @escaping @Sendable () -> OverlayContext =
+            { ProjectOverlayStore.shared.snapshot() },
+         sceneRegistryProvider: @escaping @Sendable () -> [SceneID: Scene] =
+            { SceneRegistryStore.shared.snapshot() },
          canvasSize: CGSize = OutputProfile.default.canvasSize,
          frameRate: Int = OutputProfile.default.frameRate) {
         self.screenProvider = screenProvider
         self.cameraProvider = cameraProvider
+        self.overlayContextProvider = overlayContextProvider
+        self.sceneRegistryProvider = sceneRegistryProvider
         self.canvasSize = canvasSize
         self.frameRate = frameRate
     }
@@ -167,9 +244,11 @@ actor CompositionEngine {
         let pts = CMTimeAdd(clockAnchor, CMTime(value: frameSequence, timescale: timescale))
         let duration = CMTime(value: 1, timescale: timescale)
         guard let frame = renderer.render(scene: scene,
+                                          overlayContext: overlayContextProvider(),
                                           canvasSize: canvasSize,
                                           screen: screenProvider(),
                                           camera: cameraProvider(),
+                                          scenes: sceneRegistryProvider(),
                                           presentationTime: pts,
                                           frameDuration: duration,
                                           sequence: frameSequence) else { return }

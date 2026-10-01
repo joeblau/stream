@@ -22,7 +22,7 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
     // MARK: Simulator no-op implementation
 
-    func start(with settings: StreamSettings) {
+    func start(with settings: StreamSettings, deviceUniqueID: String? = nil) {
         // No camera hardware on the Simulator; intentionally does nothing.
     }
 
@@ -59,6 +59,11 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     /// or a media-services reset restarts capture only while this is true, so a
     /// notification arriving after `stop()` cannot resurrect the camera.
     private var isRunningDesired = false
+    /// macOS only (S05, issue #73): the registry source's pinned capture-device
+    /// unique ID; nil = system default camera. Read only on `queue`; set by
+    /// `start` before `configureAndRun` so the permission-prompt retry and the
+    /// media-services-reset rebuild keep resolving the same device.
+    private var requestedDeviceUniqueID: String?
 
     override init() {
         super.init()
@@ -73,9 +78,14 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         NotificationCenter.default.removeObserver(self)
     }
 
-    func start(with settings: StreamSettings) {
+    /// Starts capture. `deviceUniqueID` (macOS) pins a specific camera from a
+    /// registry source definition; nil keeps the system default. iOS ignores
+    /// it (front/back selection stays on `settings.cameraPosition`).
+    func start(with settings: StreamSettings, deviceUniqueID: String? = nil) {
         queue.async { [weak self] in
-            self?.configureAndRun(with: settings)
+            guard let self else { return }
+            self.requestedDeviceUniqueID = deviceUniqueID
+            self.configureAndRun(with: settings)
         }
     }
 
@@ -102,8 +112,9 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         // not authorized (the stream continues screen-only).
         let authorization = AVCaptureDevice.authorizationStatus(for: .video)
         if authorization == .notDetermined {
+            let deviceUniqueID = requestedDeviceUniqueID
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                if granted { self?.start(with: settings) }
+                if granted { self?.start(with: settings, deviceUniqueID: deviceUniqueID) }
             }
             return
         }
@@ -185,7 +196,7 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     /// The input for `position`, built once and reused. Called only on `queue`.
     private func input(for position: CameraPosition) -> AVCaptureDeviceInput? {
         if let cached = inputsByPosition[position] { return cached }
-        guard let device = Self.device(for: position),
+        guard let device = device(for: position),
               let input = try? AVCaptureDeviceInput(device: device) else { return nil }
         inputsByPosition[position] = input
         return input
@@ -218,15 +229,21 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         #endif
     }
 
-    private static func device(for position: CameraPosition) -> AVCaptureDevice? {
+    private func device(for position: CameraPosition) -> AVCaptureDevice? {
         #if os(iOS)
         return AVCaptureDevice.default(.builtInWideAngleCamera,
                                        for: .video,
                                        position: position == .front ? .front : .back)
         #else
-        // macOS has no front/back pair: the system default video device is the
-        // built-in FaceTime camera (or a continuity/USB camera the user chose in
-        // Control Center). Treat it as `.front` so the PiP stays mirrored.
+        // macOS has no front/back pair. A registry source can pin a specific
+        // camera by unique ID (S05); otherwise capture uses the system default
+        // video device (the built-in FaceTime camera, or a continuity/USB
+        // camera the user chose in Control Center). Either way the device is
+        // treated as `.front` so the PiP stays mirrored.
+        if let uniqueID = requestedDeviceUniqueID,
+           let device = AVCaptureDevice(uniqueID: uniqueID) {
+            return device
+        }
         return AVCaptureDevice.default(for: .video)
         #endif
     }

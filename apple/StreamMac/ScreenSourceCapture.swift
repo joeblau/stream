@@ -32,6 +32,9 @@ final class ScreenSourceCapture: ObservableObject {
     private var pickerObserver: PickerObserverShim?
     private var pickerContinuation: CheckedContinuation<UncheckedSendableBox<SCContentFilter>?, Never>?
     private var pickerStartFailed = false
+    /// The filter the user last picked (or a fallback resolved to), reused on
+    /// restart so an unchanged source never re-presents the picker (S05).
+    private var lastFilter: SCContentFilter?
     private var stream: SCStream?
     private var output: StreamOutputShim?
     /// Serial queue for all SCStream sample callbacks.
@@ -57,11 +60,18 @@ final class ScreenSourceCapture: ObservableObject {
     }
 
     /// Presents the system content-sharing picker, then starts an SCStream for
-    /// whatever the user selects. Falls back to the first display when the
-    /// picker fails to start; a user cancel simply leaves capture off.
+    /// whatever the user selects. A restart of an unchanged source reuses the
+    /// remembered selection instead of re-prompting (S05, issue #73); the
+    /// picker only appears when no selection exists yet. Falls back to the
+    /// first display when the picker fails to start; a user cancel simply
+    /// leaves capture off.
     func pickAndStart() async {
         guard stream == nil, pickerContinuation == nil else { return }
         errorMessage = nil
+        if let lastFilter {
+            await start(with: lastFilter)
+            return
+        }
         pickerStartFailed = false
         picker.isActive = true
         let selection = await withCheckedContinuation { continuation in
@@ -81,6 +91,7 @@ final class ScreenSourceCapture: ObservableObject {
     func start(with filter: SCContentFilter) async {
         if stream != nil { await stop() }
         errorMessage = nil
+        lastFilter = filter
 
         let configuration = SCStreamConfiguration()
         // Native pixel size of the picked content; never hardcoded.
@@ -134,7 +145,49 @@ final class ScreenSourceCapture: ObservableObject {
         }
     }
 
+    /// Starts capturing the concrete target a registry `ScreenSourcePayload`
+    /// pins, WITHOUT presenting the picker (S05): displays resolve by
+    /// `CGDirectDisplayID`, windows by `CGWindowID`. An unresolvable target —
+    /// the display/window is gone, or an application target, which has no
+    /// stable restorable identifier yet — falls back to the remembered
+    /// selection or the picker so the user can re-point the source.
+    func start(matching payload: ScreenSourcePayload) async {
+        guard stream == nil, pickerContinuation == nil else { return }
+        do {
+            let content = try await SCShareableContent.current
+            switch payload.target {
+            case .display:
+                if let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
+                   let display = content.displays.first(where: { $0.displayID == id }) {
+                    await start(with: SCContentFilter(display: display, excludingWindows: []))
+                    return
+                }
+            case .window:
+                if let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
+                   let window = content.windows.first(where: { $0.windowID == id }) {
+                    await start(with: SCContentFilter(desktopIndependentWindow: window))
+                    return
+                }
+            case .application:
+                break
+            }
+        } catch {
+            // Most commonly the Screen Recording permission is missing.
+            errorMessage = "Screen Recording permission is required. Enable it for StreamMac in System Settings > Privacy & Security > Screen Recording. (\(error.localizedDescription))"
+            screenSourceLog.error("Shareable content unavailable: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        await pickAndStart()
+    }
+
     func stop() async {
+        // Dismiss a picker still waiting on this capture (demand dropped
+        // mid-presentation), so it can't resume a start nobody wants.
+        if let continuation = pickerContinuation {
+            pickerContinuation = nil
+            picker.isActive = false
+            continuation.resume(returning: nil)
+        }
         let stream = self.stream
         self.stream = nil
         self.output = nil
