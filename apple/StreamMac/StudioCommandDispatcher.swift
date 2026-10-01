@@ -208,6 +208,18 @@ enum StudioCommand: Equatable, Sendable {
     /// and selections take immediately, applying straight to program.
     case setDirectLiveEditing(Bool)
 
+    // S12 (issue #75): undo/redo of scene edits. These restore SNAPSHOTS of
+    // the undoable state (scene document + browser organization + staged
+    // scene — see SceneUndoStack.swift) recorded around every executed
+    // undoable command below. Program safety: restore writes the STAGED model
+    // and the store only, never the program snapshot — undoing an edit that
+    // was already Taken re-stages the prior state as pending edits (Take
+    // publishes it, Revert discards it) instead of retroactively rewriting
+    // live output. In direct-live mode undo/redo takes immediately, keeping
+    // the mode's preview == program contract.
+    case undo
+    case redo
+
     /// Short human label for rejection notices and future automation logs.
     var label: String {
         switch self {
@@ -276,6 +288,8 @@ enum StudioCommand: Equatable, Sendable {
         case .revert: return "Revert"
         case .setDirectLiveEditing(let on):
             return "\(on ? "Enable" : "Disable") Direct-Live Editing"
+        case .undo: return "Undo"
+        case .redo: return "Redo"
         }
     }
 }
@@ -365,6 +379,12 @@ struct StudioState: Equatable, Sendable {
     var layerLocks: [LayerID: Bool] = [:]
     var settingsPresented = false
     var settingsDirty = false
+    /// S12 undo/redo availability and the labels of the edits ⌘Z / ⇧⌘Z would
+    /// apply (the Edit menu shows "Undo <label>").
+    var canUndo = false
+    var canRedo = false
+    var undoLabel: String? = nil
+    var redoLabel: String? = nil
 }
 
 // MARK: - Dispatcher
@@ -395,6 +415,9 @@ final class StudioCommandDispatcher: ObservableObject {
     private let recorder: RecordingController
     /// The W03 preview/program model: staged vs program scene snapshots.
     private let previewProgram: PreviewProgramModel
+    /// S12 (issue #75): the scene-edit undo stack. One entry per executed
+    /// undoable command, recorded in `execute` around `perform`.
+    private let undoStack = UndoStack<SceneUndoSnapshot>()
 
     private var rejectionSequence = 0
     private var rejectionTask: Task<Void, Never>?
@@ -444,7 +467,17 @@ final class StudioCommandDispatcher: ObservableObject {
             postRejection(command: command, error: error)
             return StudioCommandResult(outcome: .rejected(error), state: state)
         }
+        // S12: snapshot the undoable state around undoable scene edits. The
+        // record happens only when the command actually changed something
+        // (the stack drops pre == post no-ops).
+        let preUndoSnapshot = command.isUndoableSceneEdit ? captureUndoSnapshot() : nil
         perform(command)
+        if let preUndoSnapshot {
+            undoStack.record(label: command.label,
+                             coalescingKey: command.undoCoalescingKey,
+                             pre: preUndoSnapshot,
+                             post: captureUndoSnapshot())
+        }
         refreshState()
         return StudioCommandResult(outcome: .success, state: state)
     }
@@ -772,6 +805,12 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDirectLiveEditing(let on):
             return previewProgram.directLiveEditing != on
                 ? nil : .unavailable("Direct-live editing is already \(on ? "on" : "off").")
+        case .undo:
+            return undoStack.canUndo
+                ? nil : .unavailable("There is nothing to undo.")
+        case .redo:
+            return undoStack.canRedo
+                ? nil : .unavailable("There is nothing to redo.")
         }
     }
 
@@ -984,7 +1023,52 @@ final class StudioCommandDispatcher: ObservableObject {
             previewProgram.revert()
         case .setDirectLiveEditing(let on):
             previewProgram.setDirectLiveEditing(on)
+        case .undo:
+            if let snapshot = undoStack.undo() {
+                applyUndoSnapshot(snapshot)
+            }
+        case .redo:
+            if let snapshot = undoStack.redo() {
+                applyUndoSnapshot(snapshot)
+            }
         }
+    }
+
+    // MARK: Undo/redo (S12, issue #75)
+
+    /// The undoable state right now: the store's document + browser state and
+    /// the staged scene. The program snapshot is deliberately EXCLUDED —
+    /// undo must never rewrite what the outputs are emitting.
+    private func captureUndoSnapshot() -> SceneUndoSnapshot {
+        sceneStore.captureUndoSnapshot(stagedScene: previewProgram.stagedScene)
+    }
+
+    /// Restores a snapshot popped from the undo/redo stack. Program-safety
+    /// semantics: the restored state lands on the STAGED model and the store;
+    /// the program snapshot is untouched, so if it differs from the restored
+    /// staged scene (e.g. undoing an edit that was already Taken) the
+    /// difference simply reads as pending staged edits — Take publishes the
+    /// restored state, Revert discards it. In direct-live mode the restore
+    /// takes immediately (the mode's contract is preview == program).
+    private func applyUndoSnapshot(_ snapshot: SceneUndoSnapshot) {
+        sceneStore.restoreUndoSnapshot(snapshot)
+        if let staged = snapshot.stagedScene,
+           sceneStore.scenes.contains(where: { $0.id == staged.id }) {
+            previewProgram.stage(staged)
+        } else {
+            previewProgram.stage(sceneStore.selected)
+        }
+        // A restored NAME-only difference (rename persists immediately and
+        // syncs both snapshots) must not read as a pending visual edit —
+        // same rule as `noteSceneRenamed` on the rename command itself.
+        if let programID = previewProgram.programScene?.id,
+           let restored = sceneStore.scene(withID: programID) {
+            previewProgram.noteSceneRenamed(programID, to: restored.name)
+        }
+        // Prune the ephemeral layer selection to layers that exist again.
+        sceneStore.selectedLayerIDs = sceneStore.selectedLayerIDs.intersection(
+            Set(previewProgram.stagedScene?.layers.map(\.id) ?? []))
+        takeStagedIfDirectLive()
     }
 
     /// Direct-live mode (W03): every edit/selection is an implicit take, so
@@ -1330,7 +1414,11 @@ final class StudioCommandDispatcher: ObservableObject {
                     ($0.id, staged?.isEffectivelyLocked($0) ?? false)
                 }),
             settingsPresented: session.isPresented,
-            settingsDirty: session.isDirty)
+            settingsDirty: session.isDirty,
+            canUndo: undoStack.canUndo,
+            canRedo: undoStack.canRedo,
+            undoLabel: undoStack.undoLabel,
+            redoLabel: undoStack.redoLabel)
     }
 
     // MARK: Rejection surfacing
@@ -1355,6 +1443,74 @@ private extension StudioCommand {
     var isGroupUnlock: Bool {
         if case .setGroupLocked(_, let locked, _) = self { return !locked }
         return false
+    }
+
+    /// S12 (issue #75): the commands the undo stack covers — every scene,
+    /// layer, group, browser-organization, and overlay/background mutation.
+    /// Excluded: output sessions and settings (not scene state), selection
+    /// and folder collapse (transient view state), Take/Revert/direct-live
+    /// (publish control, not an edit — undoing an already-Taken edit undoes
+    /// the ORIGINAL edit and re-stages it), and undo/redo themselves.
+    var isUndoableSceneEdit: Bool {
+        switch self {
+        case .addScene, .insertScene, .renameScene, .deleteScene, .updateScene,
+             .duplicateScene, .moveScene,
+             .addSceneFolder, .renameSceneFolder, .deleteSceneFolder,
+             .setSceneLocked,
+             .setLayerVisibility, .setLayerTransform, .setLayerEffects, .setLayerAudio,
+             .addLayer, .removeLayer, .duplicateLayer, .renameLayer, .setLayerLocked,
+             .moveLayer, .groupLayers, .ungroupLayers, .renameGroup,
+             .setGroupVisibility, .setGroupLocked,
+             .alignLayers, .distributeLayers,
+             .addOverlay, .removeOverlay, .renameOverlay, .setOverlayVisibility,
+             .setOverlayLocked, .setOverlayTransform, .setOverlayEffects, .moveOverlay,
+             .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground:
+            return true
+        case .startStream, .stopStream, .startPreview, .stopPreview,
+             .startRecording, .stopRecording,
+             .selectScene, .selectSceneAt, .setSceneFolderCollapsed,
+             .setOutputProfile,
+             .openSettings, .closeSettings, .applySettings, .revertSettings,
+             .take, .revert, .setDirectLiveEditing,
+             .undo, .redo:
+            return false
+        }
+    }
+
+    /// S12: the coalescing key folding rapid repeats of the SAME logical
+    /// gesture (a canvas transform drag, a slider scrub, keystroke-by-
+    /// keystroke renames) into one undo action. Nil = never coalesce.
+    var undoCoalescingKey: String? {
+        switch self {
+        case .updateScene(let scene):
+            return "update-scene.\(scene.id)"
+        case .renameScene(let id, _):
+            return "rename-scene.\(id)"
+        case .renameSceneFolder(let id, _):
+            return "rename-folder.\(id)"
+        case .setLayerTransform(let id, _, _):
+            return "layer-transform.\(id)"
+        case .setLayerEffects(let id, _, _):
+            return "layer-effects.\(id)"
+        case .setLayerAudio(let id, _, _):
+            return "layer-audio.\(id)"
+        case .renameLayer(let id, _, _):
+            return "rename-layer.\(id)"
+        case .renameGroup(let id, _, _):
+            return "rename-group.\(id)"
+        case .renameOverlay(let id, _):
+            return "rename-overlay.\(id)"
+        case .setOverlayTransform(let id, _):
+            return "overlay-transform.\(id)"
+        case .setOverlayEffects(let id, _):
+            return "overlay-effects.\(id)"
+        case .setSceneBackground(_, let sceneID):
+            return "scene-background.\(sceneID?.description ?? "staged")"
+        case .setDefaultBackground:
+            return "default-background"
+        default:
+            return nil
+        }
     }
 }
 

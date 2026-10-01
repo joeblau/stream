@@ -79,6 +79,21 @@ struct StreamMacApp: App {
         .defaultSize(width: 1440, height: 900)
         .windowResizability(.contentMinSize)
         .commands {
+            // S12 (issue #75): undo/redo for scene edits, routed through the
+            // dispatcher like every studio action. The labels name the edit
+            // ⌘Z / ⇧⌘Z would apply ("Undo Move Layer").
+            CommandGroup(replacing: .undoRedo) {
+                Button(dispatcher.state.undoLabel.map { "Undo \($0)" } ?? "Undo") {
+                    dispatcher.execute(.undo)
+                }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!dispatcher.state.canUndo)
+                Button(dispatcher.state.redoLabel.map { "Redo \($0)" } ?? "Redo") {
+                    dispatcher.execute(.redo)
+                }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!dispatcher.state.canRedo)
+            }
             // Takes over the app menu's Settings slot: ⌘, opens the embedded
             // settings pane (and closes it when already open) — routed through
             // the W05 command layer like every other studio action.

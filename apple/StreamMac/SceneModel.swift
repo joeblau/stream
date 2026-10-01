@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Combine
 import StreamCore
@@ -189,10 +190,10 @@ struct SceneBrowserDocument: Hashable, Codable, Sendable {
 @MainActor
 final class SceneStore: ObservableObject {
     @Published var scenes: [Scene] {
-        didSet { persist() }
+        didSet { scheduleSceneAutosave() }
     }
     @Published var selectedID: Scene.ID {
-        didSet { persist() }
+        didSet { scheduleSceneAutosave() }
     }
     /// S03: the layer panel's selection within the staged scene, keyed by
     /// stable LayerID. Ephemeral view state (never persisted); S04's canvas
@@ -201,42 +202,50 @@ final class SceneStore: ObservableObject {
     @Published var selectedLayerIDs: Set<LayerID> = []
     /// Project-level reusable sources that layers bind to via `sourceID`.
     @Published private(set) var sources: [SourceDefinition] {
-        didSet { persist() }
+        didSet { scheduleSceneAutosave() }
     }
     /// S07: project-wide overlays (back-to-front), stored once at document
     /// level and composited above every scene's layers. Mutated only through
     /// the dispatcher's project-level overlay commands.
     @Published private(set) var overlays: [LayerNode] {
-        didSet { persist() }
+        didSet { scheduleSceneAutosave() }
     }
     /// S07: the project default background for scenes without their own.
     @Published private(set) var defaultBackground: SceneBackground? {
-        didSet { persist() }
+        didSet { scheduleSceneAutosave() }
     }
     /// S02 browser metadata: folders, scene → folder membership, and scene
     /// locks. Immediate (never staged), persisted in the browser document.
     @Published private(set) var folders: [SceneFolder] = [] {
-        didSet { persistBrowser() }
+        didSet { scheduleBrowserAutosave() }
     }
     @Published private(set) var sceneMembership: [SceneID: SceneFolderID] = [:] {
-        didSet { persistBrowser() }
+        didSet { scheduleBrowserAutosave() }
     }
     /// Locked scenes reject edits, deletion, and reordering via the
     /// dispatcher (the lock toggle itself stays available).
     @Published private(set) var lockedSceneIDs: Set<SceneID> = [] {
-        didSet { persistBrowser() }
+        didSet { scheduleBrowserAutosave() }
     }
     private var projectID: ProjectID
     private var projectName: String
+
+    // S12 autosave: pending debounced writes (see "Autosave" below).
+    private var sceneAutosaveTask: Task<Void, Never>?
+    private var browserAutosaveTask: Task<Void, Never>?
+    /// `nonisolated(unsafe)` so `deinit` can unregister it (the store lives
+    /// for the app's lifetime; this is belt-and-braces).
+    nonisolated(unsafe) private var terminationObserver: NSObjectProtocol?
 
     private static let fileNameV2 = "stream.scenes.v2.json"
     private static let fileNameV1 = "stream.scenes.v1.json"
     private static let browserFileName = "stream.sceneBrowser.v1.json"
 
     init() {
-        let loaded = Self.loadV2().flatMap { $0.scenes.isEmpty ? nil : $0 }
-        let document = loaded
-            ?? Self.loadV1().flatMap { $0.scenes.isEmpty ? nil : SceneDocument(migratingV1: $0) }
+        // S12: every candidate file goes through the migration pipeline —
+        // unreadable or newer-than-supported files are quarantined aside
+        // (never crash-loop, never overwritten) before falling back.
+        let document = Self.loadDocument().flatMap { $0.scenes.isEmpty ? nil : $0 }
             ?? SceneDocument.makeDefault()
         projectID = document.projectID
         projectName = document.projectName
@@ -253,8 +262,22 @@ final class SceneStore: ObservableObject {
         lockedSceneIDs = Set(browser.lockedSceneIDs)
         pruneBrowserMetadata()
         normalizeOrder()
-        persist()
-        persistBrowser()
+        ProjectOverlayStore.shared.publish(document.overlayContext)
+        writeSceneDocument()
+        writeBrowserDocument()
+        // Flush any pending debounced autosave on quit. willTerminate is
+        // posted on the main thread, so the flush runs synchronously.
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.flushPendingWrites() }
+        }
+    }
+
+    deinit {
+        if let terminationObserver {
+            NotificationCenter.default.removeObserver(terminationObserver)
+        }
     }
 
     /// The whole persisted model, for consumers that work at document level.
@@ -626,7 +649,55 @@ final class SceneStore: ObservableObject {
         lockedSceneIDs = lockedSceneIDs.intersection(sceneIDs)
     }
 
+    // MARK: - Undo snapshots (S12, issue #75)
+    //
+    // The dispatcher snapshots this state around every undoable command (see
+    // SceneUndoStack.swift). Snapshots are plain values; restoring one writes
+    // the document and browser state back through the normal properties, so
+    // autosave and the overlay-store republication happen as usual. The
+    // PROGRAM snapshot is not part of this state and is never touched by a
+    // restore — undo lands on the staged model only.
+
+    /// Everything undo captures about the store.
+    func captureUndoSnapshot(stagedScene: Scene?) -> SceneUndoSnapshot {
+        SceneUndoSnapshot(scenes: scenes,
+                          selectedID: selectedID,
+                          overlays: overlays,
+                          defaultBackground: defaultBackground,
+                          folders: folders,
+                          sceneMembership: sceneMembership,
+                          lockedSceneIDs: lockedSceneIDs,
+                          stagedScene: stagedScene)
+    }
+
+    /// Writes a captured snapshot back. Browser metadata is re-pruned and the
+    /// order re-normalized so a snapshot can never resurrect dangling
+    /// references (same invariants as a fresh load).
+    func restoreUndoSnapshot(_ snapshot: SceneUndoSnapshot) {
+        guard !snapshot.scenes.isEmpty else { return }
+        scenes = snapshot.scenes
+        selectedID = scenes.contains(where: { $0.id == snapshot.selectedID })
+            ? snapshot.selectedID
+            : scenes[0].id
+        overlays = snapshot.overlays
+        defaultBackground = snapshot.defaultBackground
+        folders = snapshot.folders
+        sceneMembership = snapshot.sceneMembership
+        lockedSceneIDs = snapshot.lockedSceneIDs
+        pruneBrowserMetadata()
+        normalizeOrder()
+    }
+
     // MARK: - Persistence
+    //
+    // S12 (issue #75): loading runs every candidate file through the
+    // `SceneDocumentMigration` pipeline. A file that decodes at the current
+    // version loads; an older file migrates hop-by-hop; a CORRUPT file or one
+    // written by a NEWER app version is quarantined aside (moved to a
+    // timestamped .bak next to the original, so the bytes are never
+    // destroyed) and the store falls back to the next candidate, then to the
+    // default document — recovery never crash-loops and never overwrites data
+    // it couldn't read.
 
     private static func fileURL(_ fileName: String) -> URL? {
         FileManager.default
@@ -634,39 +705,126 @@ final class SceneStore: ObservableObject {
             .appendingPathComponent(fileName)
     }
 
-    private static func loadV2() -> SceneDocument? {
-        guard let url = fileURL(fileNameV2),
-              let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(SceneDocument.self, from: data)
+    /// Loads the scene document from the newest readable candidate: the
+    /// current-version file first (migrating it if it somehow holds older
+    /// bytes), then the v1 file (migrated v1 → v2 and left untouched on disk,
+    //  which keeps it as the readable pre-migration snapshot).
+    private static func loadDocument() -> SceneDocument? {
+        let candidates: [(url: URL?, isCurrentFile: Bool)] = [
+            (fileURL(fileNameV2), true),
+            (fileURL(fileNameV1), false)
+        ]
+        for (candidate, isCurrentFile) in candidates {
+            guard let url = candidate, let data = try? Data(contentsOf: url) else { continue }
+            switch SceneDocumentMigration.migrateToCurrent(data) {
+            case .success(let migrated):
+                guard let document = try? JSONDecoder().decode(SceneDocument.self, from: migrated) else {
+                    quarantine(url, reason: "corrupt")
+                    continue
+                }
+                // Migrating older bytes held in the SAME file autosave
+                // overwrites: keep a readable copy of the pre-migration
+                // document beside it first. (The v1 file is never overwritten
+                // — it IS its own prior snapshot.)
+                if isCurrentFile,
+                   let version = SceneDocumentMigration.detectedVersion(of: data),
+                   version < SceneDocumentMigration.currentVersion {
+                    copyAside(url, suffix: "v\(version)-pre-migration")
+                }
+                return document
+            case .failure(.newerThanSupported(let found, _)):
+                // Written by a newer app: preserve every byte and fall back
+                // rather than decode-guess and autosave over the user's data.
+                quarantine(url, reason: "unsupported-v\(found)")
+            case .failure(.unreadable):
+                quarantine(url, reason: "corrupt")
+            }
+        }
+        return nil
     }
 
-    private static func loadV1() -> LegacySceneDocumentV1? {
-        guard let url = fileURL(fileNameV1),
-              let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(LegacySceneDocumentV1.self, from: data)
+    /// Moves an unreadable/unsupported file aside so recovery falls back
+    /// cleanly and the original bytes stay recoverable next to it.
+    private static func quarantine(_ url: URL, reason: String) {
+        try? FileManager.default.moveItem(
+            at: url, to: url.appendingPathExtension("\(reason).\(backupStamp()).bak"))
     }
 
-    private func persist() {
-        // S07: every persist also republishes the project-level composition
-        // context, so the engines composite overlay/background edits on their
-        // next tick (they apply immediately to staged AND program). Published
-        // first so a failed file write never stalls the live path.
+    /// Copies a pre-migration document aside before autosave replaces it.
+    private static func copyAside(_ url: URL, suffix: String) {
+        try? FileManager.default.copyItem(
+            at: url, to: url.appendingPathExtension("\(suffix).\(backupStamp()).bak"))
+    }
+
+    private static func backupStamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
+    }
+
+    private static func loadBrowser() -> SceneBrowserDocument {
+        let empty = SceneBrowserDocument(folders: [], membership: [:], lockedSceneIDs: [])
+        guard let url = fileURL(browserFileName),
+              let data = try? Data(contentsOf: url) else { return empty }
+        guard let document = try? JSONDecoder().decode(SceneBrowserDocument.self, from: data) else {
+            quarantine(url, reason: "corrupt")
+            return empty
+        }
+        return document
+    }
+
+    // MARK: - Autosave (S12, issue #75)
+    //
+    // Persistence is a DEBOUNCED AUTOSAVE: every mutation schedules a write
+    // `autosaveDelay` out, and further mutations within the window replace
+    // (not queue) it, so a burst of edits costs one encode+write. Writes are
+    // atomic — Foundation stages the data in a temp file and renames it over
+    // the original, so a crash mid-write can never leave a torn document;
+    // an interrupted write leaves either the old or the new file, both
+    // decodable. `flushPendingWrites()` (app termination) forces any pending
+    // write out synchronously.
+
+    private static let autosaveDelay: TimeInterval = 0.75
+
+    private func scheduleSceneAutosave() {
+        // The live path never waits for the debounce: republish the
+        // project-level composition context synchronously, so the engines
+        // composite overlay/background edits on their next tick (they apply
+        // immediately to staged AND program). Published first so a failed
+        // file write never stalls the live path.
         ProjectOverlayStore.shared.publish(document.overlayContext)
+        sceneAutosaveTask?.cancel()
+        sceneAutosaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.autosaveDelay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.writeSceneDocument()
+        }
+    }
+
+    private func scheduleBrowserAutosave() {
+        browserAutosaveTask?.cancel()
+        browserAutosaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.autosaveDelay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.writeBrowserDocument()
+        }
+    }
+
+    /// Writes any pending debounced autosaves NOW (app termination).
+    func flushPendingWrites() {
+        sceneAutosaveTask?.cancel()
+        browserAutosaveTask?.cancel()
+        writeSceneDocument()
+        writeBrowserDocument()
+    }
+
+    private func writeSceneDocument() {
         guard let url = Self.fileURL(Self.fileNameV2),
               let data = try? JSONEncoder().encode(document) else { return }
         try? data.write(to: url, options: .atomic)
     }
 
-    private static func loadBrowser() -> SceneBrowserDocument {
-        guard let url = fileURL(browserFileName),
-              let data = try? Data(contentsOf: url),
-              let document = try? JSONDecoder().decode(SceneBrowserDocument.self, from: data) else {
-            return SceneBrowserDocument(folders: [], membership: [:], lockedSceneIDs: [])
-        }
-        return document
-    }
-
-    private func persistBrowser() {
+    private func writeBrowserDocument() {
         let document = SceneBrowserDocument(folders: folders,
                                             membership: sceneMembership,
                                             lockedSceneIDs: Array(lockedSceneIDs))
@@ -674,4 +832,20 @@ final class SceneStore: ObservableObject {
               let data = try? JSONEncoder().encode(document) else { return }
         try? data.write(to: url, options: .atomic)
     }
+}
+
+/// S12 (issue #75): the undoable state the dispatcher snapshots around every
+/// scene-edit command — the persisted document state, the browser
+/// organization, and the STAGED scene. Deliberately excludes the program
+/// snapshot (undo must never rewrite live output) and ephemeral view state
+/// (layer selection).
+struct SceneUndoSnapshot: Equatable, Sendable {
+    var scenes: [Scene]
+    var selectedID: SceneID
+    var overlays: [LayerNode]
+    var defaultBackground: SceneBackground?
+    var folders: [SceneFolder]
+    var sceneMembership: [SceneID: SceneFolderID]
+    var lockedSceneIDs: Set<SceneID>
+    var stagedScene: Scene?
 }
