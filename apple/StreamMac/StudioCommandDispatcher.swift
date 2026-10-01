@@ -323,6 +323,20 @@ enum StudioCommand: Equatable, Sendable {
     /// fires the rules as scenes enter/leave program.
     case setSceneSoundBindings([SceneSoundBinding], in: SceneID?)
 
+    // S08 scene audio snapshots + media entry/exit behavior (issue #99).
+    // Scene content — staged, Taken, reverted, and UNDOABLE like sound
+    // bindings; the Take path applies them as the scene enters PROGRAM
+    // (previewing a scene never fires them).
+    /// Sets/clears the STAGED scene's opt-in audio snapshot (nil = the
+    /// inherit-current option: the live mix persists across the Take).
+    case setSceneAudioSnapshot(SceneAudioSnapshot?, in: SceneID?)
+    /// Captures the CURRENT mixer state (mic fader + every registered
+    /// non-capture channel's fader/mute) into the staged scene's snapshot.
+    case captureSceneAudioSnapshot(in: SceneID?)
+    /// The staged scene's media entry/exit policy — restart/resume/continue
+    /// when it enters program; keep-playing/pause/stop when it leaves.
+    case setSceneMediaBehavior(SceneMediaBehavior, in: SceneID?)
+
     // Settings session (W04).
     case openSettings(SettingsSession.Section?)
     case closeSettings
@@ -456,6 +470,10 @@ enum StudioCommand: Equatable, Sendable {
         case .playlistNext: return "Next Track"
         case .playlistPrevious: return "Previous Track"
         case .setSceneSoundBindings: return "Scene Sounds"
+        case .setSceneAudioSnapshot(let snapshot, _):
+            return snapshot == nil ? "Inherit Current Mix" : "Set Scene Audio Snapshot"
+        case .captureSceneAudioSnapshot: return "Capture Scene Audio"
+        case .setSceneMediaBehavior: return "Scene Media Behavior"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
         case .applySettings: return "Apply Settings"
@@ -1223,6 +1241,28 @@ final class StudioCommandDispatcher: ObservableObject {
                 }
                 return nil
             }
+        // S08 (issue #99): scene content addressed to the staged scene,
+        // exactly like `.setSceneSoundBindings`.
+        case .setSceneAudioSnapshot(let snapshot, let sceneID):
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success:
+                for (label, state) in snapshot?.channelGains ?? [:] {
+                    if label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return .invalidValue("A snapshot channel label can't be empty.")
+                    }
+                    if !state.volume.isFinite || !(0...2).contains(state.volume) {
+                        return .invalidValue("Scene audio snapshot volumes must be between 0 and 2.")
+                    }
+                }
+                return nil
+            }
+        case .captureSceneAudioSnapshot(let sceneID),
+             .setSceneMediaBehavior(_, let sceneID):
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success: return nil
+            }
 
         case .openSettings, .closeSettings:
             return nil
@@ -1629,6 +1669,16 @@ final class StudioCommandDispatcher: ObservableObject {
             // Scene content: stages (and implicitly takes in direct-live)
             // like any other scene edit; the Take path fires the rules.
             editStagedScene(sceneID) { $0.soundBindings = bindings }
+        // S08 (issue #99): scene content — staged (and implicitly taken in
+        // direct-live) like any other scene edit; the Take path applies
+        // the snapshot/behavior as the scene enters program.
+        case .setSceneAudioSnapshot(let snapshot, let sceneID):
+            editStagedScene(sceneID) { $0.audioSnapshot = snapshot }
+        case .captureSceneAudioSnapshot(let sceneID):
+            let snapshot = currentAudioSnapshot()
+            editStagedScene(sceneID) { $0.audioSnapshot = snapshot }
+        case .setSceneMediaBehavior(let behavior, let sceneID):
+            editStagedScene(sceneID) { $0.mediaBehavior = behavior }
 
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
@@ -1640,6 +1690,7 @@ final class StudioCommandDispatcher: ObservableObject {
             // the program engine through the controller's observation (no
             // cadence/media interruption); persisting here keeps SceneStore
             // the source of truth for the PUBLISHED composition only.
+            let outgoingProgram = previewProgram.programScene
             guard let published = previewProgram.take() else { return }
             sceneStore.update(published)
             // A03 (issue #98): entering the scene fires its bound sounds
@@ -1647,6 +1698,12 @@ final class StudioCommandDispatcher: ObservableObject {
             // stingers fire and its beds stop). Idempotent re-sync, so
             // direct-live's implicit takes can't double-fire.
             soundboard.syncProgramScene(published)
+            // S08 (issue #99): the audio snapshot restore and media
+            // entry/exit behavior follow the program change on the same
+            // seam (both no-op when the taken scene is already program).
+            restoreSceneAudioSnapshot(entering: published,
+                                      previousProgramID: outgoingProgram?.id)
+            applyProgramMediaBehavior(entering: published, leaving: outgoingProgram)
         case .revert:
             previewProgram.revert()
         case .setDirectLiveEditing(let on):
@@ -1703,11 +1760,127 @@ final class StudioCommandDispatcher: ObservableObject {
     /// preview and program move together and each change persists (the
     /// explicit mode's save point is the edit itself).
     private func takeStagedIfDirectLive() {
-        guard previewProgram.directLiveEditing,
-              let published = previewProgram.take() else { return }
+        guard previewProgram.directLiveEditing else { return }
+        let outgoingProgram = previewProgram.programScene
+        guard let published = previewProgram.take() else { return }
         sceneStore.update(published)
         // A03 (issue #98): direct-live's implicit takes fire scene sounds too.
         soundboard.syncProgramScene(published)
+        // S08 (issue #99): same-scene re-takes no-op inside both hooks, so
+        // an edit Taken to the scene already on program never re-fires the
+        // entry behavior or re-restores the snapshot.
+        restoreSceneAudioSnapshot(entering: published,
+                                  previousProgramID: outgoingProgram?.id)
+        applyProgramMediaBehavior(entering: published, leaving: outgoingProgram)
+    }
+
+    // MARK: Scene audio snapshots & media behavior (S08, issue #99)
+
+    /// The mixer state `.captureSceneAudioSnapshot` records: the default
+    /// mic's fader/mute plus every registered NON-capture channel's
+    /// fader/mute, keyed by the A04 mixer-document label. Capture channels
+    /// are excluded by design — their program levels are the scene's
+    /// per-layer S05 `AudioBinding`s, already scene content.
+    private func currentAudioSnapshot() -> SceneAudioSnapshot {
+        let mixer = session.activeSettings.mixer
+        let micID = AudioChannelID.microphone(deviceUID: nil)
+        var gains: [String: SceneAudioChannelState] = [
+            micID.label: SceneAudioChannelState(
+                volume: max(0, min(session.activeSettings.micVolume, 2)),
+                isMuted: mixer.channelMutes[micID.label] ?? false)
+        ]
+        for (label, id) in channelIDsByLabel where id != micID {
+            if case .capture = id { continue }
+            gains[label] = SceneAudioChannelState(
+                volume: max(0, min(mixer.channelVolumes[label] ?? 1, 2)),
+                isMuted: mixer.channelMutes[label] ?? false)
+        }
+        return SceneAudioSnapshot(channelGains: gains)
+    }
+
+    /// S08 (issue #99): the taken scene's opt-in audio snapshot becomes the
+    /// live mix. The restore is written back through the mixer document
+    /// (single truth), so the mixer UI reflects it and the A04 push applies
+    /// it as ONE ramped `setChannelGain` pass — the A01 engine's gain ramps
+    /// keep the transition click-free. Only channels the snapshot names are
+    /// touched: the mixer state of every other channel survives the scene
+    /// change (restoring never touches channels the scene doesn't own).
+    /// Fires only when a DIFFERENT scene becomes program — re-taking the
+    /// same scene (a direct-live edit) leaves the mix alone.
+    private func restoreSceneAudioSnapshot(entering: Scene, previousProgramID: SceneID?) {
+        guard entering.id != previousProgramID,
+              let snapshot = entering.audioSnapshot else { return }
+        var mixer = session.activeSettings.mixer
+        var micVolume = session.activeSettings.micVolume
+        let micLabel = AudioChannelID.microphone(deviceUID: nil).label
+        for (label, state) in snapshot.channelGains {
+            let volume = max(0, min(state.volume, 2))
+            if label == micLabel {
+                micVolume = volume
+            } else {
+                mixer.channelVolumes[label] = volume
+            }
+            // A04 stores a mute as presence in the dict; unmuted removes it.
+            mixer.channelMutes[label] = state.isMuted ? true : nil
+        }
+        // One write of each surface → one state refresh → one ramped engine
+        // pass (the A01 snapshot-apply rule).
+        session.persistMixer(mixer)
+        session.persistMicVolume(micVolume)
+    }
+
+    /// S08 (issue #99): applies the media entry/exit policies of a program
+    /// change. The OUTGOING scene's exit policy governs only the sources
+    /// the entering scene does not share — a Take between scenes sharing a
+    /// source never pauses/stops/restarts it; the entering scene's entry
+    /// policy then governs every source it owns, and `restartFromStart`
+    /// deliberately restarts even a shared source (the documented
+    /// play-from-start exception). Previewing never reaches here: this
+    /// hook rides the Take paths only, and a same-scene re-take returns
+    /// before touching anything.
+    private func applyProgramMediaBehavior(entering: Scene, leaving: Scene?) {
+        guard entering.id != leaving?.id else { return }
+        let registry = SceneGraph.index(sceneStore.scenes)
+        let enteringIDs = mediaSourceIDs(in: entering, registry: registry)
+        let leavingIDs = leaving.map { mediaSourceIDs(in: $0, registry: registry) } ?? []
+        if let leaving {
+            for id in leavingIDs where !enteringIDs.contains(id) {
+                switch leaving.mediaBehavior.exit {
+                case .keepPlaying:
+                    // No scene-level intervention — the A02 demand model
+                    // still parks a source nothing references anymore.
+                    break
+                case .pause:
+                    controller.capturePool.pauseMedia(id)
+                case .stop:
+                    controller.capturePool.stopMedia(id)
+                }
+            }
+        }
+        switch entering.mediaBehavior.entry {
+        case .continue:
+            break
+        case .resume:
+            for id in enteringIDs {
+                let phase = controller.capturePool.mediaStatus(for: id).phase
+                guard phase != .playing, phase != .loading else { continue }
+                controller.capturePool.playMedia(id)
+            }
+        case .restartFromStart:
+            for id in enteringIDs {
+                controller.capturePool.restartMedia(id)
+            }
+        }
+    }
+
+    /// The registry media sources a scene's visible layers reference
+    /// (S06-flattened, so media inside nested scenes counts too).
+    private func mediaSourceIDs(in scene: Scene, registry: [SceneID: Scene]) -> Set<SourceDefinitionID> {
+        Set(SceneGraph.flattenedVisibleLayers(of: scene, in: registry).compactMap { layer in
+            guard let id = layer.sourceID,
+                  sceneStore.source(withID: id)?.payload.isMedia == true else { return nil }
+            return id
+        })
     }
 
     // MARK: Layer helpers
@@ -1947,7 +2120,10 @@ final class StudioCommandDispatcher: ObservableObject {
              .distributeLayers(_, let id),
              .setOverlayHiddenInScene(_, _, let id),
              .setSceneBackground(_, let id),
-             .setSceneSoundBindings(_, let id):
+             .setSceneSoundBindings(_, let id),
+             .setSceneAudioSnapshot(_, let id),
+             .captureSceneAudioSnapshot(let id),
+             .setSceneMediaBehavior(_, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
         default:
             return nil
@@ -2224,7 +2400,8 @@ private extension StudioCommand {
              .addOverlay, .removeOverlay, .renameOverlay, .setOverlayVisibility,
              .setOverlayLocked, .setOverlayTransform, .setOverlayEffects, .moveOverlay,
              .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground,
-             .setSceneSoundBindings:
+             .setSceneSoundBindings,
+             .setSceneAudioSnapshot, .captureSceneAudioSnapshot, .setSceneMediaBehavior:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording,

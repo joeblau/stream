@@ -526,6 +526,9 @@ struct MainWindowView: View {
                     ProgressView(value: Double(controller.audio.level))
                 }
             }
+            // S08 (issue #99): the staged scene's media entry/exit policy
+            // and opt-in audio snapshot — applied when it becomes program.
+            SceneBehaviorSectionView()
         }
         .formStyle(.grouped)
     }

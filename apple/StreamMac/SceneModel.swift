@@ -612,7 +612,12 @@ final class SceneStore: ObservableObject {
             return copy
         }
         let copy = Scene(name: "\(original.name) copy", canvas: canvas, groups: groups,
-                         layers: layers, soundBindings: soundBindings)
+                         layers: layers, soundBindings: soundBindings,
+                         // S08 (issue #99): the audio snapshot and media
+                         // behavior are plain values (no channel-identity
+                         // aliasing), so they copy verbatim.
+                         audioSnapshot: original.audioSnapshot,
+                         mediaBehavior: original.mediaBehavior)
         scenes.insert(copy, at: index + 1)
         if let folderID = sceneMembership[id] {
             sceneMembership[copy.id] = folderID
