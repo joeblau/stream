@@ -486,6 +486,9 @@ struct MainWindowView: View {
             // display/window/application picker), rename, retarget, remove,
             // and per-source capture status.
             ScreenSourcesSectionView()
+            // C09 (issue #163): Syphon server sources — discovered servers,
+            // add/rename/relink/remove, and per-source receive status.
+            SyphonSourcesSectionView()
             // W03: the inspector edits the STAGED scene (what PREVIEW shows);
             // changes reach program only via Take.
             if let scene = previewProgram.stagedScene {
