@@ -36,24 +36,32 @@ extension CaptureSourceKey {
     /// payload (the render authority). Payload kinds without a physical
     /// capture (image/text/media/web/guest/…) produce no key.
     ///
-    /// S06 seam: nested-scene layers (`.scene` payloads) are expanded by the
-    /// caller graph walker before/instead of calling this — this function is
-    /// the single place that turns "layers" into "captures to keep alive".
+    /// S06: callers flatten nested-scene references first
+    /// (`SceneGraph.flattenedVisibleLayers` — cycle-guarded), so a camera
+    /// used ONLY inside a nested scene still demands its capture. The
+    /// layer-list overload below is the single place that turns "layers"
+    /// into "captures to keep alive".
     static func demanded(program: Scene?,
                          staged: Scene?,
                          sources: [SourceDefinition]) -> Set<CaptureSourceKey> {
+        demanded(layers: [program, staged].compactMap { $0 }.flatMap(\.layers),
+                 sources: sources)
+    }
+
+    /// The capture-demand core: every visible camera/screen layer in the
+    /// (already S06-flattened) list resolves to one key, registry payloads
+    /// winning over inline ones exactly as documented above.
+    static func demanded(layers: [LayerNode],
+                         sources: [SourceDefinition]) -> Set<CaptureSourceKey> {
         var keys = Set<CaptureSourceKey>()
-        for scene in [program, staged] {
-            guard let scene else { continue }
-            for layer in scene.layers where layer.isVisible {
-                let payload = layer.sourceID
-                    .flatMap { id in sources.first(where: { $0.id == id }) }?.payload
-                    ?? layer.payload
-                switch payload {
-                case .camera(let camera): keys.insert(.camera(camera))
-                case .screen(let screen): keys.insert(.screen(screen))
-                default: break
-                }
+        for layer in layers where layer.isVisible {
+            let payload = layer.sourceID
+                .flatMap { id in sources.first(where: { $0.id == id }) }?.payload
+                ?? layer.payload
+            switch payload {
+            case .camera(let camera): keys.insert(.camera(camera))
+            case .screen(let screen): keys.insert(.screen(screen))
+            default: break
             }
         }
         return keys

@@ -263,6 +263,7 @@ final class SceneStore: ObservableObject {
         pruneBrowserMetadata()
         normalizeOrder()
         ProjectOverlayStore.shared.publish(document.overlayContext)
+        SceneRegistryStore.shared.publish(document.scenes)
         writeSceneDocument()
         writeBrowserDocument()
         // Flush any pending debounced autosave on quit. willTerminate is
@@ -793,6 +794,11 @@ final class SceneStore: ObservableObject {
         // immediately to staged AND program). Published first so a failed
         // file write never stalls the live path.
         ProjectOverlayStore.shared.publish(document.overlayContext)
+        // S06: the scene registry the engines resolve nested-scene references
+        // against — same synchronous-publish rationale. Since only TAKEN
+        // edits persist through the store, this is exactly the Take-policy
+        // propagation of shared child-scene edits to every nesting site.
+        SceneRegistryStore.shared.publish(scenes)
         sceneAutosaveTask?.cancel()
         sceneAutosaveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.autosaveDelay * 1_000_000_000))

@@ -164,7 +164,7 @@ struct LayerPanelView: View {
                     .padding(.vertical, 1)
                     .background(.quaternary, in: Capsule())
                     .foregroundStyle(.secondary)
-                    .help("\(layer.payload.displayName) layers are model-only — the render path composites camera, screen, text, and shape layers today.")
+                    .help("\(layer.payload.displayName) layers are model-only — the render path composites camera, screen, text, shape, and nested scene layers today.")
             }
             if let missing = missingReason(for: layer) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -405,6 +405,17 @@ struct LayerPanelView: View {
                 }
                 Button("Shape") {
                     dispatcher.execute(.addLayer(.shape(ShapeSourcePayload()), in: nil))
+                }
+                Divider()
+                // S06: nest another scene as a reusable layer. Cycle/depth
+                // validation is the dispatcher's — a rejection surfaces its
+                // plain-language reason in the diagnostics strip.
+                Menu("Scene") {
+                    ForEach(sceneStore.scenes) { scene in
+                        Button(scene.name) {
+                            dispatcher.execute(.addLayer(.scene(SceneReferencePayload(sceneID: scene.id)), in: nil))
+                        }
+                    }
                 }
                 Divider()
                 // Model-only kinds persist in the graph but the render path

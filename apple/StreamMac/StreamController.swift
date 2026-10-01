@@ -616,8 +616,13 @@ final class StreamController: ObservableObject {
     private func reconcileSourceDemand() {
         guard isPipelineRunning else { return }
         let staged = previewState == .active ? previewProgram.stagedScene : nil
-        let demand = CaptureSourceKey.demanded(program: previewProgram.programScene,
-                                               staged: staged,
+        // S06: expand nested-scene references (cycle-guarded) against the
+        // persisted scene registry before computing demand, so a camera used
+        // only inside a nested scene still captures.
+        let registry = SceneGraph.index(sceneStore.scenes)
+        let layers = [previewProgram.programScene, staged].compactMap { $0 }
+            .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
+        let demand = CaptureSourceKey.demanded(layers: layers,
                                                sources: sceneStore.sources)
         capturePool.reconcile(demand: demand, settings: settings)
     }

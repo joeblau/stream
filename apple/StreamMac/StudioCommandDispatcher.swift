@@ -547,6 +547,23 @@ final class StudioCommandDispatcher: ObservableObject {
             guard sceneStore.scenes.contains(where: { $0.id == scene.id }) else {
                 return .invalidTarget("Scene \(scene.id) does not exist.")
             }
+            // S06: a whole-scene replacement must not smuggle in a dangling,
+            // circular, or over-deep nested-scene reference — validate each
+            // reference exactly as if it were being added now, against the
+            // document WITH the replacement substituted in.
+            if scene.layers.contains(where: { $0.payload.isScene }) {
+                var index = SceneGraph.index(sceneStore.scenes)
+                index[scene.id] = scene
+                for layer in scene.layers {
+                    guard case .scene(let reference) = layer.payload else { continue }
+                    if let error = nestedReferenceError(referencing: reference.sceneID,
+                                                        into: scene,
+                                                        in: index,
+                                                        layerName: layer.name) {
+                        return error
+                    }
+                }
+            }
             // W03: visual edits only ever touch the staged copy, so a whole-
             // scene edit must address the scene staged in preview.
             return previewProgram.stagedScene?.id == scene.id
@@ -607,10 +624,17 @@ final class StudioCommandDispatcher: ObservableObject {
         case .addLayer(let payload, let sceneID):
             switch resolveStagedScene(sceneID) {
             case .failure(let error): return error
-            case .success:
+            case .success(let scene):
+                // S06: nested-scene references validate against the document
+                // graph — existence, circular references, nesting depth.
+                if case .scene(let reference) = payload {
+                    return nestedReferenceError(referencing: reference.sceneID,
+                                                into: scene,
+                                                in: SceneGraph.index(sceneStore.scenes))
+                }
                 return payload.isRenderable
                     ? nil
-                    : .invalidValue("\(payload.displayName) layers are model-only — the render path composites camera, screen, text, and shape layers today.")
+                    : .invalidValue("\(payload.displayName) layers are model-only — the render path composites camera, screen, text, shape, and nested scene layers today.")
             }
         case .removeLayer(let layerID, let sceneID):
             switch resolveLayer(layerID, in: sceneID) {
@@ -1122,6 +1146,32 @@ final class StudioCommandDispatcher: ObservableObject {
         }
     }
 
+    /// S06 (issue #96): the rejection for a nested-scene reference from
+    /// `container` to `target` — the target must exist, the edge must not
+    /// close a reference loop, and the resulting chain must stay within the
+    /// nesting-depth cap. The errors read as plain-language reasons in the
+    /// diagnostics strip. `index` is the document graph to validate against
+    /// (callers pass a substituted index for whole-scene replacements).
+    private func nestedReferenceError(referencing target: SceneID,
+                                      into container: Scene,
+                                      in index: [SceneID: Scene],
+                                      layerName: String? = nil) -> StudioCommandError? {
+        let subject = layerName.map { "Layer \"\($0)\" references a scene that" }
+            ?? "The referenced scene"
+        guard let targetScene = index[target] else {
+            return .invalidTarget("\(subject) does not exist.")
+        }
+        if SceneGraph.wouldCreateCycle(container: container.id, referencing: target, in: index) {
+            return .invalidValue("Nesting \"\(targetScene.name)\" inside \"\(container.name)\" would create a circular scene reference.")
+        }
+        let depth = SceneGraph.ancestorDepth(of: container.id, in: index)
+            + SceneGraph.subtreeDepth(of: target, in: index)
+        guard depth <= SceneGraph.maxNestingDepth else {
+            return .invalidValue("Nesting \"\(targetScene.name)\" inside \"\(container.name)\" would exceed the nesting depth limit of \(SceneGraph.maxNestingDepth) scenes.")
+        }
+        return nil
+    }
+
     /// S03: the rejection for editing an effectively-locked layer (its own
     /// lock, or its group's). Nil when the layer is editable.
     private func lockError(for layer: LayerNode, in scene: Scene) -> StudioCommandError? {
@@ -1315,6 +1365,12 @@ final class StudioCommandDispatcher: ObservableObject {
                                 position: GraphPoint(x: 0.98, y: 0.02),
                                 size: GraphSize(width: 0.12, height: 0.07),
                                 anchor: .topRight))
+        case .scene(let reference):
+            // S06: nest the referenced scene at full canvas (the classic
+            // "branded base layout" reuse); the user repositions/resizes it
+            // on canvas like any other layer.
+            let name = sceneStore.scene(withID: reference.sceneID)?.name ?? payload.displayName
+            return LayerNode(name: name, payload: payload, transform: .fullscreen)
         default:
             // Validation rejects non-renderable kinds before execution.
             return LayerNode(name: payload.displayName, payload: payload, transform: .fullscreen)

@@ -33,6 +33,26 @@ import Metal
 /// caches the raster by content + pixel size, so a static overlay costs
 /// nothing per frame after its first paint.
 ///
+/// Nested scenes (S06, issue #96): a `.scene` layer renders the referenced
+/// scene's own layer stack recursively, rasterized at the layer rect's pixel
+/// size and styled through the same anchor/rotation/effects path as generated
+/// content. The reference resolves LIVE against the scene registry passed
+/// into each render — never a copy — so a Taken edit to the referenced scene
+/// updates every nesting site on the next tick. Background policy (documented
+/// choice): the nested scene's EXPLICIT `Scene.background` is honored, but
+/// there is no fallback to the project default or black — a nested scene
+/// without its own background composites TRANSPARENT so the parent scene
+/// shows through (the overlay-friendly default), and project overlays never
+/// paint inside a nested scene (they are output-scope branding above the
+/// top-level composition). Missing/dangling references and reference loops
+/// paint nothing (the documented fallback); recursion is additionally capped
+/// at `SceneGraph.maxNestingDepth` beyond the edit-time cycle check. A nested
+/// scene whose entire (transitive) content is generated — text/shape only —
+/// is STATIC: its raster is cached by transitive content fingerprint + pixel
+/// size and baked through the CIContext, so it costs one texture draw per
+/// frame after its first paint. A nested scene containing camera/screen
+/// layers re-composites every frame, like any live source.
+///
 /// Visual parity with the legacy `FacecamCompositor` path: camera layers are
 /// mirrored (macOS cameras behave as `.front`); a camera layer narrower than
 /// the canvas renders as the classic PIP — aspect-FILL cropped to a rounded
@@ -73,6 +93,12 @@ final class SceneRenderer {
     private var generatedCache: [GeneratedKey: CIImage] = [:]
     private let generatedCacheLimit = 64
 
+    /// S06 raster cache for STATIC nested scenes (transitively text/shape
+    /// only): keyed by the transitive content fingerprint + pixel size, with
+    /// rasters baked through the CIContext so a hit is one texture draw.
+    /// Shares the generated cache's bound and clear-on-cap policy.
+    private var nestedCache: [GeneratedKey: CIImage] = [:]
+
     init() {
         let options: [CIContextOption: Any] = [
             .workingColorSpace: NSNull(),
@@ -87,12 +113,15 @@ final class SceneRenderer {
 
     /// Composites the background, the scene's visible layers (back-to-front),
     /// and the project overlays onto a pooled canvas-sized buffer, then wraps
-    /// it in a `CMSampleBuffer` timed on the engine's shared clock.
+    /// it in a `CMSampleBuffer` timed on the engine's shared clock. `scenes`
+    /// is the live scene-registry snapshot S06 nested-scene references
+    /// resolve against.
     func render(scene: Scene,
                 overlayContext: OverlayContext,
                 canvasSize: CGSize,
                 screen: CVPixelBuffer?,
                 camera: LatestCameraFrame.Frame?,
+                scenes: [SceneID: Scene],
                 presentationTime: CMTime,
                 frameDuration: CMTime,
                 sequence: Int64) -> CompositedFrame? {
@@ -105,14 +134,16 @@ final class SceneRenderer {
         var output = backgroundImage(overlayContext.background(for: scene), canvas: canvas)
         for layer in scene.layers where layer.isVisible {
             guard let layerImage = image(for: layer, canvas: canvas,
-                                         screen: screen, camera: camera) else {
+                                         screen: screen, camera: camera,
+                                         scenes: scenes, depth: 0, visited: [scene.id]) else {
                 continue    // documented fallback: missing source → background shows through
             }
             output = layerImage.composited(over: output)
         }
         for overlay in overlayContext.overlays(for: scene) {
             guard let overlayImage = image(for: overlay, canvas: canvas,
-                                           screen: screen, camera: camera) else {
+                                           screen: screen, camera: camera,
+                                           scenes: scenes, depth: 0, visited: [scene.id]) else {
                 continue    // same fallback as scene layers
             }
             output = overlayImage.composited(over: output)
@@ -146,10 +177,15 @@ final class SceneRenderer {
 
     /// The placed, styled image for one layer, or nil when its source has no
     /// pixels (or no renderer yet) — the caller treats nil as "paint nothing".
+    /// `depth`/`visited` are the S06 nested-scene recursion guards: how many
+    /// reference hops deep this layer sits, and the scene IDs on its path.
     private func image(for layer: LayerNode,
                        canvas: CGRect,
                        screen: CVPixelBuffer?,
-                       camera: LatestCameraFrame.Frame?) -> CIImage? {
+                       camera: LatestCameraFrame.Frame?,
+                       scenes: [SceneID: Scene],
+                       depth: Int,
+                       visited: Set<SceneID>) -> CIImage? {
         switch layer.payload {
         case .screen:
             guard let screen else { return nil }
@@ -164,10 +200,14 @@ final class SceneRenderer {
                          layer: layer, canvas: canvas, isCamera: true)
         case .shape, .text:
             return placeGenerated(payload: layer.payload, layer: layer, canvas: canvas)
+        case .scene(let reference):
+            return placeNested(reference: reference, layer: layer, canvas: canvas,
+                               screen: screen, camera: camera,
+                               scenes: scenes, depth: depth, visited: visited)
         default:
             // Payload kinds without a renderer yet (image, media, pdf, web,
-            // guest, nested scene): documented fallback is the background
-            // showing through; later waves add renderers behind this switch.
+            // guest): documented fallback is the background showing through;
+            // later waves add renderers behind this switch.
             return nil
         }
     }
@@ -240,14 +280,24 @@ final class SceneRenderer {
         default:
             return nil
         }
-        guard var image = content else { return nil }
+        guard let image = content else { return nil }
+        return stylePlaced(content: image, layer: layer, canvas: canvas,
+                           pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+    }
 
+    /// The shared placement/styling tail for rasterized-content layers
+    /// (generated shape/text and nested scenes): translate the raster into
+    /// the transform's anchor-resolved canvas rect, round corners at
+    /// placement time, rotate around the rect, then apply opacity-style
+    /// effects — the same treatment sourced layers get.
+    private func stylePlaced(content: CIImage, layer: LayerNode, canvas: CGRect,
+                             pixelWidth: Int, pixelHeight: Int) -> CIImage {
+        var image = content
         let rect = rectInCanvas(for: layer.transform, canvas: canvas,
                                 width: CGFloat(pixelWidth), height: CGFloat(pixelHeight))
         image = image.transformed(by: CGAffineTransform(
             translationX: rect.minX - image.extent.minX,
             y: rect.minY - image.extent.minY))
-        // Same placement-time corner rounding sourced layers get.
         let cornerRadius = layer.effects.compactMap { effect -> CGFloat? in
             if case .cornerRadius(let value) = effect { return CGFloat(value) }
             return nil
@@ -325,6 +375,140 @@ final class SceneRenderer {
         let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
         CTFrameDraw(frame, context)
         context.restoreGState()
+    }
+
+    // MARK: - Nested scenes (S06, issue #96)
+
+    /// The placed, styled image for a nested-scene layer: the referenced
+    /// scene's layer stack composited at the layer rect's pixel size (cached
+    /// when transitively static), then styled exactly like generated content.
+    /// Nil — paint nothing — for a missing/dangling reference, a reference
+    /// loop (the path-local `visited` guard), or recursion past
+    /// `SceneGraph.maxNestingDepth` (defense beyond the edit-time check).
+    private func placeNested(reference: SceneReferencePayload,
+                             layer: LayerNode,
+                             canvas: CGRect,
+                             screen: CVPixelBuffer?,
+                             camera: LatestCameraFrame.Frame?,
+                             scenes: [SceneID: Scene],
+                             depth: Int,
+                             visited: Set<SceneID>) -> CIImage? {
+        guard depth < SceneGraph.maxNestingDepth,
+              !visited.contains(reference.sceneID),
+              let nested = scenes[reference.sceneID] else { return nil }
+        let pixelWidth = Int((layer.transform.size.width * canvas.width).rounded())
+        let pixelHeight = Int((layer.transform.size.height * canvas.height).rounded())
+        guard pixelWidth > 0, pixelHeight > 0 else { return nil }
+
+        let path = visited.union([reference.sceneID])
+        let content: CIImage?
+        if isStaticContent(nested, scenes: scenes, visited: path) {
+            // Static nested scene: one baked raster per content+size, then a
+            // texture draw per frame — a static nested scene costs ~nothing.
+            let fingerprint = nestedFingerprint(nested, scenes: scenes, visited: path)
+            let key = GeneratedKey(descriptor: "nested|\(nested.id)|\(fingerprint)",
+                                   width: pixelWidth, height: pixelHeight)
+            content = cachedNested(key: key) {
+                nestedContent(nested, pixelWidth: pixelWidth, pixelHeight: pixelHeight,
+                              screen: screen, camera: camera,
+                              scenes: scenes, depth: depth + 1, visited: path)
+            }
+        } else {
+            content = nestedContent(nested, pixelWidth: pixelWidth, pixelHeight: pixelHeight,
+                                    screen: screen, camera: camera,
+                                    scenes: scenes, depth: depth + 1, visited: path)
+        }
+        guard let image = content else { return nil }
+        return stylePlaced(content: image, layer: layer, canvas: canvas,
+                           pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+    }
+
+    /// The nested scene's layer stack composited over its OWN canvas rect
+    /// (origin 0,0 at the layer rect's pixel size): its explicit background
+    /// (else transparent — see the header's background policy), then its
+    /// visible layers back-to-front. Project overlays stay outside: they are
+    /// output-scope branding above the top-level composition only.
+    private func nestedContent(_ scene: Scene,
+                               pixelWidth: Int,
+                               pixelHeight: Int,
+                               screen: CVPixelBuffer?,
+                               camera: LatestCameraFrame.Frame?,
+                               scenes: [SceneID: Scene],
+                               depth: Int,
+                               visited: Set<SceneID>) -> CIImage? {
+        let canvas = CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight)
+        var output = scene.background.map { backgroundImage($0, canvas: canvas) }
+        for layer in scene.layers where layer.isVisible {
+            guard let layerImage = image(for: layer, canvas: canvas,
+                                         screen: screen, camera: camera,
+                                         scenes: scenes, depth: depth, visited: visited) else {
+                continue    // same documented fallback as top-level layers
+            }
+            output = output.map { layerImage.composited(over: $0) } ?? layerImage
+        }
+        return output
+    }
+
+    /// True when every visible layer of the scene (transitively, through
+    /// nested references) paints without a live source — text/shape and
+    /// unpainted model-only kinds only. Camera/screen layers make the scene
+    /// dynamic: its content changes per frame and must not be cached.
+    private func isStaticContent(_ scene: Scene,
+                                 scenes: [SceneID: Scene],
+                                 visited: Set<SceneID>) -> Bool {
+        for layer in scene.layers where layer.isVisible {
+            switch layer.payload {
+            case .camera, .screen:
+                return false
+            case .scene(let reference):
+                guard !visited.contains(reference.sceneID),
+                      let child = scenes[reference.sceneID] else { continue }
+                if !isStaticContent(child, scenes: scenes,
+                                    visited: visited.union([reference.sceneID])) {
+                    return false
+                }
+            default:
+                continue
+            }
+        }
+        return true
+    }
+
+    /// The cache fingerprint for a static nested scene: its full value hash
+    /// PLUS the transitive fingerprints of every scene it references — a
+    /// reference stores only the target's ID, so without the recursion an
+    /// edit to a grandchild scene would leave the parent's raster stale.
+    private func nestedFingerprint(_ scene: Scene,
+                                   scenes: [SceneID: Scene],
+                                   visited: Set<SceneID>) -> Int {
+        var hasher = Hasher()
+        hasher.combine(scene)
+        for layer in scene.layers {
+            guard case .scene(let reference) = layer.payload,
+                  !visited.contains(reference.sceneID),
+                  let child = scenes[reference.sceneID] else { continue }
+            hasher.combine(nestedFingerprint(child, scenes: scenes,
+                                             visited: visited.union([reference.sceneID])))
+        }
+        return hasher.finalize()
+    }
+
+    /// Returns the cached baked raster for a static nested scene, or renders,
+    /// bakes (through the CIContext, so the cached value is a texture rather
+    /// than a lazy filter graph that would re-evaluate per frame), and
+    /// caches it. Shares the generated cache's clear-on-cap bound.
+    private func cachedNested(key: GeneratedKey, render: () -> CIImage?) -> CIImage? {
+        if let cached = nestedCache[key] { return cached }
+        if nestedCache.count >= generatedCacheLimit {
+            nestedCache.removeAll()
+        }
+        guard let rendered = render() else { return nil }
+        let extent = rendered.extent
+        guard !extent.isEmpty, !extent.isInfinite,
+              let cgImage = ciContext.createCGImage(rendered, from: extent) else { return nil }
+        let baked = CIImage(cgImage: cgImage)
+        nestedCache[key] = baked
+        return baked
     }
 
     // MARK: - Colors
