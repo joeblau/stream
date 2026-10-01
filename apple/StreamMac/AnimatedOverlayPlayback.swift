@@ -193,6 +193,8 @@ final class AnimatedImagePlayback: MediaFrameSource, @unchecked Sendable {
     /// which forwards the pool's callback). Fired off the engine lock.
     var onStatus: (@Sendable (SourceDefinitionID, MediaSourceStatus) -> Void)?
 
+    var onReachedEnd: (@Sendable (SourceDefinitionID, Double) -> Void)?
+
     private var lock = os_unfair_lock_s()
     private var imageSource: CGImageSource?
     /// The timeline honoring the FILE's loop count, used while the payload's
@@ -336,6 +338,10 @@ final class AnimatedImagePlayback: MediaFrameSource, @unchecked Sendable {
             status.phase = .ready
             status.positionSeconds = 0
         }
+        let endedAt = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        let callback = onReachedEnd
+        let id = sourceID
+        DispatchQueue.main.async { callback?(id, endedAt) }
         publishLocked()
     }
 

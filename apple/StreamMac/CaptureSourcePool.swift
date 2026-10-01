@@ -465,6 +465,7 @@ final class CaptureSourcePool: ObservableObject {
     /// tick with each buffer already retimed onto the shared host clock. The
     /// controller forwards this to `AudioMixEngine.enqueue` as `.media(id)`
     /// channels (the media twin of `onScreenAudioSample`).
+    var onMediaReachedEnd: ((SourceDefinitionID, Double) -> Void)?
     var onMediaAudioSample: (@Sendable (SourceDefinitionID, CMSampleBuffer) -> Void)?
     /// A06 (issue #118): app/system audio-only captures, fired on each
     /// capture's own ScreenCaptureKit queue (off main) with the source's
@@ -1172,6 +1173,9 @@ final class CaptureSourcePool: ObservableObject {
         let audioHandler = onMediaAudioSample
         playback.onAudioSample = { sample in
             audioHandler?(id, sample)
+        }
+        playback.onReachedEnd = { [weak self] sourceID, time in
+            Task { @MainActor [weak self] in self?.onMediaReachedEnd?(sourceID, time) }
         }
         playback.onStatus = { [weak self] sourceID, status in
             Task { @MainActor [weak self] in

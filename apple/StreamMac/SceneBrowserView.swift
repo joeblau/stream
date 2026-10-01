@@ -77,6 +77,8 @@ struct SceneBrowserView: View {
             }
             Divider()
             footer
+            Divider()
+            ShowRundownPanelView(runtime: dispatcher.rundown)
         }
         .alert(renameTarget?.title ?? "Rename", isPresented: renameBinding) {
             TextField("Name", text: $draftName)
