@@ -23,6 +23,11 @@ final class MacAudioInput: ObservableObject {
 
     /// Called with each microphone sample buffer, hopped to the main actor.
     var onMicSample: ((CMSampleBuffer) -> Void)?
+    /// A01 (issue #82): real-time mic hand-off that fires DIRECTLY on the
+    /// capture sample queue — no main-actor hop — so the audio engine's
+    /// format conversion and insert chain never run on the main thread.
+    /// The meter/UI path above is unaffected.
+    var onMicSampleOffMain: (@Sendable (CMSampleBuffer) -> Void)?
 
     private var session: AVCaptureSession?
     /// Retained for the capture's lifetime: `AVCaptureAudioDataOutput` holds its
@@ -154,7 +159,9 @@ final class MacAudioInput: ObservableObject {
         }
 
         let output = AVCaptureAudioDataOutput()
+        let offMain = onMicSampleOffMain
         let shim = AudioCaptureShim { [weak self] sample, rawLevel in
+            offMain?(sample.value)
             Task { @MainActor in
                 guard let self else { return }
                 self.onMicSample?(sample.value)

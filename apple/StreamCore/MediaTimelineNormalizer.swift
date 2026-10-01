@@ -6,6 +6,9 @@ public enum MediaTimelineKind: Hashable, Sendable {
     case video
     case mic
     case app
+    /// A01 (issue #82): the single pre-mixed program audio bus the macOS
+    /// studio engine delivers (replaces per-track mic/app on that path).
+    case program
 }
 
 /// Removes capture/reconnect wall-clock gaps before samples reach the encoder.

@@ -71,7 +71,14 @@ actor RTMPPublisher: Publisher {
     private let micCont: AsyncStream<CMSampleBuffer>.Continuation
     private let appStream: AsyncStream<CMSampleBuffer>
     private let appCont: AsyncStream<CMSampleBuffer>.Continuation
+    /// A01 (issue #82): the pre-mixed program bus from the studio audio engine.
+    private let programStream: AsyncStream<CMSampleBuffer>
+    private let programCont: AsyncStream<CMSampleBuffer>.Continuation
     private var audioConsumers: [Task<Void, Never>] = []
+    /// True once the first program buffer arrives: the publisher then carries
+    /// the engine's mix on track 0 with NO mixing/voice polish/mic gain of its
+    /// own (no duplicate processing); the per-track path is iOS's, unchanged.
+    private var usesProgramAudio = false
 
     // Frame-repeat: screen capture may emit no complete frame for static content,
     // so the observed rate stalls and keyframe cadence drifts. Re-send the frame at
@@ -94,10 +101,12 @@ actor RTMPPublisher: Publisher {
         (events, eventCont) = AsyncStream.makeStream(of: PublisherEvent.self, bufferingPolicy: .unbounded)
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
         (appStream, appCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
+        (programStream, programCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
     }
 
     nonisolated func enqueueMic(_ sb: CMSampleBuffer) { micCont.yield(sb) }
     nonisolated func enqueueApp(_ sb: CMSampleBuffer) { appCont.yield(sb) }
+    nonisolated func enqueueProgram(_ sb: CMSampleBuffer) { programCont.yield(sb) }
 
     /// Builds the RTMP connection for the current `settings`.
     ///
@@ -123,10 +132,11 @@ actor RTMPPublisher: Publisher {
 
     private func startAudioConsumers() {
         guard audioConsumers.isEmpty else { return }
-        let mic = micStream, app = appStream
+        let mic = micStream, app = appStream, program = programStream
         audioConsumers = [
             Task { [weak self] in for await sb in mic { await self?.appendMic(sb) } },
-            Task { [weak self] in for await sb in app { await self?.appendApp(sb) } }
+            Task { [weak self] in for await sb in app { await self?.appendApp(sb) } },
+            Task { [weak self] in for await sb in program { await self?.appendProgram(sb) } }
         ]
     }
 
@@ -696,7 +706,7 @@ actor RTMPPublisher: Publisher {
         // quiet, promote track 1 to the mix clock; the first mic buffer back
         // flips it home (see appendMic). No timeline rebase on either side —
         // video/app kept flowing, so mic samples re-enter already aligned.
-        if settings.includeAppAudio, !micTrackStalled, startedAt > 0,
+        if settings.includeAppAudio, !usesProgramAudio, !micTrackStalled, startedAt > 0,
            MicStallEvaluator.shouldPromoteApp(now: now,
                                               lastMicAppendAt: lastMicAppendAt,
                                               lastAppAppendAt: lastAppAppendAt,
@@ -873,10 +883,40 @@ actor RTMPPublisher: Publisher {
         await mixer.append(normalized, track: 1)
     }
 
+    /// A01 (issue #82): appends the engine's pre-mixed program bus on track 0.
+    /// Voice polish is NOT applied here — the engine runs it as the mic
+    /// channel's insert (no duplicate processing); the track volume stays at
+    /// unity because channel gains live in the engine.
+    func appendProgram(_ sb: CMSampleBuffer) async {
+        guard isRunning, !isPaused, streamAttached else { return }
+        if !usesProgramAudio {
+            usesProgramAudio = true
+            await applyAudioMixerSettings()
+        }
+        let now = DispatchTime.now().uptimeNanoseconds
+        lastMediaAt = now
+        lastMicAppendAt = now
+        let normalized = timeline.normalize(sb, kind: .program,
+                                             fallbackDuration: CMTime(value: 512, timescale: 48_000))
+        await mixer.append(normalized, track: 0)
+    }
+
     /// Configures the multitrack audio mixer: mic on track 0 (its user level
     /// applied as a linear gain, clamped to a safe range), app audio on track 1.
     /// Mic is the main track, so it also drives the mix clock.
     private func applyAudioMixerSettings() async {
+        if usesProgramAudio {
+            // Program mode (macOS studio, A01): ONE stereo track at unity, mix
+            // clock on track 0. `includeAppAudio`/micVolume are engine-side
+            // concerns on this path and must not reconfigure the mix.
+            await mixer.setAudioMixerSettings(AudioMixerSettings(
+                sampleRate: 48_000,
+                channels: 2,
+                mainTrack: 0,
+                tracks: [0: .default]
+            ))
+            return
+        }
         let gain = Float(max(0.0, min(settings.micVolume, 2.0)))
         // While the mic route is stalled, app audio (track 1) drives the mix
         // clock so the whole mix does not fall silent with it. Threaded through
@@ -897,6 +937,8 @@ actor RTMPPublisher: Publisher {
     /// track volume, so it is smooth and safe to call repeatedly.
     func setMicVolume(_ volume: Double) async {
         settings.micVolume = volume
+        // In program mode the engine owns the mic gain.
+        guard !usesProgramAudio else { return }
         await applyAudioMixerSettings()
     }
 
@@ -906,6 +948,7 @@ actor RTMPPublisher: Publisher {
         isPaused = false
         micCont.finish()
         appCont.finish()
+        programCont.finish()
         audioConsumers.forEach { $0.cancel() }
         audioConsumers = []
         frameRepeatTask?.cancel()

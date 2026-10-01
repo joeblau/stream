@@ -268,9 +268,11 @@ final class CaptureSourcePool: ObservableObject {
     /// Shared process-wide (`SourceFrameProviders.shared`) so the engines'
     /// per-source routing needs no controller rewiring.
     let frames = SourceFrameProviders.shared
-    /// App/mic audio from every screen capture; the controller routes this to
-    /// the publisher's ordered ingress.
-    var onScreenAudioSample: (@Sendable (CMSampleBuffer) -> Void)?
+    /// App/mic audio from every screen capture, fired on the capture's own
+    /// ScreenCaptureKit queue (off main) with the source's identity, so the
+    /// A01 audio engine can route each source onto its own mix channel. The
+    /// controller forwards this to `AudioMixEngine.enqueue`.
+    var onScreenAudioSample: (@Sendable (CaptureSourceKey, CMSampleBuffer) -> Void)?
     /// C10: fired when a screen capture reports an error (start failure,
     /// mid-capture stop). The controller probes Screen Recording permission
     /// here — the W06 revocation probe (`probeScreenAccess`) — because
@@ -383,8 +385,13 @@ final class CaptureSourcePool: ObservableObject {
                 holder.store(buffer)
             }
         }
-        capture.onAudioSample = { [weak self] sample in
-            self?.onScreenAudioSample?(sample)
+        // The handler value is captured (not the MainActor pool) so the
+        // off-main @Sendable closure stays isolation-clean. The controller
+        // assigns `onScreenAudioSample` before any capture exists, so the
+        // value read here is always the live one.
+        let audioHandler = onScreenAudioSample
+        capture.onAudioSampleOffMain = { sample in
+            audioHandler?(key, sample)
         }
         // Mirror the capture's own state into the per-source surface: errors
         // (permission denial, start failure, mid-capture stop) badge the

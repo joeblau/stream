@@ -57,8 +57,10 @@ import os.lock
 /// over every bound layer's capture.
 ///
 /// One ordered video consumer serializes `appendVideo` into the publisher (a
-/// `Task` per frame could reorder buffers); audio goes through the publisher's
-/// own ordered, nonisolated ingress exactly like the iOS pipeline.
+/// `Task` per frame could reorder buffers); program audio reaches the publisher
+/// through the A01 audio engine's program-bus tap (bounded, drop-oldest), which
+/// lands on the same ordered audio ingress the iOS pipeline uses — pre-mixed,
+/// so nothing is processed twice.
 @MainActor
 final class StreamController: ObservableObject {
     /// Streaming (publishing) output lifecycle — read `streamState`, never a bool.
@@ -92,6 +94,12 @@ final class StreamController: ObservableObject {
     /// existing reads (`controller.screenCapture.isCapturing`) keep working.
     var screenCapture: ScreenSourceCapture { capturePool.screenCapture(for: .defaultScreen) }
     let audio = MacAudioInput()
+    /// The A01 audio engine (issue #82): mixes every timestamped source (mic,
+    /// per-screen-source audio, future media/NDI/guests) onto the same
+    /// monotonic host clock the video engines anchor on, and fans the program
+    /// mix out to the publisher and the recorder through independent bounded
+    /// taps. Runs with the W02 pipeline demand.
+    private let audioEngine = AudioMixEngine()
 
     /// The W08 program composition engine: composites the program snapshot and
     /// fans frames out to the publisher, the recording, and the PROGRAM
@@ -253,13 +261,26 @@ final class StreamController: ObservableObject {
 
         // Capture callbacks may arrive on ScreenCaptureKit / audio queues.
         // Screen video frames land in the pool's per-source holders (wired
-        // inside the pool); app audio from every screen capture and the mic
-        // route to the publisher's nonisolated, thread-safe audio ingress.
-        capturePool.onScreenAudioSample = { [publisherBox] sample in
-            publisherBox.publisher?.enqueueApp(sample)
+        // inside the pool). A01 (issue #82): ALL source audio — the mic and
+        // every screen capture's app audio, each under its own stable channel
+        // ID — flows into the audio engine's nonisolated, lock-confined
+        // ingest; the engine mixes once and the publisher/recorder tap the
+        // program bus (below), replacing the old direct enqueueMic/enqueueApp
+        // path. Both hand-offs fire off the main actor.
+        let publisherBox = self.publisherBox
+        let audioEngine = self.audioEngine
+        capturePool.onScreenAudioSample = { key, sample in
+            audioEngine.enqueue(.capture(key), sample)
         }
-        audio.onMicSample = { [publisherBox] sample in
-            publisherBox.publisher?.enqueueMic(sample)
+        audio.onMicSampleOffMain = { sample in
+            audioEngine.enqueue(.microphone(deviceUID: nil), sample)
+        }
+        // The publisher output taps the program bus once for the controller's
+        // lifetime: the tap's bounded mailbox sheds chunks rather than ever
+        // stalling the mix, and chunks are simply dropped while no publisher
+        // owns the session (same contract as the publisher video sink below).
+        addProgramAudioTap { [publisherBox] sample in
+            publisherBox.publisher?.enqueueProgram(sample)
         }
 
         // The publisher output subscribes once for the controller's lifetime:
@@ -268,7 +289,6 @@ final class StreamController: ObservableObject {
         let (stream, continuation) = AsyncStream.makeStream(
             of: CMSampleBuffer.self, bufferingPolicy: .bufferingNewest(1))
         videoContinuation = continuation
-        let publisherBox = self.publisherBox
         videoConsumer = Task {
             for await sample in stream {
                 if let publisher = publisherBox.publisher {
@@ -314,6 +334,38 @@ final class StreamController: ObservableObject {
 
     func removeFrameSink(_ subscription: FrameSubscription) {
         Task { await engine.removeSink(subscription.token) }
+    }
+
+    // MARK: - Program audio taps (A01 fan-out, issue #82)
+
+    /// Opaque handle for a program-bus audio tap; same race-safe
+    /// register/cancel contract as `FrameSubscription`.
+    struct AudioTapSubscription: Hashable, Sendable {
+        fileprivate let token = UUID()
+    }
+
+    /// Taps the audio engine's PROGRAM bus (the master mix: every routed
+    /// source, post-fader, 48 kHz stereo). Each tap is an independent bounded
+    /// (~85 ms default), drop-oldest queue on its own serial queue, so the
+    /// recorder and the publisher keep flowing independently and a slow
+    /// consumer sheds only its own chunks (the W02 rule, applied to audio).
+    @discardableResult
+    func addProgramAudioTap(capacity: Int = 8,
+                            sink: @escaping @Sendable (CMSampleBuffer) -> Void) -> AudioTapSubscription {
+        let subscription = AudioTapSubscription()
+        Task { await audioEngine.addTap(bus: .program, token: subscription.token,
+                                        capacity: capacity, sink: sink) }
+        return subscription
+    }
+
+    func removeAudioTap(_ subscription: AudioTapSubscription) {
+        Task { await audioEngine.removeTap(subscription.token) }
+    }
+
+    /// Loss/underrun counters for the audio engine (per channel + per tap),
+    /// for the stats HUD and diagnostics.
+    func audioStatsSnapshot() async -> AudioEngineStatistics {
+        await audioEngine.statsSnapshot()
     }
 
     /// Same race-safe register/cancel as `addFrameSink`, but addressed at an
@@ -557,18 +609,20 @@ final class StreamController: ObservableObject {
     /// session (W04, issue #67). Updates the controller's working copy so no
     /// consumer reads a stale snapshot, then applies what is safe RIGHT NOW:
     /// the output profile follows the W07 staged/active rules, a mic-volume
-    /// change reaches a live publisher in place, and a preferred-input change
-    /// restarts mic capture only while no output owns the session. Everything
-    /// else (connection, bitrate, codec, voice polish) is read at the next
-    /// session start, exactly as before.
+    /// change reaches the live mix in place (the engine ramps the mic
+    /// channel's gain — no click, no encoder reconfigure), and a
+    /// preferred-input change restarts mic capture only while no output owns
+    /// the session. Everything else (connection, bitrate, codec, voice
+    /// polish) is read at the next session start, exactly as before.
     func applySavedSettings(_ newSettings: StreamSettings) {
         let previous = settings
         settings = newSettings
         applyOutputProfile(newSettings.outputProfile,
                            destination: newSettings.selectedProtocol)
-        if newSettings.micVolume != previous.micVolume,
-           let publisher = publisherBox.publisher {
-            Task { await publisher.setMicVolume(newSettings.micVolume) }
+        if newSettings.micVolume != previous.micVolume {
+            let volume = Float(max(0, min(newSettings.micVolume, 2)))
+            Task { await audioEngine.setChannelGain(.microphone(deviceUID: nil),
+                                                    volume: volume, isMuted: false) }
         }
         if newSettings.preferredAudioInputUID != previous.preferredAudioInputUID,
            isPipelineRunning, !outputsOwnProfile {
@@ -620,6 +674,7 @@ final class StreamController: ObservableObject {
 
     private func startPipeline() {
         isPipelineRunning = true
+        startAudioEngine()
         startAudioInput()
         reconcileSourceDemand()
         let program = previewProgram.programScene
@@ -629,6 +684,33 @@ final class StreamController: ObservableObject {
         if previewState == .active {
             startPreviewEngine()
         }
+    }
+
+    /// Starts the A01 audio engine and routes the microphone channel: the
+    /// mic's `VoicePolishProcessor` runs as the channel's INSERT (its position
+    /// moved here from the publisher's per-track path, so the mix is polished
+    /// exactly once — the A08 FX seam), and the settings mic volume becomes
+    /// the channel's program gain. Capture-source channels self-register on
+    /// their first audio buffer and get their S05 binding gains from
+    /// `applyProgramAudioBindings`.
+    private func startAudioEngine() {
+        let audioEngine = self.audioEngine
+        let settings = self.settings
+        Task {
+            await audioEngine.run()
+            if settings.voicePolishEnabled {
+                let polish = VoicePolishInsertBox()
+                await audioEngine.addChannel(.microphone(deviceUID: nil)) { sample in
+                    polish.process(sample)
+                }
+            } else {
+                await audioEngine.addChannel(.microphone(deviceUID: nil))
+            }
+            await audioEngine.setChannelGain(.microphone(deviceUID: nil),
+                                             volume: Float(max(0, min(settings.micVolume, 2))),
+                                             isMuted: false)
+        }
+        applyProgramAudioBindings()
     }
 
     /// Starts mic capture on the preferred input from settings, falling back
@@ -648,6 +730,8 @@ final class StreamController: ObservableObject {
         Task { await engine.stop() }
         let previewEngine = self.previewEngine
         Task { await previewEngine.stop() }
+        let audioEngine = self.audioEngine
+        Task { await audioEngine.stop() }
         capturePool.stopAll()
         audio.stop()
         outputSizeSentToPublisher = false
@@ -694,6 +778,15 @@ final class StreamController: ObservableObject {
         let demand = CaptureSourceKey.demanded(layers: layers,
                                                sources: sceneStore.sources)
         capturePool.reconcile(demand: demand, settings: settings)
+        // A01: the audio engine keeps exactly the channels its captures can
+        // feed — the mic plus one per demanded capture key. Stopped captures
+        // stop delivering, and their channels (rings, converters, FX state)
+        // are torn down here; pending gains survive so a re-created channel
+        // keeps its mix position.
+        let keep = Set(demand.map { AudioChannelID.capture($0) })
+            .union([.microphone(deviceUID: nil)])
+        let audioEngine = self.audioEngine
+        Task { await audioEngine.pruneChannels(keeping: keep) }
     }
 
     /// The W03 program seam (W05 Take, issue #68; W08 swap point, issue #65):
@@ -705,6 +798,35 @@ final class StreamController: ObservableObject {
     /// `PreviewProgramModel.programScene`.
     func publishSceneToProgram(_ scene: Scene) {
         Task { await engine.updateScene(scene) }
+        // A01: audio follows the program atomically with video — the scene's
+        // S05 `AudioBinding`s become ramped channel gains (click-free Take).
+        applyProgramAudioBindings()
+    }
+
+    /// Pushes the PROGRAM scene's per-layer `AudioBinding`s (S05) onto the
+    /// audio engine's capture channels: a visible screen layer's mute/volume
+    /// becomes its channel's program gain, and every capture channel NOT
+    /// bound in the program scene ramps to silence (a staged-only source must
+    /// never leak into the outgoing mix — the audio reading of W03). The mic
+    /// is not scene-bound; its gain comes from settings. Multiple layers
+    /// sharing one source: the first visible binding wins (documented).
+    private func applyProgramAudioBindings() {
+        guard let program = previewProgram.programScene else { return }
+        let registry = SceneGraph.index(sceneStore.scenes)
+        let layers = SceneGraph.flattenedVisibleLayers(of: program, in: registry)
+        var gains: [AudioChannelID: (volume: Float, isMuted: Bool)] = [:]
+        for layer in layers {
+            let payload = layer.sourceID
+                .flatMap { id in sceneStore.sources.first(where: { $0.id == id }) }?.payload
+                ?? layer.payload
+            guard case .screen(let screen) = payload else { continue }
+            let id = AudioChannelID.capture(.screen(screen))
+            if gains[id] == nil {
+                gains[id] = (Float(layer.audio.volume), layer.audio.isMuted)
+            }
+        }
+        let audioEngine = self.audioEngine
+        Task { await audioEngine.applyProgramCaptureGains(gains) }
     }
 
     // MARK: - Permission transitions (C10, issue #79)
@@ -755,6 +877,19 @@ final class StreamController: ObservableObject {
         outputSizeSentToPublisher = true
         let canvasSize = activeProfile.canvasSize
         Task { await publisher.setOutputSize(canvasSize, nativeShortEdge: Int(min(canvasSize.width, canvasSize.height))) }
+    }
+}
+
+/// Carries the non-Sendable `VoicePolishProcessor` into the mic channel's
+/// `@Sendable` insert closure. `@unchecked Sendable` is sound here: the
+/// processor is only ever called under the channel's ingest lock (one thread
+/// at a time, off the main actor), which is the same confinement the
+/// publishers gave their per-actor instances.
+private final class VoicePolishInsertBox: @unchecked Sendable {
+    private let processor = VoicePolishProcessor()
+
+    func process(_ sample: CMSampleBuffer) -> CMSampleBuffer {
+        processor.process(sample)
     }
 }
 
