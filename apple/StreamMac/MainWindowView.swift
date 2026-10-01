@@ -876,6 +876,17 @@ private struct TransitionSettingsSectionView: View {
         switch transition.wrappedValue.style {
         case .cut:
             EmptyView()
+        case .layerMotion:
+            durationSlider(transition)
+            Picker("Easing", selection: transition.motionEasing) {
+                ForEach(MotionEasing.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            Picker("Unmatched Layers", selection: transition.motionFallback) {
+                Text("Cut").tag(MotionFallback.cut)
+                Text("Dissolve").tag(MotionFallback.dissolve)
+            }
+            Text("Duplicate a layer or share its Motion ID across scenes. Ambiguous identities and incompatible source/mask changes use the selected fallback.")
+                .font(.caption).foregroundStyle(.secondary)
         case .dissolve, .dipToColor, .wipe, .slide:
             durationSlider(transition)
             if transition.wrappedValue.style == .dipToColor {

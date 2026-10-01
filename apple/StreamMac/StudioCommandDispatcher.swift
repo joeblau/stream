@@ -285,6 +285,7 @@ enum StudioCommand: Equatable, Sendable {
     /// Replaces a STAGED-scene text layer's payload (the string + the whole
     /// style surface; a complete value). The target must be a text layer.
     case setLayerText(LayerID, TextSourcePayload, in: SceneID?)
+    case setLayerMotionIdentity(LayerID, UUID, in: SceneID?)
     /// Session transport: doesn't alter staged content or create undo entries.
     case setDynamicOverlayTransport(LayerID, OverlayTransportAction, in: SceneID?)
     /// Replaces a project text overlay's payload (applies immediately, like
@@ -545,6 +546,14 @@ enum StudioCommand: Equatable, Sendable {
     case ptzSetSceneRecall(PTZSceneRecallLink)
     case ptzRemoveSceneRecall(UUID)
 
+    // S11: one persisted rundown and one transport clock.
+    case setRundown(ShowRundownDocument)
+    case rundownPlay
+    case rundownPause
+    case rundownStop
+    case rundownSkip
+    case runRundownCue(UUID)
+
     // Settings session (W04).
     case openSettings(SettingsSession.Section?)
     case closeSettings
@@ -662,6 +671,7 @@ enum StudioCommand: Equatable, Sendable {
         case .updateStylePreset: return "Update Style Preset"
         case .removeStylePreset: return "Remove Style Preset"
         case .setLayerText(let id, _, _): return "Layer \(id) Text"
+        case .setLayerMotionIdentity: return "Layer Motion Identity"
         case .setDynamicOverlayTransport(_, let action, _): return "Overlay \(action.rawValue)"
         case .setOverlayText: return "Overlay Text"
         case .setLayerImage(let id, _, _): return "Layer \(id) Image"
@@ -739,6 +749,12 @@ enum StudioCommand: Equatable, Sendable {
         case .ptzSetSceneRecall(let link):
             return link.recallOnProgramEntry ? "Arm Scene PTZ Recall" : "Set Scene PTZ Recall"
         case .ptzRemoveSceneRecall: return "Remove Scene PTZ Recall"
+        case .setRundown: return "Edit Rundown"
+        case .rundownPlay: return "Play Rundown"
+        case .rundownPause: return "Pause Rundown"
+        case .rundownStop: return "Stop Rundown"
+        case .rundownSkip: return "Skip Cue"
+        case .runRundownCue: return "Take Rundown Cue"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
         case .applySettings: return "Apply Settings"
@@ -988,6 +1004,7 @@ final class StudioCommandDispatcher: ObservableObject {
     /// here (the AssetLibraryPanelView hook's documented alternative) so
     /// MainWindowView needs no new environment plumbing.
     let assetLibrary: AssetLibraryStore
+    let rundown: ShowRundownController
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
     /// graph, keyed by chain-slot ID (passthrough to the controller — the
@@ -1035,6 +1052,7 @@ final class StudioCommandDispatcher: ObservableObject {
         // library it resolves documents through (see the property docs).
         self.pdfDecks = PDFDeckStore()
         self.assetLibrary = AssetLibraryStore()
+        self.rundown = ShowRundownController()
         // G06: the pool's PDF engines resolve documents through the library.
         controller.capturePool.assetLibrary = assetLibrary
         // G08 (issue #115): web widget hosts reach the asset library through
@@ -1054,6 +1072,18 @@ final class StudioCommandDispatcher: ObservableObject {
         controller.capturePool.onPDFStatus = { [weak self] id, status in
             guard let self, status.pageCount > 0 else { return }
             self.pdfDecks.notePageCount(status.pageCount, for: id)
+        }
+        rundown.onCue = { [weak self] entry in
+            guard let self else { return }
+            let result = self.execute(.runRundownCue(entry.id))
+            if case .rejected(let error) = result.outcome { self.rundown.fail(error.description) }
+        }
+        controller.capturePool.onMediaReachedEnd = { [weak self] sourceID, endedAt in
+            guard let self, let program = self.previewProgram.programScene,
+                  self.rundown.playback.current?.sceneID == program.id.rawValue,
+                  self.mediaSourceIDs(in: program, registry: SceneGraph.index(self.sceneStore.scenes))
+                    .contains(sourceID) else { return }
+            self.rundown.noteMediaEnd(at: endedAt)
         }
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
@@ -1503,13 +1533,13 @@ final class StudioCommandDispatcher: ObservableObject {
             return nil
         // S09 (issue #100): transition settings — same targeting rules as
         // the scene background (staged-scene content vs project default).
-        case .setSceneTransition(_, let sceneID):
+        case .setSceneTransition(let transition, let sceneID):
             switch resolveStagedScene(sceneID) {
             case .failure(let error): return error
-            case .success: return nil
+            case .success: return transition?.validationError.map { .invalidValue($0) }
             }
-        case .setDefaultTransition:
-            return nil
+        case .setDefaultTransition(let transition):
+            return transition.validationError.map { .invalidValue($0) }
 
         // E01 (issue #101): layer overrides are staged layer edits (same
         // targeting + lock rules as `.setLayerEffects`, plus range
@@ -1576,6 +1606,11 @@ final class StudioCommandDispatcher: ObservableObject {
         // stay a TEXT edit on a text layer — never a kind change), with range
         // validation the style model owns; title-style presets mirror the
         // G03 preset rules.
+        case .setLayerMotionIdentity(let layerID, _, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)): return lockError(for: scene.layers[index], in: scene)
+            case .failure(let error): return error
+            }
         case .setDynamicOverlayTransport(let layerID, _, let sceneID):
             switch resolveDynamicOverlay(layerID, in: sceneID) {
             case .success: return nil
@@ -1960,6 +1995,28 @@ final class StudioCommandDispatcher: ObservableObject {
             return ptzStore.recallLink(withID: id) != nil
                 ? nil : .invalidTarget("Scene PTZ recall link \(id) does not exist.")
 
+        case .setRundown(let document):
+            return document.validationError.map { .invalidValue($0) }
+        case .rundownPlay:
+            guard !rundown.document.entries.isEmpty else { return .unavailable("Add scenes to the rundown first.") }
+            guard rundown.document.entries.allSatisfy({ entry in
+                sceneStore.scenes.contains { $0.id.rawValue == entry.cue.sceneID }
+            }) else { return .invalidTarget("A rundown scene is missing. Choose a replacement or remove its cue.") }
+            guard !previewProgram.hasPendingEdits else {
+                return .unavailable("Take or revert the staged composition before playing the rundown.")
+            }
+            return nil
+        case .runRundownCue(let id):
+            guard let entry = rundown.document.entries.first(where: { $0.id == id }),
+                  sceneStore.scenes.contains(where: { $0.id.rawValue == entry.cue.sceneID }) else {
+                return .invalidTarget("The rundown cue or its scene no longer exists.")
+            }
+            guard !previewProgram.hasPendingEdits else {
+                return .unavailable("The rundown stopped to preserve staged edits. Take or revert them before restarting.")
+            }
+            return nil
+        case .rundownPause, .rundownStop, .rundownSkip:
+            return nil
         case .openSettings, .closeSettings:
             return nil
         case .applySettings:
@@ -2278,6 +2335,8 @@ final class StudioCommandDispatcher: ObservableObject {
         // implicitly takes in direct-live) like any layer edit; overlay
         // payloads write the project overlay list (immediate, live-safe);
         // presets write the project document directly.
+        case .setLayerMotionIdentity(let layerID, let id, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.motionID = id }
         case .setDynamicOverlayTransport(let layerID, let action, let sceneID):
             if case .success(let id) = resolveDynamicOverlay(layerID, in: sceneID) {
                 DynamicOverlayStore.shared.perform(action, id: id)
@@ -2553,43 +2612,24 @@ final class StudioCommandDispatcher: ObservableObject {
         case .ptzRemoveSceneRecall(let id):
             ptzStore.removeRecallLink(id)
 
+        case .setRundown(let document): rundown.update(document)
+        case .rundownPlay: rundown.play()
+        case .rundownPause: rundown.pause()
+        case .rundownStop: rundown.stop()
+        case .rundownSkip: rundown.skip()
+        case .runRundownCue(let id):
+            guard let entry = rundown.document.entries.first(where: { $0.id == id }),
+                  let scene = sceneStore.scenes.first(where: { $0.id.rawValue == entry.cue.sceneID }) else { return }
+            sceneStore.selectedID = scene.id
+            previewProgram.stage(scene)
+            publishStaged(transitionOverride: entry.transition, automated: true)
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
         case .applySettings: session.apply()
         case .revertSettings: session.revert()
 
         case .take:
-            // W03: staged → program, atomically. The model swap republishes
-            // the program engine through the controller's observation (no
-            // cadence/media interruption); persisting here keeps SceneStore
-            // the source of truth for the PUBLISHED composition only.
-            let outgoingProgram = previewProgram.programScene
-            guard let published = previewProgram.take() else { return }
-            sceneStore.update(published)
-            // A03 (issue #98): entering the scene fires its bound sounds
-            // (enter stingers + ambient beds; the outgoing scene's exit
-            // stingers fire and its beds stop). Idempotent re-sync, so
-            // direct-live's implicit takes can't double-fire.
-            soundboard.syncProgramScene(published)
-            // S08 (issue #99): the audio snapshot restore and media
-            // entry/exit behavior follow the program change on the same
-            // seam (both no-op when the taken scene is already program).
-            restoreSceneAudioSnapshot(entering: published,
-                                      previousProgramID: outgoingProgram?.id)
-            applyProgramMediaBehavior(entering: published, leaving: outgoingProgram)
-            // S09 (issue #100): a scene CHANGE takes through the configured
-            // transition (the incoming scene's override, else the project
-            // default) — the engine renders it per tick. A same-scene edit
-            // take cuts (the engine's layer fades animate visibility diffs).
-            if published.id != outgoingProgram?.id {
-                transitions.handleTake(targetSceneID: published.id,
-                                       transition: published.transition
-                                           ?? sceneStore.defaultTransition)
-                // E06 (issue #165): opt-in scene→preset PTZ recalls fire on
-                // program entry, on the same seam as scene sounds/media —
-                // previewing a scene never moves a camera.
-                ptz.recallLinkedPresets(forSceneID: published.id.rawValue)
-            }
+            publishStaged()
         case .revert:
             previewProgram.revert()
         case .setDirectLiveEditing(let on):
@@ -2647,26 +2687,22 @@ final class StudioCommandDispatcher: ObservableObject {
     /// explicit mode's save point is the edit itself).
     private func takeStagedIfDirectLive() {
         guard previewProgram.directLiveEditing else { return }
+        publishStaged()
+    }
+
+    /// Every manual/automated Take shares the same sound, audio, media and
+    /// PTZ hooks. A cue override never changes the persisted scene setting.
+    private func publishStaged(transitionOverride: SceneTransition? = nil, automated: Bool = false) {
+        if !automated { rundown.manualOverride() }
         let outgoingProgram = previewProgram.programScene
         guard let published = previewProgram.take() else { return }
         sceneStore.update(published)
-        // A03 (issue #98): direct-live's implicit takes fire scene sounds too.
         soundboard.syncProgramScene(published)
-        // S08 (issue #99): same-scene re-takes no-op inside both hooks, so
-        // an edit Taken to the scene already on program never re-fires the
-        // entry behavior or re-restores the snapshot.
-        restoreSceneAudioSnapshot(entering: published,
-                                  previousProgramID: outgoingProgram?.id)
+        restoreSceneAudioSnapshot(entering: published, previousProgramID: outgoingProgram?.id)
         applyProgramMediaBehavior(entering: published, leaving: outgoingProgram)
-        // S09 (issue #100): direct-live uses the same transitions — an
-        // implicit take that CHANGES the program scene arms its transition
-        // exactly like an explicit Take.
         if published.id != outgoingProgram?.id {
             transitions.handleTake(targetSceneID: published.id,
-                                   transition: published.transition
-                                       ?? sceneStore.defaultTransition)
-            // E06 (issue #165): direct-live's implicit takes fire the opt-in
-            // PTZ recalls too (same program-entry seam as the explicit Take).
+                transition: transitionOverride ?? published.transition ?? sceneStore.defaultTransition)
             ptz.recallLinkedPresets(forSceneID: published.id.rawValue)
         }
     }
@@ -3127,6 +3163,7 @@ final class StudioCommandDispatcher: ObservableObject {
              .setLayerSourceEffects(_, _, let id),
              .setLayerStyle(_, _, let id),
              .setLayerText(_, _, let id),
+             .setLayerMotionIdentity(_, _, let id),
              .setLayerImage(_, _, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
         default:
@@ -3486,6 +3523,7 @@ private extension StudioCommand {
              .setLayerSourceEffects,
              .setLayerStyle, .setOverlayStyle,
              .setLayerText, .setOverlayText,
+             .setLayerMotionIdentity,
              .setLayerWeb, .setOverlayWeb,
              .setLayerImage, .setOverlayImage:
             return true
@@ -3519,6 +3557,7 @@ private extension StudioCommand {
              .addEffectPreset, .updateEffectPreset, .removeEffectPreset,
              .addStylePreset, .updateStylePreset, .removeStylePreset,
              .addTextStylePreset, .updateTextStylePreset, .removeTextStylePreset,
+             .setRundown, .rundownPlay, .rundownPause, .rundownStop, .rundownSkip, .runRundownCue,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
              .undo, .redo:

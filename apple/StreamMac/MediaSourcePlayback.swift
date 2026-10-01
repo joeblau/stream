@@ -116,6 +116,8 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// but required to never reenter the playback (the pool hops actors).
     var onStatus: (@Sendable (SourceDefinitionID, MediaSourceStatus) -> Void)?
 
+    var onReachedEnd: (@Sendable (SourceDefinitionID, Double) -> Void)?
+
     private var lock = os_unfair_lock_s()
     private var player: AVPlayer?
     private var playerItem: AVPlayerItem?
@@ -326,6 +328,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     private func configureAnimated(contents: AnimatedImageContents, bookmark: Data) {
         let engine = AnimatedImagePlayback(sourceID: sourceID,
                                            payloadProvider: payloadProvider)
+        engine.onReachedEnd = { [weak self] id, time in self?.onReachedEnd?(id, time) }
         engine.onStatus = { [weak self] id, status in
             self?.onStatus?(id, status)
         }
@@ -648,8 +651,10 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             status.phase = .ready
             status.positionSeconds = trimIn.seconds
         }
+        let endedAt = CMClockGetTime(CMClockGetHostTimeClock()).seconds
         publishStatusLocked()
         os_unfair_lock_unlock(&lock)
+        onReachedEnd?(sourceID, endedAt)
     }
 
     // MARK: - Position reporting

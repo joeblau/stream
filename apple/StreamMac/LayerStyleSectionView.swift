@@ -33,6 +33,17 @@ struct LayerStyleSectionView: View {
     var body: some View {
         if let layer = selectedLayer {
             styleSection(layer)
+            Section("Scene Motion") {
+                TextField("Motion ID", text: Binding(get: { layer.motionID.uuidString }, set: { value in
+                    guard let id = UUID(uuidString: value) else { return }
+                    dispatcher.execute(.setLayerMotionIdentity(layer.id, id, in: nil))
+                }))
+                Button("Make Motion Independent") {
+                    dispatcher.execute(.setLayerMotionIdentity(layer.id, UUID(), in: nil))
+                }
+                Text("Copies share this ID. Matching requires one visible copy per scene and compatible source and mask settings.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             presetsSection(layer: layer)
         }
     }
