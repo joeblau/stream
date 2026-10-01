@@ -490,6 +490,9 @@ struct MainWindowView: View {
             // C09 (issue #163): Syphon server sources — discovered servers,
             // add/rename/relink/remove, and per-source receive status.
             SyphonSourcesSectionView()
+            // A02 (issue #97): media file sources — add/rename/remove and
+            // per-source playback status alongside transport in the layer panel.
+            MediaSourcesSectionView()
             // W03: the inspector edits the STAGED scene (what PREVIEW shows);
             // changes reach program only via Take.
             if let scene = previewProgram.stagedScene {
