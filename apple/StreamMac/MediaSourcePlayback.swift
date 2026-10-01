@@ -63,6 +63,13 @@ enum MediaSourceFactory {
 
 /// A02 (issue #97): the playback engine for ONE registry media source.
 ///
+/// G09 (issue #116): image files (GIF/APNG/animated HEIC) dispatch at load
+/// to the CGImageSource frame-stepping engine in `AnimatedOverlayPlayback.swift`
+/// (same pull cadence and transport semantics — this class stays the pool's
+/// single entry point); video files, including ProRes 4444 / HEVC-alpha
+/// overlay assets, take the AVPlayer path below, whose 32BGRA output
+/// preserves their alpha channel.
+///
 /// **Clock discipline.** Video frames are PULLED by the composition engines'
 /// render tick (`pullFrame`): the engine asks for the frame at the player's
 /// current item time and stamps the composited output on its own shared host
@@ -134,6 +141,13 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     private var wantsPlay = false
     private var didLoad = false
     private var loadedBookmark: Data?
+    /// G09 (issue #116): animated-image files (GIF/APNG/animated HEIC) have
+    /// no AVAsset representation — they play through this CGImageSource
+    /// frame-stepping engine instead of the AVPlayer path. Same pull cadence,
+    /// same transport semantics, same shared instance (so preview and
+    /// program stay frame-synchronized, and the animation composites stably
+    /// above S09 transition blends).
+    private var animated: AnimatedImagePlayback?
     private var loadTask: Task<Void, Never>?
     private var periodicObserver: Any?
     private var boundaryObserver: Any?
@@ -186,6 +200,19 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             }
             // Access is held for the rest of the session (one startAccessing
             // per load; a relink resolves the new bookmark the same way).
+            // G09 (issue #116): animated-image files dispatch to the
+            // CGImageSource engine — the probe doubles as the load-time
+            // unsupported-format gate (static/undecodable images fail here
+            // with the explicit reason, never reaching program).
+            if MediaOverlayClassifier.isAnimatedImageCandidate(url: url) {
+                switch MediaOverlayClassifier.probeAnimatedImage(url: url) {
+                case .failure(let error):
+                    fail(error.message)
+                case .success(let contents):
+                    configureAnimated(contents: contents, bookmark: bookmark)
+                }
+                return
+            }
             let asset = AVURLAsset(url: url)
             let duration = try await asset.load(.duration)
             let tracks = try await asset.load(.tracks)
@@ -233,6 +260,13 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         }
 
         let item = AVPlayerItem(asset: asset)
+        // 32BGRA carries a full alpha channel, so ProRes 4444/4444XQ and
+        // HEVC-with-alpha tracks (G09, issue #116) keep their transparency
+        // through this decode path — the renderer's CIImage compositing is
+        // premultiplied-alpha-correct against it. Codec VALIDATION for the
+        // alpha-overlay add path happens at import
+        // (`MediaOverlayClassifier.probeAlphaVideo`); an opaque codec here
+        // simply composites like any other video.
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferMetalCompatibilityKey as String: true
@@ -285,6 +319,32 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         os_unfair_lock_unlock(&lock)
     }
 
+    /// G09 (issue #116): loads an animated image into the CGImageSource
+    /// engine. Transport/status plumbing is identical to the video path —
+    /// the engine reports through the same `onStatus` mirror and honors the
+    /// payload's loops/autoplay/end action live.
+    private func configureAnimated(contents: AnimatedImageContents, bookmark: Data) {
+        let engine = AnimatedImagePlayback(sourceID: sourceID,
+                                           payloadProvider: payloadProvider)
+        engine.onStatus = { [weak self] id, status in
+            self?.onStatus?(id, status)
+        }
+        os_unfair_lock_lock(&lock)
+        animated = engine
+        loadedBookmark = bookmark
+        didLoad = true
+        status.phase = .ready
+        status.positionSeconds = 0
+        status.durationSeconds = contents.timeline.duration
+        let autoplay = payloadProvider()?.autoplay ?? true
+        let shouldPlay = autoplay || wantsPlay
+        os_unfair_lock_unlock(&lock)
+        engine.configure(contents: contents, autoplayHint: shouldPlay)
+        os_unfair_lock_lock(&lock)
+        loadTask = nil
+        os_unfair_lock_unlock(&lock)
+    }
+
     private func fail(_ message: String) {
         os_unfair_lock_lock(&lock)
         isPlaying = false
@@ -317,6 +377,12 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             os_unfair_lock_unlock(&lock)
             load()
             return nil
+        }
+        // G09: animated-image sources delegate the pull to the CGImageSource
+        // engine (no AVPlayer state exists for them; audio is n/a).
+        if let animated {
+            os_unfair_lock_unlock(&lock)
+            return animated.pullFrame()
         }
         var audio: [CMSampleBuffer] = []
         if let item = playerItem, let output = videoOutput {
@@ -413,6 +479,12 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     func play() {
         os_unfair_lock_lock(&lock)
         wantsPlay = true
+        // G09: animated-image sources forward transport to their engine.
+        if let animated {
+            os_unfair_lock_unlock(&lock)
+            animated.play()
+            return
+        }
         guard let player, didLoad else {
             os_unfair_lock_unlock(&lock)
             return
@@ -436,6 +508,11 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// demand-loss behavior: position holds for the next reference).
     func pause() {
         os_unfair_lock_lock(&lock)
+        if let animated {
+            os_unfair_lock_unlock(&lock)
+            animated.pause()
+            return
+        }
         guard let player else {
             os_unfair_lock_unlock(&lock)
             return
@@ -455,6 +532,11 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// issue's "stop" end action.
     func stop() {
         os_unfair_lock_lock(&lock)
+        if let animated {
+            os_unfair_lock_unlock(&lock)
+            animated.stop()
+            return
+        }
         guard let player else {
             os_unfair_lock_unlock(&lock)
             return
@@ -476,6 +558,11 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     func restart() {
         os_unfair_lock_lock(&lock)
         wantsPlay = true
+        if let animated {
+            os_unfair_lock_unlock(&lock)
+            animated.restart()
+            return
+        }
         guard let player, didLoad else {
             os_unfair_lock_unlock(&lock)
             return
@@ -497,6 +584,11 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// pause-stepping land on the exact frame.
     func seek(toSeconds seconds: Double) {
         os_unfair_lock_lock(&lock)
+        if let animated {
+            os_unfair_lock_unlock(&lock)
+            animated.seek(toSeconds: seconds)
+            return
+        }
         guard let player, didLoad, seconds.isFinite else {
             os_unfair_lock_unlock(&lock)
             return
@@ -614,6 +706,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         audioReader?.cancelReading()
         audioReader = nil
         audioOutput = nil
+        animated = nil
         player = nil
         playerItem = nil
         videoOutput = nil

@@ -166,6 +166,15 @@ enum StudioCommand: Equatable, Sendable {
     /// Adds a project overlay (text/shape today — branding that needs no
     /// capture) at the FRONT of the project overlay stack.
     case addOverlay(LayerPayload)
+    /// G09 (issue #116): adds a project overlay bound to a NEW registry
+    /// media source (animated image or alpha video) in one atomic command —
+    /// the source registration carries the bookmark and the playback policy
+    /// (loop/autoplay/end action, editable in the Media Playout section) and
+    /// gives the overlay its playout identity: pool demand and the render
+    /// path key media by source ID. Format validation already happened at
+    /// the file pick (`MediaOverlayClassifier`) — an unsupported format
+    /// never gets this far.
+    case addMediaOverlay(name: String, payload: MediaSourcePayload)
     case removeOverlay(LayerID)
     case renameOverlay(LayerID, to: String)
     case setOverlayVisibility(LayerID, visible: Bool)
@@ -513,6 +522,7 @@ enum StudioCommand: Equatable, Sendable {
         case .distributeLayers(let distribution, _):
             return "Distribute \(distribution.displayName)"
         case .addOverlay(let payload): return "Add \(payload.displayName) Overlay"
+        case .addMediaOverlay(let name, _): return "Add \(name) Overlay"
         case .removeOverlay: return "Remove Overlay"
         case .renameOverlay: return "Rename Overlay"
         case .setOverlayVisibility(_, let visible):
@@ -1208,10 +1218,18 @@ final class StudioCommandDispatcher: ObservableObject {
             // Branding overlays only: text/shape render without a capture.
             // Camera/screen overlays would need the S05 demand reconciliation
             // to watch the overlay list (it watches scenes today); the other
-            // kinds have no renderer yet.
+            // kinds have no renderer yet. Media overlays go through
+            // `.addMediaOverlay` (G09), which also registers their source.
             return payload.isText || payload.isShape
                 ? nil
                 : .invalidValue("\(payload.displayName) overlays aren't supported yet — add a Text or Shape overlay.")
+        case .addMediaOverlay(_, let payload):
+            // The panel's file pick already validated the format
+            // (`MediaOverlayClassifier`); the command only enforces that a
+            // file is actually linked.
+            return payload.bookmarkData != nil
+                ? nil
+                : .invalidValue("A media overlay needs a linked file — pick an animated image or an alpha video.")
         case .removeOverlay(let overlayID),
              .setOverlayVisibility(let overlayID, _),
              .setOverlayTransform(let overlayID, _),
@@ -1813,6 +1831,17 @@ final class StudioCommandDispatcher: ObservableObject {
         // the change on their next tick. No staged edit, no implicit take.
         case .addOverlay(let payload):
             sceneStore.addOverlay(makeOverlay(payload: payload))
+        case .addMediaOverlay(let name, let payload):
+            // G09 (issue #116): one atomic add — the registry source carries
+            // the bookmark + playback policy; the overlay binds to it by ID,
+            // so the pool's demand keys its playout by source and a payload
+            // edit (loop/end action) never restarts playback. Undo removes
+            // the overlay but keeps the registry source (the S12 registry-
+            // outside-the-snapshot precedent, like relinked sources).
+            let source = sceneStore.addSource(
+                SourceDefinition(name: name, payload: .media(payload)))
+            sceneStore.addOverlay(makeMediaOverlay(name: name, sourceID: source.id,
+                                                   payload: payload))
         case .removeOverlay(let overlayID):
             sceneStore.removeOverlay(overlayID)
         case .renameOverlay(let overlayID, let name):
@@ -2712,6 +2741,20 @@ final class StudioCommandDispatcher: ObservableObject {
         }
     }
 
+    /// G09 (issue #116): a media overlay (animated image / alpha video)
+    /// starts centered at 40% of the canvas — sticker/lower-third assets
+    /// drag to size on the canvas like any overlay. The inline payload
+    /// mirrors the registry source's (self-contained document rule), and
+    /// `sourceID` is what keys playout demand and frame pulls.
+    private func makeMediaOverlay(name: String, sourceID: SourceDefinitionID,
+                                  payload: MediaSourcePayload) -> LayerNode {
+        LayerNode(name: name, sourceID: sourceID, payload: .media(payload),
+                  transform: LayerTransform(
+                    position: GraphPoint(x: 0.5, y: 0.5),
+                    size: GraphSize(width: 0.4, height: 0.4),
+                    anchor: .center))
+    }
+
     private func editLayer(_ layerID: LayerID,
                            in sceneID: SceneID?,
                            _ edit: (inout LayerNode) -> Void) {
@@ -2911,6 +2954,7 @@ private extension StudioCommand {
              .alignLayers, .distributeLayers,
              .addOverlay, .removeOverlay, .renameOverlay, .setOverlayVisibility,
              .setOverlayLocked, .setOverlayTransform, .setOverlayEffects, .moveOverlay,
+             .addMediaOverlay,
              .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground,
              .setSceneTransition, .setDefaultTransition,
              .setSceneSoundBindings,
