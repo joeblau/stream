@@ -182,6 +182,10 @@ targets:
         # .builtInWideAngleCamera and a DiscoverySession asking for
         # .continuityCamera finds nothing.
         INFOPLIST_KEY_NSCameraUseContinuityCameraDeviceType: YES
+        # Without usage descriptions macOS silently denies camera/mic prompts
+        # (the sandbox entitlements alone are not enough).
+        INFOPLIST_KEY_NSCameraUsageDescription: Stream uses your cameras (including iPhone via Continuity Camera) as live sources in your broadcast scenes.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Stream uses the microphone (including connected Bluetooth mics) to capture audio for your broadcast.
     entitlements:
       path: StreamMac/StreamMac.entitlements
       properties:
