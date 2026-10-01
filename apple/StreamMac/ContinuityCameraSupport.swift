@@ -38,6 +38,30 @@ import SwiftUI
 /// Control-Center-only (their class properties are readonly), so the UI shows
 /// their live active state and points at Control Center rather than faking a
 /// toggle. All effect UI is capability-gated to Continuity-family devices.
+///
+/// EXTERNAL CAPTURE HARDWARE (C08, issue #162). DSLR/mirrorless cameras and
+/// HDMI capture devices reach this code in exactly three public shapes, all
+/// already enumerated by `DeviceMonitor`'s `.external` discovery:
+/// - UVC-native USB (camera's own "USB streaming / webcam" mode, or an HDMI
+///   capture card like the Elgato Cam Link 4K) — a real USB device;
+/// - vendor VIRTUAL cameras (Canon EOS Webcam Utility, Fujifilm X Webcam,
+///   Ecamm/OBS virtual cams) — a CoreMediaIO device fed by vendor software,
+///   so the badge must say the frames come from an app, not hardware;
+/// - proprietary PTP/SDK modes NEVER enumerate (a camera in "PC remote /
+///   tether" mode is invisible to AVCapture) — the honest answer for those is
+///   the camera's UVC mode or an HDMI capture card, no app change possible.
+///
+/// CLASSIFICATION. `AVCaptureDevice.transportType` (macOS-only, IOKit
+/// `kIOAudioDeviceTransportType*` four-character codes) separates virtual
+/// ('virt') from physical USB ('usb ') cameras — validated 2026-10-01 against
+/// the macOS 27 SDK: the installed Ecamm Live Virtual Cam reports 'virt', the
+/// built-in FaceTime camera reports 'bltn'. Apple's `isVirtualDevice` is
+/// `API_UNAVAILABLE(macos)`, so transport type is the only public hook.
+/// Within physical USB devices a documented name/modelID heuristic (same
+/// trade-off as the wired-iOS heuristic above — issue #162 forbids private
+/// APIs) badges known HDMI capture cards; anything unmatched stays
+/// `.externalUSB`, which covers UVC-mode DSLRs indistinguishable from
+/// ordinary webcams.
 
 // MARK: - Device classification
 
@@ -54,7 +78,16 @@ enum CameraDeviceKind: String, Sendable {
     /// A USB-attached iPhone/iPad (device screen + mic, muxed). Heuristic —
     /// see the file header.
     case wirediOS
-    /// Any other USB or virtual camera.
+    /// A USB HDMI capture card (Elgato Cam Link, AVerMedia Live Gamer, …)
+    /// presenting a DSLR/mirrorless/console HDMI feed as UVC. Name/modelID
+    /// heuristic — see the file header.
+    case captureCard
+    /// A CoreMediaIO virtual camera fed by vendor/user software (Canon EOS
+    /// Webcam Utility, Fujifilm X Webcam, Ecamm/OBS virtual cams). Detected
+    /// via the 'virt' IOKit transport type.
+    case virtualCamera
+    /// Any other USB camera — including UVC-mode DSLRs/mirrorless cameras,
+    /// which are indistinguishable from ordinary webcams.
     case externalUSB
 
     /// True for iPhone/iPad-sourced devices — the "iPhone & iPad" grouping
@@ -62,7 +95,7 @@ enum CameraDeviceKind: String, Sendable {
     var isAppleMobileDevice: Bool {
         switch self {
         case .continuity, .deskView, .wirediOS: return true
-        case .builtIn, .externalUSB: return false
+        case .builtIn, .captureCard, .virtualCamera, .externalUSB: return false
         }
     }
 
@@ -72,6 +105,8 @@ enum CameraDeviceKind: String, Sendable {
         case .continuity: return "Continuity"
         case .deskView: return "Desk View"
         case .wirediOS: return "USB"
+        case .captureCard: return "HDMI"
+        case .virtualCamera: return "Virtual"
         case .builtIn, .externalUSB: return nil
         }
     }
@@ -80,7 +115,19 @@ enum CameraDeviceKind: String, Sendable {
     var iconName: String {
         switch self {
         case .continuity, .deskView, .wirediOS: return "iphone"
+        case .captureCard: return "externaldrive.connected.to.line.below"
+        case .virtualCamera: return "camera.filters"
         case .builtIn, .externalUSB: return "video.fill"
+        }
+    }
+
+    /// C08 (issue #162): one-line honest explanation of the input class,
+    /// appended to picker/status help text. Nil for classes needing no caveat.
+    var hint: String? {
+        switch self {
+        case .captureCard: return ContinuitySetupGuidance.captureCardHint
+        case .virtualCamera: return ContinuitySetupGuidance.virtualCameraHint
+        case .builtIn, .continuity, .deskView, .wirediOS, .externalUSB: return nil
         }
     }
 }
@@ -102,8 +149,40 @@ extension AVCaptureDevice {
         let hasMuxedFormats = formats.contains {
             CMFormatDescriptionGetMediaType($0.formatDescription) == kCMMediaType_Muxed
         }
-        return isAppleMobileModel && hasMuxedFormats ? .wirediOS : .externalUSB
+        return isAppleMobileModel && hasMuxedFormats ? .wirediOS : streamExternalKind
     }
+
+    /// C08 (issue #162): refines a generic `.external` device into
+    /// virtual-camera / capture-card / plain-USB. See the file header for why
+    /// `transportType` and a name heuristic are the only public hooks.
+    private var streamExternalKind: CameraDeviceKind {
+        // IOKit transport codes (IOAudioTypes.h) are stable ABI; the constant
+        // isn't bridged to Swift, so the four-character code is spelled out.
+        let kTransportVirtual: Int32 = 0x7669_7274 // 'virt'
+        if transportType == kTransportVirtual { return .virtualCamera }
+        if Self.streamCaptureCardTokens.contains(where: streamExternalNameMatches) {
+            return .captureCard
+        }
+        return .externalUSB
+    }
+
+    /// True when the device name or model ID mentions a known UVC HDMI
+    /// capture product. Only products that enumerate as UVC devices are
+    /// listed — Blackmagic UltraStudio/DeckLink PCIe/Thunderbolt devices
+    /// never reach AVCapture (they need the Desktop Video SDK), so matching
+    /// them here would badge nothing.
+    private func streamExternalNameMatches(_ token: String) -> Bool {
+        localizedName.localizedCaseInsensitiveContains(token)
+            || modelID.localizedCaseInsensitiveContains(token)
+    }
+
+    private static let streamCaptureCardTokens = [
+        "cam link", "game capture", "hd60", "4k60",       // Elgato
+        "live gamer", "avermedia",                        // AVerMedia
+        "web presenter",                                  // Blackmagic (UVC model)
+        "magewell", "usb capture",                        // Magewell USB Capture
+        "epiphan",                                        // Epiphan AV.io / Webcaster
+    ]
 
     /// Display name with the connection badge, e.g. "Joe's iPhone ·
     /// Continuity" — the explicit identity issue #105 asks pickers to show.
@@ -210,4 +289,25 @@ enum ContinuitySetupGuidance {
     static let emptyStateHint =
         "Connect a camera — or use an iPhone over USB (unlock and tap Trust) "
         + "or Continuity Camera (same Apple Account, Wi-Fi & Bluetooth)."
+
+    /// C08 (issue #162): shown with a virtual camera so the badge reads
+    /// honestly — the frames are produced by software that must stay running.
+    static let virtualCameraHint =
+        "A virtual camera is fed by an app (e.g. a vendor webcam utility or OBS). "
+        + "If its source app stops, this feed freezes or shows a splash screen."
+
+    /// C08 (issue #162): shown with an HDMI capture card — the video source
+    /// is whatever is plugged into the card, so camera settings live on the
+    /// camera, not here.
+    static let captureCardHint =
+        "This is an HDMI capture device. Resolution, frame rate and autofocus are "
+        + "set on the camera feeding it; enable the camera's clean HDMI output."
+
+    /// C08 (issue #162): a DSLR/mirrorless in PTP/tether mode never enumerates
+    /// at all — the pickers simply won't list it, so the docs (not a phantom
+    /// entry) carry this guidance.
+    static let dslrConnectionHint =
+        "DSLR/mirrorless cameras: use the camera's USB webcam/streaming mode (UVC) "
+        + "or connect its HDMI output through a capture card. Tether/PC-remote "
+        + "modes do not appear as cameras on macOS."
 }

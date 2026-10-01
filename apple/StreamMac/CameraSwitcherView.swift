@@ -363,9 +363,16 @@ struct CameraSourcesSectionView: View {
                 }
                 Section("Cameras") {
                     ForEach(otherDevices, id: \.uniqueID) { device in
-                        Button(device.localizedName) {
+                        Button(device.streamSourceDisplayName) {
                             addSource(for: device)
                         }
+                    }
+                    // C08 (issue #162): with no external capture hardware
+                    // connected, say HOW a DSLR/mirrorless becomes a camera
+                    // here — PTP/tether modes never enumerate, so the picker
+                    // would otherwise look like the camera is unsupported.
+                    if otherDevices.allSatisfy({ $0.streamCameraKind == .builtIn }) {
+                        Text(ContinuitySetupGuidance.dslrConnectionHint)
                     }
                 }
             } label: {
@@ -502,7 +509,13 @@ struct CameraSourcesSectionView: View {
         if device.isSuspended {
             return "\(identity) — feed paused (unlock the iPhone to resume)"
         }
-        return "\(identity) — \(device.streamFormatSummary)"
+        // C08: virtual cameras and capture cards carry their caveat (the feed
+        // comes from software / from whatever HDMI source is attached).
+        var description = "\(identity) — \(device.streamFormatSummary)"
+        if let hint = device.streamCameraKind.hint {
+            description += ". \(hint)"
+        }
+        return description
     }
 
     // MARK: - Rename alert
@@ -518,12 +531,25 @@ extension AVCaptureDevice {
     /// C01: the device's highest-resolution format and its peak frame rate,
     /// plus whether the device carries muxed (embedded) audio — the format
     /// exposure issue #76 asks the source UI to show.
+    ///
+    /// C08 (issue #162): only real VIDEO formats compete for "best". A wired
+    /// iPhone/iPad mixes muxed (screen+audio) formats into `formats` — those
+    /// report 0×0 dimensions and a muxed-only device would render as
+    /// "0×0 · up to 0 fps" — and capture devices can expose formats whose
+    /// frame-rate ranges are empty or degenerate, so a 0 fps reading is
+    /// omitted rather than shown as "up to 0 fps".
     var streamFormatSummary: String {
-        guard let best = formats.max(by: { Self.streamPixelArea(of: $0) < Self.streamPixelArea(of: $1) })
+        let videoFormats = formats.filter {
+            CMFormatDescriptionGetMediaType($0.formatDescription) == kCMMediaType_Video
+        }
+        guard let best = videoFormats.max(by: { Self.streamPixelArea(of: $0) < Self.streamPixelArea(of: $1) })
         else { return "Video device" }
         let dimensions = CMVideoFormatDescriptionGetDimensions(best.formatDescription)
         let maxFPS = best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-        var summary = "\(dimensions.width)×\(dimensions.height) · up to \(Int(maxFPS.rounded())) fps"
+        var summary = "\(dimensions.width)×\(dimensions.height)"
+        if maxFPS > 0 {
+            summary += " · up to \(Int(maxFPS.rounded())) fps"
+        }
         let hasMuxedAudio = formats.contains {
             CMFormatDescriptionGetMediaType($0.formatDescription) == kCMMediaType_Muxed
         }
