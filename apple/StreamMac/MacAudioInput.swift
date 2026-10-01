@@ -16,8 +16,9 @@ final class MacAudioInput: ObservableObject {
     /// Audio capture devices from the most recent `refreshDevices()`.
     @Published private(set) var devices: [AVCaptureDevice] = []
     /// Human-readable description of the last start failure (missing device,
-    /// permission denial, session configuration failure). Cleared on a
-    /// successful start. Part of the S05 per-source error surface (issue #73).
+    /// permission denial, session configuration failure) or a mid-capture
+    /// device disconnect (C10, issue #79). Cleared on a successful start.
+    /// Part of the S05 per-source error surface (issue #73).
     @Published private(set) var errorMessage: String?
 
     /// Called with each microphone sample buffer, hopped to the main actor.
@@ -29,6 +30,14 @@ final class MacAudioInput: ObservableObject {
     private var outputShim: AudioCaptureShim?
     private var activeDevice: AVCaptureDevice?
     private var lastLevelPublishAt: UInt64 = 0
+    /// C10 (issue #79): the input the user/pipeline last chose. Survives an
+    /// unplug-driven stop so capture can resume when the SAME device returns
+    /// — a different device is never substituted silently.
+    private var lastRequestedDeviceUID: String?
+    /// C10: true only between "the live input was unplugged" and its return
+    /// (or an explicit restart). Gates hot-plug recovery so an intentional
+    /// pipeline stop never resurrects mic capture on a later device connect.
+    private var isAwaitingDeviceReturn = false
 
     /// Notification tokens. `nonisolated(unsafe)` so `deinit` (nonisolated on a
     /// @MainActor type) can remove them; tokens are safe to touch there.
@@ -75,6 +84,8 @@ final class MacAudioInput: ObservableObject {
     /// Starts capture from a specific device (one of `devices`).
     func start(device: AVCaptureDevice) {
         stop()
+        lastRequestedDeviceUID = device.uniqueID
+        isAwaitingDeviceReturn = false
         Task { [weak self] in
             guard await Self.requestMicrophoneAccess() else {
                 self?.errorMessage = "Microphone access is disabled for StreamMac. Enable it in System Settings > Privacy & Security > Microphone."
@@ -86,6 +97,7 @@ final class MacAudioInput: ObservableObject {
     }
 
     func stop() {
+        isAwaitingDeviceReturn = false
         guard let session else {
             level = 0
             return
@@ -183,9 +195,23 @@ final class MacAudioInput: ObservableObject {
     private func handleDeviceChange() {
         refreshDevices()
         if let activeDevice, !activeDevice.isConnected {
-            // The live input was unplugged; the session stops delivering, so
-            // don't leave a frozen non-zero meter on screen.
-            level = 0
+            // C10 (issue #79): the live input was unplugged. Stop cleanly and
+            // surface it through the existing per-source error surface —
+            // never silently substitute another input. Capture resumes only
+            // if the SAME device returns (below); choosing a different input
+            // in Settings is the explicit relink path.
+            errorMessage = "Microphone \"\(activeDevice.localizedName)\" was disconnected. Reconnect it, or choose another input in Settings."
+            audioInputLog.error("Active audio input disconnected: \(activeDevice.localizedName, privacy: .public)")
+            stop()
+            isAwaitingDeviceReturn = true
+            return
+        }
+        if isAwaitingDeviceReturn, session == nil,
+           let uid = lastRequestedDeviceUID,
+           let device = devices.first(where: { $0.uniqueID == uid }) {
+            // Hot-plug recovery: the exact input that was in use is back.
+            audioInputLog.info("Audio input returned, resuming: \(device.localizedName, privacy: .public)")
+            start(device: device)
         }
     }
 }

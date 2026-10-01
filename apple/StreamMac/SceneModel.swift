@@ -353,6 +353,24 @@ final class SceneStore: ObservableObject {
         }
     }
 
+    /// C10 (issue #79): the relink write path — re-points a source at a
+    /// replacement device/display when its original identity can't be
+    /// restored (the device is gone for good). Routes through `updateSource`,
+    /// so every bound layer in every scene follows, and the controller's
+    /// `$sources` observation re-keys the physical capture. Kind-mismatched
+    /// payloads are rejected: a camera source only takes a camera payload.
+    func relinkSource(_ id: SourceDefinitionID, to payload: LayerPayload) {
+        guard var definition = source(withID: id) else { return }
+        switch (definition.payload, payload) {
+        case (.camera, .camera), (.screen, .screen):
+            break
+        default:
+            return
+        }
+        definition.payload = payload
+        updateSource(definition)
+    }
+
     /// Removes a source from the registry. Bound layers keep their inline
     /// payload (the render authority) and simply become unbound, so their
     /// rendered content is unchanged until re-pointed.

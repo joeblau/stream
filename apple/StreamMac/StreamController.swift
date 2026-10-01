@@ -45,6 +45,17 @@ import os.lock
 /// between scenes sharing a source leaves that capture running (no flicker),
 /// and a failure to start surfaces in the pool's per-source error state.
 ///
+/// C10 (issue #79): device hot-plug, permission loss, and relinking. The
+/// `DeviceMonitor` watches camera/display/audio availability; the pool marks
+/// hot-unplugged sources MISSING (registry entry and demand survive, the
+/// renderer paints nothing, unrelated sources and outputs keep running) and
+/// resumes capture when the same stable identity returns. Screen-capture
+/// errors probe Screen Recording permission (W06's `probeScreenAccess`), and
+/// permission transitions retry blocked sources or mark revoked ones. A
+/// relink is a registry `updateSource` — the `$sources` observation below
+/// re-runs demand reconciliation so the replacement device/display takes
+/// over every bound layer's capture.
+///
 /// One ordered video consumer serializes `appendVideo` into the publisher (a
 /// `Task` per frame could reorder buffers); audio goes through the publisher's
 /// own ordered, nonisolated ingress exactly like the iOS pipeline.
@@ -69,9 +80,13 @@ final class StreamController: ObservableObject {
     let sceneStore: SceneStore
     /// The S05 keyed capture pool (issue #73): one physical capture per
     /// source identity, started/stopped purely by scene demand. Exposes the
-    /// per-source error state (`sourceErrors`) and the engines' frame read
-    /// path (`frames`).
+    /// per-source error state (`sourceErrors`), the C10 missing state
+    /// (`missingSources`), and the engines' frame read path (`frames`).
     let capturePool = CaptureSourcePool()
+    /// C10 (issue #79): camera/display/audio availability watcher. The pool
+    /// subscribes through its hooks (wired in `init`); SwiftUI reads the
+    /// published device lists for source health and relink pickers.
+    let deviceMonitor = DeviceMonitor()
     /// Compatibility read for the diagnostics row: the capture instance behind
     /// the system-picker screen source. The pool vends a stable instance, so
     /// existing reads (`controller.screenCapture.isCapturing`) keep working.
@@ -118,6 +133,15 @@ final class StreamController: ObservableObject {
     private let programConverter = PreviewImageConverter()
 
     private var settings: StreamSettings = .default
+    /// The W06 permission center (issue #69), shared with the app root. C10:
+    /// status transitions drive capture recovery (a re-granted permission
+    /// retries the sources its denial blocked; a camera revocation marks the
+    /// affected sources), and screen-capture errors trigger its revocation
+    /// probe.
+    private let permissions: PermissionsManager
+    /// The permission statuses seen at the last change fold, so only real
+    /// transitions act (`$statuses` republishes on every refresh).
+    private var lastPermissionStatuses: [PermissionsManager.Kind: PermissionsManager.Status] = [:]
     /// Hardware + destination gating for the output profile (W07); the single
     /// auditable capability place lives in StreamCore's OutputCapabilities.
     private let capabilities = OutputCapabilities.current
@@ -133,9 +157,11 @@ final class StreamController: ObservableObject {
     private var outputSizeSentToPublisher = false
     private var cancellables: Set<AnyCancellable> = []
 
-    init(sceneStore: SceneStore, previewProgram: PreviewProgramModel) {
+    init(sceneStore: SceneStore, previewProgram: PreviewProgramModel,
+         permissions: PermissionsManager) {
         self.sceneStore = sceneStore
         self.previewProgram = previewProgram
+        self.permissions = permissions
         // The persisted profile is the canvas authority from launch, so the
         // preview opens at the configured geometry before any source frame
         // ever arrives.
@@ -179,6 +205,48 @@ final class StreamController: ObservableObject {
                     guard let self, let scene else { return }
                     self.reconcileSourceDemand()
                     self.publishSceneToProgram(scene)
+                }
+            }
+            .store(in: &cancellables)
+
+        // C10 (issue #79): device hot-plug and permission-loss wiring.
+        // The DeviceMonitor reports stable identities; the pool moves exactly
+        // the affected sources between active and missing.
+        let capturePool = self.capturePool
+        deviceMonitor.onCameraDisconnected = { uniqueID in
+            capturePool.handleCameraDisconnected(uniqueID)
+        }
+        deviceMonitor.onCameraConnected = { uniqueID in
+            capturePool.handleCameraConnected(uniqueID)
+        }
+        deviceMonitor.onDisplaysChanged = { displayIDs in
+            capturePool.handleDisplaysChanged(displayIDs: displayIDs)
+        }
+        // W06's noted wiring: a screen-capture error (start failure or
+        // mid-capture stop) probes Screen Recording permission — preflight
+        // lags a System Settings revocation, so the probe is what flips the
+        // source's repair state honestly.
+        capturePool.onScreenCaptureError = { [permissions] in
+            Task { await permissions.probeScreenAccess() }
+        }
+        // Relink closes the capture loop here: a registry update (S05
+        // `updateSource`/`relinkSource`) re-keys the demand, so the old
+        // source's capture stops and the replacement's starts.
+        sceneStore.$sources
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.reconcileSourceDemand()
+                }
+            }
+            .store(in: &cancellables)
+        // Permission transitions: a re-grant retries blocked sources (and
+        // mic capture), a camera revocation marks the affected sources —
+        // other sources and outputs keep running untouched.
+        lastPermissionStatuses = permissions.statuses
+        permissions.$statuses
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handlePermissionChange()
                 }
             }
             .store(in: &cancellables)
@@ -636,6 +704,35 @@ final class StreamController: ObservableObject {
     /// `PreviewProgramModel.programScene`.
     func publishSceneToProgram(_ scene: Scene) {
         Task { await engine.updateScene(scene) }
+    }
+
+    // MARK: - Permission transitions (C10, issue #79)
+
+    /// Folds permission-status transitions into capture recovery. Only real
+    /// transitions act: a re-granted camera/screen permission retries the
+    /// sources its denial blocked (a pinned source resumes its exact
+    /// identity; the pool never substitutes), a re-granted microphone
+    /// restarts mic capture, and a camera revocation marks the affected
+    /// sources without touching other sources or the outputs. Screen
+    /// Recording revocation is probed from the pool's screen-error hook
+    /// (`onScreenCaptureError` → `probeScreenAccess`), so the repair state
+    /// surfaces even while preflight still says granted.
+    private func handlePermissionChange() {
+        let previous = lastPermissionStatuses
+        let current = permissions.statuses
+        lastPermissionStatuses = current
+        func transitioned(_ kind: PermissionsManager.Kind, to status: PermissionsManager.Status) -> Bool {
+            previous[kind] != status && current[kind] == status
+        }
+        if transitioned(.camera, to: .granted) || transitioned(.screenCapture, to: .granted) {
+            capturePool.retryErroredSources()
+        }
+        if transitioned(.microphone, to: .granted), isPipelineRunning {
+            startAudioInput()
+        }
+        if transitioned(.camera, to: .denied) {
+            capturePool.noteCameraPermissionRevoked()
+        }
     }
 
     // MARK: - Engine cadence

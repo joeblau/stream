@@ -1,7 +1,9 @@
 import AVFoundation
 import Combine
+import CoreGraphics
 import CoreMedia
 import CoreVideo
+import ScreenCaptureKit
 import StreamCore
 import os.lock
 
@@ -159,7 +161,10 @@ final class LatestScreenFrame: @unchecked Sendable {
 /// Failure surface: `sourceErrors` carries the last start failure per source
 /// (screen capture errors are mirrored live, including mid-capture stops;
 /// camera permission denials are pre-flighted) so the UI can badge individual
-/// sources later.
+/// sources later. C10 (issue #79) adds the MISSING state (`missingSources`):
+/// a hot-unplugged device/display keeps its registry entry and demand, shows
+/// the disconnect reason through `sourceErrors`, and resumes automatically
+/// when the same stable identity returns — see the hot-plug section below.
 @MainActor
 final class CaptureSourcePool: ObservableObject {
     /// The last start/run failure per source identity, for future per-source
@@ -169,12 +174,24 @@ final class CaptureSourcePool: ObservableObject {
     /// optimistically at start (their frames age out via `LatestCameraFrame`
     /// if the device never delivers); screens report from `isCapturing`.
     @Published private(set) var activeSources: Set<CaptureSourceKey> = []
+    /// C10 (issue #79): requested sources whose physical device/display is
+    /// currently unavailable (hot-unplugged, window closed, never connected).
+    /// The source stays in the registry and in demand — its layers keep
+    /// their binding, the renderer's documented fallback paints nothing, and
+    /// capture resumes automatically when the SAME identity returns. Nothing
+    /// is ever silently substituted for the missing device/display.
+    @Published private(set) var missingSources: Set<CaptureSourceKey> = []
 
     /// The engines' off-main frame read path (see `SourceFrameProviders`).
     let frames = SourceFrameProviders()
     /// App/mic audio from every screen capture; the controller routes this to
     /// the publisher's ordered ingress.
     var onScreenAudioSample: (@Sendable (CMSampleBuffer) -> Void)?
+    /// C10: fired when a screen capture reports an error (start failure,
+    /// mid-capture stop). The controller probes Screen Recording permission
+    /// here — the W06 revocation probe (`probeScreenAccess`) — because
+    /// preflight lags a System Settings toggle.
+    var onScreenCaptureError: (() -> Void)?
 
     /// Keys a start was requested for and not yet stopped. This — not
     /// `activeSources` — is what reconciliation diffs against, so an
@@ -185,6 +202,18 @@ final class CaptureSourcePool: ObservableObject {
     private var screens: [CaptureSourceKey: ScreenSourceCapture] = [:]
     private var screenFrames: [CaptureSourceKey: LatestScreenFrame] = [:]
     private var cancellables: Set<AnyCancellable> = []
+    /// C10: the physical camera each camera key's capture is actually using —
+    /// the pinned device ID, or the system default resolved at start — so a
+    /// disconnect notification can be matched to exactly the sources it
+    /// affects (and an unrelated camera never matches).
+    private var cameraDeviceIDs: [CaptureSourceKey: String] = [:]
+    /// C10: screen keys that have captured at least once, i.e. their capture
+    /// instance holds a remembered content selection, so a retry restarts
+    /// WITHOUT re-presenting the system picker.
+    private var screenHadSelection: Set<CaptureSourceKey> = []
+    /// The settings from the most recent reconcile, reused by hot-plug
+    /// recovery and permission-grant retries to restart captures.
+    private var lastReconcileSettings: StreamSettings?
 
     // MARK: - Demand reconciliation
 
@@ -192,6 +221,7 @@ final class CaptureSourcePool: ObservableObject {
     /// references, stops last references, and leaves shared captures
     /// untouched.
     func reconcile(demand rawDemand: Set<CaptureSourceKey>, settings: StreamSettings) {
+        lastReconcileSettings = settings
         let demand = Set(rawDemand.map(normalized(_:)))
         for key in demand.subtracting(requested) {
             start(key, settings: settings)
@@ -207,6 +237,7 @@ final class CaptureSourcePool: ObservableObject {
     func stopAll() {
         for key in requested { stop(key) }
         sourceErrors = [:]
+        missingSources = []
     }
 
     /// The capture instance for a screen key, created (and wired) on first
@@ -235,12 +266,26 @@ final class CaptureSourcePool: ObservableObject {
                 if capture.isCapturing {
                     self.activeSources.insert(key)
                     self.sourceErrors[key] = nil
+                    self.missingSources.remove(key)
+                    // The capture has a remembered selection from here on, so
+                    // later retries never need to re-present the picker.
+                    self.screenHadSelection.insert(key)
                 } else {
                     self.activeSources.remove(key)
                     if let message = capture.errorMessage {
                         self.sourceErrors[key] = message
                     }
                 }
+            }
+        }.store(in: &cancellables)
+        // C10: the C02 sink below mirrors terminal error messages into
+        // `sourceErrors`; this one adds the permission-revocation probe hook
+        // — a screen error can mean Screen Recording was toggled off in
+        // System Settings, and preflight lags that.
+        capture.$errorMessage.sink { [weak self] message in
+            Task { @MainActor [weak self] in
+                guard let self, message != nil else { return }
+                self.onScreenCaptureError?()
             }
         }.store(in: &cancellables)
         // C02: a pinned-source start that fails BEFORE any frame (missing
@@ -265,21 +310,7 @@ final class CaptureSourcePool: ObservableObject {
         requested.insert(key)
         switch key {
         case .camera(let payload):
-            // Pre-flight the permission so a denied camera surfaces a
-            // per-source error instead of silently rendering black.
-            // `.notDetermined` passes through: FacecamCapture presents the
-            // system prompt itself on first start.
-            switch AVCaptureDevice.authorizationStatus(for: .video) {
-            case .denied, .restricted:
-                sourceErrors[key] = "Camera access is disabled for StreamMac. Enable it in System Settings > Privacy & Security > Camera."
-                return
-            default:
-                break
-            }
-            sourceErrors[key] = nil
-            let camera = cameras[key] ?? makeCamera(for: key)
-            camera.start(with: settings, deviceUniqueID: payload.deviceID)
-            activeSources.insert(key)
+            startCamera(key, payload: payload, settings: settings)
         case .screen(let payload):
             sourceErrors[key] = nil
             let capture = screenCapture(for: key)
@@ -297,6 +328,8 @@ final class CaptureSourcePool: ObservableObject {
     private func stop(_ key: CaptureSourceKey) {
         requested.remove(key)
         activeSources.remove(key)
+        missingSources.remove(key)
+        cameraDeviceIDs[key] = nil
         switch key {
         case .camera:
             // Asynchronous on the capture's own queue; clears its frame holder.
@@ -307,13 +340,6 @@ final class CaptureSourcePool: ObservableObject {
                 Task { await capture.stop() }
             }
         }
-    }
-
-    private func makeCamera(for key: CaptureSourceKey) -> FacecamCapture {
-        let camera = FacecamCapture()
-        cameras[key] = camera
-        publishFrameHolders()
-        return camera
     }
 
     /// Hands the engines the live holder set, default (unpinned) sources
@@ -328,6 +354,220 @@ final class CaptureSourcePool: ObservableObject {
         frames.update(
             screenHolders: orderedScreens.compactMap { screenFrames[$0] },
             cameraHolders: orderedCameras.compactMap { cameras[$0]?.latest })
+    }
+
+    // MARK: - Device hot-plug and permission recovery (C10, issue #79)
+    //
+    // The DeviceMonitor (wired by StreamController) reports stable identities
+    // — camera `uniqueID`s, `CGDirectDisplayID`s — and the pool moves the
+    // matching sources between active and MISSING. A missing source keeps its
+    // registry entry and demand; its capture stops, its frame holder clears
+    // (the renderer's documented fallback paints nothing), and `sourceErrors`
+    // carries the reason so the layer badges and diagnostics surfaces can
+    // show it. Recovery restarts capture only for the SAME identity — an
+    // unrelated camera/display never substitutes; that is what the relink
+    // action (S05 registry update) is for.
+
+    /// Camera unplugged: mark every requested camera capture actually using
+    /// that device as missing. Unrelated sources keep running.
+    func handleCameraDisconnected(_ uniqueID: String) {
+        for key in requested {
+            guard case .camera = key,
+                  cameraDeviceIDs[key] == uniqueID,
+                  !missingSources.contains(key) else { continue }
+            markMissing(key, message: "The camera was disconnected. Reconnect it, or relink the source to another camera.")
+        }
+    }
+
+    /// Camera connected: restart captures waiting on exactly this device.
+    /// A default (unpinned) source that found no camera at all recovers on
+    /// ANY connect — its defined identity IS "the system default camera".
+    func handleCameraConnected(_ uniqueID: String) {
+        guard let settings = lastReconcileSettings else { return }
+        for key in missingSources {
+            guard case .camera(let payload) = key else { continue }
+            let matches = payload.deviceID.map { $0 == uniqueID }
+                ?? (cameraDeviceIDs[key] == nil || cameraDeviceIDs[key] == uniqueID)
+            guard matches else { continue }
+            startCamera(key, payload: payload, settings: settings)
+        }
+    }
+
+    /// Display set changed: pinned DISPLAY targets are checked synchronously
+    /// against CoreGraphics' active list (no permission needed); pinned
+    /// WINDOW targets and the default screen source's retry go through an
+    /// SCShareableContent re-probe (skipped entirely when it throws — the
+    /// permission-repair surface owns that state).
+    func handleDisplaysChanged(displayIDs: Set<CGDirectDisplayID>) {
+        for key in requested {
+            guard case .screen(let payload) = key, payload.target == .display,
+                  let raw = payload.targetIdentifier, let id = UInt32(raw) else { continue }
+            if !displayIDs.contains(id) {
+                guard !missingSources.contains(key) else { continue }
+                markMissing(key, message: "The captured display was disconnected. Reconnect it, or relink the source to another display.")
+            } else if missingSources.contains(key)
+                        || (!activeSources.contains(key) && sourceErrors[key] != nil) {
+                // Back (or a start that failed while it was gone): resume.
+                recoverScreen(key, payload: payload)
+            }
+        }
+        // Default screen source: if a remembered-selection capture died with
+        // an error (e.g. its display vanished), retry now that the display
+        // set changed. `pickAndStart` reuses the remembered filter, so no
+        // picker appears; sources never picked stay untouched.
+        if requested.contains(.defaultScreen),
+           !activeSources.contains(.defaultScreen),
+           sourceErrors[.defaultScreen] != nil,
+           screenHadSelection.contains(.defaultScreen) {
+            let capture = screenCapture(for: .defaultScreen)
+            Task { [weak capture] in await capture?.pickAndStart() }
+        }
+        Task { await reevaluateWindowTargets() }
+    }
+
+    /// Permission (re)granted: retry every requested source sitting in an
+    /// error/missing state. Nothing else would ever retry a source whose
+    /// start was blocked by the permission pre-flight.
+    func retryErroredSources() {
+        guard let settings = lastReconcileSettings else { return }
+        for key in requested where sourceErrors[key] != nil || missingSources.contains(key) {
+            guard !activeSources.contains(key) else { continue }
+            switch key {
+            case .camera(let payload):
+                startCamera(key, payload: payload, settings: settings)
+            case .screen(let payload):
+                missingSources.remove(key)
+                sourceErrors[key] = nil
+                let capture = screenCapture(for: key)
+                Task { [weak capture] in
+                    guard let capture else { return }
+                    if payload.targetIdentifier != nil {
+                        await capture.start(matching: payload)
+                    } else if screenHadSelection.contains(key) {
+                        await capture.pickAndStart()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Camera access revoked mid-session: surface the repair state on every
+    /// requested camera source and stop their captures. Other sources and
+    /// every output are untouched (no false LIVE — the session states never
+    /// derived from source health). `retryErroredSources` resumes capture
+    /// when the permission comes back.
+    func noteCameraPermissionRevoked() {
+        for key in requested {
+            guard case .camera = key else { continue }
+            activeSources.remove(key)
+            missingSources.remove(key)
+            sourceErrors[key] = "Camera access was revoked. Re-enable it in System Settings > Privacy & Security > Camera — capture resumes automatically."
+            cameras[key]?.stop()
+        }
+    }
+
+    /// The per-source health message a layer badge shows (C10): the
+    /// disconnect/missing reason or the last capture error. Nil = healthy.
+    func problem(for key: CaptureSourceKey) -> String? {
+        sourceErrors[normalized(key)]
+    }
+
+    /// True while the source's physical device/display is unavailable (the
+    /// missing state — capture resumes automatically when identity returns).
+    func isMissing(_ key: CaptureSourceKey) -> Bool {
+        missingSources.contains(normalized(key))
+    }
+
+    /// Starts (or restarts) a camera capture: pre-flights permission and
+    /// device presence — a pinned camera that no longer resolves becomes
+    /// MISSING instead of falling back to an unrelated device — then builds
+    /// a FRESH capture instance. A session whose device was unplugged holds
+    /// a dead input that can't reliably resume, so recovery never reuses it.
+    private func startCamera(_ key: CaptureSourceKey, payload: CameraSourcePayload,
+                             settings: StreamSettings) {
+        // `.notDetermined` passes through: FacecamCapture presents the
+        // system prompt itself on first start.
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .denied, .restricted:
+            sourceErrors[key] = "Camera access is disabled for StreamMac. Enable it in System Settings > Privacy & Security > Camera."
+            return
+        default:
+            break
+        }
+        if let deviceID = payload.deviceID {
+            cameraDeviceIDs[key] = deviceID
+            guard AVCaptureDevice(uniqueID: deviceID) != nil else {
+                markMissing(key, message: "The pinned camera is not connected. Reconnect it, or relink the source to another camera.")
+                return
+            }
+        } else {
+            guard let resolved = AVCaptureDevice.default(for: .video)?.uniqueID else {
+                cameraDeviceIDs[key] = nil
+                markMissing(key, message: "No camera is connected. Connect one, or relink the source to a specific camera.")
+                return
+            }
+            cameraDeviceIDs[key] = resolved
+        }
+        missingSources.remove(key)
+        sourceErrors[key] = nil
+        cameras[key]?.stop()
+        let camera = FacecamCapture()
+        cameras[key] = camera
+        publishFrameHolders()
+        camera.start(with: settings, deviceUniqueID: payload.deviceID)
+        activeSources.insert(key)
+    }
+
+    /// Moves a source into the missing state: capture stops, frames clear,
+    /// demand and registry binding survive.
+    private func markMissing(_ key: CaptureSourceKey, message: String) {
+        missingSources.insert(key)
+        activeSources.remove(key)
+        sourceErrors[key] = message
+        switch key {
+        case .camera:
+            cameras[key]?.stop()
+        case .screen:
+            screenFrames[key]?.clear()
+            if let capture = screens[key] {
+                Task { await capture.stop() }
+            }
+        }
+    }
+
+    /// Restarts a pinned screen source whose target is available again.
+    private func recoverScreen(_ key: CaptureSourceKey, payload: ScreenSourcePayload) {
+        missingSources.remove(key)
+        sourceErrors[key] = nil
+        let capture = screenCapture(for: key)
+        Task { [weak capture] in
+            await capture?.start(matching: payload)
+        }
+    }
+
+    /// Re-probes shareable content for pinned WINDOW targets: a window whose
+    /// app closed marks its source missing; the same window ID reappearing
+    /// restarts it. A failed probe (Screen Recording permission missing)
+    /// changes nothing — the repair surface owns that state.
+    private func reevaluateWindowTargets() async {
+        let windowKeys: [(CaptureSourceKey, ScreenSourcePayload)] = requested.compactMap { key in
+            guard case .screen(let payload) = key, payload.target == .window,
+                  payload.targetIdentifier != nil else { return nil }
+            return (key, payload)
+        }
+        guard !windowKeys.isEmpty,
+              let content = try? await SCShareableContent.current else { return }
+        for (key, payload) in windowKeys {
+            guard let raw = payload.targetIdentifier, let id = UInt32(raw) else { continue }
+            let exists = content.windows.contains { $0.windowID == id }
+            if !exists {
+                guard !missingSources.contains(key) else { continue }
+                markMissing(key, message: "The captured window is no longer available. Reopen it, or relink the source.")
+            } else if missingSources.contains(key)
+                        || (!activeSources.contains(key) && sourceErrors[key] != nil) {
+                recoverScreen(key, payload: payload)
+            }
+        }
     }
 
     /// Collapses keys that name the SAME physical device the default source

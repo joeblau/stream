@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import StreamCore
 
@@ -28,6 +29,10 @@ struct LayerPanelView: View {
     @EnvironmentObject private var previewProgram: PreviewProgramModel
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var permissions: PermissionsManager
+    /// C10 (issue #79): the capture pool's per-source health (missing state,
+    /// errors) badges rows, and the device monitor feeds the relink pickers.
+    @EnvironmentObject private var capturePool: CaptureSourcePool
+    @EnvironmentObject private var deviceMonitor: DeviceMonitor
 
     /// Rename alert state: the row being renamed plus the text field draft.
     @State private var renameTarget: RenameTarget?
@@ -249,18 +254,37 @@ struct LayerPanelView: View {
     }
 
     /// Why a layer's source can't paint, if it can't — hidden/missing
-    /// sources must be obvious (S03 acceptance).
+    /// sources must be obvious (S03 acceptance). C10 (issue #79): after the
+    /// permission checks, the pool's per-source health covers hot-unplug,
+    /// capture errors, and mid-session permission revocation.
     private func missingReason(for layer: LayerNode) -> String? {
         switch layer.payload {
         case .camera where permissions.status(for: .camera) != .granted:
             return "Camera permission is not granted — this layer renders black."
         case .screen where permissions.status(for: .screenCapture) != .granted:
             return "Screen recording permission is not granted — this layer renders black."
+        case .camera, .screen:
+            guard let key = captureSourceKey(for: layer) else { return nil }
+            return capturePool.problem(for: key)
         case .scene(let reference):
             return sceneStore.scenes.contains(where: { $0.id == reference.sceneID })
                 ? nil : "The referenced scene no longer exists."
         default:
             return nil
+        }
+    }
+
+    /// The layer's effective capture identity: the registry source's payload
+    /// when bound (the registry is the identity authority), else the inline
+    /// payload — the same resolution the capture pool's demand uses.
+    private func captureSourceKey(for layer: LayerNode) -> CaptureSourceKey? {
+        let payload = layer.sourceID
+            .flatMap { sceneStore.source(withID: $0) }?.payload
+            ?? layer.payload
+        switch payload {
+        case .camera(let camera): return .camera(camera)
+        case .screen(let screen): return .screen(screen)
+        default: return nil
         }
     }
 
@@ -275,6 +299,10 @@ struct LayerPanelView: View {
         Button("Duplicate") {
             dispatcher.execute(.duplicateLayer(layer.id, in: nil))
         }
+        // C10 (issue #79): relink a registry-bound source whose identity
+        // can't be restored (device gone for good) — the replacement updates
+        // every bound layer via the S05 registry update path.
+        relinkMenu(for: layer)
         Divider()
         Button("Move Forward") {
             move(layer, towardFront: true, in: scene)
@@ -327,6 +355,53 @@ struct LayerPanelView: View {
         Button("Delete Group and Layers", role: .destructive) {
             for member in members {
                 dispatcher.execute(.removeLayer(member.id, in: nil))
+            }
+        }
+    }
+
+    // MARK: - Relink (C10, issue #79)
+
+    /// The relink action for a layer bound to a registry source: pick a
+    /// replacement device/display for the SOURCE DEFINITION — the S05
+    /// registry update path (`SceneStore.relinkSource`) re-points every
+    /// bound layer in every scene, and the controller's `$sources`
+    /// observation re-keys the physical capture. Unbound layers (inline
+    /// payload only) get no menu: there is no definition to re-point.
+    @ViewBuilder
+    private func relinkMenu(for layer: LayerNode) -> some View {
+        if let sourceID = layer.sourceID,
+           let definition = sceneStore.source(withID: sourceID) {
+            switch definition.payload {
+            case .camera:
+                Menu("Relink Camera") {
+                    Button("System Default Camera") {
+                        sceneStore.relinkSource(sourceID, to: .camera(CameraSourcePayload()))
+                    }
+                    ForEach(deviceMonitor.videoDevices, id: \.uniqueID) { device in
+                        Button(device.localizedName) {
+                            sceneStore.relinkSource(
+                                sourceID, to: .camera(CameraSourcePayload(deviceID: device.uniqueID)))
+                        }
+                    }
+                }
+                .help("Point \"\(definition.name)\" at a different camera — every layer using it follows.")
+            case .screen:
+                Menu("Relink Screen") {
+                    ForEach(NSScreen.screens, id: \.streamDisplayID) { screen in
+                        Button(screen.localizedName) {
+                            if let displayID = screen.streamDisplayID {
+                                sceneStore.relinkSource(
+                                    sourceID,
+                                    to: .screen(ScreenSourcePayload(
+                                        target: .display,
+                                        targetIdentifier: String(displayID))))
+                            }
+                        }
+                    }
+                }
+                .help("Point \"\(definition.name)\" at a different display — every layer using it follows.")
+            default:
+                EmptyView()
             }
         }
     }
@@ -518,5 +593,15 @@ struct LayerPanelView: View {
         case nil:
             break
         }
+    }
+}
+
+/// C10 (issue #79): the CoreGraphics display ID backing an `NSScreen` — the
+/// same stable identifier a `ScreenSourcePayload` pins, so the relink menu
+/// can re-point a display source without ScreenCaptureKit (and without
+/// needing Screen Recording permission to enumerate).
+private extension NSScreen {
+    var streamDisplayID: CGDirectDisplayID? {
+        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
     }
 }

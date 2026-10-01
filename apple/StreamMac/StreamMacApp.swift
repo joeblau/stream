@@ -18,8 +18,11 @@ struct StreamMacApp: App {
     @StateObject private var settingsSession: SettingsSession
     /// The shared permission center (W06, issue #69): onboarding, the
     /// just-in-time explainers, and the settings pane all read/request
-    /// capture permissions through this one object.
-    @StateObject private var permissions = PermissionsManager()
+    /// capture permissions through this one object. C10 (issue #79): the
+    /// stream controller also observes it — permission transitions drive
+    /// capture recovery, and screen-capture errors trigger its revocation
+    /// probe.
+    @StateObject private var permissions: PermissionsManager
     /// The recording output. Owned here (not by the window) so the W05
     /// command dispatcher drives the same instance the transport bar and the
     /// first-run flow show.
@@ -37,13 +40,16 @@ struct StreamMacApp: App {
     init() {
         let sceneStore = SceneStore()
         let previewProgram = PreviewProgramModel(selected: sceneStore.selected)
+        let permissions = PermissionsManager()
         let streamController = StreamController(sceneStore: sceneStore,
-                                                previewProgram: previewProgram)
+                                                previewProgram: previewProgram,
+                                                permissions: permissions)
         let settingsSession = SettingsSession(controller: streamController)
         let recorder = RecordingController()
         _sceneStore = StateObject(wrappedValue: sceneStore)
         _previewProgram = StateObject(wrappedValue: previewProgram)
         _streamController = StateObject(wrappedValue: streamController)
+        _permissions = StateObject(wrappedValue: permissions)
         _settingsSession = StateObject(wrappedValue: settingsSession)
         _recorder = StateObject(wrappedValue: recorder)
         _dispatcher = StateObject(wrappedValue: StudioCommandDispatcher(
@@ -67,6 +73,12 @@ struct StreamMacApp: App {
                 .environmentObject(sceneStore)
                 .environmentObject(previewProgram)
                 .environmentObject(streamController)
+                // C10 (issue #79): direct observation of the pool's per-source
+                // health (missing badges) and the monitor's device lists
+                // (relink pickers) — nested objects don't invalidate views
+                // through the controller's own @Published.
+                .environmentObject(streamController.capturePool)
+                .environmentObject(streamController.deviceMonitor)
                 .environmentObject(settingsSession)
                 .environmentObject(permissions)
                 .environmentObject(recorder)

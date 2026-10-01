@@ -240,9 +240,12 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         // video device (the built-in FaceTime camera, or a continuity/USB
         // camera the user chose in Control Center). Either way the device is
         // treated as `.front` so the PiP stays mirrored.
-        if let uniqueID = requestedDeviceUniqueID,
-           let device = AVCaptureDevice(uniqueID: uniqueID) {
-            return device
+        if let uniqueID = requestedDeviceUniqueID {
+            // C10 (issue #79): a pinned camera that no longer resolves must
+            // FAIL, never fall back to an unrelated device — the capture
+            // pool surfaces the source's missing state and offers relink
+            // instead of silently substituting another camera.
+            return AVCaptureDevice(uniqueID: uniqueID)
         }
         return AVCaptureDevice.default(for: .video)
         #endif
