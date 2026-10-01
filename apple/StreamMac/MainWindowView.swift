@@ -62,7 +62,7 @@ struct MainWindowView: View {
     @AppStorage("studio.showDiagnostics") private var showDiagnostics = true
     @AppStorage("studio.showSettingsPanel") private var showSettingsPanel = false
 
-    @State private var inspectorTab: InspectorTab = .sources
+    @State private var inspectorTab: InspectorTab = .layers
     @State private var renamingScene: Scene?
     @State private var draftName = ""
 
@@ -75,6 +75,7 @@ struct MainWindowView: View {
     @State private var panelBeforeSettings: StudioPanel?
 
     private enum InspectorTab: String, CaseIterable {
+        case layers = "Layers"
         case sources = "Sources"
         case mixer = "Mixer"
         case media = "Media"
@@ -488,6 +489,10 @@ struct MainWindowView: View {
             .padding(8)
 
             switch inspectorTab {
+            case .layers:
+                // S03 (issue #71): the ordered layer panel — z-order, groups,
+                // visibility, locks, add/remove/rename/duplicate.
+                LayerPanelView()
             case .sources:
                 sourcesInspector
             case .mixer:

@@ -65,6 +65,35 @@ enum StudioCommand: Equatable, Sendable {
     case setLayerEffects(LayerID, [LayerEffect], in: SceneID?)
     case setLayerAudio(LayerID, AudioBinding, in: SceneID?)
 
+    // S03 layer-panel structure commands (also staged-only). Locks are
+    // enforced in validation: an effectively-locked layer or group rejects
+    // the edit with a reason instead of silently no-op'ing.
+    /// Adds a layer of a renderable kind (camera/screen today) at the FRONT
+    /// of the z-order, bound to the matching project source when one exists.
+    case addLayer(LayerPayload, in: SceneID?)
+    case removeLayer(LayerID, in: SceneID?)
+    /// Copies the layer (new stable ID, unlocked) directly in front of it.
+    case duplicateLayer(LayerID, in: SceneID?)
+    case renameLayer(LayerID, to: String, in: SceneID?)
+    case setLayerLocked(LayerID, locked: Bool, in: SceneID?)
+    /// Moves a layer to `toIndex` in the back-to-front array (index as
+    /// counted AFTER removing the layer) and reassigns its group — a drag
+    /// onto an ungrouped row passes nil, onto a group's row its GroupID.
+    case moveLayer(LayerID, toIndex: Int, group: GroupID?, in: SceneID?)
+    /// Creates a group from the given layers, moved adjacent at the position
+    /// of their frontmost member.
+    case groupLayers([LayerID], named: String?, in: SceneID?)
+    /// Dissolves a group; members keep their z-order, now ungrouped.
+    case ungroupLayers(GroupID, in: SceneID?)
+    case renameGroup(GroupID, to: String, in: SceneID?)
+    /// Cascades visibility to every member (group show/hide writes member
+    /// `isVisible`, so the render path — which reads only `isVisible` —
+    /// composes it). Rejected when the group or any member is locked.
+    case setGroupVisibility(GroupID, visible: Bool, in: SceneID?)
+    /// Non-destructive group lock: members become effectively locked via
+    /// composition (`member.isLocked || group.isLocked`) until unlocked.
+    case setGroupLocked(GroupID, locked: Bool, in: SceneID?)
+
     // Output profile (W07 staged-vs-active rules live in the controller).
     case setOutputProfile(OutputProfile, destination: StreamProtocol?)
 
@@ -105,6 +134,20 @@ enum StudioCommand: Equatable, Sendable {
         case .setLayerTransform: return "Move Layer"
         case .setLayerEffects: return "Layer Effects"
         case .setLayerAudio: return "Layer Audio"
+        case .addLayer(let payload, _): return "Add \(payload.displayName) Layer"
+        case .removeLayer: return "Remove Layer"
+        case .duplicateLayer: return "Duplicate Layer"
+        case .renameLayer: return "Rename Layer"
+        case .setLayerLocked(let id, let locked, _):
+            return "\(locked ? "Lock" : "Unlock") Layer \(id)"
+        case .moveLayer: return "Reorder Layer"
+        case .groupLayers: return "Group Layers"
+        case .ungroupLayers: return "Ungroup Layers"
+        case .renameGroup: return "Rename Group"
+        case .setGroupVisibility(_, let visible, _):
+            return "\(visible ? "Show" : "Hide") Group"
+        case .setGroupLocked(_, let locked, _):
+            return "\(locked ? "Lock" : "Unlock") Group"
         case .setOutputProfile: return "Set Output Profile"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
@@ -194,6 +237,10 @@ struct StudioState: Equatable, Sendable {
     var directLiveEditing = false
     /// Visibility of the STAGED scene's layers, keyed by stable LayerID.
     var layerVisibility: [LayerID: Bool] = [:]
+    /// EFFECTIVE locks of the staged scene's layers (S03): own lock OR the
+    /// layer's group's lock. UIs disable/reject edits from this map; the
+    /// dispatcher enforces the same rule in validation.
+    var layerLocks: [LayerID: Bool] = [:]
     var settingsPresented = false
     var settingsDirty = false
 }
@@ -349,8 +396,109 @@ final class StudioCommandDispatcher: ObservableObject {
              .setLayerEffects(let layerID, _, let sceneID),
              .setLayerAudio(let layerID, _, let sceneID):
             switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                return lockError(for: scene.layers[index], in: scene)
+            case .failure(let error): return error
+            }
+
+        case .addLayer(let payload, let sceneID):
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success:
+                return payload.isRenderable
+                    ? nil
+                    : .invalidValue("\(payload.displayName) layers are model-only — the render path composites camera and screen layers today.")
+            }
+        case .removeLayer(let layerID, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                return lockError(for: scene.layers[index], in: scene)
+            case .failure(let error): return error
+            }
+        case .renameLayer(let layerID, let name, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                return name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? .invalidValue("A layer name can't be empty.") : nil
+            case .failure(let error): return error
+            }
+        case .duplicateLayer(let layerID, let sceneID):
+            // Duplicating never modifies the source layer, so a locked
+            // original still duplicates (the copy starts unlocked).
+            switch resolveLayer(layerID, in: sceneID) {
             case .success: return nil
             case .failure(let error): return error
+            }
+        case .setLayerLocked(let layerID, _, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                // Locking/unlocking is the one edit a LOCKED layer accepts —
+                // but a group lock still owns its members' lock state.
+                let layer = scene.layers[index]
+                if let group = scene.group(for: layer), group.isLocked {
+                    return .unavailable("Layer \"\(layer.name)\" belongs to locked group \"\(group.name)\" — unlock the group first.")
+                }
+                return nil
+            case .failure(let error): return error
+            }
+        case .moveLayer(let layerID, let toIndex, _, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                // toIndex counts the post-removal array (count - 1 slots).
+                return (0..<scene.layers.count).contains(toIndex)
+                    ? nil
+                    : .invalidValue("Z-order index \(toIndex) is outside the scene's layer stack.")
+            case .failure(let error): return error
+            }
+        case .groupLayers(let layerIDs, _, let sceneID):
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success(let scene):
+                guard layerIDs.count > 1 else {
+                    return .invalidValue("Select at least two layers to group.")
+                }
+                for layerID in layerIDs {
+                    guard let index = scene.layers.firstIndex(where: { $0.id == layerID }) else {
+                        return .invalidTarget("Layer \(layerID) does not exist in scene \"\(scene.name)\".")
+                    }
+                    if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                }
+                return nil
+            }
+        case .ungroupLayers(let groupID, let sceneID),
+             .renameGroup(let groupID, _, let sceneID),
+             .setGroupLocked(let groupID, _, let sceneID):
+            switch resolveGroup(groupID, in: sceneID) {
+            case .failure(let error): return error
+            case .success(let (scene, group)):
+                if case .renameGroup(_, let name, _) = command,
+                   name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return .invalidValue("A group name can't be empty.")
+                }
+                // A locked group rejects edits to itself; unlocking is the
+                // one command it still accepts.
+                if group.isLocked, !command.isGroupUnlock {
+                    let memberCount = scene.members(of: groupID).count
+                    return .unavailable("Group \"\(group.name)\" (\(memberCount) layers) is locked — unlock it first.")
+                }
+                return nil
+            }
+        case .setGroupVisibility(let groupID, _, let sceneID):
+            switch resolveGroup(groupID, in: sceneID) {
+            case .failure(let error): return error
+            case .success(let (scene, group)):
+                if group.isLocked {
+                    return .unavailable("Group \"\(group.name)\" is locked — unlock it first.")
+                }
+                // The cascade writes every member's isVisible, so a locked
+                // member rejects the whole toggle rather than silently
+                // keeping its own state out of sync.
+                if let locked = scene.members(of: groupID).first(where: \.isLocked) {
+                    return .unavailable("Layer \"\(locked.name)\" in group \"\(group.name)\" is locked — unlock it first.")
+                }
+                return nil
             }
 
         case .setOutputProfile:
@@ -434,6 +582,88 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setLayerAudio(let layerID, let audio, let sceneID):
             editLayer(layerID, in: sceneID) { $0.audio = audio }
 
+        case .addLayer(let payload, let sceneID):
+            guard case .success(let scene) = resolveStagedScene(sceneID) else { return }
+            var edited = scene
+            edited.layers.append(makeLayer(payload: payload, in: scene))
+            previewProgram.applyStagedEdit(edited)
+            takeStagedIfDirectLive()
+        case .removeLayer(let layerID, let sceneID):
+            editStagedScene(sceneID) { scene in
+                guard let index = scene.layers.firstIndex(where: { $0.id == layerID }) else { return }
+                let groupID = scene.layers[index].groupID
+                scene.layers.remove(at: index)
+                // Never leave an orphaned empty group behind.
+                if let groupID, !scene.layers.contains(where: { $0.groupID == groupID }) {
+                    scene.groups.removeAll { $0.id == groupID }
+                }
+            }
+        case .duplicateLayer(let layerID, let sceneID):
+            editStagedScene(sceneID) { scene in
+                guard let index = scene.layers.firstIndex(where: { $0.id == layerID }) else { return }
+                var copy = scene.layers[index]
+                copy.id = LayerID()
+                copy.name += " copy"
+                copy.isLocked = false
+                scene.layers.insert(copy, at: index + 1)
+            }
+        case .renameLayer(let layerID, let name, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.name = name }
+        case .setLayerLocked(let layerID, let locked, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.isLocked = locked }
+        case .moveLayer(let layerID, let toIndex, let groupID, let sceneID):
+            editStagedScene(sceneID) { scene in
+                guard let index = scene.layers.firstIndex(where: { $0.id == layerID }) else { return }
+                var layer = scene.layers.remove(at: index)
+                layer.groupID = groupID
+                scene.layers.insert(layer, at: min(toIndex, scene.layers.count))
+            }
+        case .groupLayers(let layerIDs, let name, let sceneID):
+            editStagedScene(sceneID) { scene in
+                let memberSet = Set(layerIDs)
+                // Ascending indices = back-to-front, so the block keeps the
+                // members' relative z-order.
+                let memberIndices = scene.layers.indices.filter {
+                    memberSet.contains(scene.layers[$0].id)
+                }
+                guard let frontmost = memberIndices.max() else { return }
+                let group = LayerGroup(name: name ?? "Group")
+                let block: [LayerNode] = memberIndices.map { index in
+                    var layer = scene.layers[index]
+                    layer.groupID = group.id
+                    return layer
+                }
+                scene.layers.removeAll { memberSet.contains($0.id) }
+                // Land the block where the frontmost member sat, adjusted for
+                // the members removed ahead of it.
+                let insertion = frontmost - (memberIndices.count - 1)
+                scene.layers.insert(contentsOf: block, at: min(insertion, scene.layers.count))
+                scene.groups.append(group)
+            }
+        case .ungroupLayers(let groupID, let sceneID):
+            editStagedScene(sceneID) { scene in
+                for index in scene.layers.indices where scene.layers[index].groupID == groupID {
+                    scene.layers[index].groupID = nil
+                }
+                scene.groups.removeAll { $0.id == groupID }
+            }
+        case .renameGroup(let groupID, let name, let sceneID):
+            editStagedScene(sceneID) { scene in
+                guard let index = scene.groups.firstIndex(where: { $0.id == groupID }) else { return }
+                scene.groups[index].name = name
+            }
+        case .setGroupVisibility(let groupID, let visible, let sceneID):
+            editStagedScene(sceneID) { scene in
+                for index in scene.layers.indices where scene.layers[index].groupID == groupID {
+                    scene.layers[index].isVisible = visible
+                }
+            }
+        case .setGroupLocked(let groupID, let locked, let sceneID):
+            editStagedScene(sceneID) { scene in
+                guard let index = scene.groups.firstIndex(where: { $0.id == groupID }) else { return }
+                scene.groups[index].isLocked = locked
+            }
+
         case .setOutputProfile(let profile, let destination):
             controller.applyOutputProfile(profile, destination: destination)
 
@@ -471,8 +701,7 @@ final class StudioCommandDispatcher: ObservableObject {
     /// it directly; an explicit scene ID must name the staged scene — editing
     /// a background scene is rejected rather than silently bypassing the
     /// preview/program split.
-    private func resolveLayer(_ layerID: LayerID,
-                              in sceneID: SceneID?) -> Result<(Scene, Int), StudioCommandError> {
+    private func resolveStagedScene(_ sceneID: SceneID?) -> Result<Scene, StudioCommandError> {
         guard let scene = previewProgram.stagedScene else {
             return .failure(.invalidTarget("No scene is staged in preview."))
         }
@@ -481,10 +710,63 @@ final class StudioCommandDispatcher: ObservableObject {
             return .failure(.invalidTarget(name.map { "Scene \"\($0)\" is not staged in preview — select it first." }
                                            ?? "Scene \(sceneID) does not exist."))
         }
-        guard let index = scene.layers.firstIndex(where: { $0.id == layerID }) else {
-            return .failure(.invalidTarget("Layer \(layerID) does not exist in scene \"\(scene.name)\"."))
+        return .success(scene)
+    }
+
+    private func resolveLayer(_ layerID: LayerID,
+                              in sceneID: SceneID?) -> Result<(Scene, Int), StudioCommandError> {
+        switch resolveStagedScene(sceneID) {
+        case .failure(let error): return .failure(error)
+        case .success(let scene):
+            guard let index = scene.layers.firstIndex(where: { $0.id == layerID }) else {
+                return .failure(.invalidTarget("Layer \(layerID) does not exist in scene \"\(scene.name)\"."))
+            }
+            return .success((scene, index))
         }
-        return .success((scene, index))
+    }
+
+    private func resolveGroup(_ groupID: GroupID,
+                              in sceneID: SceneID?) -> Result<(Scene, LayerGroup), StudioCommandError> {
+        switch resolveStagedScene(sceneID) {
+        case .failure(let error): return .failure(error)
+        case .success(let scene):
+            guard let group = scene.group(withID: groupID) else {
+                return .failure(.invalidTarget("Group \(groupID) does not exist in scene \"\(scene.name)\"."))
+            }
+            return .success((scene, group))
+        }
+    }
+
+    /// S03: the rejection for editing an effectively-locked layer (its own
+    /// lock, or its group's). Nil when the layer is editable.
+    private func lockError(for layer: LayerNode, in scene: Scene) -> StudioCommandError? {
+        if layer.isLocked {
+            return .unavailable("Layer \"\(layer.name)\" is locked — unlock it to edit.")
+        }
+        if let group = scene.group(for: layer), group.isLocked {
+            return .unavailable("Layer \"\(layer.name)\" belongs to locked group \"\(group.name)\" — unlock the group first.")
+        }
+        return nil
+    }
+
+    /// Builds a new front-of-stack layer for `.addLayer`, binding the
+    /// matching project-level source when one is registered. A second camera
+    /// lands as a PIP instead of covering the existing fullscreen camera.
+    private func makeLayer(payload: LayerPayload, in scene: Scene) -> LayerNode {
+        let cameraSourceID = sceneStore.sources.first(where: { $0.payload.isCamera })?.id
+        let screenSourceID = sceneStore.sources.first(where: { $0.payload.isScreen })?.id
+        switch payload {
+        case .camera:
+            if scene.layers.contains(where: { $0.payload.isCamera }) {
+                return .cameraPIP(corner: .bottomRight, scale: 0.28, sourceID: cameraSourceID)
+            }
+            return .fullscreenCamera(sourceID: cameraSourceID)
+        case .screen:
+            return .fullscreenScreen(sourceID: screenSourceID)
+        default:
+            // Validation rejects non-renderable kinds before execution.
+            return LayerNode(name: payload.displayName, payload: payload, transform: .fullscreen)
+        }
     }
 
     private func editLayer(_ layerID: LayerID,
@@ -493,6 +775,16 @@ final class StudioCommandDispatcher: ObservableObject {
         guard case .success(let (resolved, index)) = resolveLayer(layerID, in: sceneID) else { return }
         var scene = resolved
         edit(&scene.layers[index])
+        previewProgram.applyStagedEdit(scene)
+        takeStagedIfDirectLive()
+    }
+
+    /// Applies one structural edit (reorder/group/lock/add/remove) to the
+    /// staged scene, with the same implicit-take behavior as value edits.
+    private func editStagedScene(_ sceneID: SceneID?,
+                                 _ edit: (inout Scene) -> Void) {
+        guard case .success(var scene) = resolveStagedScene(sceneID) else { return }
+        edit(&scene)
         previewProgram.applyStagedEdit(scene)
         takeStagedIfDirectLive()
     }
@@ -515,6 +807,10 @@ final class StudioCommandDispatcher: ObservableObject {
             directLiveEditing: previewProgram.directLiveEditing,
             layerVisibility: Dictionary(
                 uniqueKeysWithValues: (staged?.layers ?? []).map { ($0.id, $0.isVisible) }),
+            layerLocks: Dictionary(
+                uniqueKeysWithValues: (staged?.layers ?? []).map {
+                    ($0.id, staged?.isEffectivelyLocked($0) ?? false)
+                }),
             settingsPresented: session.isPresented,
             settingsDirty: session.isDirty)
     }
@@ -533,6 +829,14 @@ final class StudioCommandDispatcher: ObservableObject {
             guard !Task.isCancelled, let self, self.rejectionSequence == sequence else { return }
             self.lastRejection = nil
         }
+    }
+}
+
+private extension StudioCommand {
+    /// True for the one group-state edit a locked group still accepts.
+    var isGroupUnlock: Bool {
+        if case .setGroupLocked(_, let locked, _) = self { return !locked }
+        return false
     }
 }
 

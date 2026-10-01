@@ -115,6 +115,11 @@ final class SceneStore: ObservableObject {
     @Published var selectedID: Scene.ID {
         didSet { persist() }
     }
+    /// S03: the layer panel's selection within the staged scene, keyed by
+    /// stable LayerID. Ephemeral view state (never persisted); S04's canvas
+    /// multi-select reads and writes the same set so the panel and canvas
+    /// stay synchronized.
+    @Published var selectedLayerIDs: Set<LayerID> = []
     /// Project-level reusable sources that layers bind to via `sourceID`.
     @Published private(set) var sources: [SourceDefinition] {
         didSet { persist() }

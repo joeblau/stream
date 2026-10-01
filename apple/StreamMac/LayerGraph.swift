@@ -305,6 +305,46 @@ enum LayerPayload: Hashable, Sendable {
         if case .screen = self { return true }
         return false
     }
+
+    /// True when the current render path can actually paint this kind
+    /// (S03): only camera/screen composite today; the rest are model-only
+    /// until the composition engine grows source support. UI must mark
+    /// non-renderable kinds rather than implying they show on output.
+    var isRenderable: Bool {
+        isCamera || isScreen
+    }
+
+    /// Short human name for layer-panel rows and add-layer menus.
+    var displayName: String {
+        switch self {
+        case .camera: return "Camera"
+        case .screen: return "Screen"
+        case .image: return "Image"
+        case .text: return "Text"
+        case .shape: return "Shape"
+        case .media: return "Media"
+        case .pdf: return "PDF"
+        case .web: return "Web"
+        case .guest: return "Guest"
+        case .scene: return "Scene"
+        }
+    }
+
+    /// SF Symbol for the layer panel's type icon.
+    var systemImage: String {
+        switch self {
+        case .camera: return "camera.fill"
+        case .screen: return "display"
+        case .image: return "photo"
+        case .text: return "textformat"
+        case .shape: return "rectangle.fill"
+        case .media: return "film"
+        case .pdf: return "doc.fill"
+        case .web: return "globe"
+        case .guest: return "person.2.fill"
+        case .scene: return "rectangle.on.rectangle"
+        }
+    }
 }
 
 extension LayerPayload: Codable {
@@ -394,6 +434,10 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
     var effects: [LayerEffect]
     var audio: AudioBinding
     var groupID: GroupID?
+    /// S03: a locked layer rejects every edit (visibility, transform,
+    /// effects, audio, rename, move, remove) through the dispatcher until
+    /// unlocked. Combined with its group's lock for the EFFECTIVE lock.
+    var isLocked: Bool
 
     init(id: LayerID = LayerID(),
          name: String,
@@ -403,7 +447,8 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
          isVisible: Bool = true,
          effects: [LayerEffect] = [],
          audio: AudioBinding = .default,
-         groupID: GroupID? = nil) {
+         groupID: GroupID? = nil,
+         isLocked: Bool = false) {
         self.id = id
         self.name = name
         self.sourceID = sourceID
@@ -413,6 +458,23 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
         self.effects = effects
         self.audio = audio
         self.groupID = groupID
+        self.isLocked = isLocked
+    }
+
+    /// `isLocked` was added after v2 shipped; decode it with a default so
+    /// older persisted documents keep loading (additive wire change).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(LayerID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        sourceID = try container.decodeIfPresent(SourceDefinitionID.self, forKey: .sourceID)
+        payload = try container.decode(LayerPayload.self, forKey: .payload)
+        transform = try container.decode(LayerTransform.self, forKey: .transform)
+        isVisible = try container.decode(Bool.self, forKey: .isVisible)
+        effects = try container.decode([LayerEffect].self, forKey: .effects)
+        audio = try container.decode(AudioBinding.self, forKey: .audio)
+        groupID = try container.decodeIfPresent(GroupID.self, forKey: .groupID)
+        isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
     }
 }
 
@@ -451,11 +513,26 @@ struct LayerGroup: Identifiable, Hashable, Codable, Sendable {
     var id: GroupID
     var name: String
     var isCollapsed: Bool
+    /// S03: a locked group effectively locks every member (effective lock =
+    /// `member.isLocked || group.isLocked`), enforced non-destructively by
+    /// dispatcher rejection — member lock states survive group unlock.
+    var isLocked: Bool
 
-    init(id: GroupID = GroupID(), name: String, isCollapsed: Bool = false) {
+    init(id: GroupID = GroupID(), name: String, isCollapsed: Bool = false, isLocked: Bool = false) {
         self.id = id
         self.name = name
         self.isCollapsed = isCollapsed
+        self.isLocked = isLocked
+    }
+
+    /// `isLocked` was added after v2 shipped; decode it with a default so
+    /// older persisted documents keep loading (additive wire change).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(GroupID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        isCollapsed = try container.decode(Bool.self, forKey: .isCollapsed)
+        isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
     }
 }
 
@@ -513,12 +590,43 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+// MARK: - Scene layer-panel helpers (S03)
+
+extension Scene {
+    /// The layers in display order for the layer panel: front (top of the
+    /// list, paints last) to back. The stored `layers` array is the reverse
+    /// (back-to-front render order).
+    var frontToBackLayers: [LayerNode] {
+        layers.reversed()
+    }
+
+    /// The group a layer belongs to, if the membership resolves.
+    func group(for layer: LayerNode) -> LayerGroup? {
+        guard let groupID = layer.groupID else { return nil }
+        return groups.first(where: { $0.id == groupID })
+    }
+
+    func group(withID id: GroupID) -> LayerGroup? {
+        groups.first(where: { $0.id == id })
+    }
+
+    /// Members of a group in render (back-to-front) order.
+    func members(of groupID: GroupID) -> [LayerNode] {
+        layers.filter { $0.groupID == groupID }
+    }
+
+    /// The EFFECTIVE lock the dispatcher enforces (S03): a layer is
+    /// uneditable when it is locked itself or its group is locked.
+    func isEffectivelyLocked(_ layer: LayerNode) -> Bool {
+        layer.isLocked || (group(for: layer)?.isLocked ?? false)
+    }
+}
+
 extension Scene {
     /// Camera solo: one fullscreen camera layer.
     static func cameraSolo(name: String,
                            id: SceneID = SceneID(),
-                           cameraSourceID: SourceDefinitionID? = nil) -> Scene {
-        Scene(id: id, name: name,
+                           cameraSourceID: SourceDefinitionID? = nil) -> Scene {        Scene(id: id, name: name,
               layers: [.fullscreenCamera(sourceID: cameraSourceID)])
     }
 
