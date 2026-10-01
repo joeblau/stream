@@ -68,6 +68,23 @@ import Metal
 /// source aspect, 24 px canvas-edge inset); fullscreen layers aspect-FIT
 /// centered into their rect. `.opacity` and `.cornerRadius` effects are
 /// honored; other effects are ignored per the LayerGraph contract.
+///
+/// S09 (issue #100): the per-frame parameters of a scene blend transition
+/// (everything except stingers, which are a base-scene swap under a video
+/// mask and ride the normal `render` path's `stinger:` parameter).
+struct SceneBlend: Sendable {
+    var style: SceneTransitionStyle
+    /// 0...1 — 0 paints the outgoing scene, 1 the incoming one.
+    var progress: Double
+    var direction: TransitionDirection
+    var dipColorHex: String
+}
+
+/// S09 (issue #100): `renderTransition` cross-fades/wipes/slides/dips
+/// between two FULL scene composites per tick (project overlays stable above
+/// the blend); stingers ride the normal `render` path's `stinger:` parameter
+/// (the video mask composites above everything and the scene swaps under
+/// it); per-layer show/hide fades ride `layerOpacity:`/`exitingLayers:`.
 final class SceneRenderer {
 
     private let ciContext: CIContext
@@ -127,6 +144,16 @@ final class SceneRenderer {
     /// camera/screen layer resolves its capture identity (registry payload
     /// winning over inline, via `sourcePayloads`) and pulls THAT source's
     /// latest frame, so two camera layers paint two different cameras.
+    ///
+    /// S09 (issue #100) additions:
+    /// - `layerOpacity`: per-layer alpha multipliers for in-flight
+    ///   show/hide fades (1 = normal; absent = normal).
+    /// - `exitingLayers`: layers mid fade-OUT after a hide/remove — their
+    ///   old content composites ABOVE the scene's new stack (back-to-front
+    ///   among themselves) until the fade completes.
+    /// - `stinger`: the stinger transition's current video frame, composited
+    ///   fullscreen (aspect-fill, alpha preserved) ABOVE everything — the
+    ///   scene swap happens under it.
     func render(scene: Scene,
                 overlayContext: OverlayContext,
                 canvasSize: CGSize,
@@ -135,13 +162,150 @@ final class SceneRenderer {
                 scenes: [SceneID: Scene],
                 presentationTime: CMTime,
                 frameDuration: CMTime,
-                sequence: Int64) -> CompositedFrame? {
+                sequence: Int64,
+                layerOpacity: [LayerID: Double] = [:],
+                exitingLayers: [LayerNode] = [],
+                stinger: CVPixelBuffer? = nil) -> CompositedFrame? {
         let outWidth = Int(canvasSize.width.rounded())
         let outHeight = Int(canvasSize.height.rounded())
         guard outWidth > 1, outHeight > 1 else { return nil }
         let canvas = CGRect(x: 0, y: 0, width: outWidth, height: outHeight)
 
-        // S07 order: explicit background → scene layers → project overlays.
+        var output = sceneComposite(scene, overlayContext: overlayContext, canvas: canvas,
+                                    frames: frames, sourcePayloads: sourcePayloads,
+                                    scenes: scenes, layerOpacity: layerOpacity,
+                                    exitingLayers: exitingLayers)
+        output = applyingOverlays(output, overlayContext: overlayContext, scene: scene,
+                                  canvas: canvas, frames: frames,
+                                  sourcePayloads: sourcePayloads, scenes: scenes)
+        output = applyingStinger(output, stinger: stinger, canvas: canvas)
+        return finish(output, canvas: canvas, width: outWidth, height: outHeight,
+                      presentationTime: presentationTime, frameDuration: frameDuration,
+                      sequence: sequence)
+    }
+
+    /// S09 (issue #100): one frame of a scene blend transition — the
+    /// outgoing and incoming scenes are BOTH composited this tick (shared
+    /// sources keep pulling their latest frames, so neither side ever shows
+    /// a missing frame) and blended at `blend.progress`. Project overlays
+    /// composite ABOVE the blend (stable across the transition), under the
+    /// INCOMING scene's per-scene visibility overrides from the first frame.
+    func renderTransition(from: Scene,
+                          to: Scene,
+                          blend: SceneBlend,
+                          overlayContext: OverlayContext,
+                          canvasSize: CGSize,
+                          frames: SourceFrameLookup,
+                          sourcePayloads: [SourceDefinitionID: LayerPayload],
+                          scenes: [SceneID: Scene],
+                          presentationTime: CMTime,
+                          frameDuration: CMTime,
+                          sequence: Int64) -> CompositedFrame? {
+        let outWidth = Int(canvasSize.width.rounded())
+        let outHeight = Int(canvasSize.height.rounded())
+        guard outWidth > 1, outHeight > 1 else { return nil }
+        let canvas = CGRect(x: 0, y: 0, width: outWidth, height: outHeight)
+
+        let fromImage = sceneComposite(from, overlayContext: overlayContext, canvas: canvas,
+                                       frames: frames, sourcePayloads: sourcePayloads,
+                                       scenes: scenes, layerOpacity: [:], exitingLayers: [])
+        let toImage = sceneComposite(to, overlayContext: overlayContext, canvas: canvas,
+                                     frames: frames, sourcePayloads: sourcePayloads,
+                                     scenes: scenes, layerOpacity: [:], exitingLayers: [])
+        var output = blended(from: fromImage, to: toImage, blend: blend, canvas: canvas)
+        output = applyingOverlays(output, overlayContext: overlayContext, scene: to,
+                                  canvas: canvas, frames: frames,
+                                  sourcePayloads: sourcePayloads, scenes: scenes)
+        return finish(output, canvas: canvas, width: outWidth, height: outHeight,
+                      presentationTime: presentationTime, frameDuration: frameDuration,
+                      sequence: sequence)
+    }
+
+    // MARK: - S09 blend math
+
+    /// The per-frame blend of the two scene composites (no overlays — those
+    /// stay stable above the blend). All styles keep both scenes' pixels
+    /// live for the whole window, so a shared source never flickers out.
+    private func blended(from: CIImage, to: CIImage, blend: SceneBlend, canvas: CGRect) -> CIImage {
+        let progress = min(1, max(0, blend.progress))
+        switch blend.style {
+        case .dissolve, .stinger:
+            // (Stingers never reach this path — the engine renders them as
+            // a base swap under the video mask — but a dissolve is the
+            // honest fallback if one ever did.)
+            return to.applyingFilter("CIDissolveTransition", parameters: [
+                "inputImage": from,
+                "inputTargetImage": to,
+                "inputTime": progress
+            ])
+        case .dipToColor:
+            // Two-phase dissolve: out to the dip color over the first half,
+            // the color in to the new scene over the second.
+            let dip = CIImage(color: ciColor(blend.dipColorHex)).cropped(to: canvas)
+            if progress < 0.5 {
+                return dip.applyingFilter("CIDissolveTransition", parameters: [
+                    "inputImage": from,
+                    "inputTargetImage": dip,
+                    "inputTime": progress * 2
+                ])
+            }
+            return to.applyingFilter("CIDissolveTransition", parameters: [
+                "inputImage": dip,
+                "inputTargetImage": to,
+                "inputTime": (progress - 0.5) * 2
+            ])
+        case .wipe:
+            // Hard-edge wipe: the incoming scene is revealed by a rect
+            // growing in the travel direction (CI is bottom-left-origin).
+            let rect: CGRect
+            switch blend.direction {
+            case .right: rect = CGRect(x: 0, y: 0, width: canvas.width * progress, height: canvas.height)
+            case .left:  rect = CGRect(x: canvas.width * (1 - progress), y: 0,
+                                       width: canvas.width * progress, height: canvas.height)
+            case .up:    rect = CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height * progress)
+            case .down:  rect = CGRect(x: 0, y: canvas.height * (1 - progress),
+                                       width: canvas.width, height: canvas.height * progress)
+            }
+            guard progress > 0 else { return from }
+            return to.cropped(to: rect).composited(over: from)
+        case .slide:
+            // The incoming scene slides in over the outgoing one (which
+            // stays put) — a push-over slide.
+            let translation: CGVector
+            switch blend.direction {
+            case .right: translation = CGVector(dx: -canvas.width * (1 - progress), dy: 0)
+            case .left:  translation = CGVector(dx: canvas.width * (1 - progress), dy: 0)
+            case .up:    translation = CGVector(dx: 0, dy: -canvas.height * (1 - progress))
+            case .down:  translation = CGVector(dx: 0, dy: canvas.height * (1 - progress))
+            }
+            guard progress < 1 else { return to }
+            return to.transformed(by: CGAffineTransform(translationX: translation.dx,
+                                                        y: translation.dy))
+                .composited(over: from)
+        case .cut:
+            return to
+        }
+    }
+
+    /// Alpha-multiplies a layer image for an in-flight visibility fade.
+    private func applyingAlpha(_ image: CIImage, _ alpha: Double) -> CIImage {
+        guard alpha < 0.999 else { return image }
+        return image.applyingFilter("CIColorMatrix", parameters: [
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(max(0, alpha)))
+        ])
+    }
+
+    /// Background + the scene's visible layers (back-to-front), with S09
+    /// fade alpha applied per layer and exiting (fading-out) layers
+    /// composited above the new stack in their old relative order.
+    private func sceneComposite(_ scene: Scene,
+                                overlayContext: OverlayContext,
+                                canvas: CGRect,
+                                frames: SourceFrameLookup,
+                                sourcePayloads: [SourceDefinitionID: LayerPayload],
+                                scenes: [SceneID: Scene],
+                                layerOpacity: [LayerID: Double],
+                                exitingLayers: [LayerNode]) -> CIImage {
         var output = backgroundImage(overlayContext.background(for: scene), canvas: canvas)
         for layer in scene.layers where layer.isVisible {
             guard let layerImage = image(for: layer, canvas: canvas,
@@ -149,8 +313,31 @@ final class SceneRenderer {
                                          scenes: scenes, depth: 0, visited: [scene.id]) else {
                 continue    // documented fallback: missing source → background shows through
             }
-            output = layerImage.composited(over: output)
+            output = applyingAlpha(layerImage, layerOpacity[layer.id] ?? 1)
+                .composited(over: output)
         }
+        for layer in exitingLayers {
+            guard let layerImage = image(for: layer, canvas: canvas,
+                                         frames: frames, sourcePayloads: sourcePayloads,
+                                         scenes: scenes, depth: 0, visited: [scene.id]) else {
+                continue    // same documented fallback
+            }
+            output = applyingAlpha(layerImage, layerOpacity[layer.id] ?? 1)
+                .composited(over: output)
+        }
+        return output
+    }
+
+    /// The project overlays composited above a base image (S07 order), minus
+    /// `scene`'s per-scene visibility overrides.
+    private func applyingOverlays(_ output: CIImage,
+                                  overlayContext: OverlayContext,
+                                  scene: Scene,
+                                  canvas: CGRect,
+                                  frames: SourceFrameLookup,
+                                  sourcePayloads: [SourceDefinitionID: LayerPayload],
+                                  scenes: [SceneID: Scene]) -> CIImage {
+        var output = output
         for overlay in overlayContext.overlays(for: scene) {
             guard let overlayImage = image(for: overlay, canvas: canvas,
                                            frames: frames, sourcePayloads: sourcePayloads,
@@ -159,7 +346,34 @@ final class SceneRenderer {
             }
             output = overlayImage.composited(over: output)
         }
+        return output
+    }
 
+    /// S09: the stinger video frame composited fullscreen above everything —
+    /// aspect-FILL (a mask covers the whole canvas; a mismatched aspect
+    /// crops rather than letterboxes), alpha preserved for the wipe reveal.
+    private func applyingStinger(_ output: CIImage, stinger: CVPixelBuffer?, canvas: CGRect) -> CIImage {
+        guard let stinger else { return output }
+        var image = CIImage(cvPixelBuffer: stinger)
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return output }
+        let fill = max(canvas.width / extent.width, canvas.height / extent.height)
+        image = image.transformed(by: CGAffineTransform(scaleX: fill, y: fill))
+        image = image.transformed(by: CGAffineTransform(
+            translationX: canvas.midX - image.extent.midX,
+            y: canvas.midY - image.extent.midY))
+        return image.composited(over: output)
+    }
+
+    /// Renders the finished composite into a pooled canvas-sized buffer and
+    /// wraps it in a `CMSampleBuffer` timed on the engine's shared clock.
+    private func finish(_ output: CIImage,
+                        canvas: CGRect,
+                        width outWidth: Int,
+                        height outHeight: Int,
+                        presentationTime: CMTime,
+                        frameDuration: CMTime,
+                        sequence: Int64) -> CompositedFrame? {
         guard let pool = ensurePool(width: outWidth, height: outHeight) else { return nil }
         // Same steady-state budget as the legacy compositor: one buffer rendering
         // here, one in a subscriber, one pinned by the publisher's frame-repeat,

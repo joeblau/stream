@@ -1047,6 +1047,11 @@ struct OverlayContext: Hashable, Sendable {
     /// Back-to-front, exactly like `Scene.layers`.
     var overlays: [LayerNode] = []
     var defaultBackground: SceneBackground? = nil
+    /// S09 (issue #100): the project default transition, read by the program
+    /// engine when an incoming scene carries no per-scene override. Riding
+    /// this existing per-tick snapshot keeps the default live-configurable
+    /// without a new engine seam.
+    var defaultTransition: SceneTransition = .default
 
     static let empty = OverlayContext()
 
@@ -1171,6 +1176,122 @@ struct SceneSoundBinding: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+// MARK: - Scene audio snapshots and media behavior (S08, issue #99)
+
+/// S08 (issue #99): one channel's captured mixer state inside a scene audio
+/// snapshot. Keyed by `AudioChannelID.label` (the A04 mixer-document key),
+/// so a capture survives channel re-registration and engine restarts exactly
+/// like the mixer document itself.
+struct SceneAudioChannelState: Hashable, Codable, Sendable {
+    /// Linear fader gain, 0...2 (1 = unity).
+    var volume: Double
+    var isMuted: Bool
+
+    init(volume: Double, isMuted: Bool) {
+        self.volume = volume
+        self.isMuted = isMuted
+    }
+
+    /// Decode every field with a default (the established additive-wire
+    /// pattern), so a snapshot written by a later app version never strands
+    /// the whole scene document.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 1
+        isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
+    }
+}
+
+/// S08 (issue #99): a scene's opt-in audio snapshot — the mixer state the
+/// scene restores when it becomes PROGRAM (Take). Nil on the scene is the
+/// explicit inherit-current option: the live mix persists across the Take
+/// untouched. Only channels present in `channelGains` are touched on
+/// restore — the global mixer state of every channel the scene doesn't name
+/// survives scene changes. Scene-bound capture channels are deliberately
+/// excluded: their program levels are the scene's per-layer S05
+/// `AudioBinding`s, already scene content.
+struct SceneAudioSnapshot: Hashable, Codable, Sendable {
+    var channelGains: [String: SceneAudioChannelState]
+
+    init(channelGains: [String: SceneAudioChannelState] = [:]) {
+        self.channelGains = channelGains
+    }
+
+    /// Decode with a default so a partial snapshot never strands the scene.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        channelGains = try container.decodeIfPresent([String: SceneAudioChannelState].self,
+                                                     forKey: .channelGains) ?? [:]
+    }
+}
+
+/// S08 (issue #99): what a scene's media sources do when the scene ENTERS
+/// program (Take).
+enum SceneMediaEntryBehavior: String, Codable, CaseIterable, Sendable {
+    /// Leave playout where it is — a Take between scenes sharing a source
+    /// never restarts it (the standing A02 guarantee). The default.
+    case `continue`
+    /// Play: resume from the held position, or start a source that never
+    /// played (a play after ENDED restarts from trim-in, the A02 rule).
+    case resume
+    /// Rewind to the trim-in point and play — restarts even a source the
+    /// outgoing scene shared (the documented play-from-start exception).
+    case restartFromStart
+
+    var displayName: String {
+        switch self {
+        case .continue: return "Continue (No Restart)"
+        case .resume: return "Resume / Play"
+        case .restartFromStart: return "Restart from Start"
+        }
+    }
+}
+
+/// S08 (issue #99): what a scene's media sources do when the scene LEAVES
+/// program. Sources shared with the entering scene are exempt — the entering
+/// scene's entry policy governs them.
+enum SceneMediaExitBehavior: String, Codable, CaseIterable, Sendable {
+    /// No scene-level intervention; the A02 demand model still parks a
+    /// source nothing references anymore. The default.
+    case keepPlaying
+    /// Pause mid-file — the position (and the held last frame) survives.
+    case pause
+    /// Rewind to the trim-in point and clear the frame (black fallback).
+    case stop
+
+    var displayName: String {
+        switch self {
+        case .keepPlaying: return "Keep Playing"
+        case .pause: return "Pause"
+        case .stop: return "Stop (Rewind)"
+        }
+    }
+}
+
+/// S08 (issue #99): the scene's media entry/exit policy. Scene content —
+/// staged, Taken, reverted, and undone like layers and sound bindings.
+struct SceneMediaBehavior: Hashable, Codable, Sendable {
+    var entry: SceneMediaEntryBehavior
+    var exit: SceneMediaExitBehavior
+
+    static let `default` = SceneMediaBehavior()
+
+    init(entry: SceneMediaEntryBehavior = .continue,
+         exit: SceneMediaExitBehavior = .keepPlaying) {
+        self.entry = entry
+        self.exit = exit
+    }
+
+    /// Decode every field with a default (the established additive-wire
+    /// pattern), so a document holding only one of the two policies keeps
+    /// loading.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        entry = try container.decodeIfPresent(SceneMediaEntryBehavior.self, forKey: .entry) ?? .continue
+        exit = try container.decodeIfPresent(SceneMediaExitBehavior.self, forKey: .exit) ?? .keepPlaying
+    }
+}
+
 // MARK: - Scene
 
 /// One switchable scene: an ordered layer graph on a canvas. `layers` is
@@ -1193,6 +1314,18 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
     /// continue ambient beds). Scene content — staged, Taken, reverted, and
     /// undone like layers; the Take path fires their rules.
     var soundBindings: [SceneSoundBinding]
+    /// S08 (issue #99): the opt-in audio snapshot restored when this scene
+    /// becomes program. Nil = inherit the current mix (audio persists
+    /// globally across the Take).
+    var audioSnapshot: SceneAudioSnapshot?
+    /// S08 (issue #99): what the scene's media sources do on program
+    /// entry/exit.
+    var mediaBehavior: SceneMediaBehavior
+    /// S09 (issue #100): the transition a Take INTO this scene renders
+    /// (dissolve/wipe/stinger/…). Nil = inherit the project default
+    /// (`SceneDocument.defaultTransition`). Scene content: it stages, Takes,
+    /// reverts, and undoes like any scene edit.
+    var transition: SceneTransition?
 
     init(id: SceneID = SceneID(),
          name: String,
@@ -1201,7 +1334,10 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
          layers: [LayerNode],
          background: SceneBackground? = nil,
          hiddenOverlayIDs: Set<LayerID> = [],
-         soundBindings: [SceneSoundBinding] = []) {
+         soundBindings: [SceneSoundBinding] = [],
+         audioSnapshot: SceneAudioSnapshot? = nil,
+         mediaBehavior: SceneMediaBehavior = .default,
+         transition: SceneTransition? = nil) {
         self.id = id
         self.name = name
         self.canvas = canvas
@@ -1210,12 +1346,16 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         self.background = background
         self.hiddenOverlayIDs = hiddenOverlayIDs
         self.soundBindings = soundBindings
+        self.audioSnapshot = audioSnapshot
+        self.mediaBehavior = mediaBehavior
+        self.transition = transition
     }
 
     /// `background`/`hiddenOverlayIDs` were added after v2 shipped; decode
     /// them with defaults so older persisted documents keep loading
     /// (additive wire change, same pattern as `LayerNode.isLocked`).
-    /// A03's `soundBindings` follows the same pattern.
+    /// A03's `soundBindings` and S08's `audioSnapshot`/`mediaBehavior`
+    /// follow the same pattern, as does S09's `transition`.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(SceneID.self, forKey: .id)
@@ -1226,6 +1366,9 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         background = try container.decodeIfPresent(SceneBackground.self, forKey: .background)
         hiddenOverlayIDs = try container.decodeIfPresent(Set<LayerID>.self, forKey: .hiddenOverlayIDs) ?? []
         soundBindings = try container.decodeIfPresent([SceneSoundBinding].self, forKey: .soundBindings) ?? []
+        audioSnapshot = try container.decodeIfPresent(SceneAudioSnapshot.self, forKey: .audioSnapshot)
+        mediaBehavior = try container.decodeIfPresent(SceneMediaBehavior.self, forKey: .mediaBehavior) ?? .default
+        transition = try container.decodeIfPresent(SceneTransition.self, forKey: .transition)
     }
 }
 
@@ -1317,6 +1460,10 @@ struct SceneDocument: Hashable, Codable, Sendable {
     /// S07: the project default background, used by every scene whose own
     /// `background` is nil. Nil = the documented implicit black canvas.
     var defaultBackground: SceneBackground?
+    /// S09 (issue #100): the project default transition, used by every Take
+    /// into a scene whose own `transition` is nil. Defaults to cut, so
+    /// upgraded installs keep the pre-S09 Take behavior.
+    var defaultTransition: SceneTransition
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
@@ -1325,7 +1472,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
          scenes: [Scene],
          selectedID: SceneID,
          overlays: [LayerNode] = [],
-         defaultBackground: SceneBackground? = nil) {
+         defaultBackground: SceneBackground? = nil,
+         defaultTransition: SceneTransition = .default) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
@@ -1334,10 +1482,12 @@ struct SceneDocument: Hashable, Codable, Sendable {
         self.selectedID = selectedID
         self.overlays = overlays
         self.defaultBackground = defaultBackground
+        self.defaultTransition = defaultTransition
     }
 
     /// `overlays`/`defaultBackground` were added within v2; decode them with
     /// defaults so pre-S07 v2 documents keep loading (additive wire change).
+    /// S09's `defaultTransition` follows the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
@@ -1348,11 +1498,13 @@ struct SceneDocument: Hashable, Codable, Sendable {
         selectedID = try container.decode(SceneID.self, forKey: .selectedID)
         overlays = try container.decodeIfPresent([LayerNode].self, forKey: .overlays) ?? []
         defaultBackground = try container.decodeIfPresent(SceneBackground.self, forKey: .defaultBackground)
+        defaultTransition = try container.decodeIfPresent(SceneTransition.self, forKey: .defaultTransition) ?? .default
     }
 
     /// The S07 render context the engine composites every scene inside.
     var overlayContext: OverlayContext {
-        OverlayContext(overlays: overlays, defaultBackground: defaultBackground)
+        OverlayContext(overlays: overlays, defaultBackground: defaultBackground,
+                       defaultTransition: defaultTransition)
     }
 }
 

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import StreamCore
+import UniformTypeIdentifiers
 
 /// The persistent studio shell (W01): one window holding every production
 /// control in dedicated, collapsible panels —
@@ -526,6 +527,13 @@ struct MainWindowView: View {
                     ProgressView(value: Double(controller.audio.level))
                 }
             }
+            // S08 (issue #99): the staged scene's media entry/exit policy
+            // and opt-in audio snapshot — applied when it becomes program.
+            SceneBehaviorSectionView()
+            // S09 (issue #100): the project default transition and the
+            // staged scene's override — rendered only on Take (program);
+            // direct-live uses the same transitions.
+            TransitionSettingsSectionView()
         }
         .formStyle(.grouped)
     }
@@ -672,5 +680,207 @@ struct MainWindowView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .keyboardShortcut("l", modifiers: .command)
+    }
+}
+
+// MARK: - Transition settings (S09, issue #100)
+
+/// The transition pickers in the Sources inspector: the PROJECT default
+/// transition and the STAGED scene's override ("Inherit Default" = none).
+/// Every edit routes through the dispatcher — the override is staged scene
+/// content (Takes/reverts/undoes like any edit), the default is
+/// project-level and applies immediately. Transitions render only on Take
+/// (program); the preview monitor always cuts to the staged scene.
+private struct TransitionSettingsSectionView: View {
+    @EnvironmentObject private var dispatcher: StudioCommandDispatcher
+    @EnvironmentObject private var sceneStore: SceneStore
+    @EnvironmentObject private var previewProgram: PreviewProgramModel
+
+    /// The scene-override picker's inherit sentinel (an optional
+    /// `SceneTransitionStyle` tag: nil = inherit the project default).
+    var body: some View {
+        Section("Default Transition") {
+            transitionEditor(defaultTransitionBinding, includeStyle: true)
+        }
+        if let scene = previewProgram.stagedScene {
+            Section("Scene Transition") {
+                Picker("Type", selection: overrideStyleBinding(for: scene)) {
+                    Text("Default (\(sceneStore.defaultTransition.style.displayName))")
+                        .tag(SceneTransitionStyle?.none)
+                    ForEach(SceneTransitionStyle.allCases, id: \.self) { style in
+                        Text(style.displayName).tag(SceneTransitionStyle?.some(style))
+                    }
+                }
+                if scene.transition != nil {
+                    transitionEditor(sceneTransitionBinding(for: scene),
+                                     includeStyle: false)
+                }
+            }
+        }
+    }
+
+    // MARK: Bindings
+
+    private var defaultTransitionBinding: Binding<SceneTransition> {
+        Binding(
+            get: { sceneStore.defaultTransition },
+            set: { dispatcher.execute(.setDefaultTransition($0)) })
+    }
+
+    /// The staged scene's override STYLE: nil tag = inherit (clears the
+    /// override); a style keeps the existing override's settings when the
+    /// style is unchanged, else seeds from the project default so the
+    /// override starts from familiar values.
+    private func overrideStyleBinding(for scene: Scene) -> Binding<SceneTransitionStyle?> {
+        Binding(
+            get: { scene.transition?.style },
+            set: { style in
+                guard let style else {
+                    dispatcher.execute(.setSceneTransition(nil, in: nil))
+                    return
+                }
+                if let existing = scene.transition, existing.style == style { return }
+                let fallback = sceneStore.defaultTransition
+                var transition = SceneTransition(style: style,
+                                                 durationSeconds: fallback.durationSeconds,
+                                                 direction: fallback.direction,
+                                                 dipColorHex: fallback.dipColorHex)
+                if style == .stinger {
+                    transition.stingerCutPointSeconds = fallback.stingerCutPointSeconds
+                    transition.stingerVolume = fallback.stingerVolume
+                }
+                dispatcher.execute(.setSceneTransition(transition, in: nil))
+            })
+    }
+
+    private func sceneTransitionBinding(for scene: Scene) -> Binding<SceneTransition> {
+        Binding(
+            get: { scene.transition ?? sceneStore.defaultTransition },
+            set: { dispatcher.execute(.setSceneTransition($0, in: nil)) })
+    }
+
+    // MARK: Editor
+
+    /// The style-specific options for one transition configuration.
+    @ViewBuilder
+    private func transitionEditor(_ transition: Binding<SceneTransition>,
+                                  includeStyle: Bool) -> some View {
+        if includeStyle {
+            Picker("Type", selection: transition.style) {
+                ForEach(SceneTransitionStyle.allCases, id: \.self) { style in
+                    Text(style.displayName).tag(style)
+                }
+            }
+        }
+        switch transition.wrappedValue.style {
+        case .cut:
+            EmptyView()
+        case .dissolve, .dipToColor, .wipe, .slide:
+            durationSlider(transition)
+            if transition.wrappedValue.style == .dipToColor {
+                ColorPicker("Dip Color", selection: dipColorBinding(transition),
+                            supportsOpacity: false)
+            }
+            if transition.wrappedValue.style == .wipe
+                || transition.wrappedValue.style == .slide {
+                Picker("Direction", selection: transition.direction) {
+                    ForEach(TransitionDirection.allCases, id: \.self) { direction in
+                        Text(direction.displayName).tag(direction)
+                    }
+                }
+            }
+        case .stinger:
+            stingerEditor(transition)
+        }
+    }
+
+    private func durationSlider(_ transition: Binding<SceneTransition>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Slider(value: transition.durationSeconds, in: 0.1...3.0, step: 0.05) {
+                Text("Duration")
+            }
+            Text("Duration: \(transition.wrappedValue.durationSeconds, format: .number.precision(.fractionLength(2))) s")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func dipColorBinding(_ transition: Binding<SceneTransition>) -> Binding<Color> {
+        Binding(
+            get: {
+                let components = HexColor.components(transition.wrappedValue.dipColorHex)
+                return Color(NSColor(calibratedRed: components.red,
+                                     green: components.green,
+                                     blue: components.blue,
+                                     alpha: 1))
+            },
+            set: { color in
+                let nsColor = NSColor(color).usingColorSpace(.deviceRGB) ?? .black
+                transition.wrappedValue.dipColorHex =
+                    HexColor.string(red: Double(nsColor.redComponent),
+                                    green: Double(nsColor.greenComponent),
+                                    blue: Double(nsColor.blueComponent))
+            })
+    }
+
+    /// The stinger options: the video file (security-scoped bookmark, the
+    /// A02 media-source pattern), the cut point (seconds from playback
+    /// start at which the scene swaps under the mask), and its audio
+    /// volume in the mix.
+    @ViewBuilder
+    private func stingerEditor(_ transition: Binding<SceneTransition>) -> some View {
+        HStack {
+            Text(transition.wrappedValue.stingerFileName ?? "No stinger file")
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(transition.wrappedValue.stingerFileName == nil
+                                 ? .secondary : .primary)
+            Spacer()
+            Button("Choose…") { pickStingerFile(transition) }
+            if transition.wrappedValue.stingerBookmarkData != nil {
+                Button("Clear") {
+                    var updated = transition.wrappedValue
+                    updated.stingerBookmarkData = nil
+                    updated.stingerFileName = nil
+                    transition.wrappedValue = updated
+                }
+            }
+        }
+        VStack(alignment: .leading, spacing: 2) {
+            Slider(value: transition.stingerCutPointSeconds, in: 0...5.0, step: 0.1) {
+                Text("Cut Point")
+            }
+            Text("Cut point: \(transition.wrappedValue.stingerCutPointSeconds, format: .number.precision(.fractionLength(1))) s into the stinger")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        VStack(alignment: .leading, spacing: 2) {
+            Slider(value: transition.stingerVolume, in: 0...2.0, step: 0.05) {
+                Text("Stinger Volume")
+            }
+            Text("Stinger volume: \(transition.wrappedValue.stingerVolume, format: .number.precision(.fractionLength(2)))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        if transition.wrappedValue.stingerBookmarkData == nil {
+            Text("Without a stinger file the Take falls back to a plain dissolve.")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+    }
+
+    /// Picks the stinger video and stores its security-scoped bookmark (the
+    /// sandboxed access grant), exactly like A02 media sources.
+    private func pickStingerFile(_ transition: Binding<SceneTransition>) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie]
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose Stinger"
+        guard panel.runModal() == .OK, let url = panel.url,
+              let payload = MediaSourceFactory.payload(forPickedFile: url) else { return }
+        var updated = transition.wrappedValue
+        updated.stingerBookmarkData = payload.bookmarkData
+        updated.stingerFileName = payload.fileName
+        transition.wrappedValue = updated
     }
 }

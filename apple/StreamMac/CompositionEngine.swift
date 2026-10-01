@@ -140,6 +140,13 @@ final class SceneRegistryStore: @unchecked Sendable {
 /// executor, never on the main actor. Source frames are pulled through
 /// injected, thread-safe providers (`LatestScreenFrame` / `LatestCameraFrame`
 /// style lock-protected holders).
+///
+/// S09 (issue #100): a Take armed through `ProgramTransitionStore` turns the
+/// scene switch into a rendered transition — both scene composites render
+/// per tick and blend (overlays stable above the blend), or a stinger video
+/// masks the cut-point swap — while same-scene visibility edits animate as
+/// per-layer fades. Neither path blocks the tick cadence: the transition is
+/// just the frame the tick renders.
 actor CompositionEngine {
     /// Receives composited frames on the subscriber's private serial queue.
     typealias FrameSink = @Sendable (CompositedFrame) -> Void
@@ -179,10 +186,29 @@ actor CompositionEngine {
     /// lookup S06 nested-scene references resolve against. Defaults to the
     /// shared `SceneRegistryStore` (fed by `SceneStore`).
     private let sceneRegistryProvider: @Sendable () -> [SceneID: Scene]
+    /// S09: where the engine peeks at the armed Take transition (the
+    /// dispatcher arms one per scene-change Take). Defaults to the shared
+    /// `ProgramTransitionStore`.
+    private let transitionRequestProvider: @Sendable () -> ProgramTransitionRequest?
+    /// S09: where the engine pulls the in-flight stinger's playback state
+    /// (frames + cut-point timing). Defaults to the shared
+    /// `TransitionStingerStore` (driven by `TransitionController`).
+    private let stingerProvider: @Sendable () -> StingerSnapshot
 
     private var scene: Scene?
     private var canvasSize: CGSize
     private var frameRate: Int
+
+    /// S09 (issue #100): the in-flight scene transition, if any. Set by
+    /// `updateScene` when a scene-id switch arrives with a fresh armed
+    /// transition request (the dispatcher's Take path); rendered per tick by
+    /// `renderTransitionFrame`; cleared on completion, on cut, and on
+    /// engine (re)start.
+    private var transition: ActiveTransition?
+    /// S09: in-flight per-layer visibility fades (same-scene edits). Keyed
+    /// by stable LayerID so an interrupted fade reverses from its current
+    /// opacity — the defined final state is always the latest scene value.
+    private var layerFades: [LayerID: LayerFade] = [:]
 
     private var tickTask: Task<Void, Never>?
     private var clockAnchor: CMTime = .zero
@@ -202,6 +228,10 @@ actor CompositionEngine {
             { ProjectOverlayStore.shared.snapshot() },
          sceneRegistryProvider: @escaping @Sendable () -> [SceneID: Scene] =
             { SceneRegistryStore.shared.snapshot() },
+         transitionRequestProvider: @escaping @Sendable () -> ProgramTransitionRequest? =
+            { ProgramTransitionStore.shared.snapshot() },
+         stingerProvider: @escaping @Sendable () -> StingerSnapshot =
+            { TransitionStingerStore.shared.snapshot() },
          canvasSize: CGSize = OutputProfile.default.canvasSize,
          frameRate: Int = OutputProfile.default.frameRate) {
         self.screenProvider = screenProvider
@@ -233,6 +263,8 @@ actor CompositionEngine {
         self.sourcePayloadProvider = sourcePayloadProvider
         self.overlayContextProvider = overlayContextProvider
         self.sceneRegistryProvider = sceneRegistryProvider
+        self.transitionRequestProvider = transitionRequestProvider
+        self.stingerProvider = stingerProvider
         self.canvasSize = canvasSize
         self.frameRate = frameRate
         // A10 (issue #122): wrap the resolved lookup with the delay lines.
@@ -252,6 +284,10 @@ actor CompositionEngine {
         self.scene = scene
         self.canvasSize = canvasSize
         self.frameRate = max(1, frameRate)
+        // S09: a (re)start lands on the composition directly — no
+        // transition, no carried-over layer fades.
+        transition = nil
+        layerFades.removeAll()
         startTicking()
     }
 
@@ -270,8 +306,24 @@ actor CompositionEngine {
     /// interrupting cadence. W03 (preview/program) uses one engine per
     /// composition: StreamController runs a program engine (this path) plus a
     /// separate preview engine fed through the same `updateScene` seam.
+    ///
+    /// S09 (issue #100) transition handling: a same-scene edit diffs layer
+    /// visibility and registers show/hide fades (rendered over the next
+    /// ticks, never delaying the swap). A scene-ID switch with a fresh armed
+    /// transition request (the dispatcher arms one per Take) opens an
+    /// `ActiveTransition` instead of cutting; anything else cuts, abandoning
+    /// any in-flight transition — the documented mid-transition Take policy
+    /// is "the newest Take wins: cut to the newest target, then render that
+    /// Take's own armed transition".
     func updateScene(_ scene: Scene?) {
+        let previous = self.scene
+        if let previous, let scene, previous.id == scene.id {
+            registerLayerFades(from: previous, to: scene)
+        } else {
+            layerFades.removeAll()
+        }
         self.scene = scene
+        transition = resolveTransition(from: previous, to: scene)
     }
 
     /// Applies a new output geometry/fps. While running, this restarts the
@@ -309,6 +361,218 @@ actor CompositionEngine {
             frames[key] = AVSyncDelay.videoFrames(forMilliseconds: ms, framesPerSecond: fps)
         }
         delayLines.setDelays(frames)
+    }
+
+    // MARK: - S09 scene transitions (issue #100)
+
+    /// An in-flight scene transition. Blend styles (dissolve/dip/wipe/slide)
+    /// are timed in frames against the tick counter; a stinger is timed on
+    /// the shared host clock from playback start and completes when the
+    /// stinger store clears (end/failure/supersession) or the safety cap
+    /// trips.
+    private struct ActiveTransition {
+        var from: Scene
+        var to: Scene
+        /// The resolved style — a stinger whose media is missing resolves
+        /// to `.dissolve` here (the documented honest fallback).
+        var style: SceneTransitionStyle
+        var startSequence: Int64
+        var durationFrames: Int
+        var direction: TransitionDirection
+        var dipColorHex: String
+        var stingerCutPointSeconds: Double
+        var stingerStartedAt: CMTime
+    }
+
+    /// One layer's in-flight visibility fade. `exitingLayer` holds the OLD
+    /// content for a fade-out (the layer no longer renders from the new
+    /// scene); nil for a fade-in. `backToFrontIndex` preserves the old
+    /// z-order among exiting layers.
+    private struct LayerFade {
+        var exitingLayer: LayerNode?
+        var backToFrontIndex: Int
+        var fromOpacity: Double
+        var toOpacity: Double
+        var startSequence: Int64
+        var durationFrames: Int
+    }
+
+    /// Show/hide fades are intentionally brief — long enough to read as a
+    /// transition, short enough that a capture stopping on demand loss is
+    /// unlikely to outlive the fade-out.
+    private static let layerFadeDurationSeconds = 0.25
+    /// A stinger that never reports its end (e.g. a file that fails after
+    /// loading) still completes: the base scene has long since swapped at
+    /// the cut point, so this cap only bounds the mask's lifetime.
+    private static let stingerSafetySeconds = 10.0
+
+    /// The transition a scene switch opens, if any: only a scene-ID change
+    /// carrying a fresh armed request (a Take) transitions — plain edits,
+    /// re-renders, and stale requests all cut.
+    private func resolveTransition(from previous: Scene?, to scene: Scene?) -> ActiveTransition? {
+        guard let previous, let scene, scene.id != previous.id,
+              let request = transitionRequestProvider(),
+              request.targetSceneID == scene.id,
+              request.isFresh else { return nil }
+        let config = request.transition
+        let fps = max(1, frameRate)
+        switch config.style {
+        case .cut:
+            return nil
+        case .stinger:
+            let stinger = stingerProvider()
+            guard stinger.playback != nil else {
+                return makeBlendTransition(from: previous, to: scene,
+                                           style: .dissolve, config: config, fps: fps)
+            }
+            return ActiveTransition(from: previous, to: scene, style: .stinger,
+                                    startSequence: frameSequence, durationFrames: 0,
+                                    direction: config.direction,
+                                    dipColorHex: config.dipColorHex,
+                                    stingerCutPointSeconds: max(0, config.stingerCutPointSeconds),
+                                    stingerStartedAt: stinger.startedAt)
+        default:
+            guard config.durationSeconds > 0 else { return nil }
+            return makeBlendTransition(from: previous, to: scene,
+                                       style: config.style, config: config, fps: fps)
+        }
+    }
+
+    private func makeBlendTransition(from: Scene, to: Scene,
+                                     style: SceneTransitionStyle,
+                                     config: SceneTransition, fps: Int) -> ActiveTransition? {
+        let durationFrames = Int((config.durationSeconds * Double(fps)).rounded())
+        guard durationFrames > 0 else { return nil }
+        return ActiveTransition(from: from, to: to, style: style,
+                                startSequence: frameSequence,
+                                durationFrames: durationFrames,
+                                direction: config.direction,
+                                dipColorHex: config.dipColorHex,
+                                stingerCutPointSeconds: 0,
+                                stingerStartedAt: .zero)
+    }
+
+    /// One frame of the in-flight transition, or nil when the transition
+    /// completes this tick (the caller then clears it and renders the
+    /// settled scene — which is already `transition.to`, set at Take time).
+    private func renderTransitionFrame(_ active: ActiveTransition,
+                                       overlayContext: OverlayContext,
+                                       sourcePayloads: [SourceDefinitionID: LayerPayload],
+                                       scenes: [SceneID: Scene],
+                                       presentationTime pts: CMTime,
+                                       frameDuration: CMTime) -> CompositedFrame? {
+        if active.style == .stinger {
+            let stinger = stingerProvider()
+            let elapsed = CMTimeSubtract(pts, active.stingerStartedAt).seconds
+            let ended = stinger.playback == nil
+                || (stinger.durationSeconds > 0
+                    && elapsed > stinger.durationSeconds + 0.5)
+                || elapsed > active.stingerCutPointSeconds + Self.stingerSafetySeconds
+            guard !ended else { return nil }
+            // The scene swaps under the stinger at the cut point; the video
+            // mask (pulled per tick — the pull also tops up its mix audio)
+            // covers the swap.
+            let base = elapsed < active.stingerCutPointSeconds ? active.from : active.to
+            let stingerFrame = stinger.playback?.pullFrame()
+            return renderer.render(scene: base,
+                                   overlayContext: overlayContext,
+                                   canvasSize: canvasSize,
+                                   frames: delayedFrameLookup,
+                                   sourcePayloads: sourcePayloads,
+                                   scenes: scenes,
+                                   presentationTime: pts,
+                                   frameDuration: frameDuration,
+                                   sequence: frameSequence,
+                                   stinger: stingerFrame)
+        }
+        let progress = Double(frameSequence - active.startSequence)
+            / Double(max(1, active.durationFrames))
+        guard progress < 1 else { return nil }
+        return renderer.renderTransition(from: active.from, to: active.to,
+                                         blend: SceneBlend(style: active.style,
+                                                           progress: progress,
+                                                           direction: active.direction,
+                                                           dipColorHex: active.dipColorHex),
+                                         overlayContext: overlayContext,
+                                         canvasSize: canvasSize,
+                                         frames: delayedFrameLookup,
+                                         sourcePayloads: sourcePayloads,
+                                         scenes: scenes,
+                                         presentationTime: pts,
+                                         frameDuration: frameDuration,
+                                         sequence: frameSequence)
+    }
+
+    // MARK: - S09 layer show/hide fades
+
+    /// Diffs a same-scene edit for layer visibility changes (individual
+    /// layers and group toggles — a group's visibility edit flips each
+    /// member's `isVisible`, so both land here) and registers fades.
+    /// Interrupting a fade starts the reverse fade from the CURRENT
+    /// interpolated opacity, so the defined final state of an interrupted
+    /// transition is always the latest scene value.
+    private func registerLayerFades(from old: Scene, to new: Scene) {
+        let fps = max(1, frameRate)
+        let durationFrames = max(1, Int((Self.layerFadeDurationSeconds * Double(fps)).rounded()))
+        let oldVisible = Set(old.layers.filter(\.isVisible).map(\.id))
+        let newVisible = Set(new.layers.filter(\.isVisible).map(\.id))
+        for layer in new.layers where layer.isVisible && !oldVisible.contains(layer.id) {
+            let current = currentFadeValue(layer.id) ?? 0
+            layerFades[layer.id] = LayerFade(exitingLayer: nil,
+                                             backToFrontIndex: 0,
+                                             fromOpacity: current,
+                                             toOpacity: 1,
+                                             startSequence: frameSequence,
+                                             durationFrames: durationFrames)
+        }
+        for (index, layer) in old.layers.enumerated()
+        where layer.isVisible && !newVisible.contains(layer.id) {
+            let current = currentFadeValue(layer.id) ?? 1
+            layerFades[layer.id] = LayerFade(exitingLayer: layer,
+                                             backToFrontIndex: index,
+                                             fromOpacity: current,
+                                             toOpacity: 0,
+                                             startSequence: frameSequence,
+                                             durationFrames: durationFrames)
+        }
+    }
+
+    /// A fade's interpolated opacity right now, or its endpoint once past
+    /// the duration (nil when no fade is in flight for the layer).
+    private func currentFadeValue(_ id: LayerID) -> Double? {
+        guard let fade = layerFades[id] else { return nil }
+        let progress = Double(frameSequence - fade.startSequence)
+            / Double(max(1, fade.durationFrames))
+        guard progress < 1 else { return fade.toOpacity }
+        return fade.fromOpacity + (fade.toOpacity - fade.fromOpacity) * max(0, progress)
+    }
+
+    /// The per-tick render inputs from the fade set: alpha overrides per
+    /// layer and the exiting layers (old content, old back-to-front order).
+    /// Completed fades leave the map here — fade-ins end at full opacity,
+    /// fade-outs drop their layer.
+    private func layerFadeOverrides() -> (opacity: [LayerID: Double], exiting: [LayerNode]) {
+        guard !layerFades.isEmpty else { return ([:], []) }
+        var opacity: [LayerID: Double] = [:]
+        var exiting: [(index: Int, layer: LayerNode)] = []
+        var completed: [LayerID] = []
+        for (id, fade) in layerFades {
+            let progress = Double(frameSequence - fade.startSequence)
+                / Double(max(1, fade.durationFrames))
+            guard progress < 1 else {
+                completed.append(id)
+                continue
+            }
+            opacity[id] = fade.fromOpacity
+                + (fade.toOpacity - fade.fromOpacity) * max(0, progress)
+            if let layer = fade.exitingLayer {
+                exiting.append((fade.backToFrontIndex, layer))
+            }
+        }
+        for id in completed {
+            layerFades.removeValue(forKey: id)
+        }
+        return (opacity, exiting.sorted { $0.index < $1.index }.map(\.layer))
     }
 
     // MARK: - Subscriber fan-out
@@ -349,21 +613,49 @@ actor CompositionEngine {
     /// One output frame: pull the latest sample from every source, composite
     /// the scene graph once, stamp it on the shared clock, and broadcast.
     /// Never gated on a fresh source frame (issue #65, criterion 2).
+    ///
+    /// S09: an in-flight scene transition renders instead of the settled
+    /// scene (both sides keep compositing — the cadence never blocks and no
+    /// output drops); completion falls through to the settled render in the
+    /// same tick, so the tick that ends a transition already paints the new
+    /// composition.
     private func tick() {
         guard let scene else { return }
         frameSequence += 1
         let timescale = CMTimeScale(max(1, frameRate))
         let pts = CMTimeAdd(clockAnchor, CMTime(value: frameSequence, timescale: timescale))
         let duration = CMTime(value: 1, timescale: timescale)
+        let overlayContext = overlayContextProvider()
+        let sourcePayloads = sourcePayloadProvider()
+        let scenes = sceneRegistryProvider()
+
+        if let active = transition {
+            if let frame = renderTransitionFrame(active,
+                                                 overlayContext: overlayContext,
+                                                 sourcePayloads: sourcePayloads,
+                                                 scenes: scenes,
+                                                 presentationTime: pts,
+                                                 frameDuration: duration) {
+                for mailbox in subscribers.values {
+                    mailbox.post(frame)
+                }
+                return
+            }
+            transition = nil   // completed this tick → settled render below
+        }
+
+        let fades = layerFadeOverrides()
         guard let frame = renderer.render(scene: scene,
-                                          overlayContext: overlayContextProvider(),
+                                          overlayContext: overlayContext,
                                           canvasSize: canvasSize,
                                           frames: delayedFrameLookup,
-                                          sourcePayloads: sourcePayloadProvider(),
-                                          scenes: sceneRegistryProvider(),
+                                          sourcePayloads: sourcePayloads,
+                                          scenes: scenes,
                                           presentationTime: pts,
                                           frameDuration: duration,
-                                          sequence: frameSequence) else { return }
+                                          sequence: frameSequence,
+                                          layerOpacity: fades.opacity,
+                                          exitingLayers: fades.exiting) else { return }
         for mailbox in subscribers.values {
             mailbox.post(frame)
         }
