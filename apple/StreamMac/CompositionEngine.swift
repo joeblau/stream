@@ -153,6 +153,18 @@ actor CompositionEngine {
     /// fallback), so existing call sites need no new argument and the
     /// single-source behavior stays bit-identical.
     private let frameLookup: SourceFrameLookup
+    /// A10 (issue #122): the lookup the renderer actually reads — `frameLookup`
+    /// with each camera/screen read routed through the per-source video delay
+    /// lines. Sources with no configured delay pass straight through (zero
+    /// overhead); media playout is never delayed (it already rides the shared
+    /// clock via the render-tick pull).
+    private let delayedFrameLookup: SourceFrameLookup
+    /// A10: the frame-hold stores behind `delayedFrameLookup`, configured via
+    /// `setVideoDelays`.
+    private let delayLines = VideoFrameDelayLines()
+    /// A10: the persisted per-source video delays (ms) last pushed by the
+    /// controller; re-rendered into frames whenever the output fps changes.
+    private var videoDelaysMs: [CaptureSourceKey: Double] = [:]
     /// C01: where the engine snapshots the source registry's payload index
     /// each tick — the lookup a bound layer's `sourceID` resolves to its
     /// capture identity through. Defaults to the shared `SourcePayloadStore`
@@ -223,6 +235,13 @@ actor CompositionEngine {
         self.sceneRegistryProvider = sceneRegistryProvider
         self.canvasSize = canvasSize
         self.frameRate = frameRate
+        // A10 (issue #122): wrap the resolved lookup with the delay lines.
+        let delayLines = self.delayLines
+        let rawLookup = self.frameLookup
+        self.delayedFrameLookup = SourceFrameLookup(
+            camera: { key in delayLines.cameraFrame(for: key, fresh: rawLookup.camera(key)) },
+            screen: { key in delayLines.screenFrame(for: key, fresh: rawLookup.screen(key)) },
+            media: rawLookup.media)
     }
 
     // MARK: - Lifecycle (driven by the W02 pipeline-demand model)
@@ -261,9 +280,35 @@ actor CompositionEngine {
     func setOutput(canvasSize: CGSize, frameRate: Int) {
         self.canvasSize = canvasSize
         self.frameRate = max(1, frameRate)
+        // A10: the same millisecond delays span a different number of frames
+        // at the new rate.
+        applyVideoDelays()
         if tickTask != nil {
             startTicking()
         }
+    }
+
+    // MARK: - A10 video delay alignment (issue #122)
+
+    /// Pushes the persisted per-source video delays (MILLISECONDS, keyed by
+    /// capture identity). Each delayed source's frames are held in a bounded
+    /// per-source line (`VideoFrameDelayLines`) and emitted that many output
+    /// ticks later — compensation for capture latency differences, on the
+    /// same shared clock, with no timestamp regressions (the output PTS is
+    /// always `anchor + sequence / fps` regardless of source delay). Takes
+    /// effect between ticks: no scene swap, no clock re-anchor, no click.
+    func setVideoDelays(_ delaysMs: [CaptureSourceKey: Double]) {
+        videoDelaysMs = delaysMs
+        applyVideoDelays()
+    }
+
+    private func applyVideoDelays() {
+        let fps = max(1, frameRate)
+        var frames: [CaptureSourceKey: Int] = [:]
+        for (key, ms) in videoDelaysMs {
+            frames[key] = AVSyncDelay.videoFrames(forMilliseconds: ms, framesPerSecond: fps)
+        }
+        delayLines.setDelays(frames)
     }
 
     // MARK: - Subscriber fan-out
@@ -313,7 +358,7 @@ actor CompositionEngine {
         guard let frame = renderer.render(scene: scene,
                                           overlayContext: overlayContextProvider(),
                                           canvasSize: canvasSize,
-                                          frames: frameLookup,
+                                          frames: delayedFrameLookup,
                                           sourcePayloads: sourcePayloadProvider(),
                                           scenes: sceneRegistryProvider(),
                                           presentationTime: pts,

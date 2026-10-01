@@ -42,6 +42,10 @@ enum AudioChannelID: Hashable, Sendable {
 struct AudioEngineLevels: Sendable {
     var channels: [AudioChannelID: AudioLevels] = [:]
     var buses: [AudioBus: AudioLevels] = [:]
+    /// A10 (issue #122): channels the ducker is currently holding below
+    /// unity (their duck target < 1) — the mixer/soundboard "ducked"
+    /// indicator. Read-only: ducking never changes what the faders mean.
+    var duckedChannels: Set<AudioChannelID> = []
 }
 
 /// A01 (issue #82): the timestamped multi-source audio engine. Mixes N
@@ -74,16 +78,25 @@ struct AudioEngineLevels: Sendable {
 /// support isolated recording tracks.
 ///
 /// **Drop policy** (see `AudioRingBuffer` for the full contract): per-channel
-/// rings hold 200 ms; overflow drops OLDEST frames (bounded latency), underrun
-/// inserts counted silence, tap queues drop oldest chunks. Nothing blocks.
+/// rings hold 200 ms of real-time buffer PLUS the A10 delay headroom
+/// (`maxDelayFrames` = 500 ms), so a channel delayed by the bounded maximum
+/// never overruns its ring; overflow drops OLDEST frames (bounded latency),
+/// underrun inserts counted silence, tap queues drop oldest chunks. Nothing
+/// blocks.
 actor AudioMixEngine {
     /// Engine-wide mix format: 48 kHz stereo (canonical, see StreamCore).
     static let sampleRate = 48_000
     /// Frames per mixed chunk (~10.7 ms). Chunks are emitted back-to-back at
     /// exactly this size, so the output timestamp stream is perfectly regular.
     static let chunkFrames = 512
-    /// Per-channel ring capacity: 200 ms — the bounded real-time buffer.
-    static let ringCapacityFrames = 9_600
+    /// A10 (issue #122): the bounded per-channel audio delay headroom —
+    /// `AVSyncDelay.maxAudioDelayMs` (500 ms) in sample frames. A channel's
+    /// delay shifts its ring READ window this far behind the mix position.
+    static let maxDelayFrames = AVSyncDelay.audioFrames(
+        forMilliseconds: AVSyncDelay.maxAudioDelayMs, sampleRate: sampleRate)
+    /// Per-channel ring capacity: 200 ms of real-time buffer plus the A10
+    /// delay headroom — the bounded real-time buffer.
+    static let ringCapacityFrames = 9_600 + maxDelayFrames
     /// Gain/mute changes ease over 20 ms (960 frames) — no clicks on Take.
     static let gainRampFrames = 960
 
@@ -105,6 +118,15 @@ actor AudioMixEngine {
     /// channel creation (scene gains are pushed before a new capture's first
     /// audio buffer lands).
     private var pendingGains: [AudioChannelID: ChannelGain] = [:]
+    /// A10 (issue #122): the live ducking configuration (nil = bypassed).
+    private var ducking: DuckingConfiguration?
+    /// A10: the ducker's attack/hold/release state machine — engine-actor
+    /// state, so it survives Takes and scene changes untouched (ducking is
+    /// session-level, never scene-bound).
+    private var duckEnvelope = DuckEnvelope()
+    /// A10: the duck target last pushed per channel (1 = not ducked) — the
+    /// UI's ducked-channel snapshot and the bypass restore list.
+    private var appliedDuckGains: [AudioChannelID: Float] = [:]
 
     // Reused mix scratch (actor-confined): no per-chunk allocations.
     private var programScratch = [Float](repeating: 0, count: chunkFrames * 2)
@@ -197,6 +219,73 @@ actor AudioMixEngine {
         }
     }
 
+    // MARK: - A10 A/V delay + speech ducking (issue #122)
+
+    /// A10: the engine-side view of the persisted `DuckingSettings`, with
+    /// decibel/millisecond values pre-converted to linear gains and whole
+    /// mix chunks. Channels are matched by LABEL each chunk (not by ID at
+    /// configure time), so duck targets that come and go — soundboard pads,
+    /// playlists, scene media — join and leave the duck set with their
+    /// channels, and the config survives channel pruning untouched.
+    struct DuckingConfiguration: Sendable {
+        var sidechainLabels: Set<String>
+        var targetLabels: Set<String>
+        var thresholdLinear: Float
+        var duckGain: Float
+        var attackChunks: Int
+        var holdChunks: Int
+        var releaseChunks: Int
+
+        /// Nil when the settings mean "bypassed" (disabled, or no sidechain
+        /// or target selected) — the envelope rests and every duck ramp
+        /// eases back to unity.
+        init?(_ settings: DuckingSettings, chunkDurationSeconds: Double) {
+            guard settings.isEnabled,
+                  !settings.sidechainLabels.isEmpty,
+                  !settings.targetLabels.isEmpty else { return nil }
+            sidechainLabels = settings.sidechainLabels
+            targetLabels = settings.targetLabels
+            thresholdLinear = settings.thresholdLinear
+            duckGain = settings.duckGain
+            attackChunks = AVSyncDelay.chunkCount(forMilliseconds: settings.attackMs,
+                                                  chunkDurationSeconds: chunkDurationSeconds)
+            holdChunks = AVSyncDelay.chunkCount(forMilliseconds: settings.holdMs,
+                                                chunkDurationSeconds: chunkDurationSeconds)
+            releaseChunks = AVSyncDelay.chunkCount(forMilliseconds: settings.releaseMs,
+                                                   chunkDurationSeconds: chunkDurationSeconds)
+        }
+    }
+
+    /// A10: per-channel audio delays in MILLISECONDS, keyed by channel label
+    /// (the persisted settings map). Each channel's ring read shifts that far
+    /// BEHIND the mix position — compensation for per-source capture latency
+    /// on the same host clock, so program, monitor, aux, and isolated taps
+    /// all carry the compensated timing identically and no timestamp ever
+    /// regresses. Registry-level (like solo): the map survives engine
+    /// restarts and applies to channels that auto-register later.
+    func setChannelDelays(_ delaysMs: [String: Double]) {
+        let frames = delaysMs.mapValues {
+            AVSyncDelay.audioFrames(forMilliseconds: $0, sampleRate: Self.sampleRate)
+        }
+        registry.setDelays(frames)
+    }
+
+    /// A10: (re)configures speech-driven ducking. The envelope and per-
+    /// channel duck ramps live alongside — never inside — the base gain
+    /// ramps: the mix multiplies `base × duck`, so the A04 faders and the
+    /// ducker never fight, and bypass (nil) ramps every ducked channel back
+    /// to unity, restoring the user-set gain exactly.
+    func setDucking(_ configuration: DuckingConfiguration?) {
+        ducking = configuration
+        duckEnvelope.reset()
+        let releaseFrames = configuration.map { $0.releaseChunks * Self.chunkFrames }
+            ?? Self.gainRampFrames
+        for (id, gain) in appliedDuckGains where gain < 1 {
+            registry.setDuckGain(id, gain: 1, rampFrames: releaseFrames)
+        }
+        appliedDuckGains.removeAll()
+    }
+
     /// Capture-thread entry point: converts, inserts FX, and writes the
     /// buffer's frames into the channel's ring at the position its capture
     /// PTS maps to on the engine clock. Unknown channels auto-register
@@ -258,6 +347,7 @@ actor AudioMixEngine {
     func levelsSnapshot() -> AudioEngineLevels {
         var levels = AudioEngineLevels()
         levels.channels = registry.levelsSnapshot()
+        levels.duckedChannels = Set(appliedDuckGains.filter { $0.value < 0.999 }.keys)
         for (bus, meter) in busLevels {
             levels.buses[bus] = meter.levels
         }
@@ -318,6 +408,39 @@ actor AudioMixEngine {
         let wantMonitor = taps.values.contains { $0.isolatedChannel == nil && $0.bus == .monitor }
         let wantAux = taps.values.contains { $0.isolatedChannel == nil && $0.bus == .aux }
         let wantAnyBus = wantProgram || wantMonitor || wantAux
+
+        // A10 (issue #122): advance the duck envelope ONCE per chunk from the
+        // PRE-FADER sidechain meters (the mic reads as speech regardless of
+        // its fader), and push the new duck target onto the target channels
+        // only on envelope transitions — the channels' own ramps do the
+        // click-free attack/release trajectories between pushes.
+        if let ducking {
+            let levels = registry.levelsSnapshot()
+            var sidechain: Float = 0
+            var targets: [AudioChannelID] = []
+            for (id, channelLevels) in levels {
+                if ducking.sidechainLabels.contains(id.label) {
+                    sidechain = max(sidechain, channelLevels.rms)
+                }
+                if ducking.targetLabels.contains(id.label) {
+                    targets.append(id)
+                }
+            }
+            let decision = duckEnvelope.advance(
+                speechActive: sidechain >= ducking.thresholdLinear,
+                duckGain: ducking.duckGain,
+                parameters: DuckEnvelope.Parameters(
+                    attackChunks: ducking.attackChunks,
+                    holdChunks: ducking.holdChunks,
+                    releaseChunks: ducking.releaseChunks))
+            if decision.changed {
+                let rampFrames = decision.rampChunks * Self.chunkFrames
+                for id in targets {
+                    appliedDuckGains[id] = decision.targetGain
+                    registry.setDuckGain(id, gain: decision.targetGain, rampFrames: rampFrames)
+                }
+            }
+        }
 
         for index in programScratch.indices {
             programScratch[index] = 0
@@ -441,6 +564,11 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     /// solo survives channel teardown/re-creation — `reset`, pruning, and
     /// auto-registration all re-apply it to the next ingest instance.
     private var soloedIDs: Set<AudioChannelID> = []
+    /// A10 (issue #122): per-channel audio delay in sample frames, keyed by
+    /// channel LABEL. Registry-level (same rule as solo): the map survives
+    /// `reset` and pruning, and applies both to explicit registrations and to
+    /// channels that auto-register on their first buffer.
+    private var delayFramesByLabel: [String: Int] = [:]
 
     func setAnchor(_ anchor: CMTime) {
         os_unfair_lock_lock(&lock)
@@ -464,7 +592,8 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         // and the explicit registration (VoicePolish on the mic) must win.
         channels[id] = ChannelIngest(insert: insert,
                                      initialGain: gain?.effectiveGain ?? Self.defaultGain(for: id),
-                                     soloed: soloedIDs.contains(id))
+                                     soloed: soloedIDs.contains(id),
+                                     delayFrames: delayFramesByLabel[id.label] ?? 0)
     }
 
     /// A04: toggles one channel's monitor-only solo. The ID set is the source
@@ -520,13 +649,38 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         channel?.setAuxSend(gain, rampFrames: rampFrames)
     }
 
+    /// A10: replaces the per-channel delay map (frames, by label) and applies
+    /// it to the live channels. Delay changes take effect on the next mixed
+    /// chunk — a read-window shift, never a ring reset, so no click and no
+    /// dropped history.
+    func setDelays(_ framesByLabel: [String: Int]) {
+        os_unfair_lock_lock(&lock)
+        delayFramesByLabel = framesByLabel
+        let entries = channels.map { ($0.key, $0.value) }
+        os_unfair_lock_unlock(&lock)
+        for (id, channel) in entries {
+            channel.setDelayFrames(framesByLabel[id.label] ?? 0)
+        }
+    }
+
+    /// A10: the ducker's ramped duck-gain target for one channel. Duck rides
+    /// its own ramp and multiplies the base gain in the mix (`base × duck`),
+    /// so it never disturbs the A04 fader/binding ramps.
+    func setDuckGain(_ id: AudioChannelID, gain: Float, rampFrames: Int) {
+        os_unfair_lock_lock(&lock)
+        let channel = channels[id]
+        os_unfair_lock_unlock(&lock)
+        channel?.setDuckGain(gain, rampFrames: rampFrames)
+    }
+
     func enqueue(_ id: AudioChannelID, _ sampleBuffer: CMSampleBuffer) {
         os_unfair_lock_lock(&lock)
         let anchor = self.anchor
         let channel = channels[id] ?? {
             let created = ChannelIngest(insert: nil,
                                         initialGain: Self.defaultGain(for: id),
-                                        soloed: soloedIDs.contains(id))
+                                        soloed: soloedIDs.contains(id),
+                                        delayFrames: delayFramesByLabel[id.label] ?? 0)
             channels[id] = created
             return created
         }()
@@ -589,12 +743,23 @@ private final class ChannelIngest: @unchecked Sendable {
     /// A04: the channel's PRE-FADER (post-insert) meter, fed from the chunk
     /// the mix loop already reads — no extra pass over the ring.
     private var meter = LevelMeter()
+    /// A10 (issue #122): the channel's audio delay — the ring read lags the
+    /// mix position by this many frames, on the same host clock.
+    private var delayFrames: Int
+    /// A10: the ducker's gain ramp (1 = not ducked). Multiplies the base gain
+    /// in the mix — `effective = base × duck` — so the faders and the ducker
+    /// never fight and bypass restores the user-set gain exactly.
+    private var duck = ChannelGainRamp(gain: 1)
+    /// A10: scratch for the duck-scaled chunk (only touched while a duck
+    /// ramp is active).
+    private var duckedChunk = [Float](repeating: 0, count: AudioMixEngine.chunkFrames * 2)
 
     init(insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?, initialGain: Float,
-         soloed: Bool = false) {
+         soloed: Bool = false, delayFrames: Int = 0) {
         self.insert = insert
         self.gain = ChannelGainRamp(gain: initialGain)
         self.soloed = soloed
+        self.delayFrames = max(0, delayFrames)
     }
 
     func setGain(_ effectiveGain: Float, rampFrames: Int) {
@@ -606,6 +771,21 @@ private final class ChannelIngest: @unchecked Sendable {
     func setAuxSend(_ send: Float, rampFrames: Int) {
         os_unfair_lock_lock(&lock)
         auxSend.setTarget(send, rampFrames: rampFrames)
+        os_unfair_lock_unlock(&lock)
+    }
+
+    /// A10: re-targets the duck ramp (engine-side gain automation).
+    func setDuckGain(_ gain: Float, rampFrames: Int) {
+        os_unfair_lock_lock(&lock)
+        duck.setTarget(gain, rampFrames: rampFrames)
+        os_unfair_lock_unlock(&lock)
+    }
+
+    /// A10: re-positions the ring read window (ms → frames conversion and
+    /// clamping happened upstream in `AVSyncDelay`).
+    func setDelayFrames(_ frames: Int) {
+        os_unfair_lock_lock(&lock)
+        delayFrames = max(0, frames)
         os_unfair_lock_unlock(&lock)
     }
 
@@ -637,27 +817,42 @@ private final class ChannelIngest: @unchecked Sendable {
         ring.write(samples, at: position)
     }
 
-    /// Mix-loop read: fills the channel scratch at the absolute window,
-    /// exposes the pre-fader chunk as `isolated`, and accumulates program/aux
-    /// with per-frame ramped gains (the click-free Take/mute contract). A04:
-    /// feeds the channel meter from the pre-fader chunk, and — while a solo
-    /// is active and this channel is soloed — additionally accumulates its
-    /// post-fader signal into `monitor` (the monitor-only solo mix).
+    /// Mix-loop read: fills the channel scratch at the absolute window
+    /// (shifted back by the A10 delay), exposes the pre-fader chunk as
+    /// `isolated`, and accumulates program/aux with per-frame ramped gains
+    /// (the click-free Take/mute contract). A04: feeds the channel meter
+    /// from the pre-fader chunk, and — while a solo is active and this
+    /// channel is soloed — additionally accumulates its post-fader signal
+    /// into `monitor` (the monitor-only solo mix). A10: while a duck ramp
+    /// is active the accumulated chunk is scaled by the duck trajectory
+    /// FIRST — post-meter, post-isolated, so meters still show the live
+    /// signal and isolated recording tracks stay clean of the duck.
     func mix(at position: Int64, frameCount: Int,
              program: inout [Float], aux: inout [Float],
              isolated: inout [Float], monitor: inout [Float],
              accumulateMonitor: Bool) {
         os_unfair_lock_lock(&lock)
-        ring.fill(at: position, frameCount: frameCount, into: &chunk)
+        ring.fill(at: position - Int64(delayFrames), frameCount: frameCount, into: &chunk)
         meter.ingest(interleaved: chunk)
         for index in 0..<(frameCount * 2) { isolated[index] = chunk[index] }
+        let source: [Float]
+        if duck.current < 1 || duck.target < 1 {
+            for frame in 0..<frameCount {
+                let duckGain = duck.advance()
+                duckedChunk[frame * 2] = chunk[frame * 2] * duckGain
+                duckedChunk[frame * 2 + 1] = chunk[frame * 2 + 1] * duckGain
+            }
+            source = duckedChunk
+        } else {
+            source = chunk
+        }
         if accumulateMonitor && soloed {
-            AudioMixerCore.accumulateWithMonitor(source: chunk, frameCount: frameCount,
+            AudioMixerCore.accumulateWithMonitor(source: source, frameCount: frameCount,
                                                  gain: &gain, auxGain: &auxSend,
                                                  program: &program, aux: &aux,
                                                  monitor: &monitor)
         } else {
-            AudioMixerCore.accumulate(source: chunk, frameCount: frameCount,
+            AudioMixerCore.accumulate(source: source, frameCount: frameCount,
                                       gain: &gain, auxGain: &auxSend,
                                       program: &program, aux: &aux)
         }

@@ -449,6 +449,8 @@ struct SettingsView: View {
             monitoringBlock
 
             echoHandlingBlock
+
+            avSyncAndDuckingBlock
         } header: {
             Text("Audio")
         } footer: {
@@ -796,6 +798,218 @@ struct SettingsView: View {
                 effectBadge(.immediate)
                 Text("Capture permissions are macOS-level; the app re-reads them when it becomes active. A denied source shows its repair action here and when the source is next used.")
             }
+        }
+    }
+
+    // MARK: - A10 A/V sync + speech ducking (issue #122)
+
+    /// The engine's live ducked-channel set (labels), polled while the pane
+    /// is open so each duck-target row can show its "ducking now" state.
+    @State private var duckedChannelLabels: Set<String> = []
+
+    /// Per-source capture-latency compensation (audio delay per mic channel,
+    /// video delay per camera/screen source) and the speech-driven music
+    /// ducker. All edits are live session state (the monitoring/additional-
+    /// inputs precedent): they persist and apply immediately through the W05
+    /// dispatcher — engine read-window shifts, frame-hold re-targeting, and
+    /// ramped duck automation, never a capture restart or clock re-anchor.
+    @ViewBuilder
+    private var avSyncAndDuckingBlock: some View {
+        Text("A/V Sync")
+            .font(.callout.weight(.semibold))
+        audioDelayRow(title: "Microphone Delay",
+                      channel: .microphone(deviceUID: nil))
+        ForEach(session.activeSettings.audioInputs.filter(\.isEnabled), id: \.deviceUID) { selection in
+            audioDelayRow(title: "\(controller.audio.deviceNamesByUID[selection.deviceUID] ?? "Input") Delay",
+                          channel: .microphone(deviceUID: selection.deviceUID))
+        }
+        ForEach(controller.sceneStore.sources.filter {
+            if case .camera = $0.payload { return true }
+            if case .screen = $0.payload { return true }
+            return false
+        }, id: \.id) { source in
+            videoDelayRow(source: source)
+        }
+        Text("Delay compensates per-source hardware latency: a source that arrives EARLY gets delayed to match the others (a camera's video is usually the late one — delay its audio path's counterparts instead). Changes apply immediately; delays are bounded at \(Int(AVSyncDelay.maxAudioDelayMs)) ms.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        duckingBlock
+    }
+
+    private func audioDelayRow(title: String, channel: AudioChannelID) -> some View {
+        let ms = dispatcher.state.audioDelaysMs[channel.label] ?? 0
+        return delaySlider(title: title, value: ms, range: 0...AVSyncDelay.maxAudioDelayMs,
+                           step: 5, unit: "ms") {
+            dispatcher.execute(.setChannelAudioDelay(channel, ms: $0))
+        }
+    }
+
+    private func videoDelayRow(source: SourceDefinition) -> some View {
+        let key = StreamController.videoDelaySettingsKey(for: source.id)
+        let ms = dispatcher.state.videoDelaysMs[key] ?? 0
+        return delaySlider(title: "\(source.name) Video Delay", value: ms,
+                           range: 0...AVSyncDelay.maxVideoDelayMs, step: 5, unit: "ms") {
+            dispatcher.execute(.setSourceVideoDelay(source.id, ms: $0))
+        }
+    }
+
+    private func delaySlider(title: String, value: Double, range: ClosedRange<Double>,
+                             step: Double, unit: String,
+                             onEdit: @escaping (Double) -> Void) -> some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(value <= 0 ? "Off" : "\(Int(value.rounded())) \(unit)")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: Binding(get: { value }, set: onEdit), in: range, step: step)
+        }
+    }
+
+    // MARK: A10 ducking
+
+    @ViewBuilder
+    private var duckingBlock: some View {
+        let ducking = dispatcher.state.ducking
+        Group {
+            Text("Music Ducking")
+                .font(.callout.weight(.semibold))
+            Toggle("Duck Music While Speaking", isOn: duckingBinding(\.isEnabled))
+        if ducking.isEnabled {
+            Text("Speech Channels")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            sidechainToggle(title: "Microphone", channel: .microphone(deviceUID: nil))
+            ForEach(session.activeSettings.audioInputs.filter(\.isEnabled), id: \.deviceUID) { selection in
+                sidechainToggle(title: controller.audio.deviceNamesByUID[selection.deviceUID] ?? "Input",
+                                channel: .microphone(deviceUID: selection.deviceUID))
+            }
+            duckingSlider(title: "Threshold", keyPath: \.thresholdDb,
+                          range: DuckingSettings.thresholdDbRange, step: 1,
+                          format: { "\(Int($0.rounded())) dB" })
+            duckingSlider(title: "Reduction", keyPath: \.reductionDb,
+                          range: DuckingSettings.reductionDbRange, step: 1,
+                          format: { "−\(Int($0.rounded())) dB" })
+            duckingSlider(title: "Attack", keyPath: \.attackMs,
+                          range: DuckingSettings.attackMsRange, step: 1,
+                          format: { "\(Int($0.rounded())) ms" })
+            duckingSlider(title: "Hold", keyPath: \.holdMs,
+                          range: 0...2_000, step: 50,
+                          format: { "\(Int($0.rounded())) ms" })
+            duckingSlider(title: "Release", keyPath: \.releaseMs,
+                          range: 10...3_000, step: 50,
+                          format: { "\(Int($0.rounded())) ms" })
+            Text("Duck Targets")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            let targets = duckTargetCandidates
+            if targets.isEmpty {
+                Text("No music, media, or app-audio sources yet — add a playlist or source to duck it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(targets, id: \.channel) { target in
+                    HStack {
+                        Toggle(target.name, isOn: duckTargetBinding(target.channel))
+                        if duckedChannelLabels.contains(target.channel.label) {
+                            Text("ducking")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+            }
+            Text("While any speech channel is above the threshold, the selected channels are attenuated by the reduction (engine-side gain automation on top of the faders — base gain × duck gain — so bypass restores your exact mix). Duck state survives scene changes.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        }
+        .task { await pollDuckState() }
+    }
+
+    /// Every channel the ducker may target: music playlists (A03), app-audio
+    /// captures (A06), and registry media sources (A02) — stable channels
+    /// that outlive a release ramp (pads/stingers excluded, see
+    /// `SoundboardController.duckTargets`).
+    private var duckTargetCandidates: [(channel: AudioChannelID, name: String)] {
+        var targets = dispatcher.soundboard.duckTargets
+        for source in controller.sceneStore.sources {
+            switch source.payload {
+            case .appAudio(let payload):
+                targets.append((channel: .application(bundleID: payload.channelBundleID),
+                                name: source.name))
+            case .media:
+                targets.append((channel: .media(source.id), name: source.name))
+            default:
+                break
+            }
+        }
+        return targets
+    }
+
+    private func duckingBinding<T>(_ keyPath: WritableKeyPath<DuckingSettings, T>) -> Binding<T> {
+        Binding(
+            get: { dispatcher.state.ducking[keyPath: keyPath] },
+            set: { value in
+                var ducking = dispatcher.state.ducking
+                ducking[keyPath: keyPath] = value
+                dispatcher.execute(.setDucking(ducking))
+            })
+    }
+
+    private func duckTargetBinding(_ channel: AudioChannelID) -> Binding<Bool> {
+        Binding(
+            get: { dispatcher.state.ducking.targetLabels.contains(channel.label) },
+            set: { isTarget in
+                var ducking = dispatcher.state.ducking
+                if isTarget {
+                    ducking.targetLabels.insert(channel.label)
+                } else {
+                    ducking.targetLabels.remove(channel.label)
+                }
+                dispatcher.execute(.setDucking(ducking))
+            })
+    }
+
+    private func sidechainToggle(title: String, channel: AudioChannelID) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { dispatcher.state.ducking.sidechainLabels.contains(channel.label) },
+            set: { isSidechain in
+                var ducking = dispatcher.state.ducking
+                if isSidechain {
+                    ducking.sidechainLabels.insert(channel.label)
+                } else {
+                    ducking.sidechainLabels.remove(channel.label)
+                }
+                dispatcher.execute(.setDucking(ducking))
+            }))
+    }
+
+    private func duckingSlider(title: String, keyPath: WritableKeyPath<DuckingSettings, Double>,
+                               range: ClosedRange<Double>, step: Double,
+                               format: @escaping (Double) -> String) -> some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(format(dispatcher.state.ducking[keyPath: keyPath]))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: duckingBinding(keyPath), in: range, step: step)
+        }
+    }
+
+    /// Polls the engine's duck state while the pane is open (~7 Hz — the
+    /// indicator's only consumer; the mixer strips poll their own meters).
+    private func pollDuckState() async {
+        while !Task.isCancelled {
+            let levels = await controller.mixerLevels()
+            duckedChannelLabels = Set(levels.duckedChannels.map(\.label))
+            try? await Task.sleep(nanoseconds: 150_000_000)
         }
     }
 }

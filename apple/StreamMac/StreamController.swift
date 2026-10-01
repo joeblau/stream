@@ -384,6 +384,12 @@ final class StreamController: ObservableObject {
                 continuation.yield(frame.sampleBuffer)
             }
         }
+        // A10 (issue #122): push the persisted delays/ducking onto the
+        // engines once, so the first pipeline start is already aligned — the
+        // engine-side maps (registry delays, delay lines, duck config) all
+        // survive (re)starts, so this covers every later start too.
+        syncDelays(persisted)
+        syncDucking(persisted.ducking)
     }
 
     /// Live encode/uplink metrics for the stats HUD, straight from the publisher.
@@ -814,6 +820,16 @@ final class StreamController: ObservableObject {
         // place (mic modes are read-only for apps; Stream guides, not sets).
         if newSettings.echoHandlingMode != previous.echoHandlingMode {
             refreshEchoHandlingState()
+        }
+        // A10 (issue #122): A/V delay and ducking edits are LIVE session
+        // state (the mixer/A07 precedent) — engine-side read-window shifts
+        // and ramped gain automation, no capture restart, no clock re-anchor.
+        if newSettings.audioDelaysMs != previous.audioDelaysMs
+            || newSettings.videoDelaysMs != previous.videoDelaysMs {
+            syncDelays(newSettings)
+        }
+        if newSettings.ducking != previous.ducking {
+            syncDucking(newSettings.ducking)
         }
         updateMonitorFeedbackRisk()
         capturePool.applyPrivacyDefaults(newSettings)
@@ -1420,5 +1436,62 @@ extension StreamController {
         } else {
             Self.feedbackLog.warning("Feedback diagnostics: \(signature, privacy: .public)")
         }
+    }
+}
+
+
+// MARK: - A10 A/V delay alignment & speech ducking (issue #122)
+
+extension StreamController {
+    /// Pushes the persisted per-source delays onto the engines. Audio delays
+    /// (by channel label) go to the mix engine, which shifts each channel's
+    /// ring read on the shared host clock; video delays (by registry source
+    /// ID) resolve through the registry to capture keys and go to BOTH
+    /// composition engines, so the staged preview and the outgoing program
+    /// show the same compensated picture. All engine-side maps survive
+    /// (re)starts, so re-pushing is cheap self-healing, never a reset.
+    func syncDelays(_ settings: StreamSettings) {
+        let audioEngine = self.audioEngine
+        Task { await audioEngine.setChannelDelays(settings.audioDelaysMs) }
+        var video: [CaptureSourceKey: Double] = [:]
+        for source in sceneStore.sources {
+            let key: CaptureSourceKey?
+            switch source.payload {
+            case .camera(let payload): key = .camera(payload)
+            case .screen(let payload): key = .screen(payload)
+            // Media playout already rides the shared clock (A02); the other
+            // kinds have no capture-latency mismatch to compensate.
+            default: key = nil
+            }
+            guard let key,
+                  let ms = settings.videoDelaysMs[Self.videoDelaySettingsKey(for: source.id)]
+            else { continue }
+            video[key] = ms
+        }
+        let engine = self.engine
+        let previewEngine = self.previewEngine
+        Task {
+            await engine.setVideoDelays(video)
+            await previewEngine.setVideoDelays(video)
+        }
+    }
+
+    /// Pushes the persisted ducking configuration onto the mix engine. A
+    /// bypass (disabled / empty selection) lands as nil, which ramps every
+    /// ducked channel back to unity — restoring the user-set gain exactly.
+    func syncDucking(_ ducking: DuckingSettings) {
+        let chunkSeconds = Double(AudioMixEngine.chunkFrames)
+            / Double(AudioMixEngine.sampleRate)
+        let configuration = AudioMixEngine.DuckingConfiguration(
+            ducking, chunkDurationSeconds: chunkSeconds)
+        let audioEngine = self.audioEngine
+        Task { await audioEngine.setDucking(configuration) }
+    }
+
+    /// A10: the settings key a registry source's video delay persists under
+    /// (`source.<uuid>`). Keyed by the registry ID — not the payload — so a
+    /// relink or target edit never loses the user's alignment.
+    static func videoDelaySettingsKey(for id: SourceDefinitionID) -> String {
+        "source.\(id)"
     }
 }

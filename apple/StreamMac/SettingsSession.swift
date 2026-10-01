@@ -199,6 +199,41 @@ final class SettingsSession: ObservableObject {
         scheduleLiveSettingsSave()
     }
 
+    /// A10 (issue #122): persists one channel's audio delay (ms; 0 removes
+    /// the entry) straight into the APPLIED settings and applies it live —
+    /// a live performance surface like the mixer, not a draft/Apply edit.
+    /// The controller's apply shifts the channel's engine read window in
+    /// place (no capture restart, no clock re-anchor).
+    func persistAudioDelay(_ ms: Double, forChannelLabel label: String) {
+        let clamped = AVSyncDelay.clampedAudioDelayMs(ms)
+        activeSettings.audioDelaysMs[label] = clamped > 0 ? clamped : nil
+        draft.audioDelaysMs = activeSettings.audioDelaysMs
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// A10 (issue #122): persists one registry source's video delay (ms;
+    /// 0 removes the entry) the same live way. The controller's apply
+    /// re-targets both composition engines' frame-hold lines in place.
+    func persistVideoDelay(_ ms: Double, forSourceKey key: String) {
+        let clamped = AVSyncDelay.clampedVideoDelayMs(ms)
+        activeSettings.videoDelaysMs[key] = clamped > 0 ? clamped : nil
+        draft.videoDelaysMs = activeSettings.videoDelaysMs
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// A10 (issue #122): persists the whole ducking configuration (enable,
+    /// sidechain, threshold/reduction/envelope, targets) the same live way.
+    /// The controller's apply reconfigures the engine's duck automation —
+    /// bypass ramps ducked channels back to the user-set gains.
+    func persistDucking(_ ducking: DuckingSettings) {
+        activeSettings.ducking = ducking
+        draft.ducking = ducking
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
     /// Debounced settings write for live-surface edits (mixer fader scrubs,
     /// A05 input toggles): a scrub dispatches a command per tick, and the
     /// state updates above must stay synchronous (publishers fire, the

@@ -419,6 +419,17 @@ final class SoundboardController: ObservableObject {
 
     // MARK: - Store change application (relink / volume / removal)
 
+    /// A10 (issue #122): the soundboard channels speech-ducking may target,
+    /// with display names — every music playlist. Pads and stingers are
+    /// one-shots and deliberately excluded: ducking a one-shot would just
+    /// make the joke quieter, and their channels vanish before a release
+    /// ramp could restore them. Playlist channels are stable
+    /// (`.media(playlist.id)` survives track changes), which is exactly what
+    /// a held duck ramp needs.
+    var duckTargets: [(channel: AudioChannelID, name: String)] {
+        store.playlists.map { (channel: .media($0.id), name: $0.name) }
+    }
+
     private func refreshPads(_ pads: [SoundPad]) {
         let liveIDs = Set(pads.map(\.id))
         for (padID, engines) in padEngines where !liveIDs.contains(padID) {

@@ -205,6 +205,21 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// (C10 rules): an unplugged device falls back to the system default
     /// honestly and the selection resumes when the same device returns.
     public var monitorOutputDeviceUID: String?
+    /// A10 (issue #122): per-channel audio delays in milliseconds, keyed by
+    /// `AudioChannelID.label` (the mixer-document rule: the shared model
+    /// never names the macOS channel type). Compensates per-source capture
+    /// latency — the engine reads the channel's ring that many ms BEHIND the
+    /// mix position, on the same host clock, so timestamps never regress.
+    /// Bounded: 0…`AVSyncDelay.maxAudioDelayMs`.
+    public var audioDelaysMs: [String: Double]
+    /// A10 (issue #122): per-source VIDEO delays in milliseconds, keyed by
+    /// the registry source's stable ID string (`source.<uuid>`) so a relink
+    /// or payload edit never loses the setting. The composition engine holds
+    /// the source's frames that long (bounded: 0…`AVSyncDelay.maxVideoDelayMs`).
+    public var videoDelaysMs: [String: Double]
+    /// A10 (issue #122): speech-driven ducking — sidechain mics, threshold,
+    /// reduction, attack/hold/release, and the duck target channels.
+    public var ducking: DuckingSettings
     /// A09 (issue #121): the echo handling mode for mic capture. `off` by
     /// default — no surprise processing on upgrade. See `EchoHandlingMode`
     /// for the honest platform capability story (macOS has no built-in AEC
@@ -244,7 +259,10 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         channelFX: [String: ChannelFXChain] = [:],
         monitoringEnabled: Bool = false,
         monitorOutputDeviceUID: String? = nil,
-        echoHandlingMode: EchoHandlingMode = .off
+        echoHandlingMode: EchoHandlingMode = .off,
+        audioDelaysMs: [String: Double] = [:],
+        videoDelaysMs: [String: Double] = [:],
+        ducking: DuckingSettings = DuckingSettings()
     ) {
         self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
@@ -274,6 +292,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.monitoringEnabled = monitoringEnabled
         self.monitorOutputDeviceUID = monitorOutputDeviceUID
         self.echoHandlingMode = echoHandlingMode
+        self.audioDelaysMs = audioDelaysMs
+        self.videoDelaysMs = videoDelaysMs
+        self.ducking = ducking
     }
 
     /// Backward-compatible decode: every field falls back to its default when the
@@ -326,6 +347,12 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         // A09: blobs written before echo handling existed decode to OFF — no
         // surprise processing on upgrade.
         echoHandlingMode = try c.decodeIfPresent(EchoHandlingMode.self, forKey: .echoHandlingMode) ?? d.echoHandlingMode
+        // A10: blobs written before A/V delay + ducking existed decode to no
+        // delays and ducking OFF — alignment and levels are identical to
+        // before the upgrade.
+        audioDelaysMs = try c.decodeIfPresent([String: Double].self, forKey: .audioDelaysMs) ?? d.audioDelaysMs
+        videoDelaysMs = try c.decodeIfPresent([String: Double].self, forKey: .videoDelaysMs) ?? d.videoDelaysMs
+        ducking = try c.decodeIfPresent(DuckingSettings.self, forKey: .ducking) ?? d.ducking
     }
 
     public static let `default` = StreamSettings()

@@ -265,6 +265,25 @@ enum StudioCommand: Equatable, Sendable {
     /// default honestly and re-applies when the device returns (C10 rules).
     case setMonitorOutputDevice(uid: String?)
 
+    // A10 A/V delay alignment + speech ducking (issue #122). Live session
+    // state persisted in StreamSettings via SettingsSession (the mixer/A07
+    // precedent) — NOT scene content, NOT undoable, never staged — and
+    // applied in place on the engines (no capture restart, no clock
+    // re-anchor): audio delays shift a channel's ring read window, video
+    // delays re-target a source's frame-hold line, ducking reconfigures the
+    // engine-side gain automation.
+    /// A channel's audio delay in milliseconds (0…`AVSyncDelay.maxAudioDelayMs`;
+    /// 0 removes it). Any channel kind may carry a delay.
+    case setChannelAudioDelay(AudioChannelID, ms: Double)
+    /// A registry source's VIDEO delay in milliseconds
+    /// (0…`AVSyncDelay.maxVideoDelayMs`; 0 removes it), keyed by the stable
+    /// registry ID so a relink never loses the alignment.
+    case setSourceVideoDelay(SourceDefinitionID, ms: Double)
+    /// The whole speech-ducking configuration (enable, sidechain, threshold,
+    /// reduction, attack/hold/release, duck targets) — one value, edited
+    /// whole, like `.setChannelFXChain`.
+    case setDucking(DuckingSettings)
+
     // A09 echo handling (issue #121): the echo handling mode for mic capture
     // (off / macOS Voice Isolation preference). Live session state persisted
     // in StreamSettings via SettingsSession — NOT scene content, NOT
@@ -416,6 +435,10 @@ enum StudioCommand: Equatable, Sendable {
         case .setMonitoringEnabled(let enabled):
             return "\(enabled ? "Enable" : "Disable") Monitoring"
         case .setMonitorOutputDevice: return "Set Monitor Output"
+        case .setChannelAudioDelay(let id, _): return "Set \(id.label) Audio Delay"
+        case .setSourceVideoDelay: return "Set Source Video Delay"
+        case .setDucking(let ducking):
+            return "\(ducking.isEnabled ? "Enable" : "Configure") Ducking"
         case .setEchoHandlingMode(let mode):
             return mode == .off ? "Turn Echo Handling Off" : "Enable \(mode.displayName)"
         case .addSoundPad: return "Add Sound Pad"
@@ -562,6 +585,13 @@ struct StudioState: Equatable, Sendable {
     var monitorOutputDeviceUID: String?
     var monitorOutputFallback = false
     var monitorFeedbackRiskDeviceUID: String?
+    /// A10 (issue #122): the persisted A/V delay + ducking configuration
+    /// (mirrors `StreamSettings.audioDelaysMs` / `.videoDelaysMs` /
+    /// `.ducking`). Live session state, not scene content (never undoable,
+    /// never staged) — the A/V-sync controls read and edit through these.
+    var audioDelaysMs: [String: Double] = [:]
+    var videoDelaysMs: [String: Double] = [:]
+    var ducking: DuckingSettings = DuckingSettings()
     /// A09 (issue #121): echo handling + feedback diagnostics for the command
     /// interface — the persisted mode, whether the OS Voice Isolation mic
     /// mode is active on the live mic (nil = unknown/not preferred), and the
@@ -1099,6 +1129,23 @@ final class StudioCommandDispatcher: ObservableObject {
             return controller.monitorOutput.devices.contains(where: { $0.uid == uid })
                 ? nil : .invalidTarget("That output device is not connected.")
 
+        // A10 (issue #122): delays clamp to their documented engine bounds;
+        // the ducking model owns its parameter ranges (the settings UI
+        // clamps to the same values, so this guards automation input).
+        case .setChannelAudioDelay(_, let ms):
+            return ms.isFinite && (0...AVSyncDelay.maxAudioDelayMs).contains(ms)
+                ? nil
+                : .invalidValue("Audio delay must be between 0 and \(Int(AVSyncDelay.maxAudioDelayMs)) ms.")
+        case .setSourceVideoDelay(let id, let ms):
+            guard sceneStore.source(withID: id) != nil else {
+                return .invalidTarget("Source \(id) does not exist.")
+            }
+            return ms.isFinite && (0...AVSyncDelay.maxVideoDelayMs).contains(ms)
+                ? nil
+                : .invalidValue("Video delay must be between 0 and \(Int(AVSyncDelay.maxVideoDelayMs)) ms.")
+        case .setDucking(let ducking):
+            return ducking.validationError.map { .invalidValue($0) }
+
         // A09 echo handling validation: both modes are always acceptable —
         // Voice Isolation is a PREFERENCE the OS honors where supported, so
         // an unsupported device degrades to guidance, never a rejection.
@@ -1501,6 +1548,20 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setMonitorOutputDevice(let uid):
             session.persistMonitoring(enabled: session.activeSettings.monitoringEnabled,
                                       deviceUID: uid)
+
+        // A10 (issue #122): delay/ducking execution — persist through
+        // SettingsSession (single truth, live surfaces like the mixer); its
+        // apply shifts engine read windows / frame-hold lines / duck
+        // automation in place. Register the channel ID so the mixer push
+        // keeps addressing it too.
+        case .setChannelAudioDelay(let id, let ms):
+            channelIDsByLabel[id.label] = id
+            session.persistAudioDelay(ms, forChannelLabel: id.label)
+        case .setSourceVideoDelay(let id, let ms):
+            session.persistVideoDelay(ms,
+                                      forSourceKey: StreamController.videoDelaySettingsKey(for: id))
+        case .setDucking(let ducking):
+            session.persistDucking(ducking)
 
         // A09 echo handling execution: persist through SettingsSession
         // (single truth); its apply refreshes the controller's
@@ -2029,6 +2090,9 @@ final class StudioCommandDispatcher: ObservableObject {
             monitorOutputDeviceUID: session.activeSettings.monitorOutputDeviceUID,
             monitorOutputFallback: controller.monitorOutput.isFallbackActive,
             monitorFeedbackRiskDeviceUID: controller.monitorFeedbackRiskDeviceUID,
+            audioDelaysMs: session.activeSettings.audioDelaysMs,
+            videoDelaysMs: session.activeSettings.videoDelaysMs,
+            ducking: session.activeSettings.ducking,
             echoHandlingMode: session.activeSettings.echoHandlingMode,
             voiceIsolationActive: controller.voiceIsolationActive,
             feedbackDiagnostics: controller.feedbackDiagnostics,
@@ -2162,6 +2226,7 @@ private extension StudioCommand {
              .setAudioInputEnabled, .setAudioInputMapping, .relinkAudioInput,
              .setChannelFXChain,
              .setMonitoringEnabled, .setMonitorOutputDevice, .setEchoHandlingMode,
+             .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .addSoundPad, .updateSoundPad, .removeSoundPad,
              .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,
