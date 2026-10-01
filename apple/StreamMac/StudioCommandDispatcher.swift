@@ -1032,7 +1032,26 @@ final class StudioCommandDispatcher: ObservableObject {
         // library it resolves documents through (see the property docs).
         self.pdfDecks = PDFDeckStore()
         self.assetLibrary = AssetLibraryStore()
+        // G06: the pool's PDF engines resolve documents through the library.
+        controller.capturePool.assetLibrary = assetLibrary
+        // G08 (issue #115): web widget hosts reach the asset library through
+        // this process-wide seam (local-HTML widgets only; URL widgets and
+        // bundled fixtures never touch it).
+        BrowserOverlayAssetResolver.access = { [assetLibrary] rawID in
+            guard let uuid = UUID(uuidString: rawID) else { return nil }
+            return assetLibrary.access(for: AssetID(uuid))
+        }
+        BrowserOverlayAssetResolver.noteUsage = { [assetLibrary] rawID, site in
+            guard let uuid = UUID(uuidString: rawID) else { return }
+            assetLibrary.noteUsage(of: AssetID(uuid), from: site)
+        }
         self.state = StudioState()
+        // G06: PDF engine status re-clamps persisted deck state on document
+        // load (self capture must follow full initialization).
+        controller.capturePool.onPDFStatus = { [weak self] id, status in
+            guard let self, status.pageCount > 0 else { return }
+            self.pdfDecks.notePageCount(status.pageCount, for: id)
+        }
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
         refreshState()

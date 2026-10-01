@@ -67,19 +67,11 @@ import StreamCore
 /// `sceneEntryRefresh` policy.
 extension WebSourcePayload {
     /// The widget configuration this layer carries. All G08 surfaces bind
-    /// through here. TODAY-SHIM (until orchestrator hook 1 lands): the
-    /// persisted payload holds only `url`, so the getter derives a default
-    /// configuration around it and the setter persists the URL half —
-    /// viewport/fps/CSS/refresh-policy edits apply to the LIVE host (the
-    /// capture pool re-reads the configuration on every demand reconcile)
-    /// but do not survive a project reload until the payload expands.
+    /// through here. Persisted in full on the payload (orchestrator hook 1
+    /// landed); writes re-normalize and mirror the widget URL into `url`.
     var browserOverlay: BrowserOverlayConfiguration {
-        get {
-            BrowserOverlayConfiguration(urlString: url?.absoluteString).normalized()
-        }
-        set {
-            url = newValue.normalized().widgetURL
-        }
+        get { configuration }
+        set { configuration = newValue.normalized(); url = configuration.widgetURL }
     }
 
     /// The `BrowserOverlayFrameStore` key BOTH sides derive deterministically
@@ -89,10 +81,8 @@ extension WebSourcePayload {
     /// by asset identifier so a security-scoped re-resolution never re-keys
     /// the frame stream mid-session.
     var browserOverlayStoreKey: String? {
-        // TODAY-SHIM: after orchestrator hook 1, becomes
-        // `configuration.localHTMLAssetIdentifier.map { "webasset:\($0)" }
-        //  ?? url?.absoluteString`.
-        url?.absoluteString
+        configuration.localHTMLAssetIdentifier.map { "webasset:\($0)" }
+            ?? url?.absoluteString
     }
 
     /// A copy with the widget configuration normalized (fps/viewport clamped,

@@ -86,6 +86,9 @@ struct MainWindowView: View {
         case mixer = "Mixer"
         // A03 (issue #98): the sound panel (soundboard, music, scene sounds).
         case media = "Sound"
+        // P03 (issue #80): the asset library — every referenced file, its
+        // availability, and missing-asset repair.
+        case assets = "Assets"
         case guests = "Guests"
         case destinations = "Destinations"
     }
@@ -522,6 +525,10 @@ struct MainWindowView: View {
                 SoundboardPanelView()
                     .environmentObject(dispatcher.soundboardStore)
                     .environmentObject(dispatcher.soundboard)
+            case .assets:
+                // P03 (issue #80): the asset library panel — inventory,
+                // availability badges, and missing-asset repair.
+                AssetLibraryPanelView()
             case .guests:
                 placeholder("Guests", systemImage: "person.2",
                             message: "Remote guest management lands here in a later workstream.")
@@ -557,6 +564,10 @@ struct MainWindowView: View {
             // A02 (issue #97): media file sources — add/rename/remove and
             // per-source playback status alongside transport in the layer panel.
             MediaSourcesSectionView()
+            // G06 (issue #113): PDF/slide-deck sources — import, page
+            // navigation (inspector + ⌥⌘ arrows), fit/fill, page state
+            // shared per source across both canvases.
+            PDFSourceSectionView()
             // A06 (issue #118): app/system audio-only sources — add (running
             // app or system mix), enable/disable, rename, retarget, remove,
             // and per-source capture status. Demand is registration-based,
@@ -597,6 +608,10 @@ struct MainWindowView: View {
             // layer — content, the full style surface, timed/fly-in
             // visibility, templates, and reusable title-style presets.
             TextLayerSectionView()
+            // G08 (issue #115): browser/local-HTML widget configuration for
+            // the selected web layer — URL or asset, viewport/fps, CSS
+            // overrides, audio route, scene-entry refresh, runtime state.
+            WebOverlaySectionView()
             // G01 (issue #81): image/logo layers — add from a file sheet or
             // a Finder drop, replace the selected image layer's asset, and
             // the fit/fill content mode. P03 asset registration/usage is

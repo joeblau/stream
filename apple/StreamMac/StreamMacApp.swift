@@ -83,6 +83,11 @@ struct StreamMacApp: App {
                 .environmentObject(permissions)
                 .environmentObject(recorder)
                 .environmentObject(dispatcher)
+                // P03 (issue #80): the asset library — parked on the
+                // dispatcher, injected for the library panel (environment
+                // object) and the G01 image-layer views (environment key).
+                .environmentObject(dispatcher.assetLibrary)
+                .environment(\.assetLibraryStore, dispatcher.assetLibrary)
                 .preferredColorScheme(.dark)
                 // The smallest supported production layout (1024×640): all
                 // panels stay usable, and any of them can collapse from there.

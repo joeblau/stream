@@ -7,6 +7,30 @@ import ScreenCaptureKit
 import StreamCore
 import os.lock
 
+/// G06 (issue #113): lock-protected snapshot of the active output canvas
+/// size, published by StreamController. PDF engines read it on the render
+/// tick (off-main, under the engine lock) so `.fill` framing crops to the
+/// output aspect — never a @MainActor property read.
+final class OutputCanvasStore: @unchecked Sendable {
+    /// The process-wide live mirror (the SourcePayloadStore pattern).
+    static let shared = OutputCanvasStore()
+
+    private var lock = os_unfair_lock_s()
+    private var size: CGSize?
+
+    func publish(_ size: CGSize) {
+        os_unfair_lock_lock(&lock)
+        self.size = size
+        os_unfair_lock_unlock(&lock)
+    }
+
+    func snapshot() -> CGSize? {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return size
+    }
+}
+
 /// The physical identity of one capture source, derived from a source
 /// definition's payload (or an unbound layer's inline payload). Two layers
 /// referencing the same camera device or display produce the SAME key, which
@@ -35,6 +59,11 @@ enum CaptureSourceKey: Hashable, Sendable {
     /// configuration edit (URL, viewport, fps, CSS, audio route) re-keys the
     /// capture deliberately (the C03 pattern) and the widget reloads.
     case web(WebSourcePayload)
+    /// G06 (issue #113): a PDF/slide-deck source, keyed by its REGISTRY
+    /// source ID — the P03 asset reference lives on the `SourceDefinition`,
+    /// so page state and the document survive payload edits (the A02 media
+    /// precedent; `.pdf` payloads carry no physical-capture identity).
+    case pdf(SourceDefinitionID)
 
     /// The system-default camera (no pinned device).
     static let defaultCamera = CaptureSourceKey.camera(CameraSourcePayload())
@@ -46,7 +75,7 @@ enum CaptureSourceKey: Hashable, Sendable {
         switch self {
         case .camera(let payload): return payload.deviceID == nil
         case .screen(let payload): return payload.targetIdentifier == nil
-        case .syphon, .media, .appAudio, .web: return false
+        case .syphon, .media, .appAudio, .web, .pdf: return false
         }
     }
 }
@@ -94,6 +123,11 @@ extension CaptureSourceKey {
                 // source (the bookmark lives there); unbound media layers
                 // paint the documented fallback instead.
                 if let sourceID = layer.sourceID { keys.insert(.media(sourceID)) }
+            case .pdf:
+                // G06 (issue #113): PDF page rendering is keyed by the
+                // registry source (the asset reference lives there), exactly
+                // like media; unbound PDF layers paint nothing.
+                if let sourceID = layer.sourceID { keys.insert(.pdf(sourceID)) }
             case .web(let web):
                 // G08 (issue #115): a configured widget demands its snapshot
                 // capture; an unconfigured one (no URL, no local HTML asset)
@@ -385,6 +419,17 @@ final class CaptureSourcePool: ObservableObject {
     /// and a Take between scenes sharing it — resumes mid-file and never
     /// restarts playback.
     private var mediaPlaybacks: [CaptureSourceKey: MediaSourcePlayback] = [:]
+    /// G06 (issue #113): one PDF page-rendering engine per demanded registry
+    /// source, pull-based like media (the render tick is the cadence).
+    private var pdfPlaybacks: [CaptureSourceKey: PDFSourcePlayback] = [:]
+    /// G06: the P03 asset library PDF engines resolve documents through. Set
+    /// once by the dispatcher at startup (`dispatcher.assetLibrary`).
+    var assetLibrary: AssetLibraryStore?
+    /// G06: PDF engine status mirror — the dispatcher sets this to re-clamp
+    /// persisted deck state (`PDFDeckStore.notePageCount`) on document load.
+    var onPDFStatus: (@MainActor (SourceDefinitionID, PDFSourceStatus) -> Void)?
+    /// G06: per-source PDF load/render state for inspector badges.
+    @Published private(set) var pdfStates: [SourceDefinitionID: PDFSourceStatus] = [:]
     /// A06 (issue #118): one audio-only capture per requested app-audio key.
     /// Instances persist across demand loss (like screen captures), so a
     /// re-enabled source restarts without re-resolving anything.
@@ -632,6 +677,8 @@ final class CaptureSourcePool: ObservableObject {
             startSyphon(key, payload: payload)
         case .media(let id):
             startMedia(key, id: id)
+        case .pdf(let id):
+            startPDF(key, id: id)
         case .appAudio(let payload):
             startAppAudio(key, payload: payload, settings: settings)
         case .web(let payload):
@@ -661,6 +708,10 @@ final class CaptureSourcePool: ObservableObject {
             // holds; playout follows demand per the issue's lifecycle
             // criterion). Explicit transport Stop is what rewinds.
             mediaPlaybacks[key]?.pause()
+        case .pdf:
+            // G06: last reference removed — hold page and document (the
+            // engine has nothing to park; pause() is the demand-loss hold).
+            pdfPlaybacks[key]?.pause()
         case .appAudio:
             // A06: last reference removed (source disabled/removed, or the
             // pipeline stopped) — stop the capture; the instance and its
@@ -701,7 +752,9 @@ final class CaptureSourcePool: ObservableObject {
             cameraHolders: cameras.mapValues(\.latest))
         // A02: the keyed media playout sources (pull-based — the render tick
         // reads `frames.media(key)` straight from each playback engine).
-        frames.updateKeyedMedia(mediaPlaybacks.mapValues { $0 as any MediaFrameSource })
+        // G06: the PDF engines merge into the same keyed map.
+        frames.updateKeyedMedia(mediaPlaybacks.mapValues { $0 as any MediaFrameSource }
+            .merging(pdfPlaybacks.mapValues { $0 as any MediaFrameSource }) { _, pdf in pdf })
     }
 
     /// The capture instance for a syphon key, created (and wired) on first
@@ -858,6 +911,11 @@ final class CaptureSourcePool: ObservableObject {
                 missingSources.remove(key)
                 sourceErrors[key] = nil
                 startWeb(key, payload: payload)
+            case .pdf(let id):
+                // G06: re-resolve the asset and reload the document.
+                missingSources.remove(key)
+                sourceErrors[key] = nil
+                startPDF(key, id: id)
             }
         }
     }
@@ -977,6 +1035,10 @@ final class CaptureSourcePool: ObservableObject {
             syphonCaptures[key]?.stop()
         case .media:
             mediaPlaybacks[key]?.pause()
+        case .pdf:
+            // G06: a missing PDF asset pauses the engine; the deck state and
+            // demand survive for repair.
+            pdfPlaybacks[key]?.pause()
         case .appAudio:
             if let capture = appAudioCaptures[key] {
                 Task { await capture.stop() }
@@ -1162,6 +1224,55 @@ final class CaptureSourcePool: ObservableObject {
     /// the transport UI's read path.
     func mediaStatus(for id: SourceDefinitionID) -> MediaSourceStatus {
         mediaStates[id] ?? MediaSourceStatus()
+    }
+
+    // MARK: - PDF sources (G06, issue #113)
+
+    /// Starts (or resumes) a PDF source's page rendering: resolves the engine
+    /// (creating it on first use) and kicks the asset-resolution load.
+    private func startPDF(_ key: CaptureSourceKey, id: SourceDefinitionID) {
+        guard let playback = pdfPlayback(for: key, id: id) else { return }
+        sourceErrors[key] = nil
+        playback.load()
+        // Optimistic like media: state ages in through pdfStates; a load
+        // failure flips the error surface via the status callback.
+        activeSources.insert(key)
+    }
+
+    /// The page-rendering engine for a PDF key, created (and wired) on first
+    /// use and stable thereafter — page state is per source and shared by
+    /// both canvases, so the instance must survive Takes.
+    private func pdfPlayback(for key: CaptureSourceKey,
+                             id: SourceDefinitionID) -> PDFSourcePlayback? {
+        if let existing = pdfPlaybacks[key] { return existing }
+        guard let assetLibrary else { return nil }
+        let playback = PDFSourcePlayback(sourceID: id, assetLibrary: assetLibrary)
+        // The provider runs on the RENDER TICK (off-main, under the engine
+        // lock) — read the lock-protected canvas snapshot, never a
+        // @MainActor property.
+        playback.canvasSizeProvider = { OutputCanvasStore.shared.snapshot() }
+        playback.onStatus = { [weak self] sourceID, status in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.pdfStates[sourceID] = status
+                if status.phase == .error {
+                    self.activeSources.remove(key)
+                    self.sourceErrors[key] = status.errorMessage
+                } else if status.phase == .ready {
+                    self.sourceErrors[key] = nil
+                }
+                self.onPDFStatus?(sourceID, status)
+            }
+        }
+        pdfPlaybacks[key] = playback
+        publishFrameHolders()
+        return playback
+    }
+
+    /// Reloads a PDF source's document after a same-identity asset content
+    /// replacement (P03 relink/replace keeps the asset identifier).
+    func reloadPDF(_ id: SourceDefinitionID) {
+        pdfPlaybacks[.pdf(id)]?.load()
     }
 
     // MARK: - App audio (A06, issue #118)

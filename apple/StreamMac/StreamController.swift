@@ -228,6 +228,7 @@ final class StreamController: ObservableObject {
             annotationProvider: { .empty },
             canvasSize: persisted.outputProfile.canvasSize,
             frameRate: persisted.outputProfile.frameRate)
+        OutputCanvasStore.shared.publish(persisted.outputProfile.canvasSize)
 
         // W03: scene edits and selection changes reach the engines ONLY
         // through the preview/program model's snapshots — never straight from
@@ -859,6 +860,9 @@ final class StreamController: ObservableObject {
         let changed = profile != activeProfile
         activeProfile = profile
         stagedProfile = nil
+        // G06 (issue #113): PDF `.fill` framing reads the output canvas off
+        // the render tick via the lock-protected snapshot.
+        OutputCanvasStore.shared.publish(profile.canvasSize)
         // Align the scene graph's canvas reference (S01) with the output
         // canvas; transforms are normalized, so layers are not repositioned.
         sceneStore.setCanvasSize(profile.canvasSize)
@@ -1156,6 +1160,12 @@ final class StreamController: ObservableObject {
     /// `PreviewProgramModel.programScene`.
     func publishSceneToProgram(_ scene: Scene) {
         Task { await engine.updateScene(scene) }
+        // G08 (issue #115): program scene-entry applies each web widget's
+        // sceneEntryRefresh policy (the capture itself never restarts).
+        capturePool.noteWebWidgetSceneEntries(
+            sceneID: scene.id,
+            layers: SceneGraph.flattenedVisibleLayers(of: scene, in: SceneGraph.index(sceneStore.scenes)),
+            sources: sceneStore.sources)
         // A01: audio follows the program atomically with video — the scene's
         // S05 `AudioBinding`s become ramped channel gains (click-free Take).
         applyProgramAudioBindings()

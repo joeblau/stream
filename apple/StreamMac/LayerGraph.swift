@@ -703,7 +703,27 @@ struct PDFSourcePayload: Hashable, Codable, Sendable {
 }
 
 struct WebSourcePayload: Hashable, Codable, Sendable {
+    /// Remote widget URL (nil when the widget is a local HTML asset).
     var url: URL? = nil
+    /// The full G08 widget configuration: viewport, fps, interaction,
+    /// audio route, CSS overrides, scene-entry refresh, local HTML asset.
+    /// `url` above is kept as the renderer's frame-store key source for
+    /// remote widgets; `configuration.urlString` mirrors it on write
+    /// (see `WebSourcePayload.browserOverlay`).
+    var configuration: BrowserOverlayConfiguration = BrowserOverlayConfiguration()
+
+    private enum CodingKeys: String, CodingKey { case url, configuration }
+    init(url: URL? = nil, configuration: BrowserOverlayConfiguration = BrowserOverlayConfiguration()) {
+        self.url = url
+        self.configuration = configuration
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decodeIfPresent(URL.self, forKey: .url)
+        configuration = try c.decodeIfPresent(BrowserOverlayConfiguration.self,
+                                              forKey: .configuration)
+            ?? BrowserOverlayConfiguration(urlString: url?.absoluteString)
+    }
 }
 
 struct GuestSourcePayload: Hashable, Codable, Sendable {
@@ -865,6 +885,11 @@ enum LayerPayload: Hashable, Sendable {
         return false
     }
 
+    var isPDF: Bool {
+        if case .pdf = self { return true }
+        return false
+    }
+
     /// G01 (issue #81): a static image/logo layer.
     var isImage: Bool {
         if case .image = self { return true }
@@ -902,7 +927,7 @@ enum LayerPayload: Hashable, Sendable {
     /// composition engine grows source support. UI must mark non-renderable
     /// kinds rather than implying they show on output.
     var isRenderable: Bool {
-        isCamera || isScreen || isText || isShape || isScene || isSyphon || isMedia || isImage
+        isCamera || isScreen || isText || isShape || isScene || isSyphon || isMedia || isImage || isPDF || isWeb
     }
 
     /// Short human name for layer-panel rows and add-layer menus.

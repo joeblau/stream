@@ -596,14 +596,22 @@ final class SceneRenderer {
             // fallback.
             return placeImage(image, layer: layer, canvas: canvas)
         case .web(let web):
-            // G07 (issue #114) prototype seam: with the explicit prototype
-            // flag on, pull the widget's latest snapshot frame (published by
-            // BrowserOverlayPrototype on its own clock, latest-wins like the
-            // pool's screen-frame holders). Flag off — the shipping state —
-            // or no fresh frame paints the documented nothing fallback.
-            guard BrowserOverlayPrototypeFlag.isEnabled,
-                  let key = web.url?.absoluteString,
+            // G08 (issue #115) production path: pull the widget's latest
+            // snapshot frame (published by the capture pool's browser hosts,
+            // latest-wins like the pool's screen-frame holders). Local-HTML
+            // widgets key by asset identifier. No fresh frame paints the
+            // documented nothing fallback.
+            guard let key = web.browserOverlayStoreKey,
                   let buffer = BrowserOverlayFrameStore.shared.latest(for: key) else { return nil }
+            return place(source: CIImage(cvPixelBuffer: buffer),
+                         layer: layer, canvas: canvas, isCamera: false)
+        case .pdf:
+            // G06 (issue #113): PDF pages are pulled per tick from the pool's
+            // PDF engines, keyed by registry source ID — the `.media` pull
+            // contract verbatim. `.fit` pages letterbox through the standard
+            // placement; `.fill` pages arrive pre-cropped to canvas aspect.
+            guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
+                  let buffer = frames.media?(key) else { return nil }
             return place(source: CIImage(cvPixelBuffer: buffer),
                          layer: layer, canvas: canvas, isCamera: false)
         default:
@@ -631,6 +639,9 @@ final class SceneRenderer {
             // without restarting playback). Unbound media layers have no
             // key and paint the documented fallback.
             return layer.sourceID.map { .media($0) }
+        case .pdf:
+            // G06: PDF keys are the registry source ID, exactly like media.
+            return layer.sourceID.map { .pdf($0) }
         default: return nil
         }
     }
@@ -1093,15 +1104,15 @@ final class SceneRenderer {
 
     /// True when every visible layer of the scene (transitively, through
     /// nested references) paints without a live source — text/shape and
-    /// unpainted model-only kinds only. Camera/screen/syphon/media/image
-    /// layers make the scene dynamic: its content changes per frame and must
-    /// not be cached.
+    /// unpainted model-only kinds only. Camera/screen/syphon/media/image/pdf/
+    /// web layers make the scene dynamic: its content changes per frame and
+    /// must not be cached.
     private func isStaticContent(_ scene: Scene,
                                  scenes: [SceneID: Scene],
                                  visited: Set<SceneID>) -> Bool {
         for layer in scene.layers where layer.isVisible {
             switch layer.payload {
-            case .camera, .screen, .syphon, .media:
+            case .camera, .screen, .syphon, .media, .pdf, .web:
                 return false
             case .image:
                 // G01 (issue #81): the layer's VALUE (the payload) is static,
