@@ -123,4 +123,83 @@ import StreamCore
         #expect(restored == original)
         #expect(restored.captureExcludedBundleIDs == ["com.1password.1password", "com.apple.keychainaccess"])
     }
+
+    @Test("A blob written before the A04 mixer document existed gets the default mixer")
+    func missingMixerDefaults() throws {
+        // A04 (issue #83): snapshots from builds predating the mixer must
+        // decode to the all-unity, nothing-soloed/muted document — never
+        // throw and wipe the user's other settings.
+        let s = try decode(#"{"videoBitrate": 6000000}"#)
+        #expect(s.mixer == MixerSettings())
+    }
+
+    @Test("The A04 mixer document round-trips through encode/decode")
+    func mixerRoundTrips() throws {
+        var mixer = MixerSettings()
+        mixer.channelVolumes["app.com.example.player"] = 0.8
+        mixer.channelMutes["mic.default"] = true
+        mixer.soloedChannels = ["capture.screen-1"]
+        mixer.channelAuxSends["guest.abc"] = 1
+        mixer.busGains = ["program": 0.9, "monitor": 1.4]
+        mixer.mutedBuses = ["program"]
+        let original = StreamSettings(mixer: mixer)
+        let data = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(StreamSettings.self, from: data)
+        #expect(restored == original)
+        #expect(restored.mixer.soloedChannels == ["capture.screen-1"])
+        #expect(restored.mixer.mutedBuses == ["program"])
+    }
+
+    @Test("A blob written before the A05 audio-input list existed gets an empty list")
+    func missingAudioInputsDefaults() throws {
+        // A05 (issue #84): snapshots from builds predating multi-mic must
+        // decode to no ADDITIONAL inputs — the legacy preferredAudioInputUID
+        // default-mic path is untouched, so that mic stays enabled.
+        let s = try decode(#"{"preferredAudioInputUID": "usb-mic-1"}"#)
+        #expect(s.audioInputs.isEmpty)
+        #expect(s.preferredAudioInputUID == "usb-mic-1")
+    }
+
+    @Test("The A05 audio-input list round-trips through encode/decode")
+    func audioInputsRoundTrip() throws {
+        let original = StreamSettings(audioInputs: [
+            AudioInputSelection(deviceUID: "interface-8ch", isEnabled: true,
+                                mapping: .stereo(2, 3)),
+            AudioInputSelection(deviceUID: "usb-mic-2", isEnabled: false,
+                                mapping: .mono(1)),
+        ])
+        let data = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(StreamSettings.self, from: data)
+        #expect(restored == original)
+        #expect(restored.audioInputs.count == 2)
+        #expect(restored.audioInputs[0].mapping == .stereo(2, 3))
+        #expect(restored.audioInputs[1].isEnabled == false)
+    }
+
+    @Test("An A05 input entry written before enable/mapping keys existed gets defaults")
+    func audioInputSelectionDefaults() throws {
+        let s = try decode(#"{"audioInputs": [{"deviceUID": "usb-mic-3"}]}"#)
+        #expect(s.audioInputs == [AudioInputSelection(deviceUID: "usb-mic-3",
+                                                      isEnabled: true, mapping: .all)])
+    }
+
+    @Test("A blob written before A07 monitoring existed decodes to monitoring off on the system default")
+    func missingMonitoringDefaults() throws {
+        // A07 (issue #119): snapshots from builds predating monitoring must
+        // never surprise the user with audio output on upgrade.
+        let s = try decode(#"{"micVolume": 1.2}"#)
+        #expect(s.monitoringEnabled == false)
+        #expect(s.monitorOutputDeviceUID == nil)
+    }
+
+    @Test("The A07 monitoring settings round-trip through encode/decode")
+    func monitoringRoundTrip() throws {
+        let original = StreamSettings(monitoringEnabled: true,
+                                      monitorOutputDeviceUID: "AppleUSBAudioEngine:Focusrite:Scarlett")
+        let data = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(StreamSettings.self, from: data)
+        #expect(restored == original)
+        #expect(restored.monitoringEnabled == true)
+        #expect(restored.monitorOutputDeviceUID == "AppleUSBAudioEngine:Focusrite:Scarlett")
+    }
 }

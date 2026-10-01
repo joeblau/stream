@@ -60,6 +60,11 @@ final class ScreenSourceCapture: ObservableObject {
     var onVideoSample: ((CMSampleBuffer) -> Void)?
     /// Called with each app-audio or microphone sample buffer, main actor.
     var onAudioSample: ((CMSampleBuffer) -> Void)?
+    /// A01 (issue #82): real-time audio hand-off that fires DIRECTLY on the
+    /// SCStream sample queue — no main-actor hop — so the audio engine's
+    /// format conversion never runs on the main thread. Read once when the
+    /// stream is configured (set it before `start`/`pickAndStart`).
+    var onAudioSampleOffMain: (@Sendable (CMSampleBuffer) -> Void)?
 
     private let picker = SCContentSharingPicker.shared
     private var pickerObserver: PickerObserverShim?
@@ -176,11 +181,13 @@ final class ScreenSourceCapture: ObservableObject {
         configuration.queueDepth = 4
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
 
+        let offMainAudio = onAudioSampleOffMain
         let output = StreamOutputShim(
             onVideoSample: { [weak self] sample in
                 Task { @MainActor in self?.onVideoSample?(sample.value) }
             },
             onAudioSample: { [weak self] sample in
+                offMainAudio?(sample.value)
                 Task { @MainActor in self?.onAudioSample?(sample.value) }
             },
             onStopped: { [weak self] error in

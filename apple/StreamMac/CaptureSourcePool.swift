@@ -18,6 +18,18 @@ enum CaptureSourceKey: Hashable, Sendable {
     /// name+app identity (the server instance UUID is volatile and never
     /// part of the key, so an app relaunch re-keys onto the SAME capture).
     case syphon(SyphonSourcePayload)
+    /// A02 (issue #97): a media (video file) source, keyed by its REGISTRY
+    /// source ID — the persisted security-scoped bookmark lives on the
+    /// `SourceDefinition`, and the A01 audio channel is `.media(sourceID)`,
+    /// so the registry ID is the one stable identity across payload edits
+    /// (loop/trim/relink never re-key playout).
+    case media(SourceDefinitionID)
+    /// A06 (issue #118): an app/system audio-only capture, keyed by its
+    /// payload — mode, target bundle ID, and enablement are all identity, so
+    /// retargeting or toggling re-keys the capture deliberately (the C03
+    /// privacy-edit pattern). Demand comes from the REGISTRY
+    /// (`demandedAppAudio`), never from scene layers.
+    case appAudio(AppAudioSourcePayload)
 
     /// The system-default camera (no pinned device).
     static let defaultCamera = CaptureSourceKey.camera(CameraSourcePayload())
@@ -29,7 +41,7 @@ enum CaptureSourceKey: Hashable, Sendable {
         switch self {
         case .camera(let payload): return payload.deviceID == nil
         case .screen(let payload): return payload.targetIdentifier == nil
-        case .syphon: return false
+        case .syphon, .media, .appAudio: return false
         }
     }
 }
@@ -41,7 +53,9 @@ extension CaptureSourceKey {
     /// the registry is the identity authority, so reconfiguring a source
     /// re-keys its capture — while unbound layers fall back to their inline
     /// payload (the render authority). Payload kinds without a physical
-    /// capture (image/text/media/web/guest/…) produce no key.
+    /// capture (image/text/web/guest/…) produce no key. A02: media layers
+    /// demand playout by their registry source ID; an UNBOUND media layer
+    /// has no file to play and demands nothing.
     ///
     /// S06: callers flatten nested-scene references first
     /// (`SceneGraph.flattenedVisibleLayers` — cycle-guarded), so a camera
@@ -69,10 +83,29 @@ extension CaptureSourceKey {
             case .camera(let camera): keys.insert(.camera(camera))
             case .screen(let screen): keys.insert(.screen(screen))
             case .syphon(let syphon): keys.insert(.syphon(syphon))
+            case .media:
+                // A02 (issue #97): media playout is keyed by the registry
+                // source (the bookmark lives there); unbound media layers
+                // paint the documented fallback instead.
+                if let sourceID = layer.sourceID { keys.insert(.media(sourceID)) }
             default: break
             }
         }
         return keys
+    }
+
+    /// A06 (issue #118): app-audio sources demand capture by REGISTRATION,
+    /// not by scene layers — an enabled registry source keeps capturing no
+    /// matter which scene is staged or program, so its mix channel survives
+    /// scene switches and Takes untouched. (The W02 pipeline still gates
+    /// everything: the controller unions this set into the demand only
+    /// while the pipeline runs, and `stopAll` ends every capture with it.)
+    static func demandedAppAudio(sources: [SourceDefinition]) -> Set<CaptureSourceKey> {
+        Set(sources.compactMap { source in
+            guard case .appAudio(let payload) = source.payload, payload.isEnabled
+            else { return nil }
+            return .appAudio(payload)
+        })
     }
 }
 
@@ -103,6 +136,10 @@ final class SourceFrameProviders: @unchecked Sendable {
     private var cameraHolders: [LatestCameraFrame] = []
     private var screenHoldersByKey: [CaptureSourceKey: LatestScreenFrame] = [:]
     private var cameraHoldersByKey: [CaptureSourceKey: LatestCameraFrame] = [:]
+    /// A02 (issue #97): media playout is PULL-based (the render tick pulls
+    /// the frame for the player's current item time), so this maps keys to
+    /// the playback engines themselves, not latest-frame holders.
+    private var mediaSourcesByKey: [CaptureSourceKey: any MediaFrameSource] = [:]
 
     func update(screenHolders: [LatestScreenFrame], cameraHolders: [LatestCameraFrame]) {
         os_unfair_lock_lock(&lock)
@@ -118,6 +155,14 @@ final class SourceFrameProviders: @unchecked Sendable {
         os_unfair_lock_lock(&lock)
         self.screenHoldersByKey = screenHolders
         self.cameraHoldersByKey = cameraHolders
+        os_unfair_lock_unlock(&lock)
+    }
+
+    /// A02 (issue #97): the keyed media playout sources, published with the
+    /// other keyed holder sets (same known-key/never-substitute semantics).
+    func updateKeyedMedia(_ sources: [CaptureSourceKey: any MediaFrameSource]) {
+        os_unfair_lock_lock(&lock)
+        self.mediaSourcesByKey = sources
         os_unfair_lock_unlock(&lock)
     }
 
@@ -181,6 +226,29 @@ final class SourceFrameProviders: @unchecked Sendable {
         os_unfair_lock_unlock(&lock)
         return holder?.latest()
     }
+
+    // MARK: - Media playout (A02, issue #97)
+
+    /// True when the pool holds a playback engine for this exact media key.
+    /// A known key NEVER substitutes another source's frames; its nil reads
+    /// (loading, error, Stop end action) are the renderer's documented
+    /// paint-nothing fallback.
+    func hasMediaSource(for key: CaptureSourceKey) -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return mediaSourcesByKey[key] != nil
+    }
+
+    /// PULLS the current frame from the media playback for exactly this key
+    /// (and tops up the source's mix-engine audio — the render tick is the
+    /// playout cadence, so audio and video ride one clock). Call only from
+    /// the render tick, and only when `hasMediaSource(for:)` is true.
+    func mediaFrame(for key: CaptureSourceKey) -> CVPixelBuffer? {
+        os_unfair_lock_lock(&lock)
+        let source = mediaSourcesByKey[key]
+        os_unfair_lock_unlock(&lock)
+        return source?.pullFrame()
+    }
 }
 
 /// C01 (issue #76): the per-source frame read path `SceneRenderer` composites
@@ -192,6 +260,10 @@ final class SourceFrameProviders: @unchecked Sendable {
 struct SourceFrameLookup: Sendable {
     let camera: @Sendable (CaptureSourceKey) -> LatestCameraFrame.Frame?
     let screen: @Sendable (CaptureSourceKey) -> CVPixelBuffer?
+    /// A02 (issue #97): the media playout read path — PULLED per tick from
+    /// the pool's per-source playback engines. Nil (no media path wired)
+    /// means media layers paint the documented nothing fallback.
+    var media: (@Sendable (CaptureSourceKey) -> CVPixelBuffer?)? = nil
 }
 
 /// Holds the newest screen frame for one screen capture. Unlike the pre-W08
@@ -268,9 +340,11 @@ final class CaptureSourcePool: ObservableObject {
     /// Shared process-wide (`SourceFrameProviders.shared`) so the engines'
     /// per-source routing needs no controller rewiring.
     let frames = SourceFrameProviders.shared
-    /// App/mic audio from every screen capture; the controller routes this to
-    /// the publisher's ordered ingress.
-    var onScreenAudioSample: (@Sendable (CMSampleBuffer) -> Void)?
+    /// App/mic audio from every screen capture, fired on the capture's own
+    /// ScreenCaptureKit queue (off main) with the source's identity, so the
+    /// A01 audio engine can route each source onto its own mix channel. The
+    /// controller forwards this to `AudioMixEngine.enqueue`.
+    var onScreenAudioSample: (@Sendable (CaptureSourceKey, CMSampleBuffer) -> Void)?
     /// C10: fired when a screen capture reports an error (start failure,
     /// mid-capture stop). The controller probes Screen Recording permission
     /// here — the W06 revocation probe (`probeScreenAccess`) — because
@@ -294,6 +368,37 @@ final class CaptureSourcePool: ObservableObject {
     /// addable-server list and the missing/recovery signal for syphon
     /// sources (servers appear/disappear like hot-plugged devices, C10).
     let syphonDiscovery = SyphonServerDiscovery()
+    /// A02 (issue #97): one playback engine per media key. Instances persist
+    /// across demand loss (like screen captures and their remembered
+    /// selections): pausing holds the position, so a re-referenced source —
+    /// and a Take between scenes sharing it — resumes mid-file and never
+    /// restarts playback.
+    private var mediaPlaybacks: [CaptureSourceKey: MediaSourcePlayback] = [:]
+    /// A06 (issue #118): one audio-only capture per requested app-audio key.
+    /// Instances persist across demand loss (like screen captures), so a
+    /// re-enabled source restarts without re-resolving anything.
+    private var appAudioCaptures: [CaptureSourceKey: AppAudioCapture] = [:]
+    /// A06: the running-app directory — the Sources tab's app picker AND the
+    /// missing/recovery signal for app-audio sources (apps terminate and
+    /// relaunch like hot-plugged devices, C10). No TCC permission needed.
+    let runningApps = RunningApplicationMonitor()
+    /// A06: the per-app bundle-ID set excluded from the system mix at the
+    /// last reconcile, so a change (a per-app source added/removed/toggled)
+    /// restarts the system capture with the de-duplication intact.
+    private var lastSystemMixExclusions: Set<String> = []
+    /// A02: the transport UI's per-source status (loaded/playing/paused/
+    /// ended/error + position/duration), mirrored from each playback engine.
+    @Published private(set) var mediaStates: [SourceDefinitionID: MediaSourceStatus] = [:]
+    /// A02: media-source audio, fired on the composition engines' render
+    /// tick with each buffer already retimed onto the shared host clock. The
+    /// controller forwards this to `AudioMixEngine.enqueue` as `.media(id)`
+    /// channels (the media twin of `onScreenAudioSample`).
+    var onMediaAudioSample: (@Sendable (SourceDefinitionID, CMSampleBuffer) -> Void)?
+    /// A06 (issue #118): app/system audio-only captures, fired on each
+    /// capture's own ScreenCaptureKit queue (off main) with the source's
+    /// identity, so the A01 engine routes each onto its `.application`
+    /// channel (the app-audio twin of `onScreenAudioSample`).
+    var onAppAudioSample: (@Sendable (CaptureSourceKey, CMSampleBuffer) -> Void)?
     private var cancellables: Set<AnyCancellable> = []
     /// C10: the physical camera each camera key's capture is actually using —
     /// the pinned device ID, or the system default resolved at start — so a
@@ -317,6 +422,15 @@ final class CaptureSourcePool: ObservableObject {
                 self?.handleSyphonServersChanged(servers)
             }
         }.store(in: &cancellables)
+        // A06: apps terminate/relaunch independently of demand — reconcile
+        // app-audio sources against every directory change (quit → MISSING;
+        // the same bundle ID relaunching → auto-recovery), the C10 pattern
+        // with the running-app directory as the hot-plug signal.
+        runningApps.$runningBundleIDs.sink { [weak self] bundleIDs in
+            Task { @MainActor [weak self] in
+                self?.handleRunningAppsChanged(bundleIDs)
+            }
+        }.store(in: &cancellables)
     }
 
     // MARK: - Demand reconciliation
@@ -332,6 +446,22 @@ final class CaptureSourcePool: ObservableObject {
         }
         for key in requested.subtracting(demand) {
             stop(key)
+        }
+        // A06: the system mix excludes apps that carry their own per-app
+        // source (no double audio). That set derives from the demand, not
+        // from any single key, so when it changes the running system capture
+        // restarts with the new exclusion filter.
+        let exclusions = systemMixExclusions(in: demand, settings: settings)
+        if exclusions != lastSystemMixExclusions {
+            lastSystemMixExclusions = exclusions
+            for key in demand where requested.contains(key) && activeSources.contains(key) {
+                guard case .appAudio(let payload) = key, payload.mode == .system else { continue }
+                Task { [weak self] in
+                    guard let capture = self?.appAudioCaptures[key] else { return }
+                    await capture.stop()
+                    await capture.start(with: payload, excludingBundleIDs: exclusions)
+                }
+            }
         }
     }
 
@@ -367,6 +497,21 @@ final class CaptureSourcePool: ObservableObject {
                 }
             }
         }
+        // A06: the system mix's exclusion filter carries the global privacy
+        // exclusion list, so an active system capture restarts on the new
+        // defaults too (per-app captures are unaffected — their filter pins
+        // exactly one app regardless).
+        let exclusions = systemMixExclusions(in: requested, settings: settings)
+        lastSystemMixExclusions = exclusions
+        for key in requested where activeSources.contains(key) {
+            guard case .appAudio(let payload) = key, payload.mode == .system,
+                  let capture = appAudioCaptures[key] else { continue }
+            Task { [weak capture] in
+                guard let capture else { return }
+                await capture.stop()
+                await capture.start(with: payload, excludingBundleIDs: exclusions)
+            }
+        }
     }
 
     /// The capture instance for a screen key, created (and wired) on first
@@ -383,8 +528,13 @@ final class CaptureSourcePool: ObservableObject {
                 holder.store(buffer)
             }
         }
-        capture.onAudioSample = { [weak self] sample in
-            self?.onScreenAudioSample?(sample)
+        // The handler value is captured (not the MainActor pool) so the
+        // off-main @Sendable closure stays isolation-clean. The controller
+        // assigns `onScreenAudioSample` before any capture exists, so the
+        // value read here is always the live one.
+        let audioHandler = onScreenAudioSample
+        capture.onAudioSampleOffMain = { sample in
+            audioHandler?(key, sample)
         }
         // Mirror the capture's own state into the per-source surface: errors
         // (permission denial, start failure, mid-capture stop) badge the
@@ -453,6 +603,10 @@ final class CaptureSourcePool: ObservableObject {
             }
         case .syphon(let payload):
             startSyphon(key, payload: payload)
+        case .media(let id):
+            startMedia(key, id: id)
+        case .appAudio(let payload):
+            startAppAudio(key, payload: payload, settings: settings)
         }
     }
 
@@ -473,6 +627,18 @@ final class CaptureSourcePool: ObservableObject {
         case .syphon:
             // Synchronous disconnect; clears its frame holder.
             syphonCaptures[key]?.stop()
+        case .media:
+            // A02: last reference removed — pause mid-file (the position
+            // holds; playout follows demand per the issue's lifecycle
+            // criterion). Explicit transport Stop is what rewinds.
+            mediaPlaybacks[key]?.pause()
+        case .appAudio:
+            // A06: last reference removed (source disabled/removed, or the
+            // pipeline stopped) — stop the capture; the instance and its
+            // resolved target survive for the next demand.
+            if let capture = appAudioCaptures[key] {
+                Task { await capture.stop() }
+            }
         }
     }
 
@@ -497,6 +663,9 @@ final class CaptureSourcePool: ObservableObject {
         frames.updateKeyed(
             screenHolders: screenFrames.merging(syphonCaptures.mapValues(\.frames)) { current, _ in current },
             cameraHolders: cameras.mapValues(\.latest))
+        // A02: the keyed media playout sources (pull-based — the render tick
+        // reads `frames.media(key)` straight from each playback engine).
+        frames.updateKeyedMedia(mediaPlaybacks.mapValues { $0 as any MediaFrameSource })
     }
 
     /// The capture instance for a syphon key, created (and wired) on first
@@ -641,6 +810,14 @@ final class CaptureSourcePool: ObservableObject {
             case .syphon(let payload):
                 missingSources.remove(key)
                 startSyphon(key, payload: payload)
+            case .media(let id):
+                missingSources.remove(key)
+                sourceErrors[key] = nil
+                startMedia(key, id: id)
+            case .appAudio(let payload):
+                missingSources.remove(key)
+                sourceErrors[key] = nil
+                startAppAudio(key, payload: payload, settings: settings)
             }
         }
     }
@@ -736,6 +913,12 @@ final class CaptureSourcePool: ObservableObject {
             }
         case .syphon:
             syphonCaptures[key]?.stop()
+        case .media:
+            mediaPlaybacks[key]?.pause()
+        case .appAudio:
+            if let capture = appAudioCaptures[key] {
+                Task { await capture.stop() }
+            }
         }
     }
 
@@ -813,6 +996,219 @@ final class CaptureSourcePool: ObservableObject {
                 missingSources.remove(key)
                 sourceErrors[key] = nil
                 startSyphon(key, payload: payload)
+            }
+        }
+    }
+
+    // MARK: - Media playout (A02, issue #97)
+    //
+    // Media sources follow the pool's demand model exactly like captures: a
+    // playback engine loads on its first scene reference (program, or staged
+    // while the monitors are visible) and pauses mid-file when the last
+    // reference goes away. The engine instance persists, so a Take between
+    // scenes sharing the source — and the preview/program engines reading it
+    // simultaneously — never restarts playback: audio and video stay
+    // synchronized through scene changes because there is exactly ONE player
+    // per source, pulled per tick on the shared host clock.
+
+    /// Starts (or resumes) a media source's playout: resolves the engine
+    /// (creating it on first use) and kicks the bookmark-resolution load.
+    /// Autoplay is the payload's decision, honored at load completion.
+    private func startMedia(_ key: CaptureSourceKey, id: SourceDefinitionID) {
+        guard let playback = mediaPlayback(for: key, id: id) else { return }
+        sourceErrors[key] = nil
+        playback.load()
+        // Optimistic like cameras: frames/status age in through mediaStates;
+        // a load failure flips the error surface via the status callback.
+        activeSources.insert(key)
+    }
+
+    /// The playback engine for a media key, created (and wired) on first use
+    /// and stable thereafter. The payload provider reads the registry's live
+    /// payload index (`SourcePayloadStore`), so loop/end-action edits take
+    /// effect at the next loop point and a relink (bookmark change) reloads
+    /// the file on the pull path — the source ID key never changes.
+    private func mediaPlayback(for key: CaptureSourceKey,
+                               id: SourceDefinitionID) -> MediaSourcePlayback? {
+        if let existing = mediaPlaybacks[key] { return existing }
+        let playback = MediaSourcePlayback(sourceID: id) {
+            guard case .media(let payload) = SourcePayloadStore.shared.snapshot()[id]
+            else { return nil }
+            return payload
+        }
+        // The handler value is captured (not the MainActor pool) so the
+        // engine-tick @Sendable closure stays isolation-clean. The controller
+        // assigns `onMediaAudioSample` before any playback exists, so the
+        // value read here is always the live one (the C01 screen pattern).
+        let audioHandler = onMediaAudioSample
+        playback.onAudioSample = { sample in
+            audioHandler?(id, sample)
+        }
+        playback.onStatus = { [weak self] sourceID, status in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.mediaStates[sourceID] = status
+                if status.phase == .error {
+                    self.activeSources.remove(key)
+                    self.sourceErrors[key] = status.errorMessage
+                } else if status.phase == .playing || status.phase == .ready {
+                    self.sourceErrors[key] = nil
+                }
+            }
+        }
+        mediaPlaybacks[key] = playback
+        publishFrameHolders()
+        return playback
+    }
+
+    // MARK: - Media transport (W05 dispatcher commands)
+
+    /// The playback engine for a registry media source, creating it on
+    /// explicit transport intent (play/restart) — audition before the source
+    /// is referenced anywhere. Explicit transport acts on the ONE shared
+    /// instance, so it can never fork program vs preview playback.
+    func playMedia(_ id: SourceDefinitionID) {
+        guard let playback = mediaPlayback(for: .media(id), id: id) else { return }
+        playback.load()
+        playback.play()
+    }
+
+    func pauseMedia(_ id: SourceDefinitionID) {
+        mediaPlaybacks[.media(id)]?.pause()
+    }
+
+    func stopMedia(_ id: SourceDefinitionID) {
+        mediaPlaybacks[.media(id)]?.stop()
+    }
+
+    func restartMedia(_ id: SourceDefinitionID) {
+        guard let playback = mediaPlayback(for: .media(id), id: id) else { return }
+        playback.load()
+        playback.restart()
+    }
+
+    func seekMedia(_ id: SourceDefinitionID, toSeconds seconds: Double) {
+        mediaPlaybacks[.media(id)]?.seek(toSeconds: seconds)
+    }
+
+    /// The current status for one media source (idle when never loaded) —
+    /// the transport UI's read path.
+    func mediaStatus(for id: SourceDefinitionID) -> MediaSourceStatus {
+        mediaStates[id] ?? MediaSourceStatus()
+    }
+
+    // MARK: - App audio (A06, issue #118)
+    //
+    // App-audio sources follow the pool's demand model with ONE difference:
+    // their demand comes from the registry (registered + enabled), not from
+    // visible layers, so capture survives every scene switch and Take. Quit/
+    // relaunch is the C10 hot-plug pattern with the running-app directory as
+    // the signal; the audio itself flows off-main to the engine's
+    // `.application` channels, which the A04 mixer owns — scene
+    // `AudioBinding`s deliberately never address them (mixer-only gain).
+
+    /// Starts (or restarts) an app-audio capture. A target app that isn't
+    /// running is MISSING (auto-recovery on relaunch), never an error and
+    /// never a substitution — checked against the permission-free running-app
+    /// directory before any ScreenCaptureKit work.
+    private func startAppAudio(_ key: CaptureSourceKey, payload: AppAudioSourcePayload,
+                               settings: StreamSettings) {
+        sourceErrors[key] = nil
+        let capture = appAudioCapture(for: key)
+        if payload.mode == .application, let bundleID = payload.bundleID,
+           !runningApps.runningBundleIDs.contains(bundleID) {
+            markMissing(key, message: "\(payload.displayTitle) is not running. Launch it — capture resumes automatically, or relink the source to another app.")
+            return
+        }
+        let exclusions = systemMixExclusions(in: requested, settings: settings)
+        lastSystemMixExclusions = exclusions
+        Task { [weak capture] in
+            await capture?.start(with: payload, excludingBundleIDs: exclusions)
+        }
+    }
+
+    /// The apps the SYSTEM mix must exclude: every app carrying its own
+    /// enabled per-app source (so system + per-app never double) plus the
+    /// global privacy exclusion list (the C03 defaults applied to audio).
+    /// The studio itself is excluded by `AppAudioCapture` on top.
+    private func systemMixExclusions(in keys: Set<CaptureSourceKey>,
+                                     settings: StreamSettings) -> Set<String> {
+        var exclusions = Set(settings.captureExcludedBundleIDs)
+        for key in keys {
+            guard case .appAudio(let payload) = key,
+                  payload.mode == .application,
+                  let bundleID = payload.bundleID else { continue }
+            exclusions.insert(bundleID)
+        }
+        return exclusions
+    }
+
+    /// The capture instance for an app-audio key, created (and wired) on
+    /// first use and stable thereafter. Mirrors the screen factory's sinks so
+    /// per-source active/error state lands in the same published surfaces.
+    private func appAudioCapture(for key: CaptureSourceKey) -> AppAudioCapture {
+        if let existing = appAudioCaptures[key] { return existing }
+        let capture = AppAudioCapture()
+        appAudioCaptures[key] = capture
+        // The handler value is captured (not the MainActor pool) so the
+        // off-main @Sendable closure stays isolation-clean. The controller
+        // assigns `onAppAudioSample` before any capture exists, so the value
+        // read here is always the live one (the C01 screen pattern).
+        let audioHandler = onAppAudioSample
+        capture.onAudioSampleOffMain = { sample in
+            audioHandler?(key, sample)
+        }
+        capture.$isCapturing.sink { [weak self, weak capture] _ in
+            Task { @MainActor [weak self, weak capture] in
+                guard let self, let capture else { return }
+                if capture.isCapturing {
+                    self.activeSources.insert(key)
+                    self.sourceErrors[key] = nil
+                    self.missingSources.remove(key)
+                } else {
+                    self.activeSources.remove(key)
+                    if let message = capture.errorMessage {
+                        self.sourceErrors[key] = message
+                    }
+                }
+            }
+        }.store(in: &cancellables)
+        // A start that fails before capturing never flips `isCapturing` —
+        // mirror terminal error messages too (the C02 screen pattern), and
+        // probe Screen Recording permission: an app-audio error can mean the
+        // permission was toggled off in System Settings (the W06 hook).
+        capture.$errorMessage.sink { [weak self, weak capture] _ in
+            Task { @MainActor [weak self, weak capture] in
+                guard let self, let capture,
+                      let message = capture.errorMessage else { return }
+                if !capture.isCapturing {
+                    self.sourceErrors[key] = message
+                }
+                self.onScreenCaptureError?()
+            }
+        }.store(in: &cancellables)
+        return capture
+    }
+
+    /// The running-app directory changed (launch/terminate). Requested
+    /// app-audio sources whose target vanished move to MISSING — registry
+    /// entry and enablement survive — and missing sources whose bundle ID
+    /// relaunches restart by stable identity: an app relaunch recovers
+    /// exactly like a device hot-plug, and a DIFFERENT app never substitutes
+    /// (that is what the relink action is for). System-mix sources have no
+    /// single target app and are untouched.
+    private func handleRunningAppsChanged(_ running: Set<String>) {
+        for key in requested {
+            guard case .appAudio(let payload) = key,
+                  payload.mode == .application,
+                  let bundleID = payload.bundleID else { continue }
+            if !running.contains(bundleID), !missingSources.contains(key) {
+                markMissing(key, message: "\(payload.displayTitle) quit. Relaunch it — capture resumes automatically when it returns, or relink the source to another app.")
+            } else if running.contains(bundleID), missingSources.contains(key) {
+                missingSources.remove(key)
+                sourceErrors[key] = nil
+                startAppAudio(key, payload: payload,
+                              settings: lastReconcileSettings ?? .default)
             }
         }
     }

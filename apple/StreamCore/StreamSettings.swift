@@ -179,6 +179,53 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// Bundle identifiers whose windows every screen capture excludes by
     /// default (e.g. a password manager).
     public var captureExcludedBundleIDs: [String]
+    /// A04 (issue #83): the persisted mixer session document (non-capture
+    /// channel faders/mutes, monitor-only solo set, aux sends, bus masters).
+    /// Capture-channel levels are scene content (`AudioBinding`s), not here.
+    public var mixer: MixerSettings
+    /// A05 (issue #84): additional audio input devices enabled as their own
+    /// mix channels (macOS studio), each with its hardware-channel mapping.
+    /// Back-compat: the legacy `preferredAudioInputUID` above still names THE
+    /// default microphone (the `.microphone(deviceUID: nil)` channel); this
+    /// list carries only ADDITIONAL devices, so a pre-A05 single-mic setup
+    /// decodes to an empty list and keeps working exactly as before.
+    public var audioInputs: [AudioInputSelection]
+    /// A08 (issue #120): per-channel effect chains (high-pass, noise gate,
+    /// EQ, compressor, limiter) keyed by `AudioChannelID.label`. Additive
+    /// `decodeIfPresent`, so a pre-A08 blob decodes to an empty map and every
+    /// channel falls back to the legacy voice-polish mapping (see
+    /// `fxChain(forChannelLabel:)`). Edits apply live as parameter updates on
+    /// the channel's running insert — no capture restart.
+    public var channelFX: [String: ChannelFXChain]
+    /// A07 (issue #119): headphone monitoring of the studio's MONITOR bus
+    /// (macOS). Off by default — no unexpected audio output on first launch.
+    public var monitoringEnabled: Bool
+    /// A07 (issue #119): the CoreAudio device UID of the chosen monitor
+    /// OUTPUT (nil = follow the system default output). Pinned by stable UID
+    /// (C10 rules): an unplugged device falls back to the system default
+    /// honestly and the selection resumes when the same device returns.
+    public var monitorOutputDeviceUID: String?
+    /// A10 (issue #122): per-channel audio delays in milliseconds, keyed by
+    /// `AudioChannelID.label` (the mixer-document rule: the shared model
+    /// never names the macOS channel type). Compensates per-source capture
+    /// latency — the engine reads the channel's ring that many ms BEHIND the
+    /// mix position, on the same host clock, so timestamps never regress.
+    /// Bounded: 0…`AVSyncDelay.maxAudioDelayMs`.
+    public var audioDelaysMs: [String: Double]
+    /// A10 (issue #122): per-source VIDEO delays in milliseconds, keyed by
+    /// the registry source's stable ID string (`source.<uuid>`) so a relink
+    /// or payload edit never loses the setting. The composition engine holds
+    /// the source's frames that long (bounded: 0…`AVSyncDelay.maxVideoDelayMs`).
+    public var videoDelaysMs: [String: Double]
+    /// A10 (issue #122): speech-driven ducking — sidechain mics, threshold,
+    /// reduction, attack/hold/release, and the duck target channels.
+    public var ducking: DuckingSettings
+    /// A09 (issue #121): the echo handling mode for mic capture. `off` by
+    /// default — no surprise processing on upgrade. See `EchoHandlingMode`
+    /// for the honest platform capability story (macOS has no built-in AEC
+    /// usable from Stream's capture architecture; Voice Isolation is the OS
+    /// mic mode Stream prefers and reports on).
+    public var echoHandlingMode: EchoHandlingMode
 
     public init(
         selectedProtocol: StreamProtocol = .rtmps,
@@ -206,7 +253,16 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         outputProfile: OutputProfile = .default,
         captureShowsCursor: Bool = true,
         captureIncludesAudio: Bool = true,
-        captureExcludedBundleIDs: [String] = []
+        captureExcludedBundleIDs: [String] = [],
+        mixer: MixerSettings = MixerSettings(),
+        audioInputs: [AudioInputSelection] = [],
+        channelFX: [String: ChannelFXChain] = [:],
+        monitoringEnabled: Bool = false,
+        monitorOutputDeviceUID: String? = nil,
+        echoHandlingMode: EchoHandlingMode = .off,
+        audioDelaysMs: [String: Double] = [:],
+        videoDelaysMs: [String: Double] = [:],
+        ducking: DuckingSettings = DuckingSettings()
     ) {
         self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
@@ -230,6 +286,15 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.captureShowsCursor = captureShowsCursor
         self.captureIncludesAudio = captureIncludesAudio
         self.captureExcludedBundleIDs = captureExcludedBundleIDs
+        self.mixer = mixer
+        self.audioInputs = audioInputs
+        self.channelFX = channelFX
+        self.monitoringEnabled = monitoringEnabled
+        self.monitorOutputDeviceUID = monitorOutputDeviceUID
+        self.echoHandlingMode = echoHandlingMode
+        self.audioDelaysMs = audioDelaysMs
+        self.videoDelaysMs = videoDelaysMs
+        self.ducking = ducking
     }
 
     /// Backward-compatible decode: every field falls back to its default when the
@@ -264,9 +329,45 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         captureShowsCursor = try c.decodeIfPresent(Bool.self, forKey: .captureShowsCursor) ?? d.captureShowsCursor
         captureIncludesAudio = try c.decodeIfPresent(Bool.self, forKey: .captureIncludesAudio) ?? d.captureIncludesAudio
         captureExcludedBundleIDs = try c.decodeIfPresent([String].self, forKey: .captureExcludedBundleIDs) ?? d.captureExcludedBundleIDs
+        // A04: settings blobs written before the mixer existed decode to the
+        // default (all-unity, nothing soloed/muted) document.
+        mixer = try c.decodeIfPresent(MixerSettings.self, forKey: .mixer) ?? d.mixer
+        // A05: blobs written before multi-mic existed decode to no additional
+        // inputs — the legacy `preferredAudioInputUID` default-mic behavior
+        // above is untouched, so that mic stays enabled exactly as before.
+        audioInputs = try c.decodeIfPresent([AudioInputSelection].self, forKey: .audioInputs) ?? d.audioInputs
+        // A08: blobs written before per-channel FX existed decode to an empty
+        // chain map — every channel then follows the legacy voice-polish
+        // mapping below, so behavior is identical to before the upgrade.
+        channelFX = try c.decodeIfPresent([String: ChannelFXChain].self, forKey: .channelFX) ?? d.channelFX
+        // A07: blobs written before monitoring existed decode to monitoring
+        // OFF on the system default output (no surprise audio on upgrade).
+        monitoringEnabled = try c.decodeIfPresent(Bool.self, forKey: .monitoringEnabled) ?? d.monitoringEnabled
+        monitorOutputDeviceUID = try c.decodeIfPresent(String.self, forKey: .monitorOutputDeviceUID) ?? d.monitorOutputDeviceUID
+        // A09: blobs written before echo handling existed decode to OFF — no
+        // surprise processing on upgrade.
+        echoHandlingMode = try c.decodeIfPresent(EchoHandlingMode.self, forKey: .echoHandlingMode) ?? d.echoHandlingMode
+        // A10: blobs written before A/V delay + ducking existed decode to no
+        // delays and ducking OFF — alignment and levels are identical to
+        // before the upgrade.
+        audioDelaysMs = try c.decodeIfPresent([String: Double].self, forKey: .audioDelaysMs) ?? d.audioDelaysMs
+        videoDelaysMs = try c.decodeIfPresent([String: Double].self, forKey: .videoDelaysMs) ?? d.videoDelaysMs
+        ducking = try c.decodeIfPresent(DuckingSettings.self, forKey: .ducking) ?? d.ducking
     }
 
     public static let `default` = StreamSettings()
+
+    /// A08 (issue #120): the effect chain one channel runs — its persisted
+    /// per-channel chain when present, else the legacy voice-polish mapping
+    /// (`voicePolishEnabled` ⇒ the `.voice` preset, which voices the same
+    /// broadcast curve the fixed `VoicePolishProcessor` runs). A channel
+    /// whose chain the user has touched through the FX rack is keyed in
+    /// `channelFX` and no longer follows the global toggle; `label` is the
+    /// channel's `AudioChannelID.label` (the shared model never names that
+    /// macOS type, same rule as the mixer document).
+    public func fxChain(forChannelLabel label: String) -> ChannelFXChain {
+        channelFX[label] ?? (voicePolishEnabled ? .preset(.voice) : .preset(.off))
+    }
 
     /// Defense-in-depth for restored/legacy settings: never hand a codec to a
     /// transport that cannot packetize it, even if the UI has not normalized yet.

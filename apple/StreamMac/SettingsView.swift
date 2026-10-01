@@ -440,16 +440,268 @@ struct SettingsView: View {
             }
 
             Toggle("Voice Polish", isOn: $session.draft.voicePolishEnabled)
-            Text("Broadcast-style EQ, compression and limiting on the mic.")
+            Text("Broadcast-style EQ, compression and limiting on the mic. Voice Polish is the default chain for every mic channel without its own; per-channel effect chains (high-pass, gate, EQ, compressor, limiter) are edited live from each mixer strip's FX button.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            additionalInputsBlock
+
+            monitoringBlock
+
+            echoHandlingBlock
+
+            avSyncAndDuckingBlock
         } header: {
             Text("Audio")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Label("Mic volume applies immediately, even while live.", systemImage: "bolt.fill")
                 effectBadge(.nextSession)
-                Text("Microphone choice and Voice Polish are read when a session starts.")
+                Text("Microphone choice is read when a session starts; Voice Polish and per-channel FX apply live. Additional inputs and their channel mappings apply immediately, each as its own mixer channel. Monitoring is heard while the studio pipeline is running (Preview, stream, or recording); its level is the mixer's Monitor fader, and soloing a channel auditions it on the monitor output only.")
+            }
+        }
+    }
+
+    // MARK: - A07 headphone monitoring (issue #119)
+
+    /// The monitor output plays the mixer's MONITOR bus (same routing as
+    /// program, independent level, monitor-only solo for per-channel
+    /// audition) through a chosen output device. Edits are live session
+    /// state (like the mixer): they persist and apply immediately through
+    /// the W05 dispatcher. A pinned device that unplugs falls back to the
+    /// system default honestly and re-pins when it returns; a monitor
+    /// device that is also an enabled input is flagged as a feedback risk.
+    @ViewBuilder
+    private var monitoringBlock: some View {
+        Text("Headphone Monitoring")
+            .font(.callout.weight(.semibold))
+        Toggle("Enable Monitoring", isOn: Binding(
+            get: { session.activeSettings.monitoringEnabled },
+            set: { dispatcher.execute(.setMonitoringEnabled($0)) }
+        ))
+        Picker("Monitor Output", selection: Binding(
+            get: { session.activeSettings.monitorOutputDeviceUID ?? "" },
+            set: { dispatcher.execute(.setMonitorOutputDevice(uid: $0.isEmpty ? nil : $0)) }
+        )) {
+            Text("System Default").tag("")
+            ForEach(controller.monitorOutput.devices) { device in
+                Text(device.name).tag(device.uid)
+            }
+        }
+        .disabled(!session.activeSettings.monitoringEnabled)
+        if controller.monitorOutput.isFallbackActive {
+            Label("The selected output is disconnected — monitoring through the System Default until it returns.",
+                  systemImage: "cable.connector.slash")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+        if let error = controller.monitorOutput.errorMessage {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+        if let riskUID = controller.monitorFeedbackRiskDeviceUID {
+            let name = controller.audio.deviceNamesByUID[riskUID] ?? riskUID
+            Label("Feedback risk: \"\(name)\" is both the monitor output and an enabled input — the monitor signal can loop into the program mix. Disable that input or pick another output.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+    }
+
+    // MARK: - A09 echo handling & feedback diagnostics (issue #121)
+
+    /// Echo handling is honest about the platform: macOS has no built-in AEC
+    /// usable from Stream's capture architecture (VoiceProcessingIO is
+    /// deprecated and incompatible — see `EchoHandlingEvaluation`), so the
+    /// modes are Off and a Voice Isolation PREFERENCE (the OS mic mode is
+    /// user-controlled; Stream reports its live state and guides). Feedback
+    /// diagnostics surface below with one-click routing repairs. Edits are
+    /// live session state (like monitoring) through the W05 dispatcher.
+    @ViewBuilder
+    private var echoHandlingBlock: some View {
+        Text("Echo & Feedback")
+            .font(.callout.weight(.semibold))
+        Picker("Echo Handling", selection: Binding(
+            get: { session.activeSettings.echoHandlingMode },
+            set: { dispatcher.execute(.setEchoHandlingMode($0)) }
+        )) {
+            ForEach(EchoHandlingMode.allCases, id: \.self) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        // The channel/stereo limitations are displayed BEFORE the mode takes
+        // effect (issue #121), and Stream never stacks a second suppressor
+        // on top of the OS processing.
+        Text(session.activeSettings.echoHandlingMode.limitationNote)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        if session.activeSettings.echoHandlingMode == .voiceIsolation {
+            switch controller.voiceIsolationActive {
+            case .some(true):
+                Label("Voice Isolation is active on the microphone. Stream applies no additional echo suppression on top.",
+                      systemImage: "checkmark.shield.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            case .some(false):
+                Label("Voice Isolation is not active — while the mic is in use, open Control Center → Mic Mode and choose Voice Isolation.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            case nil:
+                Label("The Voice Isolation state is read once the mic is running.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        ForEach(controller.feedbackDiagnostics.routeIssues) { issue in
+            VStack(alignment: .leading, spacing: 4) {
+                Label(issue.title, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text(issue.fix)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(repairTitle(for: issue.repair)) {
+                    repairFeedbackRoute(issue.repair)
+                }
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private func repairTitle(for repair: FeedbackRouteIssue.Repair) -> String {
+        switch repair {
+        case .disableInput: return "Disable That Input"
+        case .muteDefaultMic: return "Mute the Mic"
+        case .disableMonitoring: return "Disable Monitoring"
+        case .lowerMonitor: return "Lower the Monitor Level"
+        }
+    }
+
+    /// The concrete routing repair (issue #121): one dispatch of an existing
+    /// studio command — never a silent automatic change.
+    private func repairFeedbackRoute(_ repair: FeedbackRouteIssue.Repair) {
+        switch repair {
+        case .disableInput(let uid):
+            dispatcher.execute(.setAudioInputEnabled(uid, false))
+        case .muteDefaultMic:
+            dispatcher.execute(.setChannelMuted(.microphone(deviceUID: nil), true))
+        case .disableMonitoring:
+            dispatcher.execute(.setMonitoringEnabled(false))
+        case .lowerMonitor:
+            let current = session.activeSettings.mixer.busGains[AudioBus.monitor.rawValue] ?? 1
+            dispatcher.execute(.setBusGain(.monitor, max(0, current / 2)))
+        }
+    }
+
+    // MARK: - A05 additional inputs (issue #84)
+
+    /// Every connected input device (minus the one the default microphone
+    /// already uses) can be enabled as its OWN mix channel, and every
+    /// enabled-but-unplugged device stays listed honestly with a relink
+    /// path. Enable/mapping edits are live session state (like the mixer):
+    /// they persist and apply immediately through the W05 dispatcher.
+    @ViewBuilder
+    private var additionalInputsBlock: some View {
+        let configured = session.activeSettings.audioInputs
+        let connected = controller.audio.devices
+        let preferredUID = session.draft.preferredAudioInputUID
+        let listed = connected.filter { $0.uniqueID != preferredUID }
+        let missing = configured.filter { selection in
+            selection.isEnabled
+                && selection.deviceUID != preferredUID
+                && !connected.contains(where: { $0.uniqueID == selection.deviceUID })
+        }
+        if !listed.isEmpty || !missing.isEmpty {
+            Text("Additional Inputs")
+                .font(.callout.weight(.semibold))
+            ForEach(listed, id: \.uniqueID) { device in
+                additionalInputRow(
+                    device: device,
+                    selection: configured.first(where: { $0.deviceUID == device.uniqueID }))
+            }
+            ForEach(missing, id: \.deviceUID) { selection in
+                missingInputRow(selection: selection)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func additionalInputRow(device: AVCaptureDevice,
+                                    selection: AudioInputSelection?) -> some View {
+        let uid = device.uniqueID
+        let enabled = selection?.isEnabled ?? false
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(device.localizedName, isOn: Binding(
+                get: { enabled },
+                set: { dispatcher.execute(.setAudioInputEnabled(uid, $0)) }
+            ))
+            if enabled {
+                let channelCount = controller.audio.deviceChannelCounts[uid] ?? 1
+                if channelCount > 1 {
+                    // Audio-interface channel mapping: which hardware inputs
+                    // feed this device's mix channel.
+                    Picker("Channels", selection: Binding(
+                        get: { selection?.mapping ?? .all },
+                        set: { dispatcher.execute(.setAudioInputMapping(uid, $0)) }
+                    )) {
+                        Text("All \(channelCount) Inputs").tag(AudioInputMapping.all)
+                        ForEach(0..<channelCount, id: \.self) { channel in
+                            Text("Input \(channel + 1) (mono)")
+                                .tag(AudioInputMapping.mono(channel))
+                        }
+                        ForEach(0..<max(0, channelCount - 1), id: \.self) { left in
+                            Text("Inputs \(left + 1) + \(left + 2) (stereo)")
+                                .tag(AudioInputMapping.stereo(left, left + 1))
+                        }
+                    }
+                }
+                if let error = controller.audio.additionalInputErrors[uid] {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func missingInputRow(selection: AudioInputSelection) -> some View {
+        let uid = selection.deviceUID
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(controller.audio.deviceNamesByUID[uid] ?? "Missing input", isOn: Binding(
+                get: { true },
+                set: { dispatcher.execute(.setAudioInputEnabled(uid, $0)) }
+            ))
+            Label("Disconnected — reconnect it, or relink to another input.",
+                  systemImage: "cable.connector.slash")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            inputRelinkMenu(for: uid)
+        }
+    }
+
+    /// The explicit relink path (C10: a different device is never
+    /// substituted silently) — replace the missing device's UID with a
+    /// connected one, keeping the input's enable/mapping.
+    @ViewBuilder
+    private func inputRelinkMenu(for uid: String) -> some View {
+        let candidates = controller.audio.devices.filter { device in
+            device.uniqueID != uid && !session.activeSettings.audioInputs.contains {
+                $0.deviceUID == device.uniqueID && $0.isEnabled
+            }
+        }
+        Menu("Relink…") {
+            if candidates.isEmpty {
+                Text("No other inputs connected")
+            } else {
+                ForEach(candidates, id: \.uniqueID) { device in
+                    Button(device.localizedName) {
+                        dispatcher.execute(.relinkAudioInput(from: uid, to: device.uniqueID))
+                    }
+                }
             }
         }
     }
@@ -546,6 +798,218 @@ struct SettingsView: View {
                 effectBadge(.immediate)
                 Text("Capture permissions are macOS-level; the app re-reads them when it becomes active. A denied source shows its repair action here and when the source is next used.")
             }
+        }
+    }
+
+    // MARK: - A10 A/V sync + speech ducking (issue #122)
+
+    /// The engine's live ducked-channel set (labels), polled while the pane
+    /// is open so each duck-target row can show its "ducking now" state.
+    @State private var duckedChannelLabels: Set<String> = []
+
+    /// Per-source capture-latency compensation (audio delay per mic channel,
+    /// video delay per camera/screen source) and the speech-driven music
+    /// ducker. All edits are live session state (the monitoring/additional-
+    /// inputs precedent): they persist and apply immediately through the W05
+    /// dispatcher — engine read-window shifts, frame-hold re-targeting, and
+    /// ramped duck automation, never a capture restart or clock re-anchor.
+    @ViewBuilder
+    private var avSyncAndDuckingBlock: some View {
+        Text("A/V Sync")
+            .font(.callout.weight(.semibold))
+        audioDelayRow(title: "Microphone Delay",
+                      channel: .microphone(deviceUID: nil))
+        ForEach(session.activeSettings.audioInputs.filter(\.isEnabled), id: \.deviceUID) { selection in
+            audioDelayRow(title: "\(controller.audio.deviceNamesByUID[selection.deviceUID] ?? "Input") Delay",
+                          channel: .microphone(deviceUID: selection.deviceUID))
+        }
+        ForEach(controller.sceneStore.sources.filter {
+            if case .camera = $0.payload { return true }
+            if case .screen = $0.payload { return true }
+            return false
+        }, id: \.id) { source in
+            videoDelayRow(source: source)
+        }
+        Text("Delay compensates per-source hardware latency: a source that arrives EARLY gets delayed to match the others (a camera's video is usually the late one — delay its audio path's counterparts instead). Changes apply immediately; delays are bounded at \(Int(AVSyncDelay.maxAudioDelayMs)) ms.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        duckingBlock
+    }
+
+    private func audioDelayRow(title: String, channel: AudioChannelID) -> some View {
+        let ms = dispatcher.state.audioDelaysMs[channel.label] ?? 0
+        return delaySlider(title: title, value: ms, range: 0...AVSyncDelay.maxAudioDelayMs,
+                           step: 5, unit: "ms") {
+            dispatcher.execute(.setChannelAudioDelay(channel, ms: $0))
+        }
+    }
+
+    private func videoDelayRow(source: SourceDefinition) -> some View {
+        let key = StreamController.videoDelaySettingsKey(for: source.id)
+        let ms = dispatcher.state.videoDelaysMs[key] ?? 0
+        return delaySlider(title: "\(source.name) Video Delay", value: ms,
+                           range: 0...AVSyncDelay.maxVideoDelayMs, step: 5, unit: "ms") {
+            dispatcher.execute(.setSourceVideoDelay(source.id, ms: $0))
+        }
+    }
+
+    private func delaySlider(title: String, value: Double, range: ClosedRange<Double>,
+                             step: Double, unit: String,
+                             onEdit: @escaping (Double) -> Void) -> some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(value <= 0 ? "Off" : "\(Int(value.rounded())) \(unit)")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: Binding(get: { value }, set: onEdit), in: range, step: step)
+        }
+    }
+
+    // MARK: A10 ducking
+
+    @ViewBuilder
+    private var duckingBlock: some View {
+        let ducking = dispatcher.state.ducking
+        Group {
+            Text("Music Ducking")
+                .font(.callout.weight(.semibold))
+            Toggle("Duck Music While Speaking", isOn: duckingBinding(\.isEnabled))
+        if ducking.isEnabled {
+            Text("Speech Channels")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            sidechainToggle(title: "Microphone", channel: .microphone(deviceUID: nil))
+            ForEach(session.activeSettings.audioInputs.filter(\.isEnabled), id: \.deviceUID) { selection in
+                sidechainToggle(title: controller.audio.deviceNamesByUID[selection.deviceUID] ?? "Input",
+                                channel: .microphone(deviceUID: selection.deviceUID))
+            }
+            duckingSlider(title: "Threshold", keyPath: \.thresholdDb,
+                          range: DuckingSettings.thresholdDbRange, step: 1,
+                          format: { "\(Int($0.rounded())) dB" })
+            duckingSlider(title: "Reduction", keyPath: \.reductionDb,
+                          range: DuckingSettings.reductionDbRange, step: 1,
+                          format: { "−\(Int($0.rounded())) dB" })
+            duckingSlider(title: "Attack", keyPath: \.attackMs,
+                          range: DuckingSettings.attackMsRange, step: 1,
+                          format: { "\(Int($0.rounded())) ms" })
+            duckingSlider(title: "Hold", keyPath: \.holdMs,
+                          range: 0...2_000, step: 50,
+                          format: { "\(Int($0.rounded())) ms" })
+            duckingSlider(title: "Release", keyPath: \.releaseMs,
+                          range: 10...3_000, step: 50,
+                          format: { "\(Int($0.rounded())) ms" })
+            Text("Duck Targets")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            let targets = duckTargetCandidates
+            if targets.isEmpty {
+                Text("No music, media, or app-audio sources yet — add a playlist or source to duck it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(targets, id: \.channel) { target in
+                    HStack {
+                        Toggle(target.name, isOn: duckTargetBinding(target.channel))
+                        if duckedChannelLabels.contains(target.channel.label) {
+                            Text("ducking")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+            }
+            Text("While any speech channel is above the threshold, the selected channels are attenuated by the reduction (engine-side gain automation on top of the faders — base gain × duck gain — so bypass restores your exact mix). Duck state survives scene changes.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        }
+        .task { await pollDuckState() }
+    }
+
+    /// Every channel the ducker may target: music playlists (A03), app-audio
+    /// captures (A06), and registry media sources (A02) — stable channels
+    /// that outlive a release ramp (pads/stingers excluded, see
+    /// `SoundboardController.duckTargets`).
+    private var duckTargetCandidates: [(channel: AudioChannelID, name: String)] {
+        var targets = dispatcher.soundboard.duckTargets
+        for source in controller.sceneStore.sources {
+            switch source.payload {
+            case .appAudio(let payload):
+                targets.append((channel: .application(bundleID: payload.channelBundleID),
+                                name: source.name))
+            case .media:
+                targets.append((channel: .media(source.id), name: source.name))
+            default:
+                break
+            }
+        }
+        return targets
+    }
+
+    private func duckingBinding<T>(_ keyPath: WritableKeyPath<DuckingSettings, T>) -> Binding<T> {
+        Binding(
+            get: { dispatcher.state.ducking[keyPath: keyPath] },
+            set: { value in
+                var ducking = dispatcher.state.ducking
+                ducking[keyPath: keyPath] = value
+                dispatcher.execute(.setDucking(ducking))
+            })
+    }
+
+    private func duckTargetBinding(_ channel: AudioChannelID) -> Binding<Bool> {
+        Binding(
+            get: { dispatcher.state.ducking.targetLabels.contains(channel.label) },
+            set: { isTarget in
+                var ducking = dispatcher.state.ducking
+                if isTarget {
+                    ducking.targetLabels.insert(channel.label)
+                } else {
+                    ducking.targetLabels.remove(channel.label)
+                }
+                dispatcher.execute(.setDucking(ducking))
+            })
+    }
+
+    private func sidechainToggle(title: String, channel: AudioChannelID) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { dispatcher.state.ducking.sidechainLabels.contains(channel.label) },
+            set: { isSidechain in
+                var ducking = dispatcher.state.ducking
+                if isSidechain {
+                    ducking.sidechainLabels.insert(channel.label)
+                } else {
+                    ducking.sidechainLabels.remove(channel.label)
+                }
+                dispatcher.execute(.setDucking(ducking))
+            }))
+    }
+
+    private func duckingSlider(title: String, keyPath: WritableKeyPath<DuckingSettings, Double>,
+                               range: ClosedRange<Double>, step: Double,
+                               format: @escaping (Double) -> String) -> some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(format(dispatcher.state.ducking[keyPath: keyPath]))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: duckingBinding(keyPath), in: range, step: step)
+        }
+    }
+
+    /// Polls the engine's duck state while the pane is open (~7 Hz — the
+    /// indicator's only consumer; the mixer strips poll their own meters).
+    private func pollDuckState() async {
+        while !Task.isCancelled {
+            let levels = await controller.mixerLevels()
+            duckedChannelLabels = Set(levels.duckedChannels.map(\.label))
+            try? await Task.sleep(nanoseconds: 150_000_000)
         }
     }
 }

@@ -24,6 +24,9 @@ final class DeviceMonitor: ObservableObject {
     @Published private(set) var connectedCameraIDs: Set<String> = []
     /// `uniqueID`s of the currently connected audio input devices.
     @Published private(set) var connectedAudioDeviceIDs: Set<String> = []
+    /// A05 (issue #84): the connected audio input devices themselves, for the
+    /// multi-mic settings list and mixer relink pickers.
+    @Published private(set) var audioDevices: [AVCaptureDevice] = []
     /// Active displays from the most recent CoreGraphics re-probe.
     @Published private(set) var connectedDisplayIDs: Set<CGDirectDisplayID> = []
     /// The connected video devices themselves, for relink pickers.
@@ -41,6 +44,11 @@ final class DeviceMonitor: ObservableObject {
     /// actor with the stable identity of the device that (dis)appeared.
     var onCameraConnected: ((String) -> Void)?
     var onCameraDisconnected: ((String) -> Void)?
+    /// A05 (issue #84): audio input (dis)appearance, routed to
+    /// `MacAudioInput` — the monitor is the ONE availability watcher, so the
+    /// audio input layer keeps no notifications of its own.
+    var onAudioDeviceConnected: ((String) -> Void)?
+    var onAudioDeviceDisconnected: ((String) -> Void)?
     /// Fires only when the active display SET actually changed (a resolution
     /// change alone keeps every ID and stays silent).
     var onDisplaysChanged: ((Set<CGDirectDisplayID>) -> Void)?
@@ -95,11 +103,21 @@ final class DeviceMonitor: ObservableObject {
 
     private func handleDeviceChange(uniqueID: String?, isVideo: Bool, connected: Bool) {
         refreshDevices()
-        guard isVideo, let uniqueID else { return }
-        if connected {
-            onCameraConnected?(uniqueID)
+        guard let uniqueID else { return }
+        if isVideo {
+            if connected {
+                onCameraConnected?(uniqueID)
+            } else {
+                onCameraDisconnected?(uniqueID)
+            }
         } else {
-            onCameraDisconnected?(uniqueID)
+            // A05: audio inputs get the same stable-identity hooks; the audio
+            // input layer re-enumerates and reconciles per-device captures.
+            if connected {
+                onAudioDeviceConnected?(uniqueID)
+            } else {
+                onAudioDeviceDisconnected?(uniqueID)
+            }
         }
     }
 
@@ -123,6 +141,7 @@ final class DeviceMonitor: ObservableObject {
             mediaType: .audio,
             position: .unspecified
         ).devices
+        audioDevices = audio
         connectedAudioDeviceIDs = Set(audio.map(\.uniqueID))
     }
 

@@ -4,6 +4,16 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<!-- A11 (issue #123): host third-party Audio Unit effects in-process
+	     inside the sandboxed app. Component ENUMERATION works sandboxed, but
+	     loading a third-party AU bundle (from /Library/Audio/Plug-Ins) into
+	     the process is blocked without this documented temporary exception —
+	     the same entitlement GarageBand-class AU hosts use. The app keeps
+	     app-sandbox enabled; out-of-process AU hosting does not exist for
+	     arbitrary v2 component AUs on macOS, so crash isolation stays at the
+	     error-handling level documented in ChannelFXProcessor. -->
+	<key>com.apple.security.temporary-exception.audio-unit-host</key>
+	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.com.joeblau.Stream</string>
@@ -11,6 +21,10 @@
 	<key>com.apple.security.device.camera</key>
 	<true/>
 	<key>com.apple.security.device.microphone</key>
+	<true/>
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-only</key>
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>

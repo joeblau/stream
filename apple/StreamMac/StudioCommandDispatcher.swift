@@ -187,8 +187,141 @@ enum StudioCommand: Equatable, Sendable {
     /// immediately, like overlay edits.
     case setDefaultBackground(SceneBackground?)
 
+    // A02 media transport (issue #97): play/pause/stop/restart/seek for a
+    // registry media source. These are SESSION state — playback position is
+    // never part of a scene document — so they are not undoable scene edits,
+    // and scene/layer locks don't gate them (they edit no scene content).
+    // They act on the ONE shared playback instance per source (the pool's),
+    // so transport can never fork preview vs program playback.
+    case mediaPlay(SourceDefinitionID)
+    case mediaPause(SourceDefinitionID)
+    /// Rewind to the trim-in point and clear the frame (black fallback).
+    case mediaStop(SourceDefinitionID)
+    /// Rewind to the trim-in point and keep playing.
+    case mediaRestart(SourceDefinitionID)
+    /// Seek to an absolute file position in seconds (clamped to the trim
+    /// range by the playback engine).
+    case mediaSeek(SourceDefinitionID, to: Double)
+
     // Output profile (W07 staged-vs-active rules live in the controller).
     case setOutputProfile(OutputProfile, destination: StreamProtocol?)
+
+    // A04 embedded mixer (issue #83): the live session mix — NOT scene
+    // content and NOT undoable scene edits. Capture-channel program levels
+    // are owned by the S05 `AudioBinding`s (edit via `.setLayerAudio`), so
+    // these commands address the scene-independent surface: non-capture
+    // channel faders/mutes, monitor-only solos, aux sends, and bus masters.
+    // Everything here persists via SettingsSession (the mixer document) and
+    // applies live, ramped, through the controller.
+    /// Sets a non-capture channel's fader (0…2). The mic fader is the live
+    /// face of `StreamSettings.micVolume`; other kinds persist in the mixer
+    /// document by channel label.
+    case setChannelVolume(AudioChannelID, Double)
+    /// Mutes/unmutes a non-capture channel in the program mix (ramped).
+    case setChannelMuted(AudioChannelID, Bool)
+    /// Monitor-only solo: while any channel is soloed the MONITOR bus
+    /// carries only the soloed channels; the program bus is never affected.
+    case setChannelSolo(AudioChannelID, Bool)
+    /// A channel's aux/guest-return send (0…1) — the per-channel routing
+    /// surface beyond program/monitor.
+    case setChannelAuxSend(AudioChannelID, Double)
+    /// Master gain for one bus (0…2).
+    case setBusGain(AudioBus, Double)
+    /// Master mute for one bus (effective gain 0; the fader value is kept).
+    case setBusMuted(AudioBus, Bool)
+
+    // A05 multi-mic inputs (issue #84): enable/disable an audio input device
+    // as its own mix channel, pick which hardware channels feed it
+    // (mono/stereo-pair mapping), and relink a missing device to a connected
+    // one. Live session state persisted in `StreamSettings.audioInputs` via
+    // SettingsSession (like the mixer document) — NOT scene content, NOT
+    // undoable, and never staged.
+    case setAudioInputEnabled(String, Bool)
+    case setAudioInputMapping(String, AudioInputMapping)
+    /// Replaces a configured input's device UID (keeping enable/mapping)
+    /// with a currently-connected device — the explicit C10 relink path for
+    /// an unplugged mic.
+    case relinkAudioInput(from: String, to: String)
+
+    // A08 per-channel FX (issue #120): one channel's whole effect chain —
+    // preset picks, per-section bypass/reset, and parameter scrubs all edit
+    // the same `ChannelFXChain` value and dispatch through here. Live
+    // session state persisted in `StreamSettings.channelFX` via
+    // SettingsSession (like the mixer document) — NOT scene content, NOT
+    // undoable, never staged — and applied as parameter updates on the
+    // channel's running insert (no capture restart).
+    case setChannelFXChain(AudioChannelID, ChannelFXChain)
+
+    // A07 headphone monitoring (issue #119): enable/disable the monitor-bus
+    // playback and choose the monitor output device (nil UID = the system
+    // default). Live session state persisted in StreamSettings via
+    // SettingsSession — NOT scene content, NOT undoable, and never staged.
+    // Monitor LEVEL stays on the A04 mixer surface (`.setBusGain(.monitor,…)`
+    // / `.setBusMuted(.monitor,…)`); per-channel audition is the existing
+    // monitor-only solo (`.setChannelSolo`).
+    case setMonitoringEnabled(Bool)
+    /// Selects the monitor output by stable CoreAudio device UID (nil =
+    /// follow the system default). An unplugged selection falls back to the
+    /// default honestly and re-applies when the device returns (C10 rules).
+    case setMonitorOutputDevice(uid: String?)
+
+    // A10 A/V delay alignment + speech ducking (issue #122). Live session
+    // state persisted in StreamSettings via SettingsSession (the mixer/A07
+    // precedent) — NOT scene content, NOT undoable, never staged — and
+    // applied in place on the engines (no capture restart, no clock
+    // re-anchor): audio delays shift a channel's ring read window, video
+    // delays re-target a source's frame-hold line, ducking reconfigures the
+    // engine-side gain automation.
+    /// A channel's audio delay in milliseconds (0…`AVSyncDelay.maxAudioDelayMs`;
+    /// 0 removes it). Any channel kind may carry a delay.
+    case setChannelAudioDelay(AudioChannelID, ms: Double)
+    /// A registry source's VIDEO delay in milliseconds
+    /// (0…`AVSyncDelay.maxVideoDelayMs`; 0 removes it), keyed by the stable
+    /// registry ID so a relink never loses the alignment.
+    case setSourceVideoDelay(SourceDefinitionID, ms: Double)
+    /// The whole speech-ducking configuration (enable, sidechain, threshold,
+    /// reduction, attack/hold/release, duck targets) — one value, edited
+    /// whole, like `.setChannelFXChain`.
+    case setDucking(DuckingSettings)
+
+    // A09 echo handling (issue #121): the echo handling mode for mic capture
+    // (off / macOS Voice Isolation preference). Live session state persisted
+    // in StreamSettings via SettingsSession — NOT scene content, NOT
+    // undoable, and never staged (the A07 monitoring precedent). Feedback
+    // detection itself needs no command: it runs from the engine taps and
+    // surfaces through StudioState; the REPAIRS ride the existing mixer /
+    // monitoring / input commands above.
+    case setEchoHandlingMode(EchoHandlingMode)
+
+    // A03 soundboard + music playlists (issue #98): pads and playlists are a
+    // project-level performance surface persisted in the soundboard document
+    // (SoundboardStore — the mixer-document precedent), NOT scene content:
+    // structural edits are immediate and never undoable scene edits, and
+    // transport is session state (the media-transport precedent). Every
+    // trigger routes through the studio engine's `.media(id)` channels, so
+    // hardware/automation triggers (D-series) are audible in the broadcast.
+    case addSoundPad(SoundPad)
+    case updateSoundPad(SoundPad)
+    case removeSoundPad(SourceDefinitionID)
+    /// Fire the pad (its trigger policy decides restart vs overlap).
+    case triggerSoundPad(SourceDefinitionID)
+    case stopSoundPad(SourceDefinitionID)
+    /// The panic button: stop every pad and in-flight scene stinger.
+    case stopAllSoundEffects
+    case addMusicPlaylist(MusicPlaylist)
+    case updateMusicPlaylist(MusicPlaylist)
+    case removeMusicPlaylist(SourceDefinitionID)
+    case playlistPlay(SourceDefinitionID)
+    case playlistPause(SourceDefinitionID)
+    /// Rewind to the start of the current track, parked.
+    case playlistStop(SourceDefinitionID)
+    case playlistNext(SourceDefinitionID)
+    case playlistPrevious(SourceDefinitionID)
+    /// A03 scene sounds (issue #98): replaces the STAGED scene's sound
+    /// bindings (enter/exit stingers, continue beds). Scene content —
+    /// staged, Taken, reverted, and UNDOABLE like layer edits; the Take path
+    /// fires the rules as scenes enter/leave program.
+    case setSceneSoundBindings([SceneSoundBinding], in: SceneID?)
 
     // Settings session (W04).
     case openSettings(SettingsSession.Section?)
@@ -279,7 +412,50 @@ enum StudioCommand: Equatable, Sendable {
             return "\(hidden ? "Hide" : "Show") Overlay in Scene"
         case .setSceneBackground: return "Set Scene Background"
         case .setDefaultBackground: return "Set Project Background"
+        case .mediaPlay: return "Play Media"
+        case .mediaPause: return "Pause Media"
+        case .mediaStop: return "Stop Media"
+        case .mediaRestart: return "Restart Media"
+        case .mediaSeek: return "Seek Media"
         case .setOutputProfile: return "Set Output Profile"
+        case .setChannelVolume(let id, _): return "Set \(id.label) Volume"
+        case .setChannelMuted(let id, let muted):
+            return "\(muted ? "Mute" : "Unmute") \(id.label)"
+        case .setChannelSolo(let id, let soloed):
+            return "\(soloed ? "Solo" : "Unsolo") \(id.label)"
+        case .setChannelAuxSend(let id, _): return "Set \(id.label) Aux Send"
+        case .setBusGain(let bus, _): return "Set \(bus.rawValue.capitalized) Gain"
+        case .setBusMuted(let bus, let muted):
+            return "\(muted ? "Mute" : "Unmute") \(bus.rawValue.capitalized)"
+        case .setAudioInputEnabled(_, let enabled):
+            return "\(enabled ? "Enable" : "Disable") Audio Input"
+        case .setAudioInputMapping: return "Set Audio Input Channels"
+        case .relinkAudioInput: return "Relink Audio Input"
+        case .setChannelFXChain(let id, _): return "Set \(id.label) FX Chain"
+        case .setMonitoringEnabled(let enabled):
+            return "\(enabled ? "Enable" : "Disable") Monitoring"
+        case .setMonitorOutputDevice: return "Set Monitor Output"
+        case .setChannelAudioDelay(let id, _): return "Set \(id.label) Audio Delay"
+        case .setSourceVideoDelay: return "Set Source Video Delay"
+        case .setDucking(let ducking):
+            return "\(ducking.isEnabled ? "Enable" : "Configure") Ducking"
+        case .setEchoHandlingMode(let mode):
+            return mode == .off ? "Turn Echo Handling Off" : "Enable \(mode.displayName)"
+        case .addSoundPad: return "Add Sound Pad"
+        case .updateSoundPad: return "Edit Sound Pad"
+        case .removeSoundPad: return "Remove Sound Pad"
+        case .triggerSoundPad: return "Trigger Sound Pad"
+        case .stopSoundPad: return "Stop Sound Pad"
+        case .stopAllSoundEffects: return "Stop All Sound Effects"
+        case .addMusicPlaylist: return "Add Playlist"
+        case .updateMusicPlaylist: return "Edit Playlist"
+        case .removeMusicPlaylist: return "Remove Playlist"
+        case .playlistPlay: return "Play Playlist"
+        case .playlistPause: return "Pause Playlist"
+        case .playlistStop: return "Stop Playlist"
+        case .playlistNext: return "Next Track"
+        case .playlistPrevious: return "Previous Track"
+        case .setSceneSoundBindings: return "Scene Sounds"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
         case .applySettings: return "Apply Settings"
@@ -379,6 +555,50 @@ struct StudioState: Equatable, Sendable {
     var layerLocks: [LayerID: Bool] = [:]
     var settingsPresented = false
     var settingsDirty = false
+    /// A04 (issue #83): the persisted mixer document — non-capture channel
+    /// faders/mutes, the monitor-only solo set, aux sends, and bus masters.
+    /// Live session state, not scene content (never undoable, never staged).
+    var mixer = MixerSettings()
+    /// The live mic fader (mirrors `StreamSettings.micVolume`).
+    var micVolume: Double = 1
+    /// A08 (issue #120): the persisted per-channel FX chains, keyed by
+    /// `AudioChannelID.label` (mirrors `StreamSettings.channelFX`). Live
+    /// session state, not scene content (never undoable, never staged).
+    var channelFX: [String: ChannelFXChain] = [:]
+    /// A08: the legacy global voice-polish toggle (mirrors
+    /// `StreamSettings.voicePolishEnabled`) — the fallback chain source for
+    /// channels with no persisted chain (see `fxChain(forLabel:)`).
+    var voicePolishEnabled: Bool = true
+
+    /// A08: the EFFECTIVE chain a channel runs — its persisted chain when
+    /// present, else the legacy voice-polish mapping (same back-compat rule
+    /// as `StreamSettings.fxChain(forChannelLabel:)`).
+    func fxChain(forLabel label: String) -> ChannelFXChain {
+        channelFX[label] ?? (voicePolishEnabled ? .preset(.voice) : .preset(.off))
+    }
+    /// A07 (issue #119): headphone-monitoring state for the command
+    /// interface — on/off, the selected output (nil = system default),
+    /// whether the selection is unplugged and the monitor is honestly
+    /// falling back to the default, and the feedback-risk input UID (the
+    /// monitor device is also an enabled capture input).
+    var monitoringEnabled = false
+    var monitorOutputDeviceUID: String?
+    var monitorOutputFallback = false
+    var monitorFeedbackRiskDeviceUID: String?
+    /// A10 (issue #122): the persisted A/V delay + ducking configuration
+    /// (mirrors `StreamSettings.audioDelaysMs` / `.videoDelaysMs` /
+    /// `.ducking`). Live session state, not scene content (never undoable,
+    /// never staged) — the A/V-sync controls read and edit through these.
+    var audioDelaysMs: [String: Double] = [:]
+    var videoDelaysMs: [String: Double] = [:]
+    var ducking: DuckingSettings = DuckingSettings()
+    /// A09 (issue #121): echo handling + feedback diagnostics for the command
+    /// interface — the persisted mode, whether the OS Voice Isolation mic
+    /// mode is active on the live mic (nil = unknown/not preferred), and the
+    /// latest warnings (duplicate routes with repairs, per-mic howl risk).
+    var echoHandlingMode: EchoHandlingMode = .off
+    var voiceIsolationActive: Bool? = nil
+    var feedbackDiagnostics = FeedbackDiagnostics()
     /// S12 undo/redo availability and the labels of the edits ⌘Z / ⇧⌘Z would
     /// apply (the Edit menu shows "Undo <label>").
     var canUndo = false
@@ -422,6 +642,30 @@ final class StudioCommandDispatcher: ObservableObject {
     private var rejectionSequence = 0
     private var rejectionTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
+    /// A04: live channel-ID lookup by persisted label, so the engine push can
+    /// address channels the mixer document names. Seeded with the mic; media/
+    /// app/guest IDs register as their commands arrive (their labels persist
+    /// harmlessly until those surfaces land).
+    private var channelIDsByLabel: [String: AudioChannelID] = [:]
+    /// A04: the mixer state last pushed to the engine — the push re-fires
+    /// only on change (self-healing: the controller mirrors mixer gains, so
+    /// engine restarts and settings applies re-apply them without help).
+    private var lastPushedMixer: (mixer: MixerSettings, micVolume: Double)?
+    /// A03 (issue #98): the soundboard document (pads + music playlists,
+    /// persisted beside the scene documents) and its playback runtime (pad
+    /// triggers, playlist transport, scene-sound rules). Owned here so the
+    /// panel, keyboard, and hardware/automation triggers share one instance.
+    let soundboardStore: SoundboardStore
+    let soundboard: SoundboardController
+
+    /// A11 (issue #123): the hosted Audio Units running in one channel's FX
+    /// graph, keyed by chain-slot ID (passthrough to the controller — the
+    /// rack polls this while open; a persisted slot with no handle did not
+    /// load). The rack's generic parameter editor binds to the returned
+    /// handles' thread-safe parameter tree / fullState surface.
+    func hostedAudioUnitHandles(forLabel label: String) -> [UUID: HostedAudioUnitHandle] {
+        controller.hostedAudioUnitHandles(forChannelLabel: label)
+    }
 
     init(controller: StreamController,
          sceneStore: SceneStore,
@@ -433,7 +677,13 @@ final class StudioCommandDispatcher: ObservableObject {
         self.session = session
         self.recorder = recorder
         self.previewProgram = previewProgram
+        let soundboardStore = SoundboardStore()
+        self.soundboardStore = soundboardStore
+        self.soundboard = SoundboardController(store: soundboardStore,
+                                               controller: controller)
         self.state = StudioState()
+        let mic = AudioChannelID.microphone(deviceUID: nil)
+        channelIDsByLabel[mic.label] = mic
         refreshState()
 
         // External changes (publisher events, the recording writer finishing,
@@ -805,10 +1055,174 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDefaultBackground:
             return nil
 
+        // A02 media transport: session state — the target must be a
+        // registered media source; locks and staging don't apply.
+        case .mediaPlay(let id), .mediaPause(let id),
+             .mediaStop(let id), .mediaRestart(let id):
+            return mediaTransportError(for: id)
+        case .mediaSeek(let id, let seconds):
+            if let error = mediaTransportError(for: id) { return error }
+            return seconds.isFinite && seconds >= 0
+                ? nil
+                : .invalidValue("Seek position must be a non-negative number of seconds.")
+
         case .setOutputProfile:
             // Always acceptable: the controller clamps to hardware/destination
             // and stages the edit while outputs own the geometry (W07).
             return nil
+
+        // A04 mixer validation. Capture-channel levels/mutes are scene audio
+        // bindings — the mixer UI edits those via `.setLayerAudio`, so a
+        // direct mixer gain command on a capture channel is rejected with
+        // guidance rather than silently fighting the binding.
+        case .setChannelVolume(let id, let volume):
+            if case .capture = id {
+                return .invalidValue("Capture channel levels are scene audio bindings — edit the layer's audio instead.")
+            }
+            return volume.isFinite && (0...2).contains(volume)
+                ? nil : .invalidValue("Channel volume must be between 0 and 2.")
+        case .setChannelMuted(let id, _):
+            if case .capture = id {
+                return .invalidValue("Capture channel mute is a scene audio binding — edit the layer's audio instead.")
+            }
+            return nil
+        case .setChannelSolo:
+            // Solo is mixer (monitor) state: any channel kind may solo.
+            return nil
+        case .setChannelAuxSend(_, let send):
+            return send.isFinite && (0...1).contains(send)
+                ? nil : .invalidValue("Aux send must be between 0 and 1.")
+        case .setBusGain(_, let gain):
+            return gain.isFinite && (0...2).contains(gain)
+                ? nil : .invalidValue("Bus gain must be between 0 and 2.")
+        case .setBusMuted:
+            return nil
+
+        // A05 multi-mic validation: enablement is free-form (a device may be
+        // enabled while unplugged — it reports missing and recovers); mapping
+        // requires a configured input; relink requires a connected target.
+        case .setAudioInputEnabled(let uid, _):
+            return uid.isEmpty
+                ? .invalidValue("An audio input device must be selected.") : nil
+        case .setAudioInputMapping(let uid, let mapping):
+            guard session.activeSettings.audioInputs.contains(where: { $0.deviceUID == uid }) else {
+                return .invalidTarget("Audio input \(uid) is not configured — enable it first.")
+            }
+            switch mapping {
+            case .all: return nil
+            case .mono(let channel): return channel >= 0
+                ? nil : .invalidValue("Channel indices must be zero or greater.")
+            case .stereo(let left, let right): return left >= 0 && right >= 0
+                ? nil : .invalidValue("Channel indices must be zero or greater.")
+            }
+        case .relinkAudioInput(let from, let to):
+            guard from != to else {
+                return .invalidValue("The input is already linked to that device.")
+            }
+            return controller.deviceMonitor.audioDevices.contains(where: { $0.uniqueID == to })
+                ? nil : .invalidTarget("The relink target device is not connected.")
+
+        // A08 FX validation: the chain model owns its ranges (the rack's
+        // sliders clamp to the same values, so this guards automation input).
+        case .setChannelFXChain(_, let chain):
+            return chain.validationError.map { .invalidValue($0) }
+
+        // A07 monitoring validation: enabling is always acceptable; an
+        // explicit output device must be CONNECTED (nil = system default is
+        // always valid). Selecting a device while it is unplugged is
+        // rejected rather than silently pinning a fallback.
+        case .setMonitoringEnabled:
+            return nil
+        case .setMonitorOutputDevice(let uid):
+            guard let uid else { return nil }
+            return controller.monitorOutput.devices.contains(where: { $0.uid == uid })
+                ? nil : .invalidTarget("That output device is not connected.")
+
+        // A10 (issue #122): delays clamp to their documented engine bounds;
+        // the ducking model owns its parameter ranges (the settings UI
+        // clamps to the same values, so this guards automation input).
+        case .setChannelAudioDelay(_, let ms):
+            return ms.isFinite && (0...AVSyncDelay.maxAudioDelayMs).contains(ms)
+                ? nil
+                : .invalidValue("Audio delay must be between 0 and \(Int(AVSyncDelay.maxAudioDelayMs)) ms.")
+        case .setSourceVideoDelay(let id, let ms):
+            guard sceneStore.source(withID: id) != nil else {
+                return .invalidTarget("Source \(id) does not exist.")
+            }
+            return ms.isFinite && (0...AVSyncDelay.maxVideoDelayMs).contains(ms)
+                ? nil
+                : .invalidValue("Video delay must be between 0 and \(Int(AVSyncDelay.maxVideoDelayMs)) ms.")
+        case .setDucking(let ducking):
+            return ducking.validationError.map { .invalidValue($0) }
+
+        // A09 echo handling validation: both modes are always acceptable —
+        // Voice Isolation is a PREFERENCE the OS honors where supported, so
+        // an unsupported device degrades to guidance, never a rejection.
+        case .setEchoHandlingMode:
+            return nil
+
+        // A03 soundboard/playlist validation (issue #98): transport and
+        // structural commands address the soundboard document's stable IDs
+        // (locks and staging never apply — the media-transport precedent).
+        case .addSoundPad(let pad):
+            return pad.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A pad name can't be empty.") : nil
+        case .updateSoundPad(let pad):
+            guard soundboardStore.pad(withID: pad.id) != nil else {
+                return .invalidTarget("Sound pad \(pad.id) does not exist.")
+            }
+            return pad.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A pad name can't be empty.") : nil
+        case .removeSoundPad(let id),
+             .triggerSoundPad(let id),
+             .stopSoundPad(let id):
+            return soundboardStore.pad(withID: id) != nil
+                ? nil : .invalidTarget("Sound pad \(id) does not exist.")
+        case .stopAllSoundEffects:
+            return nil
+        case .addMusicPlaylist(let playlist):
+            return playlist.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A playlist name can't be empty.") : nil
+        case .updateMusicPlaylist(let playlist):
+            guard soundboardStore.playlist(withID: playlist.id) != nil else {
+                return .invalidTarget("Playlist \(playlist.id) does not exist.")
+            }
+            return playlist.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A playlist name can't be empty.") : nil
+        case .removeMusicPlaylist(let id):
+            return soundboardStore.playlist(withID: id) != nil
+                ? nil : .invalidTarget("Playlist \(id) does not exist.")
+        case .playlistPlay(let id):
+            guard let playlist = soundboardStore.playlist(withID: id) else {
+                return .invalidTarget("Playlist \(id) does not exist.")
+            }
+            return playlist.tracks.isEmpty
+                ? .unavailable("Playlist \"\(playlist.name)\" has no tracks — add audio files first.")
+                : nil
+        case .playlistPause(let id), .playlistStop(let id):
+            return soundboardStore.playlist(withID: id) != nil
+                ? nil : .invalidTarget("Playlist \(id) does not exist.")
+        case .playlistNext(let id), .playlistPrevious(let id):
+            guard let playlist = soundboardStore.playlist(withID: id) else {
+                return .invalidTarget("Playlist \(id) does not exist.")
+            }
+            return playlist.tracks.isEmpty
+                ? .unavailable("Playlist \"\(playlist.name)\" has no tracks.")
+                : nil
+        case .setSceneSoundBindings(let bindings, let sceneID):
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success:
+                for binding in bindings {
+                    if binding.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return .invalidValue("A scene sound name can't be empty.")
+                    }
+                    if !(0...2).contains(binding.volume) {
+                        return .invalidValue("Scene sound volume must be between 0 and 2.")
+                    }
+                }
+                return nil
+            }
 
         case .openSettings, .closeSettings:
             return nil
@@ -842,9 +1256,18 @@ final class StudioCommandDispatcher: ObservableObject {
 
     private func perform(_ command: StudioCommand) {
         switch command {
-        case .startStream: controller.goLive()
+        case .startStream:
+            controller.goLive()
+            // A03 (issue #98): the pipeline is up — fire the restored program
+            // scene's enter rules once (idempotent; a Take already synced
+            // the scene is a no-op).
+            soundboard.syncProgramScene(previewProgram.programScene)
         case .stopStream: controller.stopStream()
-        case .startPreview: controller.startPreview()
+        case .startPreview:
+            controller.startPreview()
+            // A03: same launch restore as startStream — the program scene's
+            // ambient beds and enter stingers start with the pipeline.
+            soundboard.syncProgramScene(previewProgram.programScene)
         case .stopPreview: controller.stopPreview()
         case .startRecording: recorder.start(stream: controller)
         case .stopRecording: recorder.stop()
@@ -1028,8 +1451,184 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDefaultBackground(let background):
             sceneStore.setDefaultBackground(background)
 
+        case .mediaPlay(let id): controller.capturePool.playMedia(id)
+        case .mediaPause(let id): controller.capturePool.pauseMedia(id)
+        case .mediaStop(let id): controller.capturePool.stopMedia(id)
+        case .mediaRestart(let id): controller.capturePool.restartMedia(id)
+        case .mediaSeek(let id, let seconds):
+            controller.capturePool.seekMedia(id, toSeconds: seconds)
+
         case .setOutputProfile(let profile, let destination):
             controller.applyOutputProfile(profile, destination: destination)
+
+        // A04 mixer execution: mutate the persisted mixer document through
+        // SettingsSession (single truth), register the channel ID so the
+        // engine push can address it, and let `refreshState`'s push apply the
+        // change live (ramped) through the controller.
+        case .setChannelVolume(let id, let volume):
+            channelIDsByLabel[id.label] = id
+            // Only the DEFAULT mic channel's fader is the live face of
+            // `micVolume`; A05 additional mic channels persist in the mixer
+            // document by label like every other non-capture channel.
+            if id == .microphone(deviceUID: nil) {
+                session.persistMicVolume(volume)
+            } else {
+                var mixer = session.activeSettings.mixer
+                mixer.channelVolumes[id.label] = volume
+                session.persistMixer(mixer)
+            }
+        case .setChannelMuted(let id, let muted):
+            channelIDsByLabel[id.label] = id
+            var mixer = session.activeSettings.mixer
+            mixer.channelMutes[id.label] = muted ? true : nil
+            session.persistMixer(mixer)
+        case .setChannelSolo(let id, let soloed):
+            channelIDsByLabel[id.label] = id
+            var mixer = session.activeSettings.mixer
+            if soloed {
+                mixer.soloedChannels.insert(id.label)
+            } else {
+                mixer.soloedChannels.remove(id.label)
+            }
+            session.persistMixer(mixer)
+        case .setChannelAuxSend(let id, let send):
+            channelIDsByLabel[id.label] = id
+            var mixer = session.activeSettings.mixer
+            mixer.channelAuxSends[id.label] = send > 0 ? send : nil
+            session.persistMixer(mixer)
+        case .setBusGain(let bus, let gain):
+            var mixer = session.activeSettings.mixer
+            mixer.busGains[bus.rawValue] = gain
+            session.persistMixer(mixer)
+        case .setBusMuted(let bus, let muted):
+            var mixer = session.activeSettings.mixer
+            if muted {
+                mixer.mutedBuses.insert(bus.rawValue)
+            } else {
+                mixer.mutedBuses.remove(bus.rawValue)
+            }
+            session.persistMixer(mixer)
+
+        // A05 multi-mic execution: mutate the persisted input list through
+        // SettingsSession (single truth); its apply starts/stops the affected
+        // devices' captures and mix channels live.
+        case .setAudioInputEnabled(let uid, let enabled):
+            var inputs = session.activeSettings.audioInputs
+            if let index = inputs.firstIndex(where: { $0.deviceUID == uid }) {
+                inputs[index].isEnabled = enabled
+            } else {
+                inputs.append(AudioInputSelection(deviceUID: uid, isEnabled: enabled))
+            }
+            session.persistAudioInputs(inputs)
+        case .setAudioInputMapping(let uid, let mapping):
+            var inputs = session.activeSettings.audioInputs
+            guard let index = inputs.firstIndex(where: { $0.deviceUID == uid }) else { return }
+            inputs[index].mapping = mapping
+            session.persistAudioInputs(inputs)
+        case .relinkAudioInput(let from, let to):
+            var inputs = session.activeSettings.audioInputs
+            guard let index = inputs.firstIndex(where: { $0.deviceUID == from }) else { return }
+            var entry = inputs[index]
+            inputs.remove(at: index)
+            entry.deviceUID = to
+            if let existing = inputs.firstIndex(where: { $0.deviceUID == to }) {
+                // The target already has a configured entry: enable wins,
+                // the relinked mapping (user's latest intent) replaces it.
+                inputs[existing].isEnabled = inputs[existing].isEnabled || entry.isEnabled
+                inputs[existing].mapping = entry.mapping
+            } else {
+                inputs.append(entry)
+            }
+            session.persistAudioInputs(inputs)
+
+        // A08 FX execution: persist the channel's chain through
+        // SettingsSession (single truth, live surface like the mixer); its
+        // apply pushes the chain onto the channel's running insert as
+        // parameter updates — no capture restart, no audio gap.
+        case .setChannelFXChain(let id, let chain):
+            channelIDsByLabel[id.label] = id
+            session.persistChannelFX(chain, forChannelLabel: id.label)
+
+        // A07 monitoring execution: persist through SettingsSession (single
+        // truth); its apply retargets the live monitor player in place.
+        case .setMonitoringEnabled(let enabled):
+            session.persistMonitoring(enabled: enabled,
+                                      deviceUID: session.activeSettings.monitorOutputDeviceUID)
+        case .setMonitorOutputDevice(let uid):
+            session.persistMonitoring(enabled: session.activeSettings.monitoringEnabled,
+                                      deviceUID: uid)
+
+        // A10 (issue #122): delay/ducking execution — persist through
+        // SettingsSession (single truth, live surfaces like the mixer); its
+        // apply shifts engine read windows / frame-hold lines / duck
+        // automation in place. Register the channel ID so the mixer push
+        // keeps addressing it too.
+        case .setChannelAudioDelay(let id, let ms):
+            channelIDsByLabel[id.label] = id
+            session.persistAudioDelay(ms, forChannelLabel: id.label)
+        case .setSourceVideoDelay(let id, let ms):
+            session.persistVideoDelay(ms,
+                                      forSourceKey: StreamController.videoDelaySettingsKey(for: id))
+        case .setDucking(let ducking):
+            session.persistDucking(ducking)
+
+        // A09 echo handling execution: persist through SettingsSession
+        // (single truth); its apply refreshes the controller's
+        // voice-isolation state reporting in place.
+        case .setEchoHandlingMode(let mode):
+            session.persistEchoHandlingMode(mode)
+
+        // A03 soundboard/playlist execution (issue #98): structural edits
+        // write the soundboard document (the controller's store observation
+        // hot-applies payload relinks and gains); transport acts on the ONE
+        // shared playback instance per pad/playlist, so a UI button and a
+        // hardware trigger can never fork playback.
+        case .addSoundPad(let pad):
+            soundboardStore.addPad(pad)
+        case .updateSoundPad(let pad):
+            soundboardStore.updatePad(pad)
+        case .removeSoundPad(let id):
+            soundboardStore.removePad(id)
+        case .triggerSoundPad(let id):
+            if let pad = soundboardStore.pad(withID: id) {
+                soundboard.triggerPad(pad)
+            }
+        case .stopSoundPad(let id):
+            if let pad = soundboardStore.pad(withID: id) {
+                soundboard.stopPad(pad)
+            }
+        case .stopAllSoundEffects:
+            soundboard.stopAllSoundEffects()
+        case .addMusicPlaylist(let playlist):
+            soundboardStore.addPlaylist(playlist)
+        case .updateMusicPlaylist(let playlist):
+            soundboardStore.updatePlaylist(playlist)
+        case .removeMusicPlaylist(let id):
+            soundboardStore.removePlaylist(id)
+        case .playlistPlay(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.playPlaylist(playlist)
+            }
+        case .playlistPause(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.pausePlaylist(playlist)
+            }
+        case .playlistStop(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.stopPlaylist(playlist)
+            }
+        case .playlistNext(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.nextTrack(playlist)
+            }
+        case .playlistPrevious(let id):
+            if let playlist = soundboardStore.playlist(withID: id) {
+                soundboard.previousTrack(playlist)
+            }
+        case .setSceneSoundBindings(let bindings, let sceneID):
+            // Scene content: stages (and implicitly takes in direct-live)
+            // like any other scene edit; the Take path fires the rules.
+            editStagedScene(sceneID) { $0.soundBindings = bindings }
 
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
@@ -1043,6 +1642,11 @@ final class StudioCommandDispatcher: ObservableObject {
             // the source of truth for the PUBLISHED composition only.
             guard let published = previewProgram.take() else { return }
             sceneStore.update(published)
+            // A03 (issue #98): entering the scene fires its bound sounds
+            // (enter stingers + ambient beds; the outgoing scene's exit
+            // stingers fire and its beds stop). Idempotent re-sync, so
+            // direct-live's implicit takes can't double-fire.
+            soundboard.syncProgramScene(published)
         case .revert:
             previewProgram.revert()
         case .setDirectLiveEditing(let on):
@@ -1102,6 +1706,8 @@ final class StudioCommandDispatcher: ObservableObject {
         guard previewProgram.directLiveEditing,
               let published = previewProgram.take() else { return }
         sceneStore.update(published)
+        // A03 (issue #98): direct-live's implicit takes fire scene sounds too.
+        soundboard.syncProgramScene(published)
     }
 
     // MARK: Layer helpers
@@ -1180,6 +1786,19 @@ final class StudioCommandDispatcher: ObservableObject {
         }
         if let group = scene.group(for: layer), group.isLocked {
             return .unavailable("Layer \"\(layer.name)\" belongs to locked group \"\(group.name)\" — unlock the group first.")
+        }
+        return nil
+    }
+
+    /// A02 (issue #97): the rejection for a media transport command — the
+    /// target must be a REGISTERED media source (transport is keyed by
+    /// registry source ID, the same identity playout and the mix engine use).
+    private func mediaTransportError(for id: SourceDefinitionID) -> StudioCommandError? {
+        guard let source = sceneStore.source(withID: id) else {
+            return .invalidTarget("Media source \(id) does not exist.")
+        }
+        guard source.payload.isMedia else {
+            return .invalidTarget("Source \"\(source.name)\" is not a media source.")
         }
         return nil
     }
@@ -1327,7 +1946,8 @@ final class StudioCommandDispatcher: ObservableObject {
              .alignLayers(_, let id),
              .distributeLayers(_, let id),
              .setOverlayHiddenInScene(_, _, let id),
-             .setSceneBackground(_, let id):
+             .setSceneBackground(_, let id),
+             .setSceneSoundBindings(_, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
         default:
             return nil
@@ -1471,10 +2091,93 @@ final class StudioCommandDispatcher: ObservableObject {
                 }),
             settingsPresented: session.isPresented,
             settingsDirty: session.isDirty,
+            mixer: session.activeSettings.mixer,
+            micVolume: session.activeSettings.micVolume,
+            channelFX: session.activeSettings.channelFX,
+            voicePolishEnabled: session.activeSettings.voicePolishEnabled,
+            monitoringEnabled: session.activeSettings.monitoringEnabled,
+            monitorOutputDeviceUID: session.activeSettings.monitorOutputDeviceUID,
+            monitorOutputFallback: controller.monitorOutput.isFallbackActive,
+            monitorFeedbackRiskDeviceUID: controller.monitorFeedbackRiskDeviceUID,
+            audioDelaysMs: session.activeSettings.audioDelaysMs,
+            videoDelaysMs: session.activeSettings.videoDelaysMs,
+            ducking: session.activeSettings.ducking,
+            echoHandlingMode: session.activeSettings.echoHandlingMode,
+            voiceIsolationActive: controller.voiceIsolationActive,
+            feedbackDiagnostics: controller.feedbackDiagnostics,
             canUndo: undoStack.canUndo,
             canRedo: undoStack.canRedo,
             undoLabel: undoStack.undoLabel,
             redoLabel: undoStack.redoLabel)
+        registerAppAudioMixerChannels()
+        pushMixerStateToEngine()
+    }
+
+    /// A06 (issue #118): app-audio sources are mixer-owned, never scene-bound
+    /// — no S05 `AudioBinding` addresses an `.application` channel, so the
+    /// mixer document (fader/mute, default unity) is their ONLY program-gain
+    /// surface. Their channel IDs register here, from the registry on every
+    /// store change, so `pushMixerStateToEngine` applies the persisted gain
+    /// even before the first audio buffer lands (the engine's pending gains
+    /// hold it until the channel auto-registers on enqueue).
+    private func registerAppAudioMixerChannels() {
+        for source in sceneStore.sources {
+            guard case .appAudio(let payload) = source.payload, payload.isEnabled
+            else { continue }
+            let id = AudioChannelID.application(bundleID: payload.channelBundleID)
+            channelIDsByLabel[id.label] = id
+        }
+    }
+
+    // MARK: Mixer engine push (A04, issue #83)
+
+    /// Applies the persisted mixer state to the audio engine through the
+    /// controller — idempotently, only when it changed. Runs from
+    /// `refreshState` so it fires after every mixer command AND after any
+    /// external settings write (Apply/revert); the controller mirrors the
+    /// pushed gains, so pipeline restarts re-apply the full mixer state.
+    private func pushMixerStateToEngine() {
+        let desired = (mixer: session.activeSettings.mixer,
+                       micVolume: session.activeSettings.micVolume)
+        if let last = lastPushedMixer, last == desired { return }
+        lastPushedMixer = desired
+        let mixer = desired.mixer
+        // A05 (issue #84): enabled additional mic channels register under
+        // their stable labels so their faders/mutes/solos persist in the
+        // mixer document and push to the engine like any non-capture
+        // channel — even before the device's first buffer lands.
+        for selection in session.activeSettings.audioInputs where selection.isEnabled {
+            let id = AudioChannelID.microphone(deviceUID: selection.deviceUID)
+            channelIDsByLabel[id.label] = id
+        }
+        // Channels: fader/mute per registered non-capture ID (capture levels
+        // are scene bindings). The DEFAULT mic's fader is the settings
+        // micVolume; A05 additional mics and other kinds read the mixer
+        // document.
+        for (label, id) in channelIDsByLabel {
+            if case .capture = id { continue }
+            let volume: Float
+            if id == .microphone(deviceUID: nil) {
+                volume = Float(max(0, min(desired.micVolume, 2)))
+            } else {
+                volume = Float(max(0, min(mixer.channelVolumes[label] ?? 1, 2)))
+            }
+            controller.applyMixerChannelGain(id, volume: volume,
+                                             isMuted: mixer.channelMutes[label] ?? false)
+        }
+        // Solo (monitor state) and aux sends (routing) apply to EVERY
+        // registered channel, capture channels included.
+        for (label, id) in channelIDsByLabel {
+            controller.applyMixerSolo(id, soloed: mixer.soloedChannels.contains(label))
+            controller.applyMixerAuxSend(id, gain: Float(mixer.channelAuxSends[label] ?? 0))
+        }
+        // Bus masters: a muted bus rides gain 0 while its fader value is
+        // preserved in the document.
+        for bus in AudioBus.allCases {
+            let gain = mixer.mutedBuses.contains(bus.rawValue)
+                ? 0 : (mixer.busGains[bus.rawValue] ?? 1)
+            controller.applyMixerBusGain(bus, gain: Float(gain))
+        }
     }
 
     // MARK: Rejection surfacing
@@ -1520,12 +2223,25 @@ private extension StudioCommand {
              .alignLayers, .distributeLayers,
              .addOverlay, .removeOverlay, .renameOverlay, .setOverlayVisibility,
              .setOverlayLocked, .setOverlayTransform, .setOverlayEffects, .moveOverlay,
-             .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground:
+             .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground,
+             .setSceneSoundBindings:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,
              .setOutputProfile,
+             .setChannelVolume, .setChannelMuted, .setChannelSolo,
+             .setChannelAuxSend, .setBusGain, .setBusMuted,
+             .setAudioInputEnabled, .setAudioInputMapping, .relinkAudioInput,
+             .setChannelFXChain,
+             .setMonitoringEnabled, .setMonitorOutputDevice, .setEchoHandlingMode,
+             .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
+             .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
+             .addSoundPad, .updateSoundPad, .removeSoundPad,
+             .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,
+             .addMusicPlaylist, .updateMusicPlaylist, .removeMusicPlaylist,
+             .playlistPlay, .playlistPause, .playlistStop,
+             .playlistNext, .playlistPrevious,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
              .undo, .redo:
@@ -1562,6 +2278,8 @@ private extension StudioCommand {
             return "overlay-effects.\(id)"
         case .setSceneBackground(_, let sceneID):
             return "scene-background.\(sceneID?.description ?? "staged")"
+        case .setSceneSoundBindings(_, let sceneID):
+            return "scene-sound-bindings.\(sceneID?.description ?? "staged")"
         case .setDefaultBackground:
             return "default-background"
         default:

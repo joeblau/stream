@@ -77,7 +77,8 @@ struct MainWindowView: View {
         case layers = "Layers"
         case sources = "Sources"
         case mixer = "Mixer"
-        case media = "Media"
+        // A03 (issue #98): the sound panel (soundboard, music, scene sounds).
+        case media = "Sound"
         case guests = "Guests"
         case destinations = "Destinations"
     }
@@ -452,11 +453,15 @@ struct MainWindowView: View {
             case .sources:
                 sourcesInspector
             case .mixer:
-                placeholder("Mixer", systemImage: "slider.vertical.3",
-                            message: "Per-source audio levels land here in a later workstream.")
+                // A04 (issue #83): the embedded mixer — one strip per active
+                // audio channel plus program/monitor masters.
+                MixerPanelView()
             case .media:
-                placeholder("Media", systemImage: "photo.on.rectangle",
-                            message: "Overlays, videos and images land here in a later workstream.")
+                // A03 (issue #98): the embedded sound panel — soundboard
+                // pads, music playlists, and the staged scene's sounds.
+                SoundboardPanelView()
+                    .environmentObject(dispatcher.soundboardStore)
+                    .environmentObject(dispatcher.soundboard)
             case .guests:
                 placeholder("Guests", systemImage: "person.2",
                             message: "Remote guest management lands here in a later workstream.")
@@ -489,6 +494,14 @@ struct MainWindowView: View {
             // C09 (issue #163): Syphon server sources — discovered servers,
             // add/rename/relink/remove, and per-source receive status.
             SyphonSourcesSectionView()
+            // A02 (issue #97): media file sources — add/rename/remove and
+            // per-source playback status alongside transport in the layer panel.
+            MediaSourcesSectionView()
+            // A06 (issue #118): app/system audio-only sources — add (running
+            // app or system mix), enable/disable, rename, retarget, remove,
+            // and per-source capture status. Demand is registration-based,
+            // independent of any screen scene.
+            AppAudioSourcesSectionView()
             // W03: the inspector edits the STAGED scene (what PREVIEW shows);
             // changes reach program only via Take.
             if let scene = previewProgram.stagedScene {

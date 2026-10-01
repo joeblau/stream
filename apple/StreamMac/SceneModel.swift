@@ -362,7 +362,8 @@ final class SceneStore: ObservableObject {
     func relinkSource(_ id: SourceDefinitionID, to payload: LayerPayload) {
         guard var definition = source(withID: id) else { return }
         switch (definition.payload, payload) {
-        case (.camera, .camera), (.screen, .screen), (.syphon, .syphon):
+        case (.camera, .camera), (.screen, .screen), (.syphon, .syphon), (.media, .media),
+             (.appAudio, .appAudio):
             break
         default:
             return
@@ -603,7 +604,15 @@ final class SceneStore: ObservableObject {
         }
         var canvas = original.canvas
         canvas.id = CanvasID()
-        let copy = Scene(name: "\(original.name) copy", canvas: canvas, groups: groups, layers: layers)
+        // A03 (issue #98): sound bindings copy with FRESH IDs (new mix
+        // channels), exactly like layers — nothing aliases the original.
+        let soundBindings = original.soundBindings.map { binding -> SceneSoundBinding in
+            var copy = binding
+            copy.id = SourceDefinitionID()
+            return copy
+        }
+        let copy = Scene(name: "\(original.name) copy", canvas: canvas, groups: groups,
+                         layers: layers, soundBindings: soundBindings)
         scenes.insert(copy, at: index + 1)
         if let folderID = sceneMembership[id] {
             sceneMembership[copy.id] = folderID

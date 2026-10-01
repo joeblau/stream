@@ -426,9 +426,77 @@ struct ShapeSourcePayload: Hashable, Codable, Sendable {
     var fillColorHex: String = "#FFFFFF"
 }
 
+/// A02 (issue #97): what a media source does when playback reaches the
+/// trim-out point (or the file's natural end). The issue's
+/// return-to-previous-scene / advance-the-rundown actions are scene-control
+/// decisions that belong to S08; this enum is the seam for them.
+enum MediaEndAction: String, Codable, CaseIterable, Sendable {
+    /// Freeze on the last frame (the renderer keeps painting it).
+    case hold
+    /// Rewind to the trim-in point and clear the frame (black fallback).
+    case stop
+
+    var displayName: String {
+        switch self {
+        case .hold: return "Hold Last Frame"
+        case .stop: return "Stop (Black)"
+        }
+    }
+}
+
+/// A02 (issue #97): a local video file (MP4/MOV/ProRes — anything
+/// AVFoundation reads) as a named, reusable source. The app is sandboxed, so
+/// the persisted identity is a SECURITY-SCOPED BOOKMARK created from the
+/// user's file pick, not the raw URL. Transport position/play state is
+/// session state and deliberately NOT here; the payload owns the durable
+/// playback policy (loop, autoplay, end action, trim points).
 struct MediaSourcePayload: Hashable, Codable, Sendable {
     var assetIdentifier: String? = nil
+    /// Security-scoped bookmark for the picked video file (the access grant).
+    var bookmarkData: Data? = nil
+    /// The picked file's display name (bookmarks don't round-trip one).
+    var fileName: String? = nil
     var loops: Bool = true
+    /// Start playing as soon as the source is loaded (first reference).
+    var autoplay: Bool = true
+    var endAction: MediaEndAction = .hold
+    /// Trim-in point in seconds (nil = file start).
+    var trimInSeconds: Double? = nil
+    /// Trim-out point in seconds (nil = natural end).
+    var trimOutSeconds: Double? = nil
+
+    init(assetIdentifier: String? = nil,
+         bookmarkData: Data? = nil,
+         fileName: String? = nil,
+         loops: Bool = true,
+         autoplay: Bool = true,
+         endAction: MediaEndAction = .hold,
+         trimInSeconds: Double? = nil,
+         trimOutSeconds: Double? = nil) {
+        self.assetIdentifier = assetIdentifier
+        self.bookmarkData = bookmarkData
+        self.fileName = fileName
+        self.loops = loops
+        self.autoplay = autoplay
+        self.endAction = endAction
+        self.trimInSeconds = trimInSeconds
+        self.trimOutSeconds = trimOutSeconds
+    }
+
+    /// The A02 fields were added after v2 shipped; decode every field with a
+    /// default so older persisted documents keep loading (additive wire
+    /// change, same pattern as `LayerNode.isLocked`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        assetIdentifier = try container.decodeIfPresent(String.self, forKey: .assetIdentifier)
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        loops = try container.decodeIfPresent(Bool.self, forKey: .loops) ?? true
+        autoplay = try container.decodeIfPresent(Bool.self, forKey: .autoplay) ?? true
+        endAction = try container.decodeIfPresent(MediaEndAction.self, forKey: .endAction) ?? .hold
+        trimInSeconds = try container.decodeIfPresent(Double.self, forKey: .trimInSeconds)
+        trimOutSeconds = try container.decodeIfPresent(Double.self, forKey: .trimOutSeconds)
+    }
 }
 
 struct PDFSourcePayload: Hashable, Codable, Sendable {
@@ -474,6 +542,74 @@ struct SceneReferencePayload: Hashable, Codable, Sendable {
     var sceneID: SceneID
 }
 
+/// A06 (issue #118): an application-audio source — the audio of one running
+/// app, or the whole-system mix, captured INDEPENDENTLY of any screen/video
+/// scene. App-audio sources live in the project source registry only (never
+/// as canvas layers: the payload is not renderable, so layer-add validation
+/// rejects it), and their capture demand is "registered + enabled" rather
+/// than "a visible layer references it".
+///
+/// Every field is part of the payload identity, so retargeting or toggling
+/// `isEnabled` re-keys the capture pool and restarts/stops the capture
+/// deliberately — exactly the C03 privacy-edit pattern.
+struct AppAudioSourcePayload: Hashable, Codable, Sendable {
+    enum Mode: String, Codable, CaseIterable, Sendable {
+        /// One running application, pinned by bundle identifier.
+        case application
+        /// The whole-system mix (every app except the studio itself and the
+        /// globally excluded apps). Per-app sources are excluded from this
+        /// mix at capture time so system + per-app never double.
+        case system
+    }
+    var mode: Mode = .application
+    /// The target app's bundle identifier (application mode).
+    var bundleID: String? = nil
+    /// The app's display name at registration time, so the row reads
+    /// sensibly after the app quits (the C10 missing state).
+    var appName: String? = nil
+    /// Whether the source captures. Demand = registered + enabled.
+    var isEnabled: Bool = true
+
+    init(mode: Mode = .application,
+         bundleID: String? = nil,
+         appName: String? = nil,
+         isEnabled: Bool = true) {
+        self.mode = mode
+        self.bundleID = bundleID
+        self.appName = appName
+        self.isEnabled = isEnabled
+    }
+
+    /// Decode every field with a default so documents written before later
+    /// A06 refinements keep loading (the established additive-wire pattern).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try container.decodeIfPresent(Mode.self, forKey: .mode) ?? .application
+        bundleID = try container.decodeIfPresent(String.self, forKey: .bundleID)
+        appName = try container.decodeIfPresent(String.self, forKey: .appName)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+    }
+
+    /// The synthetic channel key for the system mix (it has no bundle ID).
+    static let systemMixChannelID = "stream.system-mix"
+
+    /// The `AudioChannelID.application(bundleID:)` key this source feeds.
+    var channelBundleID: String {
+        switch mode {
+        case .system: return Self.systemMixChannelID
+        case .application: return bundleID ?? "unconfigured"
+        }
+    }
+
+    /// The display title for source rows and the mixer strip fallback.
+    var displayTitle: String {
+        switch mode {
+        case .system: return "System Audio"
+        case .application: return appName ?? bundleID ?? "Unconfigured App"
+        }
+    }
+}
+
 /// The typed content of one layer. Encoded as a `kind` discriminator string
 /// plus a per-kind payload object, decoupled from Swift case names, so the
 /// format grows (new kinds) without breaking older persisted documents.
@@ -489,6 +625,9 @@ enum LayerPayload: Hashable, Sendable {
     case guest(GuestSourcePayload)
     case syphon(SyphonSourcePayload)
     case scene(SceneReferencePayload)
+    /// A06 (issue #118): app/system audio-only capture. Registry-source only
+    /// — never a renderable canvas layer.
+    case appAudio(AppAudioSourcePayload)
 
     /// Stable discriminator used on the wire.
     var kind: String {
@@ -504,6 +643,7 @@ enum LayerPayload: Hashable, Sendable {
         case .guest: return "guest"
         case .syphon: return "syphon"
         case .scene: return "scene"
+        case .appAudio: return "appAudio"
         }
     }
 
@@ -519,6 +659,17 @@ enum LayerPayload: Hashable, Sendable {
 
     var isSyphon: Bool {
         if case .syphon = self { return true }
+        return false
+    }
+
+    var isMedia: Bool {
+        if case .media = self { return true }
+        return false
+    }
+
+    /// A06 (issue #118): an app/system audio-only registry source.
+    var isAppAudio: Bool {
+        if case .appAudio = self { return true }
         return false
     }
 
@@ -539,12 +690,14 @@ enum LayerPayload: Hashable, Sendable {
 
     /// True when the current render path can actually paint this kind:
     /// camera/screen through the capture pipeline (S03), solid-color shapes
-    /// and text generated directly by `SceneRenderer` (S07), and nested
-    /// scenes rendered recursively (S06). The rest are model-only until the
-    /// composition engine grows source support. UI must mark non-renderable
-    /// kinds rather than implying they show on output.
+    /// and text generated directly by `SceneRenderer` (S07), nested
+    /// scenes rendered recursively (S06), and media (A02, issue #97: video
+    /// file playout pulled per tick from the pool's playback engines). The
+    /// rest are model-only until the composition engine grows source
+    /// support. UI must mark non-renderable kinds rather than implying they
+    /// show on output.
     var isRenderable: Bool {
-        isCamera || isScreen || isText || isShape || isScene || isSyphon
+        isCamera || isScreen || isText || isShape || isScene || isSyphon || isMedia
     }
 
     /// Short human name for layer-panel rows and add-layer menus.
@@ -561,6 +714,7 @@ enum LayerPayload: Hashable, Sendable {
         case .guest: return "Guest"
         case .syphon: return "Syphon"
         case .scene: return "Scene"
+        case .appAudio: return "App Audio"
         }
     }
 
@@ -578,13 +732,14 @@ enum LayerPayload: Hashable, Sendable {
         case .guest: return "person.2.fill"
         case .syphon: return "app.connected.to.app.below.fill"
         case .scene: return "rectangle.on.rectangle"
+        case .appAudio: return "speaker.wave.2.fill"
         }
     }
 }
 
 extension LayerPayload: Codable {
     private enum Kind: String, Codable {
-        case camera, screen, image, text, shape, media, pdf, web, guest, syphon, scene
+        case camera, screen, image, text, shape, media, pdf, web, guest, syphon, scene, appAudio
     }
     private enum CodingKeys: String, CodingKey {
         case kind, payload
@@ -615,6 +770,8 @@ extension LayerPayload: Codable {
             self = .syphon(try container.decode(SyphonSourcePayload.self, forKey: .payload))
         case .scene:
             self = .scene(try container.decode(SceneReferencePayload.self, forKey: .payload))
+        case .appAudio:
+            self = .appAudio(try container.decode(AppAudioSourcePayload.self, forKey: .payload))
         }
     }
 
@@ -653,6 +810,9 @@ extension LayerPayload: Codable {
             try container.encode(payload, forKey: .payload)
         case .scene(let payload):
             try container.encode(Kind.scene, forKey: .kind)
+            try container.encode(payload, forKey: .payload)
+        case .appAudio(let payload):
+            try container.encode(Kind.appAudio, forKey: .kind)
             try container.encode(payload, forKey: .payload)
         }
     }
@@ -934,6 +1094,83 @@ enum HexColor {
     }
 }
 
+// MARK: - Scene sounds (A03, issue #98)
+
+/// When a scene-sound binding fires. Enter/exit are one-shot stingers (they
+/// play through to the end even across a following scene change); `continue`
+/// is an ambient bed that loops while the scene is on program.
+enum SceneSoundRule: String, Codable, CaseIterable, Sendable {
+    case enter
+    case exit
+    case `continue`
+
+    var displayName: String {
+        switch self {
+        case .enter: return "On Enter (Stinger)"
+        case .exit: return "On Exit (Stinger)"
+        case .continue: return "Continue (Ambient Bed)"
+        }
+    }
+}
+
+/// A03 (issue #98): one sound bound to a scene — an enter/exit stinger or a
+/// looping ambient bed. Scene CONTENT: bindings stage, Take, revert, and undo
+/// exactly like layers, and the Take path (W05 dispatcher →
+/// `SoundboardController.syncProgramScene`) fires the rules as the scene
+/// enters/leaves program. The binding carries its own security-scoped
+/// bookmark (self-contained, the soundboard pattern), and its `id` doubles as
+/// the `.media(id)` mix-channel identity, so a relinked clip keeps its
+/// channel (and level) — hardware triggers route through the studio engine
+/// and are audible in the broadcast, as the issue requires.
+struct SceneSoundBinding: Identifiable, Hashable, Codable, Sendable {
+    /// Stable identity — also the `.media(id)` mix-channel key.
+    var id: SourceDefinitionID
+    var rule: SceneSoundRule
+    var name: String
+    /// Security-scoped bookmark for the picked audio file (the access grant).
+    var bookmarkData: Data?
+    /// The picked file's display name (bookmarks don't round-trip one).
+    var fileName: String?
+    /// Linear program gain, 0...2 (1 = unity).
+    var volume: Double
+
+    init(id: SourceDefinitionID = SourceDefinitionID(),
+         rule: SceneSoundRule = .enter,
+         name: String,
+         bookmarkData: Data? = nil,
+         fileName: String? = nil,
+         volume: Double = 1) {
+        self.id = id
+        self.rule = rule
+        self.name = name
+        self.bookmarkData = bookmarkData
+        self.fileName = fileName
+        self.volume = volume
+    }
+
+    /// Decode every field with a default so documents written before later
+    /// A03 refinements keep loading (the established additive-wire pattern).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(SourceDefinitionID.self, forKey: .id) ?? SourceDefinitionID()
+        rule = try container.decodeIfPresent(SceneSoundRule.self, forKey: .rule) ?? .enter
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Sound"
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 1
+    }
+
+    /// Builds a binding from a user-picked audio file (nil when the bookmark
+    /// can't be created).
+    static func make(pickedFile url: URL, rule: SceneSoundRule) -> SceneSoundBinding? {
+        guard let payload = MediaSourceFactory.payload(forPickedFile: url) else { return nil }
+        return SceneSoundBinding(rule: rule,
+                                 name: url.deletingPathExtension().lastPathComponent,
+                                 bookmarkData: payload.bookmarkData,
+                                 fileName: payload.fileName)
+    }
+}
+
 // MARK: - Scene
 
 /// One switchable scene: an ordered layer graph on a canvas. `layers` is
@@ -952,6 +1189,10 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
     /// stable LayerIDs of `SceneDocument.overlays` entries this scene hides.
     /// Scene-local content, so overrides stage and Take like any scene edit.
     var hiddenOverlayIDs: Set<LayerID>
+    /// A03 (issue #98): the scene's bound sounds (enter/exit stingers,
+    /// continue ambient beds). Scene content — staged, Taken, reverted, and
+    /// undone like layers; the Take path fires their rules.
+    var soundBindings: [SceneSoundBinding]
 
     init(id: SceneID = SceneID(),
          name: String,
@@ -959,7 +1200,8 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
          groups: [LayerGroup] = [],
          layers: [LayerNode],
          background: SceneBackground? = nil,
-         hiddenOverlayIDs: Set<LayerID> = []) {
+         hiddenOverlayIDs: Set<LayerID> = [],
+         soundBindings: [SceneSoundBinding] = []) {
         self.id = id
         self.name = name
         self.canvas = canvas
@@ -967,11 +1209,13 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         self.layers = layers
         self.background = background
         self.hiddenOverlayIDs = hiddenOverlayIDs
+        self.soundBindings = soundBindings
     }
 
     /// `background`/`hiddenOverlayIDs` were added after v2 shipped; decode
     /// them with defaults so older persisted documents keep loading
     /// (additive wire change, same pattern as `LayerNode.isLocked`).
+    /// A03's `soundBindings` follows the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(SceneID.self, forKey: .id)
@@ -981,6 +1225,7 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         layers = try container.decode([LayerNode].self, forKey: .layers)
         background = try container.decodeIfPresent(SceneBackground.self, forKey: .background)
         hiddenOverlayIDs = try container.decodeIfPresent(Set<LayerID>.self, forKey: .hiddenOverlayIDs) ?? []
+        soundBindings = try container.decodeIfPresent([SceneSoundBinding].self, forKey: .soundBindings) ?? []
     }
 }
 

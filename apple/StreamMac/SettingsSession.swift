@@ -117,4 +117,136 @@ final class SettingsSession: ObservableObject {
         draftCredentials = [activeSettings.selectedProtocol:
             (activeSettings.rtmpURL, activeSettings.streamKey)]
     }
+
+    // MARK: - A04 mixer persistence (issue #83)
+
+    /// Persists the mixer document straight into the APPLIED settings and
+    /// mirrors it into the draft — the mixer is a live performance surface,
+    /// not a draft/Apply editor. Mirroring keeps `draft.mixer` fresh so a
+    /// later settings Apply can't roll mixer state back, and `isDirty` is
+    /// unaffected. The dispatcher ramps the live engine gains itself.
+    func persistMixer(_ mixer: MixerSettings) {
+        activeSettings.mixer = mixer
+        draft.mixer = mixer
+        scheduleLiveSettingsSave()
+    }
+
+    /// The mixer's mic fader is the live face of `micVolume`: persist it and
+    /// mirror it into the draft without the Apply dance (same freshness rule
+    /// as `persistMixer`). The dispatcher applies the live, ramped engine
+    /// gain — mixer mute state lives there, not in settings.
+    func persistMicVolume(_ value: Double) {
+        let clamped = max(0, min(value, 2))
+        activeSettings.micVolume = clamped
+        draft.micVolume = clamped
+        scheduleLiveSettingsSave()
+    }
+
+    /// A05 (issue #84): persists the additional-input device list (enable /
+    /// hardware-channel mapping / relink) straight into the APPLIED settings
+    /// and applies it to the live pipeline — like the mixer, this is a live
+    /// session surface, not a draft/Apply edit. Mirroring keeps
+    /// `draft.audioInputs` fresh so a later settings Apply can't roll the
+    /// input list back, and `isDirty` is unaffected. The controller's
+    /// `applySavedSettings` diff starts/stops the affected devices' captures
+    /// and mix channels in place.
+    func persistAudioInputs(_ inputs: [AudioInputSelection]) {
+        activeSettings.audioInputs = inputs
+        draft.audioInputs = inputs
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// A08 (issue #120): persists one channel's effect chain (preset pick,
+    /// section toggle, parameter scrub, reset) straight into the APPLIED
+    /// settings — the FX rack is a live performance surface like the mixer,
+    /// not a draft/Apply editor. Mirroring keeps `draft.channelFX` fresh so a
+    /// later settings Apply can't roll chains back, and `isDirty` is
+    /// unaffected. The controller's `applySavedSettings` diff pushes the new
+    /// chain onto the channel's RUNNING insert as parameter updates — no
+    /// capture restart, no ring reset, no audio gap.
+    func persistChannelFX(_ chain: ChannelFXChain, forChannelLabel label: String) {
+        activeSettings.channelFX[label] = chain
+        draft.channelFX = activeSettings.channelFX
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// A07 (issue #119): persists the headphone-monitoring configuration
+    /// (enable + monitor output device) straight into the APPLIED settings
+    /// and applies it live — like the mixer and the input list, this is a
+    /// live session surface, not a draft/Apply edit. Mirroring keeps the
+    /// draft fresh so a later settings Apply can't roll monitoring back.
+    /// The controller's apply retargets the monitor player in place.
+    func persistMonitoring(enabled: Bool, deviceUID: String?) {
+        activeSettings.monitoringEnabled = enabled
+        activeSettings.monitorOutputDeviceUID = deviceUID
+        draft.monitoringEnabled = enabled
+        draft.monitorOutputDeviceUID = deviceUID
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// A09 (issue #121): persists the echo handling mode straight into the
+    /// APPLIED settings and applies it live — like monitoring, a live session
+    /// surface, not a draft/Apply edit. Mirroring keeps the draft fresh so a
+    /// later settings Apply can't roll the mode back. The controller's apply
+    /// refreshes the voice-isolation state reporting in place.
+    func persistEchoHandlingMode(_ mode: EchoHandlingMode) {
+        activeSettings.echoHandlingMode = mode
+        draft.echoHandlingMode = mode
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// A10 (issue #122): persists one channel's audio delay (ms; 0 removes
+    /// the entry) straight into the APPLIED settings and applies it live —
+    /// a live performance surface like the mixer, not a draft/Apply edit.
+    /// The controller's apply shifts the channel's engine read window in
+    /// place (no capture restart, no clock re-anchor).
+    func persistAudioDelay(_ ms: Double, forChannelLabel label: String) {
+        let clamped = AVSyncDelay.clampedAudioDelayMs(ms)
+        activeSettings.audioDelaysMs[label] = clamped > 0 ? clamped : nil
+        draft.audioDelaysMs = activeSettings.audioDelaysMs
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// A10 (issue #122): persists one registry source's video delay (ms;
+    /// 0 removes the entry) the same live way. The controller's apply
+    /// re-targets both composition engines' frame-hold lines in place.
+    func persistVideoDelay(_ ms: Double, forSourceKey key: String) {
+        let clamped = AVSyncDelay.clampedVideoDelayMs(ms)
+        activeSettings.videoDelaysMs[key] = clamped > 0 ? clamped : nil
+        draft.videoDelaysMs = activeSettings.videoDelaysMs
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// A10 (issue #122): persists the whole ducking configuration (enable,
+    /// sidechain, threshold/reduction/envelope, targets) the same live way.
+    /// The controller's apply reconfigures the engine's duck automation —
+    /// bypass ramps ducked channels back to the user-set gains.
+    func persistDucking(_ ducking: DuckingSettings) {
+        activeSettings.ducking = ducking
+        draft.ducking = ducking
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// Debounced settings write for live-surface edits (mixer fader scrubs,
+    /// A05 input toggles): a scrub dispatches a command per tick, and the
+    /// state updates above must stay synchronous (publishers fire, the
+    /// engine ramps live), but the FILE write coalesces to one save per
+    /// gesture instead of one per tick.
+    private var mixerSaveTask: Task<Void, Never>?
+
+    private func scheduleLiveSettingsSave() {
+        mixerSaveTask?.cancel()
+        mixerSaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.store.save(self.activeSettings)
+        }
+    }
 }
