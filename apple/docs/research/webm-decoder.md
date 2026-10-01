@@ -46,6 +46,15 @@ the native-compatibility acceptance criterion or advertising format support.
 The HEVC fixture name alone also does not prove alpha survived encoding;
 inspect decoded alpha on that unrestricted run.
 
+The Native Media Research workflow repeats the complete prototype on hosted
+macOS 15 and 26 runners. `G10_REQUIRE_NATIVE_CONTROLS=1` makes the run fail
+unless H.264 and ProRes decode all 60 frames and ProRes retains alpha 0–255;
+an unavailable codec service can no longer produce a green qualification
+check. The harness writes `native-probes.json`, elapsed decode/seek results,
+fixtures and reference masks for review. The workflow does not install or
+link a decoder into the product. macOS 14 still requires a separate run with
+a compatible Swift 6 toolchain; the hosted matrix is not minimum-OS evidence.
+
 ## Bounds and limitations
 
 The parser rejects files over 512 MiB, enforces a shared one-million-element

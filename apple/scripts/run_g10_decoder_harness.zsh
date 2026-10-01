@@ -19,7 +19,11 @@ clang -O2 -I"$VPX_PREFIX/include" -c scripts/g10_vpx_bridge.c -o "$G10_DIR/bridg
 swiftc -swift-version 6 -parse-as-library -import-objc-header scripts/g10_vpx_bridge.h \
     StreamCore/WebMContainer.swift scripts/g10_decoder_harness.swift "$G10_DIR/bridge.o" \
     -L"$VPX_PREFIX/lib" -lvpx -o "$G10_DIR/decoder"
-"$G10_DIR/decoder" "$G10_DIR/fixtures" "$G10_DIR/results" | tee "$G10_DIR/results.txt"
+typeset -a decoder_options=()
+if [[ "${G10_REQUIRE_NATIVE_CONTROLS:-0}" == 1 ]]; then
+    decoder_options+=(--require-native-controls)
+fi
+"$G10_DIR/decoder" "$G10_DIR/fixtures" "$G10_DIR/results" "${decoder_options[@]}" | tee "$G10_DIR/results.txt"
 for codec in vp8 vp9; do
     decoder="libvpx"
     if [[ "$codec" == vp9 ]]; then decoder="libvpx-vp9"; fi
