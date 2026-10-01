@@ -243,6 +243,18 @@ final class CaptureSourcePool: ObservableObject {
                 }
             }
         }.store(in: &cancellables)
+        // C02: a pinned-source start that fails BEFORE any frame (missing
+        // display/window/app, permission denial) never flips `isCapturing`,
+        // so the sink above stays silent — mirror terminal error messages
+        // too, or the sources UI would read "idle" instead of "error".
+        capture.$errorMessage.sink { [weak self, weak capture] _ in
+            Task { @MainActor [weak self, weak capture] in
+                guard let self, let capture,
+                      let message = capture.errorMessage,
+                      !capture.isCapturing else { return }
+                self.sourceErrors[key] = message
+            }
+        }.store(in: &cancellables)
         publishFrameHolders()
         return capture
     }

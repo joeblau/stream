@@ -10,8 +10,14 @@ private let screenSourceLog = Logger(subsystem: "com.joeblau.StreamMac", categor
 /// sample buffers to the publisher layer.
 ///
 /// `pickAndStart()` presents `SCContentSharingPicker` for the user to choose a
-/// display, window, or application; when the picker cannot present or report a
-/// selection (e.g. headless runs) it falls back to capturing the first display.
+/// display, window, or application (the DEFAULT, unpinned source path).
+/// `start(matching:)` silently resolves a registry `ScreenSourcePayload`'s
+/// pinned display (`CGDirectDisplayID`), window (`CGWindowID`, with an
+/// owning-app + title relink fallback — window IDs are volatile), or
+/// application (bundle identifier) target. A pinned target that cannot be
+/// resolved surfaces an error and captures NOTHING: it never falls back to
+/// the first display or an arbitrary window, so a missing source can never
+/// expose unrelated desktop content (C02, issue #77).
 /// `start(with:)` accepts a filter directly for callers that already know what
 /// to capture.
 @MainActor
@@ -62,9 +68,10 @@ final class ScreenSourceCapture: ObservableObject {
     /// Presents the system content-sharing picker, then starts an SCStream for
     /// whatever the user selects. A restart of an unchanged source reuses the
     /// remembered selection instead of re-prompting (S05, issue #73); the
-    /// picker only appears when no selection exists yet. Falls back to the
-    /// first display when the picker fails to start; a user cancel simply
-    /// leaves capture off.
+    /// picker only appears when no selection exists yet. A user cancel simply
+    /// leaves capture off; a picker that fails to start surfaces an error —
+    /// it NEVER silently captures the first display (C02, issue #77), so an
+    /// unpinned source can't expose content the user didn't choose.
     func pickAndStart() async {
         guard stream == nil, pickerContinuation == nil else { return }
         errorMessage = nil
@@ -82,7 +89,7 @@ final class ScreenSourceCapture: ObservableObject {
         if let selection {
             await start(with: selection.value)
         } else if pickerStartFailed {
-            await startWithFirstDisplay()
+            errorMessage = "The content-sharing picker could not be presented. Add a screen source from the Sources tab instead, or try again."
         }
     }
 
@@ -146,38 +153,37 @@ final class ScreenSourceCapture: ObservableObject {
     }
 
     /// Starts capturing the concrete target a registry `ScreenSourcePayload`
-    /// pins, WITHOUT presenting the picker (S05): displays resolve by
-    /// `CGDirectDisplayID`, windows by `CGWindowID`. An unresolvable target —
-    /// the display/window is gone, or an application target, which has no
-    /// stable restorable identifier yet — falls back to the remembered
-    /// selection or the picker so the user can re-point the source.
+    /// pins, WITHOUT presenting the picker (S05/C02):
+    /// - display: resolves by `CGDirectDisplayID`;
+    /// - window: resolves by `CGWindowID`, falling back to a RELINK match on
+    ///   the persisted owning-app bundle ID + window title (window IDs are
+    ///   volatile — they change when the app relaunches or recreates the
+    ///   window). The relinked ID is used for this run only; C10 owns
+    ///   persisting relinked identities back to the document;
+    /// - application: resolves by bundle identifier and captures the display
+    ///   the app's windows sit on, filtered to that app's windows only.
+    ///
+    /// A pinned target that cannot be resolved sets `errorMessage` and
+    /// captures NOTHING — never the first display, never the picker — so a
+    /// disconnected display, closed window, or quit app can't silently expose
+    /// unrelated desktop content (C02 acceptance).
     func start(matching payload: ScreenSourcePayload) async {
         guard stream == nil, pickerContinuation == nil else { return }
+        errorMessage = nil
         do {
             let content = try await SCShareableContent.current
-            switch payload.target {
-            case .display:
-                if let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
-                   let display = content.displays.first(where: { $0.displayID == id }) {
-                    await start(with: SCContentFilter(display: display, excludingWindows: []))
-                    return
-                }
-            case .window:
-                if let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
-                   let window = content.windows.first(where: { $0.windowID == id }) {
-                    await start(with: SCContentFilter(desktopIndependentWindow: window))
-                    return
-                }
-            case .application:
-                break
+            switch Self.resolve(payload, in: content) {
+            case .filter(let filter):
+                await start(with: filter)
+            case .missing(let reason):
+                errorMessage = reason
+                screenSourceLog.error("Pinned screen source unresolvable: \(reason, privacy: .public)")
             }
         } catch {
             // Most commonly the Screen Recording permission is missing.
             errorMessage = "Screen Recording permission is required. Enable it for StreamMac in System Settings > Privacy & Security > Screen Recording. (\(error.localizedDescription))"
             screenSourceLog.error("Shareable content unavailable: \(error.localizedDescription, privacy: .public)")
-            return
         }
-        await pickAndStart()
     }
 
     func stop() async {
@@ -198,22 +204,88 @@ final class ScreenSourceCapture: ObservableObject {
         screenSourceLog.info("ScreenCaptureKit stream stopped")
     }
 
-    // MARK: - Picker
+    // MARK: - Pinned target resolution (C02, issue #77)
 
-    private func startWithFirstDisplay() async {
-        do {
-            let content = try await SCShareableContent.current
-            guard let display = content.displays.first else {
-                errorMessage = "No display is available to capture."
-                return
+    /// The outcome of pinning a payload to live shareable content: a filter
+    /// to capture, or a plain-language reason the target is unavailable.
+    enum PinnedResolution {
+        case filter(SCContentFilter)
+        case missing(String)
+    }
+
+    /// Maps a pinned payload to a live `SCContentFilter`. Pure lookup — no
+    /// picker, no fallback to unrelated content. `nonisolated` because it
+    /// reads only its arguments, so the picker UI can reuse it for previews.
+    nonisolated static func resolve(_ payload: ScreenSourcePayload,
+                                    in content: SCShareableContent) -> PinnedResolution {
+        switch payload.target {
+        case .display:
+            if let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
+               let display = content.displays.first(where: { $0.displayID == id }) {
+                return .filter(SCContentFilter(display: display, excludingWindows: []))
             }
-            await start(with: SCContentFilter(display: display, excludingWindows: []))
-        } catch {
-            // Most commonly the Screen Recording permission is missing.
-            errorMessage = "Screen Recording permission is required. Enable it for StreamMac in System Settings > Privacy & Security > Screen Recording. (\(error.localizedDescription))"
-            screenSourceLog.error("Shareable content unavailable: \(error.localizedDescription, privacy: .public)")
+            return .missing("The display this source captures is not connected. Reconnect it, or change the source's target from the Sources tab.")
+        case .window:
+            if let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
+               let window = content.windows.first(where: { $0.windowID == id }) {
+                return .filter(SCContentFilter(desktopIndependentWindow: window))
+            }
+            // Relink: `CGWindowID` is volatile, so a stale ID falls back to
+            // the persisted owning app + title. The match is intentionally
+            // exact on title — a fuzzy match could capture the WRONG window.
+            if let bundleID = payload.applicationBundleID {
+                let candidates = content.windows.filter {
+                    $0.owningApplication?.bundleIdentifier == bundleID
+                }
+                let relinked: SCWindow?
+                if let title = payload.windowTitle, !title.isEmpty {
+                    relinked = candidates.first(where: { $0.title == title })
+                } else {
+                    relinked = candidates.first
+                }
+                if let relinked {
+                    screenSourceLog.info("Relinked window source by owning app + title (new windowID=\(relinked.windowID, privacy: .public))")
+                    return .filter(SCContentFilter(desktopIndependentWindow: relinked))
+                }
+            }
+            return .missing("The window this source captures is no longer open. Reopen it, or change the source's target from the Sources tab.")
+        case .application:
+            guard let bundleID = payload.targetIdentifier ?? payload.applicationBundleID,
+                  let application = content.applications.first(where: { $0.bundleIdentifier == bundleID })
+            else {
+                return .missing("The application this source captures is not running. Launch it, or change the source's target from the Sources tab.")
+            }
+            // ScreenCaptureKit has no app-only filter; capture the display
+            // the app's windows sit on, filtered down to that app's windows.
+            let windows = content.windows.filter {
+                $0.owningApplication?.bundleIdentifier == bundleID
+            }
+            guard let display = displayHosting(windows, in: content) else {
+                return .missing("\(application.applicationName) has no open windows to capture. Open a window, or change the source's target.")
+            }
+            return .filter(SCContentFilter(display: display, including: [application], exceptingWindows: []))
         }
     }
+
+    /// The display with the largest overlap of any of `windows` — where the
+    /// app visually "is". Nil when the app has no on-screen windows.
+    nonisolated private static func displayHosting(_ windows: [SCWindow],
+                                                   in content: SCShareableContent) -> SCDisplay? {
+        var best: (display: SCDisplay, area: CGFloat)?
+        for window in windows {
+            for display in content.displays {
+                let overlap = display.frame.intersection(window.frame)
+                guard !overlap.isNull else { continue }
+                let area = overlap.width * overlap.height
+                if area > (best?.area ?? 0) {
+                    best = (display, area)
+                }
+            }
+        }
+        return best?.display
+    }
+
+    // MARK: - Picker
 
     private func pickerDidCancel() {
         guard let continuation = pickerContinuation else { return }

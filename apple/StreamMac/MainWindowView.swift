@@ -473,6 +473,10 @@ struct MainWindowView: View {
 
     private var sourcesInspector: some View {
         Form {
+            // C02 (issue #77): the screen-source registry — add (pinned
+            // display/window/application picker), rename, retarget, remove,
+            // and per-source capture status.
+            ScreenSourcesSectionView()
             // W03: the inspector edits the STAGED scene (what PREVIEW shows);
             // changes reach program only via Take.
             if let scene = previewProgram.stagedScene {

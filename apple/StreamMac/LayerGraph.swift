@@ -221,7 +221,39 @@ struct ScreenSourcePayload: Hashable, Codable, Sendable {
     var target: Target = .display
     /// Restorable identifier of the specific display/window/app;
     /// nil = ask through the system content picker on first use.
+    /// - display: decimal `CGDirectDisplayID` string;
+    /// - window: decimal `CGWindowID` string (volatile — see `windowTitle`);
+    /// - application: the app's bundle identifier.
     var targetIdentifier: String? = nil
+    /// C02 (issue #77): the owning app's bundle identifier for window
+    /// targets. A `CGWindowID` is volatile — it changes every time the app
+    /// relaunches or recreates the window — so relinking matches the owning
+    /// app (this) plus `windowTitle` instead. C10 owns full relinking.
+    var applicationBundleID: String? = nil
+    /// C02: the window title persisted alongside `targetIdentifier`; the
+    /// second half of the window relink key (owning app + title).
+    var windowTitle: String? = nil
+
+    init(target: Target = .display,
+         targetIdentifier: String? = nil,
+         applicationBundleID: String? = nil,
+         windowTitle: String? = nil) {
+        self.target = target
+        self.targetIdentifier = targetIdentifier
+        self.applicationBundleID = applicationBundleID
+        self.windowTitle = windowTitle
+    }
+
+    /// The C02 relink fields were added after v2 shipped; decode every field
+    /// with a default so older persisted documents keep loading (additive
+    /// wire change, same pattern as `LayerNode.isLocked`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        target = try container.decodeIfPresent(Target.self, forKey: .target) ?? .display
+        targetIdentifier = try container.decodeIfPresent(String.self, forKey: .targetIdentifier)
+        applicationBundleID = try container.decodeIfPresent(String.self, forKey: .applicationBundleID)
+        windowTitle = try container.decodeIfPresent(String.self, forKey: .windowTitle)
+    }
 }
 
 struct ImageSourcePayload: Hashable, Codable, Sendable {
