@@ -538,6 +538,12 @@ struct MainWindowView: View {
             // the selected layer — layer overrides (staged scene content)
             // versus bound-source defaults (project-level), plus presets.
             SourceEffectsSectionView()
+            // E05 (issue #109): capability-gated hardware camera controls
+            // (focus/exposure/white-balance modes) and macOS reactions.
+            CameraControlsSectionView()
+            // E06 (issue #165): VISCA-over-IP PTZ targets, presets, and
+            // opt-in recall-on-Take links.
+            PTZControlSectionView()
         }
         .formStyle(.grouped)
     }
