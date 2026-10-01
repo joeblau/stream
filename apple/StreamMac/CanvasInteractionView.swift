@@ -65,10 +65,50 @@ enum CanvasGeometry {
             .map { rotated($0, around: center, degrees: degrees) }
     }
 
-    /// Point-in-layer test honoring rotation (rotate the probe back into the
-    /// layer's unrotated frame and test the plain rect).
+    /// G03 (issue #106): the layer's corners with STYLING accounted for —
+    /// the perspective tilt projects the rect's corners (matching the
+    /// renderer's `CIPerspectiveTransform` quad exactly) and the S04 rotation
+    /// then maps the projected quad, the same order the renderer applies
+    /// them. Shadows are decorative and excluded; borders stroke inside the
+    /// rect, so neither changes the bounds. Identity perspective = the plain
+    /// rotated corners.
+    static func styledCorners(of rect: CGRect, degrees: Double,
+                              perspective: LayerPerspective) -> [CGPoint] {
+        guard !perspective.isIdentity else { return corners(of: rect, degrees: degrees) }
+        let projected = perspective.projectedCorners(of: rect)
+        let quad = [projected.topLeft, projected.topRight,
+                    projected.bottomRight, projected.bottomLeft]
+        guard degrees != 0 else { return quad }
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        return quad.map { rotated($0, around: center, degrees: degrees) }
+    }
+
+    /// Point-in-quad test for a convex quad (the perspective projection
+    /// stays convex across the clamped ±80° range), corners in tl/tr/br/bl
+    /// order.
+    static func quadContains(_ point: CGPoint, _ corners: [CGPoint]) -> Bool {
+        guard corners.count == 4 else { return false }
+        var positive = false
+        var negative = false
+        for index in 0..<4 {
+            let a = corners[index]
+            let b = corners[(index + 1) % 4]
+            let cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+            if cross > 0 { positive = true } else if cross < 0 { negative = true }
+            if positive && negative { return false }
+        }
+        return true
+    }
+
+    /// Point-in-layer test honoring rotation and G03 perspective styling.
     static func contains(_ point: CGPoint, layer: LayerNode, canvas: CGSize) -> Bool {
         let rect = rect(for: layer.transform, canvas: canvas)
+        let perspective = layer.style.perspective
+        if !perspective.isIdentity {
+            return quadContains(point, styledCorners(of: rect,
+                                                     degrees: layer.transform.rotationDegrees,
+                                                     perspective: perspective))
+        }
         guard layer.transform.rotationDegrees != 0 else { return rect.contains(point) }
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let local = rotated(point, around: center, degrees: -layer.transform.rotationDegrees)
@@ -84,12 +124,13 @@ enum CanvasGeometry {
         return nil
     }
 
-    /// The axis-aligned bounding box of layers' ROTATED corners — the
-    /// selection bounds the chrome and snapping use.
+    /// The axis-aligned bounding box of layers' STYLED corners (rotation +
+    /// G03 perspective) — the selection bounds the chrome and snapping use.
     static func boundingRect(of layers: [LayerNode], canvas: CGSize) -> CGRect {
         layers.reduce(CGRect.null) { bounds, layer in
             let rect = rect(for: layer.transform, canvas: canvas)
-            return corners(of: rect, degrees: layer.transform.rotationDegrees)
+            return styledCorners(of: rect, degrees: layer.transform.rotationDegrees,
+                                 perspective: layer.style.perspective)
                 .reduce(bounds) { $0.union(CGRect(origin: $1, size: .zero)) }
         }
     }
@@ -622,7 +663,9 @@ struct CanvasInteractionView: View {
 
         if editable.count == 1, let layer = editable.first {
             let rect = CanvasGeometry.rect(for: layer.transform, canvas: canvasSize)
-            let corners = CanvasGeometry.corners(of: rect, degrees: layer.transform.rotationDegrees)
+            let corners = CanvasGeometry.styledCorners(of: rect,
+                                                       degrees: layer.transform.rotationDegrees,
+                                                       perspective: layer.style.perspective)
             let topMid = CanvasGeometry.midpoint(corners[0], corners[1])
             let bottomMid = CanvasGeometry.midpoint(corners[3], corners[2])
             let up = unitVector(from: bottomMid, to: topMid)
@@ -666,7 +709,9 @@ struct CanvasInteractionView: View {
             let editable = editableSelection(scene)
             ForEach(selected) { layer in
                 let rect = CanvasGeometry.rect(for: layer.transform, canvas: canvasSize)
-                let corners = CanvasGeometry.corners(of: rect, degrees: layer.transform.rotationDegrees)
+                let corners = CanvasGeometry.styledCorners(of: rect,
+                                                           degrees: layer.transform.rotationDegrees,
+                                                           perspective: layer.style.perspective)
                     .map(viewPoint)
                 Path { path in
                     path.addLines(corners)
@@ -684,10 +729,15 @@ struct CanvasInteractionView: View {
     }
 
     /// Corner + edge handles and the rotate knob for one selected layer.
+    /// Handles sit on the STYLED (perspective-projected) corners so they
+    /// track what the user sees; the resize math itself edits the underlying
+    /// unprojected rect (G03 styling never rewrites the transform).
     @ViewBuilder
     private func singleSelectionHandles(_ layer: LayerNode) -> some View {
         let rect = CanvasGeometry.rect(for: layer.transform, canvas: canvasSize)
-        let corners = CanvasGeometry.corners(of: rect, degrees: layer.transform.rotationDegrees)
+        let corners = CanvasGeometry.styledCorners(of: rect,
+                                                   degrees: layer.transform.rotationDegrees,
+                                                   perspective: layer.style.perspective)
         let points = corners + [
             CanvasGeometry.midpoint(corners[0], corners[1]),
             CanvasGeometry.midpoint(corners[1], corners[2]),

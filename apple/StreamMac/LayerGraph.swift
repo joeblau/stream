@@ -847,6 +847,12 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
     /// override replaces the source defaults wholesale. Staged scene content:
     /// edits stage, Take, revert, and undo like the transform.
     var effectOverrides: SourceEffects?
+    /// G03 (issue #106): the layer's styling — shape mask, border, shadow,
+    /// opacity, perspective. `.identity` = unstyled. Staged scene content
+    /// exactly like the transform; on overlays it is project-level content
+    /// through the S07 overlay commands. Non-destructive and
+    /// alpha-preserving (see LayerStyle.swift).
+    var style: LayerStyle
 
     init(id: LayerID = LayerID(),
          name: String,
@@ -858,7 +864,8 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
          audio: AudioBinding = .default,
          groupID: GroupID? = nil,
          isLocked: Bool = false,
-         effectOverrides: SourceEffects? = nil) {
+         effectOverrides: SourceEffects? = nil,
+         style: LayerStyle = .identity) {
         self.id = id
         self.name = name
         self.sourceID = sourceID
@@ -870,11 +877,12 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
         self.groupID = groupID
         self.isLocked = isLocked
         self.effectOverrides = effectOverrides
+        self.style = style
     }
 
     /// `isLocked` was added after v2 shipped; decode it with a default so
     /// older persisted documents keep loading (additive wire change).
-    /// E01's `effectOverrides` follows the same pattern.
+    /// E01's `effectOverrides` and G03's `style` follow the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(LayerID.self, forKey: .id)
@@ -888,6 +896,7 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
         groupID = try container.decodeIfPresent(GroupID.self, forKey: .groupID)
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
         effectOverrides = try container.decodeIfPresent(SourceEffects.self, forKey: .effectOverrides)
+        style = try container.decodeIfPresent(LayerStyle.self, forKey: .style) ?? .identity
     }
 }
 
@@ -1490,6 +1499,10 @@ struct SceneDocument: Hashable, Codable, Sendable {
     /// stored once at project level and applied by writing their value as a
     /// layer override or a source default.
     var effectPresets: [SourceEffectPreset]
+    /// G03 (issue #106): reusable named layer-STYLING presets (masks,
+    /// borders, shadows, opacity, perspective), stored once at project level
+    /// and applied by writing their value as a layer's/overlay's style.
+    var stylePresets: [LayerStylePreset]
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
@@ -1500,7 +1513,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
          overlays: [LayerNode] = [],
          defaultBackground: SceneBackground? = nil,
          defaultTransition: SceneTransition = .default,
-         effectPresets: [SourceEffectPreset] = []) {
+         effectPresets: [SourceEffectPreset] = [],
+         stylePresets: [LayerStylePreset] = []) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
@@ -1511,12 +1525,13 @@ struct SceneDocument: Hashable, Codable, Sendable {
         self.defaultBackground = defaultBackground
         self.defaultTransition = defaultTransition
         self.effectPresets = effectPresets
+        self.stylePresets = stylePresets
     }
 
     /// `overlays`/`defaultBackground` were added within v2; decode them with
     /// defaults so pre-S07 v2 documents keep loading (additive wire change).
-    /// S09's `defaultTransition` and E01's `effectPresets` follow the same
-    /// pattern.
+    /// S09's `defaultTransition`, E01's `effectPresets`, and G03's
+    /// `stylePresets` follow the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
@@ -1529,6 +1544,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
         defaultBackground = try container.decodeIfPresent(SceneBackground.self, forKey: .defaultBackground)
         defaultTransition = try container.decodeIfPresent(SceneTransition.self, forKey: .defaultTransition) ?? .default
         effectPresets = try container.decodeIfPresent([SourceEffectPreset].self, forKey: .effectPresets) ?? []
+        stylePresets = try container.decodeIfPresent([LayerStylePreset].self, forKey: .stylePresets) ?? []
     }
 
     /// The S07 render context the engine composites every scene inside.

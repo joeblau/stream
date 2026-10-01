@@ -226,6 +226,12 @@ final class SceneStore: ObservableObject {
     @Published private(set) var effectPresets: [SourceEffectPreset] {
         didSet { scheduleSceneAutosave() }
     }
+    /// G03 (issue #106): reusable named layer-styling presets, persisted in
+    /// the scene document. Project-level — apply immediately, never staged
+    /// (the E01 preset precedent).
+    @Published private(set) var stylePresets: [LayerStylePreset] {
+        didSet { scheduleSceneAutosave() }
+    }
     /// S02 browser metadata: folders, scene → folder membership, and scene
     /// locks. Immediate (never staged), persisted in the browser document.
     @Published private(set) var folders: [SceneFolder] = [] {
@@ -266,6 +272,7 @@ final class SceneStore: ObservableObject {
         defaultBackground = document.defaultBackground
         defaultTransition = document.defaultTransition
         effectPresets = document.effectPresets
+        stylePresets = document.stylePresets
         scenes = document.scenes
         selectedID = document.scenes.contains(where: { $0.id == document.selectedID })
             ? document.selectedID
@@ -309,7 +316,8 @@ final class SceneStore: ObservableObject {
                       overlays: overlays,
                       defaultBackground: defaultBackground,
                       defaultTransition: defaultTransition,
-                      effectPresets: effectPresets)
+                      effectPresets: effectPresets,
+                      stylePresets: stylePresets)
     }
 
     var selected: Scene? {
@@ -440,6 +448,31 @@ final class SceneStore: ObservableObject {
 
     func removeEffectPreset(_ id: EffectPresetID) {
         effectPresets.removeAll { $0.id == id }
+    }
+
+    // MARK: - Layer style presets (G03, issue #106)
+
+    func stylePreset(withID id: LayerStylePresetID) -> LayerStylePreset? {
+        stylePresets.first(where: { $0.id == id })
+    }
+
+    /// Registers a reusable layer-style preset (project-level, applies
+    /// immediately, like effect presets).
+    @discardableResult
+    func addStylePreset(_ preset: LayerStylePreset) -> LayerStylePreset {
+        stylePresets.append(preset)
+        return preset
+    }
+
+    /// Replaces a style preset in place (rename/style edits). Applying a
+    /// preset copies its VALUE, so editing it never re-points existing users.
+    func updateStylePreset(_ preset: LayerStylePreset) {
+        guard let index = stylePresets.firstIndex(where: { $0.id == preset.id }) else { return }
+        stylePresets[index] = preset
+    }
+
+    func removeStylePreset(_ id: LayerStylePresetID) {
+        stylePresets.removeAll { $0.id == id }
     }
 
     // MARK: - Project overlays and default background (S07, issue #74)

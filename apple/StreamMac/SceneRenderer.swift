@@ -62,6 +62,19 @@ import StreamCore
 /// frame after its first paint. A nested scene containing camera/screen
 /// layers re-composites every frame, like any live source.
 ///
+/// G03 (issue #106) layer styling (`LayerNode.style`) is a non-destructive,
+/// alpha-preserving pass over the placed layer image, identical for sourced,
+/// generated, and nested layers: shape MASK (rectangle/circle/custom —
+/// custom assets are the P03 seam and render unmasked until resolvable) and
+/// BORDER before rotation, PERSPECTIVE tilt (corner projection through
+/// `CIPerspectiveTransform`) around the layer center, then the S04 rotation,
+/// then OPACITY (the style's resting opacity multiplies any legacy
+/// `.opacity` effect) and the drop SHADOW (the styled silhouette, tinted,
+/// blurred, offset, composited underneath). All pixel measurements are
+/// 1080p-reference pixels scaled by the render height. The shadow is
+/// decorative and excluded from the canvas selection bounds; the perspective
+/// quad IS the selection bounds (see CanvasInteractionView).
+///
 /// Visual parity with the legacy `FacecamCompositor` path: camera layers are
 /// mirrored (macOS cameras behave as `.front`); a camera layer narrower than
 /// the canvas renders as the classic PIP — aspect-FILL cropped to a rounded
@@ -626,8 +639,9 @@ final class SceneRenderer {
         if let cornerRadius, cornerRadius > 0 {
             image = applyRoundedCorners(image, radius: cornerRadius, rect: rect)
         }
+        image = applyingShapeStyle(layer.style, to: image, rect: rect, canvas: canvas)
         image = rotated(image, degrees: layer.transform.rotationDegrees, around: rect)
-        return applyEffects(image, layer: layer)
+        return applyEffects(image, layer: layer, canvas: canvas)
     }
 
     /// Returns the cached raster for `key`, or draws it into a fresh
@@ -878,8 +892,8 @@ final class SceneRenderer {
                               cornerRadius: cornerRadius)
         }
 
-        let styled = applyEffects(placed, layer: layer)
-        return sourceEffects.map { applyingPictureAdjustments($0, to: styled) } ?? styled
+        let adjusted = sourceEffects.map { applyingPictureAdjustments($0, to: placed) } ?? placed
+        return applyEffects(adjusted, layer: layer, canvas: canvas)
     }
 
     // MARK: - E01 source effects (issue #101)
@@ -1037,6 +1051,7 @@ final class SceneRenderer {
         if let cornerRadius, cornerRadius > 0 {
             image = applyRoundedCorners(image, radius: cornerRadius, rect: rect)
         }
+        image = applyingShapeStyle(layer.style, to: image, rect: rect, canvas: canvas)
         return rotated(image, degrees: layer.transform.rotationDegrees, around: rect)
     }
 
@@ -1070,6 +1085,7 @@ final class SceneRenderer {
             y: rect.minY - image.extent.minY))
         image = image.cropped(to: rect)
         image = applyRoundedCorners(image, radius: cornerRadius, rect: rect)
+        image = applyingShapeStyle(layer.style, to: image, rect: rect, canvas: canvas)
         return rotated(image, degrees: layer.transform.rotationDegrees, around: rect)
     }
 
@@ -1100,7 +1116,7 @@ final class SceneRenderer {
         }
     }
 
-    private func applyEffects(_ image: CIImage, layer: LayerNode) -> CIImage {
+    private func applyEffects(_ image: CIImage, layer: LayerNode, canvas: CGRect) -> CIImage {
         var image = image
         for effect in layer.effects {
             switch effect {
@@ -1111,10 +1127,208 @@ final class SceneRenderer {
             case .cornerRadius:
                 break   // applied during placement, where the rect is known
             case .border, .chromaKey:
-                break   // ignored per the LayerGraph renderer contract
+                break   // legacy border is superseded by `LayerStyle.border`
+                        // (G03); chromaKey is E02's seam in the styling pass
             }
         }
+        // G03: the style's resting opacity multiplies any legacy fade value.
+        let opacity = layer.style.opacity
+        if opacity < 0.999 {
+            image = image.applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(max(0, opacity)))
+            ])
+        }
+        return applyingShadow(layer.style, to: image, canvas: canvas)
+    }
+
+    // MARK: - G03 layer styling (issue #106)
+
+    /// Reference-pixel scale: style geometry is authored against the 1080p
+    /// canvas and scales with the render height (the text `fontSize`
+    /// precedent), so a style renders identically at any encode resolution.
+    private func styleScale(_ canvas: CGRect) -> CGFloat {
+        canvas.height / 1080
+    }
+
+    /// The pre-rotation styling pass over a placed layer image: shape mask →
+    /// border → perspective tilt. `rect` is the layer's anchor-resolved
+    /// canvas rect (CI coordinates). Non-destructive and alpha-preserving:
+    /// the mask is an alpha blend, the border an overlaid stroke raster, and
+    /// perspective a corner projection of the layer box.
+    private func applyingShapeStyle(_ style: LayerStyle, to image: CIImage,
+                                    rect: CGRect, canvas: CGRect) -> CIImage {
+        var image = image
+        if style.hasMask {
+            image = applyingMask(style.mask, to: image, rect: rect, canvas: canvas)
+        }
+        if style.hasBorder {
+            image = applyingBorder(style.border, maskShape: style.mask, to: image,
+                                   rect: rect, canvas: canvas)
+        }
+        if style.hasPerspective {
+            image = applyingPerspective(style.perspective, to: image, rect: rect, canvas: canvas)
+        }
         return image
+    }
+
+    /// Clips the layer image to the style mask's alpha. An unresolvable
+    /// custom mask is the documented no-op (the P03 asset seam).
+    private func applyingMask(_ mask: LayerMask, to image: CIImage,
+                              rect: CGRect, canvas: CGRect) -> CIImage {
+        guard let maskImage = maskImage(for: mask, rect: rect, canvas: canvas) else {
+            return image
+        }
+        return image.applyingFilter("CIBlendWithAlphaMask", parameters: [
+            kCIInputBackgroundImageKey: CIImage.empty(),
+            kCIInputMaskImageKey: maskImage
+        ])
+    }
+
+    /// The mask image covering `rect`: the shape raster (cached by shape +
+    /// pixel size through the generated-content cache), feathered, then
+    /// optionally inverted. Feather blurs WITHOUT clamping so the edge fades
+    /// to transparent rather than smearing edge pixels outward.
+    private func maskImage(for mask: LayerMask, rect: CGRect, canvas: CGRect) -> CIImage? {
+        let scale = styleScale(canvas)
+        let pixelWidth = Int(rect.width.rounded())
+        let pixelHeight = Int(rect.height.rounded())
+        guard pixelWidth > 0, pixelHeight > 0 else { return nil }
+        let radius = min(CGFloat(mask.cornerRadius) * scale,
+                         min(rect.width, rect.height) / 2)
+        let shapeImage: CIImage?
+        switch mask.shape {
+        case .none:
+            return nil
+        case .rectangle:
+            if radius > 0 {
+                shapeImage = generated(key: GeneratedKey(descriptor: "g03mask|rounded|\(radius)",
+                                                         width: pixelWidth,
+                                                         height: pixelHeight)) { context, bounds in
+                    context.setFillColor(CGColor(gray: 1, alpha: 1))
+                    context.addPath(CGPath(roundedRect: bounds, cornerWidth: radius,
+                                           cornerHeight: radius, transform: nil))
+                    context.fillPath()
+                }
+            } else {
+                shapeImage = CIImage(color: .white)
+                    .cropped(to: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
+            }
+        case .circle:
+            shapeImage = generated(key: GeneratedKey(descriptor: "g03mask|ellipse",
+                                                     width: pixelWidth,
+                                                     height: pixelHeight)) { context, bounds in
+                context.setFillColor(CGColor(gray: 1, alpha: 1))
+                context.fillEllipse(in: bounds)
+            }
+        case .custom:
+            // P03 asset-library seam: no render path resolves asset
+            // identifiers yet, so a custom mask renders the layer UNMASKED.
+            return nil
+        }
+        guard var result = shapeImage else { return nil }
+        result = result.transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+        let feather = CGFloat(mask.feather) * scale
+        if feather > 0 {
+            result = result.applyingFilter("CIGaussianBlur", parameters: ["inputRadius": feather])
+        }
+        if mask.isInverted {
+            // Alpha invert: white wherever the mask is transparent.
+            result = CIImage.empty().applyingFilter("CIBlendWithAlphaMask", parameters: [
+                kCIInputBackgroundImageKey: CIImage(color: .white),
+                kCIInputMaskImageKey: result
+            ])
+        }
+        return result
+    }
+
+    /// The border stroke composited over the (masked) layer image. The
+    /// stroke is rasterized INSIDE the rect (inset by half the line width)
+    /// through the generated-content cache and follows the mask shape:
+    /// ellipse for a circle mask, rounded rect for a rectangle mask, the
+    /// plain rect otherwise.
+    private func applyingBorder(_ border: LayerBorder, maskShape mask: LayerMask,
+                                to image: CIImage, rect: CGRect, canvas: CGRect) -> CIImage {
+        let scale = styleScale(canvas)
+        let pixelWidth = Int(rect.width.rounded())
+        let pixelHeight = Int(rect.height.rounded())
+        let width = CGFloat(border.width) * scale
+        guard pixelWidth > 0, pixelHeight > 0, width > 0 else { return image }
+        let radius: CGFloat = mask.shape == .rectangle
+            ? min(CGFloat(mask.cornerRadius) * scale, min(rect.width, rect.height) / 2)
+            : 0
+        let descriptor = "g03border|\(mask.shape.rawValue)|\(radius)|\(width)|\(border.colorHex)"
+        let strokeImage = generated(key: GeneratedKey(descriptor: descriptor,
+                                                      width: pixelWidth,
+                                                      height: pixelHeight)) { context, bounds in
+            let lineRect = bounds.insetBy(dx: width / 2, dy: width / 2)
+            guard lineRect.width > 0, lineRect.height > 0 else { return }
+            context.setStrokeColor(cgColor(border.colorHex))
+            context.setLineWidth(width)
+            if mask.shape == .circle {
+                context.strokeEllipse(in: lineRect)
+            } else if radius > 0 {
+                context.addPath(CGPath(roundedRect: lineRect, cornerWidth: radius,
+                                       cornerHeight: radius, transform: nil))
+                context.strokePath()
+            } else {
+                context.stroke(lineRect)
+            }
+        }
+        guard var stroke = strokeImage else { return image }
+        stroke = stroke.transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+        return stroke.composited(over: image)
+    }
+
+    /// The perspective tilt: the layer image is cropped to its box (content
+    /// outside the box is definitionally clipped under a tilt) and its
+    /// corners projected through the pitch/yaw model. The projection helper
+    /// works in y-down space; the renderer flips in and out of it (CI is
+    /// bottom-left-origin), so the quad here is exactly the quad
+    /// `CanvasGeometry` draws for the selection bounds.
+    private func applyingPerspective(_ perspective: LayerPerspective, to image: CIImage,
+                                     rect: CGRect, canvas: CGRect) -> CIImage {
+        guard !perspective.isIdentity else { return image }
+        let downRect = CGRect(x: rect.minX, y: canvas.maxY - rect.maxY,
+                              width: rect.width, height: rect.height)
+        let projected = perspective.projectedCorners(of: downRect)
+        func ciPoint(_ point: CGPoint) -> CIVector {
+            CIVector(x: point.x, y: canvas.maxY - point.y)
+        }
+        return image.cropped(to: rect).applyingFilter("CIPerspectiveTransform", parameters: [
+            "inputTopLeft": ciPoint(projected.topLeft),
+            "inputTopRight": ciPoint(projected.topRight),
+            "inputBottomRight": ciPoint(projected.bottomRight),
+            "inputBottomLeft": ciPoint(projected.bottomLeft)
+        ])
+    }
+
+    /// The drop shadow composited UNDER the finished layer image: the
+    /// styled silhouette (the shadow color masked by the layer's alpha),
+    /// blurred and offset. Runs after opacity so the shadow dims with the
+    /// layer. Decorative: excluded from the canvas selection bounds.
+    private func applyingShadow(_ style: LayerStyle, to image: CIImage, canvas: CGRect) -> CIImage {
+        let shadow = style.shadow
+        guard shadow.isEnabled else { return image }
+        let extent = image.extent
+        guard !extent.isEmpty, !extent.isInfinite else { return image }
+        let scale = styleScale(canvas)
+        let components = HexColor.components(shadow.colorHex)
+        var silhouette = CIImage(color: CIColor(red: components.red, green: components.green,
+                                                blue: components.blue, alpha: components.alpha))
+            .cropped(to: extent)
+            .applyingFilter("CIBlendWithAlphaMask", parameters: [
+                kCIInputBackgroundImageKey: CIImage.empty(),
+                kCIInputMaskImageKey: image
+            ])
+        let radius = CGFloat(shadow.radius) * scale
+        if radius > 0 {
+            silhouette = silhouette.applyingFilter("CIGaussianBlur", parameters: ["inputRadius": radius])
+        }
+        // CI is bottom-left-origin: the +y-down offset becomes -y.
+        silhouette = silhouette.transformed(by: CGAffineTransform(
+            translationX: CGFloat(shadow.offsetX) * scale,
+            y: -CGFloat(shadow.offsetY) * scale))
+        return image.composited(over: silhouette)
     }
 
     private func rotated(_ image: CIImage, degrees: Double, around rect: CGRect) -> CIImage {
