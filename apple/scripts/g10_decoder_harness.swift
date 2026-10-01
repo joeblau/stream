@@ -8,10 +8,12 @@ import UniformTypeIdentifiers
 @main struct G10DecoderHarness {
     struct NativeResult: Codable {
         var fixture: String
+        var outputPixelFormat: UInt32 = kCVPixelFormatType_32BGRA
         var readable: Bool?
         var frames = 0
         var minimumAlpha: UInt8?
         var maximumAlpha: UInt8?
+        var hasTranslucentAlpha = false
         var status: Int?
         var error: String?
     }
@@ -37,6 +39,12 @@ import UniformTypeIdentifiers
         for url in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
             .sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             nativeResults.append(await nativeProbe(url))
+            if url.lastPathComponent == "prores4444-alpha.mov" {
+                // Apple recommends a 16-bit alpha format for ProRes. Also
+                // measure the app's 8-bit RGB path rather than conflating
+                // its conversion rounding with a missing alpha channel.
+                nativeResults.append(await nativeProbe(url, pixelFormat: kCVPixelFormatType_64ARGB))
+            }
             guard url.pathExtension == "webm" else { continue }
             let container = try WebMContainerParser.parse(Data(contentsOf: url))
             guard let track = container.videoTrack else { continue }
@@ -86,14 +94,17 @@ import UniformTypeIdentifiers
         try encoder.encode(nativeResults).write(to: output.appendingPathComponent("native-probes.json"))
         if CommandLine.arguments.contains("--require-native-controls") {
             for name in ["h264-opaque.mp4", "prores4444-alpha.mov"] {
-                guard let result = nativeResults.first(where: { $0.fixture == name }),
+                let format = name == "prores4444-alpha.mov"
+                    ? kCVPixelFormatType_64ARGB : kCVPixelFormatType_32BGRA
+                guard let result = nativeResults.first(where: { $0.fixture == name && $0.outputPixelFormat == format }),
                       result.status == AVAssetReader.Status.completed.rawValue,
                       result.frames == 60, result.error == nil else {
                     throw NSError(domain: "G10.NativeControl", code: 1,
                                   userInfo: [NSLocalizedDescriptionKey: "Native control did not decode all 60 frames: \(name)"])
                 }
                 if name == "prores4444-alpha.mov" {
-                    guard result.minimumAlpha == 0, result.maximumAlpha == 255 else {
+                    guard result.minimumAlpha == 0, result.maximumAlpha == 255,
+                          result.hasTranslucentAlpha else {
                         throw NSError(domain: "G10.NativeAlpha", code: 1,
                                       userInfo: [NSLocalizedDescriptionKey: "Native ProRes control lost alpha"])
                     }
@@ -133,8 +144,8 @@ import UniformTypeIdentifiers
         guard CGImageDestinationFinalize(dest) else { throw CocoaError(.fileWriteUnknown) }
     }
 
-    static func nativeProbe(_ url: URL) async -> NativeResult {
-        var result = NativeResult(fixture: url.lastPathComponent)
+    static func nativeProbe(_ url: URL, pixelFormat: UInt32 = kCVPixelFormatType_32BGRA) async -> NativeResult {
+        var result = NativeResult(fixture: url.lastPathComponent, outputPixelFormat: pixelFormat)
         do {
             let asset = AVURLAsset(url: url)
             let tracks = try await asset.loadTracks(withMediaType: .video)
@@ -147,7 +158,7 @@ import UniformTypeIdentifiers
             print("NATIVE \(url.lastPathComponent): container readable=\(readable), video track recognized")
             let reader = try AVAssetReader(asset: asset)
             let output = AVAssetReaderTrackOutput(track: track, outputSettings:
-                [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+                [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat])
             output.alwaysCopiesSampleData = false
             reader.add(output)
             guard reader.startReading() else { throw reader.error ?? CocoaError(.coderInvalidValue) }
@@ -160,14 +171,19 @@ import UniformTypeIdentifiers
                     let bytes = address.assumingMemoryBound(to: UInt8.self)
                     for y in 0..<CVPixelBufferGetHeight(image) {
                         for x in 0..<CVPixelBufferGetWidth(image) {
-                            let a = bytes[y * CVPixelBufferGetBytesPerRow(image) + x * 4 + 3]
+                            // 64ARGB uses big-endian 16-bit A,R,G,B. The
+                            // first alpha byte maps to the measured 8-bit
+                            // range; 32BGRA stores alpha in byte three.
+                            let offset = pixelFormat == kCVPixelFormatType_64ARGB ? x * 8 : x * 4 + 3
+                            let a = bytes[y * CVPixelBufferGetBytesPerRow(image) + offset]
                             minimum = min(minimum, a); maximum = max(maximum, a)
+                            if (2...253).contains(a) { result.hasTranslucentAlpha = true }
                         }
                     }
                 }
                 CVPixelBufferUnlockBaseAddress(image, .readOnly)
             }
-            print("NATIVE \(url.lastPathComponent): readable=\(readable), frames=\(count), alpha \(minimum)...\(maximum), status=\(reader.status.rawValue), error=\(String(describing: reader.error))")
+            print("NATIVE \(url.lastPathComponent) format=\(pixelFormat): readable=\(readable), frames=\(count), alpha \(minimum)...\(maximum), translucent=\(result.hasTranslucentAlpha), status=\(reader.status.rawValue), error=\(String(describing: reader.error))")
             result.frames = count
             result.minimumAlpha = count > 0 ? minimum : nil
             result.maximumAlpha = count > 0 ? maximum : nil
