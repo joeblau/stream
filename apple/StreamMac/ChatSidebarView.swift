@@ -5,9 +5,14 @@ import SwiftUI
 /// `ChatFeedView` — same feed concepts, plus a connection header since the macOS
 /// layout keeps the panel always visible (no sheet detents).
 struct ChatSidebarView: View {
-    /// Owned here so the connection survives view re-creation. `RestreamChat` is
-    /// `@Observable`, so plain `@State` (not `@StateObject`) keeps it alive.
-    @State private var chat = RestreamChat()
+    /// Owned by the shell (W04) and shared with the settings pane, so signing
+    /// in from either place lights up both. `RestreamChat` is `@Observable`,
+    /// so a plain property tracks changes in `body`.
+    private let chat: RestreamChat
+
+    init(chat: RestreamChat = RestreamChat()) {
+        self.chat = chat
+    }
 
     var body: some View {
         VStack(spacing: 0) {

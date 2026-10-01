@@ -2,17 +2,11 @@ import AVFoundation
 import CoreMedia
 import StreamCore
 
-/// Moves a `CMSampleBuffer` (not yet `Sendable`-annotated in CoreMedia on all
-/// SDKs) across the hop from the compositor's callback thread onto the writer's
-/// serial queue. The buffer is retained, so it stays valid until the queue
-/// releases it.
-private struct SendableSampleBuffer: @unchecked Sendable {
-    let buffer: CMSampleBuffer
-}
-
 /// Records the composited program output to a local `.mp4` via `AVAssetWriter`,
-/// fed from `StreamController.onCompositedSample`. Video only; audio is a v2
-/// nicety and intentionally skipped.
+/// fed from its own `CompositionEngine` subscription (W08, issue #65): one of
+/// N independent frame consumers, so recording can no longer claim or starve
+/// the preview/publisher paths. Video only; audio is a v2 nicety and
+/// intentionally skipped.
 ///
 /// The app sandbox denies `~/Movies` without user-selected-file entitlements, so
 /// recordings land in the shared App Group container's `Recordings/` folder (the
@@ -21,52 +15,70 @@ private struct SendableSampleBuffer: @unchecked Sendable {
 /// disk-space guard. The finished file's path is published on `lastRecordingURL`.
 @MainActor
 final class RecordingController: ObservableObject {
-    @Published private(set) var isRecording = false
+    /// Independent recording lifecycle (W02, issue #62) — drives the transport
+    /// bar and the diagnostics strip; `isRecording` is the computed convenience.
+    @Published private(set) var state: RecordingSessionState = .idle
     /// Path of the most recent cleanly-finished recording; nil until one exists.
     @Published private(set) var lastRecordingURL: URL?
     @Published private(set) var lastError: String?
 
+    var isRecording: Bool { state.isRecording }
+
     private let store = RecordingStore()
     /// Serializes every touch of the `AVAssetWriter` (appends, finish) against the
-    /// compositor's callback thread.
+    /// engine subscription's delivery queue.
     private let queue = DispatchQueue(label: "com.joeblau.StreamMac.recording")
     private var session: RecordingSession?
     private weak var stream: StreamController?
+    /// The recording output's engine subscription (W08 fan-out).
+    private var frameSubscription: StreamController.FrameSubscription?
 
     /// Start if idle, stop (and finish the .mp4) if recording.
     func toggle(stream: StreamController) {
-        isRecording ? stop() : start(stream: stream)
+        state.isRecording ? stop() : start(stream: stream)
     }
 
     func start(stream: StreamController) {
-        guard !isRecording else { return }
+        guard !state.isActive else { return }
         lastError = nil
         guard store.hasSufficientSpace() else {
             lastError = "Not enough disk space to record (1 GB minimum)."
+            state = .failed(lastError!)
             return
         }
         guard let url = store.makeRecordingURL(date: Date()) else {
             lastError = "The recordings folder is unavailable (App Group container missing)."
+            state = .failed(lastError!)
             return
         }
         let session = RecordingSession(outputURL: url)
         self.session = session
         self.stream = stream
-        // Note: this claims the single-consumer composited-sample hook for the
-        // duration of the recording and hands it back on stop.
-        stream.onCompositedSample = { [queue] sample in
-            let box = SendableSampleBuffer(buffer: sample)
-            queue.async { session.append(box.buffer) }
+        // Subscribe as one independent engine consumer: a backed-up writer
+        // only sheds recording frames (bounded, drop-oldest queue) and never
+        // stalls the preview or the publisher.
+        frameSubscription = stream.addFrameSink { [queue] frame in
+            queue.async { session.append(frame.sampleBuffer) }
         }
-        isRecording = true
+        // The recording output keeps the render pipeline alive on its own, so
+        // stopping the preview mid-recording cannot starve the writer.
+        stream.noteRecordingStarted()
+        state = .recording
     }
 
     func stop() {
-        guard isRecording else { return }
-        isRecording = false
-        stream?.onCompositedSample = nil
+        guard state.isRecording else { return }
+        state = .stopping
+        if let frameSubscription {
+            stream?.removeFrameSink(frameSubscription)
+        }
+        frameSubscription = nil
+        stream?.noteRecordingStopped()
         stream = nil
-        guard let session else { return }
+        guard let session else {
+            state = .idle
+            return
+        }
         self.session = nil
         queue.async { [weak self, store] in
             session.finish { url in
@@ -75,8 +87,10 @@ final class RecordingController: ObservableObject {
                     if let url {
                         store.markComplete(url)
                         self.lastRecordingURL = url
+                        self.state = .idle
                     } else {
                         self.lastError = "Recording could not be written."
+                        self.state = .failed(self.lastError!)
                     }
                 }
             }

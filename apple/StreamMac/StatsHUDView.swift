@@ -3,9 +3,12 @@ import StreamCore
 
 /// Compact live-stats strip for the macOS main window: uplink health pill,
 /// bitrate, measured fps, and (only when non-zero) dropped frames. Polls
-/// `StreamController.statsSnapshot()` at ~1 Hz while the stream is live and
-/// idles empty otherwise. All formatting and health classification reuse
-/// StreamCore's `LiveStats` helpers, so the HUD matches the iOS stats card.
+/// `StreamController.statsSnapshot()` at ~1 Hz while a streaming session is
+/// active and idles empty otherwise. Before the first acknowledged publish
+/// (and during reconnects) the pill shows the session state — connecting,
+/// reconnecting — instead of stale metrics. All formatting and health
+/// classification reuse StreamCore's `LiveStats` helpers, so the HUD matches
+/// the iOS stats card.
 struct StatsHUDView: View {
     @ObservedObject var stream: StreamController
 
@@ -23,8 +26,8 @@ struct StatsHUDView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(.ultraThinMaterial, in: Capsule())
-        .task(id: stream.isLive) {
-            guard stream.isLive else {
+        .task(id: stream.streamState) {
+            guard stream.streamState.isActive else {
                 stats = nil
                 return
             }
@@ -40,16 +43,36 @@ struct StatsHUDView: View {
             Circle()
                 .fill(healthTint)
                 .frame(width: 8, height: 8)
-            Text(stats?.linkHealth.label ?? "Offline")
+            Text(stats?.linkHealth.label ?? sessionLabel)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(healthTint)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Uplink health")
-        .accessibilityValue(stats?.linkHealth.label ?? "Offline")
+        .accessibilityValue(stats?.linkHealth.label ?? sessionLabel)
+    }
+
+    /// Shown while the publisher has no metrics yet (pre-ack / mid-reconnect),
+    /// so the strip reports the real session state rather than "Offline".
+    private var sessionLabel: String {
+        switch stream.streamState {
+        case .connecting: return "Connecting…"
+        case .reconnecting: return "Reconnecting…"
+        case .stopping: return "Stopping…"
+        case .failed: return "Failed"
+        case .idle, .live: return "Offline"
+        }
     }
 
     private var healthTint: Color {
+        if stats == nil {
+            switch stream.streamState {
+            case .connecting: return .yellow
+            case .reconnecting: return .orange
+            case .failed: return .red
+            case .idle, .live, .stopping: return .secondary
+            }
+        }
         switch stats?.linkHealth {
         case .good:      return .green
         case .fair:      return .yellow

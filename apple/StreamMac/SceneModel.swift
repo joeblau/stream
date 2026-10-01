@@ -2,7 +2,10 @@ import Foundation
 import Combine
 import StreamCore
 
-/// Which sources a scene composites into the outgoing frame.
+/// The classic three-layout view of a scene, now derived from (and applied
+/// back onto) the layer graph — see the `Scene` extension below. Kept as the
+/// compatibility surface for the fixed-layout UI and render path while the
+/// graph model underneath is the source of truth.
 enum SceneLayout: String, Codable, CaseIterable, Sendable {
     case cameraSolo, screenSolo, screenPlusCam
 
@@ -29,31 +32,81 @@ enum SceneLayout: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// One switchable scene (Ecamm-style). `pipCorner`/`pipScale` only apply to
-/// `.screenPlusCam`; `pipScale` is the fraction of frame width (0.10...0.40).
-struct Scene: Identifiable, Hashable, Codable, Sendable {
-    var id: UUID
-    var name: String
-    var layout: SceneLayout
-    var pipCorner: PIPCorner
-    var pipScale: Double
+extension Scene {
+    /// The topmost camera layer that is a PIP box (anything not fullscreen).
+    /// Visibility is ignored so PIP geometry survives layout switches.
+    private var cameraPIPIndex: Int? {
+        layers.lastIndex(where: { $0.payload.isCamera && $0.transform.size.width < 1 })
+    }
 
-    init(id: UUID = UUID(),
-         name: String,
-         layout: SceneLayout,
-         pipCorner: PIPCorner = .bottomRight,
-         pipScale: Double = 0.28) {
-        self.id = id
-        self.name = name
-        self.layout = layout
-        self.pipCorner = pipCorner
-        self.pipScale = pipScale
+    /// The fixed-layout equivalent of the graph: which visible sources the
+    /// scene composites. Setting it rebuilds the visible layers for that
+    /// layout, reusing existing layers (and their source bindings) and
+    /// keeping a hidden PIP layer so corner/size survive layout switches —
+    /// the v1 model stored those fields unconditionally.
+    var layout: SceneLayout {
+        get {
+            let hasScreen = layers.contains { $0.isVisible && $0.payload.isScreen }
+            let hasCamera = layers.contains { $0.isVisible && $0.payload.isCamera }
+            switch (hasScreen, hasCamera) {
+            case (true, true): return .screenPlusCam
+            case (true, false): return .screenSolo
+            default: return .cameraSolo
+            }
+        }
+        set {
+            let cameraSourceID = layers.first(where: { $0.payload.isCamera })?.sourceID
+            let screen = layers.first(where: { $0.payload.isScreen })
+                ?? .fullscreenScreen(sourceID: nil)
+            var pip = cameraPIPIndex.map { layers[$0] }
+                ?? .cameraPIP(corner: .bottomRight, scale: 0.28, sourceID: cameraSourceID)
+
+            switch newValue {
+            case .cameraSolo:
+                pip.isVisible = false
+                layers = [layers.first(where: { $0.payload.isCamera && $0.transform.size.width >= 1 })
+                            ?? .fullscreenCamera(sourceID: cameraSourceID), pip]
+            case .screenSolo:
+                pip.isVisible = false
+                layers = [screen, pip]
+            case .screenPlusCam:
+                pip.isVisible = true
+                layers = [screen, pip]
+            }
+        }
+    }
+
+    /// The PIP corner of the camera overlay (`.bottomRight` when the scene
+    /// has no camera PIP layer). Only meaningful for `.screenPlusCam`.
+    var pipCorner: PIPCorner {
+        get {
+            cameraPIPIndex.map { PIPCorner(anchor: layers[$0].transform.anchor) } ?? .bottomRight
+        }
+        set {
+            guard let index = cameraPIPIndex else { return }
+            layers[index].transform = LayerTransform(pipCorner: newValue,
+                                                     scale: layers[index].transform.size.width)
+        }
+    }
+
+    /// The PIP size as a fraction of frame width (0.10...0.40), or the
+    /// classic default when the scene has no camera PIP layer.
+    var pipScale: Double {
+        get {
+            cameraPIPIndex.map { layers[$0].transform.size.width } ?? 0.28
+        }
+        set {
+            guard let index = cameraPIPIndex else { return }
+            layers[index].transform = LayerTransform(pipCorner: pipCorner, scale: newValue)
+        }
     }
 }
 
-/// The scene list + selection, persisted as JSON in the shared App Group
-/// container (same storage pattern as `SettingsStore`: a plain file, never the
-/// UserDefaults suite, so `cfprefsd` stays quiet).
+/// The scene list + selection, persisted as the versioned `SceneDocument`
+/// (v2) in the shared App Group container (same storage pattern as
+/// `SettingsStore`: a plain file, never the UserDefaults suite, so
+/// `cfprefsd` stays quiet). On first launch after the upgrade, an existing
+/// v1 file is migrated once and left on disk untouched.
 @MainActor
 final class SceneStore: ObservableObject {
     @Published var scenes: [Scene] {
@@ -62,36 +115,68 @@ final class SceneStore: ObservableObject {
     @Published var selectedID: Scene.ID {
         didSet { persist() }
     }
+    /// Project-level reusable sources that layers bind to via `sourceID`.
+    @Published private(set) var sources: [SourceDefinition] {
+        didSet { persist() }
+    }
+    private var projectID: ProjectID
+    private var projectName: String
 
-    private static let fileName = "stream.scenes.v1.json"
+    private static let fileNameV2 = "stream.scenes.v2.json"
+    private static let fileNameV1 = "stream.scenes.v1.json"
 
     init() {
-        if let restored = Self.loadFromDisk(), !restored.scenes.isEmpty {
-            scenes = restored.scenes
-            let restoredSelection = restored.selectedID
-            selectedID = restored.scenes.contains(where: { $0.id == restoredSelection })
-                ? restoredSelection
-                : restored.scenes[0].id
-        } else {
-            let defaults = [
-                Scene(name: "Camera", layout: .cameraSolo),
-                Scene(name: "Screen", layout: .screenSolo),
-                Scene(name: "Screen + Cam", layout: .screenPlusCam)
-            ]
-            scenes = defaults
-            selectedID = defaults[2].id
-            persist()
-        }
+        let loaded = Self.loadV2().flatMap { $0.scenes.isEmpty ? nil : $0 }
+        let document = loaded
+            ?? Self.loadV1().flatMap { $0.scenes.isEmpty ? nil : SceneDocument(migratingV1: $0) }
+            ?? SceneDocument.makeDefault()
+        projectID = document.projectID
+        projectName = document.projectName
+        sources = document.sources
+        scenes = document.scenes
+        selectedID = document.scenes.contains(where: { $0.id == document.selectedID })
+            ? document.selectedID
+            : document.scenes[0].id
+        persist()
+    }
+
+    /// The whole persisted model, for consumers that work at document level.
+    var document: SceneDocument {
+        SceneDocument(projectID: projectID,
+                      projectName: projectName,
+                      sources: sources,
+                      scenes: scenes,
+                      selectedID: selectedID)
     }
 
     var selected: Scene? {
         scenes.first(where: { $0.id == selectedID })
     }
 
-    func addScene() {
-        let scene = Scene(name: "Scene \(scenes.count + 1)", layout: .screenPlusCam)
+    private var cameraSourceID: SourceDefinitionID? {
+        sources.first(where: { $0.payload.isCamera })?.id
+    }
+
+    private var screenSourceID: SourceDefinitionID? {
+        sources.first(where: { $0.payload.isScreen })?.id
+    }
+
+    /// Adds a default scene (same template as the scenes panel's + button)
+    /// and selects it.
+    @discardableResult
+    func addScene() -> Scene {
+        addScene(Scene.screenPlusCam(name: "Scene \(scenes.count + 1)",
+                                     screenSourceID: screenSourceID,
+                                     cameraSourceID: cameraSourceID))
+    }
+
+    /// Appends a fully-formed scene (built from the `Scene` factories — e.g.
+    /// the W06 first-run sample scene) and selects it.
+    @discardableResult
+    func addScene(_ scene: Scene) -> Scene {
         scenes.append(scene)
         selectedID = scene.id
+        return scene
     }
 
     func rename(_ id: Scene.ID, to name: String) {
@@ -112,6 +197,19 @@ final class SceneStore: ObservableObject {
         scenes[index] = scene
     }
 
+    /// Aligns every scene's canvas reference size with the output profile's
+    /// canvas (W07): transforms are normalized to the canvas, so this records
+    /// the new aspect/resolution intent only — no layer is repositioned.
+    func setCanvasSize(_ size: CGSize) {
+        let reference = GraphSize(width: Double(size.width), height: Double(size.height))
+        guard scenes.contains(where: { $0.canvas.referenceSize != reference }) else { return }
+        scenes = scenes.map { scene in
+            var scene = scene
+            scene.canvas.referenceSize = reference
+            return scene
+        }
+    }
+
     /// Selects the scene at 1-based position `number` (⌘1…⌘9), if it exists.
     func select(number: Int) {
         let index = number - 1
@@ -121,26 +219,27 @@ final class SceneStore: ObservableObject {
 
     // MARK: - Persistence
 
-    private struct Snapshot: Codable {
-        var scenes: [Scene]
-        var selectedID: UUID
-    }
-
-    private static func fileURL() -> URL? {
+    private static func fileURL(_ fileName: String) -> URL? {
         FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: AppGroup.identifier)?
             .appendingPathComponent(fileName)
     }
 
-    private static func loadFromDisk() -> Snapshot? {
-        guard let url = fileURL(),
+    private static func loadV2() -> SceneDocument? {
+        guard let url = fileURL(fileNameV2),
               let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(Snapshot.self, from: data)
+        return try? JSONDecoder().decode(SceneDocument.self, from: data)
+    }
+
+    private static func loadV1() -> LegacySceneDocumentV1? {
+        guard let url = fileURL(fileNameV1),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(LegacySceneDocumentV1.self, from: data)
     }
 
     private func persist() {
-        guard let url = Self.fileURL(),
-              let data = try? JSONEncoder().encode(Snapshot(scenes: scenes, selectedID: selectedID)) else { return }
+        guard let url = Self.fileURL(Self.fileNameV2),
+              let data = try? JSONEncoder().encode(document) else { return }
         try? data.write(to: url, options: .atomic)
     }
 }

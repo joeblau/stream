@@ -11,11 +11,33 @@ import os
 
 private let sessionLog = Logger(subsystem: "com.joeblau.Stream", category: "session")
 
+/// Coarse publishing-lifecycle signals, emitted from the points where the
+/// publisher itself observes them (never optimistic UI flags). `StreamController`
+/// folds these into the streaming session state machine, so the LIVE badge
+/// lights only on an acknowledged publish and reconnects are visible.
+enum PublisherEvent: Sendable {
+    /// A connect/publish attempt has begun (initial go-live and every retry).
+    case connecting
+    /// The ingest acknowledged the publish: RTMP `publish()` resolved with
+    /// onStatus success, or the SRT/WHIP session's `connect()` returned.
+    case published
+    /// The connection dropped or stalled and a supervised reconnect is running.
+    case reconnecting(reason: String)
+    /// A non-recoverable failure ended the session (setup errors; the supervised
+    /// reconnect loop otherwise retries indefinitely while the user owns it).
+    case failed(message: String)
+    /// `stop()` finished tearing the pipeline down.
+    case stopped
+}
+
 /// The publisher surface, so `ScreenCaptureController` can drive either the
 /// dedicated `RTMPPublisher` or the unified-transport `SessionPublisher` behind one
 /// type. Both are actors sharing the same encode pipeline (mixer, ABR, timeline
 /// normalizer, frame admission).
 protocol Publisher: Actor {
+    /// Lifecycle events for the session state machine. Single-consumer (the
+    /// controller); created in `init` so it is safe to read before `start`.
+    nonisolated var events: AsyncStream<PublisherEvent> { get }
     func start(_ settings: StreamSettings) async throws
     func stop() async
     func pause() async
@@ -99,6 +121,9 @@ actor SessionPublisher: Publisher {
     private var backoff = ReconnectBackoff()
     private var watchdog = WatchdogState()
     private var lastMediaAt = DispatchTime.now().uptimeNanoseconds
+    /// Lifecycle events for the controller's streaming state machine (W02).
+    nonisolated let events: AsyncStream<PublisherEvent>
+    private let eventCont: AsyncStream<PublisherEvent>.Continuation
     /// Mic-stall failover: promote app audio (track 1) to the mix clock if the mic
     /// route goes silent while app audio still flows; the first mic buffer flips home.
     private var micTrackStalled = false
@@ -135,6 +160,7 @@ actor SessionPublisher: Publisher {
          telemetry: FrameTelemetry = FrameTelemetry()) {
         self.transport = streamProtocol
         self.telemetry = telemetry
+        (events, eventCont) = AsyncStream.makeStream(of: PublisherEvent.self, bufferingPolicy: .unbounded)
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
         (appStream, appCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
     }
@@ -336,6 +362,7 @@ actor SessionPublisher: Publisher {
         recoveryInProgress = true
         defer { recoveryInProgress = false }
 
+        eventCont.yield(.reconnecting(reason: reason))
         sessionLog.warning("\(self.transport.displayName, privacy: .public) recovery requested: \(reason, privacy: .public)")
         // Detach the dead session so encoded frames stop piling into its unbounded
         // send queue; the fresh session in connectAndPublish resets admission. Nil the
@@ -370,10 +397,12 @@ actor SessionPublisher: Publisher {
             }
             shouldDelay = true
             attempt += 1
+            eventCont.yield(.connecting)
             do {
                 try await connectAndPublish()
                 timeline.markDiscontinuity()
                 backoff.reset()
+                eventCont.yield(.published)
                 sessionLog.info("\(self.transport.displayName, privacy: .public) reconnected after \(attempt) attempt(s)")
                 stableConnectionTask?.cancel()
                 stableConnectionTask = Task { [weak self] in
@@ -781,6 +810,8 @@ actor SessionPublisher: Publisher {
         voicePolish = nil
         guard isRunning else {
             await mixer.stopRunning()
+            eventCont.yield(.stopped)
+            eventCont.finish()
             return
         }
         isRunning = false
@@ -789,5 +820,7 @@ actor SessionPublisher: Publisher {
         session = nil
         stream = nil
         await mixer.stopRunning()
+        eventCont.yield(.stopped)
+        eventCont.finish()
     }
 }

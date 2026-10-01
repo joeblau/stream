@@ -76,6 +76,20 @@ public struct SettingsStore: Sendable {
         persistNonSecret(settings)
     }
 
+    /// Reads a protocol's stored connection secrets WITHOUT selecting it (W04):
+    /// the settings session's draft edits each protocol's URL + key
+    /// independently and only persists on Apply.
+    public func connectionSecrets(for proto: StreamProtocol) -> (url: String, key: String) {
+        (keychain.string(for: .url(proto)) ?? "",
+         keychain.string(for: .key(proto)) ?? "")
+    }
+
+    /// Writes a protocol's connection secrets WITHOUT changing the selection.
+    public func saveConnectionSecrets(url: String, key: String, for proto: StreamProtocol) {
+        keychain.set(url, for: .url(proto))
+        keychain.set(key, for: .key(proto))
+    }
+
     /// Saves the currently-shown protocol's credentials, switches, then loads the
     /// target protocol's stored credentials into the active fields (each protocol
     /// keeps its own Keychain slot). Persists the new selection.
