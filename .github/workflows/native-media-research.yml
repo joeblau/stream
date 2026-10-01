@@ -1,0 +1,58 @@
+name: Native Media Research
+
+on:
+  pull_request:
+    paths:
+      - 'apple/scripts/g10_*'
+      - 'apple/scripts/run_g10_decoder_harness.zsh'
+      - 'apple/StreamCore/WebMContainer.swift'
+      - 'apple/docs/research/webm-decoder.md'
+      - '.github/workflows/native-media-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-media-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  decoder:
+    name: WebM and native controls (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Show environment
+        run: |
+          sw_vers
+          uname -m
+          swift --version
+      - name: Install research-only decoder tools
+        run: brew install ffmpeg libvpx
+      - name: Validate optional decoder and native controls
+        run: |
+          mkdir -p build
+          VPX_PREFIX="$(brew --prefix libvpx)" G10_REQUIRE_NATIVE_CONTROLS=1 \\
+            zsh scripts/run_g10_decoder_harness.zsh 2>&1 | tee build/native-media-research.log
+      - name: Upload measured results and fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-media-${{ matrix.os }}
+          path: |
+            apple/build/native-media-research.log
+            apple/build/g10-validation/results.txt
+            apple/build/g10-validation/results
+            apple/build/g10-validation/fixtures
+          if-no-files-found: warn
+          retention-days: 14
