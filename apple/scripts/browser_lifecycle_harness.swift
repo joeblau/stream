@@ -4,6 +4,24 @@ import StreamCore
 
 @main struct BrowserLifecycleHarness {
     @MainActor static func main() async throws {
+        let base = BrowserOverlayConfiguration(urlString:"https://example.invalid/widget?token=fixture")
+        let original = WebSourcePayload(configuration:base)
+        let identity = original.browserOverlayStoreKey
+        precondition(identity != nil && !(identity!.contains("fixture")))
+        precondition(WebSourcePayload(configuration:base).browserOverlayStoreKey == identity)
+        var changed = base
+        changed.pixelWidth += 1
+        precondition(WebSourcePayload(configuration:changed).browserOverlayStoreKey != identity)
+        changed = base; changed.audioRoute = .systemMix
+        precondition(WebSourcePayload(configuration:changed).browserOverlayStoreKey != identity)
+        changed = base; changed.allowsInteraction = true
+        precondition(WebSourcePayload(configuration:changed).browserOverlayStoreKey != identity)
+        changed = base; changed.cssOverrides = "body { color: red }"
+        precondition(WebSourcePayload(configuration:changed).browserOverlayStoreKey != identity)
+        let legacy = WebSourcePayload(url:URL(string: "https://example.invalid/widget?token=fixture"))
+        precondition(legacy.browserOverlayStoreKey == identity)
+        precondition(WebSourcePayload().browserOverlayStoreKey == nil)
+        print("PASS: stable/equal/legacy widget identity, URL secrecy, different viewport/audio/interaction/CSS isolation")
         guard CGSessionCopyCurrentDictionary() != nil else {
             print("SKIP: WindowServer session is unavailable; run on a logged-in, unrestricted Mac")
             return

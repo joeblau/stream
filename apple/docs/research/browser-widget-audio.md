@@ -6,6 +6,8 @@ G07's measured snapshot path is retained for visual widgets. The previous `helpe
 
 Muted/unavailable routes use [WebKit's public media suspension API](https://developer.apple.com/documentation/webkit/wkwebview/setallmediaplaybacksuspended(_:completionhandler:)) in addition to autoplay restrictions and media-element muting. Apple documents that page/user playback cannot resume until the host lifts suspension. This also suspends video-element playback; CSS/DOM animations continue. Stop suspends and unloads the page. Snapshot generations reject late completions after Stop/Reload, avoiding restarted capture and negative in-flight accounting.
 
+Frame identity now hashes the complete normalized configuration. Widgets with the same URL but different viewport/audio/interaction/CSS settings cannot overwrite one another; legacy URL-only payloads still resolve correctly. A bounded identity cache avoids encoding full CSS every render tick and does not put widget URL credentials in the frame-store key.
+
 Interactive pages now reparent into an embedded inspector scroll view. The same WKWebView keeps its original viewport and context; it is not duplicated into another page. Closing the inspector restores the hidden click-through render host. No visible floating interaction window is created. Reload and Replay stay in the inspector.
 
 The actual sources compile in the native app and `scripts/run_browser_lifecycle_harness.zsh`. The harness checks reparenting, absence of a floating interaction window, route warnings, and stopped-page/output state on a logged-in Mac. This restricted workspace has no accessible WindowServer session, so runtime checks are explicitly skipped.
