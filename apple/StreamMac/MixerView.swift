@@ -278,6 +278,14 @@ struct MixerPanelView: View {
             return "Screen"
         case .media: return "Media"
         case .application(let bundleID):
+            // A06 (issue #118): resolve the registry source's name so the
+            // strip reads "Spotify"/"System Audio", not a bundle-ID fragment.
+            for source in sceneStore.sources {
+                if case .appAudio(let payload) = source.payload,
+                   payload.channelBundleID == bundleID {
+                    return source.name
+                }
+            }
             return bundleID.components(separatedBy: ".").last ?? bundleID
         case .guest(let id): return "Guest \(id.prefix(4))"
         }

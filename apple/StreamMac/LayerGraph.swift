@@ -542,6 +542,74 @@ struct SceneReferencePayload: Hashable, Codable, Sendable {
     var sceneID: SceneID
 }
 
+/// A06 (issue #118): an application-audio source — the audio of one running
+/// app, or the whole-system mix, captured INDEPENDENTLY of any screen/video
+/// scene. App-audio sources live in the project source registry only (never
+/// as canvas layers: the payload is not renderable, so layer-add validation
+/// rejects it), and their capture demand is "registered + enabled" rather
+/// than "a visible layer references it".
+///
+/// Every field is part of the payload identity, so retargeting or toggling
+/// `isEnabled` re-keys the capture pool and restarts/stops the capture
+/// deliberately — exactly the C03 privacy-edit pattern.
+struct AppAudioSourcePayload: Hashable, Codable, Sendable {
+    enum Mode: String, Codable, CaseIterable, Sendable {
+        /// One running application, pinned by bundle identifier.
+        case application
+        /// The whole-system mix (every app except the studio itself and the
+        /// globally excluded apps). Per-app sources are excluded from this
+        /// mix at capture time so system + per-app never double.
+        case system
+    }
+    var mode: Mode = .application
+    /// The target app's bundle identifier (application mode).
+    var bundleID: String? = nil
+    /// The app's display name at registration time, so the row reads
+    /// sensibly after the app quits (the C10 missing state).
+    var appName: String? = nil
+    /// Whether the source captures. Demand = registered + enabled.
+    var isEnabled: Bool = true
+
+    init(mode: Mode = .application,
+         bundleID: String? = nil,
+         appName: String? = nil,
+         isEnabled: Bool = true) {
+        self.mode = mode
+        self.bundleID = bundleID
+        self.appName = appName
+        self.isEnabled = isEnabled
+    }
+
+    /// Decode every field with a default so documents written before later
+    /// A06 refinements keep loading (the established additive-wire pattern).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try container.decodeIfPresent(Mode.self, forKey: .mode) ?? .application
+        bundleID = try container.decodeIfPresent(String.self, forKey: .bundleID)
+        appName = try container.decodeIfPresent(String.self, forKey: .appName)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+    }
+
+    /// The synthetic channel key for the system mix (it has no bundle ID).
+    static let systemMixChannelID = "stream.system-mix"
+
+    /// The `AudioChannelID.application(bundleID:)` key this source feeds.
+    var channelBundleID: String {
+        switch mode {
+        case .system: return Self.systemMixChannelID
+        case .application: return bundleID ?? "unconfigured"
+        }
+    }
+
+    /// The display title for source rows and the mixer strip fallback.
+    var displayTitle: String {
+        switch mode {
+        case .system: return "System Audio"
+        case .application: return appName ?? bundleID ?? "Unconfigured App"
+        }
+    }
+}
+
 /// The typed content of one layer. Encoded as a `kind` discriminator string
 /// plus a per-kind payload object, decoupled from Swift case names, so the
 /// format grows (new kinds) without breaking older persisted documents.
@@ -557,6 +625,9 @@ enum LayerPayload: Hashable, Sendable {
     case guest(GuestSourcePayload)
     case syphon(SyphonSourcePayload)
     case scene(SceneReferencePayload)
+    /// A06 (issue #118): app/system audio-only capture. Registry-source only
+    /// — never a renderable canvas layer.
+    case appAudio(AppAudioSourcePayload)
 
     /// Stable discriminator used on the wire.
     var kind: String {
@@ -572,6 +643,7 @@ enum LayerPayload: Hashable, Sendable {
         case .guest: return "guest"
         case .syphon: return "syphon"
         case .scene: return "scene"
+        case .appAudio: return "appAudio"
         }
     }
 
@@ -592,6 +664,12 @@ enum LayerPayload: Hashable, Sendable {
 
     var isMedia: Bool {
         if case .media = self { return true }
+        return false
+    }
+
+    /// A06 (issue #118): an app/system audio-only registry source.
+    var isAppAudio: Bool {
+        if case .appAudio = self { return true }
         return false
     }
 
@@ -636,6 +714,7 @@ enum LayerPayload: Hashable, Sendable {
         case .guest: return "Guest"
         case .syphon: return "Syphon"
         case .scene: return "Scene"
+        case .appAudio: return "App Audio"
         }
     }
 
@@ -653,13 +732,14 @@ enum LayerPayload: Hashable, Sendable {
         case .guest: return "person.2.fill"
         case .syphon: return "app.connected.to.app.below.fill"
         case .scene: return "rectangle.on.rectangle"
+        case .appAudio: return "speaker.wave.2.fill"
         }
     }
 }
 
 extension LayerPayload: Codable {
     private enum Kind: String, Codable {
-        case camera, screen, image, text, shape, media, pdf, web, guest, syphon, scene
+        case camera, screen, image, text, shape, media, pdf, web, guest, syphon, scene, appAudio
     }
     private enum CodingKeys: String, CodingKey {
         case kind, payload
@@ -690,6 +770,8 @@ extension LayerPayload: Codable {
             self = .syphon(try container.decode(SyphonSourcePayload.self, forKey: .payload))
         case .scene:
             self = .scene(try container.decode(SceneReferencePayload.self, forKey: .payload))
+        case .appAudio:
+            self = .appAudio(try container.decode(AppAudioSourcePayload.self, forKey: .payload))
         }
     }
 
@@ -728,6 +810,9 @@ extension LayerPayload: Codable {
             try container.encode(payload, forKey: .payload)
         case .scene(let payload):
             try container.encode(Kind.scene, forKey: .kind)
+            try container.encode(payload, forKey: .payload)
+        case .appAudio(let payload):
+            try container.encode(Kind.appAudio, forKey: .kind)
             try container.encode(payload, forKey: .payload)
         }
     }

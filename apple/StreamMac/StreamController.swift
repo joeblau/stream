@@ -278,6 +278,16 @@ final class StreamController: ObservableObject {
         capturePool.onMediaAudioSample = { id, sample in
             audioEngine.enqueue(.media(id), sample)
         }
+        // A06 (issue #118): app/system audio-only captures ride the same
+        // ingest, keyed by the target's bundle ID — the `.application`
+        // channel kind the A01 engine and A04 mixer already define. These
+        // channels are mixer-owned (never scene-bound): no S05
+        // `AudioBinding` addresses them, so their level is the persisted
+        // mixer fader, independent of every scene.
+        capturePool.onAppAudioSample = { key, sample in
+            guard case .appAudio(let payload) = key else { return }
+            audioEngine.enqueue(.application(bundleID: payload.channelBundleID), sample)
+        }
         audio.onMicSampleOffMain = { sample in
             audioEngine.enqueue(.microphone(deviceUID: nil), sample)
         }
@@ -830,6 +840,11 @@ final class StreamController: ObservableObject {
             .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
         let demand = CaptureSourceKey.demanded(layers: layers,
                                                sources: sceneStore.sources)
+            // A06 (issue #118): app-audio sources demand capture by
+            // REGISTRATION (registered + enabled), independent of which scene
+            // is staged/program — unioned here so the W02 pipeline gate and
+            // `stopAll` still govern their lifecycle.
+            .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
         capturePool.reconcile(demand: demand, settings: settings)
         // A01: the audio engine keeps exactly the channels its captures can
         // feed — the mic plus one per demanded capture key. Stopped captures
@@ -840,6 +855,11 @@ final class StreamController: ObservableObject {
             // A02: media playout keys map onto `.media` channels (keyed by
             // registry source ID), not capture channels.
             if case .media(let id) = key { return .media(id) }
+            // A06: app-audio keys map onto `.application` channels (keyed by
+            // the target's bundle ID / the system-mix channel key).
+            if case .appAudio(let payload) = key {
+                return .application(bundleID: payload.channelBundleID)
+            }
             return .capture(key)
         }).union([.microphone(deviceUID: nil)])
         let audioEngine = self.audioEngine

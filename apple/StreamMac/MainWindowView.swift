@@ -493,6 +493,11 @@ struct MainWindowView: View {
             // A02 (issue #97): media file sources — add/rename/remove and
             // per-source playback status alongside transport in the layer panel.
             MediaSourcesSectionView()
+            // A06 (issue #118): app/system audio-only sources — add (running
+            // app or system mix), enable/disable, rename, retarget, remove,
+            // and per-source capture status. Demand is registration-based,
+            // independent of any screen scene.
+            AppAudioSourcesSectionView()
             // W03: the inspector edits the STAGED scene (what PREVIEW shows);
             // changes reach program only via Take.
             if let scene = previewProgram.stagedScene {

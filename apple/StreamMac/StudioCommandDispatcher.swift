@@ -1651,7 +1651,24 @@ final class StudioCommandDispatcher: ObservableObject {
             canRedo: undoStack.canRedo,
             undoLabel: undoStack.undoLabel,
             redoLabel: undoStack.redoLabel)
+        registerAppAudioMixerChannels()
         pushMixerStateToEngine()
+    }
+
+    /// A06 (issue #118): app-audio sources are mixer-owned, never scene-bound
+    /// — no S05 `AudioBinding` addresses an `.application` channel, so the
+    /// mixer document (fader/mute, default unity) is their ONLY program-gain
+    /// surface. Their channel IDs register here, from the registry on every
+    /// store change, so `pushMixerStateToEngine` applies the persisted gain
+    /// even before the first audio buffer lands (the engine's pending gains
+    /// hold it until the channel auto-registers on enqueue).
+    private func registerAppAudioMixerChannels() {
+        for source in sceneStore.sources {
+            guard case .appAudio(let payload) = source.payload, payload.isEnabled
+            else { continue }
+            let id = AudioChannelID.application(bundleID: payload.channelBundleID)
+            channelIDsByLabel[id.label] = id
+        }
     }
 
     // MARK: Mixer engine push (A04, issue #83)
