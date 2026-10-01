@@ -794,6 +794,12 @@ final class StudioCommandDispatcher: ObservableObject {
     /// `.triggerCameraReaction` commands ride. Owned here so UI, and later
     /// automation/hardware controllers, share one instance.
     let cameraControls: CameraControlCenter
+    /// E03 (issue #164): the person-segmentation capability + live per-source
+    /// segmentation status the Background Effects inspector surface reads.
+    /// Read-only — effect settings ride E01's existing source-effect
+    /// commands, so no new command kinds (and no `isUndoableSceneEdit`
+    /// classification) exist for E03.
+    let backgroundEffects: BackgroundEffectsCenter
     /// E06 (issue #165): the PTZ document (network targets, presets,
     /// scene recall links — the soundboard-document precedent) and its
     /// runtime (transports, stop-on-focus-loss discipline, Take-seam recall).
@@ -833,6 +839,9 @@ final class StudioCommandDispatcher: ObservableObject {
         self.cameraControls = CameraControlCenter(deviceMonitor: controller.deviceMonitor,
                                                   pool: controller.capturePool,
                                                   session: session)
+        // E03 (issue #164): the background-effects status center (capability
+        // matrix + live segmentation state for the inspector; read-only).
+        self.backgroundEffects = BackgroundEffectsCenter()
         // E06 (issue #165): the PTZ document + runtime (see the property
         // docs; created like the soundboard pair above).
         let ptzStore = PTZPresetStore()

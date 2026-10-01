@@ -1,13 +1,16 @@
 import Foundation
 import os.lock
+import StreamCore
 
 // MARK: - E01 (issue #101): per-source framing and picture adjustment effects
 //
 // One `SourceEffects` value describes the full effect stack for a rendered
 // source: FRAMING (digital zoom/pan, mirror, rotation — they reshape the
-// source image before placement) and PICTURE ADJUSTMENTS (brightness,
+// source image before placement), PICTURE ADJUSTMENTS (brightness,
 // contrast, saturation, temperature, tint, gamma — color-only, applied after
-// placement through the renderer's existing Core Image path).
+// placement through the renderer's existing Core Image path), and E03's
+// (issue #164) BACKGROUND effect (person-segmentation blur/replacement,
+// recompositing the source before framing; camera layers only).
 //
 // Scope is deliberately two-level, matching the issue's "source defaults
 // versus layer overrides":
@@ -64,6 +67,12 @@ struct SourceEffects: Hashable, Codable, Sendable {
     /// 0.5...2 (CIGammaAdjust inputPower; 1 = unchanged).
     var gamma: Double = 1
 
+    /// E03 (issue #164): the person-segmentation background effect (off /
+    /// blur / replacement). Applies to camera layers only; capability-gated
+    /// and budget-governed downstream, and a passthrough fallback renders the
+    /// source untouched whenever segmentation can't produce a mask.
+    var background: BackgroundEffectSettings = BackgroundEffectSettings()
+
     /// Skip the whole stack without losing the configured values.
     var isBypassed: Bool = false
 
@@ -93,6 +102,8 @@ struct SourceEffects: Hashable, Codable, Sendable {
             ?? SourceEffects.neutralTemperature
         tint = try container.decodeIfPresent(Double.self, forKey: .tint) ?? 0
         gamma = try container.decodeIfPresent(Double.self, forKey: .gamma) ?? 1
+        background = try container.decodeIfPresent(BackgroundEffectSettings.self, forKey: .background)
+            ?? BackgroundEffectSettings()
         isBypassed = try container.decodeIfPresent(Bool.self, forKey: .isBypassed) ?? false
     }
 
@@ -108,9 +119,14 @@ struct SourceEffects: Hashable, Codable, Sendable {
             || temperature != SourceEffects.neutralTemperature || tint != 0 || gamma != 1
     }
 
+    /// True when the background effect is configured (mode ≠ off).
+    var hasBackgroundEffect: Bool {
+        background.isEnabled
+    }
+
     /// True when rendering this value costs nothing (identity or bypassed).
     var isRenderNoOp: Bool {
-        isBypassed || (!hasFraming && !hasPictureAdjustments)
+        isBypassed || (!hasFraming && !hasPictureAdjustments && !hasBackgroundEffect)
     }
 
     /// The value with every field clamped to its documented range (the
@@ -127,6 +143,7 @@ struct SourceEffects: Hashable, Codable, Sendable {
         copy.temperature = min(9000, max(3000, temperature))
         copy.tint = min(100, max(-100, tint))
         copy.gamma = min(2, max(0.5, gamma))
+        copy.background = background.clamped()
         return copy
     }
 
@@ -155,6 +172,7 @@ struct SourceEffects: Hashable, Codable, Sendable {
         }
         if !(-100...100).contains(tint) { return "Tint must be between -100 and 100." }
         if !(0.5...2).contains(gamma) { return "Gamma must be between 0.5 and 2." }
+        if let error = background.validationError { return error }
         return nil
     }
 }
