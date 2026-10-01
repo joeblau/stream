@@ -574,6 +574,7 @@ final class StreamController: ObservableObject {
            isPipelineRunning, !outputsOwnProfile {
             startAudioInput()
         }
+        capturePool.applyPrivacyDefaults(newSettings)
     }
 
     /// Entry point for settings edits (W04: `applySavedSettings(_:)` routes
