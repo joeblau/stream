@@ -122,6 +122,73 @@ struct StreamMacApp: App {
                     hasCompletedFirstRun = false
                 }
             }
+            // G11 (issue #117): the presentation annotation + live-demo
+            // commands — every control the annotation toolbar has, with
+            // hotkeys, routed through the dispatcher like every studio
+            // action. State labels/checkmarks read the dispatcher's
+            // published `StudioState.annotations` mirror.
+            CommandMenu("Annotate") {
+                let annotationState = dispatcher.state.annotations
+                Button {
+                    dispatcher.execute(.setAnnotationTool(nil))
+                } label: {
+                    if annotationState.activeTool == nil {
+                        Label("Selection Tool", systemImage: "checkmark")
+                    } else {
+                        Text("Selection Tool")
+                    }
+                }
+                .keyboardShortcut("0", modifiers: [.command, .option])
+                ForEach(AnnotationTool.allCases, id: \.self) { tool in
+                    Button {
+                        dispatcher.execute(.setAnnotationTool(tool))
+                    } label: {
+                        if annotationState.activeTool == tool {
+                            Label("\(tool.displayName) Tool", systemImage: "checkmark")
+                        } else {
+                            Text("\(tool.displayName) Tool")
+                        }
+                    }
+                    .keyboardShortcut(toolShortcut(tool), modifiers: [.command, .option])
+                }
+                Divider()
+                Button("Undo Annotation") {
+                    dispatcher.execute(.undoAnnotationStroke(in: nil))
+                }
+                .keyboardShortcut("z", modifiers: [.command, .option])
+                .disabled(!dispatcher.canExecute(.undoAnnotationStroke(in: nil)))
+                Button("Redo Annotation") {
+                    dispatcher.execute(.redoAnnotationStroke(in: nil))
+                }
+                .keyboardShortcut("z", modifiers: [.command, .option, .shift])
+                .disabled(!dispatcher.canExecute(.redoAnnotationStroke(in: nil)))
+                Button("Clear Annotations") {
+                    dispatcher.execute(.clearAnnotations(in: nil))
+                }
+                .keyboardShortcut("k", modifiers: [.command, .option])
+                .disabled(!dispatcher.canExecute(.clearAnnotations(in: nil)))
+                Divider()
+                Toggle("Annotations Visible in Scene", isOn: Binding(
+                    get: { dispatcher.state.annotations.stagedVisible },
+                    set: { dispatcher.execute(.setAnnotationVisibility(visible: $0, in: nil)) }))
+                    .keyboardShortcut("v", modifiers: [.command, .option])
+                    .disabled(!dispatcher.canExecute(.setAnnotationVisibility(visible: true, in: nil)))
+                Toggle("Annotations in Program", isOn: Binding(
+                    get: { dispatcher.state.annotations.stagedInProgram },
+                    set: { dispatcher.execute(.setAnnotationsInProgram($0, in: nil)) }))
+                    .keyboardShortcut("b", modifiers: [.command, .option])
+                    .disabled(!dispatcher.canExecute(.setAnnotationsInProgram(true, in: nil)))
+            }
         }
+    }
+}
+
+/// G11 (issue #117): the ⌥⌘ digit for each annotation tool (⌥⌘0 returns to
+/// the selection tool).
+private func toolShortcut(_ tool: AnnotationTool) -> KeyEquivalent {
+    switch tool {
+    case .pen: return "1"
+    case .highlighter: return "2"
+    case .pointer: return "3"
     }
 }

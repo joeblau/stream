@@ -155,6 +155,41 @@ enum StudioCommand: Equatable, Sendable {
     /// between the outermost two along one axis.
     case distributeLayers(LayerDistribution, in: SceneID?)
 
+    // G11 presentation annotations (issue #117): pen/highlighter strokes and
+    // the laser pointer drawn over the preview canvas. Annotations live in
+    // their own per-scene-keyed document (AnnotationStore — the A03
+    // soundboard-document precedent), NOT in the S01 scene graph: they are
+    // never staged scene content, so Take/Revert never gates them, scene
+    // locks don't apply (like project overlays), and they are NOT S12-
+    // undoable scene edits — strokes carry their own stroke-level history
+    // (undo/redo below IS that history). Per-scene visibility and the
+    // explicit "part of program" choice apply immediately to BOTH monitors
+    // (the S07 project-overlay precedent). `in: nil` targets the STAGED
+    // scene (the canvas the presenter draws on); an explicit ID must name an
+    // existing scene.
+    /// Commits one finished pen/highlighter stroke to the scene's
+    /// annotations (the canvas drag commits on mouse-up).
+    case addAnnotationStroke(AnnotationStroke, in: SceneID?)
+    /// Stroke-level undo/redo of the scene's annotation edits (add/clear) —
+    /// the acceptance criterion's "undo", deliberately separate from ⌘Z
+    /// scene-edit undo.
+    case undoAnnotationStroke(in: SceneID?)
+    case redoAnnotationStroke(in: SceneID?)
+    /// Removes every stroke from the scene (undoable at stroke level).
+    case clearAnnotations(in: SceneID?)
+    /// Per-scene visibility: hidden annotations paint nowhere — not the
+    /// preview chrome, not the program output.
+    case setAnnotationVisibility(visible: Bool, in: SceneID?)
+    /// The explicit per-scene "annotations are part of program" choice: on,
+    /// strokes (and the broadcast pointer) composite into the program output
+    /// through AnnotationRenderer; off, they stay preview-only telestrator
+    /// marks. Applies immediately, like project overlays.
+    case setAnnotationsInProgram(Bool, in: SceneID?)
+    /// Selects the canvas drawing tool (nil = normal selection mode).
+    /// Session state, like layer selection — validated and routed here so
+    /// toolbar, menu/hotkeys, canvas Escape, and automation agree.
+    case setAnnotationTool(AnnotationTool?)
+
     // S07 project-wide overlays and backgrounds (issue #74). Overlays are
     // PROJECT-level content — NOT bound to the staged scene: these commands
     // mutate the SceneStore overlay list directly and apply immediately to
@@ -521,6 +556,17 @@ enum StudioCommand: Equatable, Sendable {
         case .alignLayers(let alignment, _): return "Align \(alignment.displayName)"
         case .distributeLayers(let distribution, _):
             return "Distribute \(distribution.displayName)"
+        case .addAnnotationStroke(let stroke, _):
+            return "\(stroke.tool.displayName) Stroke"
+        case .undoAnnotationStroke: return "Undo Annotation"
+        case .redoAnnotationStroke: return "Redo Annotation"
+        case .clearAnnotations: return "Clear Annotations"
+        case .setAnnotationVisibility(let visible, _):
+            return "\(visible ? "Show" : "Hide") Annotations"
+        case .setAnnotationsInProgram(let include, _):
+            return "\(include ? "Broadcast" : "Unbroadcast") Annotations"
+        case .setAnnotationTool(let tool):
+            return tool.map { "Select \($0.displayName) Tool" } ?? "Select the Selection Tool"
         case .addOverlay(let payload): return "Add \(payload.displayName) Overlay"
         case .addMediaOverlay(let name, _): return "Add \(name) Overlay"
         case .removeOverlay: return "Remove Overlay"
@@ -764,6 +810,11 @@ struct StudioState: Equatable, Sendable {
     var canRedo = false
     var undoLabel: String? = nil
     var redoLabel: String? = nil
+    /// G11 (issue #117): the annotation surface mirror — active tool, drawing
+    /// settings, the staged scene's stroke summary, and the live pointer. The
+    /// Annotate menu, the toolbar, and the canvas chrome read this (the
+    /// dispatcher's own published state) instead of the nested store.
+    var annotations: AnnotationUIState = .empty
 }
 
 // MARK: - Dispatcher
@@ -840,6 +891,12 @@ final class StudioCommandDispatcher: ObservableObject {
     /// hardware/automation triggers share one instance.
     let ptzStore: PTZPresetStore
     let ptz: PTZController
+    /// G11 (issue #117): the annotation document (per-scene strokes +
+    /// visibility + program gate) and session state (active tool, drawing
+    /// settings, laser pointer). Owned here so the toolbar, the canvas
+    /// overlay, the Annotate menu, and future automation share one instance
+    /// and every mutation routes through the annotation commands.
+    let annotations: AnnotationStore
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
     /// graph, keyed by chain-slot ID (passthrough to the controller — the
@@ -880,6 +937,9 @@ final class StudioCommandDispatcher: ObservableObject {
         let ptzStore = PTZPresetStore()
         self.ptzStore = ptzStore
         self.ptz = PTZController(store: ptzStore)
+        // G11 (issue #117): the annotation document + session state (see the
+        // property doc; created like the soundboard pair above).
+        self.annotations = AnnotationStore()
         self.state = StudioState()
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
@@ -911,7 +971,9 @@ final class StudioCommandDispatcher: ObservableObject {
                 sceneStore.objectWillChange,
                 session.objectWillChange,
                 recorder.objectWillChange),
-            previewProgram.objectWillChange)
+            Publishers.Merge(
+                previewProgram.objectWillChange,
+                annotations.objectWillChange))
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.refreshState()
@@ -1211,6 +1273,47 @@ final class StudioCommandDispatcher: ObservableObject {
                     ? nil
                     : .invalidValue("Select at least three unlocked layers to distribute.")
             }
+
+        // G11 (issue #117): annotation commands address the annotation
+        // document keyed by scene — NOT staged scene content, so locks and
+        // staging never gate them (the project-overlay precedent); the
+        // target scene must simply exist (nil = the staged scene, the canvas
+        // the presenter draws on).
+        case .addAnnotationStroke(let stroke, let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success:
+                return stroke.validationError.map { .invalidValue($0) }
+            }
+        case .undoAnnotationStroke(let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success(let id):
+                return annotations.canUndoStroke(in: id)
+                    ? nil : .unavailable("There is no annotation to undo.")
+            }
+        case .redoAnnotationStroke(let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success(let id):
+                return annotations.canRedoStroke(in: id)
+                    ? nil : .unavailable("There is no annotation to redo.")
+            }
+        case .clearAnnotations(let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success(let id):
+                return annotations.annotations(for: id).strokes.isEmpty
+                    ? .unavailable("The scene has no annotations to clear.") : nil
+            }
+        case .setAnnotationVisibility(_, let sceneID),
+             .setAnnotationsInProgram(_, let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success: return nil
+            }
+        case .setAnnotationTool:
+            return nil
 
         // S07 project overlays: validated against the SceneStore overlay
         // list (project level — never the staged scene).
@@ -1826,6 +1929,41 @@ final class StudioCommandDispatcher: ObservableObject {
         case .distributeLayers(let distribution, let sceneID):
             distributeSelectedLayers(distribution, in: sceneID)
 
+        // G11 (issue #117): annotation execution — write the annotation
+        // document through the store (single truth); its publish updates the
+        // program bridge, so program-included strokes composite on the
+        // program engine's next tick, live-safe like project overlays.
+        case .addAnnotationStroke(let stroke, let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.addStroke(stroke, in: id)
+            }
+        case .undoAnnotationStroke(let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.undoStroke(in: id)
+            }
+        case .redoAnnotationStroke(let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.redoStroke(in: id)
+            }
+        case .clearAnnotations(let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.clearStrokes(in: id)
+            }
+        case .setAnnotationVisibility(let visible, let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.setVisible(visible, in: id)
+            }
+        case .setAnnotationsInProgram(let include, let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.setIncludeInProgram(include, in: id)
+            }
+        case .setAnnotationTool(let tool):
+            annotations.activeTool = tool
+            // Leaving the pointer tool retires the laser dot with it.
+            if tool != .pointer {
+                annotations.clearPointer()
+            }
+
         // S07 project overlays: project-level edits — SceneStore publishes
         // them to every engine on persist, so staged AND program composite
         // the change on their next tick. No staged edit, no implicit take.
@@ -2377,6 +2515,24 @@ final class StudioCommandDispatcher: ObservableObject {
 
     // MARK: Layer helpers
 
+    /// G11 (issue #117): the scene an annotation command targets — `nil`
+    /// means the STAGED scene (the canvas being drawn on); an explicit ID
+    /// must name an existing scene. Unlike `resolveStagedScene`, an explicit
+    /// ID need not be staged: annotations are document content keyed by
+    /// scene, not staged scene state.
+    private func resolveAnnotationScene(_ sceneID: SceneID?) -> Result<SceneID, StudioCommandError> {
+        guard let sceneID else {
+            guard let staged = previewProgram.stagedScene else {
+                return .failure(.invalidTarget("No scene is staged in preview."))
+            }
+            return .success(staged.id)
+        }
+        guard let scene = sceneStore.scenes.first(where: { $0.id == sceneID }) else {
+            return .failure(.invalidTarget("Scene \(sceneID) does not exist."))
+        }
+        return .success(scene.id)
+    }
+
     /// W03: layer edits only ever mutate the STAGED scene. `in: nil` targets
     /// it directly; an explicit scene ID must name the staged scene — editing
     /// a background scene is rejected rather than silently bypassing the
@@ -2817,7 +2973,8 @@ final class StudioCommandDispatcher: ObservableObject {
             canUndo: undoStack.canUndo,
             canRedo: undoStack.canRedo,
             undoLabel: undoStack.undoLabel,
-            redoLabel: undoStack.redoLabel)
+            redoLabel: undoStack.redoLabel,
+            annotations: annotations.uiState(stagedSceneID: staged?.id))
         registerAppAudioMixerChannels()
         pushMixerStateToEngine()
     }
@@ -2941,6 +3098,16 @@ private extension StudioCommand {
     /// mixer-document precedent), unlike layer effect OVERRIDES, which are
     /// staged scene content and undo with it. G03's style presets follow the
     /// same rule; layer/overlay STYLES are content and undo.
+    /// G11 (issue #117): annotation commands are excluded — strokes,
+    /// visibility, and the program gate live in the annotation document
+    /// outside the S12 snapshot (the mixer/soundboard-document precedent).
+    /// Strokes are ephemeral live-presentation marks with their own
+    /// stroke-level history (`.undoAnnotationStroke`); the per-scene
+    /// visibility and program-inclusion choices are annotation-document
+    /// state applied immediately to both monitors (the S07 project-overlay
+    /// precedent), not staged scene content — including them in ⌘Z scene
+    /// undo would silently entangle live telestrator marks with document
+    /// edits.
     var isUndoableSceneEdit: Bool {
         switch self {
         case .addScene, .insertScene, .renameScene, .deleteScene, .updateScene,
@@ -2983,6 +3150,9 @@ private extension StudioCommand {
              .ptzMove, .ptzZoom, .ptzStop, .ptzStopAll,
              .ptzStorePreset, .ptzRecallPreset, .ptzRemovePreset,
              .ptzSetSceneRecall, .ptzRemoveSceneRecall,
+             .addAnnotationStroke, .undoAnnotationStroke, .redoAnnotationStroke,
+             .clearAnnotations, .setAnnotationVisibility,
+             .setAnnotationsInProgram, .setAnnotationTool,
              .setSourceEffectDefaults,
              .addEffectPreset, .updateEffectPreset, .removeEffectPreset,
              .addStylePreset, .updateStylePreset, .removeStylePreset,

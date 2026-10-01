@@ -230,6 +230,13 @@ enum CanvasSnapping {
 ///
 /// Every edit goes through the dispatcher as `.setLayerTransform`, so locks,
 /// staging, Take/Revert, and direct-live behave exactly like panel edits.
+///
+/// G11 (issue #117): while an annotation tool is active (pen / highlighter /
+/// laser pointer), the drag gesture draws instead — strokes commit through
+/// `.addAnnotationStroke` on mouse-up and the pointer tracks hover. Committed
+/// strokes, the in-progress stroke, and the pointer dot draw as the same
+/// preview-only chrome (see `annotationChrome`); whether they also reach
+/// program is the explicit per-scene choice rendered by `AnnotationRenderer`.
 struct CanvasInteractionView: View {
     @EnvironmentObject private var dispatcher: StudioCommandDispatcher
     @EnvironmentObject private var previewProgram: PreviewProgramModel
@@ -250,6 +257,9 @@ struct CanvasInteractionView: View {
     @State private var session: DragSession?
     @State private var marqueeRect: CGRect?
     @State private var snapGuides = CanvasSnapGuides.none
+    /// G11 (issue #117): the in-flight pen/highlighter drag, in normalized
+    /// canvas points (committed as one stroke on mouse-up).
+    @State private var inProgressStroke: [AnnotationPoint] = []
 
     private enum Handle: Equatable {
         /// Click/drag on a layer body (or a selection-only click: locked or ⇧).
@@ -283,6 +293,7 @@ struct CanvasInteractionView: View {
     var body: some View {
         ZStack {
             if isLive {
+                annotationChrome
                 safeMarginsChrome
                 selectionChrome
                 marqueeChrome
@@ -300,6 +311,7 @@ struct CanvasInteractionView: View {
         .focusEffectDisabled()
         .onKeyPress(phases: .down, action: keyPressed)
         .contextMenu { canvasContextMenu }
+        .onContinuousHover(coordinateSpace: .local, perform: hoverChanged)
     }
 
     /// Interactive only while a scene is staged and the monitor has an image.
@@ -307,6 +319,17 @@ struct CanvasInteractionView: View {
         previewProgram.stagedScene != nil && imageRect.width > 1 && imageRect.height > 1
             && canvasSize.width > 1 && canvasSize.height > 1
     }
+
+    // MARK: G11 annotation input state
+
+    /// The active annotation tool, mirrored from the dispatcher's published
+    /// state (nil = normal selection mode). Reading `dispatcher.state` keeps
+    /// the overlay reactive.
+    private var annotationTool: AnnotationTool? {
+        dispatcher.state.annotations.activeTool
+    }
+
+    private var annotations: AnnotationStore { dispatcher.annotations }
 
     // MARK: Coordinate conversion (view points ↔ canvas points)
 
@@ -344,6 +367,12 @@ struct CanvasInteractionView: View {
 
     private func dragChanged(_ value: DragGesture.Value) {
         guard isLive else { return }
+        // G11: an active annotation tool owns the drag — selection, marquee,
+        // and handles stay out of the way while drawing/pointing.
+        if let tool = annotationTool {
+            annotationDragChanged(value, tool: tool)
+            return
+        }
         if session == nil {
             session = beginSession(at: canvasPoint(value.startLocation))
         }
@@ -352,6 +381,10 @@ struct CanvasInteractionView: View {
     }
 
     private func dragEnded(_ value: DragGesture.Value) {
+        if let tool = annotationTool {
+            annotationDragEnded(tool)
+            return
+        }
         defer {
             session = nil
             marqueeRect = nil
@@ -362,6 +395,57 @@ struct CanvasInteractionView: View {
         // A plain click on an already-selected layer collapses the selection
         // to it (standard canvas behavior); drags keep the multi-selection.
         sceneStore.selectedLayerIDs = [target]
+    }
+
+    // MARK: G11 annotation drawing (issue #117)
+
+    /// A pen/highlighter drag accumulates the stroke; a pointer drag moves
+    /// the laser dot. Points are normalized canvas coordinates, clamped into
+    /// the canvas on commit.
+    private func annotationDragChanged(_ value: DragGesture.Value, tool: AnnotationTool) {
+        guard let scene = previewProgram.stagedScene else { return }
+        if tool.leavesStroke {
+            if inProgressStroke.isEmpty {
+                inProgressStroke = [normalizedPoint(value.startLocation)]
+            }
+            if inProgressStroke.count < AnnotationStroke.maxPointCount {
+                inProgressStroke.append(normalizedPoint(value.location))
+            }
+        } else {
+            annotations.updatePointer(sceneID: scene.id, point: normalizedPoint(value.location))
+        }
+    }
+
+    /// Mouse-up commits the accumulated stroke through the dispatcher (one
+    /// command = one undoable stroke edit). A click without a drag commits
+    /// nothing — a stroke needs at least two points.
+    private func annotationDragEnded(_ tool: AnnotationTool) {
+        defer { inProgressStroke = [] }
+        guard tool.leavesStroke, inProgressStroke.count >= 2 else { return }
+        let stroke = AnnotationStroke(tool: tool,
+                                      colorHex: annotations.colorHex,
+                                      width: annotations.strokeWidth(for: tool),
+                                      points: inProgressStroke.map { $0.clampedToCanvas })
+        dispatcher.execute(.addAnnotationStroke(stroke, in: nil))
+    }
+
+    /// Laser-pointer hover tracking: the dot follows the mouse over the
+    /// canvas while the pointer tool is active and clears when it leaves.
+    private func hoverChanged(_ phase: HoverPhase) {
+        guard annotationTool == .pointer, isLive,
+              let scene = previewProgram.stagedScene else { return }
+        switch phase {
+        case .active(let location):
+            annotations.updatePointer(sceneID: scene.id, point: normalizedPoint(location))
+        case .ended:
+            annotations.clearPointer()
+        }
+    }
+
+    private func normalizedPoint(_ viewPoint: CGPoint) -> AnnotationPoint {
+        let canvas = canvasPoint(viewPoint)
+        return AnnotationPoint(x: Double(canvas.x / canvasSize.width),
+                               y: Double(canvas.y / canvasSize.height))
     }
 
     /// Mouse-down: resolve what the press grabbed — a selection handle, a
@@ -630,6 +714,11 @@ struct CanvasInteractionView: View {
     /// Arrow keys: 1 canvas pixel, ⇧ = 10 — in the active profile's canvas
     /// pixels, so a nudge means the same thing at any window size.
     private func keyPressed(_ press: KeyPress) -> KeyPress.Result {
+        // G11: Escape leaves the drawing tool and returns to selection mode.
+        if press.key == .escape, annotationTool != nil {
+            dispatcher.execute(.setAnnotationTool(nil))
+            return .handled
+        }
         guard let scene = previewProgram.stagedScene else { return .ignored }
         let step = press.modifiers.contains(.shift) ? 10.0 : 1.0
         let delta: CGSize
@@ -831,6 +920,94 @@ struct CanvasInteractionView: View {
                     .position(x: imageRect.midX, y: imageRect.midY)
             }
         }
+    }
+
+    // MARK: G11 annotation chrome (preview-only — the program path is AnnotationRenderer)
+    //
+    // Committed strokes, the in-progress stroke, and the laser pointer draw
+    // here in SwiftUI over the PREVIEW monitor image — alongside the S04
+    // selection chrome and under the same guarantee: none of it touches the
+    // engine's composed frames. When a scene's annotations are explicitly
+    // program-included, the PROGRAM engine composites them through
+    // `AnnotationRenderer.composite` (fed by `ProgramAnnotationStore`); the
+    // preview engine is wired with an empty annotation provider so the
+    // strokes draw here exactly once, never doubled.
+
+    @ViewBuilder
+    private var annotationChrome: some View {
+        if let scene = previewProgram.stagedScene {
+            let uiState = dispatcher.state.annotations
+            let sceneAnnotations = annotations.annotations(for: scene.id)
+            if sceneAnnotations.isVisible {
+                ForEach(sceneAnnotations.strokes) { stroke in
+                    strokeChrome(points: stroke.points, colorHex: stroke.colorHex,
+                                 width: stroke.width, tool: stroke.tool)
+                }
+            }
+            if inProgressStroke.count > 1, let tool = uiState.activeTool, tool.leavesStroke {
+                strokeChrome(points: inProgressStroke, colorHex: uiState.colorHex,
+                             width: tool == .highlighter
+                                 ? uiState.highlighterWidth : uiState.penWidth,
+                             tool: tool)
+            }
+            if uiState.activeTool == .pointer, sceneAnnotations.isVisible,
+               let pointer = uiState.pointer, pointer.sceneID == scene.id {
+                pointerChrome(at: pointer.point)
+            }
+        }
+    }
+
+    /// One stroke as a SwiftUI path in view coordinates: normalized canvas
+    /// points mapped through the same view transform the selection chrome
+    /// uses; the width (1080p-reference pixels) scales with the VIEW height,
+    /// exactly the renderer's scale mapped into view space — what you draw
+    /// is what `AnnotationRenderer` composites.
+    @ViewBuilder
+    private func strokeChrome(points: [AnnotationPoint], colorHex: String,
+                              width: Double, tool: AnnotationTool) -> some View {
+        Path { path in
+            guard let first = points.first else { return }
+            path.move(to: viewPoint(for: first))
+            for point in points.dropFirst() {
+                path.addLine(to: viewPoint(for: point))
+            }
+        }
+        .stroke(annotationColor(colorHex, tool: tool),
+                style: StrokeStyle(lineWidth: viewStrokeWidth(width),
+                                   lineCap: .round, lineJoin: .round))
+    }
+
+    private func pointerChrome(at point: AnnotationPoint) -> some View {
+        let center = viewPoint(for: point)
+        let scale = imageRect.height / 1080
+        return ZStack {
+            Circle()
+                .fill(Color.red.opacity(0.30))
+                .frame(width: 32 * scale, height: 32 * scale)
+            Circle()
+                .fill(Color.red.opacity(0.95))
+                .frame(width: 10 * scale, height: 10 * scale)
+                .overlay(Circle().stroke(Color.white.opacity(0.9),
+                                         lineWidth: max(1, 1.5 * scale)))
+        }
+        .position(center)
+        .allowsHitTesting(false)
+    }
+
+    private func viewPoint(for point: AnnotationPoint) -> CGPoint {
+        viewPoint(CGPoint(x: CGFloat(point.x) * canvasSize.width,
+                          y: CGFloat(point.y) * canvasSize.height))
+    }
+
+    private func viewStrokeWidth(_ referenceWidth: Double) -> CGFloat {
+        CGFloat(referenceWidth) * imageRect.height / 1080
+    }
+
+    private func annotationColor(_ hex: String, tool: AnnotationTool) -> Color {
+        let components = HexColor.components(hex)
+        return Color(.sRGB, red: components.red, green: components.green,
+                     blue: components.blue,
+                     opacity: components.alpha * (tool == .highlighter ? 0.45 : 1))
     }
 
     // MARK: Context menu (alignment, distribute, snapping options)
