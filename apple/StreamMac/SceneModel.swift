@@ -162,11 +162,18 @@ final class SceneStore: ObservableObject {
     }
 
     func addScene() {
-        let scene = Scene.screenPlusCam(name: "Scene \(scenes.count + 1)",
-                                        screenSourceID: screenSourceID,
-                                        cameraSourceID: cameraSourceID)
+        addScene(Scene.screenPlusCam(name: "Scene \(scenes.count + 1)",
+                                     screenSourceID: screenSourceID,
+                                     cameraSourceID: cameraSourceID))
+    }
+
+    /// Appends a fully-formed scene (built from the `Scene` factories — e.g.
+    /// the W06 first-run sample scene) and selects it.
+    @discardableResult
+    func addScene(_ scene: Scene) -> Scene {
         scenes.append(scene)
         selectedID = scene.id
+        return scene
     }
 
     func rename(_ id: Scene.ID, to name: String) {

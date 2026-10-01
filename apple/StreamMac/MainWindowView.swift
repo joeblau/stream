@@ -27,10 +27,22 @@ struct MainWindowView: View {
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var controller: StreamController
     @EnvironmentObject private var session: SettingsSession
+    @EnvironmentObject private var permissions: PermissionsManager
     @StateObject private var recorder = RecordingController()
     /// Shared Restream chat connection: the sidebar shows it and the settings
     /// pane edits its credentials (W04 — one instance, one sign-in).
     @State private var chat = RestreamChat()
+
+    /// W06 first-run gating (persisted by the app): while false, the studio
+    /// window presents the setup-guide sheet.
+    @Binding private var firstRunCompleted: Bool
+    /// W06 just-in-time permission explainer: the kind whose source was just
+    /// used without the permission granted, if any.
+    @State private var permissionPrompt: PermissionsManager.Kind?
+
+    init(firstRunCompleted: Binding<Bool>) {
+        _firstRunCompleted = firstRunCompleted
+    }
 
     // Panel visibility, persisted so the layout restores across launches.
     @AppStorage("studio.showScenesPanel") private var showScenesPanel = true
@@ -119,6 +131,33 @@ struct MainWindowView: View {
             controller.startPreview()
             // Restore a settings pane left open last launch.
             session.isPresented = showSettingsPanel
+            permissions.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Permissions may have changed in System Settings (W06).
+            permissions.refresh()
+        }
+        // W06 first-run setup guide: shown only until completed/skipped.
+        .sheet(isPresented: Binding(
+            get: { !firstRunCompleted },
+            set: { if !$0 { firstRunCompleted = true } })) {
+            OnboardingView(recorder: recorder) {
+                firstRunCompleted = true
+            }
+            .interactiveDismissDisabled()
+        }
+        // W06 just-in-time permission explainer: selecting a scene whose
+        // source lacks its OS permission explains the purpose and offers the
+        // request (or the denied-state repair) instead of a silent black
+        // source.
+        .sheet(item: $permissionPrompt) { kind in
+            JustInTimePermissionSheet(kind: kind) {
+                permissionPrompt = nil
+            }
+        }
+        .onChange(of: sceneStore.selected) { _, scene in
+            promptForMissingSourcePermission(in: scene)
         }
         .onChange(of: session.isPresented) { _, presented in
             // Persist the layout, and move keyboard focus in/out of the pane.
@@ -209,6 +248,20 @@ struct MainWindowView: View {
         Binding(
             get: { renamingScene != nil },
             set: { if !$0 { renamingScene = nil } })
+    }
+
+    /// W06 just-in-time gating: when the selected scene starts using a source
+    /// whose OS permission is missing, surface the explainer sheet (purpose
+    /// copy + request/repair). Never during first run — the onboarding flow
+    /// owns those prompts — and one prompt at a time.
+    private func promptForMissingSourcePermission(in scene: Scene?) {
+        guard firstRunCompleted, permissionPrompt == nil, let scene else { return }
+        let layout = scene.layout
+        if layout.usesCamera, permissions.status(for: .camera) != .granted {
+            permissionPrompt = .camera
+        } else if layout.usesScreen, permissions.status(for: .screenCapture) != .granted {
+            permissionPrompt = .screenCapture
+        }
     }
 
     // MARK: - Scenes panel

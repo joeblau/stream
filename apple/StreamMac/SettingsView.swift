@@ -19,6 +19,7 @@ import StreamCore
 struct SettingsView: View {
     @ObservedObject var session: SettingsSession
     @EnvironmentObject private var controller: StreamController
+    @EnvironmentObject private var permissions: PermissionsManager
 
     /// Shared Restream chat controller (owned by the shell) so credentials
     /// entered here light up the chat sidebar.
@@ -63,33 +64,43 @@ struct SettingsView: View {
 
     // MARK: - Application permission state
 
-    @State private var cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
-    @State private var micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-    @State private var screenCaptureGranted = CGPreflightScreenCaptureAccess()
+    // Permission status/request/repair is centralized in the shared
+    // PermissionsManager (W06) — the same object the onboarding flow and the
+    // just-in-time explainers use, so this section can never disagree with
+    // them.
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            Form {
-                connectionSection
-                videoSection
-                audioSection
-                chatSection
-                applicationSection
+            ScrollViewReader { proxy in
+                Form {
+                    connectionSection.id(SettingsSession.Section.connection)
+                    videoSection.id(SettingsSession.Section.video)
+                    audioSection.id(SettingsSession.Section.audio)
+                    chatSection.id(SettingsSession.Section.chat)
+                    applicationSection.id(SettingsSession.Section.application)
+                }
+                .formStyle(.grouped)
+                .onChange(of: session.requestedSection) { _, section in
+                    // W06 deep-link (e.g. the first-run flow's destination
+                    // step): scroll to the requested section, then consume it.
+                    guard let section else { return }
+                    withAnimation { proxy.scrollTo(section, anchor: .top) }
+                    session.requestedSection = nil
+                }
             }
-            .formStyle(.grouped)
             Divider()
             actionBar
         }
         .onAppear {
             controller.audio.refreshDevices()
-            refreshPermissions()
+            permissions.refresh()
         }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification)) { _ in
             // The user may have flipped a permission in System Settings.
-            refreshPermissions()
+            permissions.refresh()
         }
         .onExitCommand { onClose() }
     }
@@ -438,62 +449,38 @@ struct SettingsView: View {
 
     // MARK: - Application
 
-    private func refreshPermissions() {
-        cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-        screenCaptureGranted = CGPreflightScreenCaptureAccess()
-    }
-
     @ViewBuilder
-    private func permissionRow(_ title: String,
-                               granted: Bool,
-                               settingsPath: String,
-                               request: (() -> Void)? = nil) -> some View {
+    private func permissionRow(_ kind: PermissionsManager.Kind) -> some View {
+        let status = permissions.status(for: kind)
         HStack {
-            Label(title,
-                  systemImage: granted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
-                .foregroundStyle(granted ? .green : .orange)
+            Label(kind.title,
+                  systemImage: status == .granted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                .foregroundStyle(status == .granted ? .green : .orange)
+            if status == .denied {
+                Text("Denied")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
             Spacer()
-            if let request, !granted {
-                Button("Request…", action: request)
+            if status == .needsRequest {
+                Button("Request…") {
+                    Task { await permissions.request(kind) }
+                }
             }
             Button("System Settings…") {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(settingsPath)") {
-                    NSWorkspace.shared.open(url)
-                }
+                permissions.openSystemSettings(for: kind)
             }
         }
         .font(.callout)
+        .help(permissions.repairAction(for: kind)?.message ?? kind.purpose)
     }
 
     @ViewBuilder
     private var applicationSection: some View {
         Section {
-            permissionRow("Camera",
-                          granted: cameraStatus == .authorized,
-                          settingsPath: "Privacy_Camera",
-                          request: cameraStatus == .notDetermined ? {
-                              Task {
-                                  _ = await AVCaptureDevice.requestAccess(for: .video)
-                                  refreshPermissions()
-                              }
-                          } : nil)
-            permissionRow("Microphone",
-                          granted: micStatus == .authorized,
-                          settingsPath: "Privacy_Microphone",
-                          request: micStatus == .notDetermined ? {
-                              Task {
-                                  _ = await AVCaptureDevice.requestAccess(for: .audio)
-                                  refreshPermissions()
-                              }
-                          } : nil)
-            permissionRow("Screen Capture",
-                          granted: screenCaptureGranted,
-                          settingsPath: "Privacy_ScreenCapture",
-                          request: !screenCaptureGranted ? {
-                              _ = CGRequestScreenCaptureAccess()
-                              refreshPermissions()
-                          } : nil)
+            permissionRow(.camera)
+            permissionRow(.microphone)
+            permissionRow(.screenCapture)
 
             Button("Restore Default Panel Layout", action: onResetLayout)
         } header: {
@@ -501,7 +488,7 @@ struct SettingsView: View {
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 effectBadge(.immediate)
-                Text("Capture permissions are macOS-level; the app re-reads them when it becomes active.")
+                Text("Capture permissions are macOS-level; the app re-reads them when it becomes active. A denied source shows its repair action here and when the source is next used.")
             }
         }
     }

@@ -11,6 +11,14 @@ struct StreamMacApp: App {
     /// active values. Owned here so the menu command (⌘,), the toolbar, and
     /// later the W05 command layer / W06 first-run flow share it.
     @StateObject private var settingsSession: SettingsSession
+    /// The shared permission center (W06, issue #69): onboarding, the
+    /// just-in-time explainers, and the settings pane all read/request
+    /// capture permissions through this one object.
+    @StateObject private var permissions = PermissionsManager()
+
+    /// W06 first-run gating: false until the setup guide is finished or
+    /// skipped; the studio window presents the onboarding sheet while false.
+    @AppStorage("onboarding.hasCompletedFirstRun") private var hasCompletedFirstRun = false
 
     init() {
         let sceneStore = SceneStore()
@@ -29,10 +37,11 @@ struct StreamMacApp: App {
         // inside this shell as an embedded pane (W04), so there is no
         // separate `SwiftUI.Settings` scene.
         Window("Stream Studio", id: "studio") {
-            MainWindowView()
+            MainWindowView(firstRunCompleted: $hasCompletedFirstRun)
                 .environmentObject(sceneStore)
                 .environmentObject(streamController)
                 .environmentObject(settingsSession)
+                .environmentObject(permissions)
                 .preferredColorScheme(.dark)
                 // The smallest supported production layout (1024×640): all
                 // panels stay usable, and any of them can collapse from there.
@@ -48,6 +57,11 @@ struct StreamMacApp: App {
                     settingsSession.isPresented.toggle()
                 }
                 .keyboardShortcut(",", modifiers: .command)
+                Divider()
+                // W06: re-run the first-run setup guide on demand.
+                Button("Setup Guide…") {
+                    hasCompletedFirstRun = false
+                }
             }
         }
     }

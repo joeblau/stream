@@ -25,6 +25,22 @@ final class SettingsSession: ObservableObject {
     @Published var draft: StreamSettings
     /// Whether the shell is presenting the embedded settings pane.
     @Published var isPresented = false
+    /// A section the pane should scroll to when it next renders (W06: the
+    /// first-run flow jumps straight to Connection). Consumed and cleared by
+    /// the settings view after scrolling.
+    @Published var requestedSection: Section?
+
+    /// The settings pane's top-level sections, for deep-linking (W06).
+    enum Section: String, Sendable {
+        case connection, video, audio, chat, application
+    }
+
+    /// Opens the settings pane, optionally scrolled to a section — the entry
+    /// point for guided jumps like the first-run flow's destination step.
+    func showSettings(section: Section? = nil) {
+        requestedSection = section
+        isPresented = true
+    }
 
     private let store: SettingsStore
     private let controller: StreamController
