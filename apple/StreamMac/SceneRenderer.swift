@@ -24,7 +24,7 @@ import StreamCore
 /// Source fallback (documented contract): a visible layer whose source has no
 /// current pixels — screen capture not started, camera stalled past
 /// `LatestCameraFrame`'s freshness window, media playout loading/errored/
-/// stopped (A02), or a payload kind with no renderer yet (image/web/guest/…)
+/// stopped (A02), or a payload kind with no renderer yet (image/pdf/guest/…)
 /// — paints NOTHING, so the background shows
 /// through. The tick is never gated on a source: the composition always
 /// renders at the output fps from the latest sample each source produced.
@@ -493,8 +493,19 @@ final class SceneRenderer {
             return placeNested(reference: reference, layer: layer, canvas: canvas,
                                frames: frames, sourcePayloads: sourcePayloads,
                                scenes: scenes, depth: depth, visited: visited)
+        case .web(let web):
+            // G07 (issue #114) prototype seam: with the explicit prototype
+            // flag on, pull the widget's latest snapshot frame (published by
+            // BrowserOverlayPrototype on its own clock, latest-wins like the
+            // pool's screen-frame holders). Flag off — the shipping state —
+            // or no fresh frame paints the documented nothing fallback.
+            guard BrowserOverlayPrototypeFlag.isEnabled,
+                  let key = web.url?.absoluteString,
+                  let buffer = BrowserOverlayFrameStore.shared.latest(for: key) else { return nil }
+            return place(source: CIImage(cvPixelBuffer: buffer),
+                         layer: layer, canvas: canvas, isCamera: false)
         default:
-            // Payload kinds without a renderer yet (image, pdf, web,
+            // Payload kinds without a renderer yet (image, pdf,
             // guest): documented fallback is the background showing through;
             // later waves add renderers behind this switch.
             return nil
