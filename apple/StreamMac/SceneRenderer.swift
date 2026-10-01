@@ -67,7 +67,11 @@ import Metal
 /// box (`size.width` is the classic 0.10…0.40 scale, height derived from the
 /// source aspect, 24 px canvas-edge inset); fullscreen layers aspect-FIT
 /// centered into their rect. `.opacity` and `.cornerRadius` effects are
-/// honored; other effects are ignored per the LayerGraph contract.
+/// honored; other effects are ignored per the LayerGraph contract. E01 (issue
+/// #101) source effects are a separate model (`LayerNode.effectOverrides` /
+/// `SourceDefinition.effectDefaults`): framing reframes the source before
+/// placement, picture adjustments recolor it after, and a bypassed stack is a
+/// render no-op.
 ///
 /// S09 (issue #100): the per-frame parameters of a scene blend transition
 /// (everything except stingers, which are a base-scene swap under a video
@@ -106,6 +110,13 @@ final class SceneRenderer {
     /// per-frame filter-allocation churn rationale as the PIP mask above.
     private let linearGradientGenerator = CIFilter(name: "CILinearGradient")
 
+    /// E01 (issue #101): where the renderer snapshots the source registry's
+    /// effect-defaults index — the lookup a bound layer WITHOUT its own
+    /// `effectOverrides` inherits its framing/picture adjustments through.
+    /// Defaults to the shared `SourceEffectsStore` (fed by `SceneStore`), so
+    /// existing call sites need no new argument; tests can inject a fixed map.
+    private let sourceEffectsProvider: () -> [SourceDefinitionID: SourceEffects]
+
     /// S07 raster cache for generated content (shape/text layers): keyed by
     /// the full content + pixel-size descriptor, so a static overlay draws
     /// once and is composited from cache every frame after. Bounded — a
@@ -124,7 +135,9 @@ final class SceneRenderer {
     /// Shares the generated cache's bound and clear-on-cap policy.
     private var nestedCache: [GeneratedKey: CIImage] = [:]
 
-    init() {
+    init(sourceEffectsProvider: @escaping () -> [SourceDefinitionID: SourceEffects] =
+            { SourceEffectsStore.shared.snapshot() }) {
+        self.sourceEffectsProvider = sourceEffectsProvider
         let options: [CIContextOption: Any] = [
             .workingColorSpace: NSNull(),
             .cacheIntermediates: false
@@ -796,12 +809,18 @@ final class SceneRenderer {
     /// Places a source image according to the layer's normalized transform.
     /// Camera layers narrower than the canvas take the classic PIP treatment
     /// (fill-crop, rounded corners, edge inset); everything else aspect-fits
-    /// centered into its anchor-resolved rect.
+    /// centered into its anchor-resolved rect. E01 (issue #101): the layer's
+    /// effective source effects (its override, else the bound source's
+    /// defaults) reframe the source BEFORE placement (zoom/pan crop, mirror,
+    /// rotation) and adjust its picture AFTER (brightness/contrast/saturation/
+    /// temperature/tint/gamma) — a bypassed or identity set is a render no-op.
     private func place(source: CIImage,
                        layer: LayerNode,
                        canvas: CGRect,
                        isCamera: Bool) -> CIImage? {
-        let extent = source.extent
+        let sourceEffects = layer.effectiveSourceEffects(defaults: sourceEffectsProvider())
+        let framed = sourceEffects.map { applyingFraming($0, to: source) } ?? source
+        let extent = framed.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
 
         let cornerRadius = layer.effects.compactMap { effect -> CGFloat? in
@@ -811,14 +830,87 @@ final class SceneRenderer {
 
         let placed: CIImage
         if isCamera, layer.transform.size.width < 1 {
-            placed = placePIP(source: source, layer: layer, canvas: canvas,
+            placed = placePIP(source: framed, layer: layer, canvas: canvas,
                               cornerRadius: cornerRadius ?? 16)
         } else {
-            placed = placeFit(source: source, layer: layer, canvas: canvas,
+            placed = placeFit(source: framed, layer: layer, canvas: canvas,
                               cornerRadius: cornerRadius)
         }
 
-        return applyEffects(placed, layer: layer)
+        let styled = applyEffects(placed, layer: layer)
+        return sourceEffects.map { applyingPictureAdjustments($0, to: styled) } ?? styled
+    }
+
+    // MARK: - E01 source effects (issue #101)
+
+    /// The framing half of a source effect stack, applied to the raw source
+    /// image BEFORE placement: mirror (horizontal flip about the extent),
+    /// rotation (about the extent center — the rotated extent is what
+    /// placement fits into the layer rect, so a 90° turn re-points a sideways
+    /// camera instead of cropping it), then the zoom/pan crop (the extent
+    /// shrunk by `zoom`, panned within the available slack, so the crop never
+    /// leaves the source). All geometry-only — no color work here.
+    private func applyingFraming(_ effects: SourceEffects, to source: CIImage) -> CIImage {
+        guard !effects.isBypassed, effects.hasFraming else { return source }
+        var image = source
+        if effects.isMirrored {
+            image = image.oriented(.upMirrored)
+        }
+        if effects.rotationDegrees != 0 {
+            let extent = image.extent
+            let center = CGPoint(x: extent.midX, y: extent.midY)
+            let radians = -CGFloat(effects.rotationDegrees) * .pi / 180
+            image = image.transformed(by: CGAffineTransform(translationX: center.x, y: center.y)
+                .rotated(by: radians)
+                .translatedBy(x: -center.x, y: -center.y))
+        }
+        let zoom = max(1, effects.zoom)
+        if zoom > 1 {
+            let extent = image.extent
+            let cropWidth = extent.width / zoom
+            let cropHeight = extent.height / zoom
+            // Pan is a -1...1 fraction of the available slack, so every value
+            // keeps the crop inside the source (±1 pins it to that edge).
+            let maxDX = (extent.width - cropWidth) / 2
+            let maxDY = (extent.height - cropHeight) / 2
+            let centerX = extent.midX + CGFloat(effects.panX) * maxDX
+            let centerY = extent.midY + CGFloat(effects.panY) * maxDY
+            image = image.cropped(to: CGRect(x: centerX - cropWidth / 2,
+                                             y: centerY - cropHeight / 2,
+                                             width: cropWidth,
+                                             height: cropHeight))
+        }
+        return image
+    }
+
+    /// The picture-adjustment half of a source effect stack, applied to the
+    /// PLACED layer image (color-only, extent-preserving) through the shared
+    /// Core Image pipeline: brightness/contrast/saturation via
+    /// CIColorControls, white balance via CITemperatureAndTint (neutral
+    /// 6500 K / tint 0 → target), gamma via CIGammaAdjust.
+    private func applyingPictureAdjustments(_ effects: SourceEffects, to image: CIImage) -> CIImage {
+        guard !effects.isBypassed, effects.hasPictureAdjustments else { return image }
+        var output = image
+        if effects.brightness != 0 || effects.contrast != 1 || effects.saturation != 1 {
+            output = output.applyingFilter("CIColorControls", parameters: [
+                "inputBrightness": effects.brightness,
+                "inputContrast": effects.contrast,
+                "inputSaturation": effects.saturation
+            ])
+        }
+        if effects.temperature != SourceEffects.neutralTemperature || effects.tint != 0 {
+            output = output.applyingFilter("CITemperatureAndTint", parameters: [
+                "inputNeutral": CIVector(x: CGFloat(SourceEffects.neutralTemperature), y: 0),
+                "inputTargetNeutral": CIVector(x: CGFloat(effects.temperature),
+                                               y: CGFloat(effects.tint))
+            ])
+        }
+        if effects.gamma != 1 {
+            output = output.applyingFilter("CIGammaAdjust", parameters: [
+                "inputPower": effects.gamma
+            ])
+        }
+        return output
     }
 
     /// Aspect-FIT centered in the transform's rect. The rect comes from the

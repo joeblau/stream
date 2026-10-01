@@ -37,6 +37,8 @@ enum SourceDefinitionTag {}
 enum LayerTag {}
 enum GroupTag {}
 enum CanvasTag {}
+/// E01 (issue #101): reusable effect presets (`SourceEffectPreset`).
+enum EffectPresetTag {}
 
 typealias ProjectID = GraphID<ProjectTag>
 typealias SceneID = GraphID<SceneTag>
@@ -44,6 +46,7 @@ typealias SourceDefinitionID = GraphID<SourceDefinitionTag>
 typealias LayerID = GraphID<LayerTag>
 typealias GroupID = GraphID<GroupTag>
 typealias CanvasID = GraphID<CanvasTag>
+typealias EffectPresetID = GraphID<EffectPresetTag>
 
 // MARK: - Geometry
 //
@@ -838,6 +841,12 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
     /// effects, audio, rename, move, remove) through the dispatcher until
     /// unlocked. Combined with its group's lock for the EFFECTIVE lock.
     var isLocked: Bool
+    /// E01 (issue #101): the layer's framing/picture-adjustment OVERRIDES.
+    /// Nil = inherit the bound source's `SourceDefinition.effectDefaults`
+    /// (identity when unbound/unset). A complete value, not a patch — an
+    /// override replaces the source defaults wholesale. Staged scene content:
+    /// edits stage, Take, revert, and undo like the transform.
+    var effectOverrides: SourceEffects?
 
     init(id: LayerID = LayerID(),
          name: String,
@@ -848,7 +857,8 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
          effects: [LayerEffect] = [],
          audio: AudioBinding = .default,
          groupID: GroupID? = nil,
-         isLocked: Bool = false) {
+         isLocked: Bool = false,
+         effectOverrides: SourceEffects? = nil) {
         self.id = id
         self.name = name
         self.sourceID = sourceID
@@ -859,10 +869,12 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
         self.audio = audio
         self.groupID = groupID
         self.isLocked = isLocked
+        self.effectOverrides = effectOverrides
     }
 
     /// `isLocked` was added after v2 shipped; decode it with a default so
     /// older persisted documents keep loading (additive wire change).
+    /// E01's `effectOverrides` follows the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(LayerID.self, forKey: .id)
@@ -875,6 +887,7 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
         audio = try container.decode(AudioBinding.self, forKey: .audio)
         groupID = try container.decodeIfPresent(GroupID.self, forKey: .groupID)
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
+        effectOverrides = try container.decodeIfPresent(SourceEffects.self, forKey: .effectOverrides)
     }
 }
 
@@ -958,11 +971,20 @@ struct SourceDefinition: Identifiable, Hashable, Codable, Sendable {
     var id: SourceDefinitionID
     var name: String
     var payload: LayerPayload
+    /// E01 (issue #101): the source's framing/picture-adjustment DEFAULTS,
+    /// applied to every bound layer that carries no `effectOverrides` of its
+    /// own. Nil = identity. Project-level: edits apply immediately to staged
+    /// AND program compositions (the S07 overlay-edit precedent). Optional,
+    /// so the synthesized decoder treats it as additive (`decodeIfPresent`)
+    /// and pre-E01 documents keep loading.
+    var effectDefaults: SourceEffects? = nil
 
-    init(id: SourceDefinitionID = SourceDefinitionID(), name: String, payload: LayerPayload) {
+    init(id: SourceDefinitionID = SourceDefinitionID(), name: String, payload: LayerPayload,
+         effectDefaults: SourceEffects? = nil) {
         self.id = id
         self.name = name
         self.payload = payload
+        self.effectDefaults = effectDefaults
     }
 }
 
@@ -1464,6 +1486,10 @@ struct SceneDocument: Hashable, Codable, Sendable {
     /// into a scene whose own `transition` is nil. Defaults to cut, so
     /// upgraded installs keep the pre-S09 Take behavior.
     var defaultTransition: SceneTransition
+    /// E01 (issue #101): reusable named framing/picture-adjustment presets,
+    /// stored once at project level and applied by writing their value as a
+    /// layer override or a source default.
+    var effectPresets: [SourceEffectPreset]
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
@@ -1473,7 +1499,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
          selectedID: SceneID,
          overlays: [LayerNode] = [],
          defaultBackground: SceneBackground? = nil,
-         defaultTransition: SceneTransition = .default) {
+         defaultTransition: SceneTransition = .default,
+         effectPresets: [SourceEffectPreset] = []) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
@@ -1483,11 +1510,13 @@ struct SceneDocument: Hashable, Codable, Sendable {
         self.overlays = overlays
         self.defaultBackground = defaultBackground
         self.defaultTransition = defaultTransition
+        self.effectPresets = effectPresets
     }
 
     /// `overlays`/`defaultBackground` were added within v2; decode them with
     /// defaults so pre-S07 v2 documents keep loading (additive wire change).
-    /// S09's `defaultTransition` follows the same pattern.
+    /// S09's `defaultTransition` and E01's `effectPresets` follow the same
+    /// pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
@@ -1499,6 +1528,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
         overlays = try container.decodeIfPresent([LayerNode].self, forKey: .overlays) ?? []
         defaultBackground = try container.decodeIfPresent(SceneBackground.self, forKey: .defaultBackground)
         defaultTransition = try container.decodeIfPresent(SceneTransition.self, forKey: .defaultTransition) ?? .default
+        effectPresets = try container.decodeIfPresent([SourceEffectPreset].self, forKey: .effectPresets) ?? []
     }
 
     /// The S07 render context the engine composites every scene inside.

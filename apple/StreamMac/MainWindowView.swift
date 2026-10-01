@@ -534,6 +534,10 @@ struct MainWindowView: View {
             // staged scene's override — rendered only on Take (program);
             // direct-live uses the same transitions.
             TransitionSettingsSectionView()
+            // E01 (issue #101): per-source framing/picture adjustments for
+            // the selected layer — layer overrides (staged scene content)
+            // versus bound-source defaults (project-level), plus presets.
+            SourceEffectsSectionView()
         }
         .formStyle(.grouped)
     }

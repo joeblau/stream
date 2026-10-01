@@ -195,6 +195,25 @@ enum StudioCommand: Equatable, Sendable {
     /// immediately, like the default background.
     case setDefaultTransition(SceneTransition)
 
+    // E01 per-source framing and picture adjustment effects (issue #101).
+    // Layer OVERRIDES are staged scene content (Take/revert/undo like any
+    // layer edit); source DEFAULTS and presets are project-level (apply
+    // immediately to staged AND program, the S07 overlay-edit precedent) —
+    // and neither is undoable-scene-edit state beyond the staged scene (the
+    // source registry and presets live outside the S12 undo snapshot, like
+    // the mixer document).
+    /// Sets/clears a STAGED-scene layer's effect overrides (nil = inherit the
+    /// bound source's defaults). The value is complete — overrides replace
+    /// the source defaults wholesale, bypass included.
+    case setLayerSourceEffects(LayerID, SourceEffects?, in: SceneID?)
+    /// Sets/clears a registry source's effect DEFAULTS (nil = identity).
+    /// Render-side only: never re-keys the capture pool.
+    case setSourceEffectDefaults(SourceDefinitionID, SourceEffects?)
+    /// Saves a reusable named effect preset (project-level).
+    case addEffectPreset(SourceEffectPreset)
+    case updateEffectPreset(SourceEffectPreset)
+    case removeEffectPreset(EffectPresetID)
+
     // A02 media transport (issue #97): play/pause/stop/restart/seek for a
     // registry media source. These are SESSION state — playback position is
     // never part of a scene document — so they are not undoable scene edits,
@@ -436,6 +455,13 @@ enum StudioCommand: Equatable, Sendable {
         case .setDefaultBackground: return "Set Project Background"
         case .setSceneTransition: return "Set Scene Transition"
         case .setDefaultTransition: return "Set Default Transition"
+        case .setLayerSourceEffects(let id, let effects, _):
+            return effects == nil ? "Reset Layer Source Effects" : "Layer \(id) Source Effects"
+        case .setSourceEffectDefaults(_, let effects):
+            return effects == nil ? "Reset Source Effect Defaults" : "Source Effect Defaults"
+        case .addEffectPreset: return "Save Effect Preset"
+        case .updateEffectPreset: return "Update Effect Preset"
+        case .removeEffectPreset: return "Remove Effect Preset"
         case .mediaPlay: return "Play Media"
         case .mediaPause: return "Pause Media"
         case .mediaStop: return "Stop Media"
@@ -1115,6 +1141,35 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDefaultTransition:
             return nil
 
+        // E01 (issue #101): layer overrides are staged layer edits (same
+        // targeting + lock rules as `.setLayerEffects`, plus range
+        // validation the value model owns); source defaults address the
+        // registry; presets are project-level documents.
+        case .setLayerSourceEffects(let layerID, let effects, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                return effects?.validationError.map { .invalidValue($0) }
+            case .failure(let error): return error
+            }
+        case .setSourceEffectDefaults(let id, let effects):
+            guard sceneStore.source(withID: id) != nil else {
+                return .invalidTarget("Source \(id) does not exist.")
+            }
+            return effects?.validationError.map { .invalidValue($0) }
+        case .addEffectPreset(let preset):
+            return preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A preset name can't be empty.") : nil
+        case .updateEffectPreset(let preset):
+            guard sceneStore.effectPreset(withID: preset.id) != nil else {
+                return .invalidTarget("Effect preset \(preset.id) does not exist.")
+            }
+            return preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A preset name can't be empty.") : nil
+        case .removeEffectPreset(let id):
+            return sceneStore.effectPreset(withID: id) != nil
+                ? nil : .invalidTarget("Effect preset \(id) does not exist.")
+
         // A02 media transport: session state — the target must be a
         // registered media source; locks and staging don't apply.
         case .mediaPlay(let id), .mediaPause(let id),
@@ -1542,6 +1597,22 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDefaultTransition(let transition):
             sceneStore.setDefaultTransition(transition)
             transitions.preloadStinger(for: transition)
+
+        // E01 (issue #101): the layer override is staged scene content (and
+        // implicitly takes in direct-live) like any layer edit; source
+        // defaults and presets write the project registry/documents directly
+        // and publish to every engine on the next tick (render-side only —
+        // no capture re-key).
+        case .setLayerSourceEffects(let layerID, let effects, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.effectOverrides = effects }
+        case .setSourceEffectDefaults(let id, let effects):
+            sceneStore.setSourceEffectDefaults(id, to: effects)
+        case .addEffectPreset(let preset):
+            sceneStore.addEffectPreset(preset)
+        case .updateEffectPreset(let preset):
+            sceneStore.updateEffectPreset(preset)
+        case .removeEffectPreset(let id):
+            sceneStore.removeEffectPreset(id)
 
         case .mediaPlay(let id): controller.capturePool.playMedia(id)
         case .mediaPause(let id): controller.capturePool.pauseMedia(id)
@@ -2193,7 +2264,8 @@ final class StudioCommandDispatcher: ObservableObject {
              .setSceneSoundBindings(_, let id),
              .setSceneAudioSnapshot(_, let id),
              .captureSceneAudioSnapshot(let id),
-             .setSceneMediaBehavior(_, let id):
+             .setSceneMediaBehavior(_, let id),
+             .setLayerSourceEffects(_, _, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
         default:
             return nil
@@ -2473,6 +2545,10 @@ private extension StudioCommand {
     /// and folder collapse (transient view state), Take/Revert/direct-live
     /// (publish control, not an edit — undoing an already-Taken edit undoes
     /// the ORIGINAL edit and re-stages it), and undo/redo themselves.
+    /// E01's source effect defaults and effect presets are excluded too:
+    /// the registry and the preset list live outside the undo snapshot (the
+    /// mixer-document precedent), unlike layer effect OVERRIDES, which are
+    /// staged scene content and undo with it.
     var isUndoableSceneEdit: Bool {
         switch self {
         case .addScene, .insertScene, .renameScene, .deleteScene, .updateScene,
@@ -2489,7 +2565,8 @@ private extension StudioCommand {
              .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground,
              .setSceneTransition, .setDefaultTransition,
              .setSceneSoundBindings,
-             .setSceneAudioSnapshot, .captureSceneAudioSnapshot, .setSceneMediaBehavior:
+             .setSceneAudioSnapshot, .captureSceneAudioSnapshot, .setSceneMediaBehavior,
+             .setLayerSourceEffects:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording,
@@ -2507,6 +2584,8 @@ private extension StudioCommand {
              .addMusicPlaylist, .updateMusicPlaylist, .removeMusicPlaylist,
              .playlistPlay, .playlistPause, .playlistStop,
              .playlistNext, .playlistPrevious,
+             .setSourceEffectDefaults,
+             .addEffectPreset, .updateEffectPreset, .removeEffectPreset,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
              .undo, .redo:
@@ -2529,6 +2608,8 @@ private extension StudioCommand {
             return "layer-transform.\(id)"
         case .setLayerEffects(let id, _, _):
             return "layer-effects.\(id)"
+        case .setLayerSourceEffects(let id, _, _):
+            return "layer-source-effects.\(id)"
         case .setLayerAudio(let id, _, _):
             return "layer-audio.\(id)"
         case .renameLayer(let id, _, _):
