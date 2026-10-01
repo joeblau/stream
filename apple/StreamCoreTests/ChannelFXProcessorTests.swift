@@ -150,7 +150,12 @@ import StreamCore
         let chain = ChannelFXChain.preset(.voice)
         let reference = processedRMS(frequency: 2_500, amplitude: 0.02, chain: chain)
         let chest = processedRMS(frequency: 100, amplitude: 0.02, chain: chain)
-        #expect(20 * log10(chest / reference) > 3)
+        // The low shelf is configured for +3 dB, not strictly more than
+        // +3 dB. Its finite slope, the high-pass, and the reference band's
+        // response shift the measured whole-chain result slightly. Keep a
+        // narrow tolerance that still rejects bypass or the wrong gain.
+        let boost = 20 * log10(chest / reference)
+        #expect((2.5...3.5).contains(boost))
     }
 
     @Test("Voice preset: 1150 Hz dips below the 2.5 kHz reference")
