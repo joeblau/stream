@@ -20,6 +20,10 @@ import SwiftUI
 /// the cursor, app audio, or any apps/windows) and a "Privacy…" editor that
 /// writes the payload back through `updateSource`, re-keying the capture so
 /// exclusions apply by capture restart, never mid-frame.
+///
+/// C04 (issue #104): rows likewise carry a crop indicator (region, zoom, or
+/// app tracking configured) and a "Region & Zoom…" editor for the capture
+/// region, follow-cursor zoom, and opt-in active-app tracking.
 struct ScreenSourcesSectionView: View {
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var controller: StreamController
@@ -35,6 +39,8 @@ struct ScreenSourcesSectionView: View {
     @State private var draftName = ""
     /// C03: the source whose privacy options are being edited (sheet).
     @State private var privacyTarget: SourceDefinition?
+    /// C04: the source whose region/zoom/tracking options are being edited.
+    @State private var regionTarget: SourceDefinition?
 
     private enum PickerMode: Identifiable {
         case add
@@ -102,6 +108,13 @@ struct ScreenSourcesSectionView: View {
                 ScreenSourcePrivacyView(source: source, payload: payload)
             }
         }
+        // C04: per-source region/zoom/tracking editor. Applying re-keys the
+        // capture pool, so the source's capture restarts with the new crop.
+        .sheet(item: $regionTarget) { source in
+            if case .screen(let payload) = source.payload {
+                ScreenSourceRegionView(source: source, payload: payload)
+            }
+        }
     }
 
     // MARK: - Rows
@@ -120,6 +133,7 @@ struct ScreenSourcesSectionView: View {
                     .lineLimit(1)
             }
             Spacer()
+            regionIndicator(for: source)
             privacyIndicator(for: source)
             statusBadge(for: source)
         }
@@ -136,6 +150,10 @@ struct ScreenSourcesSectionView: View {
                 privacyTarget = source
             }
             .help("Cursor, audio, and app/window exclusions for this source")
+            Button("Region & Zoom…") {
+                regionTarget = source
+            }
+            .help("Capture region, follow-cursor zoom, and active-app tracking for this source")
             Divider()
             Button("Remove Source", role: .destructive) {
                 sceneStore.removeSource(source.id)
@@ -144,6 +162,32 @@ struct ScreenSourcesSectionView: View {
     }
 
     // MARK: - Status
+
+    /// C04: a crop icon when this source carries a region, zoom, or app
+    /// tracking configuration, so a cropped/followed capture is always
+    /// visible in the row, never silently applied.
+    @ViewBuilder
+    private func regionIndicator(for source: SourceDefinition) -> some View {
+        if case .screen(let payload) = source.payload, payload.hasRegionDynamics {
+            Label(regionSummary(payload), systemImage: "crop")
+                .labelStyle(.iconOnly)
+                .foregroundStyle(.purple)
+                .help(regionSummary(payload))
+        }
+    }
+
+    private func regionSummary(_ payload: ScreenSourcePayload) -> String {
+        var parts: [String] = []
+        if payload.region != nil { parts.append("region") }
+        if payload.zoom.isEnabled {
+            parts.append("zoom ×\(String(format: "%.2g", payload.zoom.zoomFactor))")
+        }
+        if payload.appTracking.isEnabled {
+            let count = payload.appTracking.allowedBundleIDs.count
+            parts.append("follows \(count) app\(count == 1 ? "" : "s")")
+        }
+        return "Capture: " + parts.joined(separator: ", ")
+    }
 
     /// C03: a shield icon when this source's EFFECTIVE privacy (per-source
     /// options over the global defaults) hides anything — cursor, app audio,

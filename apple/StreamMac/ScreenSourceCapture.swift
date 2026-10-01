@@ -34,6 +34,19 @@ private let screenSourceLog = Logger(subsystem: "com.joeblau.StreamMac", categor
 /// OS limitation: the system content-sharing picker vends an opaque filter,
 /// so the unpinned picker path can only apply cursor/audio options, not
 /// app/window exclusions — pin the source from the Sources tab for those.
+///
+/// C04 (issue #104): pinned DISPLAY payloads can also carry a capture
+/// `region`, follow-cursor `zoom`, and opt-in active-app tracking. The
+/// region is persisted relative to the display's size at draw time and
+/// rescaled against the live display, so its relative geometry survives
+/// resolution/scale changes; a region that no longer fits fails closed
+/// (error + black, the defined fallback — never a silent re-point). The
+/// crop rides `SCStreamConfiguration.sourceRect`/width/height through the
+/// same `start(with:privacy:)` path, and zoom/tracking pan it LIVE via
+/// `SCStream.updateConfiguration` (no capture restarts per cursor move) —
+/// see `ScreenRegionDynamicsController`. Tracking follows only the payload's
+/// allowed apps, never Stream itself, and fails closed when the followed app
+/// is privacy-excluded.
 @MainActor
 final class ScreenSourceCapture: ObservableObject {
     @Published private(set) var isCapturing = false
@@ -60,6 +73,13 @@ final class ScreenSourceCapture: ObservableObject {
     private var pickerPrivacy: EffectiveCapturePrivacy = .standard
     private var stream: SCStream?
     private var output: StreamOutputShim?
+    /// C04: the configuration handed to the running stream, retained so the
+    /// region dynamics can re-apply it (with a new `sourceRect`) through
+    /// `updateConfiguration`. Nil whenever no stream runs.
+    private var activeConfiguration: SCStreamConfiguration?
+    /// C04: the live region/zoom/tracking runtime (pinned display captures
+    /// with region dynamics only); torn down with the stream.
+    private var regionDynamics: ScreenRegionDynamicsController?
     /// Serial queue for all SCStream sample callbacks.
     private let sampleQueue = DispatchQueue(label: "com.joeblau.StreamMac.screen-source.samples",
                                             qos: .userInitiated)
@@ -122,8 +142,13 @@ final class ScreenSourceCapture: ObservableObject {
     /// Starts capturing the content described by `filter` — display, window, or
     /// application — with audio from the captured apps and the microphone.
     /// C03: `privacy` sets the cursor and app-audio configuration flags.
+    /// C04: `dynamics` (pinned display captures with a region, zoom, or app
+    /// tracking) crops the stream to the region through
+    /// `SCStreamConfiguration.sourceRect` and then pans the crop live via
+    /// `ScreenRegionDynamicsController` + `updateConfiguration`.
     func start(with filter: SCContentFilter,
-               privacy: EffectiveCapturePrivacy = .standard) async {
+               privacy: EffectiveCapturePrivacy = .standard,
+               dynamics: ScreenRegionDynamicsInput? = nil) async {
         if stream != nil { await stop() }
         errorMessage = nil
         lastFilter = filter
@@ -131,8 +156,15 @@ final class ScreenSourceCapture: ObservableObject {
         let configuration = SCStreamConfiguration()
         // Native pixel size of the picked content; never hardcoded.
         let scale = CGFloat(filter.pointPixelScale)
-        configuration.width = max(2, Int((filter.contentRect.width * scale).rounded()))
-        configuration.height = max(2, Int((filter.contentRect.height * scale).rounded()))
+        if let dynamics {
+            let initial = dynamics.filterCrop(for: dynamics.baseRegion)
+            configuration.sourceRect = initial.rect
+            configuration.width = Int(initial.pixelSize.width)
+            configuration.height = Int(initial.pixelSize.height)
+        } else {
+            configuration.width = max(2, Int((filter.contentRect.width * scale).rounded()))
+            configuration.height = max(2, Int((filter.contentRect.height * scale).rounded()))
+        }
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         configuration.showsCursor = privacy.showsCursor
         configuration.capturesAudio = privacy.capturesAudio
@@ -167,12 +199,17 @@ final class ScreenSourceCapture: ObservableObject {
             }
             self.stream = stream
             self.output = output
+            self.activeConfiguration = dynamics != nil ? configuration : nil
             try await stream.startCapture()
             isCapturing = true
+            if let dynamics {
+                startRegionDynamics(dynamics)
+            }
             screenSourceLog.info("ScreenCaptureKit stream started")
         } catch {
             self.stream = nil
             self.output = nil
+            self.activeConfiguration = nil
             isCapturing = false
             let nsError = error as NSError
             errorMessage = "\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))"
@@ -200,6 +237,13 @@ final class ScreenSourceCapture: ObservableObject {
     /// per-source options resolve against; the resulting filter excludes the
     /// studio's own windows and the user's excluded apps/windows, and the
     /// configuration carries the effective cursor/audio flags.
+    ///
+    /// C04 (issue #104): display payloads may carry a region/zoom/tracking
+    /// configuration (see the type doc). A stored region is rescaled against
+    /// the LIVE display size (its relative geometry persists across
+    /// resolution changes); a region that no longer fits the display fails
+    /// closed, and so does app tracking whose allowed apps collide with the
+    /// privacy exclusion list.
     func start(matching payload: ScreenSourcePayload,
                defaults: StreamSettings = .default) async {
         guard stream == nil, pickerContinuation == nil else { return }
@@ -209,7 +253,19 @@ final class ScreenSourceCapture: ObservableObject {
             let content = try await SCShareableContent.current
             switch Self.resolve(payload, privacy: privacy, in: content) {
             case .filter(let filter):
-                await start(with: filter, privacy: privacy)
+                if let conflict = Self.trackingConflict(payload, privacy: privacy) {
+                    errorMessage = conflict
+                    screenSourceLog.error("App tracking conflicts with privacy: \(conflict, privacy: .public)")
+                    return
+                }
+                let dynamics = Self.regionDynamicsInput(for: payload, privacy: privacy,
+                                                        filter: filter, in: content)
+                if case .missing(let reason) = dynamics {
+                    errorMessage = reason
+                    screenSourceLog.error("Region unresolvable: \(reason, privacy: .public)")
+                    return
+                }
+                await start(with: filter, privacy: privacy, dynamics: dynamics.input)
             case .missing(let reason):
                 errorMessage = reason
                 screenSourceLog.error("Pinned screen source unresolvable: \(reason, privacy: .public)")
@@ -219,6 +275,79 @@ final class ScreenSourceCapture: ObservableObject {
             errorMessage = "Screen Recording permission is required. Enable it for StreamMac in System Settings > Privacy & Security > Screen Recording. (\(error.localizedDescription))"
             screenSourceLog.error("Shareable content unavailable: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// The C04 dynamics input for a pinned display payload, or the fail-closed
+    /// reason a stored region can't map onto the live display. Nil input =
+    /// no region dynamics (window/app targets, unpinned or plain displays).
+    nonisolated private static func regionDynamicsInput(
+        for payload: ScreenSourcePayload,
+        privacy: EffectiveCapturePrivacy,
+        filter: SCContentFilter,
+        in content: SCShareableContent) -> RegionDynamicsResolution {
+        guard payload.target == .display, payload.hasRegionDynamics,
+              let id = payload.targetIdentifier.flatMap({ UInt32($0) }),
+              let display = content.displays.first(where: { $0.displayID == id }) else {
+            return .input(nil)
+        }
+        let full = CGRect(origin: .zero, size: display.frame.size)
+        var base = full
+        if let region = payload.region {
+            guard let resolved = resolvedRegion(region, displaySize: display.frame.size) else {
+                return .missing("This source's region no longer fits the display (\(Int(display.frame.width))×\(Int(display.frame.height)) points). Edit the region from the Sources tab — capture fails closed rather than capturing the wrong area.")
+            }
+            base = resolved
+        }
+        return .input(ScreenRegionDynamicsInput(
+            displayID: id,
+            displayFrame: display.frame,
+            contentRect: filter.contentRect,
+            pointScale: CGFloat(filter.pointPixelScale),
+            baseRegion: base,
+            zoom: payload.zoom,
+            tracking: payload.appTracking,
+            excludedBundleIDs: privacy.excludedBundleIDs + [studioBundleID]))
+    }
+
+    enum RegionDynamicsResolution {
+        case input(ScreenRegionDynamicsInput?)
+        case missing(String)
+
+        var input: ScreenRegionDynamicsInput? {
+            guard case .input(let value) = self else { return nil }
+            return value
+        }
+    }
+
+    /// Rescales a stored region against the live display size (the region is
+    /// persisted with the display size at draw time, so its RELATIVE
+    /// geometry survives resolution/scale changes), clamped to the display.
+    /// Nil when nothing meaningful remains — the defined fallback is
+    /// fail-closed, never a re-point.
+    nonisolated static func resolvedRegion(_ region: CaptureRegion,
+                                           displaySize: CGSize) -> CGRect? {
+        guard region.displaySize.width > 0, region.displaySize.height > 0 else { return nil }
+        let scaleX = displaySize.width / region.displaySize.width
+        let scaleY = displaySize.height / region.displaySize.height
+        let rect = CGRect(x: region.rect.minX * scaleX,
+                          y: region.rect.minY * scaleY,
+                          width: region.rect.width * scaleX,
+                          height: region.rect.height * scaleY)
+            .intersection(CGRect(origin: .zero, size: displaySize))
+        guard rect.width >= 32, rect.height >= 32 else { return nil }
+        return rect
+    }
+
+    /// C04 fail-closed check: app tracking that follows an app the EFFECTIVE
+    /// privacy options exclude can only mean "capture nothing" — error,
+    /// never a silent re-point (the C03 contract applied to tracking).
+    nonisolated static func trackingConflict(_ payload: ScreenSourcePayload,
+                                             privacy: EffectiveCapturePrivacy) -> String? {
+        guard payload.appTracking.isEnabled else { return nil }
+        let excluded = Set(privacy.excludedBundleIDs)
+        guard let conflict = payload.appTracking.allowedBundleIDs
+            .first(where: { excluded.contains($0) }) else { return nil }
+        return "This source's app tracking follows an app its privacy options exclude (\(conflict)). Remove the exclusion or the tracking entry — capture fails closed rather than re-pointing."
     }
 
     func stop() async {
@@ -232,11 +361,57 @@ final class ScreenSourceCapture: ObservableObject {
         let stream = self.stream
         self.stream = nil
         self.output = nil
+        self.activeConfiguration = nil
+        regionDynamics?.stop()
+        regionDynamics = nil
         isCapturing = false
         if let stream {
             try? await stream.stopCapture()
         }
         screenSourceLog.info("ScreenCaptureKit stream stopped")
+    }
+
+    // MARK: - Region dynamics (C04, issue #104)
+
+    /// Wires the region/zoom/tracking controller to the running stream. The
+    /// controller pans the crop live; fail-closed tracking stops the capture
+    /// with an error (black + error badge, never a silent re-point).
+    private func startRegionDynamics(_ input: ScreenRegionDynamicsInput) {
+        let controller = ScreenRegionDynamicsController(input: input)
+        controller.onCrop = { [weak self] sourceRect, pixelSize in
+            Task { @MainActor in self?.applyDynamicCrop(sourceRect, pixelSize: pixelSize) }
+        }
+        controller.onFailClosed = { [weak self] message in
+            Task { @MainActor in self?.trackingDidFailClosed(message) }
+        }
+        regionDynamics = controller
+        controller.start()
+    }
+
+    /// Applies a dynamics-computed crop to the running stream through
+    /// `updateConfiguration` — zoom/tracking never restart the capture, so
+    /// panning costs no flicker and no re-negotiated outputs.
+    private func applyDynamicCrop(_ sourceRect: CGRect, pixelSize: CGSize) {
+        guard let stream, let configuration = activeConfiguration else { return }
+        configuration.sourceRect = sourceRect
+        configuration.width = max(2, Int(pixelSize.width))
+        configuration.height = max(2, Int(pixelSize.height))
+        Task {
+            do {
+                try await stream.updateConfiguration(configuration)
+            } catch {
+                screenSourceLog.error("Region/zoom update failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Active-app tracking followed a privacy-excluded app: stop and surface
+    /// the fail-closed error. `stop()` doesn't clear `errorMessage`, and the
+    /// pool mirrors it into the per-source error badge.
+    private func trackingDidFailClosed(_ message: String) {
+        errorMessage = message
+        screenSourceLog.error("App tracking failed closed: \(message, privacy: .public)")
+        Task { await stop() }
     }
 
     // MARK: - Pinned target resolution (C02, issue #77)
@@ -455,6 +630,9 @@ final class ScreenSourceCapture: ObservableObject {
         isCapturing = false
         stream = nil
         output = nil
+        activeConfiguration = nil
+        regionDynamics?.stop()
+        regionDynamics = nil
         screenSourceLog.error("Capture stopped: domain=\(error.domain, privacy: .public) code=\(error.code, privacy: .public) message=\(error.localizedDescription, privacy: .public)")
         if error.code != SCStreamError.Code.userStopped.rawValue {
             errorMessage = "\(error.localizedDescription) (\(error.domain) \(error.code))"

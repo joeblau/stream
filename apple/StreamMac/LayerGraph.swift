@@ -238,23 +238,37 @@ struct ScreenSourcePayload: Hashable, Codable, Sendable {
     /// it re-keys the capture pool and restarts the capture with the new
     /// filter — exclusions apply deliberately, never mid-frame.
     var privacy: CapturePrivacyOptions = CapturePrivacyOptions()
+    /// C04 (issue #104): a user-drawn capture region on a display target.
+    /// Part of the payload identity, so editing it re-keys the capture
+    /// deliberately, exactly like privacy edits.
+    var region: CaptureRegion? = nil
+    /// C04: follow-the-cursor zoom on a display/region capture.
+    var zoom: ScreenZoomOptions = ScreenZoomOptions()
+    /// C04: opt-in frontmost-app tracking on a display/region capture.
+    var appTracking: ActiveAppTrackingOptions = ActiveAppTrackingOptions()
 
     init(target: Target = .display,
          targetIdentifier: String? = nil,
          applicationBundleID: String? = nil,
          windowTitle: String? = nil,
-         privacy: CapturePrivacyOptions = CapturePrivacyOptions()) {
+         privacy: CapturePrivacyOptions = CapturePrivacyOptions(),
+         region: CaptureRegion? = nil,
+         zoom: ScreenZoomOptions = ScreenZoomOptions(),
+         appTracking: ActiveAppTrackingOptions = ActiveAppTrackingOptions()) {
         self.target = target
         self.targetIdentifier = targetIdentifier
         self.applicationBundleID = applicationBundleID
         self.windowTitle = windowTitle
         self.privacy = privacy
+        self.region = region
+        self.zoom = zoom
+        self.appTracking = appTracking
     }
 
     /// The C02 relink fields were added after v2 shipped; decode every field
     /// with a default so older persisted documents keep loading (additive
     /// wire change, same pattern as `LayerNode.isLocked`). C03's `privacy`
-    /// follows the same pattern.
+    /// and C04's `region`/`zoom`/`appTracking` follow the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         target = try container.decodeIfPresent(Target.self, forKey: .target) ?? .display
@@ -263,7 +277,59 @@ struct ScreenSourcePayload: Hashable, Codable, Sendable {
         windowTitle = try container.decodeIfPresent(String.self, forKey: .windowTitle)
         privacy = try container.decodeIfPresent(CapturePrivacyOptions.self, forKey: .privacy)
             ?? CapturePrivacyOptions()
+        region = try container.decodeIfPresent(CaptureRegion.self, forKey: .region)
+        zoom = try container.decodeIfPresent(ScreenZoomOptions.self, forKey: .zoom)
+            ?? ScreenZoomOptions()
+        appTracking = try container.decodeIfPresent(ActiveAppTrackingOptions.self, forKey: .appTracking)
+            ?? ActiveAppTrackingOptions()
     }
+
+    /// C04: true when this payload carries any region/zoom/tracking
+    /// configuration (drives the source-row indicator and decides whether a
+    /// display capture builds the dynamics runtime).
+    var hasRegionDynamics: Bool {
+        region != nil || zoom.isEnabled || appTracking.isEnabled
+    }
+}
+
+/// C04 (issue #104): a user-drawn capture region on a display target.
+struct CaptureRegion: Hashable, Codable, Sendable {
+    /// The region in display points, relative to the display's top-left.
+    var rect: CGRect
+    /// The display's point size when the region was drawn. Capture
+    /// resolution changes rescale `rect` proportionally against the live
+    /// size, so the region's RELATIVE geometry persists across scale/display
+    /// changes; a region that no longer fits the display fails closed
+    /// (error + black, never a silent re-point).
+    var displaySize: CGSize
+}
+
+/// C04 (issue #104): follow-the-cursor zoom for display/region captures.
+/// Applied live through `SCStream.updateConfiguration` — no capture restart
+/// per cursor move; editing the options themselves re-keys the capture.
+struct ScreenZoomOptions: Hashable, Codable, Sendable {
+    var isEnabled: Bool = false
+    /// 1.5...4.0; the crop is the base region shrunk by this factor.
+    var zoomFactor: Double = 2.0
+    /// true: the zoomed crop pans after the cursor (exponentially smoothed;
+    /// a still cursor converges and stops emitting updates). false: a static
+    /// centered zoom of the base region.
+    var followsCursor: Bool = true
+    /// true: holding ⌃ freezes panning mid-capture.
+    var pauseWithControlKey: Bool = true
+}
+
+/// C04 (issue #104): opt-in frontmost-app tracking for display/region
+/// captures. The region follows the frontmost app's main window, restricted
+/// to `allowedBundleIDs`. Stream itself can never be allowed — switching
+/// back to the studio leaves the region where it is and (display filters
+/// always exclude studio windows) never captures its controls. An allowed
+/// app the privacy options exclude fails closed (error + black), never a
+/// silent re-point.
+struct ActiveAppTrackingOptions: Hashable, Codable, Sendable {
+    var isEnabled: Bool = false
+    /// Only these apps may move the region.
+    var allowedBundleIDs: [String] = []
 }
 
 /// C03 (issue #78): per-source capture privacy persisted on
