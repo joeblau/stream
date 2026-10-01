@@ -222,8 +222,13 @@ final class StreamController: ObservableObject {
         self.previewEngine = CompositionEngine(
             screenProvider: { frames.latestScreenFrame() },
             cameraProvider: { frames.freshestCameraFrame() },
+            // G11 (issue #117): preview shows annotations as SwiftUI chrome in
+            // CanvasInteractionView — painting them into the image too would
+            // double-draw them.
+            annotationProvider: { .empty },
             canvasSize: persisted.outputProfile.canvasSize,
             frameRate: persisted.outputProfile.frameRate)
+        OutputCanvasStore.shared.publish(persisted.outputProfile.canvasSize)
 
         // W03: scene edits and selection changes reach the engines ONLY
         // through the preview/program model's snapshots — never straight from
@@ -855,6 +860,9 @@ final class StreamController: ObservableObject {
         let changed = profile != activeProfile
         activeProfile = profile
         stagedProfile = nil
+        // G06 (issue #113): PDF `.fill` framing reads the output canvas off
+        // the render tick via the lock-protected snapshot.
+        OutputCanvasStore.shared.publish(profile.canvasSize)
         // Align the scene graph's canvas reference (S01) with the output
         // canvas; transforms are normalized, so layers are not repositioned.
         sceneStore.setCanvasSize(profile.canvasSize)
@@ -1098,7 +1106,21 @@ final class StreamController: ObservableObject {
         let registry = SceneGraph.index(sceneStore.scenes)
         let layers = [previewProgram.programScene, staged].compactMap { $0 }
             .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
-        let demand = CaptureSourceKey.demanded(layers: layers,
+        // G09 (issue #116): project overlay media (animated images / alpha
+        // video) composites ABOVE every scene, so its playout demand comes
+        // from the overlay list, not scene layers: an overlay demands its
+        // media source while visible in the program OR staged composition
+        // (a per-scene hide narrows the demand exactly like a scene-layer
+        // visibility toggle). Being in the SAME unioned demand set, a shared
+        // overlay source keeps playing across Takes untouched — no restart.
+        let overlayLayers = sceneStore.overlays.filter { overlay in
+            guard overlay.isVisible else { return false }
+            let hiddenInProgram = previewProgram.programScene?
+                .hiddenOverlayIDs.contains(overlay.id) ?? false
+            let hiddenInStaged = staged?.hiddenOverlayIDs.contains(overlay.id) ?? false
+            return !hiddenInProgram || (staged != nil && !hiddenInStaged)
+        }
+        let demand = CaptureSourceKey.demanded(layers: layers + overlayLayers,
                                                sources: sceneStore.sources)
             // A06 (issue #118): app-audio sources demand capture by
             // REGISTRATION (registered + enabled), independent of which scene
@@ -1138,6 +1160,12 @@ final class StreamController: ObservableObject {
     /// `PreviewProgramModel.programScene`.
     func publishSceneToProgram(_ scene: Scene) {
         Task { await engine.updateScene(scene) }
+        // G08 (issue #115): program scene-entry applies each web widget's
+        // sceneEntryRefresh policy (the capture itself never restarts).
+        capturePool.noteWebWidgetSceneEntries(
+            sceneID: scene.id,
+            layers: SceneGraph.flattenedVisibleLayers(of: scene, in: SceneGraph.index(sceneStore.scenes)),
+            sources: sceneStore.sources)
         // A01: audio follows the program atomically with video — the scene's
         // S05 `AudioBinding`s become ramped channel gains (click-free Take).
         applyProgramAudioBindings()
@@ -1175,8 +1203,15 @@ final class StreamController: ObservableObject {
         // `applyProgramCaptureGains` only covers `.capture` channels, so
         // media gains go through the documented per-channel gain API here.
         let staged = previewState == .active ? previewProgram.stagedScene : nil
+        // G09 (issue #116): overlay media sources are in playout demand
+        // (reconcileSourceDemand above) but carry no AudioBinding — project
+        // overlays are VISUAL branding, so their channels ride the
+        // no-binding default (volume 0) and stay silent. Including them in
+        // the demanded set is what makes that explicit instead of leaking a
+        // unity-gain default onto program.
         let demandLayers = [previewProgram.programScene, staged].compactMap { $0 }
             .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
+            + sceneStore.overlays.filter { $0.payload.isMedia }
         let demandedMedia: Set<SourceDefinitionID> = Set(
             CaptureSourceKey.demanded(layers: demandLayers, sources: sceneStore.sources)
                 .compactMap { key -> SourceDefinitionID? in

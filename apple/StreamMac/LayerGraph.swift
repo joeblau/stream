@@ -410,15 +410,233 @@ extension ScreenSourcePayload {
     }
 }
 
-struct ImageSourcePayload: Hashable, Codable, Sendable {
-    var assetIdentifier: String? = nil
+/// G01 (issue #81): how an image layer scales its source into the transform
+/// rect. Both modes preserve the source's pixel aspect (no stretch) and its
+/// alpha (transparent margins stay transparent under `.fit`; a `.fill` crop
+/// clips through the layer's alpha, never flattening it).
+enum ImageContentMode: String, Codable, CaseIterable, Sendable {
+    /// Aspect-FIT centered in the rect — the logo/bug default: the whole
+    /// image shows, transparent padding fills the mismatch.
+    case fit
+    /// Aspect-FILL centered, cropped to the rect — full-bleed backgrounds.
+    case fill
+
+    var displayName: String {
+        switch self {
+        case .fit: return "Fit (Preserve Aspect)"
+        case .fill: return "Fill (Crop)"
+        }
+    }
 }
 
+/// G01 (issue #81): a static image or logo layer — PNG/JPEG/HEIF/TIFF pixels
+/// or a natively rendered vector/PDF page (format validation is the import
+/// path's `ImageAssetValidator` gate). The persisted identity mirrors A02's
+/// media sources: a SECURITY-SCOPED BOOKMARK is the self-contained access
+/// grant (the layer renders even if the P03 asset library is unavailable),
+/// and `assetIdentifier` registers the file in the P03 asset library
+/// (`AssetLibraryStore`) for recoverable project references and usage
+/// tracking. Alpha, color space, and pixel aspect ride the decoded CGImage
+/// into the renderer untouched; the transform/contentMode own all scaling.
+struct ImageSourcePayload: Hashable, Codable, Sendable {
+    /// The P03 asset library registration (`AssetID` string); nil when the
+    /// library wasn't wired at import time.
+    var assetIdentifier: String? = nil
+    /// Security-scoped bookmark for the picked file (the access grant).
+    var bookmarkData: Data? = nil
+    /// The picked file's display name (bookmarks don't round-trip one).
+    var fileName: String? = nil
+    /// How the image scales into the layer rect.
+    var contentMode: ImageContentMode = .fit
+    /// Pixel dimensions recorded at import (the renderer reads the decoded
+    /// image's own size; these are the UI's aspect hint before first paint).
+    var pixelWidth: Int? = nil
+    var pixelHeight: Int? = nil
+
+    init(assetIdentifier: String? = nil,
+         bookmarkData: Data? = nil,
+         fileName: String? = nil,
+         contentMode: ImageContentMode = .fit,
+         pixelWidth: Int? = nil,
+         pixelHeight: Int? = nil) {
+        self.assetIdentifier = assetIdentifier
+        self.bookmarkData = bookmarkData
+        self.fileName = fileName
+        self.contentMode = contentMode
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+    }
+
+    /// Every G01 field beyond `assetIdentifier` was added after v2 shipped;
+    /// decode each with a default so older persisted documents keep loading
+    /// (additive wire change, same pattern as `MediaSourcePayload`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        assetIdentifier = try container.decodeIfPresent(String.self, forKey: .assetIdentifier)
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        contentMode = try container.decodeIfPresent(ImageContentMode.self, forKey: .contentMode) ?? .fit
+        pixelWidth = try container.decodeIfPresent(Int.self, forKey: .pixelWidth)
+        pixelHeight = try container.decodeIfPresent(Int.self, forKey: .pixelHeight)
+    }
+
+    /// The image cache/store identity: the P03 asset registration wins (it
+    /// survives relink/replace — same asset, new file), then the bookmark
+    /// bytes (self-contained layers), then "unconfigured".
+    var cacheKey: String {
+        if let assetIdentifier { return "asset/\(assetIdentifier)" }
+        if let bookmarkData { return "bookmark/\(AssetContentHasher.sha256(of: bookmarkData))" }
+        return "unconfigured"
+    }
+
+    /// True when the payload names an image to paint (a configured layer).
+    var isConfigured: Bool {
+        assetIdentifier != nil || bookmarkData != nil
+    }
+}
+
+/// G02 (issue #110): a text/title layer — editable broadcast titles, lower
+/// thirds, and host/guest name captions. The legacy four fields (text, font,
+/// size, color) are the tip; the full style surface (alignment, background
+/// bar, padding, auto vs fixed box, wrapping, overflow, timed/fly-in
+/// visibility) is the StreamCore `TextTitleStyle` value model — same ranges,
+/// same additive-wire rules. The string may carry `{host}`/`{guest}` tokens
+/// resolved at render time (see `TitleTemplate`); the pinned font fallback
+/// chain (`TitleFontFallback`) makes a reopened/exported document render
+/// deterministically on a machine missing the requested font.
+///
+/// SEAM for G05 (ticker): builds on THIS payload and the generated-content
+/// render path — a per-tick text provider keyed by layer ID (the
+/// `TitleTokenStore` pattern) feeds dynamic strings without new layer kinds;
+/// the raster cache already re-renders only when the resolved string
+/// changes. G04 (issue #111) landed the first provider of that shape: the
+/// `timer` field below turns the layer into a countdown/stopwatch/clock/
+/// scheduled-start overlay, resolved per tick by the StreamMac
+/// `TimerOverlayStore` (runtime state keyed by layer ID, shared by preview
+/// and program — never in this payload, never undoable scene content).
 struct TextSourcePayload: Hashable, Codable, Sendable {
     var text: String = ""
     var fontName: String? = nil
     var fontSize: Double = 48
     var colorHex: String = "#FFFFFF"
+    // G02 style surface (see TextTitleStyle for ranges/semantics).
+    var alignment: TextHorizontalAlignment = .leading
+    var verticalAlignment: TextVerticalAlignment = .center
+    var backgroundColorHex: String? = nil
+    var padding: Double = 0
+    var boxSizing: TextBoxSizing = .fixed
+    var wraps: Bool = true
+    var overflow: TextOverflow = .clip
+    var timing: TitleTiming? = nil
+    /// G04 (issue #111): when set, the layer renders a live timer string
+    /// (resolved per tick) instead of the static `text`. Config is durable
+    /// scene content (stages/Takes/undoes with the payload); transport state
+    /// lives in the shared `DynamicOverlayStore` keyed by playback ID.
+    var timer: TimerOverlayConfiguration? = nil
+    var ticker: TickerOverlayConfiguration? = nil
+
+    init(text: String = "",
+         fontName: String? = nil,
+         fontSize: Double = 48,
+         colorHex: String = "#FFFFFF",
+         alignment: TextHorizontalAlignment = .leading,
+         verticalAlignment: TextVerticalAlignment = .center,
+         backgroundColorHex: String? = nil,
+         padding: Double = 0,
+         boxSizing: TextBoxSizing = .fixed,
+         wraps: Bool = true,
+         overflow: TextOverflow = .clip,
+         timing: TitleTiming? = nil,
+         timer: TimerOverlayConfiguration? = nil,
+         ticker: TickerOverlayConfiguration? = nil) {
+        self.text = text
+        self.fontName = fontName
+        self.fontSize = fontSize
+        self.colorHex = colorHex
+        self.alignment = alignment
+        self.verticalAlignment = verticalAlignment
+        self.backgroundColorHex = backgroundColorHex
+        self.padding = padding
+        self.boxSizing = boxSizing
+        self.wraps = wraps
+        self.overflow = overflow
+        self.timing = timing
+        self.timer = timer
+        self.ticker = ticker
+    }
+
+    /// Every G02 field was added after v2 shipped; decode each with its
+    /// default so pre-G02 documents keep loading (the established
+    /// additive-wire pattern, same as `LayerNode.isLocked`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        fontName = try container.decodeIfPresent(String.self, forKey: .fontName)
+        fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize) ?? 48
+        colorHex = try container.decodeIfPresent(String.self, forKey: .colorHex) ?? "#FFFFFF"
+        alignment = try container.decodeIfPresent(TextHorizontalAlignment.self, forKey: .alignment)
+            ?? .leading
+        verticalAlignment = try container.decodeIfPresent(TextVerticalAlignment.self,
+                                                          forKey: .verticalAlignment) ?? .center
+        backgroundColorHex = try container.decodeIfPresent(String.self, forKey: .backgroundColorHex)
+        padding = try container.decodeIfPresent(Double.self, forKey: .padding) ?? 0
+        boxSizing = try container.decodeIfPresent(TextBoxSizing.self, forKey: .boxSizing) ?? .fixed
+        wraps = try container.decodeIfPresent(Bool.self, forKey: .wraps) ?? true
+        overflow = try container.decodeIfPresent(TextOverflow.self, forKey: .overflow) ?? .clip
+        timing = try container.decodeIfPresent(TitleTiming.self, forKey: .timing)
+        timer = try container.decodeIfPresent(TimerOverlayConfiguration.self, forKey: .timer)
+        ticker = try container.decodeIfPresent(TickerOverlayConfiguration.self, forKey: .ticker)
+    }
+
+    /// The payload's styling fields as one `TextTitleStyle` value — what a
+    /// preset/template captures and applies. Setting writes every styling
+    /// field and leaves `text` untouched.
+    var style: TextTitleStyle {
+        get {
+            var style = TextTitleStyle()
+            style.fontName = fontName
+            style.fontSize = fontSize
+            style.colorHex = colorHex
+            style.alignment = alignment
+            style.verticalAlignment = verticalAlignment
+            style.backgroundColorHex = backgroundColorHex
+            style.padding = padding
+            style.boxSizing = boxSizing
+            style.wraps = wraps
+            style.overflow = overflow
+            style.timing = timing
+            return style
+        }
+        set {
+            fontName = newValue.fontName
+            fontSize = newValue.fontSize
+            colorHex = newValue.colorHex
+            alignment = newValue.alignment
+            verticalAlignment = newValue.verticalAlignment
+            backgroundColorHex = newValue.backgroundColorHex
+            padding = newValue.padding
+            boxSizing = newValue.boxSizing
+            wraps = newValue.wraps
+            overflow = newValue.overflow
+            timing = newValue.timing
+        }
+    }
+
+    /// The style model owns the style ranges; the timer model owns the
+    /// timer ranges.
+    var validationError: String? {
+        if timer != nil && ticker != nil { return "Choose either a timer or a ticker for this layer." }
+        return style.validationError ?? timer?.validationError ?? ticker?.validationError
+            ?? (ticker != nil ? TickerOverlayConfiguration.textValidationError(text) : nil)
+    }
+
+    func clamped() -> TextSourcePayload {
+        var copy = self
+        copy.style = style.clamped()
+        copy.timer = timer?.clamped()
+        copy.ticker = ticker?.clamped()
+        return copy
+    }
 }
 
 struct ShapeSourcePayload: Hashable, Codable, Sendable {
@@ -508,7 +726,27 @@ struct PDFSourcePayload: Hashable, Codable, Sendable {
 }
 
 struct WebSourcePayload: Hashable, Codable, Sendable {
+    /// Remote widget URL (nil when the widget is a local HTML asset).
     var url: URL? = nil
+    /// The full G08 widget configuration: viewport, fps, interaction,
+    /// audio route, CSS overrides, scene-entry refresh, local HTML asset.
+    /// `url` above is kept as the renderer's frame-store key source for
+    /// remote widgets; `configuration.urlString` mirrors it on write
+    /// (see `WebSourcePayload.browserOverlay`).
+    var configuration: BrowserOverlayConfiguration = BrowserOverlayConfiguration()
+
+    private enum CodingKeys: String, CodingKey { case url, configuration }
+    init(url: URL? = nil, configuration: BrowserOverlayConfiguration = BrowserOverlayConfiguration()) {
+        self.url = url
+        self.configuration = configuration
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decodeIfPresent(URL.self, forKey: .url)
+        configuration = try c.decodeIfPresent(BrowserOverlayConfiguration.self,
+                                              forKey: .configuration)
+            ?? BrowserOverlayConfiguration(urlString: url?.absoluteString)
+    }
 }
 
 struct GuestSourcePayload: Hashable, Codable, Sendable {
@@ -670,6 +908,17 @@ enum LayerPayload: Hashable, Sendable {
         return false
     }
 
+    var isPDF: Bool {
+        if case .pdf = self { return true }
+        return false
+    }
+
+    /// G01 (issue #81): a static image/logo layer.
+    var isImage: Bool {
+        if case .image = self { return true }
+        return false
+    }
+
     /// A06 (issue #118): an app/system audio-only registry source.
     var isAppAudio: Bool {
         if case .appAudio = self { return true }
@@ -694,13 +943,14 @@ enum LayerPayload: Hashable, Sendable {
     /// True when the current render path can actually paint this kind:
     /// camera/screen through the capture pipeline (S03), solid-color shapes
     /// and text generated directly by `SceneRenderer` (S07), nested
-    /// scenes rendered recursively (S06), and media (A02, issue #97: video
-    /// file playout pulled per tick from the pool's playback engines). The
-    /// rest are model-only until the composition engine grows source
-    /// support. UI must mark non-renderable kinds rather than implying they
-    /// show on output.
+    /// scenes rendered recursively (S06), media (A02, issue #97: video
+    /// file playout pulled per tick from the pool's playback engines), and
+    /// image layers (G01, issue #81: decoded ImageIO assets composited with
+    /// alpha through the image store). The rest are model-only until the
+    /// composition engine grows source support. UI must mark non-renderable
+    /// kinds rather than implying they show on output.
     var isRenderable: Bool {
-        isCamera || isScreen || isText || isShape || isScene || isSyphon || isMedia
+        isCamera || isScreen || isText || isShape || isScene || isSyphon || isMedia || isImage || isPDF || isWeb
     }
 
     /// Short human name for layer-panel rows and add-layer menus.
@@ -847,6 +1097,12 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
     /// override replaces the source defaults wholesale. Staged scene content:
     /// edits stage, Take, revert, and undo like the transform.
     var effectOverrides: SourceEffects?
+    /// G03 (issue #106): the layer's styling — shape mask, border, shadow,
+    /// opacity, perspective. `.identity` = unstyled. Staged scene content
+    /// exactly like the transform; on overlays it is project-level content
+    /// through the S07 overlay commands. Non-destructive and
+    /// alpha-preserving (see LayerStyle.swift).
+    var style: LayerStyle
 
     init(id: LayerID = LayerID(),
          name: String,
@@ -858,7 +1114,8 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
          audio: AudioBinding = .default,
          groupID: GroupID? = nil,
          isLocked: Bool = false,
-         effectOverrides: SourceEffects? = nil) {
+         effectOverrides: SourceEffects? = nil,
+         style: LayerStyle = .identity) {
         self.id = id
         self.name = name
         self.sourceID = sourceID
@@ -870,11 +1127,12 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
         self.groupID = groupID
         self.isLocked = isLocked
         self.effectOverrides = effectOverrides
+        self.style = style
     }
 
     /// `isLocked` was added after v2 shipped; decode it with a default so
     /// older persisted documents keep loading (additive wire change).
-    /// E01's `effectOverrides` follows the same pattern.
+    /// E01's `effectOverrides` and G03's `style` follow the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(LayerID.self, forKey: .id)
@@ -888,6 +1146,7 @@ struct LayerNode: Identifiable, Hashable, Codable, Sendable {
         groupID = try container.decodeIfPresent(GroupID.self, forKey: .groupID)
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
         effectOverrides = try container.decodeIfPresent(SourceEffects.self, forKey: .effectOverrides)
+        style = try container.decodeIfPresent(LayerStyle.self, forKey: .style) ?? .identity
     }
 }
 
@@ -1007,9 +1266,9 @@ struct SourceDefinition: Identifiable, Hashable, Codable, Sendable {
 enum SceneBackground: Hashable, Sendable {
     case solid(colorHex: String)
     case gradient(topColorHex: String, bottomColorHex: String)
-    /// Model-only until an asset store exists: no render path resolves
-    /// `assetIdentifier` yet, so an image background paints the documented
-    /// black fallback.
+    /// G01 (issue #81): an image background composites through the same
+    /// image store as image layers (aspect-FILL covering the canvas); an
+    /// unresolved/missing asset paints the documented black fallback.
     case image(ImageSourcePayload)
 
     /// Short human name for background pickers.
@@ -1490,6 +1749,15 @@ struct SceneDocument: Hashable, Codable, Sendable {
     /// stored once at project level and applied by writing their value as a
     /// layer override or a source default.
     var effectPresets: [SourceEffectPreset]
+    /// G03 (issue #106): reusable named layer-STYLING presets (masks,
+    /// borders, shadows, opacity, perspective), stored once at project level
+    /// and applied by writing their value as a layer's/overlay's style.
+    var stylePresets: [LayerStylePreset]
+    /// G02 (issue #110): reusable named TITLE-style presets (font, size,
+    /// color, alignment, background, padding, box, wrapping, overflow,
+    /// timing — everything but the string), stored once at project level
+    /// and applied by writing their value onto a text layer's payload.
+    var textStylePresets: [TextStylePreset]
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
@@ -1500,7 +1768,9 @@ struct SceneDocument: Hashable, Codable, Sendable {
          overlays: [LayerNode] = [],
          defaultBackground: SceneBackground? = nil,
          defaultTransition: SceneTransition = .default,
-         effectPresets: [SourceEffectPreset] = []) {
+         effectPresets: [SourceEffectPreset] = [],
+         stylePresets: [LayerStylePreset] = [],
+         textStylePresets: [TextStylePreset] = []) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
@@ -1511,12 +1781,14 @@ struct SceneDocument: Hashable, Codable, Sendable {
         self.defaultBackground = defaultBackground
         self.defaultTransition = defaultTransition
         self.effectPresets = effectPresets
+        self.stylePresets = stylePresets
+        self.textStylePresets = textStylePresets
     }
 
     /// `overlays`/`defaultBackground` were added within v2; decode them with
     /// defaults so pre-S07 v2 documents keep loading (additive wire change).
-    /// S09's `defaultTransition` and E01's `effectPresets` follow the same
-    /// pattern.
+    /// S09's `defaultTransition`, E01's `effectPresets`, G03's
+    /// `stylePresets`, and G02's `textStylePresets` follow the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
@@ -1529,6 +1801,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
         defaultBackground = try container.decodeIfPresent(SceneBackground.self, forKey: .defaultBackground)
         defaultTransition = try container.decodeIfPresent(SceneTransition.self, forKey: .defaultTransition) ?? .default
         effectPresets = try container.decodeIfPresent([SourceEffectPreset].self, forKey: .effectPresets) ?? []
+        stylePresets = try container.decodeIfPresent([LayerStylePreset].self, forKey: .stylePresets) ?? []
+        textStylePresets = try container.decodeIfPresent([TextStylePreset].self, forKey: .textStylePresets) ?? []
     }
 
     /// The S07 render context the engine composites every scene inside.

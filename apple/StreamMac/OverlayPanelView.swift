@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The S07 overlays & backgrounds panel (issue #74): the PROJECT-wide overlay
 /// stack and the two background scopes, surfaced as a distinct section above
@@ -15,15 +16,29 @@ import SwiftUI
 ///   like any scene edit.
 /// - PROJECT default background: the fallback behind every scene that has no
 ///   background of its own; unset = the documented black canvas.
+///
+/// G09 (issue #116) media overlays: the Add menu's Animated Image / Alpha
+/// Video items validate the picked file's format at import (unsupported
+/// files are rejected with an explicit error, never reaching program) and
+/// register a media source + overlay in one dispatcher command. Media
+/// overlay rows carry inline play/pause/replay transport, and the context
+/// menu edits the payload's loop/autoplay/end-action policy live.
 struct OverlayPanelView: View {
     @EnvironmentObject private var dispatcher: StudioCommandDispatcher
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var previewProgram: PreviewProgramModel
+    @EnvironmentObject private var capturePool: CaptureSourcePool
 
     @State private var isExpanded = true
     /// Rename alert state: the overlay being renamed plus the field draft.
     @State private var renameTarget: LayerNode?
     @State private var draftName = ""
+    /// G09 (issue #116): which media-overlay file picker is showing, if any.
+    @State private var mediaPicker: MediaOverlayPickerKind?
+    /// G09: import-time format rejection (unsupported animated image /
+    /// non-alpha codec) — the error surfaces HERE, before the asset is
+    /// registered, so it can never reach program.
+    @State private var formatError: String?
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
@@ -57,6 +72,53 @@ struct OverlayPanelView: View {
             TextField("Name", text: $draftName)
             Button("Rename") { commitRename() }
             Button("Cancel", role: .cancel) {}
+        }
+        .alert("Unsupported Overlay Format", isPresented: formatErrorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(formatError ?? "")
+        }
+        // G09: the two media-overlay pickers share one importer presentation.
+        .fileImporter(isPresented: mediaPickerPresented,
+                      allowedContentTypes: mediaPicker?.allowedContentTypes ?? [.data]) { result in
+            guard let kind = mediaPicker, case .success(let url) = result else { return }
+            mediaPicker = nil
+            importMediaOverlay(kind: kind, url: url)
+        }
+    }
+
+    /// G09 (issue #116): validates the picked file's format (the explicit
+    /// pre-program error) and registers source + overlay in one command.
+    private func importMediaOverlay(kind: MediaOverlayPickerKind, url: URL) {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        switch kind {
+        case .animatedImage:
+            switch MediaOverlayClassifier.probeAnimatedImage(url: url) {
+            case .failure(let error):
+                formatError = error.message
+            case .success:
+                guard let payload = MediaSourceFactory.payload(forPickedFile: url) else { return }
+                dispatcher.execute(.addMediaOverlay(
+                    name: url.deletingPathExtension().lastPathComponent,
+                    payload: payload))
+            }
+        case .alphaVideo:
+            // The codec probe is async (AVAsset track load) — the bookmark
+            // (the durable access grant) is created synchronously while the
+            // picker's access is held; the probe re-acquires its own.
+            guard let payload = MediaSourceFactory.payload(forPickedFile: url) else { return }
+            let name = url.deletingPathExtension().lastPathComponent
+            Task {
+                let probeAccess = url.startAccessingSecurityScopedResource()
+                defer { if probeAccess { url.stopAccessingSecurityScopedResource() } }
+                switch await MediaOverlayClassifier.probeAlphaVideo(url: url) {
+                case .failure(let error):
+                    formatError = error.message
+                case .success:
+                    dispatcher.execute(.addMediaOverlay(name: name, payload: payload))
+                }
+            }
         }
     }
 
@@ -165,6 +227,13 @@ struct OverlayPanelView: View {
                     .help("This overlay is hidden in the staged scene (a per-scene override that stages and Takes like any scene edit).")
             }
             Spacer()
+            // G09 (issue #116): media overlays (animated image / alpha
+            // video) carry inline transport on the ONE shared playback
+            // instance — replay/pause here can never fork preview vs
+            // program playback.
+            if let sourceID = overlay.sourceID, overlay.payload.isMedia {
+                mediaTransportButtons(sourceID: sourceID)
+            }
             Button {
                 dispatcher.execute(.setOverlayLocked(overlay.id, locked: !overlay.isLocked))
             } label: {
@@ -190,6 +259,29 @@ struct OverlayPanelView: View {
         Button("Rename…") {
             draftName = overlay.name
             renameTarget = overlay
+        }
+        // G09: media overlay playback policy (loop / autoplay / stop-on-
+        // last-frame vs clear) lives on the registry source payload — edits
+        // write through the registry, so the running playback engine picks
+        // them up live at the next pass without restarting.
+        if let sourceID = overlay.sourceID,
+           let source = sceneStore.source(withID: sourceID),
+           case .media(let payload) = source.payload {
+            Divider()
+            Button(payload.loops ? "Disable Loop" : "Enable Loop") {
+                updateMediaPolicy(sourceID) { $0.loops.toggle() }
+            }
+            Button(payload.autoplay ? "Disable Autoplay" : "Enable Autoplay") {
+                updateMediaPolicy(sourceID) { $0.autoplay.toggle() }
+            }
+            Menu("When Playback Ends") {
+                ForEach(MediaEndAction.allCases, id: \.self) { action in
+                    Button(action.displayName) {
+                        updateMediaPolicy(sourceID) { $0.endAction = action }
+                    }
+                }
+            }
+            .help("Hold Last Frame keeps the final frame painting; Stop rewinds and clears (paint-nothing fallback).")
         }
         Divider()
         Button("Move Forward") {
@@ -226,6 +318,15 @@ struct OverlayPanelView: View {
             Button("Shape") {
                 dispatcher.execute(.addOverlay(.shape(ShapeSourcePayload())))
             }
+            Divider()
+            // G09 (issue #116): animated images and alpha video ride the A02
+            // media playout engine, composited above every scene.
+            Button("Animated Image…") {
+                mediaPicker = .animatedImage
+            }
+            Button("Alpha Video…") {
+                mediaPicker = .alphaVideo
+            }
         } label: {
             Label("Add Overlay", systemImage: "plus")
         }
@@ -247,6 +348,63 @@ struct OverlayPanelView: View {
         dispatcher.execute(.renameOverlay(renameTarget.id, to: draftName))
     }
 
+    // MARK: - Media overlay pickers (G09)
+
+    private var mediaPickerPresented: Binding<Bool> {
+        Binding(
+            get: { mediaPicker != nil },
+            set: { if !$0 { mediaPicker = nil } })
+    }
+
+    private var formatErrorPresented: Binding<Bool> {
+        Binding(
+            get: { formatError != nil },
+            set: { if !$0 { formatError = nil } })
+    }
+
+    // MARK: - Media overlay transport and policy (G09)
+
+    /// Play/pause and replay for a media overlay's shared playback instance
+    /// (session state — the same W05 media transport the Media Playout
+    /// section uses).
+    @ViewBuilder
+    private func mediaTransportButtons(sourceID: SourceDefinitionID) -> some View {
+        let status = capturePool.mediaStatus(for: sourceID)
+        let isPlaying = status.phase == .playing
+        Button {
+            dispatcher.execute(isPlaying ? .mediaPause(sourceID) : .mediaPlay(sourceID))
+        } label: {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                .foregroundStyle(status.phase == .error ? .orange : .secondary)
+        }
+        .buttonStyle(.borderless)
+        .help(status.phase == .error
+              ? (status.errorMessage ?? "Playback error")
+              : (isPlaying ? "Pause" : "Play"))
+        Button {
+            dispatcher.execute(.mediaRestart(sourceID))
+        } label: {
+            Image(systemName: "backward.end.fill")
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+        .help("Replay from the beginning")
+    }
+
+    /// Durable playback-policy edits write through the S05 registry update
+    /// path (the MediaSourcesSectionView pattern): the media key is the
+    /// source ID, so the playback engine keeps running and picks the new
+    /// policy up live.
+    private func updateMediaPolicy(_ sourceID: SourceDefinitionID,
+                                   _ edit: (inout MediaSourcePayload) -> Void) {
+        guard let source = sceneStore.source(withID: sourceID),
+              case .media(var payload) = source.payload else { return }
+        edit(&payload)
+        var updated = source
+        updated.payload = .media(payload)
+        sceneStore.updateSource(updated)
+    }
+
     // MARK: - Color conversion
 
     private static func color(from hex: String) -> Color {
@@ -259,5 +417,22 @@ struct OverlayPanelView: View {
         return HexColor.string(red: Double(nsColor.redComponent),
                                green: Double(nsColor.greenComponent),
                                blue: Double(nsColor.blueComponent))
+    }
+}
+
+/// G09 (issue #116): which media-overlay file picker is open — the two
+/// kinds differ in accepted content types and in which import-time format
+/// gate the picked file must pass (`MediaOverlayClassifier`).
+private enum MediaOverlayPickerKind {
+    case animatedImage
+    case alphaVideo
+
+    var allowedContentTypes: [UTType] {
+        switch self {
+        case .animatedImage:
+            return [.gif, .png, .heic, .heif, .webP]
+        case .alphaVideo:
+            return [.movie, .quickTimeMovie, .mpeg4Movie]
+        }
     }
 }

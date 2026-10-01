@@ -194,6 +194,11 @@ actor CompositionEngine {
     /// (frames + cut-point timing). Defaults to the shared
     /// `TransitionStingerStore` (driven by `TransitionController`).
     private let stingerProvider: @Sendable () -> StingerSnapshot
+    /// G11 (issue #117): where the engine snapshots program annotations each
+    /// tick. Defaults to the shared `ProgramAnnotationStore`; the preview
+    /// engine injects `{ .empty }` because preview shows annotations as
+    /// SwiftUI chrome (painting them into the image too would double-draw).
+    private let annotationProvider: @Sendable () -> AnnotationRenderSnapshot
 
     private var scene: Scene?
     private var canvasSize: CGSize
@@ -232,6 +237,8 @@ actor CompositionEngine {
             { ProgramTransitionStore.shared.snapshot() },
          stingerProvider: @escaping @Sendable () -> StingerSnapshot =
             { TransitionStingerStore.shared.snapshot() },
+         annotationProvider: @escaping @Sendable () -> AnnotationRenderSnapshot =
+            { ProgramAnnotationStore.shared.snapshot() },
          canvasSize: CGSize = OutputProfile.default.canvasSize,
          frameRate: Int = OutputProfile.default.frameRate) {
         self.screenProvider = screenProvider
@@ -265,6 +272,7 @@ actor CompositionEngine {
         self.sceneRegistryProvider = sceneRegistryProvider
         self.transitionRequestProvider = transitionRequestProvider
         self.stingerProvider = stingerProvider
+        self.annotationProvider = annotationProvider
         self.canvasSize = canvasSize
         self.frameRate = frameRate
         // A10 (issue #122): wrap the resolved lookup with the delay lines.
@@ -628,6 +636,7 @@ actor CompositionEngine {
         let overlayContext = overlayContextProvider()
         let sourcePayloads = sourcePayloadProvider()
         let scenes = sceneRegistryProvider()
+        let annotations = annotationProvider()
 
         if let active = transition {
             if let frame = renderTransitionFrame(active,
@@ -655,7 +664,8 @@ actor CompositionEngine {
                                           frameDuration: duration,
                                           sequence: frameSequence,
                                           layerOpacity: fades.opacity,
-                                          exitingLayers: fades.exiting) else { return }
+                                          exitingLayers: fades.exiting,
+                                          annotations: annotations) else { return }
         for mailbox in subscribers.values {
             mailbox.post(frame)
         }

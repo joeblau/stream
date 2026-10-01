@@ -52,7 +52,12 @@ final class VideoFrameDelayLines: @unchecked Sendable {
                 cameraLines[key, default: CameraLine()].delayFrames = frames
             case .screen:
                 screenLines[key, default: ScreenLine()].delayFrames = frames
-            case .syphon, .media, .appAudio:
+            case .syphon, .media, .appAudio, .web, .pdf:
+                // G08 (issue #115): web widgets composite through the
+                // BrowserOverlayFrameStore (not the keyed delay-line read
+                // path), so a source-video-delay entry for a web key is a
+                // no-op here, exactly like syphon/media/appAudio/pdf (G06
+                // pages pull through the keyed media map, not delay lines).
                 break
             }
         }

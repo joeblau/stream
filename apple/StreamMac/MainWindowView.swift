@@ -42,6 +42,12 @@ struct MainWindowView: View {
     @EnvironmentObject private var dispatcher: StudioCommandDispatcher
     /// The W03 preview/program model: the inspector edits its staged scene.
     @EnvironmentObject private var previewProgram: PreviewProgramModel
+    /// G01 (issue #81): the image-layer coordinator — imports, P03 library
+    /// registration/usage, and decode publishing. Owned here so the inspector
+    /// section and the canvas drop share one instance.
+    @StateObject private var imageLayers = ImageLayerCoordinator()
+    /// The orchestrator-injected shared P03 asset library (nil pre-wiring).
+    @Environment(\.assetLibraryStore) private var assetLibrary
     /// Shared Restream chat connection: the sidebar shows it and the settings
     /// pane edits its credentials (W04 — one instance, one sign-in).
     @State private var chat = RestreamChat()
@@ -80,6 +86,9 @@ struct MainWindowView: View {
         case mixer = "Mixer"
         // A03 (issue #98): the sound panel (soundboard, music, scene sounds).
         case media = "Sound"
+        // P03 (issue #80): the asset library — every referenced file, its
+        // availability, and missing-asset repair.
+        case assets = "Assets"
         case guests = "Guests"
         case destinations = "Destinations"
     }
@@ -145,6 +154,12 @@ struct MainWindowView: View {
             // Restore a settings pane left open last launch.
             session.isPresented = showSettingsPanel
             permissions.refresh()
+            // G01: attach the shared P03 asset library when the orchestrator
+            // has injected it (idempotent; nil pre-wiring).
+            if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
+        }
+        .onChange(of: assetLibrary.map(ObjectIdentifier.init)) { _, _ in
+            if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -286,6 +301,10 @@ struct MainWindowView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1)
             Divider()
+            // G11 (issue #117): pen/highlighter/pointer annotation toolbar —
+            // preview chrome only; program inclusion is an explicit toggle.
+            AnnotationToolbarView()
+            Divider()
             transitionControls
             if showDiagnostics {
                 Divider()
@@ -327,6 +346,14 @@ struct MainWindowView: View {
                 accent: dispatcher.state.stream.isLive ? .red : Color.secondary.opacity(0.3),
                 isHighlighted: dispatcher.state.stream.isLive,
                 placeholder: controller.isPreviewing ? "Waiting for sources…" : "Preview off")
+        }
+        // G01 (issue #81): Finder drag/drop of an image file (PNG/JPEG/HEIF/
+        // TIFF/PDF) onto the monitors adds an image layer to the staged
+        // scene — the drop half of the add-asset acceptance (the file sheet
+        // is in ImageLayerSectionView). Only image/PDF UTIs activate the
+        // drop; the import pipeline validates the rest.
+        .onDrop(of: [.image, .pdf], isTargeted: nil) { providers in
+            handleImageFileDrop(providers)
         }
     }
 
@@ -433,6 +460,41 @@ struct MainWindowView: View {
         .padding(.vertical, 8)
     }
 
+    // MARK: - G01 image drops (issue #81)
+
+    /// Adds an image layer to the staged scene from a dropped image file.
+    /// The import pipeline validates the format (an unsupported/undecodable
+    /// file surfaces its reason in the window's error alert, never reaches a
+    /// scene); the new layer lands as a bottom-right logo-style bug the user
+    /// repositions on canvas.
+    private func handleImageFileDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first(where: {
+            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }) else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url else { return }
+            Task { @MainActor in
+                switch await imageLayers.importImage(at: url) {
+                case .failure(let error):
+                    controller.errorMessage = error.message
+                case .success(let payload):
+                    guard var scene = previewProgram.stagedScene else { return }
+                    let layer = LayerNode(
+                        name: url.deletingPathExtension().lastPathComponent,
+                        payload: .image(payload),
+                        transform: LayerTransform(
+                            position: GraphPoint(x: 0.98, y: 0.98),
+                            size: GraphSize(width: 0.2, height: 0.2),
+                            anchor: .bottomRight))
+                    scene.layers.append(layer)
+                    dispatcher.execute(.updateScene(scene))
+                    imageLayers.noteUsage(of: payload, from: layer.id)
+                }
+            }
+        }
+        return true
+    }
+
     // MARK: - Inspector panel
 
     private var inspectorPanel: some View {
@@ -463,6 +525,10 @@ struct MainWindowView: View {
                 SoundboardPanelView()
                     .environmentObject(dispatcher.soundboardStore)
                     .environmentObject(dispatcher.soundboard)
+            case .assets:
+                // P03 (issue #80): the asset library panel — inventory,
+                // availability badges, and missing-asset repair.
+                AssetLibraryPanelView()
             case .guests:
                 placeholder("Guests", systemImage: "person.2",
                             message: "Remote guest management lands here in a later workstream.")
@@ -498,6 +564,10 @@ struct MainWindowView: View {
             // A02 (issue #97): media file sources — add/rename/remove and
             // per-source playback status alongside transport in the layer panel.
             MediaSourcesSectionView()
+            // G06 (issue #113): PDF/slide-deck sources — import, page
+            // navigation (inspector + ⌥⌘ arrows), fit/fill, page state
+            // shared per source across both canvases.
+            PDFSourceSectionView()
             // A06 (issue #118): app/system audio-only sources — add (running
             // app or system mix), enable/disable, rename, retarget, remove,
             // and per-source capture status. Demand is registration-based,
@@ -534,6 +604,23 @@ struct MainWindowView: View {
             // staged scene's override — rendered only on Take (program);
             // direct-live uses the same transitions.
             TransitionSettingsSectionView()
+            // G02 (issue #110): text/title editing for the selected text
+            // layer — content, the full style surface, timed/fly-in
+            // visibility, templates, and reusable title-style presets.
+            TextLayerSectionView()
+            // G08 (issue #115): browser/local-HTML widget configuration for
+            // the selected web layer — URL or asset, viewport/fps, CSS
+            // overrides, audio route, scene-entry refresh, runtime state.
+            WebOverlaySectionView()
+            // G01 (issue #81): image/logo layers — add from a file sheet or
+            // a Finder drop, replace the selected image layer's asset, and
+            // the fit/fill content mode. P03 asset registration/usage is
+            // live once the shared AssetLibraryStore is injected.
+            ImageLayerSectionView(coordinator: imageLayers)
+            // G03 (issue #106): layer styling for the selected layer —
+            // masks, borders, shadows, opacity, perspective (staged scene
+            // content), plus reusable style presets.
+            LayerStyleSectionView()
             // E01 (issue #101): per-source framing/picture adjustments for
             // the selected layer — layer overrides (staged scene content)
             // versus bound-source defaults (project-level), plus presets.

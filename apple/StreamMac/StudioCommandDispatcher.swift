@@ -155,6 +155,41 @@ enum StudioCommand: Equatable, Sendable {
     /// between the outermost two along one axis.
     case distributeLayers(LayerDistribution, in: SceneID?)
 
+    // G11 presentation annotations (issue #117): pen/highlighter strokes and
+    // the laser pointer drawn over the preview canvas. Annotations live in
+    // their own per-scene-keyed document (AnnotationStore — the A03
+    // soundboard-document precedent), NOT in the S01 scene graph: they are
+    // never staged scene content, so Take/Revert never gates them, scene
+    // locks don't apply (like project overlays), and they are NOT S12-
+    // undoable scene edits — strokes carry their own stroke-level history
+    // (undo/redo below IS that history). Per-scene visibility and the
+    // explicit "part of program" choice apply immediately to BOTH monitors
+    // (the S07 project-overlay precedent). `in: nil` targets the STAGED
+    // scene (the canvas the presenter draws on); an explicit ID must name an
+    // existing scene.
+    /// Commits one finished pen/highlighter stroke to the scene's
+    /// annotations (the canvas drag commits on mouse-up).
+    case addAnnotationStroke(AnnotationStroke, in: SceneID?)
+    /// Stroke-level undo/redo of the scene's annotation edits (add/clear) —
+    /// the acceptance criterion's "undo", deliberately separate from ⌘Z
+    /// scene-edit undo.
+    case undoAnnotationStroke(in: SceneID?)
+    case redoAnnotationStroke(in: SceneID?)
+    /// Removes every stroke from the scene (undoable at stroke level).
+    case clearAnnotations(in: SceneID?)
+    /// Per-scene visibility: hidden annotations paint nowhere — not the
+    /// preview chrome, not the program output.
+    case setAnnotationVisibility(visible: Bool, in: SceneID?)
+    /// The explicit per-scene "annotations are part of program" choice: on,
+    /// strokes (and the broadcast pointer) composite into the program output
+    /// through AnnotationRenderer; off, they stay preview-only telestrator
+    /// marks. Applies immediately, like project overlays.
+    case setAnnotationsInProgram(Bool, in: SceneID?)
+    /// Selects the canvas drawing tool (nil = normal selection mode).
+    /// Session state, like layer selection — validated and routed here so
+    /// toolbar, menu/hotkeys, canvas Escape, and automation agree.
+    case setAnnotationTool(AnnotationTool?)
+
     // S07 project-wide overlays and backgrounds (issue #74). Overlays are
     // PROJECT-level content — NOT bound to the staged scene: these commands
     // mutate the SceneStore overlay list directly and apply immediately to
@@ -166,6 +201,15 @@ enum StudioCommand: Equatable, Sendable {
     /// Adds a project overlay (text/shape today — branding that needs no
     /// capture) at the FRONT of the project overlay stack.
     case addOverlay(LayerPayload)
+    /// G09 (issue #116): adds a project overlay bound to a NEW registry
+    /// media source (animated image or alpha video) in one atomic command —
+    /// the source registration carries the bookmark and the playback policy
+    /// (loop/autoplay/end action, editable in the Media Playout section) and
+    /// gives the overlay its playout identity: pool demand and the render
+    /// path key media by source ID. Format validation already happened at
+    /// the file pick (`MediaOverlayClassifier`) — an unsupported format
+    /// never gets this far.
+    case addMediaOverlay(name: String, payload: MediaSourcePayload)
     case removeOverlay(LayerID)
     case renameOverlay(LayerID, to: String)
     case setOverlayVisibility(LayerID, visible: Bool)
@@ -214,6 +258,72 @@ enum StudioCommand: Equatable, Sendable {
     case updateEffectPreset(SourceEffectPreset)
     case removeEffectPreset(EffectPresetID)
 
+    // G03 layer styling (issue #106): masks, borders, shadows, opacity,
+    // perspective. LAYER styles are staged scene content (same targeting,
+    // lock, Take/revert/undo rules as `.setLayerSourceEffects`); OVERLAY
+    // styles are project-level and apply immediately to staged AND program
+    // (the S07 overlay-edit precedent); presets are project-level documents
+    // (the E01 effect-preset precedent — outside the S12 undo snapshot).
+    /// Replaces a STAGED-scene layer's style (a complete value; `.identity`
+    /// is the reset).
+    case setLayerStyle(LayerID, LayerStyle, in: SceneID?)
+    /// Replaces a project overlay's style (applies immediately, like
+    /// `.setOverlayEffects`).
+    case setOverlayStyle(LayerID, LayerStyle)
+    /// Saves a reusable named style preset (project-level).
+    case addStylePreset(LayerStylePreset)
+    case updateStylePreset(LayerStylePreset)
+    case removeStylePreset(LayerStylePresetID)
+
+    // G02 text layers (issue #110): text content + title style. LAYER
+    // payloads are staged scene content (same targeting, lock,
+    // Take/revert/undo rules as `.setLayerStyle`); OVERLAY payloads are
+    // project-level and apply immediately to staged AND program (the S07
+    // overlay-edit precedent); title-style presets are project-level
+    // documents (the E01/G03 preset precedent — outside the S12 undo
+    // snapshot).
+    /// Replaces a STAGED-scene text layer's payload (the string + the whole
+    /// style surface; a complete value). The target must be a text layer.
+    case setLayerText(LayerID, TextSourcePayload, in: SceneID?)
+    /// Session transport: doesn't alter staged content or create undo entries.
+    case setDynamicOverlayTransport(LayerID, OverlayTransportAction, in: SceneID?)
+    /// Replaces a project text overlay's payload (applies immediately, like
+    /// `.setOverlayStyle`). The target must be a text overlay.
+    case setOverlayText(LayerID, TextSourcePayload)
+
+    // G01 image layers (issue #81): image payload (asset/file binding +
+    // content mode). Same targeting, lock, Take/revert/undo rules as the G02
+    // text payloads: LAYER payloads are staged scene content; OVERLAY
+    // payloads are project-level and apply immediately. Format validation
+    // happened at the pick/drop (`ImageAssetValidator`) — an unsupported
+    // file never gets this far.
+    /// Replaces a STAGED-scene image layer's payload (a complete value). The
+    /// target must be an image layer.
+    case setLayerImage(LayerID, ImageSourcePayload, in: SceneID?)
+    /// Replaces a project image overlay's payload (applies immediately, like
+    /// `.setOverlayText`). The target must be an image overlay.
+    case setOverlayImage(LayerID, ImageSourcePayload)
+    /// Saves a reusable named title-style preset (project-level).
+    case addTextStylePreset(TextStylePreset)
+    case updateTextStylePreset(TextStylePreset)
+    case removeTextStylePreset(TextStylePresetID)
+
+    // G08 browser overlay widgets (issue #115): the web payload is a
+    // complete value (widget URL/local HTML plus the whole
+    // BrowserOverlayConfiguration surface — viewport, fps, interaction,
+    // audio route, CSS overrides, scene-entry refresh). LAYER payloads are
+    // staged scene content (same targeting, lock, Take/revert/undo rules as
+    // `.setLayerText`); OVERLAY payloads are project-level and apply
+    // immediately to staged AND program (the `.setOverlayText` precedent).
+    // Every edit re-keys the capture pool (payload identity = capture
+    // identity, the C03 pattern), so the widget reloads deliberately.
+    /// Replaces a STAGED-scene web layer's payload. The target must be a
+    /// web layer.
+    case setLayerWeb(LayerID, WebSourcePayload, in: SceneID?)
+    /// Replaces a project web overlay's payload (applies immediately, like
+    /// `.setOverlayText`). The target must be a web overlay.
+    case setOverlayWeb(LayerID, WebSourcePayload)
+
     // A02 media transport (issue #97): play/pause/stop/restart/seek for a
     // registry media source. These are SESSION state — playback position is
     // never part of a scene document — so they are not undoable scene edits,
@@ -229,6 +339,21 @@ enum StudioCommand: Equatable, Sendable {
     /// Seek to an absolute file position in seconds (clamped to the trim
     /// range by the playback engine).
     case mediaSeek(SourceDefinitionID, to: Double)
+
+    // G06 presentation navigation (issue #113): next/previous/jump page and
+    // fit/fill framing for a registry PDF source. These are PROGRAM-AWARE
+    // like the A02 media transport: they act on the ONE shared per-source
+    // deck state (`PDFDeckStore`), which both composition engines read on
+    // their next tick, so a page change is live on program the moment the
+    // source is on program and can never fork preview vs program playback.
+    // Page state is session/document state, never scene content: not staged,
+    // not undoable, and scene/layer locks don't gate it.
+    case pdfNextPage(SourceDefinitionID)
+    case pdfPreviousPage(SourceDefinitionID)
+    /// Jump to a 0-based page (clamped to the loaded page count by the store).
+    case pdfGoToPage(SourceDefinitionID, page: Int)
+    /// Per-source page framing (fit/fill), applied at rasterization.
+    case pdfSetFraming(SourceDefinitionID, framing: DeckFraming)
 
     // Output profile (W07 staged-vs-active rules live in the controller).
     case setOutputProfile(OutputProfile, destination: StreamProtocol?)
@@ -495,7 +620,19 @@ enum StudioCommand: Equatable, Sendable {
         case .alignLayers(let alignment, _): return "Align \(alignment.displayName)"
         case .distributeLayers(let distribution, _):
             return "Distribute \(distribution.displayName)"
+        case .addAnnotationStroke(let stroke, _):
+            return "\(stroke.tool.displayName) Stroke"
+        case .undoAnnotationStroke: return "Undo Annotation"
+        case .redoAnnotationStroke: return "Redo Annotation"
+        case .clearAnnotations: return "Clear Annotations"
+        case .setAnnotationVisibility(let visible, _):
+            return "\(visible ? "Show" : "Hide") Annotations"
+        case .setAnnotationsInProgram(let include, _):
+            return "\(include ? "Broadcast" : "Unbroadcast") Annotations"
+        case .setAnnotationTool(let tool):
+            return tool.map { "Select \($0.displayName) Tool" } ?? "Select the Selection Tool"
         case .addOverlay(let payload): return "Add \(payload.displayName) Overlay"
+        case .addMediaOverlay(let name, _): return "Add \(name) Overlay"
         case .removeOverlay: return "Remove Overlay"
         case .renameOverlay: return "Rename Overlay"
         case .setOverlayVisibility(_, let visible):
@@ -518,11 +655,31 @@ enum StudioCommand: Equatable, Sendable {
         case .addEffectPreset: return "Save Effect Preset"
         case .updateEffectPreset: return "Update Effect Preset"
         case .removeEffectPreset: return "Remove Effect Preset"
+        case .setLayerStyle(let id, let style, _):
+            return style.isRenderNoOp ? "Reset Layer Style" : "Layer \(id) Style"
+        case .setOverlayStyle: return "Overlay Style"
+        case .addStylePreset: return "Save Style Preset"
+        case .updateStylePreset: return "Update Style Preset"
+        case .removeStylePreset: return "Remove Style Preset"
+        case .setLayerText(let id, _, _): return "Layer \(id) Text"
+        case .setDynamicOverlayTransport(_, let action, _): return "Overlay \(action.rawValue)"
+        case .setOverlayText: return "Overlay Text"
+        case .setLayerImage(let id, _, _): return "Layer \(id) Image"
+        case .setOverlayImage: return "Overlay Image"
+        case .setLayerWeb(let id, _, _): return "Layer \(id) Browser Source"
+        case .setOverlayWeb: return "Overlay Browser Source"
+        case .addTextStylePreset: return "Save Title Style Preset"
+        case .updateTextStylePreset: return "Update Title Style Preset"
+        case .removeTextStylePreset: return "Remove Title Style Preset"
         case .mediaPlay: return "Play Media"
         case .mediaPause: return "Pause Media"
         case .mediaStop: return "Stop Media"
         case .mediaRestart: return "Restart Media"
         case .mediaSeek: return "Seek Media"
+        case .pdfNextPage: return "Next Page"
+        case .pdfPreviousPage: return "Previous Page"
+        case .pdfGoToPage: return "Go to Page"
+        case .pdfSetFraming: return "Set Page Framing"
         case .setOutputProfile: return "Set Output Profile"
         case .setChannelVolume(let id, _): return "Set \(id.label) Volume"
         case .setChannelMuted(let id, let muted):
@@ -731,6 +888,11 @@ struct StudioState: Equatable, Sendable {
     var canRedo = false
     var undoLabel: String? = nil
     var redoLabel: String? = nil
+    /// G11 (issue #117): the annotation surface mirror — active tool, drawing
+    /// settings, the staged scene's stroke summary, and the live pointer. The
+    /// Annotate menu, the toolbar, and the canvas chrome read this (the
+    /// dispatcher's own published state) instead of the nested store.
+    var annotations: AnnotationUIState = .empty
 }
 
 // MARK: - Dispatcher
@@ -807,6 +969,25 @@ final class StudioCommandDispatcher: ObservableObject {
     /// hardware/automation triggers share one instance.
     let ptzStore: PTZPresetStore
     let ptz: PTZController
+    /// G11 (issue #117): the annotation document (per-scene strokes +
+    /// visibility + program gate) and session state (active tool, drawing
+    /// settings, laser pointer). Owned here so the toolbar, the canvas
+    /// overlay, the Annotate menu, and future automation share one instance
+    /// and every mutation routes through the annotation commands.
+    let annotations: AnnotationStore
+    /// G06 (issue #113): the presentations document (per-source selected page
+    /// + fit/fill framing, persisted beside the PTZ/soundboard documents).
+    /// Owned here so the inspector section, the Present menu, and future
+    /// automation share one instance and every mutation routes through the
+    /// pdf navigation commands. Its off-main mirror (`PDFDeckStateStore`) is
+    /// what the page-rendering engines read on the render tick.
+    let pdfDecks: PDFDeckStore
+    /// P03 (issue #80): the asset library — G06 imports presentation
+    /// documents through it (project copies, so project packaging retains the
+    /// bytes) and the section view reads availability/usage from it. Parked
+    /// here (the AssetLibraryPanelView hook's documented alternative) so
+    /// MainWindowView needs no new environment plumbing.
+    let assetLibrary: AssetLibraryStore
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
     /// graph, keyed by chain-slot ID (passthrough to the controller — the
@@ -847,7 +1028,33 @@ final class StudioCommandDispatcher: ObservableObject {
         let ptzStore = PTZPresetStore()
         self.ptzStore = ptzStore
         self.ptz = PTZController(store: ptzStore)
+        // G11 (issue #117): the annotation document + session state (see the
+        // property doc; created like the soundboard pair above).
+        self.annotations = AnnotationStore()
+        // G06 (issue #113): the presentations document + the P03 asset
+        // library it resolves documents through (see the property docs).
+        self.pdfDecks = PDFDeckStore()
+        self.assetLibrary = AssetLibraryStore()
+        // G06: the pool's PDF engines resolve documents through the library.
+        controller.capturePool.assetLibrary = assetLibrary
+        // G08 (issue #115): web widget hosts reach the asset library through
+        // this process-wide seam (local-HTML widgets only; URL widgets and
+        // bundled fixtures never touch it).
+        BrowserOverlayAssetResolver.access = { [assetLibrary] rawID in
+            guard let uuid = UUID(uuidString: rawID) else { return nil }
+            return assetLibrary.access(for: AssetID(uuid))
+        }
+        BrowserOverlayAssetResolver.noteUsage = { [assetLibrary] rawID, site in
+            guard let uuid = UUID(uuidString: rawID) else { return }
+            assetLibrary.noteUsage(of: AssetID(uuid), from: site)
+        }
         self.state = StudioState()
+        // G06: PDF engine status re-clamps persisted deck state on document
+        // load (self capture must follow full initialization).
+        controller.capturePool.onPDFStatus = { [weak self] id, status in
+            guard let self, status.pageCount > 0 else { return }
+            self.pdfDecks.notePageCount(status.pageCount, for: id)
+        }
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
         refreshState()
@@ -871,14 +1078,21 @@ final class StudioCommandDispatcher: ObservableObject {
         // External changes (publisher events, the recording writer finishing,
         // scene edits) never pass through `execute`, so observe the stores
         // directly. `objectWillChange` fires in willSet — the Task hop lands
-        // post-set, so the snapshot reads current values.
+        // post-set, so the snapshot reads current values. G06: the deck store
+        // and asset library join the merge so PDF section views reading
+        // `dispatcher.pdfDecks` / `dispatcher.assetLibrary` refresh with the
+        // dispatcher's own published state.
         Publishers.Merge(
             Publishers.Merge4(
                 controller.objectWillChange,
                 sceneStore.objectWillChange,
                 session.objectWillChange,
                 recorder.objectWillChange),
-            previewProgram.objectWillChange)
+            Publishers.Merge4(
+                previewProgram.objectWillChange,
+                annotations.objectWillChange,
+                pdfDecks.objectWillChange,
+                assetLibrary.objectWillChange))
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.refreshState()
@@ -1179,16 +1393,67 @@ final class StudioCommandDispatcher: ObservableObject {
                     : .invalidValue("Select at least three unlocked layers to distribute.")
             }
 
+        // G11 (issue #117): annotation commands address the annotation
+        // document keyed by scene — NOT staged scene content, so locks and
+        // staging never gate them (the project-overlay precedent); the
+        // target scene must simply exist (nil = the staged scene, the canvas
+        // the presenter draws on).
+        case .addAnnotationStroke(let stroke, let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success:
+                return stroke.validationError.map { .invalidValue($0) }
+            }
+        case .undoAnnotationStroke(let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success(let id):
+                return annotations.canUndoStroke(in: id)
+                    ? nil : .unavailable("There is no annotation to undo.")
+            }
+        case .redoAnnotationStroke(let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success(let id):
+                return annotations.canRedoStroke(in: id)
+                    ? nil : .unavailable("There is no annotation to redo.")
+            }
+        case .clearAnnotations(let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success(let id):
+                return annotations.annotations(for: id).strokes.isEmpty
+                    ? .unavailable("The scene has no annotations to clear.") : nil
+            }
+        case .setAnnotationVisibility(_, let sceneID),
+             .setAnnotationsInProgram(_, let sceneID):
+            switch resolveAnnotationScene(sceneID) {
+            case .failure(let error): return error
+            case .success: return nil
+            }
+        case .setAnnotationTool:
+            return nil
+
         // S07 project overlays: validated against the SceneStore overlay
         // list (project level — never the staged scene).
         case .addOverlay(let payload):
-            // Branding overlays only: text/shape render without a capture.
-            // Camera/screen overlays would need the S05 demand reconciliation
-            // to watch the overlay list (it watches scenes today); the other
-            // kinds have no renderer yet.
-            return payload.isText || payload.isShape
+            // Branding overlays only: text/shape render without a capture,
+            // and G01 (issue #81) image overlays composite a decoded asset
+            // (the logo case). Camera/screen overlays would need the S05
+            // demand reconciliation to watch the overlay list (it watches
+            // scenes today); the other kinds have no renderer yet. Media
+            // overlays go through `.addMediaOverlay` (G09), which also
+            // registers their source.
+            return payload.isText || payload.isShape || payload.isImage
                 ? nil
-                : .invalidValue("\(payload.displayName) overlays aren't supported yet — add a Text or Shape overlay.")
+                : .invalidValue("\(payload.displayName) overlays aren't supported yet — add a Text, Shape, or Image overlay.")
+        case .addMediaOverlay(_, let payload):
+            // The panel's file pick already validated the format
+            // (`MediaOverlayClassifier`); the command only enforces that a
+            // file is actually linked.
+            return payload.bookmarkData != nil
+                ? nil
+                : .invalidValue("A media overlay needs a linked file — pick an animated image or an alpha video.")
         case .removeOverlay(let overlayID),
              .setOverlayVisibility(let overlayID, _),
              .setOverlayTransform(let overlayID, _),
@@ -1275,6 +1540,128 @@ final class StudioCommandDispatcher: ObservableObject {
             return sceneStore.effectPreset(withID: id) != nil
                 ? nil : .invalidTarget("Effect preset \(id) does not exist.")
 
+        // G03 (issue #106): layer styles follow the `.setLayerEffects` /
+        // `.setLayerSourceEffects` targeting + lock rules, with range
+        // validation the style model owns; overlay styles follow the S07
+        // overlay rules; style presets mirror the E01 preset rules.
+        case .setLayerStyle(let layerID, let style, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                return style.validationError.map { .invalidValue($0) }
+            case .failure(let error): return error
+            }
+        case .setOverlayStyle(let overlayID, let style):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay):
+                if let error = overlayLockError(for: overlay) { return error }
+                return style.validationError.map { .invalidValue($0) }
+            case .failure(let error): return error
+            }
+        case .addStylePreset(let preset):
+            return preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A preset name can't be empty.") : nil
+        case .updateStylePreset(let preset):
+            guard sceneStore.stylePreset(withID: preset.id) != nil else {
+                return .invalidTarget("Style preset \(preset.id) does not exist.")
+            }
+            return preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A preset name can't be empty.") : nil
+        case .removeStylePreset(let id):
+            return sceneStore.stylePreset(withID: id) != nil
+                ? nil : .invalidTarget("Style preset \(id) does not exist.")
+
+        // G02 (issue #110): text payloads follow the `.setLayerStyle` /
+        // `.setOverlayStyle` targeting + lock rules (plus the payload must
+        // stay a TEXT edit on a text layer — never a kind change), with range
+        // validation the style model owns; title-style presets mirror the
+        // G03 preset rules.
+        case .setDynamicOverlayTransport(let layerID, _, let sceneID):
+            switch resolveDynamicOverlay(layerID, in: sceneID) {
+            case .success: return nil
+            case .failure(let error): return error
+            }
+        case .setLayerText(let layerID, let payload, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                guard scene.layers[index].payload.isText else {
+                    return .invalidTarget("Layer \"\(scene.layers[index].name)\" is not a text layer.")
+                }
+                return payload.validationError.map { .invalidValue($0) }
+            case .failure(let error): return error
+            }
+        case .setOverlayText(let overlayID, let payload):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay):
+                if let error = overlayLockError(for: overlay) { return error }
+                guard overlay.payload.isText else {
+                    return .invalidTarget("Overlay \"\(overlay.name)\" is not a text overlay.")
+                }
+                return payload.validationError.map { .invalidValue($0) }
+            case .failure(let error): return error
+            }
+        // G01 (issue #81): image payloads follow the G02 text targeting +
+        // lock rules (a payload edit never changes the layer KIND; format
+        // validation happened at the pick/drop — `ImageAssetValidator`).
+        case .setLayerImage(let layerID, _, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                return scene.layers[index].payload.isImage
+                    ? nil
+                    : .invalidTarget("Layer \"\(scene.layers[index].name)\" is not an image layer.")
+            case .failure(let error): return error
+            }
+        case .setOverlayImage(let overlayID, _):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay):
+                if let error = overlayLockError(for: overlay) { return error }
+                return overlay.payload.isImage
+                    ? nil
+                    : .invalidTarget("Overlay \"\(overlay.name)\" is not an image overlay.")
+            case .failure(let error): return error
+            }
+        case .setLayerWeb(let layerID, _, let sceneID):
+            // G08: the payload normalizes fail-closed (unsupported URL
+            // schemes clear; fps/viewport clamp), so an "invalid" widget
+            // config can never be written — only the target checks apply.
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                guard scene.layers[index].payload.isWeb else {
+                    return .invalidTarget("Layer \"\(scene.layers[index].name)\" is not a browser source.")
+                }
+                return nil
+            case .failure(let error): return error
+            }
+        case .setOverlayWeb(let overlayID, _):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay):
+                if let error = overlayLockError(for: overlay) { return error }
+                guard overlay.payload.isWeb else {
+                    return .invalidTarget("Overlay \"\(overlay.name)\" is not a browser source.")
+                }
+                return nil
+            case .failure(let error): return error
+            }
+        case .addTextStylePreset(let preset):
+            if preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .invalidValue("A preset name can't be empty.")
+            }
+            return preset.style.validationError.map { .invalidValue($0) }
+        case .updateTextStylePreset(let preset):
+            guard sceneStore.textStylePreset(withID: preset.id) != nil else {
+                return .invalidTarget("Title style preset \(preset.id) does not exist.")
+            }
+            if preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .invalidValue("A preset name can't be empty.")
+            }
+            return preset.style.validationError.map { .invalidValue($0) }
+        case .removeTextStylePreset(let id):
+            return sceneStore.textStylePreset(withID: id) != nil
+                ? nil : .invalidTarget("Title style preset \(id) does not exist.")
+
         // A02 media transport: session state — the target must be a
         // registered media source; locks and staging don't apply.
         case .mediaPlay(let id), .mediaPause(let id),
@@ -1285,6 +1672,18 @@ final class StudioCommandDispatcher: ObservableObject {
             return seconds.isFinite && seconds >= 0
                 ? nil
                 : .invalidValue("Seek position must be a non-negative number of seconds.")
+
+        // G06 (issue #113): page navigation is program-aware session state —
+        // the target must be a REGISTERED PDF source; locks and staging don't
+        // apply (the A02 media-transport precedent).
+        case .pdfNextPage(let id), .pdfPreviousPage(let id),
+             .pdfSetFraming(let id, _):
+            return pdfNavigationError(for: id)
+        case .pdfGoToPage(let id, let page):
+            if let error = pdfNavigationError(for: id) { return error }
+            return page >= 0
+                ? nil
+                : .invalidValue("A page number must be zero or greater.")
 
         case .setOutputProfile:
             // Always acceptable: the controller clamps to hardware/destination
@@ -1754,11 +2153,57 @@ final class StudioCommandDispatcher: ObservableObject {
         case .distributeLayers(let distribution, let sceneID):
             distributeSelectedLayers(distribution, in: sceneID)
 
+        // G11 (issue #117): annotation execution — write the annotation
+        // document through the store (single truth); its publish updates the
+        // program bridge, so program-included strokes composite on the
+        // program engine's next tick, live-safe like project overlays.
+        case .addAnnotationStroke(let stroke, let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.addStroke(stroke, in: id)
+            }
+        case .undoAnnotationStroke(let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.undoStroke(in: id)
+            }
+        case .redoAnnotationStroke(let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.redoStroke(in: id)
+            }
+        case .clearAnnotations(let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.clearStrokes(in: id)
+            }
+        case .setAnnotationVisibility(let visible, let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.setVisible(visible, in: id)
+            }
+        case .setAnnotationsInProgram(let include, let sceneID):
+            if case .success(let id) = resolveAnnotationScene(sceneID) {
+                annotations.setIncludeInProgram(include, in: id)
+            }
+        case .setAnnotationTool(let tool):
+            annotations.activeTool = tool
+            // Leaving the pointer tool retires the laser dot with it.
+            if tool != .pointer {
+                annotations.clearPointer()
+            }
+
         // S07 project overlays: project-level edits — SceneStore publishes
         // them to every engine on persist, so staged AND program composite
         // the change on their next tick. No staged edit, no implicit take.
         case .addOverlay(let payload):
             sceneStore.addOverlay(makeOverlay(payload: payload))
+        case .addMediaOverlay(let name, let payload):
+            // G09 (issue #116): one atomic add — the registry source carries
+            // the bookmark + playback policy; the overlay binds to it by ID,
+            // so the pool's demand keys its playout by source and a payload
+            // edit (loop/end action) never restarts playback. Undo removes
+            // the overlay but keeps the registry source (the S12 registry-
+            // outside-the-snapshot precedent, like relinked sources).
+            let source = sceneStore.addSource(
+                SourceDefinition(name: name, payload: .media(payload)))
+            sceneStore.addOverlay(makeMediaOverlay(name: name, sourceID: source.id,
+                                                   payload: payload))
         case .removeOverlay(let overlayID):
             sceneStore.removeOverlay(overlayID)
         case .renameOverlay(let overlayID, let name):
@@ -1814,12 +2259,70 @@ final class StudioCommandDispatcher: ObservableObject {
         case .removeEffectPreset(let id):
             sceneStore.removeEffectPreset(id)
 
+        // G03 (issue #106): the layer style is staged scene content (and
+        // implicitly takes in direct-live) like any layer edit; overlay
+        // styles write the project overlay list (immediate, live-safe);
+        // presets write the project document directly.
+        case .setLayerStyle(let layerID, let style, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.style = style }
+        case .setOverlayStyle(let overlayID, let style):
+            editOverlay(overlayID) { $0.style = style }
+        case .addStylePreset(let preset):
+            sceneStore.addStylePreset(preset)
+        case .updateStylePreset(let preset):
+            sceneStore.updateStylePreset(preset)
+        case .removeStylePreset(let id):
+            sceneStore.removeStylePreset(id)
+
+        // G02 (issue #110): the text payload is staged scene content (and
+        // implicitly takes in direct-live) like any layer edit; overlay
+        // payloads write the project overlay list (immediate, live-safe);
+        // presets write the project document directly.
+        case .setDynamicOverlayTransport(let layerID, let action, let sceneID):
+            if case .success(let id) = resolveDynamicOverlay(layerID, in: sceneID) {
+                DynamicOverlayStore.shared.perform(action, id: id)
+            }
+        case .setLayerText(let layerID, let payload, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.payload = .text(payload) }
+        case .setOverlayText(let overlayID, let payload):
+            editOverlay(overlayID) { $0.payload = .text(payload) }
+        // G01 (issue #81): same staging rules as the text payloads above.
+        case .setLayerImage(let layerID, let payload, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.payload = .image(payload) }
+        case .setOverlayImage(let overlayID, let payload):
+            editOverlay(overlayID) { $0.payload = .image(payload) }
+        case .setLayerWeb(let layerID, let payload, let sceneID):
+            // G08: normalization is fail-closed (the payload shim clamps
+            // fps/viewport and clears unsupported URL schemes), so the
+            // stored value is always within the renderer's contract.
+            editLayer(layerID, in: sceneID) { $0.payload = .web(payload.normalizedWebPayload) }
+        case .setOverlayWeb(let overlayID, let payload):
+            editOverlay(overlayID) { $0.payload = .web(payload.normalizedWebPayload) }
+        case .addTextStylePreset(let preset):
+            sceneStore.addTextStylePreset(preset)
+        case .updateTextStylePreset(let preset):
+            sceneStore.updateTextStylePreset(preset)
+        case .removeTextStylePreset(let id):
+            sceneStore.removeTextStylePreset(id)
+
         case .mediaPlay(let id): controller.capturePool.playMedia(id)
         case .mediaPause(let id): controller.capturePool.pauseMedia(id)
         case .mediaStop(let id): controller.capturePool.stopMedia(id)
         case .mediaRestart(let id): controller.capturePool.restartMedia(id)
         case .mediaSeek(let id, let seconds):
             controller.capturePool.seekMedia(id, toSeconds: seconds)
+
+        // G06 (issue #113): page navigation writes the ONE shared deck store
+        // per source (never a per-canvas fork); the engines pick the change
+        // up on their next render tick through the off-main snapshot.
+        case .pdfNextPage(let id):
+            pdfDecks.advance(by: 1, for: id, fallbackPage: pdfDefaultPage(for: id))
+        case .pdfPreviousPage(let id):
+            pdfDecks.advance(by: -1, for: id, fallbackPage: pdfDefaultPage(for: id))
+        case .pdfGoToPage(let id, let page):
+            pdfDecks.setPage(page, for: id)
+        case .pdfSetFraming(let id, let framing):
+            pdfDecks.setFraming(framing, for: id, fallbackPage: pdfDefaultPage(for: id))
 
         case .setOutputProfile(let profile, let destination):
             controller.applyOutputProfile(profile, destination: destination)
@@ -2279,6 +2782,24 @@ final class StudioCommandDispatcher: ObservableObject {
 
     // MARK: Layer helpers
 
+    /// G11 (issue #117): the scene an annotation command targets — `nil`
+    /// means the STAGED scene (the canvas being drawn on); an explicit ID
+    /// must name an existing scene. Unlike `resolveStagedScene`, an explicit
+    /// ID need not be staged: annotations are document content keyed by
+    /// scene, not staged scene state.
+    private func resolveAnnotationScene(_ sceneID: SceneID?) -> Result<SceneID, StudioCommandError> {
+        guard let sceneID else {
+            guard let staged = previewProgram.stagedScene else {
+                return .failure(.invalidTarget("No scene is staged in preview."))
+            }
+            return .success(staged.id)
+        }
+        guard let scene = sceneStore.scenes.first(where: { $0.id == sceneID }) else {
+            return .failure(.invalidTarget("Scene \(sceneID) does not exist."))
+        }
+        return .success(scene.id)
+    }
+
     /// W03: layer edits only ever mutate the STAGED scene. `in: nil` targets
     /// it directly; an explicit scene ID must name the staged scene — editing
     /// a background scene is rejected rather than silently bypassing the
@@ -2305,6 +2826,25 @@ final class StudioCommandDispatcher: ObservableObject {
             }
             return .success((scene, index))
         }
+    }
+
+    private func resolveDynamicOverlay(_ id: LayerID, in sceneID: SceneID?)
+        -> Result<UUID, StudioCommandError> {
+        let scene: Scene?
+        if sceneID == nil || sceneID == previewProgram.stagedScene?.id {
+            scene = previewProgram.stagedScene
+        } else if sceneID == previewProgram.programScene?.id {
+            scene = previewProgram.programScene
+        } else {
+            scene = sceneStore.scenes.first { $0.id == sceneID }
+        }
+        guard let layer = scene?.layers.first(where: { $0.id == id }),
+              case .text(let text) = layer.payload else {
+            return .failure(.invalidTarget("Select a timer or ticker text layer."))
+        }
+        if let timer = text.timer, timer.kind.usesTransport { return .success(timer.runtimeID) }
+        if let ticker = text.ticker { return .success(ticker.runtimeID) }
+        return .failure(.invalidTarget("This text layer has no elapsed timer or ticker transport."))
     }
 
     private func resolveGroup(_ groupID: GroupID,
@@ -2368,6 +2908,47 @@ final class StudioCommandDispatcher: ObservableObject {
             return .invalidTarget("Source \"\(source.name)\" is not a media source.")
         }
         return nil
+    }
+
+    /// G06 (issue #113): the rejection for a page-navigation command — the
+    /// target must be a REGISTERED PDF source (navigation is keyed by registry
+    /// source ID, the same identity page rendering uses).
+    private func pdfNavigationError(for id: SourceDefinitionID) -> StudioCommandError? {
+        guard let source = sceneStore.source(withID: id) else {
+            return .invalidTarget("Presentation source \(id) does not exist.")
+        }
+        guard case .pdf = source.payload else {
+            return .invalidTarget("Source \"\(source.name)\" is not a presentation source.")
+        }
+        return nil
+    }
+
+    /// The payload's persisted default page — the seed for deck state before
+    /// the source has ever been navigated.
+    private func pdfDefaultPage(for id: SourceDefinitionID) -> Int {
+        guard case .pdf(let payload) = sceneStore.source(withID: id)?.payload else { return 0 }
+        return payload.page
+    }
+
+    /// G06 (issue #113): the PDF source the keyboard / Present-menu navigation
+    /// targets — the SELECTED layer's bound PDF source first, else the first
+    /// visible PDF source in the staged scene (S06-flattened, so a deck nested
+    /// in a referenced scene counts), so hotkeys act on what the presenter is
+    /// looking at. Nil when no PDF source is in play (controls disable).
+    func presentationNavigationTarget() -> SourceDefinitionID? {
+        guard let staged = previewProgram.stagedScene else { return nil }
+        let registry = SceneGraph.index(sceneStore.scenes)
+        let layers = SceneGraph.flattenedVisibleLayers(of: staged, in: registry)
+        func pdfSourceID(of layer: LayerNode) -> SourceDefinitionID? {
+            guard let id = layer.sourceID,
+                  let source = sceneStore.source(withID: id),
+                  case .pdf = source.payload else { return nil }
+            return id
+        }
+        for layer in layers where sceneStore.selectedLayerIDs.contains(layer.id) {
+            if let id = pdfSourceID(of: layer) { return id }
+        }
+        return layers.lazy.compactMap(pdfSourceID(of:)).first
     }
 
     /// E06 (issue #165): the rejection for a PTZ target configuration —
@@ -2543,7 +3124,10 @@ final class StudioCommandDispatcher: ObservableObject {
              .setSceneAudioSnapshot(_, let id),
              .captureSceneAudioSnapshot(let id),
              .setSceneMediaBehavior(_, let id),
-             .setLayerSourceEffects(_, _, let id):
+             .setLayerSourceEffects(_, _, let id),
+             .setLayerStyle(_, _, let id),
+             .setLayerText(_, _, let id),
+             .setLayerImage(_, _, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
         default:
             return nil
@@ -2581,6 +3165,18 @@ final class StudioCommandDispatcher: ObservableObject {
                                 position: GraphPoint(x: 0.98, y: 0.02),
                                 size: GraphSize(width: 0.12, height: 0.07),
                                 anchor: .topRight))
+        case .image(let image):
+            // G01 (issue #81): a logo-style bug anchored bottom-right. The
+            // renderer aspect-fits, so the height is nominal until the image
+            // decodes; the user repositions/resizes on canvas like any layer.
+            return LayerNode(name: image.fileName.map {
+                                 ($0 as NSString).deletingPathExtension
+                             } ?? payload.displayName,
+                             payload: payload,
+                             transform: LayerTransform(
+                                position: GraphPoint(x: 0.98, y: 0.98),
+                                size: GraphSize(width: 0.2, height: 0.2),
+                                anchor: .bottomRight))
         case .scene(let reference):
             // S06: nest the referenced scene at full canvas (the classic
             // "branded base layout" reuse); the user repositions/resizes it
@@ -2632,6 +3228,17 @@ final class StudioCommandDispatcher: ObservableObject {
                                 position: GraphPoint(x: 0.5, y: 0.94),
                                 size: GraphSize(width: 0.5, height: 0.07),
                                 anchor: .center))
+        case .image(let image):
+            // G01 (issue #81): a corner branding bug — small, top-right,
+            // aspect-fit (the height is nominal until the image decodes).
+            return LayerNode(name: image.fileName.map {
+                                 ($0 as NSString).deletingPathExtension
+                             } ?? "Image Overlay",
+                             payload: payload,
+                             transform: LayerTransform(
+                                position: GraphPoint(x: 0.98, y: 0.02),
+                                size: GraphSize(width: 0.12, height: 0.08),
+                                anchor: .topRight))
         default:
             // Shape: a small solid block in the top-right corner.
             return LayerNode(name: "\(payload.displayName) Overlay", payload: payload,
@@ -2640,6 +3247,20 @@ final class StudioCommandDispatcher: ObservableObject {
                                 size: GraphSize(width: 0.10, height: 0.06),
                                 anchor: .topRight))
         }
+    }
+
+    /// G09 (issue #116): a media overlay (animated image / alpha video)
+    /// starts centered at 40% of the canvas — sticker/lower-third assets
+    /// drag to size on the canvas like any overlay. The inline payload
+    /// mirrors the registry source's (self-contained document rule), and
+    /// `sourceID` is what keys playout demand and frame pulls.
+    private func makeMediaOverlay(name: String, sourceID: SourceDefinitionID,
+                                  payload: MediaSourcePayload) -> LayerNode {
+        LayerNode(name: name, sourceID: sourceID, payload: .media(payload),
+                  transform: LayerTransform(
+                    position: GraphPoint(x: 0.5, y: 0.5),
+                    size: GraphSize(width: 0.4, height: 0.4),
+                    anchor: .center))
     }
 
     private func editLayer(_ layerID: LayerID,
@@ -2704,7 +3325,8 @@ final class StudioCommandDispatcher: ObservableObject {
             canUndo: undoStack.canUndo,
             canRedo: undoStack.canRedo,
             undoLabel: undoStack.undoLabel,
-            redoLabel: undoStack.redoLabel)
+            redoLabel: undoStack.redoLabel,
+            annotations: annotations.uiState(stagedSceneID: staged?.id))
         registerAppAudioMixerChannels()
         pushMixerStateToEngine()
     }
@@ -2826,7 +3448,23 @@ private extension StudioCommand {
     /// E01's source effect defaults and effect presets are excluded too:
     /// the registry and the preset list live outside the undo snapshot (the
     /// mixer-document precedent), unlike layer effect OVERRIDES, which are
-    /// staged scene content and undo with it.
+    /// staged scene content and undo with it. G03's style presets and G02's
+    /// title-style presets follow the same rule; layer/overlay STYLES and
+    /// text payloads are content and undo.
+    /// G11 (issue #117): annotation commands are excluded — strokes,
+    /// visibility, and the program gate live in the annotation document
+    /// outside the S12 snapshot (the mixer/soundboard-document precedent).
+    /// Strokes are ephemeral live-presentation marks with their own
+    /// stroke-level history (`.undoAnnotationStroke`); the per-scene
+    /// visibility and program-inclusion choices are annotation-document
+    /// state applied immediately to both monitors (the S07 project-overlay
+    /// precedent), not staged scene content — including them in ⌘Z scene
+    /// undo would silently entangle live telestrator marks with document
+    /// edits.
+    /// G06 (issue #113): pdf page navigation and framing are excluded — page
+    /// state is the A02 playback-position precedent (session/document state,
+    /// never scene content), persisted in the presentations document outside
+    /// the S12 snapshot.
     var isUndoableSceneEdit: Bool {
         switch self {
         case .addScene, .insertScene, .renameScene, .deleteScene, .updateScene,
@@ -2840,11 +3478,16 @@ private extension StudioCommand {
              .alignLayers, .distributeLayers,
              .addOverlay, .removeOverlay, .renameOverlay, .setOverlayVisibility,
              .setOverlayLocked, .setOverlayTransform, .setOverlayEffects, .moveOverlay,
+             .addMediaOverlay,
              .setOverlayHiddenInScene, .setSceneBackground, .setDefaultBackground,
              .setSceneTransition, .setDefaultTransition,
              .setSceneSoundBindings,
              .setSceneAudioSnapshot, .captureSceneAudioSnapshot, .setSceneMediaBehavior,
-             .setLayerSourceEffects:
+             .setLayerSourceEffects,
+             .setLayerStyle, .setOverlayStyle,
+             .setLayerText, .setOverlayText,
+             .setLayerWeb, .setOverlayWeb,
+             .setLayerImage, .setOverlayImage:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording,
@@ -2858,6 +3501,8 @@ private extension StudioCommand {
              .setCameraControls, .triggerCameraReaction,
              .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
+             .setDynamicOverlayTransport,
+             .pdfNextPage, .pdfPreviousPage, .pdfGoToPage, .pdfSetFraming,
              .addSoundPad, .updateSoundPad, .removeSoundPad,
              .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,
              .addMusicPlaylist, .updateMusicPlaylist, .removeMusicPlaylist,
@@ -2867,8 +3512,13 @@ private extension StudioCommand {
              .ptzMove, .ptzZoom, .ptzStop, .ptzStopAll,
              .ptzStorePreset, .ptzRecallPreset, .ptzRemovePreset,
              .ptzSetSceneRecall, .ptzRemoveSceneRecall,
+             .addAnnotationStroke, .undoAnnotationStroke, .redoAnnotationStroke,
+             .clearAnnotations, .setAnnotationVisibility,
+             .setAnnotationsInProgram, .setAnnotationTool,
              .setSourceEffectDefaults,
              .addEffectPreset, .updateEffectPreset, .removeEffectPreset,
+             .addStylePreset, .updateStylePreset, .removeStylePreset,
+             .addTextStylePreset, .updateTextStylePreset, .removeTextStylePreset,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
              .undo, .redo:
@@ -2893,6 +3543,22 @@ private extension StudioCommand {
             return "layer-effects.\(id)"
         case .setLayerSourceEffects(let id, _, _):
             return "layer-source-effects.\(id)"
+        case .setLayerStyle(let id, _, _):
+            return "layer-style.\(id)"
+        case .setLayerText(let id, _, _):
+            return "layer-text.\(id)"
+        case .setOverlayText(let id, _):
+            return "overlay-text.\(id)"
+        case .setLayerWeb(let id, _, _):
+            return "layer-web.\(id)"
+        case .setOverlayWeb(let id, _):
+            return "overlay-web.\(id)"
+        case .setLayerImage(let id, _, _):
+            return "layer-image.\(id)"
+        case .setOverlayImage(let id, _):
+            return "overlay-image.\(id)"
+        case .setOverlayStyle(let id, _):
+            return "overlay-style.\(id)"
         case .setLayerAudio(let id, _, _):
             return "layer-audio.\(id)"
         case .renameLayer(let id, _, _):

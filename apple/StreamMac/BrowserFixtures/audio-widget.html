@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<!-- G07 (issue #114) fixture: a widget that makes sound — an alert sting
+     synthesized with the Web Audio API (no media file, so the probe isolates
+     process-level audio routing from codec questions). Autoplay is enabled by
+     the host configuration (mediaTypesRequiringUserActionForPlayback = []).
+     The page exposes window.__widgetAudioState so the harness can verify the
+     AudioContext actually reached `running` (vs. autoplay-blocked). -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  #badge {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 420px; height: 120px; border-radius: 20px;
+    background: rgba(24, 10, 40, 0.85); border: 2px solid rgba(200, 120, 255, 0.9);
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, sans-serif; font-size: 30px; color: #e6c8ff;
+  }
+</style>
+</head>
+<body>
+  <div id="badge">AUDIO STING WIDGET</div>
+  <script>
+    window.__widgetAudioState = "starting";
+    const ctx = new AudioContext();
+    function sting() {
+      const now = ctx.currentTime;
+      [523.25, 659.25, 783.99].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0, now + i * 0.12);
+        gain.gain.linearRampToValueAtTime(0.2, now + i * 0.12 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.5);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now + i * 0.12);
+        osc.stop(now + i * 0.12 + 0.6);
+      });
+    }
+    ctx.addEventListener("statechange", () => {
+      window.__widgetAudioState = ctx.state;
+    });
+    window.__widgetAudioState = ctx.state;
+    sting();
+    setInterval(sting, 2000);
+  </script>
+</body>
+</html>
