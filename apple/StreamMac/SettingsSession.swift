@@ -128,7 +128,7 @@ final class SettingsSession: ObservableObject {
     func persistMixer(_ mixer: MixerSettings) {
         activeSettings.mixer = mixer
         draft.mixer = mixer
-        scheduleMixerSave()
+        scheduleLiveSettingsSave()
     }
 
     /// The mixer's mic fader is the live face of `micVolume`: persist it and
@@ -139,16 +139,32 @@ final class SettingsSession: ObservableObject {
         let clamped = max(0, min(value, 2))
         activeSettings.micVolume = clamped
         draft.micVolume = clamped
-        scheduleMixerSave()
+        scheduleLiveSettingsSave()
     }
 
-    /// Debounced settings write for mixer edits: a fader scrub dispatches a
-    /// command per tick, and the state updates above must stay synchronous
-    /// (publishers fire, the engine ramps live), but the FILE write coalesces
-    /// to one save per gesture instead of one per tick.
+    /// A05 (issue #84): persists the additional-input device list (enable /
+    /// hardware-channel mapping / relink) straight into the APPLIED settings
+    /// and applies it to the live pipeline — like the mixer, this is a live
+    /// session surface, not a draft/Apply edit. Mirroring keeps
+    /// `draft.audioInputs` fresh so a later settings Apply can't roll the
+    /// input list back, and `isDirty` is unaffected. The controller's
+    /// `applySavedSettings` diff starts/stops the affected devices' captures
+    /// and mix channels in place.
+    func persistAudioInputs(_ inputs: [AudioInputSelection]) {
+        activeSettings.audioInputs = inputs
+        draft.audioInputs = inputs
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
+    /// Debounced settings write for live-surface edits (mixer fader scrubs,
+    /// A05 input toggles): a scrub dispatches a command per tick, and the
+    /// state updates above must stay synchronous (publishers fire, the
+    /// engine ramps live), but the FILE write coalesces to one save per
+    /// gesture instead of one per tick.
     private var mixerSaveTask: Task<Void, Never>?
 
-    private func scheduleMixerSave() {
+    private func scheduleLiveSettingsSave() {
         mixerSaveTask?.cancel()
         mixerSaveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)

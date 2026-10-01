@@ -149,4 +149,37 @@ import StreamCore
         #expect(restored.mixer.soloedChannels == ["capture.screen-1"])
         #expect(restored.mixer.mutedBuses == ["program"])
     }
+
+    @Test("A blob written before the A05 audio-input list existed gets an empty list")
+    func missingAudioInputsDefaults() throws {
+        // A05 (issue #84): snapshots from builds predating multi-mic must
+        // decode to no ADDITIONAL inputs — the legacy preferredAudioInputUID
+        // default-mic path is untouched, so that mic stays enabled.
+        let s = try decode(#"{"preferredAudioInputUID": "usb-mic-1"}"#)
+        #expect(s.audioInputs.isEmpty)
+        #expect(s.preferredAudioInputUID == "usb-mic-1")
+    }
+
+    @Test("The A05 audio-input list round-trips through encode/decode")
+    func audioInputsRoundTrip() throws {
+        let original = StreamSettings(audioInputs: [
+            AudioInputSelection(deviceUID: "interface-8ch", isEnabled: true,
+                                mapping: .stereo(2, 3)),
+            AudioInputSelection(deviceUID: "usb-mic-2", isEnabled: false,
+                                mapping: .mono(1)),
+        ])
+        let data = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(StreamSettings.self, from: data)
+        #expect(restored == original)
+        #expect(restored.audioInputs.count == 2)
+        #expect(restored.audioInputs[0].mapping == .stereo(2, 3))
+        #expect(restored.audioInputs[1].isEnabled == false)
+    }
+
+    @Test("An A05 input entry written before enable/mapping keys existed gets defaults")
+    func audioInputSelectionDefaults() throws {
+        let s = try decode(#"{"audioInputs": [{"deviceUID": "usb-mic-3"}]}"#)
+        #expect(s.audioInputs == [AudioInputSelection(deviceUID: "usb-mic-3",
+                                                      isEnabled: true, mapping: .all)])
+    }
 }

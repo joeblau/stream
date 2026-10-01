@@ -443,13 +443,125 @@ struct SettingsView: View {
             Text("Broadcast-style EQ, compression and limiting on the mic.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            additionalInputsBlock
         } header: {
             Text("Audio")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Label("Mic volume applies immediately, even while live.", systemImage: "bolt.fill")
                 effectBadge(.nextSession)
-                Text("Microphone choice and Voice Polish are read when a session starts.")
+                Text("Microphone choice and Voice Polish are read when a session starts. Additional inputs and their channel mappings apply immediately, each as its own mixer channel.")
+            }
+        }
+    }
+
+    // MARK: - A05 additional inputs (issue #84)
+
+    /// Every connected input device (minus the one the default microphone
+    /// already uses) can be enabled as its OWN mix channel, and every
+    /// enabled-but-unplugged device stays listed honestly with a relink
+    /// path. Enable/mapping edits are live session state (like the mixer):
+    /// they persist and apply immediately through the W05 dispatcher.
+    @ViewBuilder
+    private var additionalInputsBlock: some View {
+        let configured = session.activeSettings.audioInputs
+        let connected = controller.audio.devices
+        let preferredUID = session.draft.preferredAudioInputUID
+        let listed = connected.filter { $0.uniqueID != preferredUID }
+        let missing = configured.filter { selection in
+            selection.isEnabled
+                && selection.deviceUID != preferredUID
+                && !connected.contains(where: { $0.uniqueID == selection.deviceUID })
+        }
+        if !listed.isEmpty || !missing.isEmpty {
+            Text("Additional Inputs")
+                .font(.callout.weight(.semibold))
+            ForEach(listed, id: \.uniqueID) { device in
+                additionalInputRow(
+                    device: device,
+                    selection: configured.first(where: { $0.deviceUID == device.uniqueID }))
+            }
+            ForEach(missing, id: \.deviceUID) { selection in
+                missingInputRow(selection: selection)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func additionalInputRow(device: AVCaptureDevice,
+                                    selection: AudioInputSelection?) -> some View {
+        let uid = device.uniqueID
+        let enabled = selection?.isEnabled ?? false
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(device.localizedName, isOn: Binding(
+                get: { enabled },
+                set: { dispatcher.execute(.setAudioInputEnabled(uid, $0)) }
+            ))
+            if enabled {
+                let channelCount = controller.audio.deviceChannelCounts[uid] ?? 1
+                if channelCount > 1 {
+                    // Audio-interface channel mapping: which hardware inputs
+                    // feed this device's mix channel.
+                    Picker("Channels", selection: Binding(
+                        get: { selection?.mapping ?? .all },
+                        set: { dispatcher.execute(.setAudioInputMapping(uid, $0)) }
+                    )) {
+                        Text("All \(channelCount) Inputs").tag(AudioInputMapping.all)
+                        ForEach(0..<channelCount, id: \.self) { channel in
+                            Text("Input \(channel + 1) (mono)")
+                                .tag(AudioInputMapping.mono(channel))
+                        }
+                        ForEach(0..<max(0, channelCount - 1), id: \.self) { left in
+                            Text("Inputs \(left + 1) + \(left + 2) (stereo)")
+                                .tag(AudioInputMapping.stereo(left, left + 1))
+                        }
+                    }
+                }
+                if let error = controller.audio.additionalInputErrors[uid] {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func missingInputRow(selection: AudioInputSelection) -> some View {
+        let uid = selection.deviceUID
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(controller.audio.deviceNamesByUID[uid] ?? "Missing input", isOn: Binding(
+                get: { true },
+                set: { dispatcher.execute(.setAudioInputEnabled(uid, $0)) }
+            ))
+            Label("Disconnected — reconnect it, or relink to another input.",
+                  systemImage: "cable.connector.slash")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            inputRelinkMenu(for: uid)
+        }
+    }
+
+    /// The explicit relink path (C10: a different device is never
+    /// substituted silently) — replace the missing device's UID with a
+    /// connected one, keeping the input's enable/mapping.
+    @ViewBuilder
+    private func inputRelinkMenu(for uid: String) -> some View {
+        let candidates = controller.audio.devices.filter { device in
+            device.uniqueID != uid && !session.activeSettings.audioInputs.contains {
+                $0.deviceUID == device.uniqueID && $0.isEnabled
+            }
+        }
+        Menu("Relink…") {
+            if candidates.isEmpty {
+                Text("No other inputs connected")
+            } else {
+                ForEach(candidates, id: \.uniqueID) { device in
+                    Button(device.localizedName) {
+                        dispatcher.execute(.relinkAudioInput(from: uid, to: device.uniqueID))
+                    }
+                }
             }
         }
     }

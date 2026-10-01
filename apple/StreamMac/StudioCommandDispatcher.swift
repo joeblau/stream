@@ -230,6 +230,19 @@ enum StudioCommand: Equatable, Sendable {
     /// Master mute for one bus (effective gain 0; the fader value is kept).
     case setBusMuted(AudioBus, Bool)
 
+    // A05 multi-mic inputs (issue #84): enable/disable an audio input device
+    // as its own mix channel, pick which hardware channels feed it
+    // (mono/stereo-pair mapping), and relink a missing device to a connected
+    // one. Live session state persisted in `StreamSettings.audioInputs` via
+    // SettingsSession (like the mixer document) — NOT scene content, NOT
+    // undoable, and never staged.
+    case setAudioInputEnabled(String, Bool)
+    case setAudioInputMapping(String, AudioInputMapping)
+    /// Replaces a configured input's device UID (keeping enable/mapping)
+    /// with a currently-connected device — the explicit C10 relink path for
+    /// an unplugged mic.
+    case relinkAudioInput(from: String, to: String)
+
     // Settings session (W04).
     case openSettings(SettingsSession.Section?)
     case closeSettings
@@ -334,6 +347,10 @@ enum StudioCommand: Equatable, Sendable {
         case .setBusGain(let bus, _): return "Set \(bus.rawValue.capitalized) Gain"
         case .setBusMuted(let bus, let muted):
             return "\(muted ? "Mute" : "Unmute") \(bus.rawValue.capitalized)"
+        case .setAudioInputEnabled(_, let enabled):
+            return "\(enabled ? "Enable" : "Disable") Audio Input"
+        case .setAudioInputMapping: return "Set Audio Input Channels"
+        case .relinkAudioInput: return "Relink Audio Input"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
         case .applySettings: return "Apply Settings"
@@ -919,6 +936,30 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setBusMuted:
             return nil
 
+        // A05 multi-mic validation: enablement is free-form (a device may be
+        // enabled while unplugged — it reports missing and recovers); mapping
+        // requires a configured input; relink requires a connected target.
+        case .setAudioInputEnabled(let uid, _):
+            return uid.isEmpty
+                ? .invalidValue("An audio input device must be selected.") : nil
+        case .setAudioInputMapping(let uid, let mapping):
+            guard session.activeSettings.audioInputs.contains(where: { $0.deviceUID == uid }) else {
+                return .invalidTarget("Audio input \(uid) is not configured — enable it first.")
+            }
+            switch mapping {
+            case .all: return nil
+            case .mono(let channel): return channel >= 0
+                ? nil : .invalidValue("Channel indices must be zero or greater.")
+            case .stereo(let left, let right): return left >= 0 && right >= 0
+                ? nil : .invalidValue("Channel indices must be zero or greater.")
+            }
+        case .relinkAudioInput(let from, let to):
+            guard from != to else {
+                return .invalidValue("The input is already linked to that device.")
+            }
+            return controller.deviceMonitor.audioDevices.contains(where: { $0.uniqueID == to })
+                ? nil : .invalidTarget("The relink target device is not connected.")
+
         case .openSettings, .closeSettings:
             return nil
         case .applySettings:
@@ -1153,7 +1194,10 @@ final class StudioCommandDispatcher: ObservableObject {
         // change live (ramped) through the controller.
         case .setChannelVolume(let id, let volume):
             channelIDsByLabel[id.label] = id
-            if case .microphone = id {
+            // Only the DEFAULT mic channel's fader is the live face of
+            // `micVolume`; A05 additional mic channels persist in the mixer
+            // document by label like every other non-capture channel.
+            if id == .microphone(deviceUID: nil) {
                 session.persistMicVolume(volume)
             } else {
                 var mixer = session.activeSettings.mixer
@@ -1191,6 +1235,38 @@ final class StudioCommandDispatcher: ObservableObject {
                 mixer.mutedBuses.remove(bus.rawValue)
             }
             session.persistMixer(mixer)
+
+        // A05 multi-mic execution: mutate the persisted input list through
+        // SettingsSession (single truth); its apply starts/stops the affected
+        // devices' captures and mix channels live.
+        case .setAudioInputEnabled(let uid, let enabled):
+            var inputs = session.activeSettings.audioInputs
+            if let index = inputs.firstIndex(where: { $0.deviceUID == uid }) {
+                inputs[index].isEnabled = enabled
+            } else {
+                inputs.append(AudioInputSelection(deviceUID: uid, isEnabled: enabled))
+            }
+            session.persistAudioInputs(inputs)
+        case .setAudioInputMapping(let uid, let mapping):
+            var inputs = session.activeSettings.audioInputs
+            guard let index = inputs.firstIndex(where: { $0.deviceUID == uid }) else { return }
+            inputs[index].mapping = mapping
+            session.persistAudioInputs(inputs)
+        case .relinkAudioInput(let from, let to):
+            var inputs = session.activeSettings.audioInputs
+            guard let index = inputs.firstIndex(where: { $0.deviceUID == from }) else { return }
+            var entry = inputs[index]
+            inputs.remove(at: index)
+            entry.deviceUID = to
+            if let existing = inputs.firstIndex(where: { $0.deviceUID == to }) {
+                // The target already has a configured entry: enable wins,
+                // the relinked mapping (user's latest intent) replaces it.
+                inputs[existing].isEnabled = inputs[existing].isEnabled || entry.isEnabled
+                inputs[existing].mapping = entry.mapping
+            } else {
+                inputs.append(entry)
+            }
+            session.persistAudioInputs(inputs)
 
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
@@ -1684,13 +1760,22 @@ final class StudioCommandDispatcher: ObservableObject {
         if let last = lastPushedMixer, last == desired { return }
         lastPushedMixer = desired
         let mixer = desired.mixer
+        // A05 (issue #84): enabled additional mic channels register under
+        // their stable labels so their faders/mutes/solos persist in the
+        // mixer document and push to the engine like any non-capture
+        // channel — even before the device's first buffer lands.
+        for selection in session.activeSettings.audioInputs where selection.isEnabled {
+            let id = AudioChannelID.microphone(deviceUID: selection.deviceUID)
+            channelIDsByLabel[id.label] = id
+        }
         // Channels: fader/mute per registered non-capture ID (capture levels
-        // are scene bindings). The mic's fader is the settings micVolume;
-        // others read the mixer document.
+        // are scene bindings). The DEFAULT mic's fader is the settings
+        // micVolume; A05 additional mics and other kinds read the mixer
+        // document.
         for (label, id) in channelIDsByLabel {
             if case .capture = id { continue }
             let volume: Float
-            if case .microphone = id {
+            if id == .microphone(deviceUID: nil) {
                 volume = Float(max(0, min(desired.micVolume, 2)))
             } else {
                 volume = Float(max(0, min(mixer.channelVolumes[label] ?? 1, 2)))
@@ -1764,6 +1849,7 @@ private extension StudioCommand {
              .setOutputProfile,
              .setChannelVolume, .setChannelMuted, .setChannelSolo,
              .setChannelAuxSend, .setBusGain, .setBusMuted,
+             .setAudioInputEnabled, .setAudioInputMapping, .relinkAudioInput,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,

@@ -230,6 +230,17 @@ final class StreamController: ObservableObject {
         deviceMonitor.onDisplaysChanged = { displayIDs in
             capturePool.handleDisplaysChanged(displayIDs: displayIDs)
         }
+        // A05 (issue #84): audio input hot-plug routes to the audio input
+        // layer — the DeviceMonitor is the one availability watcher, so
+        // MacAudioInput keeps no notifications of its own. An unplug stops
+        // only that device's channel; a return on the same uniqueID resumes.
+        let audio = self.audio
+        deviceMonitor.onAudioDeviceConnected = { _ in
+            audio.noteAudioDeviceConnected()
+        }
+        deviceMonitor.onAudioDeviceDisconnected = { _ in
+            audio.noteAudioDeviceDisconnected()
+        }
         // W06's noted wiring: a screen-capture error (start failure or
         // mid-capture stop) probes Screen Recording permission — preflight
         // lags a System Settings revocation, so the probe is what flips the
@@ -290,6 +301,12 @@ final class StreamController: ObservableObject {
         }
         audio.onMicSampleOffMain = { sample in
             audioEngine.enqueue(.microphone(deviceUID: nil), sample)
+        }
+        // A05 (issue #84): additional input devices feed their own
+        // UID-pinned channels the same way (buffers arrive already
+        // channel-mapped from the device's own capture queue).
+        audio.onDeviceSampleOffMain = { uid, sample in
+            audioEngine.enqueue(.microphone(deviceUID: uid), sample)
         }
         // The publisher output taps the program bus once for the controller's
         // lifetime: the tap's bounded mailbox sheds chunks rather than ever
@@ -391,6 +408,10 @@ final class StreamController: ObservableObject {
     /// mixer-muted mic stays muted across pipeline restarts instead of the
     /// engine's settings-derived gain silently unmuting it.
     private var mixerGains: [AudioChannelID: (volume: Float, isMuted: Bool)] = [:]
+    /// A05 (issue #84): the additional (UID-pinned) mic channels currently
+    /// registered on the audio engine, so settings applies can diff and
+    /// sync them without tearing down channels that keep running.
+    private var additionalMicChannelIDs: Set<AudioChannelID> = []
 
     /// Live mixer channel gain (ramped). The dispatcher owns mixer state;
     /// this is its write path for non-scene-bound channels (the mic today,
@@ -687,6 +708,20 @@ final class StreamController: ObservableObject {
            isPipelineRunning, !outputsOwnProfile {
             startAudioInput()
         }
+        // A05 (issue #84): additional-input enable/mapping edits are a LIVE
+        // surface — they apply in place even while an output owns the encode
+        // geometry (a new mic channel joins the running mix; nothing about
+        // the encoder or the canvas changes). The exclusion re-check also
+        // covers a preferred-input change: the device the default mic
+        // channel now uses must never double-capture as its own channel.
+        if newSettings.audioInputs != previous.audioInputs
+            || newSettings.preferredAudioInputUID != previous.preferredAudioInputUID {
+            if isPipelineRunning {
+                audio.startAdditionalInputs(newSettings.audioInputs,
+                                            excludingDeviceUID: newSettings.preferredAudioInputUID)
+                syncAdditionalMicChannels()
+            }
+        }
         capturePool.applyPrivacyDefaults(newSettings)
     }
 
@@ -773,7 +808,58 @@ final class StreamController: ObservableObject {
                                                 ?? Float(max(0, min(settings.micVolume, 2))),
                                              isMuted: micMixerGain?.isMuted ?? false)
         }
+        // A05 (issue #84): the engine (re)start wiped every channel, so the
+        // additional mic channels all register fresh from settings.
+        additionalMicChannelIDs = []
+        syncAdditionalMicChannels()
         applyProgramAudioBindings()
+    }
+
+    /// A05 (issue #84): the additional (UID-pinned) mic channels the current
+    /// settings enable — excluding the device the DEFAULT mic channel
+    /// already captures (the legacy preferred input), which must never
+    /// double-capture as its own channel.
+    private func wantedAdditionalMicChannels() -> Set<AudioChannelID> {
+        Set(settings.audioInputs.compactMap { selection -> AudioChannelID? in
+            guard selection.isEnabled,
+                  selection.deviceUID != settings.preferredAudioInputUID else { return nil }
+            return .microphone(deviceUID: selection.deviceUID)
+        })
+    }
+
+    /// A05 (issue #84): diffs the enabled additional mic channels against
+    /// the engine registration and syncs it — newly enabled devices get a
+    /// channel with their OWN VoicePolish insert instance (per-channel
+    /// processing state; the A08 FX seam) and their mirrored mixer gain;
+    /// disabled/relinked-away channels are torn down. Channels that keep
+    /// running are untouched (no ring/FX reset on an unrelated edit).
+    private func syncAdditionalMicChannels() {
+        let wanted = wantedAdditionalMicChannels()
+        let added = wanted.subtracting(additionalMicChannelIDs)
+        let removed = additionalMicChannelIDs.subtracting(wanted)
+        guard !added.isEmpty || !removed.isEmpty else { return }
+        additionalMicChannelIDs = wanted
+        let audioEngine = self.audioEngine
+        let polishEnabled = settings.voicePolishEnabled
+        let gains = mixerGains
+        Task {
+            for id in removed {
+                await audioEngine.removeChannel(id)
+            }
+            for id in added {
+                if polishEnabled {
+                    let polish = VoicePolishInsertBox()
+                    await audioEngine.addChannel(id) { sample in
+                        polish.process(sample)
+                    }
+                } else {
+                    await audioEngine.addChannel(id)
+                }
+                await audioEngine.setChannelGain(id,
+                                                 volume: gains[id]?.volume ?? 1,
+                                                 isMuted: gains[id]?.isMuted ?? false)
+            }
+        }
     }
 
     /// Starts mic capture on the preferred input from settings, falling back
@@ -785,6 +871,11 @@ final class StreamController: ObservableObject {
         } else {
             audio.start()
         }
+        // A05 (issue #84): arm every enabled additional input device; the
+        // device the default mic channel uses is excluded so it never
+        // captures twice.
+        audio.startAdditionalInputs(settings.audioInputs,
+                                    excludingDeviceUID: settings.preferredAudioInputUID)
     }
 
     private func stopPipeline() {
@@ -862,6 +953,9 @@ final class StreamController: ObservableObject {
             }
             return .capture(key)
         }).union([.microphone(deviceUID: nil)])
+            // A05: enabled additional mic channels survive pruning too — a
+            // mic's capture lifetime is settings-driven, not scene demand.
+            .union(additionalMicChannelIDs)
         let audioEngine = self.audioEngine
         Task { await audioEngine.pruneChannels(keeping: keep) }
     }

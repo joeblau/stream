@@ -183,6 +183,13 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// channel faders/mutes, monitor-only solo set, aux sends, bus masters).
     /// Capture-channel levels are scene content (`AudioBinding`s), not here.
     public var mixer: MixerSettings
+    /// A05 (issue #84): additional audio input devices enabled as their own
+    /// mix channels (macOS studio), each with its hardware-channel mapping.
+    /// Back-compat: the legacy `preferredAudioInputUID` above still names THE
+    /// default microphone (the `.microphone(deviceUID: nil)` channel); this
+    /// list carries only ADDITIONAL devices, so a pre-A05 single-mic setup
+    /// decodes to an empty list and keeps working exactly as before.
+    public var audioInputs: [AudioInputSelection]
 
     public init(
         selectedProtocol: StreamProtocol = .rtmps,
@@ -211,7 +218,8 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         captureShowsCursor: Bool = true,
         captureIncludesAudio: Bool = true,
         captureExcludedBundleIDs: [String] = [],
-        mixer: MixerSettings = MixerSettings()
+        mixer: MixerSettings = MixerSettings(),
+        audioInputs: [AudioInputSelection] = []
     ) {
         self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
@@ -236,6 +244,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.captureIncludesAudio = captureIncludesAudio
         self.captureExcludedBundleIDs = captureExcludedBundleIDs
         self.mixer = mixer
+        self.audioInputs = audioInputs
     }
 
     /// Backward-compatible decode: every field falls back to its default when the
@@ -273,6 +282,10 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         // A04: settings blobs written before the mixer existed decode to the
         // default (all-unity, nothing soloed/muted) document.
         mixer = try c.decodeIfPresent(MixerSettings.self, forKey: .mixer) ?? d.mixer
+        // A05: blobs written before multi-mic existed decode to no additional
+        // inputs — the legacy `preferredAudioInputUID` default-mic behavior
+        // above is untouched, so that mic stays enabled exactly as before.
+        audioInputs = try c.decodeIfPresent([AudioInputSelection].self, forKey: .audioInputs) ?? d.audioInputs
     }
 
     public static let `default` = StreamSettings()

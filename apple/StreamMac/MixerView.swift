@@ -67,7 +67,10 @@ struct MixerPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task { await pollLevels() }
-        .onAppear { mergeExpectedCaptureChannels() }
+        .onAppear {
+            mergeExpectedCaptureChannels()
+            mergeExpectedMicChannels()
+        }
         .onChange(of: sceneStore.sources) { _, _ in mergeExpectedCaptureChannels() }
     }
 
@@ -78,7 +81,19 @@ struct MixerPanelView: View {
             let snapshot = await controller.mixerLevels()
             levels = snapshot
             mergeSeenChannels(snapshot.channels.keys)
+            mergeExpectedMicChannels()
             try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+    }
+
+    /// A05 (issue #84): enabled additional input devices get a strip even
+    /// before their first audio buffer lands — and keep it while unplugged
+    /// (inactive, with relink controls), so hot-plug never reshuffles the
+    /// board. Read from the audio input layer's armed selections.
+    private func mergeExpectedMicChannels() {
+        for selection in controller.audio.additionalInputs {
+            let id = AudioChannelID.microphone(deviceUID: selection.deviceUID)
+            if !channelOrder.contains(id) { channelOrder.append(id) }
         }
     }
 
@@ -109,16 +124,38 @@ struct MixerPanelView: View {
         let isSoloed = mixer.soloedChannels.contains(id.label)
         let auxOn = (mixer.channelAuxSends[id.label] ?? 0) > 0
         switch id {
-        case .microphone:
-            strip(title: "Microphone",
-                  meterLevels: meterLevels,
-                  volume: dispatcher.state.micVolume, range: 0...2,
-                  isMuted: mixer.channelMutes[id.label] ?? false,
-                  isSoloed: isSoloed, auxOn: auxOn, controlsEnabled: true,
-                  onVolume: { dispatcher.execute(.setChannelVolume(id, $0)) },
-                  onMute: { dispatcher.execute(.setChannelMuted(id, $0)) },
-                  onSolo: { dispatcher.execute(.setChannelSolo(id, $0)) },
-                  onAux: { dispatcher.execute(.setChannelAuxSend(id, $0 ? 1 : 0)) })
+        case .microphone(let uid):
+            if let uid {
+                // A05 (issue #84): an additional (UID-pinned) input device.
+                // Its fader reads the mixer document (micVolume is the
+                // DEFAULT mic's fader), and while the device is unplugged the
+                // strip shows honestly inactive with a relink control (C10:
+                // never silently substitute another input).
+                let missing = controller.audio.missingAdditionalDeviceUIDs.contains(uid)
+                VStack(spacing: 2) {
+                    strip(title: controller.audio.deviceNamesByUID[uid] ?? "Input",
+                          meterLevels: missing ? nil : meterLevels,
+                          volume: mixer.channelVolumes[id.label] ?? 1, range: 0...2,
+                          isMuted: mixer.channelMutes[id.label] ?? false,
+                          isSoloed: isSoloed, auxOn: auxOn,
+                          controlsEnabled: !missing,
+                          onVolume: { dispatcher.execute(.setChannelVolume(id, $0)) },
+                          onMute: { dispatcher.execute(.setChannelMuted(id, $0)) },
+                          onSolo: { dispatcher.execute(.setChannelSolo(id, $0)) },
+                          onAux: { dispatcher.execute(.setChannelAuxSend(id, $0 ? 1 : 0)) })
+                    if missing { relinkMenu(for: uid) }
+                }
+            } else {
+                strip(title: "Microphone",
+                      meterLevels: meterLevels,
+                      volume: dispatcher.state.micVolume, range: 0...2,
+                      isMuted: mixer.channelMutes[id.label] ?? false,
+                      isSoloed: isSoloed, auxOn: auxOn, controlsEnabled: true,
+                      onVolume: { dispatcher.execute(.setChannelVolume(id, $0)) },
+                      onMute: { dispatcher.execute(.setChannelMuted(id, $0)) },
+                      onSolo: { dispatcher.execute(.setChannelSolo(id, $0)) },
+                      onAux: { dispatcher.execute(.setChannelAuxSend(id, $0 ? 1 : 0)) })
+            }
         case .capture(let key):
             let binding = captureBinding(for: key)
             strip(title: name(for: id),
@@ -170,6 +207,31 @@ struct MixerPanelView: View {
             return (layer.id, layer.audio)
         }
         return nil
+    }
+
+    /// A05: the explicit relink path for an unplugged input device — pick a
+    /// currently-connected device; the input's enable/mapping carry over
+    /// (the same uniqueID returning would have resumed automatically).
+    private func relinkMenu(for uid: String) -> some View {
+        let candidates = controller.deviceMonitor.audioDevices.filter { device in
+            device.uniqueID != uid && !controller.audio.additionalInputs.contains {
+                $0.deviceUID == device.uniqueID && $0.isEnabled
+            }
+        }
+        return Menu("Relink…") {
+            if candidates.isEmpty {
+                Text("No other inputs connected")
+            } else {
+                ForEach(candidates, id: \.uniqueID) { device in
+                    Button(device.localizedName) {
+                        dispatcher.execute(.relinkAudioInput(from: uid, to: device.uniqueID))
+                    }
+                }
+            }
+        }
+        .font(.caption2)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     // MARK: - Bus (master) strips
@@ -269,7 +331,9 @@ struct MixerPanelView: View {
 
     private func name(for id: AudioChannelID) -> String {
         switch id {
-        case .microphone: return "Microphone"
+        case .microphone(let uid):
+            guard let uid else { return "Microphone" }
+            return controller.audio.deviceNamesByUID[uid] ?? "Microphone"
         case .capture(let key):
             if case .screen(let screen) = key,
                let source = sceneStore.sources.first(where: { $0.payload == .screen(screen) }) {
