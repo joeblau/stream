@@ -14,8 +14,8 @@ import StreamCore
 /// Edits mutate only the draft. `apply()` validates, persists, and applies in
 /// one step; `revert()` — or simply closing the area — leaves the active
 /// state untouched. Presentation (`isPresented`) also lives here, so the menu
-/// command (⌘,), the toolbar toggle, and a future W05 command layer share one
-/// entry point, and W06 first-run can present the same session.
+/// command (⌘,), the toolbar toggle, the W05 command layer, and W06 first-run
+/// share one entry point.
 @MainActor
 final class SettingsSession: ObservableObject {
     /// What the app is actually using. Updated only by `apply()`.

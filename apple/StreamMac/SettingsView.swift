@@ -20,6 +20,8 @@ struct SettingsView: View {
     @ObservedObject var session: SettingsSession
     @EnvironmentObject private var controller: StreamController
     @EnvironmentObject private var permissions: PermissionsManager
+    /// Apply/Revert route through the W05 command layer like every studio action.
+    @EnvironmentObject private var dispatcher: StudioCommandDispatcher
 
     /// Shared Restream chat controller (owned by the shell) so credentials
     /// entered here light up the chat sidebar.
@@ -135,10 +137,10 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Revert") { session.revert() }
+            Button("Revert") { dispatcher.execute(.revertSettings) }
                 .disabled(!session.isDirty)
                 .help("Discard every unapplied edit")
-            Button("Apply") { session.apply() }
+            Button("Apply") { dispatcher.execute(.applySettings) }
                 .disabled(!session.canApply)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)

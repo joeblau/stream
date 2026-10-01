@@ -7,7 +7,7 @@ import Foundation
 /// for recording — never optimistic UI flags.
 
 /// Lifecycle of the publishing (Go Live) output.
-enum StreamSessionState: Equatable {
+enum StreamSessionState: Equatable, Sendable {
     /// No session; the Go Live button is armed.
     case idle
     /// A connect/publish attempt is in flight and not yet acknowledged.
@@ -45,7 +45,7 @@ enum StreamSessionState: Equatable {
 }
 
 /// Lifecycle of the local recording output.
-enum RecordingSessionState: Equatable {
+enum RecordingSessionState: Equatable, Sendable {
     case idle
     /// The writer is open and receiving composited frames.
     case recording
@@ -68,7 +68,7 @@ enum RecordingSessionState: Equatable {
 /// Lifecycle of the on-screen presentation (preview) output. Independent from
 /// streaming/recording: stopping preview never ends an active output, and an
 /// active output keeps the render pipeline alive with the preview off.
-enum PreviewSessionState: Equatable {
+enum PreviewSessionState: Equatable, Sendable {
     case idle
     case active
 }

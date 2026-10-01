@@ -28,7 +28,11 @@ struct MainWindowView: View {
     @EnvironmentObject private var controller: StreamController
     @EnvironmentObject private var session: SettingsSession
     @EnvironmentObject private var permissions: PermissionsManager
-    @StateObject private var recorder = RecordingController()
+    /// The app's recording output (owned by the app shell since W05).
+    @EnvironmentObject private var recorder: RecordingController
+    /// The W05 command layer: every studio action below routes through this
+    /// dispatcher instead of calling the controllers/stores directly.
+    @EnvironmentObject private var dispatcher: StudioCommandDispatcher
     /// Shared Restream chat connection: the sidebar shows it and the settings
     /// pane edits its credentials (W04 — one instance, one sign-in).
     @State private var chat = RestreamChat()
@@ -107,7 +111,7 @@ struct MainWindowView: View {
             // ⌘1…⌘9 jump straight to a scene from anywhere in the window; the
             // hidden buttons only carry the shortcuts.
             ForEach(1...9, id: \.self) { number in
-                Button("") { sceneStore.select(number: number) }
+                Button("") { dispatcher.execute(.selectSceneAt(number)) }
                     .keyboardShortcut(KeyEquivalent(Character("\(number)")),
                                       modifiers: .command)
                     .hidden()
@@ -118,17 +122,17 @@ struct MainWindowView: View {
             // asks in-window instead of silently tearing the outputs down.
             WindowCloseGuard(
                 hasActiveOutputs: {
-                    controller.streamState.isActive || recorder.state.isActive
+                    dispatcher.state.stream.isActive || dispatcher.state.recording.isActive
                 },
                 stopAllOutputs: {
-                    controller.stopStream()
-                    recorder.stop()
+                    dispatcher.execute(.stopStream)
+                    dispatcher.execute(.stopRecording)
                 },
-                stopPreview: { controller.stopPreview() })
+                stopPreview: { dispatcher.execute(.stopPreview) })
         }
         .toolbar { panelToggles }
         .onAppear {
-            controller.startPreview()
+            dispatcher.execute(.startPreview)
             // Restore a settings pane left open last launch.
             session.isPresented = showSettingsPanel
             permissions.refresh()
@@ -174,7 +178,7 @@ struct MainWindowView: View {
             TextField("Scene name", text: $draftName)
             Button("Rename") {
                 if let scene = renamingScene {
-                    sceneStore.rename(scene.id, to: draftName)
+                    dispatcher.execute(.renameScene(scene.id, to: draftName))
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -219,7 +223,10 @@ struct MainWindowView: View {
             .toggleStyle(.button)
             .help("Show or hide the inspector panel")
 
-            Toggle(isOn: $session.isPresented) {
+            Toggle(isOn: Binding(
+                get: { session.isPresented },
+                set: { dispatcher.execute($0 ? .openSettings(nil) : .closeSettings) }
+            )) {
                 Label("Settings", systemImage: "gear")
             }
             .toggleStyle(.button)
@@ -232,7 +239,7 @@ struct MainWindowView: View {
     private var settingsPane: some View {
         SettingsView(session: session,
                      chat: chat,
-                     onClose: { session.isPresented = false },
+                     onClose: { dispatcher.execute(.closeSettings) },
                      onResetLayout: resetPanelLayout)
     }
 
@@ -271,7 +278,7 @@ struct MainWindowView: View {
     private var sceneSelection: Binding<Scene.ID?> {
         Binding(
             get: { sceneStore.selectedID },
-            set: { if let id = $0 { sceneStore.selectedID = id } })
+            set: { if let id = $0 { dispatcher.execute(.selectScene(id)) } })
     }
 
     private var scenesPanel: some View {
@@ -292,7 +299,7 @@ struct MainWindowView: View {
                                 renamingScene = scene
                             }
                             Button("Delete", role: .destructive) {
-                                sceneStore.delete(scene.id)
+                                dispatcher.execute(.deleteScene(scene.id))
                             }
                             .disabled(sceneStore.scenes.count <= 1)
                         }
@@ -301,7 +308,7 @@ struct MainWindowView: View {
 
             Divider()
             Button {
-                sceneStore.addScene()
+                dispatcher.execute(.addScene)
             } label: {
                 Label("Add Scene", systemImage: "plus")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -333,10 +340,22 @@ struct MainWindowView: View {
     // MARK: - Diagnostics strip
 
     /// Live uplink health + recording status (W02 session states); this strip
-    /// never opens a separate window.
+    /// never opens a separate window. Rejected W05 commands surface here
+    /// transiently (the dispatcher auto-clears the notice after a few
+    /// seconds) — visible but never modal.
     private var diagnosticsStrip: some View {
         HStack(spacing: 16) {
             StatsHUDView(stream: controller)
+
+            if let rejection = dispatcher.lastRejection {
+                Label("\(rejection.command): \(rejection.message)",
+                      systemImage: "exclamationmark.octagon.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .id(rejection.sequence)
+                    .transition(.opacity)
+            }
 
             Spacer()
 
@@ -444,7 +463,7 @@ struct MainWindowView: View {
             set: { newLayout in
                 var updated = scene
                 updated.layout = newLayout
-                sceneStore.update(updated)
+                dispatcher.execute(.updateScene(updated))
             })
     }
 
@@ -454,7 +473,7 @@ struct MainWindowView: View {
             set: { corner in
                 var updated = scene
                 updated.pipCorner = corner
-                sceneStore.update(updated)
+                dispatcher.execute(.updateScene(updated))
             })
     }
 
@@ -464,35 +483,35 @@ struct MainWindowView: View {
             set: { scale in
                 var updated = scene
                 updated.pipScale = scale
-                sceneStore.update(updated)
+                dispatcher.execute(.updateScene(updated))
             })
     }
 
     // MARK: - Transport bar
 
+    /// Every button routes through the W05 dispatcher and every label reads
+    /// the published `StudioState` — this bar is the reference subscriber.
     private var transportBar: some View {
         HStack(spacing: 16) {
             Button {
-                recorder.toggle(stream: controller)
+                dispatcher.execute(dispatcher.state.recording.isRecording
+                                   ? .stopRecording : .startRecording)
             } label: {
-                Label(recorder.state.isRecording ? "Stop Recording"
-                      : recorder.state == .stopping ? "Stopping…" : "Record",
-                      systemImage: recorder.state.isRecording ? "stop.circle.fill" : "record.circle")
+                Label(dispatcher.state.recording.isRecording ? "Stop Recording"
+                      : dispatcher.state.recording == .stopping ? "Stopping…" : "Record",
+                      systemImage: dispatcher.state.recording.isRecording ? "stop.circle.fill" : "record.circle")
             }
-            .tint(recorder.state.isRecording ? .red : nil)
-            .disabled(recorder.state == .stopping)
+            .tint(dispatcher.state.recording.isRecording ? .red : nil)
+            .disabled(dispatcher.state.recording == .stopping)
 
             Button {
-                if controller.isPreviewing {
-                    controller.stopPreview()
-                } else {
-                    controller.startPreview()
-                }
+                dispatcher.execute(dispatcher.state.preview == .active
+                                   ? .stopPreview : .startPreview)
             } label: {
-                Label(controller.isPreviewing ? "Stop Preview" : "Preview",
-                      systemImage: controller.isPreviewing ? "eye.slash" : "eye")
+                Label(dispatcher.state.preview == .active ? "Stop Preview" : "Preview",
+                      systemImage: dispatcher.state.preview == .active ? "eye.slash" : "eye")
             }
-            .help(controller.isPreviewing
+            .help(dispatcher.state.preview == .active
                   ? "Stop the on-screen preview (an active stream or recording keeps running)"
                   : "Start the on-screen preview")
 
@@ -504,14 +523,14 @@ struct MainWindowView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .animation(.default, value: controller.streamState)
+        .animation(.default, value: dispatcher.state.stream)
     }
 
     /// The streaming session status: LIVE only on an acknowledged publish;
     /// connecting / reconnecting / stopping / failed are each distinct (W02).
     @ViewBuilder
     private var streamStatusBadge: some View {
-        switch controller.streamState {
+        switch dispatcher.state.stream {
         case .idle:
             EmptyView()
         case .live:
@@ -546,24 +565,24 @@ struct MainWindowView: View {
     @ViewBuilder
     private var goLiveButton: some View {
         Group {
-            switch controller.streamState {
+            switch dispatcher.state.stream {
             case .idle, .failed:
                 Button {
-                    controller.goLive()
+                    dispatcher.execute(.startStream)
                 } label: {
-                    Text(controller.streamState == .idle ? "Go Live" : "Retry Go Live")
+                    Text(dispatcher.state.stream == .idle ? "Go Live" : "Retry Go Live")
                 }
                 .tint(.green)
             case .connecting:
                 Button {
-                    controller.stopStream()
+                    dispatcher.execute(.stopStream)
                 } label: {
                     Text("Cancel")
                 }
                 .tint(.orange)
             case .live, .reconnecting:
                 Button {
-                    controller.stopStream()
+                    dispatcher.execute(.stopStream)
                 } label: {
                     Text("End Stream")
                 }

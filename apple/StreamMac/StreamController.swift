@@ -509,6 +509,14 @@ final class StreamController: ObservableObject {
         }
     }
 
+    /// W05 Take (issue #68): publishes a scene to the program path. Today the
+    /// engine always composites the selected scene, so Take lands the staged
+    /// selection on that same path; W03's full preview/program model will give
+    /// program its own scene — this entry point is where the two diverge.
+    func publishSceneToProgram(_ scene: Scene) {
+        Task { await engine.updateScene(scene) }
+    }
+
     /// Hands the engine the current scene graph. Called on every scene edit /
     /// selection change and at pipeline start; the engine composites whatever
     /// graph it holds at each tick, so edits apply on the very next frame.

@@ -17,9 +17,9 @@ import SwiftUI
 /// source is next used — see `JustInTimePermissionSheet`).
 struct OnboardingView: View {
     @EnvironmentObject private var permissions: PermissionsManager
-    @EnvironmentObject private var sceneStore: SceneStore
-    @EnvironmentObject private var controller: StreamController
-    @EnvironmentObject private var session: SettingsSession
+    /// Studio actions (recording, scene creation, preview, settings) route
+    /// through the W05 command layer like the rest of the shell.
+    @EnvironmentObject private var dispatcher: StudioCommandDispatcher
     /// The shell's recorder, so the guided test recording uses the same
     /// pipeline state as the transport bar.
     @ObservedObject var recorder: RecordingController
@@ -129,7 +129,8 @@ struct OnboardingView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    recorder.toggle(stream: controller)
+                    dispatcher.execute(recorder.state.isRecording
+                                       ? .stopRecording : .startRecording)
                 } label: {
                     Label(recorder.state.isRecording ? "Stop Recording" : "Start Recording",
                           systemImage: recorder.state.isRecording ? "stop.circle.fill" : "record.circle")
@@ -171,7 +172,7 @@ struct OnboardingView: View {
             HStack(spacing: 12) {
                 Button("Set Up Destination…") {
                     onFinish()
-                    session.showSettings(section: .connection)
+                    dispatcher.execute(.openSettings(.connection))
                 }
                 .buttonStyle(.borderedProminent)
                 Button("Skip for Now", action: onFinish)
@@ -241,9 +242,9 @@ struct OnboardingView: View {
             // states are visible the moment permissions are fixed.
             scene = .screenPlusCam(name: "Sample: Screen + Cam")
         }
-        sceneStore.addScene(scene)
+        dispatcher.execute(.insertScene(scene))
         sampleSceneName = scene.name
-        controller.startPreview()
+        dispatcher.execute(.startPreview)
     }
 }
 
