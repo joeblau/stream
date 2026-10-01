@@ -115,12 +115,15 @@ final class SceneRenderer {
     /// and the project overlays onto a pooled canvas-sized buffer, then wraps
     /// it in a `CMSampleBuffer` timed on the engine's shared clock. `scenes`
     /// is the live scene-registry snapshot S06 nested-scene references
-    /// resolve against.
+    /// resolve against. `frames` is the C01 per-source read path: each
+    /// camera/screen layer resolves its capture identity (registry payload
+    /// winning over inline, via `sourcePayloads`) and pulls THAT source's
+    /// latest frame, so two camera layers paint two different cameras.
     func render(scene: Scene,
                 overlayContext: OverlayContext,
                 canvasSize: CGSize,
-                screen: CVPixelBuffer?,
-                camera: LatestCameraFrame.Frame?,
+                frames: SourceFrameLookup,
+                sourcePayloads: [SourceDefinitionID: LayerPayload],
                 scenes: [SceneID: Scene],
                 presentationTime: CMTime,
                 frameDuration: CMTime,
@@ -134,7 +137,7 @@ final class SceneRenderer {
         var output = backgroundImage(overlayContext.background(for: scene), canvas: canvas)
         for layer in scene.layers where layer.isVisible {
             guard let layerImage = image(for: layer, canvas: canvas,
-                                         screen: screen, camera: camera,
+                                         frames: frames, sourcePayloads: sourcePayloads,
                                          scenes: scenes, depth: 0, visited: [scene.id]) else {
                 continue    // documented fallback: missing source → background shows through
             }
@@ -142,7 +145,7 @@ final class SceneRenderer {
         }
         for overlay in overlayContext.overlays(for: scene) {
             guard let overlayImage = image(for: overlay, canvas: canvas,
-                                           screen: screen, camera: camera,
+                                           frames: frames, sourcePayloads: sourcePayloads,
                                            scenes: scenes, depth: 0, visited: [scene.id]) else {
                 continue    // same fallback as scene layers
             }
@@ -181,18 +184,20 @@ final class SceneRenderer {
     /// reference hops deep this layer sits, and the scene IDs on its path.
     private func image(for layer: LayerNode,
                        canvas: CGRect,
-                       screen: CVPixelBuffer?,
-                       camera: LatestCameraFrame.Frame?,
+                       frames: SourceFrameLookup,
+                       sourcePayloads: [SourceDefinitionID: LayerPayload],
                        scenes: [SceneID: Scene],
                        depth: Int,
                        visited: Set<SceneID>) -> CIImage? {
         switch layer.payload {
         case .screen:
-            guard let screen else { return nil }
+            guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
+                  let screen = frames.screen(key) else { return nil }
             return place(source: CIImage(cvPixelBuffer: screen),
                          layer: layer, canvas: canvas, isCamera: false)
         case .camera:
-            guard let camera else { return nil }
+            guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
+                  let camera = frames.camera(key) else { return nil }
             // Mirror like the legacy path: every macOS camera is `.front`.
             let orientation: CGImagePropertyOrientation =
                 camera.position == .front ? .upMirrored : .up
@@ -202,13 +207,27 @@ final class SceneRenderer {
             return placeGenerated(payload: layer.payload, layer: layer, canvas: canvas)
         case .scene(let reference):
             return placeNested(reference: reference, layer: layer, canvas: canvas,
-                               screen: screen, camera: camera,
+                               frames: frames, sourcePayloads: sourcePayloads,
                                scenes: scenes, depth: depth, visited: visited)
         default:
             // Payload kinds without a renderer yet (image, media, pdf, web,
             // guest): documented fallback is the background showing through;
             // later waves add renderers behind this switch.
             return nil
+        }
+    }
+
+    /// C01 (issue #76): the layer's capture identity — the registry source's
+    /// payload when bound (the registry is the identity authority), else the
+    /// inline payload. This is the SAME resolution the capture pool's demand
+    /// uses, so the key always names the capture the pool actually runs.
+    private func captureKey(for layer: LayerNode,
+                            sourcePayloads: [SourceDefinitionID: LayerPayload]) -> CaptureSourceKey? {
+        let payload = layer.sourceID.flatMap { sourcePayloads[$0] } ?? layer.payload
+        switch payload {
+        case .camera(let camera): return .camera(camera)
+        case .screen(let screen): return .screen(screen)
+        default: return nil
         }
     }
 
@@ -388,8 +407,8 @@ final class SceneRenderer {
     private func placeNested(reference: SceneReferencePayload,
                              layer: LayerNode,
                              canvas: CGRect,
-                             screen: CVPixelBuffer?,
-                             camera: LatestCameraFrame.Frame?,
+                             frames: SourceFrameLookup,
+                             sourcePayloads: [SourceDefinitionID: LayerPayload],
                              scenes: [SceneID: Scene],
                              depth: Int,
                              visited: Set<SceneID>) -> CIImage? {
@@ -410,12 +429,12 @@ final class SceneRenderer {
                                    width: pixelWidth, height: pixelHeight)
             content = cachedNested(key: key) {
                 nestedContent(nested, pixelWidth: pixelWidth, pixelHeight: pixelHeight,
-                              screen: screen, camera: camera,
+                              frames: frames, sourcePayloads: sourcePayloads,
                               scenes: scenes, depth: depth + 1, visited: path)
             }
         } else {
             content = nestedContent(nested, pixelWidth: pixelWidth, pixelHeight: pixelHeight,
-                                    screen: screen, camera: camera,
+                                    frames: frames, sourcePayloads: sourcePayloads,
                                     scenes: scenes, depth: depth + 1, visited: path)
         }
         guard let image = content else { return nil }
@@ -431,8 +450,8 @@ final class SceneRenderer {
     private func nestedContent(_ scene: Scene,
                                pixelWidth: Int,
                                pixelHeight: Int,
-                               screen: CVPixelBuffer?,
-                               camera: LatestCameraFrame.Frame?,
+                               frames: SourceFrameLookup,
+                               sourcePayloads: [SourceDefinitionID: LayerPayload],
                                scenes: [SceneID: Scene],
                                depth: Int,
                                visited: Set<SceneID>) -> CIImage? {
@@ -440,7 +459,7 @@ final class SceneRenderer {
         var output = scene.background.map { backgroundImage($0, canvas: canvas) }
         for layer in scene.layers where layer.isVisible {
             guard let layerImage = image(for: layer, canvas: canvas,
-                                         screen: screen, camera: camera,
+                                         frames: frames, sourcePayloads: sourcePayloads,
                                          scenes: scenes, depth: depth, visited: visited) else {
                 continue    // same documented fallback as top-level layers
             }

@@ -817,6 +817,9 @@ final class SceneStore: ObservableObject {
         // edits persist through the store, this is exactly the Take-policy
         // propagation of shared child-scene edits to every nesting site.
         SceneRegistryStore.shared.publish(scenes)
+        // C01 (issue #76): the source payload index the engines resolve a
+        // bound layer's capture identity against (per-source frame routing).
+        SourcePayloadStore.shared.publish(sources)
         sceneAutosaveTask?.cancel()
         sceneAutosaveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.autosaveDelay * 1_000_000_000))

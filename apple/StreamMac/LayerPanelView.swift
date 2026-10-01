@@ -477,8 +477,21 @@ struct LayerPanelView: View {
     private var bottomBar: some View {
         HStack(spacing: 12) {
             Menu {
-                Button("Camera") {
-                    dispatcher.execute(.addLayer(.camera(CameraSourcePayload()), in: nil))
+                // C01 (issue #76): a camera layer binds an existing registry
+                // source (each captures independently through the pool), or
+                // the plain system-default camera — the pre-C01 behavior.
+                Menu("Camera") {
+                    ForEach(sceneStore.sources.filter { $0.payload.isCamera }) { source in
+                        Button(source.name) {
+                            addCameraLayer(boundTo: source)
+                        }
+                    }
+                    if sceneStore.sources.contains(where: { $0.payload.isCamera }) {
+                        Divider()
+                    }
+                    Button("Camera (System Default)") {
+                        dispatcher.execute(.addLayer(.camera(CameraSourcePayload()), in: nil))
+                    }
                 }
                 // C02 (issue #77): a screen layer binds an existing registry
                 // source (each captures independently), or creates a new one
@@ -559,6 +572,25 @@ struct LayerPanelView: View {
             .web(WebSourcePayload()),
             .guest(GuestSourcePayload()),
         ]
+    }
+
+    // MARK: - Source-bound camera layers (C01, issue #76)
+
+    /// Adds a camera layer bound to `source` at the front of the staged
+    /// scene — fullscreen when the scene has no camera yet, a PIP when one
+    /// is already placed (so the new camera never covers it). Routes through
+    /// `.updateScene` (the dispatcher's lock and undo path) rather than
+    /// `.addLayer`, which would auto-bind the FIRST registered camera source
+    /// — wrong once several camera sources coexist.
+    private func addCameraLayer(boundTo source: SourceDefinition) {
+        guard var scene = previewProgram.stagedScene else { return }
+        var layer = scene.layers.contains(where: { $0.payload.isCamera })
+            ? LayerNode.cameraPIP(corner: .bottomRight, scale: 0.28, sourceID: source.id)
+            : LayerNode.fullscreenCamera(sourceID: source.id)
+        layer.name = source.name
+        layer.payload = source.payload
+        scene.layers.append(layer)
+        dispatcher.execute(.updateScene(scene))
     }
 
     // MARK: - Source-bound screen layers (C02, issue #77)

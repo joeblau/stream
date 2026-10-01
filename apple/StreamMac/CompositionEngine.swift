@@ -53,6 +53,34 @@ final class ProjectOverlayStore: @unchecked Sendable {
     }
 }
 
+/// The process-wide hand-off of the source registry's payload index (C01,
+/// issue #76) from `SceneStore` (main actor, publishes on every mutation) to
+/// every `CompositionEngine` (its own actor, snapshots each tick). The
+/// renderer resolves a bound layer's `sourceID` through this index to the
+/// DEFINITION's payload — the registry is the identity authority, exactly as
+/// the capture pool's demand resolution reads it — so the layer's frame comes
+/// from the source its registry binding names. Lock-protected value
+/// snapshots, so a mid-tick publish can never tear a frame.
+final class SourcePayloadStore: @unchecked Sendable {
+    static let shared = SourcePayloadStore()
+
+    private var lock = os_unfair_lock_s()
+    private var payloads: [SourceDefinitionID: LayerPayload] = [:]
+
+    func publish(_ sources: [SourceDefinition]) {
+        let index = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0.payload) })
+        os_unfair_lock_lock(&lock)
+        self.payloads = index
+        os_unfair_lock_unlock(&lock)
+    }
+
+    func snapshot() -> [SourceDefinitionID: LayerPayload] {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return payloads
+    }
+}
+
 /// The process-wide hand-off of the scene registry (S06, issue #96) from
 /// `SceneStore` (main actor, publishes on every mutation) to every
 /// `CompositionEngine` (its own actor, snapshots each tick). S06 nested-scene
@@ -119,6 +147,17 @@ actor CompositionEngine {
     private let renderer = SceneRenderer()
     private let screenProvider: @Sendable () -> CVPixelBuffer?
     private let cameraProvider: @Sendable () -> LatestCameraFrame.Frame?
+    /// C01 (issue #76): the per-source frame read path the renderer routes
+    /// each camera/screen layer through. Defaults to the shared pool's keyed
+    /// providers (with the injected legacy providers as the unknown-key
+    /// fallback), so existing call sites need no new argument and the
+    /// single-source behavior stays bit-identical.
+    private let frameLookup: SourceFrameLookup
+    /// C01: where the engine snapshots the source registry's payload index
+    /// each tick — the lookup a bound layer's `sourceID` resolves to its
+    /// capture identity through. Defaults to the shared `SourcePayloadStore`
+    /// (fed by `SceneStore`).
+    private let sourcePayloadProvider: @Sendable () -> [SourceDefinitionID: LayerPayload]
     /// S07: where the engine reads the project-level overlay/background
     /// context each tick. Defaults to the shared `ProjectOverlayStore` (fed
     /// by `SceneStore`), so existing call sites need no new argument; tests
@@ -144,6 +183,9 @@ actor CompositionEngine {
 
     init(screenProvider: @escaping @Sendable () -> CVPixelBuffer?,
          cameraProvider: @escaping @Sendable () -> LatestCameraFrame.Frame?,
+         frameLookup: SourceFrameLookup? = nil,
+         sourcePayloadProvider: @escaping @Sendable () -> [SourceDefinitionID: LayerPayload] =
+            { SourcePayloadStore.shared.snapshot() },
          overlayContextProvider: @escaping @Sendable () -> OverlayContext =
             { ProjectOverlayStore.shared.snapshot() },
          sceneRegistryProvider: @escaping @Sendable () -> [SceneID: Scene] =
@@ -152,6 +194,20 @@ actor CompositionEngine {
          frameRate: Int = OutputProfile.default.frameRate) {
         self.screenProvider = screenProvider
         self.cameraProvider = cameraProvider
+        self.frameLookup = frameLookup ?? SourceFrameLookup(
+            camera: { key in
+                let frames = SourceFrameProviders.shared
+                return frames.hasCameraSource(for: key)
+                    ? frames.cameraFrame(for: key)
+                    : cameraProvider()
+            },
+            screen: { key in
+                let frames = SourceFrameProviders.shared
+                return frames.hasScreenSource(for: key)
+                    ? frames.screenFrame(for: key)
+                    : screenProvider()
+            })
+        self.sourcePayloadProvider = sourcePayloadProvider
         self.overlayContextProvider = overlayContextProvider
         self.sceneRegistryProvider = sceneRegistryProvider
         self.canvasSize = canvasSize
@@ -246,8 +302,8 @@ actor CompositionEngine {
         guard let frame = renderer.render(scene: scene,
                                           overlayContext: overlayContextProvider(),
                                           canvasSize: canvasSize,
-                                          screen: screenProvider(),
-                                          camera: cameraProvider(),
+                                          frames: frameLookup,
+                                          sourcePayloads: sourcePayloadProvider(),
                                           scenes: sceneRegistryProvider(),
                                           presentationTime: pts,
                                           frameDuration: duration,

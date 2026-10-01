@@ -75,15 +75,43 @@ extension CaptureSourceKey {
 /// here exactly as they pulled the single W03 holders; the pool (main actor)
 /// replaces the holder arrays whenever a capture instance is created. Stopped
 /// captures clear their holder, so a holder list never serves stale pixels.
+///
+/// C01 (issue #76): alongside the default-source-first arrays (the legacy
+/// single-frame read path), the holders are also published KEYED by source
+/// identity, so `SceneRenderer` can paint each camera/screen layer from the
+/// source its (registry or inline) payload names — two camera layers in one
+/// scene show two different cameras. The keyed read falls back to the
+/// default-first frame only when the pool has NO capture for the key (e.g.
+/// the key names the default device by unique ID, which the pool normalizes
+/// onto the default capture); a key the pool DOES hold never substitutes —
+/// its stalled frame ages out to the documented paint-nothing fallback.
 final class SourceFrameProviders: @unchecked Sendable {
+    /// The process-wide live providers. The pool (a StreamController
+    /// singleton, like the engines' other process-wide stores —
+    /// `ProjectOverlayStore` / `SceneRegistryStore`) publishes here, so the
+    /// engines' per-source read path needs no extra wiring at the call site.
+    static let shared = SourceFrameProviders()
+
     private var lock = os_unfair_lock_s()
     private var screenHolders: [LatestScreenFrame] = []
     private var cameraHolders: [LatestCameraFrame] = []
+    private var screenHoldersByKey: [CaptureSourceKey: LatestScreenFrame] = [:]
+    private var cameraHoldersByKey: [CaptureSourceKey: LatestCameraFrame] = [:]
 
     func update(screenHolders: [LatestScreenFrame], cameraHolders: [LatestCameraFrame]) {
         os_unfair_lock_lock(&lock)
         self.screenHolders = screenHolders
         self.cameraHolders = cameraHolders
+        os_unfair_lock_unlock(&lock)
+    }
+
+    /// C01: the keyed holder set, published with (never instead of) the
+    /// ordered arrays above.
+    func updateKeyed(screenHolders: [CaptureSourceKey: LatestScreenFrame],
+                     cameraHolders: [CaptureSourceKey: LatestCameraFrame]) {
+        os_unfair_lock_lock(&lock)
+        self.screenHoldersByKey = screenHolders
+        self.cameraHoldersByKey = cameraHolders
         os_unfair_lock_unlock(&lock)
     }
 
@@ -110,6 +138,54 @@ final class SourceFrameProviders: @unchecked Sendable {
         }
         return nil
     }
+
+    // MARK: - Per-source routing (C01, issue #76)
+
+    /// True when the pool holds a capture for this exact key — the renderer
+    /// checks this before the keyed read so an unknown key (never demanded,
+    /// or normalized onto the default capture) falls back to the legacy
+    /// default-first frame, while a known key NEVER substitutes another
+    /// source's pixels.
+    func hasCameraSource(for key: CaptureSourceKey) -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return cameraHoldersByKey[key] != nil
+    }
+
+    func hasScreenSource(for key: CaptureSourceKey) -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return screenHoldersByKey[key] != nil
+    }
+
+    /// The freshest frame from the capture for exactly this key (nil while
+    /// its frames age out — the documented paint-nothing fallback). Call
+    /// only when `hasCameraSource(for:)` is true.
+    func cameraFrame(for key: CaptureSourceKey) -> LatestCameraFrame.Frame? {
+        os_unfair_lock_lock(&lock)
+        let holder = cameraHoldersByKey[key]
+        os_unfair_lock_unlock(&lock)
+        return holder?.freshest()
+    }
+
+    /// The latest frame from the screen capture for exactly this key.
+    func screenFrame(for key: CaptureSourceKey) -> CVPixelBuffer? {
+        os_unfair_lock_lock(&lock)
+        let holder = screenHoldersByKey[key]
+        os_unfair_lock_unlock(&lock)
+        return holder?.latest()
+    }
+}
+
+/// C01 (issue #76): the per-source frame read path `SceneRenderer` composites
+/// through. Each closure resolves a layer's capture identity
+/// (`CaptureSourceKey`, derived from its registry or inline payload) to THAT
+/// source's latest frame, with the documented fallbacks: an unknown key reads
+/// the default-source-first frame (legacy single-source behavior), a known
+/// key with no fresh pixels paints nothing (never a substitute source).
+struct SourceFrameLookup: Sendable {
+    let camera: @Sendable (CaptureSourceKey) -> LatestCameraFrame.Frame?
+    let screen: @Sendable (CaptureSourceKey) -> CVPixelBuffer?
 }
 
 /// Holds the newest screen frame for one screen capture. Unlike the pre-W08
@@ -183,7 +259,9 @@ final class CaptureSourcePool: ObservableObject {
     @Published private(set) var missingSources: Set<CaptureSourceKey> = []
 
     /// The engines' off-main frame read path (see `SourceFrameProviders`).
-    let frames = SourceFrameProviders()
+    /// Shared process-wide (`SourceFrameProviders.shared`) so the engines'
+    /// per-source routing needs no controller rewiring.
+    let frames = SourceFrameProviders.shared
     /// App/mic audio from every screen capture; the controller routes this to
     /// the publisher's ordered ingress.
     var onScreenAudioSample: (@Sendable (CMSampleBuffer) -> Void)?
@@ -343,7 +421,9 @@ final class CaptureSourcePool: ObservableObject {
     }
 
     /// Hands the engines the live holder set, default (unpinned) sources
-    /// first so the single-path providers prefer the primary capture.
+    /// first so the single-path providers prefer the primary capture. C01:
+    /// the same holders are ALSO published keyed by source identity, so the
+    /// renderer routes each camera/screen layer to its own source's frames.
     private func publishFrameHolders() {
         let orderedScreens = screens.keys.sorted {
             ($0.isDefaultSource ? 0 : 1) < ($1.isDefaultSource ? 0 : 1)
@@ -354,6 +434,9 @@ final class CaptureSourcePool: ObservableObject {
         frames.update(
             screenHolders: orderedScreens.compactMap { screenFrames[$0] },
             cameraHolders: orderedCameras.compactMap { cameras[$0]?.latest })
+        frames.updateKeyed(
+            screenHolders: screenFrames,
+            cameraHolders: cameras.mapValues(\.latest))
     }
 
     // MARK: - Device hot-plug and permission recovery (C10, issue #79)
