@@ -81,7 +81,7 @@ public enum ChromaKeyTransform {
         let length = sqrt(keyChroma.x*keyChroma.x + keyChroma.y*keyChroma.y)
         // Desaturate key-aligned spill close to edges, retaining luminance.
         let alignment = length > 0.001 ? max(0,(chroma(rgb).x*keyChroma.x + chroma(rgb).y*keyChroma.y)/(length*length)) : 0
-        let strength = settings.spill * (1-matte) * min(1,alignment)
+        let strength = settings.spill * min(1,alignment)
         let luma = 0.299*rgb.x + 0.587*rgb.y + 0.114*rgb.z
         let cleaned = rgb * (1-strength) + SIMD3(repeating: luma) * strength
         let a = alpha * matte
