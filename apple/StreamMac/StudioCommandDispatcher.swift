@@ -265,6 +265,15 @@ enum StudioCommand: Equatable, Sendable {
     /// default honestly and re-applies when the device returns (C10 rules).
     case setMonitorOutputDevice(uid: String?)
 
+    // A09 echo handling (issue #121): the echo handling mode for mic capture
+    // (off / macOS Voice Isolation preference). Live session state persisted
+    // in StreamSettings via SettingsSession — NOT scene content, NOT
+    // undoable, and never staged (the A07 monitoring precedent). Feedback
+    // detection itself needs no command: it runs from the engine taps and
+    // surfaces through StudioState; the REPAIRS ride the existing mixer /
+    // monitoring / input commands above.
+    case setEchoHandlingMode(EchoHandlingMode)
+
     // A03 soundboard + music playlists (issue #98): pads and playlists are a
     // project-level performance surface persisted in the soundboard document
     // (SoundboardStore — the mixer-document precedent), NOT scene content:
@@ -407,6 +416,8 @@ enum StudioCommand: Equatable, Sendable {
         case .setMonitoringEnabled(let enabled):
             return "\(enabled ? "Enable" : "Disable") Monitoring"
         case .setMonitorOutputDevice: return "Set Monitor Output"
+        case .setEchoHandlingMode(let mode):
+            return mode == .off ? "Turn Echo Handling Off" : "Enable \(mode.displayName)"
         case .addSoundPad: return "Add Sound Pad"
         case .updateSoundPad: return "Edit Sound Pad"
         case .removeSoundPad: return "Remove Sound Pad"
@@ -551,6 +562,13 @@ struct StudioState: Equatable, Sendable {
     var monitorOutputDeviceUID: String?
     var monitorOutputFallback = false
     var monitorFeedbackRiskDeviceUID: String?
+    /// A09 (issue #121): echo handling + feedback diagnostics for the command
+    /// interface — the persisted mode, whether the OS Voice Isolation mic
+    /// mode is active on the live mic (nil = unknown/not preferred), and the
+    /// latest warnings (duplicate routes with repairs, per-mic howl risk).
+    var echoHandlingMode: EchoHandlingMode = .off
+    var voiceIsolationActive: Bool? = nil
+    var feedbackDiagnostics = FeedbackDiagnostics()
     /// S12 undo/redo availability and the labels of the edits ⌘Z / ⇧⌘Z would
     /// apply (the Edit menu shows "Undo <label>").
     var canUndo = false
@@ -1081,6 +1099,12 @@ final class StudioCommandDispatcher: ObservableObject {
             return controller.monitorOutput.devices.contains(where: { $0.uid == uid })
                 ? nil : .invalidTarget("That output device is not connected.")
 
+        // A09 echo handling validation: both modes are always acceptable —
+        // Voice Isolation is a PREFERENCE the OS honors where supported, so
+        // an unsupported device degrades to guidance, never a rejection.
+        case .setEchoHandlingMode:
+            return nil
+
         // A03 soundboard/playlist validation (issue #98): transport and
         // structural commands address the soundboard document's stable IDs
         // (locks and staging never apply — the media-transport precedent).
@@ -1477,6 +1501,12 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setMonitorOutputDevice(let uid):
             session.persistMonitoring(enabled: session.activeSettings.monitoringEnabled,
                                       deviceUID: uid)
+
+        // A09 echo handling execution: persist through SettingsSession
+        // (single truth); its apply refreshes the controller's
+        // voice-isolation state reporting in place.
+        case .setEchoHandlingMode(let mode):
+            session.persistEchoHandlingMode(mode)
 
         // A03 soundboard/playlist execution (issue #98): structural edits
         // write the soundboard document (the controller's store observation
@@ -1999,6 +2029,9 @@ final class StudioCommandDispatcher: ObservableObject {
             monitorOutputDeviceUID: session.activeSettings.monitorOutputDeviceUID,
             monitorOutputFallback: controller.monitorOutput.isFallbackActive,
             monitorFeedbackRiskDeviceUID: controller.monitorFeedbackRiskDeviceUID,
+            echoHandlingMode: session.activeSettings.echoHandlingMode,
+            voiceIsolationActive: controller.voiceIsolationActive,
+            feedbackDiagnostics: controller.feedbackDiagnostics,
             canUndo: undoStack.canUndo,
             canRedo: undoStack.canRedo,
             undoLabel: undoStack.undoLabel,
@@ -2128,7 +2161,7 @@ private extension StudioCommand {
              .setChannelAuxSend, .setBusGain, .setBusMuted,
              .setAudioInputEnabled, .setAudioInputMapping, .relinkAudioInput,
              .setChannelFXChain,
-             .setMonitoringEnabled, .setMonitorOutputDevice,
+             .setMonitoringEnabled, .setMonitorOutputDevice, .setEchoHandlingMode,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .addSoundPad, .updateSoundPad, .removeSoundPad,
              .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,

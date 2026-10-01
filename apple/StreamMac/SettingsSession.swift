@@ -187,6 +187,18 @@ final class SettingsSession: ObservableObject {
         scheduleLiveSettingsSave()
     }
 
+    /// A09 (issue #121): persists the echo handling mode straight into the
+    /// APPLIED settings and applies it live — like monitoring, a live session
+    /// surface, not a draft/Apply edit. Mirroring keeps the draft fresh so a
+    /// later settings Apply can't roll the mode back. The controller's apply
+    /// refreshes the voice-isolation state reporting in place.
+    func persistEchoHandlingMode(_ mode: EchoHandlingMode) {
+        activeSettings.echoHandlingMode = mode
+        draft.echoHandlingMode = mode
+        controller.applySavedSettings(activeSettings)
+        scheduleLiveSettingsSave()
+    }
+
     /// Debounced settings write for live-surface edits (mixer fader scrubs,
     /// A05 input toggles): a scrub dispatches a command per tick, and the
     /// state updates above must stay synchronous (publishers fire, the

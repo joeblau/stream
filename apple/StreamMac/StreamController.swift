@@ -4,6 +4,7 @@ import CoreImage
 import CoreMedia
 import CoreVideo
 import StreamCore
+import os
 import os.lock
 
 /// The heart of the macOS app: owns the capture sources (screen, camera, mic),
@@ -110,6 +111,26 @@ final class StreamController: ObservableObject {
     /// electrically). Nil when monitoring is safe or off. Surfaced in the
     /// settings Audio section and the StudioState snapshot.
     @Published private(set) var monitorFeedbackRiskDeviceUID: String?
+    /// A09 (issue #121): the latest feedback/echo diagnostics — per-mic howl
+    /// risk from the tap-fed detectors, duplicate capture/feedback routes
+    /// with concrete repairs, and the voice-isolation state. Refreshed by the
+    /// diagnostics poll loop while the pipeline runs; surfaced in the
+    /// settings Audio section and the StudioState snapshot.
+    @Published private(set) var feedbackDiagnostics = FeedbackDiagnostics()
+    /// A09: whether the macOS Voice Isolation mic mode is active on the
+    /// default mic's capture device (nil = unknown or mode not preferred).
+    /// Mic modes are user-controlled (the API is read-only), so Stream
+    /// reports and guides rather than applying DSP itself.
+    @Published private(set) var voiceIsolationActive: Bool?
+    /// A09: capture-thread side of the feedback detectors (tap sinks feed it;
+    /// the main actor only polls its readings).
+    private let feedbackAnalyzer = FeedbackAnalyzer()
+    private var feedbackDiagnosticsTask: Task<Void, Never>?
+    private var feedbackMonitorTap: AudioTapSubscription?
+    private var feedbackMicTaps: [AudioChannelID: AudioTapSubscription] = [:]
+    /// A09: the last logged diagnostics signature, so support logs see
+    /// transitions, not a 2 Hz repeat of the same warning set.
+    private var lastLoggedFeedbackSignature = ""
 
     /// The W08 program composition engine: composites the program snapshot and
     /// fans frames out to the publisher, the recording, and the PROGRAM
@@ -788,6 +809,12 @@ final class StreamController: ObservableObject {
             monitorOutput.applyConfiguration(enabled: newSettings.monitoringEnabled,
                                              deviceUID: newSettings.monitorOutputDeviceUID)
         }
+        // A09 (issue #121): the echo handling mode is live session state like
+        // monitoring — an edit refreshes the voice-isolation state report in
+        // place (mic modes are read-only for apps; Stream guides, not sets).
+        if newSettings.echoHandlingMode != previous.echoHandlingMode {
+            refreshEchoHandlingState()
+        }
         updateMonitorFeedbackRisk()
         capturePool.applyPrivacyDefaults(newSettings)
     }
@@ -882,6 +909,10 @@ final class StreamController: ObservableObject {
         additionalMicChannelIDs = []
         syncAdditionalMicChannels()
         applyProgramAudioBindings()
+        // A09 (issue #121): the engine (re)start wiped every tap-fed channel,
+        // so the feedback diagnostics re-register their reference/mic taps
+        // and start with fresh detector state.
+        startFeedbackDiagnostics()
     }
 
     /// A05 (issue #84): the additional (UID-pinned) mic channels the current
@@ -932,6 +963,10 @@ final class StreamController: ObservableObject {
                                                  isMuted: gains[id]?.isMuted ?? false)
             }
         }
+        // A09 (issue #121): the diagnostics' isolated mic taps follow the
+        // same channel diff, so every mic channel gets a howl detector.
+        for id in removed { removeFeedbackMicTap(id) }
+        for id in added { addFeedbackMicTap(id) }
     }
 
     /// A08 (issue #120): pushes each channel's CURRENT effective chain (the
@@ -959,6 +994,9 @@ final class StreamController: ObservableObject {
         // captures twice.
         audio.startAdditionalInputs(settings.audioInputs,
                                     excludingDeviceUID: settings.preferredAudioInputUID)
+        // A09 (issue #121): mic capture (re)started — re-read the OS mic mode
+        // on the device now in use.
+        refreshEchoHandlingState()
     }
 
     private func stopPipeline() {
@@ -969,6 +1007,9 @@ final class StreamController: ObservableObject {
         Task { await previewEngine.stop() }
         let audioEngine = self.audioEngine
         Task { await audioEngine.stop() }
+        // A09 (issue #121): stop the diagnostics poll and drop the taps with
+        // the pipeline (the next start re-registers them fresh).
+        stopFeedbackDiagnostics()
         capturePool.stopAll()
         audio.stop()
         outputSizeSentToPublisher = false
@@ -1256,5 +1297,128 @@ private final class PreviewImageConverter: @unchecked Sendable {
         guard let buffer = frame.pixelBuffer else { return nil }
         let image = CIImage(cvPixelBuffer: buffer)
         return context.createCGImage(image, from: image.extent)
+    }
+}
+
+// MARK: - A09 echo handling & feedback diagnostics (issue #121)
+
+extension StreamController {
+    private static let feedbackLog = Logger(subsystem: "com.joeblau.Stream",
+                                            category: "feedback-diagnostics")
+
+    /// Registers the diagnostics taps and starts the poll loop. Called from
+    /// `startAudioEngine` so every engine (re)start re-taps fresh channels:
+    /// the MONITOR bus is the reference (tapped independently of the A07
+    /// player tap — a tap, never a channel, per the A07 feedback-safety rule)
+    /// and each mic channel gets an isolated (pre-fader) tap feeding its own
+    /// howl detector. All taps are bounded and drop-oldest, so diagnostics
+    /// can never stall the mix.
+    func startFeedbackDiagnostics() {
+        stopFeedbackDiagnostics()
+        let analyzer = feedbackAnalyzer
+        analyzer.reset()
+        let monitorTap = AudioTapSubscription()
+        feedbackMonitorTap = monitorTap
+        let audioEngine = self.audioEngine
+        Task {
+            await audioEngine.addTap(bus: .monitor, token: monitorTap.token,
+                                     capacity: 8) { sample in
+                analyzer.ingestReference(sample)
+            }
+        }
+        addFeedbackMicTap(.microphone(deviceUID: nil))
+        for id in additionalMicChannelIDs { addFeedbackMicTap(id) }
+        feedbackDiagnosticsTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                self?.evaluateFeedbackDiagnostics()
+            }
+        }
+    }
+
+    /// Stops the poll loop and removes every diagnostics tap (pipeline stop).
+    func stopFeedbackDiagnostics() {
+        feedbackDiagnosticsTask?.cancel()
+        feedbackDiagnosticsTask = nil
+        if let feedbackMonitorTap { removeAudioTap(feedbackMonitorTap) }
+        feedbackMonitorTap = nil
+        for (_, tap) in feedbackMicTaps { removeAudioTap(tap) }
+        feedbackMicTaps = [:]
+        feedbackAnalyzer.reset()
+        feedbackDiagnostics = FeedbackDiagnostics()
+        lastLoggedFeedbackSignature = ""
+    }
+
+    /// Registers (idempotently) one mic channel's isolated tap + detector.
+    func addFeedbackMicTap(_ id: AudioChannelID) {
+        guard feedbackMicTaps[id] == nil else { return }
+        let analyzer = feedbackAnalyzer
+        analyzer.addChannel(label: id.label)
+        let tap = AudioTapSubscription()
+        feedbackMicTaps[id] = tap
+        let audioEngine = self.audioEngine
+        let label = id.label
+        Task {
+            await audioEngine.addIsolatedTap(channel: id, token: tap.token,
+                                             capacity: 8) { sample in
+                analyzer.ingestMic(sample, channelLabel: label)
+            }
+        }
+    }
+
+    /// Removes one mic channel's tap + detector (channel left demand).
+    func removeFeedbackMicTap(_ id: AudioChannelID) {
+        if let tap = feedbackMicTaps.removeValue(forKey: id) {
+            removeAudioTap(tap)
+        }
+        feedbackAnalyzer.removeChannel(label: id.label)
+    }
+
+    /// Re-reads the OS Voice Isolation state for the preferred mode. Mic
+    /// modes are user-controlled (Control Center → Mic Mode; the API is
+    /// read-only), so when the user prefers Voice Isolation Stream reports
+    /// whether macOS has it active on the default mic's device and the UI
+    /// guides from there — Stream never applies a second suppressor on top.
+    func refreshEchoHandlingState() {
+        guard settings.echoHandlingMode == .voiceIsolation else {
+            voiceIsolationActive = nil
+            return
+        }
+        // `activeMicrophoneMode` is an app-level (class) property (macOS
+        // 12+): macOS reports the mic mode in effect for this app's capture.
+        voiceIsolationActive = AVCaptureDevice.activeMicrophoneMode == .voiceIsolation
+    }
+
+    /// The 2 Hz fold: detector readings + the routing facts → the published
+    /// `FeedbackDiagnostics`, with a support-log line on every transition of
+    /// the warning set (issue #121: "log events for support").
+    private func evaluateFeedbackDiagnostics() {
+        let risks = feedbackAnalyzer.riskByChannel()
+        var input = FeedbackRouteInput()
+        input.monitoringEnabled = monitorOutput.isEnabled
+        input.monitorOutputUID = monitorOutput.effectiveDeviceUID
+        input.defaultInputUID = AVCaptureDevice.default(for: .audio)?.uniqueID
+        input.preferredInputUID = settings.preferredAudioInputUID
+        input.additionalEnabledInputUIDs = settings.audioInputs
+            .filter(\.isEnabled).map(\.deviceUID)
+        input.howlingChannelLabels = risks.filter { $0.value.isWarning }
+            .map(\.key).sorted()
+        var diagnostics = FeedbackDiagnostics()
+        diagnostics.howlRiskByChannel = risks
+        diagnostics.routeIssues = FeedbackRouteAnalyzer.issues(for: input)
+        diagnostics.voiceIsolationActive = voiceIsolationActive
+        feedbackDiagnostics = diagnostics
+
+        let signature = (diagnostics.routeIssues.map(\.id)
+            + risks.filter { $0.value.isWarning }.map { "howl.\($0.key)" }).sorted()
+            .joined(separator: "|")
+        guard signature != lastLoggedFeedbackSignature else { return }
+        lastLoggedFeedbackSignature = signature
+        if signature.isEmpty {
+            Self.feedbackLog.info("Feedback diagnostics clear")
+        } else {
+            Self.feedbackLog.warning("Feedback diagnostics: \(signature, privacy: .public)")
+        }
     }
 }

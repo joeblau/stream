@@ -447,6 +447,8 @@ struct SettingsView: View {
             additionalInputsBlock
 
             monitoringBlock
+
+            echoHandlingBlock
         } header: {
             Text("Audio")
         } footer: {
@@ -502,6 +504,93 @@ struct SettingsView: View {
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
                 .foregroundStyle(.orange)
+        }
+    }
+
+    // MARK: - A09 echo handling & feedback diagnostics (issue #121)
+
+    /// Echo handling is honest about the platform: macOS has no built-in AEC
+    /// usable from Stream's capture architecture (VoiceProcessingIO is
+    /// deprecated and incompatible — see `EchoHandlingEvaluation`), so the
+    /// modes are Off and a Voice Isolation PREFERENCE (the OS mic mode is
+    /// user-controlled; Stream reports its live state and guides). Feedback
+    /// diagnostics surface below with one-click routing repairs. Edits are
+    /// live session state (like monitoring) through the W05 dispatcher.
+    @ViewBuilder
+    private var echoHandlingBlock: some View {
+        Text("Echo & Feedback")
+            .font(.callout.weight(.semibold))
+        Picker("Echo Handling", selection: Binding(
+            get: { session.activeSettings.echoHandlingMode },
+            set: { dispatcher.execute(.setEchoHandlingMode($0)) }
+        )) {
+            ForEach(EchoHandlingMode.allCases, id: \.self) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        // The channel/stereo limitations are displayed BEFORE the mode takes
+        // effect (issue #121), and Stream never stacks a second suppressor
+        // on top of the OS processing.
+        Text(session.activeSettings.echoHandlingMode.limitationNote)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        if session.activeSettings.echoHandlingMode == .voiceIsolation {
+            switch controller.voiceIsolationActive {
+            case .some(true):
+                Label("Voice Isolation is active on the microphone. Stream applies no additional echo suppression on top.",
+                      systemImage: "checkmark.shield.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            case .some(false):
+                Label("Voice Isolation is not active — while the mic is in use, open Control Center → Mic Mode and choose Voice Isolation.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            case nil:
+                Label("The Voice Isolation state is read once the mic is running.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        ForEach(controller.feedbackDiagnostics.routeIssues) { issue in
+            VStack(alignment: .leading, spacing: 4) {
+                Label(issue.title, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text(issue.fix)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(repairTitle(for: issue.repair)) {
+                    repairFeedbackRoute(issue.repair)
+                }
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private func repairTitle(for repair: FeedbackRouteIssue.Repair) -> String {
+        switch repair {
+        case .disableInput: return "Disable That Input"
+        case .muteDefaultMic: return "Mute the Mic"
+        case .disableMonitoring: return "Disable Monitoring"
+        case .lowerMonitor: return "Lower the Monitor Level"
+        }
+    }
+
+    /// The concrete routing repair (issue #121): one dispatch of an existing
+    /// studio command — never a silent automatic change.
+    private func repairFeedbackRoute(_ repair: FeedbackRouteIssue.Repair) {
+        switch repair {
+        case .disableInput(let uid):
+            dispatcher.execute(.setAudioInputEnabled(uid, false))
+        case .muteDefaultMic:
+            dispatcher.execute(.setChannelMuted(.microphone(deviceUID: nil), true))
+        case .disableMonitoring:
+            dispatcher.execute(.setMonitoringEnabled(false))
+        case .lowerMonitor:
+            let current = session.activeSettings.mixer.busGains[AudioBus.monitor.rawValue] ?? 1
+            dispatcher.execute(.setBusGain(.monitor, max(0, current / 2)))
         }
     }
 

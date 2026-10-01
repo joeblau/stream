@@ -205,6 +205,12 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// (C10 rules): an unplugged device falls back to the system default
     /// honestly and the selection resumes when the same device returns.
     public var monitorOutputDeviceUID: String?
+    /// A09 (issue #121): the echo handling mode for mic capture. `off` by
+    /// default — no surprise processing on upgrade. See `EchoHandlingMode`
+    /// for the honest platform capability story (macOS has no built-in AEC
+    /// usable from Stream's capture architecture; Voice Isolation is the OS
+    /// mic mode Stream prefers and reports on).
+    public var echoHandlingMode: EchoHandlingMode
 
     public init(
         selectedProtocol: StreamProtocol = .rtmps,
@@ -237,7 +243,8 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         audioInputs: [AudioInputSelection] = [],
         channelFX: [String: ChannelFXChain] = [:],
         monitoringEnabled: Bool = false,
-        monitorOutputDeviceUID: String? = nil
+        monitorOutputDeviceUID: String? = nil,
+        echoHandlingMode: EchoHandlingMode = .off
     ) {
         self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
@@ -266,6 +273,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.channelFX = channelFX
         self.monitoringEnabled = monitoringEnabled
         self.monitorOutputDeviceUID = monitorOutputDeviceUID
+        self.echoHandlingMode = echoHandlingMode
     }
 
     /// Backward-compatible decode: every field falls back to its default when the
@@ -315,6 +323,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         // OFF on the system default output (no surprise audio on upgrade).
         monitoringEnabled = try c.decodeIfPresent(Bool.self, forKey: .monitoringEnabled) ?? d.monitoringEnabled
         monitorOutputDeviceUID = try c.decodeIfPresent(String.self, forKey: .monitorOutputDeviceUID) ?? d.monitorOutputDeviceUID
+        // A09: blobs written before echo handling existed decode to OFF — no
+        // surprise processing on upgrade.
+        echoHandlingMode = try c.decodeIfPresent(EchoHandlingMode.self, forKey: .echoHandlingMode) ?? d.echoHandlingMode
     }
 
     public static let `default` = StreamSettings()
