@@ -123,4 +123,30 @@ import StreamCore
         #expect(restored == original)
         #expect(restored.captureExcludedBundleIDs == ["com.1password.1password", "com.apple.keychainaccess"])
     }
+
+    @Test("A blob written before the A04 mixer document existed gets the default mixer")
+    func missingMixerDefaults() throws {
+        // A04 (issue #83): snapshots from builds predating the mixer must
+        // decode to the all-unity, nothing-soloed/muted document — never
+        // throw and wipe the user's other settings.
+        let s = try decode(#"{"videoBitrate": 6000000}"#)
+        #expect(s.mixer == MixerSettings())
+    }
+
+    @Test("The A04 mixer document round-trips through encode/decode")
+    func mixerRoundTrips() throws {
+        var mixer = MixerSettings()
+        mixer.channelVolumes["app.com.example.player"] = 0.8
+        mixer.channelMutes["mic.default"] = true
+        mixer.soloedChannels = ["capture.screen-1"]
+        mixer.channelAuxSends["guest.abc"] = 1
+        mixer.busGains = ["program": 0.9, "monitor": 1.4]
+        mixer.mutedBuses = ["program"]
+        let original = StreamSettings(mixer: mixer)
+        let data = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(StreamSettings.self, from: data)
+        #expect(restored == original)
+        #expect(restored.mixer.soloedChannels == ["capture.screen-1"])
+        #expect(restored.mixer.mutedBuses == ["program"])
+    }
 }

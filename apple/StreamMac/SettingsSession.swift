@@ -117,4 +117,43 @@ final class SettingsSession: ObservableObject {
         draftCredentials = [activeSettings.selectedProtocol:
             (activeSettings.rtmpURL, activeSettings.streamKey)]
     }
+
+    // MARK: - A04 mixer persistence (issue #83)
+
+    /// Persists the mixer document straight into the APPLIED settings and
+    /// mirrors it into the draft — the mixer is a live performance surface,
+    /// not a draft/Apply editor. Mirroring keeps `draft.mixer` fresh so a
+    /// later settings Apply can't roll mixer state back, and `isDirty` is
+    /// unaffected. The dispatcher ramps the live engine gains itself.
+    func persistMixer(_ mixer: MixerSettings) {
+        activeSettings.mixer = mixer
+        draft.mixer = mixer
+        scheduleMixerSave()
+    }
+
+    /// The mixer's mic fader is the live face of `micVolume`: persist it and
+    /// mirror it into the draft without the Apply dance (same freshness rule
+    /// as `persistMixer`). The dispatcher applies the live, ramped engine
+    /// gain — mixer mute state lives there, not in settings.
+    func persistMicVolume(_ value: Double) {
+        let clamped = max(0, min(value, 2))
+        activeSettings.micVolume = clamped
+        draft.micVolume = clamped
+        scheduleMixerSave()
+    }
+
+    /// Debounced settings write for mixer edits: a fader scrub dispatches a
+    /// command per tick, and the state updates above must stay synchronous
+    /// (publishers fire, the engine ramps live), but the FILE write coalesces
+    /// to one save per gesture instead of one per tick.
+    private var mixerSaveTask: Task<Void, Never>?
+
+    private func scheduleMixerSave() {
+        mixerSaveTask?.cancel()
+        mixerSaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.store.save(self.activeSettings)
+        }
+    }
 }

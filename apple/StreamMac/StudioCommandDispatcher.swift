@@ -190,6 +190,30 @@ enum StudioCommand: Equatable, Sendable {
     // Output profile (W07 staged-vs-active rules live in the controller).
     case setOutputProfile(OutputProfile, destination: StreamProtocol?)
 
+    // A04 embedded mixer (issue #83): the live session mix — NOT scene
+    // content and NOT undoable scene edits. Capture-channel program levels
+    // are owned by the S05 `AudioBinding`s (edit via `.setLayerAudio`), so
+    // these commands address the scene-independent surface: non-capture
+    // channel faders/mutes, monitor-only solos, aux sends, and bus masters.
+    // Everything here persists via SettingsSession (the mixer document) and
+    // applies live, ramped, through the controller.
+    /// Sets a non-capture channel's fader (0…2). The mic fader is the live
+    /// face of `StreamSettings.micVolume`; other kinds persist in the mixer
+    /// document by channel label.
+    case setChannelVolume(AudioChannelID, Double)
+    /// Mutes/unmutes a non-capture channel in the program mix (ramped).
+    case setChannelMuted(AudioChannelID, Bool)
+    /// Monitor-only solo: while any channel is soloed the MONITOR bus
+    /// carries only the soloed channels; the program bus is never affected.
+    case setChannelSolo(AudioChannelID, Bool)
+    /// A channel's aux/guest-return send (0…1) — the per-channel routing
+    /// surface beyond program/monitor.
+    case setChannelAuxSend(AudioChannelID, Double)
+    /// Master gain for one bus (0…2).
+    case setBusGain(AudioBus, Double)
+    /// Master mute for one bus (effective gain 0; the fader value is kept).
+    case setBusMuted(AudioBus, Bool)
+
     // Settings session (W04).
     case openSettings(SettingsSession.Section?)
     case closeSettings
@@ -280,6 +304,15 @@ enum StudioCommand: Equatable, Sendable {
         case .setSceneBackground: return "Set Scene Background"
         case .setDefaultBackground: return "Set Project Background"
         case .setOutputProfile: return "Set Output Profile"
+        case .setChannelVolume(let id, _): return "Set \(id.label) Volume"
+        case .setChannelMuted(let id, let muted):
+            return "\(muted ? "Mute" : "Unmute") \(id.label)"
+        case .setChannelSolo(let id, let soloed):
+            return "\(soloed ? "Solo" : "Unsolo") \(id.label)"
+        case .setChannelAuxSend(let id, _): return "Set \(id.label) Aux Send"
+        case .setBusGain(let bus, _): return "Set \(bus.rawValue.capitalized) Gain"
+        case .setBusMuted(let bus, let muted):
+            return "\(muted ? "Mute" : "Unmute") \(bus.rawValue.capitalized)"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
         case .applySettings: return "Apply Settings"
@@ -379,6 +412,12 @@ struct StudioState: Equatable, Sendable {
     var layerLocks: [LayerID: Bool] = [:]
     var settingsPresented = false
     var settingsDirty = false
+    /// A04 (issue #83): the persisted mixer document — non-capture channel
+    /// faders/mutes, the monitor-only solo set, aux sends, and bus masters.
+    /// Live session state, not scene content (never undoable, never staged).
+    var mixer = MixerSettings()
+    /// The live mic fader (mirrors `StreamSettings.micVolume`).
+    var micVolume: Double = 1
     /// S12 undo/redo availability and the labels of the edits ⌘Z / ⇧⌘Z would
     /// apply (the Edit menu shows "Undo <label>").
     var canUndo = false
@@ -422,6 +461,15 @@ final class StudioCommandDispatcher: ObservableObject {
     private var rejectionSequence = 0
     private var rejectionTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
+    /// A04: live channel-ID lookup by persisted label, so the engine push can
+    /// address channels the mixer document names. Seeded with the mic; media/
+    /// app/guest IDs register as their commands arrive (their labels persist
+    /// harmlessly until those surfaces land).
+    private var channelIDsByLabel: [String: AudioChannelID] = [:]
+    /// A04: the mixer state last pushed to the engine — the push re-fires
+    /// only on change (self-healing: the controller mirrors mixer gains, so
+    /// engine restarts and settings applies re-apply them without help).
+    private var lastPushedMixer: (mixer: MixerSettings, micVolume: Double)?
 
     init(controller: StreamController,
          sceneStore: SceneStore,
@@ -434,6 +482,8 @@ final class StudioCommandDispatcher: ObservableObject {
         self.recorder = recorder
         self.previewProgram = previewProgram
         self.state = StudioState()
+        let mic = AudioChannelID.microphone(deviceUID: nil)
+        channelIDsByLabel[mic.label] = mic
         refreshState()
 
         // External changes (publisher events, the recording writer finishing,
@@ -810,6 +860,33 @@ final class StudioCommandDispatcher: ObservableObject {
             // and stages the edit while outputs own the geometry (W07).
             return nil
 
+        // A04 mixer validation. Capture-channel levels/mutes are scene audio
+        // bindings — the mixer UI edits those via `.setLayerAudio`, so a
+        // direct mixer gain command on a capture channel is rejected with
+        // guidance rather than silently fighting the binding.
+        case .setChannelVolume(let id, let volume):
+            if case .capture = id {
+                return .invalidValue("Capture channel levels are scene audio bindings — edit the layer's audio instead.")
+            }
+            return volume.isFinite && (0...2).contains(volume)
+                ? nil : .invalidValue("Channel volume must be between 0 and 2.")
+        case .setChannelMuted(let id, _):
+            if case .capture = id {
+                return .invalidValue("Capture channel mute is a scene audio binding — edit the layer's audio instead.")
+            }
+            return nil
+        case .setChannelSolo:
+            // Solo is mixer (monitor) state: any channel kind may solo.
+            return nil
+        case .setChannelAuxSend(_, let send):
+            return send.isFinite && (0...1).contains(send)
+                ? nil : .invalidValue("Aux send must be between 0 and 1.")
+        case .setBusGain(_, let gain):
+            return gain.isFinite && (0...2).contains(gain)
+                ? nil : .invalidValue("Bus gain must be between 0 and 2.")
+        case .setBusMuted:
+            return nil
+
         case .openSettings, .closeSettings:
             return nil
         case .applySettings:
@@ -1030,6 +1107,51 @@ final class StudioCommandDispatcher: ObservableObject {
 
         case .setOutputProfile(let profile, let destination):
             controller.applyOutputProfile(profile, destination: destination)
+
+        // A04 mixer execution: mutate the persisted mixer document through
+        // SettingsSession (single truth), register the channel ID so the
+        // engine push can address it, and let `refreshState`'s push apply the
+        // change live (ramped) through the controller.
+        case .setChannelVolume(let id, let volume):
+            channelIDsByLabel[id.label] = id
+            if case .microphone = id {
+                session.persistMicVolume(volume)
+            } else {
+                var mixer = session.activeSettings.mixer
+                mixer.channelVolumes[id.label] = volume
+                session.persistMixer(mixer)
+            }
+        case .setChannelMuted(let id, let muted):
+            channelIDsByLabel[id.label] = id
+            var mixer = session.activeSettings.mixer
+            mixer.channelMutes[id.label] = muted ? true : nil
+            session.persistMixer(mixer)
+        case .setChannelSolo(let id, let soloed):
+            channelIDsByLabel[id.label] = id
+            var mixer = session.activeSettings.mixer
+            if soloed {
+                mixer.soloedChannels.insert(id.label)
+            } else {
+                mixer.soloedChannels.remove(id.label)
+            }
+            session.persistMixer(mixer)
+        case .setChannelAuxSend(let id, let send):
+            channelIDsByLabel[id.label] = id
+            var mixer = session.activeSettings.mixer
+            mixer.channelAuxSends[id.label] = send > 0 ? send : nil
+            session.persistMixer(mixer)
+        case .setBusGain(let bus, let gain):
+            var mixer = session.activeSettings.mixer
+            mixer.busGains[bus.rawValue] = gain
+            session.persistMixer(mixer)
+        case .setBusMuted(let bus, let muted):
+            var mixer = session.activeSettings.mixer
+            if muted {
+                mixer.mutedBuses.insert(bus.rawValue)
+            } else {
+                mixer.mutedBuses.remove(bus.rawValue)
+            }
+            session.persistMixer(mixer)
 
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
@@ -1471,10 +1593,55 @@ final class StudioCommandDispatcher: ObservableObject {
                 }),
             settingsPresented: session.isPresented,
             settingsDirty: session.isDirty,
+            mixer: session.activeSettings.mixer,
+            micVolume: session.activeSettings.micVolume,
             canUndo: undoStack.canUndo,
             canRedo: undoStack.canRedo,
             undoLabel: undoStack.undoLabel,
             redoLabel: undoStack.redoLabel)
+        pushMixerStateToEngine()
+    }
+
+    // MARK: Mixer engine push (A04, issue #83)
+
+    /// Applies the persisted mixer state to the audio engine through the
+    /// controller — idempotently, only when it changed. Runs from
+    /// `refreshState` so it fires after every mixer command AND after any
+    /// external settings write (Apply/revert); the controller mirrors the
+    /// pushed gains, so pipeline restarts re-apply the full mixer state.
+    private func pushMixerStateToEngine() {
+        let desired = (mixer: session.activeSettings.mixer,
+                       micVolume: session.activeSettings.micVolume)
+        if let last = lastPushedMixer, last == desired { return }
+        lastPushedMixer = desired
+        let mixer = desired.mixer
+        // Channels: fader/mute per registered non-capture ID (capture levels
+        // are scene bindings). The mic's fader is the settings micVolume;
+        // others read the mixer document.
+        for (label, id) in channelIDsByLabel {
+            if case .capture = id { continue }
+            let volume: Float
+            if case .microphone = id {
+                volume = Float(max(0, min(desired.micVolume, 2)))
+            } else {
+                volume = Float(max(0, min(mixer.channelVolumes[label] ?? 1, 2)))
+            }
+            controller.applyMixerChannelGain(id, volume: volume,
+                                             isMuted: mixer.channelMutes[label] ?? false)
+        }
+        // Solo (monitor state) and aux sends (routing) apply to EVERY
+        // registered channel, capture channels included.
+        for (label, id) in channelIDsByLabel {
+            controller.applyMixerSolo(id, soloed: mixer.soloedChannels.contains(label))
+            controller.applyMixerAuxSend(id, gain: Float(mixer.channelAuxSends[label] ?? 0))
+        }
+        // Bus masters: a muted bus rides gain 0 while its fader value is
+        // preserved in the document.
+        for bus in AudioBus.allCases {
+            let gain = mixer.mutedBuses.contains(bus.rawValue)
+                ? 0 : (mixer.busGains[bus.rawValue] ?? 1)
+            controller.applyMixerBusGain(bus, gain: Float(gain))
+        }
     }
 
     // MARK: Rejection surfacing
@@ -1526,6 +1693,8 @@ private extension StudioCommand {
              .startRecording, .stopRecording,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,
              .setOutputProfile,
+             .setChannelVolume, .setChannelMuted, .setChannelSolo,
+             .setChannelAuxSend, .setBusGain, .setBusMuted,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
              .undo, .redo:

@@ -368,6 +368,46 @@ final class StreamController: ObservableObject {
         await audioEngine.statsSnapshot()
     }
 
+    // MARK: - A04 mixer surface (issue #83)
+
+    /// The dispatcher's mixer channel gains, mirrored here so engine
+    /// (re)starts and settings applies re-apply the FULL mixer state — a
+    /// mixer-muted mic stays muted across pipeline restarts instead of the
+    /// engine's settings-derived gain silently unmuting it.
+    private var mixerGains: [AudioChannelID: (volume: Float, isMuted: Bool)] = [:]
+
+    /// Live mixer channel gain (ramped). The dispatcher owns mixer state;
+    /// this is its write path for non-scene-bound channels (the mic today,
+    /// media/app/guest channels as those surfaces land). Capture channels are
+    /// scene-bound (S05 `AudioBinding`s drive them from the program scene)
+    /// and intentionally have no write path here.
+    func applyMixerChannelGain(_ id: AudioChannelID, volume: Float, isMuted: Bool) {
+        mixerGains[id] = (volume, isMuted)
+        Task { await audioEngine.setChannelGain(id, volume: volume, isMuted: isMuted) }
+    }
+
+    /// Live mixer master gain for one bus (program/monitor/aux). The
+    /// dispatcher folds bus mutes into the value it passes (0 while muted).
+    func applyMixerBusGain(_ bus: AudioBus, gain: Float) {
+        Task { await audioEngine.setBusGain(bus, gain: gain) }
+    }
+
+    /// Live monitor-only solo toggle for one channel (any kind — solo is
+    /// mixer state, so capture channels solo too; program is never affected).
+    func applyMixerSolo(_ id: AudioChannelID, soloed: Bool) {
+        Task { await audioEngine.setChannelSolo(id, soloed: soloed) }
+    }
+
+    /// Live mixer aux/guest-return send for one channel.
+    func applyMixerAuxSend(_ id: AudioChannelID, gain: Float) {
+        Task { await audioEngine.setChannelAuxSend(id, gain: gain) }
+    }
+
+    /// The engine's latest meter snapshot, for the mixer UI's ~20 Hz poll.
+    func mixerLevels() async -> AudioEngineLevels {
+        await audioEngine.levelsSnapshot()
+    }
+
     /// Same race-safe register/cancel as `addFrameSink`, but addressed at an
     /// explicit engine — the W03 studio monitors subscribe to BOTH engines
     /// (PREVIEW on the preview engine, PROGRAM on the program engine), while
@@ -621,8 +661,11 @@ final class StreamController: ObservableObject {
                            destination: newSettings.selectedProtocol)
         if newSettings.micVolume != previous.micVolume {
             let volume = Float(max(0, min(newSettings.micVolume, 2)))
+            // A04: a settings Apply must not clear a mixer mic mute.
+            let muted = mixerGains[.microphone(deviceUID: nil)]?.isMuted ?? false
+            mixerGains[.microphone(deviceUID: nil)] = (volume, muted)
             Task { await audioEngine.setChannelGain(.microphone(deviceUID: nil),
-                                                    volume: volume, isMuted: false) }
+                                                    volume: volume, isMuted: muted) }
         }
         if newSettings.preferredAudioInputUID != previous.preferredAudioInputUID,
            isPipelineRunning, !outputsOwnProfile {
@@ -696,6 +739,9 @@ final class StreamController: ObservableObject {
     private func startAudioEngine() {
         let audioEngine = self.audioEngine
         let settings = self.settings
+        // A04: the dispatcher's mixer gain for the mic (fader + mute) wins
+        // over the raw settings volume once one has been pushed.
+        let micMixerGain = mixerGains[.microphone(deviceUID: nil)]
         Task {
             await audioEngine.run()
             if settings.voicePolishEnabled {
@@ -707,8 +753,9 @@ final class StreamController: ObservableObject {
                 await audioEngine.addChannel(.microphone(deviceUID: nil))
             }
             await audioEngine.setChannelGain(.microphone(deviceUID: nil),
-                                             volume: Float(max(0, min(settings.micVolume, 2))),
-                                             isMuted: false)
+                                             volume: micMixerGain?.volume
+                                                ?? Float(max(0, min(settings.micVolume, 2))),
+                                             isMuted: micMixerGain?.isMuted ?? false)
         }
         applyProgramAudioBindings()
     }

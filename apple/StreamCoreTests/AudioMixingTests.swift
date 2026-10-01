@@ -80,4 +80,67 @@ struct AudioMixingTests {
     @Test func busesEnumerateTheA01RoutingSurface() {
         #expect(Set(AudioBus.allCases) == [.program, .monitor, .aux])
     }
+
+    // MARK: - A04 monitor-only solo accumulation (issue #83)
+
+    @Test func monitorAccumulationCarriesTheSamePostFaderSignal() {
+        let frames = 2
+        var program = [Float](repeating: 0, count: frames * 2)
+        var aux = [Float](repeating: 0, count: frames * 2)
+        var monitor = [Float](repeating: 0, count: frames * 2)
+        var half = ChannelGainRamp(gain: 0.5)
+        var silent = ChannelGainRamp(gain: 0)
+        AudioMixerCore.accumulateWithMonitor(source: [1, 1, 1, 1], frameCount: frames,
+                                             gain: &half, auxGain: &silent,
+                                             program: &program, aux: &aux,
+                                             monitor: &monitor)
+        // Monitor gets exactly the program contribution (post-fader), so the
+        // soloed monitor mix matches what program would carry for the channel.
+        #expect(program == [0.5, 0.5, 0.5, 0.5])
+        #expect(monitor == program)
+        #expect(aux == [0, 0, 0, 0])
+    }
+
+    // MARK: - A04 metering (issue #83)
+
+    @Test func meterAttacksInstantlyAndDecaysPerChunk() {
+        var meter = LevelMeter()
+        meter.ingest(interleaved: [1, -1, 0.5, -0.5])
+        #expect(meter.peak == 1)
+        #expect(meter.levels.isClipping)
+        let hot = meter.peak
+        meter.ingest(interleaved: [0, 0, 0, 0])
+        #expect(meter.peak == hot * LevelMeter.peakDecay)   // exponential decay
+        #expect(meter.levels.isClipping)                    // latch still held
+    }
+
+    @Test func meterClipLatchExpires() {
+        var meter = LevelMeter()
+        meter.ingest(interleaved: [1, 1])
+        #expect(meter.levels.isClipping)
+        for _ in 0..<LevelMeter.clipHoldChunksOnClip {
+            meter.ingest(interleaved: [0, 0])
+        }
+        #expect(!meter.levels.isClipping)
+    }
+
+    @Test func meterRmsTracksSteadySignal() {
+        var meter = LevelMeter()
+        // A steady 0.5-amplitude chunk converges the smoothed RMS near 0.5.
+        for _ in 0..<40 {
+            meter.ingest(interleaved: [0.5, -0.5, 0.5, -0.5])
+        }
+        #expect(abs(meter.levels.rms - 0.5) < 0.01)
+        #expect(!meter.levels.isClipping)
+    }
+
+    @Test func busGainScalesMeteringPreClamp() {
+        // Bus meters ingest the post-gain, PRE-clamp signal: a 0.6 chunk at
+        // gain 2 meters 1.2 — peak pins above full scale and the clip latch
+        // reads "the clamp engaged".
+        var meter = LevelMeter()
+        meter.ingest(interleaved: [0.6, -0.6], gain: 2)
+        #expect(meter.peak > 1.19)
+        #expect(meter.levels.isClipping)
+    }
 }

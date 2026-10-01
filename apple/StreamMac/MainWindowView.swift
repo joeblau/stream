@@ -452,8 +452,9 @@ struct MainWindowView: View {
             case .sources:
                 sourcesInspector
             case .mixer:
-                placeholder("Mixer", systemImage: "slider.vertical.3",
-                            message: "Per-source audio levels land here in a later workstream.")
+                // A04 (issue #83): the embedded mixer — one strip per active
+                // audio channel plus program/monitor masters.
+                MixerPanelView()
             case .media:
                 placeholder("Media", systemImage: "photo.on.rectangle",
                             message: "Overlays, videos and images land here in a later workstream.")

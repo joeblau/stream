@@ -33,6 +33,17 @@ enum AudioChannelID: Hashable, Sendable {
     }
 }
 
+/// A04 (issue #83): one metering snapshot for the mixer UI, polled at
+/// ~15–30 Hz. Per-channel levels are PRE-FADER (post-insert) — a muted or
+/// binding-ducked source still shows its live signal, so the strip answers
+/// "is this source alive?". Per-bus levels are POST-FADER, POST-GAIN,
+/// PRE-CLAMP — the master meter shows exactly the mixed signal, and its clip
+/// latch means the safety clamp engaged.
+struct AudioEngineLevels: Sendable {
+    var channels: [AudioChannelID: AudioLevels] = [:]
+    var buses: [AudioBus: AudioLevels] = [:]
+}
+
 /// A01 (issue #82): the timestamped multi-source audio engine. Mixes N
 /// timestamped sources — mic(s), screen-source audio, and future media/app/
 /// NDI/guest channels — onto the SAME monotonic host clock the video
@@ -86,6 +97,8 @@ actor AudioMixEngine {
     private var mixPosition: Int64 = 0
     private var tickTask: Task<Void, Never>?
     private var busGains: [AudioBus: Float] = [.program: 1, .monitor: 1, .aux: 1]
+    /// A04: per-bus meters (post-gain, pre-clamp), fed in `postBus`.
+    private var busLevels: [AudioBus: LevelMeter] = [:]
     private var taps: [UUID: AudioTapMailbox] = [:]
     private var cancelledTokens: Set<UUID> = []
     /// Gain assignments that arrived before their channel existed; applied at
@@ -229,6 +242,28 @@ actor AudioMixEngine {
         busGains[bus] = max(0, gain)
     }
 
+    /// A04 monitor-only solo (issue #83): while ANY channel is soloed, the
+    /// MONITOR bus carries only the soloed channels' post-fader signal; the
+    /// PROGRAM bus — what the stream and recording emit — is NEVER affected
+    /// by solo (a solo mishap can't take a source out of the broadcast).
+    /// The flag survives channel teardown/re-creation (registry-level), so a
+    /// capture that stops and resumes keeps its solo state.
+    func setChannelSolo(_ id: AudioChannelID, soloed: Bool) {
+        registry.setSoloed(id, soloed: soloed)
+    }
+
+    /// A04: the latest meter snapshot for the mixer UI (poll at ~15–30 Hz;
+    /// cheap — reads lock-confined per-channel meters and the actor's bus
+    /// meters, no audio-thread work).
+    func levelsSnapshot() -> AudioEngineLevels {
+        var levels = AudioEngineLevels()
+        levels.channels = registry.levelsSnapshot()
+        for (bus, meter) in busLevels {
+            levels.buses[bus] = meter.levels
+        }
+        return levels
+    }
+
     /// Loss/underrun counters per channel plus per-tap shed counts.
     func statsSnapshot() -> AudioEngineStatistics {
         var stats = registry.statistics()
@@ -290,13 +325,19 @@ actor AudioMixEngine {
             auxScratch[index] = 0
         }
 
+        // A04 monitor-only solo: while any channel is soloed, the monitor
+        // bus is built from the soloed channels' post-fader contributions
+        // instead of mirroring program.
+        let soloActive = wantMonitor && registry.anySoloed()
+
         for id in channelIDs {
             let wantsISO = taps.values.contains { $0.isolatedChannel == id }
             guard wantAnyBus || wantsISO else { continue }
             for index in isoScratch.indices { isoScratch[index] = 0 }
             registry.mixChannel(id, at: position, frameCount: frames,
                                 program: &programScratch, aux: &auxScratch,
-                                isolated: &isoScratch)
+                                isolated: &isoScratch, monitor: &monitorScratch,
+                                accumulateMonitor: soloActive)
             if wantsISO {
                 let pts = chunkPTS(at: position)
                 if let sample = makeSampleBuffer(isoScratch, frames: frames, pts: pts) {
@@ -308,7 +349,8 @@ actor AudioMixEngine {
         }
 
         postBus(.program, from: programScratch, at: position, wanted: wantProgram)
-        postBus(.monitor, from: programScratch, at: position, wanted: wantMonitor)
+        postBus(.monitor, from: soloActive ? monitorScratch : programScratch,
+                at: position, wanted: wantMonitor)
         postBus(.aux, from: auxScratch, at: position, wanted: wantAux)
     }
 
@@ -316,7 +358,11 @@ actor AudioMixEngine {
                          at position: Int64, wanted: Bool) {
         guard wanted else { return }
         var mixed = samples
-        AudioMixerCore.applyBusGainAndClamp(&mixed, gain: busGains[bus] ?? 1)
+        let gain = busGains[bus] ?? 1
+        // A04: meter the post-gain, PRE-clamp signal — a latched clip here
+        // means the safety clamp below actually engaged.
+        busLevels[bus, default: LevelMeter()].ingest(interleaved: mixed, gain: gain)
+        AudioMixerCore.applyBusGainAndClamp(&mixed, gain: gain)
         let pts = chunkPTS(at: position)
         guard let sample = makeSampleBuffer(mixed, frames: Self.chunkFrames, pts: pts)
         else { return }
@@ -391,6 +437,10 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
     private var channels: [AudioChannelID: ChannelIngest] = [:]
     private var anchor: CMTime = .invalid
+    /// A04: soloed channel IDs. Registry-level (not per-channel-instance) so
+    /// solo survives channel teardown/re-creation — `reset`, pruning, and
+    /// auto-registration all re-apply it to the next ingest instance.
+    private var soloedIDs: Set<AudioChannelID> = []
 
     func setAnchor(_ anchor: CMTime) {
         os_unfair_lock_lock(&lock)
@@ -413,7 +463,35 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         // auto-registered the channel (insert-less) just before this call,
         // and the explicit registration (VoicePolish on the mic) must win.
         channels[id] = ChannelIngest(insert: insert,
-                                     initialGain: gain?.effectiveGain ?? Self.defaultGain(for: id))
+                                     initialGain: gain?.effectiveGain ?? Self.defaultGain(for: id),
+                                     soloed: soloedIDs.contains(id))
+    }
+
+    /// A04: toggles one channel's monitor-only solo. The ID set is the source
+    /// of truth (applied to future ingest instances); the live channel gets
+    /// the flag immediately.
+    func setSoloed(_ id: AudioChannelID, soloed: Bool) {
+        os_unfair_lock_lock(&lock)
+        if soloed { soloedIDs.insert(id) } else { soloedIDs.remove(id) }
+        let channel = channels[id]
+        os_unfair_lock_unlock(&lock)
+        channel?.setSoloed(soloed)
+    }
+
+    /// A04: true while any channel is soloed (the monitor bus switches from
+    /// mirroring program to the soloed-only mix).
+    func anySoloed() -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return !soloedIDs.isEmpty
+    }
+
+    /// A04: the per-channel PRE-FADER meter readings for the mixer UI.
+    func levelsSnapshot() -> [AudioChannelID: AudioLevels] {
+        os_unfair_lock_lock(&lock)
+        let entries = channels.map { ($0.key, $0.value.levels) }
+        os_unfair_lock_unlock(&lock)
+        return Dictionary(uniqueKeysWithValues: entries)
     }
 
     func removeChannel(_ id: AudioChannelID) {
@@ -447,7 +525,8 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         let anchor = self.anchor
         let channel = channels[id] ?? {
             let created = ChannelIngest(insert: nil,
-                                        initialGain: Self.defaultGain(for: id))
+                                        initialGain: Self.defaultGain(for: id),
+                                        soloed: soloedIDs.contains(id))
             channels[id] = created
             return created
         }()
@@ -463,12 +542,14 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func mixChannel(_ id: AudioChannelID, at position: Int64, frameCount: Int,
                     program: inout [Float], aux: inout [Float],
-                    isolated: inout [Float]) {
+                    isolated: inout [Float], monitor: inout [Float],
+                    accumulateMonitor: Bool) {
         os_unfair_lock_lock(&lock)
         let channel = channels[id]
         os_unfair_lock_unlock(&lock)
         channel?.mix(at: position, frameCount: frameCount,
-                     program: &program, aux: &aux, isolated: &isolated)
+                     program: &program, aux: &aux, isolated: &isolated,
+                     monitor: &monitor, accumulateMonitor: accumulateMonitor)
     }
 
     func statistics() -> AudioEngineStatistics {
@@ -503,10 +584,17 @@ private final class ChannelIngest: @unchecked Sendable {
     private var gain: ChannelGainRamp
     private var auxSend = ChannelGainRamp(gain: 0)
     private var chunk = [Float](repeating: 0, count: AudioMixEngine.chunkFrames * 2)
+    /// A04: monitor-only solo flag (registry-owned; re-applied on re-create).
+    private var soloed: Bool
+    /// A04: the channel's PRE-FADER (post-insert) meter, fed from the chunk
+    /// the mix loop already reads — no extra pass over the ring.
+    private var meter = LevelMeter()
 
-    init(insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?, initialGain: Float) {
+    init(insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?, initialGain: Float,
+         soloed: Bool = false) {
         self.insert = insert
         self.gain = ChannelGainRamp(gain: initialGain)
+        self.soloed = soloed
     }
 
     func setGain(_ effectiveGain: Float, rampFrames: Int) {
@@ -518,6 +606,13 @@ private final class ChannelIngest: @unchecked Sendable {
     func setAuxSend(_ send: Float, rampFrames: Int) {
         os_unfair_lock_lock(&lock)
         auxSend.setTarget(send, rampFrames: rampFrames)
+        os_unfair_lock_unlock(&lock)
+    }
+
+    /// A04: monitor-only solo flag (see `AudioMixEngine.setChannelSolo`).
+    func setSoloed(_ soloed: Bool) {
+        os_unfair_lock_lock(&lock)
+        self.soloed = soloed
         os_unfair_lock_unlock(&lock)
     }
 
@@ -544,17 +639,36 @@ private final class ChannelIngest: @unchecked Sendable {
 
     /// Mix-loop read: fills the channel scratch at the absolute window,
     /// exposes the pre-fader chunk as `isolated`, and accumulates program/aux
-    /// with per-frame ramped gains (the click-free Take/mute contract).
+    /// with per-frame ramped gains (the click-free Take/mute contract). A04:
+    /// feeds the channel meter from the pre-fader chunk, and — while a solo
+    /// is active and this channel is soloed — additionally accumulates its
+    /// post-fader signal into `monitor` (the monitor-only solo mix).
     func mix(at position: Int64, frameCount: Int,
              program: inout [Float], aux: inout [Float],
-             isolated: inout [Float]) {
+             isolated: inout [Float], monitor: inout [Float],
+             accumulateMonitor: Bool) {
         os_unfair_lock_lock(&lock)
         ring.fill(at: position, frameCount: frameCount, into: &chunk)
+        meter.ingest(interleaved: chunk)
         for index in 0..<(frameCount * 2) { isolated[index] = chunk[index] }
-        AudioMixerCore.accumulate(source: chunk, frameCount: frameCount,
-                                  gain: &gain, auxGain: &auxSend,
-                                  program: &program, aux: &aux)
+        if accumulateMonitor && soloed {
+            AudioMixerCore.accumulateWithMonitor(source: chunk, frameCount: frameCount,
+                                                 gain: &gain, auxGain: &auxSend,
+                                                 program: &program, aux: &aux,
+                                                 monitor: &monitor)
+        } else {
+            AudioMixerCore.accumulate(source: chunk, frameCount: frameCount,
+                                      gain: &gain, auxGain: &auxSend,
+                                      program: &program, aux: &aux)
+        }
         os_unfair_lock_unlock(&lock)
+    }
+
+    /// A04: the channel's current pre-fader meter reading.
+    var levels: AudioLevels {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return meter.levels
     }
 
     func statistics() -> AudioChannelStatistics {

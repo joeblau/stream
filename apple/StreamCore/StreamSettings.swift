@@ -179,6 +179,10 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     /// Bundle identifiers whose windows every screen capture excludes by
     /// default (e.g. a password manager).
     public var captureExcludedBundleIDs: [String]
+    /// A04 (issue #83): the persisted mixer session document (non-capture
+    /// channel faders/mutes, monitor-only solo set, aux sends, bus masters).
+    /// Capture-channel levels are scene content (`AudioBinding`s), not here.
+    public var mixer: MixerSettings
 
     public init(
         selectedProtocol: StreamProtocol = .rtmps,
@@ -206,7 +210,8 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         outputProfile: OutputProfile = .default,
         captureShowsCursor: Bool = true,
         captureIncludesAudio: Bool = true,
-        captureExcludedBundleIDs: [String] = []
+        captureExcludedBundleIDs: [String] = [],
+        mixer: MixerSettings = MixerSettings()
     ) {
         self.selectedProtocol = selectedProtocol
         self.rtmpURL = rtmpURL
@@ -230,6 +235,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         self.captureShowsCursor = captureShowsCursor
         self.captureIncludesAudio = captureIncludesAudio
         self.captureExcludedBundleIDs = captureExcludedBundleIDs
+        self.mixer = mixer
     }
 
     /// Backward-compatible decode: every field falls back to its default when the
@@ -264,6 +270,9 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         captureShowsCursor = try c.decodeIfPresent(Bool.self, forKey: .captureShowsCursor) ?? d.captureShowsCursor
         captureIncludesAudio = try c.decodeIfPresent(Bool.self, forKey: .captureIncludesAudio) ?? d.captureIncludesAudio
         captureExcludedBundleIDs = try c.decodeIfPresent([String].self, forKey: .captureExcludedBundleIDs) ?? d.captureExcludedBundleIDs
+        // A04: settings blobs written before the mixer existed decode to the
+        // default (all-unity, nothing soloed/muted) document.
+        mixer = try c.decodeIfPresent(MixerSettings.self, forKey: .mixer) ?? d.mixer
     }
 
     public static let `default` = StreamSettings()
