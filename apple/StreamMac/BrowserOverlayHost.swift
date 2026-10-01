@@ -113,16 +113,6 @@ private final class WebOverlayHostingWindow: NSWindow {
         orderFrontRegardless()
     }
 
-    /// Deliberate interaction mode: the widget surfaces as a real floating
-    /// panel the operator can click/dismiss content in. Still excluded from
-    /// display captures (`sharingType` never changes).
-    func enterInteractionMode() {
-        alphaValue = 1
-        ignoresMouseEvents = false
-        styleMask = [.titled, .resizable]
-        orderFrontRegardless()
-    }
-
     override var canBecomeKey: Bool { !ignoresMouseEvents }
     override var canBecomeMain: Bool { false }
 }
@@ -151,16 +141,10 @@ private final class WebOverlayHostingWindow: NSWindow {
 /// fail-closed scheme check on every main-frame navigation, and asset-
 /// resolution errors for local HTML.
 ///
-/// Audio (G07 decision, unchanged): `.muted` (default) blocks audio autoplay
-/// AND force-mutes media elements in-page — the audio-widget fixture's
-/// `window.__widgetAudioState` reads `suspended`/`running` as the evidence
-/// hook. `.systemMix` lets the WebContent process play to the system output
-/// (A06 system-mix captures it; no independent channel). `.helperApp` is the
-/// only independent-gain route and the helper target is NOT implemented in
-/// G08 (follow-up: a small `StreamWidgetHelper` app target in project.yml
-/// hosting one WKWebView, captured via the existing A06 per-app path);
-/// until it ships the host runs helper-routed widgets with systemMix
-/// behavior and publishes `routeWarning`.
+/// Audio defaults to suspended media playback. Explicit system-mix widgets
+/// use the existing system capture channel. Independent helper audio remains
+/// unavailable until its capture/attribution prototype is validated; requests
+/// fail silent, with an inline warning, rather than changing audio routes.
 @MainActor
 final class BrowserOverlayHost: NSObject, ObservableObject {
     /// The frame-store key this host publishes under — fixed at creation,
@@ -194,6 +178,10 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     private var completions: [CFAbsoluteTime] = []
     private var totalLatencyMs = 0.0
     private var inFlight = 0
+    private var snapshotGeneration = UUID()
+    private var isRunning = false
+    private var isEmbedded = false
+    private var mediaIsSuspended = false
     private var occlusionObserver: NSObjectProtocol?
     private let signposter = OSSignposter(subsystem: "com.joeblau.StreamMac",
                                           category: "browser-overlay")
@@ -217,7 +205,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         // suspended — the audio-widget fixture reads "suspended"); audible
         // routes let widget media autoplay.
         webConfiguration.mediaTypesRequiringUserActionForPlayback =
-            configuration.audioRoute == .muted ? .all : []
+            configuration.audioRoute != .systemMix ? .all : []
         webView = BrowserWidgetWebView(
             frame: CGRect(origin: .zero,
                           size: CGSize(width: CGFloat(configuration.pixelWidth),
@@ -235,7 +223,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         webView.navigationDelegate = self
 
         routeWarning = configuration.audioRoute == .helperApp
-            ? "Independent helper-app audio needs the StreamWidgetHelper target (G08 follow-up) — this widget plays through the system mix for now."
+            ? "Independent widget audio is unavailable in this build. This widget stays silent; choose System Mix explicitly to hear it."
             : nil
 
         occlusionObserver = NotificationCenter.default.addObserver(
@@ -244,6 +232,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
             queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    guard !self.isEmbedded, self.isRunning else { return }
                     self.isOccluded = !self.window.occlusionState.contains(.visible)
                     if self.isOccluded {
                         // Re-assert visibility: a window manager shuffle can
@@ -266,11 +255,10 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         totalLatencyMs = 0
         inFlight = 0
 
-        if configuration.allowsInteraction {
-            window.enterInteractionMode()
-        } else {
-            window.enterHiddenMode()
-        }
+        isRunning = true
+        snapshotGeneration = UUID()
+        setMediaSuspended(configuration.audioRoute != .systemMix)
+        if !isEmbedded { window.enterHiddenMode() }
 
         if let assetID = configuration.localHTMLAssetIdentifier {
             loadLocalHTMLAsset(assetID)
@@ -288,6 +276,12 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     /// removed). The instance — window, webview, remembered page — survives,
     /// so a re-demanded widget restarts without rebuilding anything.
     func stop() {
+        isRunning = false
+        snapshotGeneration = UUID()
+        inFlight = 0
+        setMediaSuspended(true)
+        webView.stopLoading()
+        webView.loadHTMLString("", baseURL: nil)
         stopCaptureClock()
         navigationTimeout?.invalidate()
         navigationTimeout = nil
@@ -318,6 +312,10 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     /// old widget build.
     func reload() {
         guard loadState != .idle else { return }
+        stopCaptureClock()
+        snapshotGeneration = UUID()
+        inFlight = 0
+        BrowserOverlayFrameStore.shared.clear(storeKey)
         if configuration.localHTMLAssetIdentifier != nil {
             assetAccess = nil
             start()
@@ -333,6 +331,33 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     func noteSceneEntry() {
         guard configuration.sceneEntryRefresh == .reload, loadState != .idle else { return }
         reload()
+    }
+
+    private func setMediaSuspended(_ value: Bool) {
+        guard value != mediaIsSuspended else { return }
+        mediaIsSuspended = value
+        webView.setAllMediaPlaybackSuspended(value, completionHandler: nil)
+    }
+
+    /// Reparent the same page into the inspector; no second page, navigation,
+    /// audio context, or floating interactive window is created.
+    func attachInteraction(to container: NSScrollView) {
+        guard configuration.allowsInteraction else { return }
+        isEmbedded = true
+        webView.removeFromSuperview()
+        window.contentView = nil
+        window.orderOut(nil)
+        container.documentView = webView
+        webView.frame.size = CGSize(width: configuration.pixelWidth, height: configuration.pixelHeight)
+        isOccluded = false
+    }
+
+    func detachInteraction() {
+        guard isEmbedded else { return }
+        isEmbedded = false
+        webView.removeFromSuperview()
+        window.contentView = webView
+        if isRunning { window.enterHiddenMode() }
     }
 
     // MARK: - Programmatic interaction
@@ -393,6 +418,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     }
 
     private func snapshotTick() {
+        guard isRunning, loadState == .ready else { return }
         guard inFlight < Self.maxInFlightSnapshots else {
             metrics.dropped += 1
             return
@@ -401,9 +427,10 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         let requestedAt = CFAbsoluteTimeGetCurrent()
         metrics.requested += 1
         inFlight += 1
+        let generation = snapshotGeneration
         webView.takeSnapshot(with: nil) { [weak self] image, error in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                guard let self, self.isRunning, self.snapshotGeneration == generation else { return }
                 self.inFlight -= 1
                 self.signposter.endInterval("snapshot", state)
                 let latency = (CFAbsoluteTimeGetCurrent() - requestedAt) * 1000
@@ -490,7 +517,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
             })();
             """) { _, _ in }
         }
-        if configuration.audioRoute == .muted {
+        if configuration.audioRoute != .systemMix {
             webView.evaluateJavaScript("""
             (function() {
                 function muteAll() {
@@ -547,8 +574,10 @@ extension BrowserOverlayHost: WKNavigationDelegate {
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
+            guard self.isRunning else { return }
             self.navigationTimeout?.invalidate()
             self.navigationTimeout = nil
+            guard self.webView.url?.absoluteString != "about:blank" else { return }
             self.applyPageInjections()
             self.loadState = .ready
             // The snapshot clock runs only while the page is alive — a failed
@@ -561,6 +590,7 @@ extension BrowserOverlayHost: WKNavigationDelegate {
                              didFailProvisionalNavigation navigation: WKNavigation!,
                              withError error: Error) {
         Task { @MainActor in
+            guard self.isRunning else { return }
             self.navigationTimeout?.invalidate()
             self.loadState = .failed(error.localizedDescription)
         }
@@ -570,6 +600,7 @@ extension BrowserOverlayHost: WKNavigationDelegate {
                              didFail navigation: WKNavigation!,
                              withError error: Error) {
         Task { @MainActor in
+            guard self.isRunning else { return }
             self.navigationTimeout?.invalidate()
             self.loadState = .failed(error.localizedDescription)
         }
@@ -594,5 +625,32 @@ extension BrowserOverlayHost {
                 ?? bundle.url(forResource: name, withExtension: "html")
         else { return nil }
         return BrowserOverlayConfiguration(urlString: url.absoluteString).normalized()
+    }
+}
+
+/// Interactive widget controls stay in the main studio inspector.
+struct BrowserWidgetInteractionView: NSViewRepresentable {
+    let host: BrowserOverlayHost
+    final class Coordinator {
+        weak var host: BrowserOverlayHost?
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
+        scroll.drawsBackground = false
+        context.coordinator.host = host
+        host.attachInteraction(to: scroll)
+        return scroll
+    }
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        if context.coordinator.host !== host {
+            context.coordinator.host?.detachInteraction()
+            context.coordinator.host = host
+            host.attachInteraction(to: scroll)
+        }
+    }
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        coordinator.host?.detachInteraction()
     }
 }

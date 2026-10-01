@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import StreamCore
 
 /// G08 (issue #115): the browser-overlay integration seam — every G08-owned
@@ -70,20 +71,18 @@ extension WebSourcePayload {
     /// through here. Persisted in full on the payload (orchestrator hook 1
     /// landed); writes re-normalize and mirror the widget URL into `url`.
     var browserOverlay: BrowserOverlayConfiguration {
-        get { configuration }
+        get {
+            var value = configuration
+            if value.urlString == nil, value.localHTMLAssetIdentifier == nil { value.urlString = url?.absoluteString }
+            return value.normalized()
+        }
         set { configuration = newValue.normalized(); url = configuration.widgetURL }
     }
 
-    /// The `BrowserOverlayFrameStore` key BOTH sides derive deterministically
-    /// (no I/O, no shared state): the capture host writes under it, the
-    /// renderer's `.web` branch reads under it. Remote widgets key by URL
-    /// string (the G07 renderer contract, unchanged); local-HTML widgets key
-    /// by asset identifier so a security-scoped re-resolution never re-keys
-    /// the frame stream mid-session.
-    var browserOverlayStoreKey: String? {
-        configuration.localHTMLAssetIdentifier.map { "webasset:\($0)" }
-            ?? url?.absoluteString
-    }
+    /// All effective settings participate in identity. Widgets sharing a URL
+    /// but differing in viewport, audio, CSS or interaction never overwrite
+    /// each other's frames. Equal configurations still share one source.
+    var browserOverlayStoreKey: String? { BrowserWidgetIdentity.shared.key(for: browserOverlay) }
 
     /// A copy with the widget configuration normalized (fps/viewport clamped,
     /// unsupported URL schemes failed closed, CSS bounded).
@@ -100,5 +99,26 @@ extension LayerPayload {
     var isWeb: Bool {
         if case .web = self { return true }
         return false
+    }
+}
+
+private final class BrowserWidgetIdentity: @unchecked Sendable {
+    static let shared = BrowserWidgetIdentity()
+    private let lock = NSLock()
+    private var keys: [BrowserOverlayConfiguration: String] = [:]
+    func key(for configuration: BrowserOverlayConfiguration) -> String? {
+        guard configuration.hasWidgetContent else { return nil }
+        lock.lock()
+        let existing = keys[configuration]
+        lock.unlock()
+        if let existing { return existing }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(configuration) else { return nil }
+        let key = "web:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        lock.lock()
+        if keys.count >= 128 { keys.removeAll(keepingCapacity: true) }
+        keys[configuration] = key
+        lock.unlock()
+        return key
     }
 }

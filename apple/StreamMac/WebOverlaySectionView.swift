@@ -125,17 +125,17 @@ struct WebOverlaySectionView: View {
             let config = configBinding(for: layer)
             Toggle("Deliberate Interaction Mode", isOn: config.allowsInteraction)
             if config.wrappedValue.allowsInteraction {
-                Text("The widget surfaces as a floating panel that accepts clicks. Off (default), it is click-through and driven programmatically (Reload / Replay Alert).")
+                Text("Interact with the widget in the embedded inspector below. Off (default), it is click-through and driven with Reload / Replay Alert.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Picker("Audio", selection: config.audioRoute) {
-                Text("Muted (default)").tag(BrowserWidgetAudioRoute.muted)
+                Text("Muted (media suspended)").tag(BrowserWidgetAudioRoute.muted)
                 Text("System Mix").tag(BrowserWidgetAudioRoute.systemMix)
-                Text("Helper App (independent channel)").tag(BrowserWidgetAudioRoute.helperApp)
+                Text("Independent Audio (unavailable)").tag(BrowserWidgetAudioRoute.helperApp).disabled(true)
             }
             if config.wrappedValue.audioRoute == .helperApp {
-                Text("Independent gain needs the StreamWidgetHelper target — a G08 follow-up. Until it ships, the widget plays through the system mix.")
+                Text("Independent widget audio is unavailable in this build. This widget stays silent; select System Mix explicitly to hear it.")
                     .font(.caption)
                     .foregroundStyle(.orange)
             } else if config.wrappedValue.audioRoute == .systemMix {
@@ -183,14 +183,16 @@ struct WebOverlaySectionView: View {
             }
             if let host = capturePool.webHost(for: key) {
                 WebHostStatusView(host: host)
+                if payload.browserOverlay.allowsInteraction {
+                    BrowserWidgetInteractionView(host: host).frame(height: 220)
+                }
                 HStack {
-                    Button("Reload") { host.reload() }
+                    Button("Reload") { host.reload() }.disabled(state == .idle)
                     Button("Replay Alert") {
                         Task { _ = await host.replayAlertAnimation() }
-                    }
+                    }.disabled(state != .ready)
                 }
                 .buttonStyle(.borderless)
-                .disabled(state != .ready)
                 if host.isOccluded {
                     Text("The hidden widget window is occluded — WebKit is throttling it. Bring a screen to the front or restart the widget.")
                         .font(.caption)

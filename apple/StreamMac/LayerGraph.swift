@@ -730,9 +730,8 @@ struct WebSourcePayload: Hashable, Codable, Sendable {
     var url: URL? = nil
     /// The full G08 widget configuration: viewport, fps, interaction,
     /// audio route, CSS overrides, scene-entry refresh, local HTML asset.
-    /// `url` above is kept as the renderer's frame-store key source for
-    /// remote widgets; `configuration.urlString` mirrors it on write
-    /// (see `WebSourcePayload.browserOverlay`).
+    /// `url` mirrors the effective remote widget URL for legacy documents
+    /// and the URL editor. Frame identity uses the full normalized configuration.
     var configuration: BrowserOverlayConfiguration = BrowserOverlayConfiguration()
 
     private enum CodingKeys: String, CodingKey { case url, configuration }
