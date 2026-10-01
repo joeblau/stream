@@ -179,6 +179,38 @@ struct StreamMacApp: App {
                     .keyboardShortcut("b", modifiers: [.command, .option])
                     .disabled(!dispatcher.canExecute(.setAnnotationsInProgram(true, in: nil)))
             }
+            // G06 (issue #113): presentation page navigation — next/previous
+            // plus first/last jumps, routed through the dispatcher like every
+            // studio action. The target resolves live
+            // (`presentationNavigationTarget`): the selected layer's PDF
+            // source, else the first visible PDF source in the staged scene.
+            // Page state is shared per source, so these hotkeys move preview
+            // AND program together and can never fork the two canvases.
+            CommandMenu("Present") {
+                let target = dispatcher.presentationNavigationTarget()
+                Button("Next Page") {
+                    if let target { dispatcher.execute(.pdfNextPage(target)) }
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                .disabled(target == nil)
+                Button("Previous Page") {
+                    if let target { dispatcher.execute(.pdfPreviousPage(target)) }
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .disabled(target == nil)
+                Divider()
+                Button("First Page") {
+                    if let target { dispatcher.execute(.pdfGoToPage(target, page: 0)) }
+                }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                .disabled(target == nil)
+                Button("Last Page") {
+                    // Int.max clamps to the loaded page count in the store.
+                    if let target { dispatcher.execute(.pdfGoToPage(target, page: .max)) }
+                }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                .disabled(target == nil)
+            }
         }
     }
 }

@@ -309,6 +309,21 @@ enum StudioCommand: Equatable, Sendable {
     /// range by the playback engine).
     case mediaSeek(SourceDefinitionID, to: Double)
 
+    // G06 presentation navigation (issue #113): next/previous/jump page and
+    // fit/fill framing for a registry PDF source. These are PROGRAM-AWARE
+    // like the A02 media transport: they act on the ONE shared per-source
+    // deck state (`PDFDeckStore`), which both composition engines read on
+    // their next tick, so a page change is live on program the moment the
+    // source is on program and can never fork preview vs program playback.
+    // Page state is session/document state, never scene content: not staged,
+    // not undoable, and scene/layer locks don't gate it.
+    case pdfNextPage(SourceDefinitionID)
+    case pdfPreviousPage(SourceDefinitionID)
+    /// Jump to a 0-based page (clamped to the loaded page count by the store).
+    case pdfGoToPage(SourceDefinitionID, page: Int)
+    /// Per-source page framing (fit/fill), applied at rasterization.
+    case pdfSetFraming(SourceDefinitionID, framing: DeckFraming)
+
     // Output profile (W07 staged-vs-active rules live in the controller).
     case setOutputProfile(OutputProfile, destination: StreamProtocol?)
 
@@ -625,6 +640,10 @@ enum StudioCommand: Equatable, Sendable {
         case .mediaStop: return "Stop Media"
         case .mediaRestart: return "Restart Media"
         case .mediaSeek: return "Seek Media"
+        case .pdfNextPage: return "Next Page"
+        case .pdfPreviousPage: return "Previous Page"
+        case .pdfGoToPage: return "Go to Page"
+        case .pdfSetFraming: return "Set Page Framing"
         case .setOutputProfile: return "Set Output Profile"
         case .setChannelVolume(let id, _): return "Set \(id.label) Volume"
         case .setChannelMuted(let id, let muted):
@@ -920,6 +939,19 @@ final class StudioCommandDispatcher: ObservableObject {
     /// overlay, the Annotate menu, and future automation share one instance
     /// and every mutation routes through the annotation commands.
     let annotations: AnnotationStore
+    /// G06 (issue #113): the presentations document (per-source selected page
+    /// + fit/fill framing, persisted beside the PTZ/soundboard documents).
+    /// Owned here so the inspector section, the Present menu, and future
+    /// automation share one instance and every mutation routes through the
+    /// pdf navigation commands. Its off-main mirror (`PDFDeckStateStore`) is
+    /// what the page-rendering engines read on the render tick.
+    let pdfDecks: PDFDeckStore
+    /// P03 (issue #80): the asset library — G06 imports presentation
+    /// documents through it (project copies, so project packaging retains the
+    /// bytes) and the section view reads availability/usage from it. Parked
+    /// here (the AssetLibraryPanelView hook's documented alternative) so
+    /// MainWindowView needs no new environment plumbing.
+    let assetLibrary: AssetLibraryStore
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
     /// graph, keyed by chain-slot ID (passthrough to the controller — the
@@ -963,6 +995,10 @@ final class StudioCommandDispatcher: ObservableObject {
         // G11 (issue #117): the annotation document + session state (see the
         // property doc; created like the soundboard pair above).
         self.annotations = AnnotationStore()
+        // G06 (issue #113): the presentations document + the P03 asset
+        // library it resolves documents through (see the property docs).
+        self.pdfDecks = PDFDeckStore()
+        self.assetLibrary = AssetLibraryStore()
         self.state = StudioState()
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
@@ -987,16 +1023,21 @@ final class StudioCommandDispatcher: ObservableObject {
         // External changes (publisher events, the recording writer finishing,
         // scene edits) never pass through `execute`, so observe the stores
         // directly. `objectWillChange` fires in willSet — the Task hop lands
-        // post-set, so the snapshot reads current values.
+        // post-set, so the snapshot reads current values. G06: the deck store
+        // and asset library join the merge so PDF section views reading
+        // `dispatcher.pdfDecks` / `dispatcher.assetLibrary` refresh with the
+        // dispatcher's own published state.
         Publishers.Merge(
             Publishers.Merge4(
                 controller.objectWillChange,
                 sceneStore.objectWillChange,
                 session.objectWillChange,
                 recorder.objectWillChange),
-            Publishers.Merge(
+            Publishers.Merge4(
                 previewProgram.objectWillChange,
-                annotations.objectWillChange))
+                annotations.objectWillChange,
+                pdfDecks.objectWillChange,
+                assetLibrary.objectWillChange))
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.refreshState()
@@ -1525,6 +1566,18 @@ final class StudioCommandDispatcher: ObservableObject {
             return seconds.isFinite && seconds >= 0
                 ? nil
                 : .invalidValue("Seek position must be a non-negative number of seconds.")
+
+        // G06 (issue #113): page navigation is program-aware session state —
+        // the target must be a REGISTERED PDF source; locks and staging don't
+        // apply (the A02 media-transport precedent).
+        case .pdfNextPage(let id), .pdfPreviousPage(let id),
+             .pdfSetFraming(let id, _):
+            return pdfNavigationError(for: id)
+        case .pdfGoToPage(let id, let page):
+            if let error = pdfNavigationError(for: id) { return error }
+            return page >= 0
+                ? nil
+                : .invalidValue("A page number must be zero or greater.")
 
         case .setOutputProfile:
             // Always acceptable: the controller clamps to hardware/destination
@@ -2137,6 +2190,18 @@ final class StudioCommandDispatcher: ObservableObject {
         case .mediaSeek(let id, let seconds):
             controller.capturePool.seekMedia(id, toSeconds: seconds)
 
+        // G06 (issue #113): page navigation writes the ONE shared deck store
+        // per source (never a per-canvas fork); the engines pick the change
+        // up on their next render tick through the off-main snapshot.
+        case .pdfNextPage(let id):
+            pdfDecks.advance(by: 1, for: id, fallbackPage: pdfDefaultPage(for: id))
+        case .pdfPreviousPage(let id):
+            pdfDecks.advance(by: -1, for: id, fallbackPage: pdfDefaultPage(for: id))
+        case .pdfGoToPage(let id, let page):
+            pdfDecks.setPage(page, for: id)
+        case .pdfSetFraming(let id, let framing):
+            pdfDecks.setFraming(framing, for: id, fallbackPage: pdfDefaultPage(for: id))
+
         case .setOutputProfile(let profile, let destination):
             controller.applyOutputProfile(profile, destination: destination)
 
@@ -2704,6 +2769,47 @@ final class StudioCommandDispatcher: ObservableObject {
         return nil
     }
 
+    /// G06 (issue #113): the rejection for a page-navigation command — the
+    /// target must be a REGISTERED PDF source (navigation is keyed by registry
+    /// source ID, the same identity page rendering uses).
+    private func pdfNavigationError(for id: SourceDefinitionID) -> StudioCommandError? {
+        guard let source = sceneStore.source(withID: id) else {
+            return .invalidTarget("Presentation source \(id) does not exist.")
+        }
+        guard case .pdf = source.payload else {
+            return .invalidTarget("Source \"\(source.name)\" is not a presentation source.")
+        }
+        return nil
+    }
+
+    /// The payload's persisted default page — the seed for deck state before
+    /// the source has ever been navigated.
+    private func pdfDefaultPage(for id: SourceDefinitionID) -> Int {
+        guard case .pdf(let payload) = sceneStore.source(withID: id)?.payload else { return 0 }
+        return payload.page
+    }
+
+    /// G06 (issue #113): the PDF source the keyboard / Present-menu navigation
+    /// targets — the SELECTED layer's bound PDF source first, else the first
+    /// visible PDF source in the staged scene (S06-flattened, so a deck nested
+    /// in a referenced scene counts), so hotkeys act on what the presenter is
+    /// looking at. Nil when no PDF source is in play (controls disable).
+    func presentationNavigationTarget() -> SourceDefinitionID? {
+        guard let staged = previewProgram.stagedScene else { return nil }
+        let registry = SceneGraph.index(sceneStore.scenes)
+        let layers = SceneGraph.flattenedVisibleLayers(of: staged, in: registry)
+        func pdfSourceID(of layer: LayerNode) -> SourceDefinitionID? {
+            guard let id = layer.sourceID,
+                  let source = sceneStore.source(withID: id),
+                  case .pdf = source.payload else { return nil }
+            return id
+        }
+        for layer in layers where sceneStore.selectedLayerIDs.contains(layer.id) {
+            if let id = pdfSourceID(of: layer) { return id }
+        }
+        return layers.lazy.compactMap(pdfSourceID(of:)).first
+    }
+
     /// E06 (issue #165): the rejection for a PTZ target configuration —
     /// the identity rules (add = new ID, update = existing ID) plus usable
     /// name/host/port/address values.
@@ -3190,6 +3296,10 @@ private extension StudioCommand {
     /// precedent), not staged scene content — including them in ⌘Z scene
     /// undo would silently entangle live telestrator marks with document
     /// edits.
+    /// G06 (issue #113): pdf page navigation and framing are excluded — page
+    /// state is the A02 playback-position precedent (session/document state,
+    /// never scene content), persisted in the presentations document outside
+    /// the S12 snapshot.
     var isUndoableSceneEdit: Bool {
         switch self {
         case .addScene, .insertScene, .renameScene, .deleteScene, .updateScene,
@@ -3224,6 +3334,7 @@ private extension StudioCommand {
              .setCameraControls, .triggerCameraReaction,
              .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
+             .pdfNextPage, .pdfPreviousPage, .pdfGoToPage, .pdfSetFraming,
              .addSoundPad, .updateSoundPad, .removeSoundPad,
              .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,
              .addMusicPlaylist, .updateMusicPlaylist, .removeMusicPlaylist,
