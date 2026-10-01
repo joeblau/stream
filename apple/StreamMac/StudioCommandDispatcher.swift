@@ -1005,6 +1005,7 @@ final class StudioCommandDispatcher: ObservableObject {
     /// MainWindowView needs no new environment plumbing.
     let assetLibrary: AssetLibraryStore
     let rundown: ShowRundownController
+    let lutLibrary = LUTLibraryController()
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
     /// graph, keyed by chain-slot ID (passthrough to the controller — the
@@ -3324,6 +3325,20 @@ final class StudioCommandDispatcher: ObservableObject {
 
     private func refreshState() {
         let staged = previewProgram.stagedScene
+        let effects = sceneStore.sources.compactMap(\.effectDefaults)
+            + sceneStore.effectPresets.map(\.effects)
+            + (sceneStore.scenes.flatMap(\.layers) + sceneStore.overlays
+               + (staged?.layers ?? []) + (previewProgram.programScene?.layers ?? [])).compactMap(\.effectOverrides)
+        let lutIDs = Set(effects.compactMap { $0.lut.assetID })
+        let usedSites = Set(lutIDs.map { "lut/\($0)" })
+        for site in assetLibrary.usage.keys where site.hasPrefix("lut/") && !usedSites.contains(site) {
+            assetLibrary.clearUsage(site: site)
+        }
+        for id in lutIDs {
+            let site = "lut/\(id)"
+            if assetLibrary.usage[site]?.contains(id) != true { assetLibrary.noteUsage(of: id, from: site) }
+        }
+        lutLibrary.sync(ids: lutIDs, library: assetLibrary)
         state = StudioState(
             stream: controller.streamState,
             preview: controller.previewState,

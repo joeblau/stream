@@ -173,5 +173,6 @@ struct SourceEffectsSectionView: View {
         }
         Slider(value: effects.tint, in: -100...100) { Text("Tint") }
         Slider(value: effects.gamma, in: 0.5...2) { Text("Gamma") }
+        ColorTransformControlsView(effects: effects)
     }
 }

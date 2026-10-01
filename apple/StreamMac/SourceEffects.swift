@@ -73,6 +73,9 @@ struct SourceEffects: Hashable, Codable, Sendable {
     /// source untouched whenever segmentation can't produce a mask.
     var background: BackgroundEffectSettings = BackgroundEffectSettings()
 
+    var chromaKey = ChromaKeySettings()
+    var lut = LUTSettings()
+
     /// Skip the whole stack without losing the configured values.
     var isBypassed: Bool = false
 
@@ -104,6 +107,8 @@ struct SourceEffects: Hashable, Codable, Sendable {
         gamma = try container.decodeIfPresent(Double.self, forKey: .gamma) ?? 1
         background = try container.decodeIfPresent(BackgroundEffectSettings.self, forKey: .background)
             ?? BackgroundEffectSettings()
+        chromaKey = try container.decodeIfPresent(ChromaKeySettings.self, forKey: .chromaKey) ?? ChromaKeySettings()
+        lut = try container.decodeIfPresent(LUTSettings.self, forKey: .lut) ?? LUTSettings()
         isBypassed = try container.decodeIfPresent(Bool.self, forKey: .isBypassed) ?? false
     }
 
@@ -126,7 +131,7 @@ struct SourceEffects: Hashable, Codable, Sendable {
 
     /// True when rendering this value costs nothing (identity or bypassed).
     var isRenderNoOp: Bool {
-        isBypassed || (!hasFraming && !hasPictureAdjustments && !hasBackgroundEffect)
+        isBypassed || (!hasFraming && !hasPictureAdjustments && !hasBackgroundEffect && !(chromaKey.isEnabled && !chromaKey.isBypassed) && !lut.isEnabled)
     }
 
     /// The value with every field clamped to its documented range (the
@@ -172,7 +177,7 @@ struct SourceEffects: Hashable, Codable, Sendable {
         }
         if !(-100...100).contains(tint) { return "Tint must be between -100 and 100." }
         if !(0.5...2).contains(gamma) { return "Gamma must be between 0.5 and 2." }
-        if let error = background.validationError { return error }
+        if let error = background.validationError ?? chromaKey.validationError ?? lut.validationError { return error }
         return nil
     }
 }

@@ -1345,7 +1345,8 @@ final class SceneRenderer {
                        canvas: CGRect,
                        isCamera: Bool) -> CIImage? {
         let sourceEffects = layer.effectiveSourceEffects(defaults: sourceEffectsProvider())
-        let framed = sourceEffects.map { applyingFraming($0, to: source) } ?? source
+        let keyed = sourceEffects.flatMap { $0.isBypassed ? nil : $0.chromaKey }.map { ColorTransformRenderer.key($0, image: source) } ?? source
+        let framed = sourceEffects.map { applyingFraming($0, to: keyed) } ?? keyed
         let extent = framed.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
 
@@ -1383,7 +1384,8 @@ final class SceneRenderer {
                               cornerRadius: cornerRadius)
         }
 
-        let adjusted = sourceEffects.map { applyingPictureAdjustments($0, to: placed) } ?? placed
+        var adjusted = sourceEffects.map { applyingPictureAdjustments($0, to: placed) } ?? placed
+        if let effects = sourceEffects, !effects.isBypassed { adjusted = ColorTransformRenderer.lut(effects.lut, image: adjusted) }
         return applyEffects(adjusted, layer: layer, canvas: canvas)
     }
 
