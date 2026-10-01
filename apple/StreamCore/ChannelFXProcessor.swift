@@ -32,37 +32,55 @@ private final class FXConverterInputState: @unchecked Sendable {
 
 /// A08 (issue #120): the configurable per-channel effect chain — the
 /// controllable successor to `VoicePolishProcessor`'s fixed curve, running
-/// the same Apple-native, offline-render graph pattern on the capture thread:
+/// the same Apple-native, offline-render graph pattern on the capture thread.
+/// A11 (issue #123) adds hosted third-party Audio Unit effects between the
+/// compressor and the limiter:
 ///
 ///   player → AVAudioUnitEQ (high-pass + 3 bands) → gate (DynamicsProcessor,
-///   downward expansion) → compressor (DynamicsProcessor) → PeakLimiter
-///   → mainMixer
+///   downward expansion) → compressor (DynamicsProcessor)
+///   → [hosted AU slots, in chain order] → PeakLimiter → mainMixer
 ///
-/// The effect ORDER is fixed and matches `ChannelFXChain.effectOrder`; each
-/// section's enable maps to band bypass / `shouldBypassEffect`, so toggling a
-/// section never rebuilds the graph and preserves channel count, timing, and
-/// audio continuity (the issue's criteria). Exactly the input frame count is
-/// rendered per call — the chain adds ZERO latency
-/// (`ChannelFXChain.latencySeconds`).
+/// The hosted units sit there deliberately: after the dynamics that shape the
+/// voice, before the safety ceiling that catches anything a plugin outputs
+/// hot. The native effect ORDER is fixed and matches
+/// `ChannelFXChain.effectOrder`; each section's enable maps to band bypass /
+/// `shouldBypassEffect`, so toggling a section never rebuilds the graph and
+/// preserves channel count, timing, and audio continuity (the issue's
+/// criteria). Exactly the input frame count is rendered per call — the native
+/// sections add ZERO latency (`ChannelFXChain.latencySeconds`); a hosted AU
+/// may REPORT latency (`AUAudioUnit.latency`), which the offline render does
+/// not compensate (frame counts are preserved, so content shifts by that
+/// amount) — the rack surfaces it per slot.
 ///
 /// **Live parameter updates** (no capture restarts): the caller hands the
 /// latest `ChannelFXChain` to every `process(_:chain:)` call — the chain is a
 /// tiny value type the owning insert box swaps under a lock, so the audio
 /// thread never blocks on UI work. A changed chain re-writes the AU
 /// parameters in place (thread-safe `AUParameterTree` writes); an unchanged
-/// one costs one value comparison. An inactive chain
+/// one costs one value comparison. A chain whose hosted-slot STRUCTURE
+/// changed (add/remove/reorder/component swap) rebuilds the graph in place —
+/// same format, same converter, between two buffers. An inactive chain
 /// (`ChannelFXChain.isActive == false`) takes the zero-cost identity path:
 /// the SAME buffer object is returned and no engine is ever built.
 ///
-/// Failure policy matches VoicePolishProcessor: any format/engine/render
-/// problem logs once and returns the input UNCHANGED — FX must never drop or
-/// mute a source. Unavailable native processing modes (true broadband
-/// denoise, de-esser) are documented on the chain model; they arrive through
-/// A11 (Audio Unit hosting).
+/// **A11 failure isolation (documented honestly):** hosted units are
+/// instantiated IN-PROCESS — a plugin that crashes (vs. returns an error)
+/// takes the app with it; macOS offers no out-of-process hosting for
+/// arbitrary v2 component AUs. What the host DOES contain: a component that
+/// is no longer installed never reaches instantiation (`isAvailable`
+/// pre-check → bypassed placeholder, chain runs); a unit whose graph build
+/// or engine start throws degrades the chain to native-only (logged once);
+/// a render error passes the buffer through unchanged. The rack reads which
+/// slots actually loaded via `hostedHandles()`.
+///
+/// Failure policy otherwise matches VoicePolishProcessor: any
+/// format/engine/render problem logs once and returns the input UNCHANGED —
+/// FX must never drop or mute a source.
 ///
 /// Not `Sendable`: each channel's insert owns its own instance, confined to
 /// the channel's ingest lock (the same confinement the publishers gave their
-/// VoicePolishProcessor instances).
+/// VoicePolishProcessor instances). The published handles cross to the main
+/// thread under their own unfair lock (`hostedHandles()`).
 public final class ChannelFXProcessor {
 
     private static let log = Logger(subsystem: "com.joeblau.Stream", category: "channel-fx")
@@ -70,12 +88,31 @@ public final class ChannelFXProcessor {
     /// Upper bound per `renderOffline` call (see VoicePolishProcessor).
     private static let maxRenderFrames: AVAudioFrameCount = 4096
 
+    /// One hosted unit running in the graph, tied to its chain slot.
+    private struct HostedUnit {
+        let slotID: UUID
+        let unit: AVAudioUnitEffect
+    }
+
+    /// Identity of the hosted section's STRUCTURE: which slots, with which
+    /// components, in which order. State blobs and bypass flags are
+    /// deliberately excluded — they never require a graph rebuild.
+    private struct HostedSlotKey: Equatable {
+        let id: UUID
+        let component: AudioUnitComponentID
+    }
+
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
     private var eq: AVAudioUnitEQ?
     private var gate: AVAudioUnitEffect?
     private var compressor: AVAudioUnitEffect?
     private var limiter: AVAudioUnitEffect?
+    /// Hosted units in signal order (between compressor and limiter).
+    private var hostedUnits: [HostedUnit] = []
+    /// The hosted structure the CURRENT graph was built with, so
+    /// `applyChain` can tell "parameter edit" from "slot add/remove/reorder".
+    private var builtHostedStructure: [HostedSlotKey] = []
     /// Engine/render format: deinterleaved Float32 PCM at the source's rate
     /// and channels.
     private var renderFormat: AVAudioFormat?
@@ -86,6 +123,10 @@ public final class ChannelFXProcessor {
     /// The chain last written onto the graph; `process` re-applies on change.
     private var appliedChain: ChannelFXChain?
     private var didLogFailure = false
+    /// UI-facing handles for the running hosted units, published after every
+    /// graph build under this lock (the only cross-thread surface).
+    private var handleLock = os_unfair_lock_s()
+    private var handles: [UUID: HostedAudioUnitHandle] = [:]
 
     public init() {}
 
@@ -99,12 +140,24 @@ public final class ChannelFXProcessor {
         gate = nil
         compressor = nil
         limiter = nil
+        hostedUnits = []
+        builtHostedStructure = []
         converter = nil
         renderFormat = nil
         outputFormatDescription = nil
         builtRate = 0
         builtChannels = 0
         appliedChain = nil
+        publishHandles()
+    }
+
+    /// The handles of the hosted units currently running in the graph, keyed
+    /// by chain-slot ID. Main-thread safe (own lock); a slot with no handle
+    /// is NOT loaded — plugin missing, load failed, or the channel is idle.
+    public func hostedHandles() -> [UUID: HostedAudioUnitHandle] {
+        os_unfair_lock_lock(&handleLock)
+        defer { os_unfair_lock_unlock(&handleLock) }
+        return handles
     }
 
     /// Runs one buffer through the chain. Timing is preserved verbatim
@@ -124,7 +177,8 @@ public final class ChannelFXProcessor {
 
         if engine == nil || builtRate != asbd.mSampleRate || builtChannels != asbd.mChannelsPerFrame {
             reset()
-            guard buildEngine(sampleRate: asbd.mSampleRate, channels: asbd.mChannelsPerFrame) else {
+            guard buildWithFallback(sampleRate: asbd.mSampleRate,
+                                    channels: asbd.mChannelsPerFrame, chain: chain) else {
                 return fail(sampleBuffer, "engine build failed")
             }
             var sourceASBD = asbd
@@ -133,13 +187,15 @@ public final class ChannelFXProcessor {
             }
             converter = AVAudioConverter(from: sourceFormat, to: renderFormat!)
         }
+        // Live parameter update: write the chain onto the graph only when it
+        // changed (value-type diff — no per-buffer cost when idle). A
+        // changed hosted-slot structure rebuilds the graph in place (same
+        // format, converter kept), so `player`/`engine` are fetched AFTER.
+        applyChain(chain)
         guard let engine, let player, let renderFormat, let converter,
               let outputFormatDescription else {
             return fail(sampleBuffer, "engine not ready")
         }
-        // Live parameter update: write the chain onto the graph only when it
-        // changed (value-type diff — no per-buffer cost when idle).
-        applyChain(chain)
 
         // 1. Source AudioBufferList → render-format AVAudioPCMBuffer.
         guard let sourcePCM = VoicePolishProcessor.extractPCM(
@@ -230,10 +286,31 @@ public final class ChannelFXProcessor {
 
     // MARK: - Engine construction
 
+    /// Builds the graph for `chain`, degrading honestly when hosted units
+    /// fail: first attempt includes every AVAILABLE hosted component; if the
+    /// engine refuses to start with them attached, log once and rebuild
+    /// native-only (the affected slots simply publish no handle — the rack
+    /// shows them as not loaded, and the chain keeps running).
+    private func buildWithFallback(sampleRate: Double, channels: UInt32,
+                                   chain: ChannelFXChain) -> Bool {
+        let wantsHosted = chain.audioUnits.contains { $0.component.isAvailable }
+        if buildEngine(sampleRate: sampleRate, channels: channels,
+                       chain: chain, includeHosted: wantsHosted) {
+            return true
+        }
+        if wantsHosted {
+            logFailure("a hosted Audio Unit failed to load; running native sections only")
+            return buildEngine(sampleRate: sampleRate, channels: channels,
+                               chain: chain, includeHosted: false)
+        }
+        return false
+    }
+
     /// Builds and starts the manual-rendering graph at the source's live
     /// format, with every section bypassed; `applyChain` then writes the
     /// real parameters. Returns false (→ passthrough) on any failure.
-    private func buildEngine(sampleRate: Double, channels: UInt32) -> Bool {
+    private func buildEngine(sampleRate: Double, channels: UInt32,
+                             chain: ChannelFXChain, includeHosted: Bool) -> Bool {
         guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                          sampleRate: sampleRate,
                                          channels: AVAudioChannelCount(channels),
@@ -247,11 +324,32 @@ public final class ChannelFXProcessor {
         let compressor = VoicePolishProcessor.effect(kAudioUnitSubType_DynamicsProcessor)
         let limiter = VoicePolishProcessor.effect(kAudioUnitSubType_PeakLimiter)
 
-        for node in [player, eq, gate, compressor, limiter] { engine.attach(node) }
+        // A11: instantiate the chain's hosted slots (those still installed —
+        // `isAvailable` pre-checks registration so a missing plugin never
+        // reaches the non-failable AVAudioUnitEffect initializer). Each unit
+        // is an `AVAudioUnitEffect` from the slot's AudioComponentDescription,
+        // the same graph seam the Apple-native effects use.
+        var hosted: [HostedUnit] = []
+        if includeHosted {
+            for slot in chain.audioUnits where slot.component.isAvailable {
+                hosted.append(HostedUnit(
+                    slotID: slot.id,
+                    unit: AVAudioUnitEffect(audioComponentDescription: slot.component.componentDescription)))
+            }
+        }
+
+        for node in [player, eq, gate, compressor] as [AVAudioNode] { engine.attach(node) }
+        for hostedUnit in hosted { engine.attach(hostedUnit.unit) }
+        engine.attach(limiter)
         engine.connect(player, to: eq, format: format)
         engine.connect(eq, to: gate, format: format)
         engine.connect(gate, to: compressor, format: format)
-        engine.connect(compressor, to: limiter, format: format)
+        var upstream: AVAudioNode = compressor
+        for hostedUnit in hosted {
+            engine.connect(upstream, to: hostedUnit.unit, format: format)
+            upstream = hostedUnit.unit
+        }
+        engine.connect(upstream, to: limiter, format: format)
         engine.connect(limiter, to: engine.mainMixerNode, format: format)
 
         do {
@@ -262,6 +360,16 @@ public final class ChannelFXProcessor {
             return false
         }
         player.play()
+
+        // Restore persisted plugin state AFTER start (a unit may reject
+        // fullState before its render resources exist). Best-effort: a
+        // plugin that rejects the blob keeps its own defaults — the slot
+        // stays loaded and the chain keeps running.
+        for hostedUnit in hosted {
+            guard let slot = chain.audioUnits.first(where: { $0.id == hostedUnit.slotID }),
+                  let fullState = HostedAudioUnitSlot.decodeState(slot.state) else { continue }
+            hostedUnit.unit.auAudioUnit.fullState = fullState
+        }
 
         var outASBD = AudioStreamBasicDescription(
             mSampleRate: sampleRate,
@@ -283,31 +391,72 @@ public final class ChannelFXProcessor {
                                              formatDescriptionOut: &description) == noErr,
               let description else { return false }
 
+        // On an in-place hosted-structure rebuild this replaces a RUNNING
+        // graph — stop it first so its render resources release now.
+        self.engine?.stop()
         self.engine = engine
         self.player = player
         self.eq = eq
         self.gate = gate
         self.compressor = compressor
         self.limiter = limiter
+        self.hostedUnits = hosted
+        self.builtHostedStructure = Self.hostedStructure(of: includeHosted ? chain.audioUnits : [])
         self.renderFormat = format
         self.outputFormatDescription = description
         self.builtRate = sampleRate
         self.builtChannels = channels
         self.appliedChain = nil
         self.didLogFailure = false
+        publishHandles()
         return true
+    }
+
+    private static func hostedStructure(of slots: [HostedAudioUnitSlot]) -> [HostedSlotKey] {
+        slots.map { HostedSlotKey(id: $0.id, component: $0.component) }
+    }
+
+    /// Publishes the current hosted units as UI-facing handles (called after
+    /// every build and on reset, from the confined audio side; readers take
+    /// the handle lock).
+    private func publishHandles() {
+        var published: [UUID: HostedAudioUnitHandle] = [:]
+        for hostedUnit in hostedUnits {
+            let auAudioUnit = hostedUnit.unit.auAudioUnit
+            published[hostedUnit.slotID] = HostedAudioUnitHandle(
+                slotID: hostedUnit.slotID,
+                audioUnit: auAudioUnit,
+                latencySeconds: auAudioUnit.latency)
+        }
+        os_unfair_lock_lock(&handleLock)
+        handles = published
+        os_unfair_lock_unlock(&handleLock)
     }
 
     // MARK: - Live chain application
 
     /// Writes a changed chain onto the running graph: EQ band parameters and
     /// per-band bypass, the gate's expansion region, the compressor's
-    /// dynamics mapping (headRoom = |threshold| / ratio), and the limiter's
-    /// ceiling. Section enables map to bypass flags — the graph never
-    /// rebuilds, so a toggle mid-stream keeps the buffer stream continuous.
+    /// dynamics mapping (headRoom = |threshold| / ratio), the limiter's
+    /// ceiling, and each hosted unit's bypass. Section enables map to bypass
+    /// flags — the graph never rebuilds for a parameter edit, so a toggle
+    /// mid-stream keeps the buffer stream continuous. A changed hosted-slot
+    /// STRUCTURE (add/remove/reorder/component swap) is the one edit that
+    /// rebuilds the graph — in place, between two buffers, same format.
     private func applyChain(_ chain: ChannelFXChain) {
-        guard appliedChain != chain, let eq, let gate, let compressor, let limiter else { return }
+        guard appliedChain != chain else { return }
+
+        if Self.hostedStructure(of: chain.audioUnits) != builtHostedStructure {
+            // In-place graph rebuild. Format/converter survive (buildEngine
+            // re-creates them identically); a failed rebuild keeps the
+            // PREVIOUS graph running — the new parameters below then apply
+            // to it as far as they line up, and the rack shows the hosted
+            // slots that did not load.
+            _ = buildWithFallback(sampleRate: builtRate, channels: builtChannels, chain: chain)
+        }
         appliedChain = chain
+
+        guard let eq, let gate, let compressor, let limiter else { return }
 
         eq.globalGain = 0
         let bands = eq.bands
@@ -363,6 +512,23 @@ public final class ChannelFXProcessor {
             limiter, address: AUParameterAddress(kLimiterParam_PreGain),
             value: Float(chain.limiter.ceiling))
         limiter.auAudioUnit.shouldBypassEffect = !chain.limiter.isEnabled
+
+        // A11: live bypass per hosted slot. `fullState` is applied at build
+        // time only — re-applying it here would stomp the user's live edits
+        // (the persisted blob is captured FROM the running unit).
+        for slot in chain.audioUnits {
+            guard let hosted = hostedUnits.first(where: { $0.slotID == slot.id }) else { continue }
+            hosted.unit.auAudioUnit.shouldBypassEffect = !slot.isEnabled
+        }
+    }
+
+    /// One-shot failure log (no buffer to pass through — for build-time
+    /// degradations where the chain keeps running, just without a piece).
+    private func logFailure(_ reason: String) {
+        if !didLogFailure {
+            didLogFailure = true
+            Self.log.error("Channel FX degradation: \(reason, privacy: .public)")
+        }
     }
 
     /// One-shot failure log + passthrough. FX degrade to dry source, never

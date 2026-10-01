@@ -130,19 +130,45 @@ public struct ChannelFXChain: Hashable, Codable, Sendable {
     public var equalizer: Equalizer
     public var compressor: Compressor
     public var limiter: Limiter
+    /// A11 (issue #123): hosted third-party Audio Unit effects, in signal
+    /// order, inserted BETWEEN the compressor and the limiter (the safety
+    /// ceiling always stays last). Ordered, individually bypassable,
+    /// persisted by component identity + a `fullState` blob; a missing
+    /// plugin degrades to a bypassed placeholder and the chain still runs.
+    /// AU add/remove/reorder/bypass never flips `preset` — presets describe
+    /// the native sections, slots are orthogonal to them.
+    public var audioUnits: [HostedAudioUnitSlot]
 
     public init(preset: ChannelFXPreset = .off,
                 highPass: HighPass = HighPass(),
                 noiseGate: NoiseGate = NoiseGate(),
                 equalizer: Equalizer = Equalizer(),
                 compressor: Compressor = Compressor(),
-                limiter: Limiter = Limiter()) {
+                limiter: Limiter = Limiter(),
+                audioUnits: [HostedAudioUnitSlot] = []) {
         self.preset = preset
         self.highPass = highPass
         self.noiseGate = noiseGate
         self.equalizer = equalizer
         self.compressor = compressor
         self.limiter = limiter
+        self.audioUnits = audioUnits
+    }
+
+    /// A11: additive decoding — chain blobs written before Audio Unit
+    /// hosting existed carry no `audioUnits` key and must still decode (the
+    /// synthesized decoder would throw on the missing key and take the whole
+    /// settings document down with it).
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = ChannelFXChain()
+        preset = try c.decodeIfPresent(ChannelFXPreset.self, forKey: .preset) ?? defaults.preset
+        highPass = try c.decodeIfPresent(HighPass.self, forKey: .highPass) ?? defaults.highPass
+        noiseGate = try c.decodeIfPresent(NoiseGate.self, forKey: .noiseGate) ?? defaults.noiseGate
+        equalizer = try c.decodeIfPresent(Equalizer.self, forKey: .equalizer) ?? defaults.equalizer
+        compressor = try c.decodeIfPresent(Compressor.self, forKey: .compressor) ?? defaults.compressor
+        limiter = try c.decodeIfPresent(Limiter.self, forKey: .limiter) ?? defaults.limiter
+        audioUnits = try c.decodeIfPresent([HostedAudioUnitSlot].self, forKey: .audioUnits) ?? []
     }
 
     /// True when no section is active — the processor takes the zero-cost
@@ -151,6 +177,7 @@ public struct ChannelFXChain: Hashable, Codable, Sendable {
     public var isActive: Bool {
         highPass.isEnabled || noiseGate.isEnabled || equalizer.isEnabled
             || compressor.isEnabled || limiter.isEnabled
+            || audioUnits.contains(where: \.isEnabled)
     }
 
     /// The fixed processing order, for the FX rack's visible-order row.
@@ -234,6 +261,16 @@ public struct ChannelFXChain: Hashable, Codable, Sendable {
         if let error = check(compressor.releaseMs, 20...2_000, "Compressor release") { return error }
         if let error = check(compressor.makeupGain, 0...24, "Compressor makeup") { return error }
         if let error = check(limiter.ceiling, -12...0, "Limiter ceiling") { return error }
+        // A11: hosted Audio Unit slots — bounded count (capture-thread
+        // render cost) and bounded state blobs (settings-document size).
+        if audioUnits.count > HostedAudioUnitSlot.maxSlotsPerChannel {
+            return "A channel hosts at most \(HostedAudioUnitSlot.maxSlotsPerChannel) Audio Units."
+        }
+        for slot in audioUnits {
+            if let state = slot.state, state.count > HostedAudioUnitSlot.maxStateBytes {
+                return "\(slot.component.displayName) saved state is too large."
+            }
+        }
         return nil
     }
 }

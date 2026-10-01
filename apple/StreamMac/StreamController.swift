@@ -996,6 +996,15 @@ final class StreamController: ObservableObject {
         }
     }
 
+    /// A11 (issue #123): the hosted Audio Units running in one channel's FX
+    /// graph, keyed by chain-slot ID (empty while the channel is idle or
+    /// when no slot loaded). The FX rack binds its generic parameter editor
+    /// to these; the handles' parameter tree / fullState are the unit's
+    /// thread-safe surface.
+    func hostedAudioUnitHandles(forChannelLabel label: String) -> [UUID: HostedAudioUnitHandle] {
+        channelFXBoxes.first(where: { $0.key.label == label })?.value.hostedAudioUnitHandles() ?? [:]
+    }
+
     /// Starts mic capture on the preferred input from settings, falling back
     /// to the system default when none is chosen or the chosen device is gone.
     private func startAudioInput() {
@@ -1274,6 +1283,14 @@ private final class ChannelFXInsertBox: @unchecked Sendable {
         let chain = self.chain
         os_unfair_lock_unlock(&lock)
         return processor.process(sample, chain: chain)
+    }
+
+    /// A11 (issue #123): the hosted Audio Units currently running in this
+    /// channel's graph (main-thread safe — the processor publishes them
+    /// under their own lock). A persisted slot with no handle did not load
+    /// (plugin missing, load failure, or the channel is idle).
+    func hostedAudioUnitHandles() -> [UUID: HostedAudioUnitHandle] {
+        processor.hostedHandles()
     }
 }
 

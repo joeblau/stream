@@ -196,6 +196,14 @@ targets:
       path: StreamMac/StreamMac.entitlements
       properties:
         com.apple.security.app-sandbox: true
+        # A11 (issue #123): host third-party Audio Unit effects in-process.
+        # Enumerating components works sandboxed; LOADING a third-party AU
+        # bundle into the process requires this documented temporary
+        # exception (the GarageBand-class host entitlement). Sandbox stays
+        # on; macOS has no out-of-process hosting for arbitrary v2 component
+        # AUs, so crash containment is the error-handling ladder documented
+        # in ChannelFXProcessor. Kept in sync with StreamMac.entitlements.
+        com.apple.security.temporary-exception.audio-unit-host: true
         com.apple.security.device.camera: true
         com.apple.security.device.microphone: true
         com.apple.security.network.client: true

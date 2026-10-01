@@ -658,6 +658,15 @@ final class StudioCommandDispatcher: ObservableObject {
     let soundboardStore: SoundboardStore
     let soundboard: SoundboardController
 
+    /// A11 (issue #123): the hosted Audio Units running in one channel's FX
+    /// graph, keyed by chain-slot ID (passthrough to the controller — the
+    /// rack polls this while open; a persisted slot with no handle did not
+    /// load). The rack's generic parameter editor binds to the returned
+    /// handles' thread-safe parameter tree / fullState surface.
+    func hostedAudioUnitHandles(forLabel label: String) -> [UUID: HostedAudioUnitHandle] {
+        controller.hostedAudioUnitHandles(forChannelLabel: label)
+    }
+
     init(controller: StreamController,
          sceneStore: SceneStore,
          session: SettingsSession,

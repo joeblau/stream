@@ -219,17 +219,17 @@ struct MixerPanelView: View {
     }
 
     /// A08 (issue #120): opens the channel's FX rack sheet (preset, per-
-    /// section bypass/reset, live parameters). Tinted while any section is
-    /// active so the strip shows processing at a glance. Mic channels only —
-    /// capture/media/app/guest channels have no native insert chain yet
-    /// (their processing modes arrive through A11 Audio Unit hosting).
+    /// section bypass/reset, live parameters, A11 hosted Audio Units).
+    /// Tinted while any section is active so the strip shows processing at
+    /// a glance. Mic channels only — capture/media/app/guest channels have
+    /// no insert chain yet.
     private func fxButton(for id: AudioChannelID) -> some View {
         let active = dispatcher.state.fxChain(forLabel: id.label).isActive
         return Button("FX") { fxRack = FXRackTarget(channel: id) }
             .buttonStyle(.bordered)
             .controlSize(.mini)
             .tint(active ? .purple : nil)
-            .help("Per-channel effects: high-pass, noise gate, EQ, compressor, limiter — applied live")
+            .help("Per-channel effects: high-pass, noise gate, EQ, compressor, Audio Units, limiter — applied live")
     }
 
     /// A05: the explicit relink path for an unplugged input device — pick a
