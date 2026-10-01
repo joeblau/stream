@@ -38,13 +38,11 @@ finds the preceding keyframe, prerolls, and compares the target frame's full
 RGBA hash with sequential decode. Timestamps come from signed block offsets
 plus cluster time and checked nanosecond scaling, not a guessed frame rate.
 
-**Native validation remains a gate.** H.264 and ProRes control files also
-fail decode in this sandbox; these results do not establish that those
-formats are unsupported. Repeat the native probe outside this restricted
-process on the minimum supported macOS and a current release before closing
-the native-compatibility acceptance criterion or advertising format support.
-The HEVC fixture name alone also does not prove alpha survived encoding;
-inspect decoded alpha on that unrestricted run.
+H.264 and ProRes control files also fail decode in this sandbox; those local
+results do not establish that the formats are unsupported. The hosted
+measurements below resolve that ambiguity for the two tested configurations.
+The local HEVC fixture name alone does not prove alpha survived encoding;
+HEVC alpha remains unqualified by this research matrix.
 
 The Native Media Research workflow repeats the complete prototype on hosted
 macOS 15 and 26 runners. `G10_REQUIRE_NATIVE_CONTROLS=1` makes the run fail
@@ -61,6 +59,30 @@ An initial hosted BGRA probe decoded ProRes with alpha 0–254 rather than
 8-bit RGB route and Apple's recommended 64ARGB ProRes-alpha route, keeping
 their results separate. [Apple's reader output guidance](https://developer.apple.com/documentation/avfoundation/avassetreadertrackoutput)
 recommends alpha-bearing high-bit-depth formats to preserve ProRes alpha.
+
+## Hosted native measurements (2026-10-01)
+
+Both [macOS 15.7.9 (24G830)](https://github.com/joeblau/stream/actions/runs/36942618228/job/110637384726)
+and [macOS 26.6.2 (25G83)](https://github.com/joeblau/stream/actions/runs/36942618228/job/110637385029)
+passed on arm64 with libvpx 1.17.0 and FFmpeg 9.0.1. H.264 decoded all
+60 frames as opaque BGRA. ProRes 4444 decoded all 60 frames with transparent,
+translucent and opaque alpha: 0–254 in BGRA and 0–255 in 64ARGB. Both outputs
+completed without reader errors. AVFoundation rejected each tested WebM
+container with -11828, including VP8/VP9 alpha, opaque VP9/Opus and AV1.
+
+The optional adapter decoded every VP8/VP9 fixture, retained timestamps,
+and reproduced frame 37 after keyframe-30 preroll. VP8/VP9 alpha masks both
+matched FFmpeg exactly. Decode, output hashing/snapshot and seek validation
+for each two-second 128×96 clip took 0.34–0.43 seconds on macOS 15 and
+0.24–0.30 seconds on macOS 26. These tiny fixtures establish correctness,
+not a 1080p/4K throughput claim. Per-run artifacts include the fixtures,
+native JSON report, decoded masks and logs.
+
+The bounded research acceptance is satisfied on these documented systems.
+Minimum-OS, Intel, real production-size workload, signed helper and complete
+shipping qualification remain in [R03 #92](https://github.com/joeblau/stream/issues/92)
+and [R05 #94](https://github.com/joeblau/stream/issues/94). No native support
+claim is extended to untested codecs or configurations.
 
 ## Bounds and limitations
 
@@ -101,5 +123,6 @@ acquire a mandatory libvpx dependency.
 - [libvpx SDK and tools](https://www.webmproject.org/code/)
 - [Apple AVAssetReader](https://developer.apple.com/documentation/avfoundation/avassetreader)
 
-G10 stays open pending the unrestricted native validation above. The
-prototype and optional packaging decision are ready for review.
+G10's prototype and optional packaging decision are supported by the hosted
+measurements above. A production helper remains follow-up implementation;
+native playback retains its existing dependency path.
