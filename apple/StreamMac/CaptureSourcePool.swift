@@ -1048,7 +1048,7 @@ final class CaptureSourcePool: ObservableObject {
             // G08: no physical device/display ever marks a widget missing,
             // but halt the snapshot clock if one lands here — the frame
             // store keeps the last frame until its freshness window lapses.
-            webHosts[key]?.stopCaptureClock()
+            webHosts[key]?.stop()
         }
     }
 
