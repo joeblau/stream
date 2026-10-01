@@ -94,6 +94,38 @@ enum StudioCommand: Equatable, Sendable {
     /// composition (`member.isLocked || group.isLocked`) until unlocked.
     case setGroupLocked(GroupID, locked: Bool, in: SceneID?)
 
+    // S07 project-wide overlays and backgrounds (issue #74). Overlays are
+    // PROJECT-level content — NOT bound to the staged scene: these commands
+    // mutate the SceneStore overlay list directly and apply immediately to
+    // BOTH the staged and program compositions (live-safe shared branding,
+    // the Ecamm-style behavior the issue describes), so they never appear as
+    // pending staged edits and Take/Revert does not gate them. The per-scene
+    // pieces — hiding an overlay in one scene and a scene's own background —
+    // ARE scene content and ride the normal staged→program path.
+    /// Adds a project overlay (text/shape today — branding that needs no
+    /// capture) at the FRONT of the project overlay stack.
+    case addOverlay(LayerPayload)
+    case removeOverlay(LayerID)
+    case renameOverlay(LayerID, to: String)
+    case setOverlayVisibility(LayerID, visible: Bool)
+    case setOverlayLocked(LayerID, locked: Bool)
+    case setOverlayTransform(LayerID, LayerTransform)
+    case setOverlayEffects(LayerID, [LayerEffect])
+    /// Moves an overlay to `toIndex` in the back-to-front array (index as
+    /// counted AFTER removing it — same semantics as `moveLayer`).
+    case moveOverlay(LayerID, toIndex: Int)
+    /// Per-scene override: hides/shows a project overlay in the STAGED scene
+    /// only (`Scene.hiddenOverlayIDs` — staged scene content, taken/reverted
+    /// like any scene edit).
+    case setOverlayHiddenInScene(LayerID, hidden: Bool, in: SceneID?)
+    /// Sets the STAGED scene's own background (nil = inherit the project
+    /// default). Scene content: stages and Takes like any scene edit.
+    case setSceneBackground(SceneBackground?, in: SceneID?)
+    /// Sets the PROJECT default background — every scene without its own
+    /// background falls back to it (then to black). Project-level: applies
+    /// immediately, like overlay edits.
+    case setDefaultBackground(SceneBackground?)
+
     // Output profile (W07 staged-vs-active rules live in the controller).
     case setOutputProfile(OutputProfile, destination: StreamProtocol?)
 
@@ -148,6 +180,20 @@ enum StudioCommand: Equatable, Sendable {
             return "\(visible ? "Show" : "Hide") Group"
         case .setGroupLocked(_, let locked, _):
             return "\(locked ? "Lock" : "Unlock") Group"
+        case .addOverlay(let payload): return "Add \(payload.displayName) Overlay"
+        case .removeOverlay: return "Remove Overlay"
+        case .renameOverlay: return "Rename Overlay"
+        case .setOverlayVisibility(_, let visible):
+            return "\(visible ? "Show" : "Hide") Overlay"
+        case .setOverlayLocked(_, let locked):
+            return "\(locked ? "Lock" : "Unlock") Overlay"
+        case .setOverlayTransform: return "Move Overlay"
+        case .setOverlayEffects: return "Overlay Effects"
+        case .moveOverlay: return "Reorder Overlay"
+        case .setOverlayHiddenInScene(_, let hidden, _):
+            return "\(hidden ? "Hide" : "Show") Overlay in Scene"
+        case .setSceneBackground: return "Set Scene Background"
+        case .setDefaultBackground: return "Set Project Background"
         case .setOutputProfile: return "Set Output Profile"
         case .openSettings: return "Open Settings"
         case .closeSettings: return "Close Settings"
@@ -407,7 +453,7 @@ final class StudioCommandDispatcher: ObservableObject {
             case .success:
                 return payload.isRenderable
                     ? nil
-                    : .invalidValue("\(payload.displayName) layers are model-only — the render path composites camera and screen layers today.")
+                    : .invalidValue("\(payload.displayName) layers are model-only — the render path composites camera, screen, text, and shape layers today.")
             }
         case .removeLayer(let layerID, let sceneID):
             switch resolveLayer(layerID, in: sceneID) {
@@ -500,6 +546,64 @@ final class StudioCommandDispatcher: ObservableObject {
                 }
                 return nil
             }
+
+        // S07 project overlays: validated against the SceneStore overlay
+        // list (project level — never the staged scene).
+        case .addOverlay(let payload):
+            // Branding overlays only: text/shape render without a capture.
+            // Camera/screen overlays would need the S05 demand reconciliation
+            // to watch the overlay list (it watches scenes today); the other
+            // kinds have no renderer yet.
+            return payload.isText || payload.isShape
+                ? nil
+                : .invalidValue("\(payload.displayName) overlays aren't supported yet — add a Text or Shape overlay.")
+        case .removeOverlay(let overlayID),
+             .setOverlayVisibility(let overlayID, _),
+             .setOverlayTransform(let overlayID, _),
+             .setOverlayEffects(let overlayID, _):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay): return overlayLockError(for: overlay)
+            case .failure(let error): return error
+            }
+        case .renameOverlay(let overlayID, let name):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay):
+                if let error = overlayLockError(for: overlay) { return error }
+                return name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? .invalidValue("An overlay name can't be empty.") : nil
+            case .failure(let error): return error
+            }
+        case .setOverlayLocked(let overlayID, _):
+            // Locking/unlocking is the one edit a LOCKED overlay accepts.
+            switch resolveOverlay(overlayID) {
+            case .success: return nil
+            case .failure(let error): return error
+            }
+        case .moveOverlay(let overlayID, let toIndex):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay):
+                if let error = overlayLockError(for: overlay) { return error }
+                // toIndex counts the post-removal array (count - 1 slots).
+                return (0..<sceneStore.overlays.count).contains(toIndex)
+                    ? nil
+                    : .invalidValue("Z-order index \(toIndex) is outside the overlay stack.")
+            case .failure(let error): return error
+            }
+        case .setOverlayHiddenInScene(let overlayID, _, let sceneID):
+            // Scene content: the override lands on the STAGED scene.
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success:
+                return sceneStore.overlays.contains(where: { $0.id == overlayID })
+                    ? nil : .invalidTarget("Overlay \(overlayID) does not exist.")
+            }
+        case .setSceneBackground(_, let sceneID):
+            switch resolveStagedScene(sceneID) {
+            case .failure(let error): return error
+            case .success: return nil
+            }
+        case .setDefaultBackground:
+            return nil
 
         case .setOutputProfile:
             // Always acceptable: the controller clamps to hardware/destination
@@ -664,6 +768,40 @@ final class StudioCommandDispatcher: ObservableObject {
                 scene.groups[index].isLocked = locked
             }
 
+        // S07 project overlays: project-level edits — SceneStore publishes
+        // them to every engine on persist, so staged AND program composite
+        // the change on their next tick. No staged edit, no implicit take.
+        case .addOverlay(let payload):
+            sceneStore.addOverlay(makeOverlay(payload: payload))
+        case .removeOverlay(let overlayID):
+            sceneStore.removeOverlay(overlayID)
+        case .renameOverlay(let overlayID, let name):
+            editOverlay(overlayID) { $0.name = name }
+        case .setOverlayVisibility(let overlayID, let visible):
+            editOverlay(overlayID) { $0.isVisible = visible }
+        case .setOverlayLocked(let overlayID, let locked):
+            editOverlay(overlayID) { $0.isLocked = locked }
+        case .setOverlayTransform(let overlayID, let transform):
+            editOverlay(overlayID) { $0.transform = transform }
+        case .setOverlayEffects(let overlayID, let effects):
+            editOverlay(overlayID) { $0.effects = effects }
+        case .moveOverlay(let overlayID, let toIndex):
+            sceneStore.moveOverlay(overlayID, toIndex: toIndex)
+        case .setOverlayHiddenInScene(let overlayID, let hidden, let sceneID):
+            // Scene content: stages (and implicitly takes in direct-live)
+            // like any other scene edit.
+            editStagedScene(sceneID) { scene in
+                if hidden {
+                    scene.hiddenOverlayIDs.insert(overlayID)
+                } else {
+                    scene.hiddenOverlayIDs.remove(overlayID)
+                }
+            }
+        case .setSceneBackground(let background, let sceneID):
+            editStagedScene(sceneID) { $0.background = background }
+        case .setDefaultBackground(let background):
+            sceneStore.setDefaultBackground(background)
+
         case .setOutputProfile(let profile, let destination):
             controller.applyOutputProfile(profile, destination: destination)
 
@@ -763,9 +901,73 @@ final class StudioCommandDispatcher: ObservableObject {
             return .fullscreenCamera(sourceID: cameraSourceID)
         case .screen:
             return .fullscreenScreen(sourceID: screenSourceID)
+        case .text:
+            // S07: a lower-third text bug, centered near the bottom edge.
+            return LayerNode(name: payload.displayName, payload: payload,
+                             transform: LayerTransform(
+                                position: GraphPoint(x: 0.5, y: 0.88),
+                                size: GraphSize(width: 0.6, height: 0.09),
+                                anchor: .center))
+        case .shape:
+            // S07: a small solid block in the top-right corner (a fullscreen
+            // shape would obscure the whole scene).
+            return LayerNode(name: payload.displayName, payload: payload,
+                             transform: LayerTransform(
+                                position: GraphPoint(x: 0.98, y: 0.02),
+                                size: GraphSize(width: 0.12, height: 0.07),
+                                anchor: .topRight))
         default:
             // Validation rejects non-renderable kinds before execution.
             return LayerNode(name: payload.displayName, payload: payload, transform: .fullscreen)
+        }
+    }
+
+    // MARK: Overlay helpers (S07)
+
+    /// Resolves an overlay ID against the SceneStore's PROJECT overlay list
+    /// (overlay commands are never staged-scene-bound).
+    private func resolveOverlay(_ overlayID: LayerID) -> Result<LayerNode, StudioCommandError> {
+        guard let overlay = sceneStore.overlays.first(where: { $0.id == overlayID }) else {
+            return .failure(.invalidTarget("Overlay \(overlayID) does not exist."))
+        }
+        return .success(overlay)
+    }
+
+    /// S07: the rejection for editing a locked overlay. Overlays have no
+    /// groups, so the own-lock is the whole story. Nil when editable.
+    private func overlayLockError(for overlay: LayerNode) -> StudioCommandError? {
+        overlay.isLocked
+            ? .unavailable("Overlay \"\(overlay.name)\" is locked — unlock it to edit.")
+            : nil
+    }
+
+    /// Applies one edit to an overlay in place; the SceneStore write persists
+    /// and republishes the project overlay context to every engine.
+    private func editOverlay(_ overlayID: LayerID, _ edit: (inout LayerNode) -> Void) {
+        guard case .success(var overlay) = resolveOverlay(overlayID) else { return }
+        edit(&overlay)
+        sceneStore.updateOverlay(overlay)
+    }
+
+    /// Builds a new front-of-stack project overlay for `.addOverlay`
+    /// (validation restricts payloads to text/shape): branding-style
+    /// placements that never obscure the whole canvas.
+    private func makeOverlay(payload: LayerPayload) -> LayerNode {
+        switch payload {
+        case .text:
+            // Lower-third bug: centered near the bottom edge.
+            return LayerNode(name: "Text Overlay", payload: payload,
+                             transform: LayerTransform(
+                                position: GraphPoint(x: 0.5, y: 0.94),
+                                size: GraphSize(width: 0.5, height: 0.07),
+                                anchor: .center))
+        default:
+            // Shape: a small solid block in the top-right corner.
+            return LayerNode(name: "\(payload.displayName) Overlay", payload: payload,
+                             transform: LayerTransform(
+                                position: GraphPoint(x: 0.98, y: 0.02),
+                                size: GraphSize(width: 0.10, height: 0.06),
+                                anchor: .topRight))
         }
     }
 

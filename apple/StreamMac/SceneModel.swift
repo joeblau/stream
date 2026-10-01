@@ -124,6 +124,16 @@ final class SceneStore: ObservableObject {
     @Published private(set) var sources: [SourceDefinition] {
         didSet { persist() }
     }
+    /// S07: project-wide overlays (back-to-front), stored once at document
+    /// level and composited above every scene's layers. Mutated only through
+    /// the dispatcher's project-level overlay commands.
+    @Published private(set) var overlays: [LayerNode] {
+        didSet { persist() }
+    }
+    /// S07: the project default background for scenes without their own.
+    @Published private(set) var defaultBackground: SceneBackground? {
+        didSet { persist() }
+    }
     private var projectID: ProjectID
     private var projectName: String
 
@@ -138,6 +148,8 @@ final class SceneStore: ObservableObject {
         projectID = document.projectID
         projectName = document.projectName
         sources = document.sources
+        overlays = document.overlays
+        defaultBackground = document.defaultBackground
         scenes = document.scenes
         selectedID = document.scenes.contains(where: { $0.id == document.selectedID })
             ? document.selectedID
@@ -151,7 +163,9 @@ final class SceneStore: ObservableObject {
                       projectName: projectName,
                       sources: sources,
                       scenes: scenes,
-                      selectedID: selectedID)
+                      selectedID: selectedID,
+                      overlays: overlays,
+                      defaultBackground: defaultBackground)
     }
 
     var selected: Scene? {
@@ -226,6 +240,53 @@ final class SceneStore: ObservableObject {
                 scenes[sceneIndex].layers[layerIndex].sourceID = nil
             }
         }
+    }
+
+    // MARK: - Project overlays and default background (S07, issue #74)
+    //
+    // Overlays are PROJECT-level content: one list, composited above every
+    // scene's layers, edited in one place. Edits apply immediately (they are
+    // not part of any scene's staged snapshot) and reach the engines through
+    // `ProjectOverlayStore`, which `persist()` republishes. Per-scene overlay
+    // visibility overrides live on the scenes themselves
+    // (`Scene.hiddenOverlayIDs`) and follow the normal staged→program path —
+    // removing an overlay also prunes those overrides so no scene keeps a
+    // dangling reference.
+
+    /// Appends an overlay at the FRONT of the project overlay stack.
+    @discardableResult
+    func addOverlay(_ overlay: LayerNode) -> LayerNode {
+        overlays.append(overlay)
+        return overlay
+    }
+
+    /// Replaces an overlay in place (rename, visibility, lock, transform,
+    /// effects edits write back the mutated copy through here).
+    func updateOverlay(_ overlay: LayerNode) {
+        guard let index = overlays.firstIndex(where: { $0.id == overlay.id }) else { return }
+        overlays[index] = overlay
+    }
+
+    /// Moves an overlay to `toIndex` in the back-to-front array (index as
+    /// counted AFTER removing the overlay — same semantics as layer moves).
+    func moveOverlay(_ id: LayerID, toIndex: Int) {
+        guard let index = overlays.firstIndex(where: { $0.id == id }) else { return }
+        let overlay = overlays.remove(at: index)
+        overlays.insert(overlay, at: min(toIndex, overlays.count))
+    }
+
+    /// Removes an overlay and prunes every scene's per-scene override of it.
+    func removeOverlay(_ id: LayerID) {
+        overlays.removeAll { $0.id == id }
+        for sceneIndex in scenes.indices {
+            scenes[sceneIndex].hiddenOverlayIDs.remove(id)
+        }
+    }
+
+    /// Sets the project default background (nil = the documented black
+    /// fallback for scenes without their own background).
+    func setDefaultBackground(_ background: SceneBackground?) {
+        defaultBackground = background
     }
 
     /// Adds a default scene (same template as the scenes panel's + button)
@@ -305,6 +366,11 @@ final class SceneStore: ObservableObject {
     }
 
     private func persist() {
+        // S07: every persist also republishes the project-level composition
+        // context, so the engines composite overlay/background edits on their
+        // next tick (they apply immediately to staged AND program). Published
+        // first so a failed file write never stalls the live path.
+        ProjectOverlayStore.shared.publish(document.overlayContext)
         guard let url = Self.fileURL(Self.fileNameV2),
               let data = try? JSONEncoder().encode(document) else { return }
         try? data.write(to: url, options: .atomic)

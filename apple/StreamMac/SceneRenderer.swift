@@ -1,5 +1,6 @@
 import CoreImage
 import CoreMedia
+import CoreText
 import CoreVideo
 import Metal
 
@@ -12,12 +13,25 @@ import Metal
 /// paint. Transforms are normalized 0…1 canvas coordinates with an anchor, so
 /// the graph renders identically at any canvas size.
 ///
+/// S07 (issue #74) compositing order, back to front: the explicit background
+/// (`scene.background`, else the project default from `overlayContext`, else
+/// the documented implicit black canvas) → the scene's visible layers → the
+/// project-wide overlays from `overlayContext`, minus the scene's
+/// `hiddenOverlayIDs` per-scene overrides. Overlays are shared branding —
+/// stored once at document level, painted above every scene.
+///
 /// Source fallback (documented contract): a visible layer whose source has no
 /// current pixels — screen capture not started, camera stalled past
 /// `LatestCameraFrame`'s freshness window, or a payload kind with no renderer
-/// yet (image/text/media/web/guest/…) — paints NOTHING, so the black canvas
-/// shows through. The tick is never gated on a source: the composition always
+/// yet (image/media/web/guest/…) — paints NOTHING, so the background shows
+/// through. The tick is never gated on a source: the composition always
 /// renders at the output fps from the latest sample each source produced.
+///
+/// Generated content (S07): solid-color shape and text layers have no
+/// external source — the renderer rasterizes them itself (Core Graphics /
+/// Core Text, off-main on the engine actor) at the layer's transform rect and
+/// caches the raster by content + pixel size, so a static overlay costs
+/// nothing per frame after its first paint.
 ///
 /// Visual parity with the legacy `FacecamCompositor` path: camera layers are
 /// mirrored (macOS cameras behave as `.front`); a camera layer narrower than
@@ -43,6 +57,22 @@ final class SceneRenderer {
     private var cachedMaskRect: CGRect = .null
     private var cachedMaskRadius: CGFloat = -1
 
+    /// Reused gradient generator for gradient backgrounds (S07): same
+    /// per-frame filter-allocation churn rationale as the PIP mask above.
+    private let linearGradientGenerator = CIFilter(name: "CILinearGradient")
+
+    /// S07 raster cache for generated content (shape/text layers): keyed by
+    /// the full content + pixel-size descriptor, so a static overlay draws
+    /// once and is composited from cache every frame after. Bounded — a
+    /// resize drag churns sizes, so the cache clears itself past the cap.
+    private struct GeneratedKey: Hashable {
+        let descriptor: String
+        let width: Int
+        let height: Int
+    }
+    private var generatedCache: [GeneratedKey: CIImage] = [:]
+    private let generatedCacheLimit = 64
+
     init() {
         let options: [CIContextOption: Any] = [
             .workingColorSpace: NSNull(),
@@ -55,10 +85,11 @@ final class SceneRenderer {
         }
     }
 
-    /// Composites the scene's visible layers (back-to-front) onto a pooled
-    /// canvas-sized buffer and wraps it in a `CMSampleBuffer` timed on the
-    /// engine's shared clock.
+    /// Composites the background, the scene's visible layers (back-to-front),
+    /// and the project overlays onto a pooled canvas-sized buffer, then wraps
+    /// it in a `CMSampleBuffer` timed on the engine's shared clock.
     func render(scene: Scene,
+                overlayContext: OverlayContext,
                 canvasSize: CGSize,
                 screen: CVPixelBuffer?,
                 camera: LatestCameraFrame.Frame?,
@@ -70,13 +101,21 @@ final class SceneRenderer {
         guard outWidth > 1, outHeight > 1 else { return nil }
         let canvas = CGRect(x: 0, y: 0, width: outWidth, height: outHeight)
 
-        var output = CIImage(color: .black).cropped(to: canvas)
+        // S07 order: explicit background → scene layers → project overlays.
+        var output = backgroundImage(overlayContext.background(for: scene), canvas: canvas)
         for layer in scene.layers where layer.isVisible {
             guard let layerImage = image(for: layer, canvas: canvas,
                                          screen: screen, camera: camera) else {
-                continue    // documented fallback: missing source → black region
+                continue    // documented fallback: missing source → background shows through
             }
             output = layerImage.composited(over: output)
+        }
+        for overlay in overlayContext.overlays(for: scene) {
+            guard let overlayImage = image(for: overlay, canvas: canvas,
+                                           screen: screen, camera: camera) else {
+                continue    // same fallback as scene layers
+            }
+            output = overlayImage.composited(over: output)
         }
 
         guard let pool = ensurePool(width: outWidth, height: outHeight) else { return nil }
@@ -123,12 +162,183 @@ final class SceneRenderer {
                 camera.position == .front ? .upMirrored : .up
             return place(source: CIImage(cvPixelBuffer: camera.buffer).oriented(orientation),
                          layer: layer, canvas: canvas, isCamera: true)
+        case .shape, .text:
+            return placeGenerated(payload: layer.payload, layer: layer, canvas: canvas)
         default:
-            // Payload kinds without a renderer yet (image, text, shape, media,
-            // pdf, web, guest, nested scene): documented fallback is the black
-            // canvas; W03+ adds renderers behind this switch.
+            // Payload kinds without a renderer yet (image, media, pdf, web,
+            // guest, nested scene): documented fallback is the background
+            // showing through; later waves add renderers behind this switch.
             return nil
         }
+    }
+
+    // MARK: - Backgrounds (S07)
+
+    /// The canvas-sized background image. Nil background = the documented
+    /// implicit black canvas; an image background has no render path yet (no
+    /// asset store), so it paints the same black fallback.
+    private func backgroundImage(_ background: SceneBackground?, canvas: CGRect) -> CIImage {
+        switch background {
+        case .solid(let colorHex):
+            return CIImage(color: ciColor(colorHex)).cropped(to: canvas)
+        case .gradient(let topColorHex, let bottomColorHex):
+            // CI coordinates are bottom-left-origin: the "top" color anchors
+            // at the canvas's maximum Y.
+            guard let filter = linearGradientGenerator else {
+                return CIImage(color: ciColor(topColorHex)).cropped(to: canvas)
+            }
+            filter.setValue(CIVector(x: canvas.midX, y: canvas.maxY), forKey: "inputPoint0")
+            filter.setValue(ciColor(topColorHex), forKey: "inputColor0")
+            filter.setValue(CIVector(x: canvas.midX, y: canvas.minY), forKey: "inputPoint1")
+            filter.setValue(ciColor(bottomColorHex), forKey: "inputColor1")
+            return (filter.outputImage ?? CIImage(color: ciColor(topColorHex))).cropped(to: canvas)
+        case .image, nil:
+            return CIImage(color: .black).cropped(to: canvas)
+        }
+    }
+
+    // MARK: - Generated content (S07: shapes and text)
+
+    /// The placed, styled image for a generated-content layer (shape/text):
+    /// rasterized at the transform rect's pixel size (cached), translated
+    /// into canvas position, then rotated and effect-styled like any layer.
+    private func placeGenerated(payload: LayerPayload, layer: LayerNode, canvas: CGRect) -> CIImage? {
+        let pixelWidth = Int((layer.transform.size.width * canvas.width).rounded())
+        let pixelHeight = Int((layer.transform.size.height * canvas.height).rounded())
+        guard pixelWidth > 0, pixelHeight > 0 else { return nil }
+
+        let content: CIImage?
+        switch payload {
+        case .shape(let shape):
+            let descriptor = "shape|\(shape.shape.rawValue)|\(shape.fillColorHex)"
+            content = generated(key: GeneratedKey(descriptor: descriptor,
+                                                  width: pixelWidth, height: pixelHeight)) { context, rect in
+                context.setFillColor(cgColor(shape.fillColorHex))
+                switch shape.shape {
+                case .rectangle:
+                    context.fill(rect)
+                case .roundedRectangle:
+                    let radius = min(rect.width, rect.height) * 0.15
+                    context.addPath(CGPath(roundedRect: rect, cornerWidth: radius,
+                                           cornerHeight: radius, transform: nil))
+                    context.fillPath()
+                case .ellipse:
+                    context.fillEllipse(in: rect)
+                }
+            }
+        case .text(let text):
+            guard !text.text.isEmpty else { return nil }
+            // `fontSize` is points on the 1080p reference canvas; scale with
+            // the actual output height so text tracks the render resolution.
+            let scaledFontSize = text.fontSize * (canvas.height / 1080)
+            let descriptor = "text|\(text.text)|\(text.fontName ?? "")|\(scaledFontSize)|\(text.colorHex)"
+            content = generated(key: GeneratedKey(descriptor: descriptor,
+                                                  width: pixelWidth, height: pixelHeight)) { context, rect in
+                drawText(text.text, fontName: text.fontName, fontSize: scaledFontSize,
+                         colorHex: text.colorHex, in: rect, context: context)
+            }
+        default:
+            return nil
+        }
+        guard var image = content else { return nil }
+
+        let rect = rectInCanvas(for: layer.transform, canvas: canvas,
+                                width: CGFloat(pixelWidth), height: CGFloat(pixelHeight))
+        image = image.transformed(by: CGAffineTransform(
+            translationX: rect.minX - image.extent.minX,
+            y: rect.minY - image.extent.minY))
+        // Same placement-time corner rounding sourced layers get.
+        let cornerRadius = layer.effects.compactMap { effect -> CGFloat? in
+            if case .cornerRadius(let value) = effect { return CGFloat(value) }
+            return nil
+        }.first
+        if let cornerRadius, cornerRadius > 0 {
+            image = applyRoundedCorners(image, radius: cornerRadius, rect: rect)
+        }
+        image = rotated(image, degrees: layer.transform.rotationDegrees, around: rect)
+        return applyEffects(image, layer: layer)
+    }
+
+    /// Returns the cached raster for `key`, or draws it into a fresh
+    /// RGBA bitmap context and caches the result. The cache clears itself
+    /// past the cap so a resize drag (a new size per frame) can't grow it
+    /// without bound.
+    private func generated(key: GeneratedKey,
+                           draw: (CGContext, CGRect) -> Void) -> CIImage? {
+        if let cached = generatedCache[key] { return cached }
+        if generatedCache.count >= generatedCacheLimit {
+            generatedCache.removeAll()
+        }
+        let rect = CGRect(x: 0, y: 0, width: key.width, height: key.height)
+        guard let context = CGContext(data: nil,
+                                      width: key.width,
+                                      height: key.height,
+                                      bitsPerComponent: 8,
+                                      bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        draw(context, rect)
+        guard let cgImage = context.makeImage() else { return nil }
+        let image = CIImage(cgImage: cgImage)
+        generatedCache[key] = image
+        return image
+    }
+
+    /// Rasterizes text into the (already canvas-upright) bitmap context using
+    /// Core Text — thread-safe off-main, unlike AppKit string drawing. The
+    /// text is frame-set into the layer rect, clipped, and vertically
+    /// centered within the frame it measures to.
+    private func drawText(_ string: String,
+                          fontName: String?,
+                          fontSize: Double,
+                          colorHex: String,
+                          in rect: CGRect,
+                          context: CGContext) {
+        let font = CTFontCreateWithName((fontName ?? "Helvetica") as CFString,
+                                        max(1, CGFloat(fontSize)), nil)
+        let attributes: [CFString: Any] = [
+            kCTFontAttributeName: font,
+            kCTForegroundColorAttributeName: cgColor(colorHex)
+        ]
+        guard let attributed = CFAttributedStringCreate(nil, string as CFString,
+                                                        attributes as CFDictionary)
+        else { return }
+        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
+        // Vertically center the measured text block inside the layer rect.
+        let measured = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter, CFRange(location: 0, length: 0), nil,
+            CGSize(width: rect.width, height: .greatestFiniteMagnitude), nil)
+        let textRect = CGRect(x: rect.minX,
+                              y: rect.minY + (rect.height - min(measured.height, rect.height)) / 2,
+                              width: rect.width,
+                              height: min(measured.height, rect.height))
+        context.saveGState()
+        context.textMatrix = .identity
+        context.translateBy(x: 0, y: rect.height)
+        context.scaleBy(x: 1, y: -1)
+        let path = CGPath(rect: CGRect(x: textRect.minX,
+                                       y: rect.height - textRect.maxY,
+                                       width: textRect.width,
+                                       height: textRect.height),
+                          transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
+        CTFrameDraw(frame, context)
+        context.restoreGState()
+    }
+
+    // MARK: - Colors
+
+    private func ciColor(_ hex: String) -> CIColor {
+        let components = HexColor.components(hex)
+        return CIColor(red: components.red, green: components.green,
+                       blue: components.blue, alpha: components.alpha)
+    }
+
+    private func cgColor(_ hex: String) -> CGColor {
+        let components = HexColor.components(hex)
+        return CGColor(red: components.red, green: components.green,
+                       blue: components.blue, alpha: components.alpha)
     }
 
     /// Places a source image according to the layer's normalized transform.

@@ -306,12 +306,24 @@ enum LayerPayload: Hashable, Sendable {
         return false
     }
 
-    /// True when the current render path can actually paint this kind
-    /// (S03): only camera/screen composite today; the rest are model-only
-    /// until the composition engine grows source support. UI must mark
-    /// non-renderable kinds rather than implying they show on output.
+    var isText: Bool {
+        if case .text = self { return true }
+        return false
+    }
+
+    var isShape: Bool {
+        if case .shape = self { return true }
+        return false
+    }
+
+    /// True when the current render path can actually paint this kind:
+    /// camera/screen through the capture pipeline (S03) plus solid-color
+    /// shapes and text, which `SceneRenderer` generates directly (S07). The
+    /// rest are model-only until the composition engine grows source support.
+    /// UI must mark non-renderable kinds rather than implying they show on
+    /// output.
     var isRenderable: Bool {
-        isCamera || isScreen
+        isCamera || isScreen || isText || isShape
     }
 
     /// Short human name for layer-panel rows and add-layer menus.
@@ -566,6 +578,134 @@ struct SourceDefinition: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+// MARK: - Backgrounds and project overlays (S07)
+//
+// S07 (issue #74) adds the two scopes around a scene's own layers:
+// - an explicit BACKGROUND: per scene (`Scene.background`), falling back to
+//   the project default (`SceneDocument.defaultBackground`), falling back to
+//   the documented implicit black canvas;
+// - PROJECT-WIDE OVERLAYS: layers stored once at document level
+//   (`SceneDocument.overlays`) that composite above EVERY scene's layers
+//   without being duplicated into each scene, with per-scene visibility
+//   overrides (`Scene.hiddenOverlayIDs`).
+//
+// Deterministic compositing order (back to front): background → scene layers
+// → project overlays.
+
+/// What a scene composites onto before its first layer. Wire format is a
+/// `kind` discriminator so new background kinds are additive.
+enum SceneBackground: Hashable, Sendable {
+    case solid(colorHex: String)
+    case gradient(topColorHex: String, bottomColorHex: String)
+    /// Model-only until an asset store exists: no render path resolves
+    /// `assetIdentifier` yet, so an image background paints the documented
+    /// black fallback.
+    case image(ImageSourcePayload)
+
+    /// Short human name for background pickers.
+    var displayName: String {
+        switch self {
+        case .solid: return "Solid Color"
+        case .gradient: return "Gradient"
+        case .image: return "Image"
+        }
+    }
+}
+
+extension SceneBackground: Codable {
+    private enum Kind: String, Codable {
+        case solid, gradient, image
+    }
+    private enum CodingKeys: String, CodingKey {
+        case kind, colorHex, topColorHex, bottomColorHex, payload
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .solid:
+            self = .solid(colorHex: try container.decode(String.self, forKey: .colorHex))
+        case .gradient:
+            self = .gradient(topColorHex: try container.decode(String.self, forKey: .topColorHex),
+                             bottomColorHex: try container.decode(String.self, forKey: .bottomColorHex))
+        case .image:
+            self = .image(try container.decode(ImageSourcePayload.self, forKey: .payload))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .solid(let colorHex):
+            try container.encode(Kind.solid, forKey: .kind)
+            try container.encode(colorHex, forKey: .colorHex)
+        case .gradient(let topColorHex, let bottomColorHex):
+            try container.encode(Kind.gradient, forKey: .kind)
+            try container.encode(topColorHex, forKey: .topColorHex)
+            try container.encode(bottomColorHex, forKey: .bottomColorHex)
+        case .image(let payload):
+            try container.encode(Kind.image, forKey: .kind)
+            try container.encode(payload, forKey: .payload)
+        }
+    }
+}
+
+/// The project-level composition context every scene renders inside (S07):
+/// the shared overlays painted above scene layers and the default background
+/// painted behind them. A plain value snapshot is what the composition engine
+/// reads each tick (via `ProjectOverlayStore`), so a mid-tick overlay edit can
+/// never tear a frame.
+struct OverlayContext: Hashable, Sendable {
+    /// Back-to-front, exactly like `Scene.layers`.
+    var overlays: [LayerNode] = []
+    var defaultBackground: SceneBackground? = nil
+
+    static let empty = OverlayContext()
+
+    /// The overlays that paint for `scene`, back-to-front: visible and not
+    /// hidden by the scene's per-scene override. Locks never affect rendering
+    /// (they gate edits only), same as scene layers.
+    func overlays(for scene: Scene) -> [LayerNode] {
+        overlays.filter { $0.isVisible && !scene.hiddenOverlayIDs.contains($0.id) }
+    }
+
+    /// The background `scene` composites onto: its own override, else the
+    /// project default. Nil = the documented implicit black canvas.
+    func background(for scene: Scene) -> SceneBackground? {
+        scene.background ?? defaultBackground
+    }
+}
+
+/// Shared `#RRGGBB` / `#RRGGBBAA` parsing and formatting for the `colorHex`
+/// fields on text, shape, effect, and background payloads. Unparseable values
+/// read as opaque white (the payloads' own defaults), never crash.
+enum HexColor {
+    static func components(_ hex: String) -> (red: Double, green: Double, blue: Double, alpha: Double) {
+        var string = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if string.hasPrefix("#") { string.removeFirst() }
+        var value: UInt64 = 0
+        guard Scanner(string: string).scanHexInt64(&value) else { return (1, 1, 1, 1) }
+        switch string.count {
+        case 6:
+            return (Double((value >> 16) & 0xFF) / 255,
+                    Double((value >> 8) & 0xFF) / 255,
+                    Double(value & 0xFF) / 255, 1)
+        case 8:
+            return (Double((value >> 24) & 0xFF) / 255,
+                    Double((value >> 16) & 0xFF) / 255,
+                    Double((value >> 8) & 0xFF) / 255,
+                    Double(value & 0xFF) / 255)
+        default:
+            return (1, 1, 1, 1)
+        }
+    }
+
+    static func string(red: Double, green: Double, blue: Double) -> String {
+        let clamp: (Double) -> Int = { min(255, max(0, Int(($0 * 255).rounded()))) }
+        return String(format: "#%02X%02X%02X", clamp(red), clamp(green), clamp(blue))
+    }
+}
+
 // MARK: - Scene
 
 /// One switchable scene: an ordered layer graph on a canvas. `layers` is
@@ -576,17 +716,43 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
     var canvas: Canvas
     var groups: [LayerGroup]
     var layers: [LayerNode]
+    /// S07: the explicit background this scene composites onto. Nil inherits
+    /// the project default (`SceneDocument.defaultBackground`); when that is
+    /// also unset the documented fallback remains the implicit black canvas.
+    var background: SceneBackground?
+    /// S07: per-scene visibility overrides for project-wide overlays — the
+    /// stable LayerIDs of `SceneDocument.overlays` entries this scene hides.
+    /// Scene-local content, so overrides stage and Take like any scene edit.
+    var hiddenOverlayIDs: Set<LayerID>
 
     init(id: SceneID = SceneID(),
          name: String,
          canvas: Canvas = Canvas(),
          groups: [LayerGroup] = [],
-         layers: [LayerNode]) {
+         layers: [LayerNode],
+         background: SceneBackground? = nil,
+         hiddenOverlayIDs: Set<LayerID> = []) {
         self.id = id
         self.name = name
         self.canvas = canvas
         self.groups = groups
         self.layers = layers
+        self.background = background
+        self.hiddenOverlayIDs = hiddenOverlayIDs
+    }
+
+    /// `background`/`hiddenOverlayIDs` were added after v2 shipped; decode
+    /// them with defaults so older persisted documents keep loading
+    /// (additive wire change, same pattern as `LayerNode.isLocked`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(SceneID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        canvas = try container.decode(Canvas.self, forKey: .canvas)
+        groups = try container.decode([LayerGroup].self, forKey: .groups)
+        layers = try container.decode([LayerNode].self, forKey: .layers)
+        background = try container.decodeIfPresent(SceneBackground.self, forKey: .background)
+        hiddenOverlayIDs = try container.decodeIfPresent(Set<LayerID>.self, forKey: .hiddenOverlayIDs) ?? []
     }
 }
 
@@ -658,6 +824,10 @@ extension Scene {
 /// source registry, every scene's layer graph, and the current selection.
 /// `version` drives migration; `SceneDocument.currentVersion` is what
 /// `SceneStore` writes.
+///
+/// S07: `overlays` and `defaultBackground` are PROJECT-level content, stored
+/// once here — shared branding survives scene changes and exports once with
+/// the project instead of being duplicated into every scene's layer stack.
 struct SceneDocument: Hashable, Codable, Sendable {
     static let currentVersion = 2
 
@@ -667,18 +837,48 @@ struct SceneDocument: Hashable, Codable, Sendable {
     var sources: [SourceDefinition]
     var scenes: [Scene]
     var selectedID: SceneID
+    /// S07: project-wide overlays, back-to-front exactly like `Scene.layers`.
+    /// Composited above EVERY scene's layers; a scene hides individual
+    /// overlays via its `hiddenOverlayIDs`.
+    var overlays: [LayerNode]
+    /// S07: the project default background, used by every scene whose own
+    /// `background` is nil. Nil = the documented implicit black canvas.
+    var defaultBackground: SceneBackground?
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
          projectName: String = "Stream Project",
          sources: [SourceDefinition],
          scenes: [Scene],
-         selectedID: SceneID) {
+         selectedID: SceneID,
+         overlays: [LayerNode] = [],
+         defaultBackground: SceneBackground? = nil) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
         self.sources = sources
         self.scenes = scenes
         self.selectedID = selectedID
+        self.overlays = overlays
+        self.defaultBackground = defaultBackground
+    }
+
+    /// `overlays`/`defaultBackground` were added within v2; decode them with
+    /// defaults so pre-S07 v2 documents keep loading (additive wire change).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        projectID = try container.decode(ProjectID.self, forKey: .projectID)
+        projectName = try container.decode(String.self, forKey: .projectName)
+        sources = try container.decode([SourceDefinition].self, forKey: .sources)
+        scenes = try container.decode([Scene].self, forKey: .scenes)
+        selectedID = try container.decode(SceneID.self, forKey: .selectedID)
+        overlays = try container.decodeIfPresent([LayerNode].self, forKey: .overlays) ?? []
+        defaultBackground = try container.decodeIfPresent(SceneBackground.self, forKey: .defaultBackground)
+    }
+
+    /// The S07 render context the engine composites every scene inside.
+    var overlayContext: OverlayContext {
+        OverlayContext(overlays: overlays, defaultBackground: defaultBackground)
     }
 }

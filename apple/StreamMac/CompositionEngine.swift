@@ -23,6 +23,36 @@ struct CompositedFrame: @unchecked Sendable {
     }
 }
 
+/// The process-wide hand-off of S07 project-level composition state (overlays
+/// + default background) from `SceneStore` (main actor, writes on every
+/// persist) to every `CompositionEngine` (its own actor, reads each tick).
+/// This bridge exists because the engines' scene seam (`updateScene`) carries
+/// only the per-scene value, and overlay edits are deliberately NOT part of
+/// any scene's staged snapshot: they are project-level edits that apply
+/// immediately to BOTH the staged and program compositions (live-safe, the
+/// Ecamm-style behavior issue #74 describes), while per-scene overrides
+/// (`Scene.hiddenOverlayIDs`, `Scene.background`) stay on the staged→program
+/// Take path as ordinary scene content. Lock-protected value snapshots, so a
+/// mid-tick publish can never tear a frame.
+final class ProjectOverlayStore: @unchecked Sendable {
+    static let shared = ProjectOverlayStore()
+
+    private var lock = os_unfair_lock_s()
+    private var context = OverlayContext.empty
+
+    func publish(_ context: OverlayContext) {
+        os_unfair_lock_lock(&lock)
+        self.context = context
+        os_unfair_lock_unlock(&lock)
+    }
+
+    func snapshot() -> OverlayContext {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return context
+    }
+}
+
 /// The W08 GPU composition engine (issue #65): renders the current scene graph
 /// ONCE per output tick and broadcasts the result to any number of independent
 /// consumers — preview, recording, publishers, and future virtual/NDI outputs.
@@ -57,6 +87,11 @@ actor CompositionEngine {
     private let renderer = SceneRenderer()
     private let screenProvider: @Sendable () -> CVPixelBuffer?
     private let cameraProvider: @Sendable () -> LatestCameraFrame.Frame?
+    /// S07: where the engine reads the project-level overlay/background
+    /// context each tick. Defaults to the shared `ProjectOverlayStore` (fed
+    /// by `SceneStore`), so existing call sites need no new argument; tests
+    /// and future wiring can inject any source.
+    private let overlayContextProvider: @Sendable () -> OverlayContext
 
     private var scene: Scene?
     private var canvasSize: CGSize
@@ -73,10 +108,13 @@ actor CompositionEngine {
 
     init(screenProvider: @escaping @Sendable () -> CVPixelBuffer?,
          cameraProvider: @escaping @Sendable () -> LatestCameraFrame.Frame?,
+         overlayContextProvider: @escaping @Sendable () -> OverlayContext =
+            { ProjectOverlayStore.shared.snapshot() },
          canvasSize: CGSize = OutputProfile.default.canvasSize,
          frameRate: Int = OutputProfile.default.frameRate) {
         self.screenProvider = screenProvider
         self.cameraProvider = cameraProvider
+        self.overlayContextProvider = overlayContextProvider
         self.canvasSize = canvasSize
         self.frameRate = frameRate
     }
@@ -167,6 +205,7 @@ actor CompositionEngine {
         let pts = CMTimeAdd(clockAnchor, CMTime(value: frameSequence, timescale: timescale))
         let duration = CMTime(value: 1, timescale: timescale)
         guard let frame = renderer.render(scene: scene,
+                                          overlayContext: overlayContextProvider(),
                                           canvasSize: canvasSize,
                                           screen: screenProvider(),
                                           camera: cameraProvider(),
