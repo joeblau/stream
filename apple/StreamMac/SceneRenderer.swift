@@ -90,6 +90,25 @@ import StreamCore
 /// the render tick (`PersonSegmentationCoordinator`), blended here when
 /// fresh, and falls back to the unmodified source whenever it isn't.
 ///
+/// G02 (issue #110) text layers: the full `TextSourcePayload` style surface
+/// (alignment, background bar, padding, auto-sized vs fixed box, wrapping,
+/// overflow) rasterizes through the generated-content path — cached by
+/// content + pixel size like shapes — and inherits G03 `LayerStyle` styling
+/// unchanged through `stylePlaced`. `{token}` host/guest names resolve per
+/// tick against `tokenProvider` and are part of the cache descriptor, so a
+/// published name change re-rasterizes exactly once. Fonts resolve through
+/// the pinned `TitleFontFallback` chain, so an exported/reopened document
+/// renders deterministically on a machine missing the requested font, and
+/// Unicode/emoji ride the same pinned per-glyph cascade. Timed/fly-in
+/// visibility is RENDERER-SIDE and timestamp-parametrized (the documented
+/// preference over an engine change): the model carries only durations, the
+/// renderer anchors elapsed time to the first tick the layer paints after
+/// being absent (a hide → show replays the animation), and applies the
+/// fly-in/fade-out as a translate+alpha pass over the placed image — the
+/// cached raster is never animation-keyed, and S09's
+/// `layerOpacity`/`exitingLayers` fades stay the edit-driven visibility
+/// seam.
+///
 /// S09 (issue #100): the per-frame parameters of a scene blend transition
 /// (everything except stingers, which are a base-scene swap under a video
 /// mask and ride the normal `render` path's `stinger:` parameter).
@@ -141,11 +160,29 @@ final class SceneRenderer {
     /// of paying for it twice.
     private let segmentation: PersonSegmentationCoordinator
 
+    /// G02 (issue #110): where the renderer snapshots the live title-token
+    /// values (`{host}`/`{guest}` display names) each text layer resolves
+    /// against. Defaults to the shared `TitleTokenStore`; tests can inject a
+    /// fixed map.
+    private let tokenProvider: () -> [String: String]
+
     /// E03: the current tick's frame interval in milliseconds, set by
     /// `render`/`renderTransition` before any layer work so the segmentation
     /// governor budgets against the real cadence. Renderer state is
     /// engine-actor-confined, so a per-tick property is safe.
     private var currentFrameIntervalMs = 33.3
+
+    /// G02 (issue #110): the current tick's clock seconds, set by
+    /// `render`/`renderTransition` before any layer work — the timestamp the
+    /// timed/fly-in title visibility samples against.
+    private var currentPresentationSeconds = 0.0
+    /// G02: per-layer timed-visibility anchors — the clock seconds at which
+    /// each timed text layer FIRST painted after being absent. A layer absent
+    /// from a tick is pruned (`textTimingSeen` is rebuilt per render call),
+    /// so a hide → show replays the fly-in. Engine-actor-confined state,
+    /// same rule as `currentFrameIntervalMs`.
+    private var textTimingStart: [LayerID: Double] = [:]
+    private var textTimingSeen: Set<LayerID> = []
 
     /// S07 raster cache for generated content (shape/text layers): keyed by
     /// the full content + pixel-size descriptor, so a static overlay draws
@@ -167,9 +204,12 @@ final class SceneRenderer {
 
     init(sourceEffectsProvider: @escaping () -> [SourceDefinitionID: SourceEffects] =
             { SourceEffectsStore.shared.snapshot() },
-         segmentation: PersonSegmentationCoordinator = .shared) {
+         segmentation: PersonSegmentationCoordinator = .shared,
+         tokenProvider: @escaping () -> [String: String] =
+            { TitleTokenStore.shared.snapshot() }) {
         self.sourceEffectsProvider = sourceEffectsProvider
         self.segmentation = segmentation
+        self.tokenProvider = tokenProvider
         let options: [CIContextOption: Any] = [
             .workingColorSpace: NSNull(),
             .cacheIntermediates: false
@@ -216,6 +256,11 @@ final class SceneRenderer {
         guard outWidth > 1, outHeight > 1 else { return nil }
         let canvas = CGRect(x: 0, y: 0, width: outWidth, height: outHeight)
         currentFrameIntervalMs = max(1, CMTimeGetSeconds(frameDuration) * 1000)
+        // G02: timed/fly-in titles sample against the engine clock; the seen
+        // set rebuilds each call so an absent layer's anchor prunes (and its
+        // next appearance replays the timing).
+        currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
+        textTimingSeen.removeAll()
 
         var output = sceneComposite(scene, overlayContext: overlayContext, canvas: canvas,
                                     frames: frames, sourcePayloads: sourcePayloads,
@@ -225,6 +270,7 @@ final class SceneRenderer {
                                   canvas: canvas, frames: frames,
                                   sourcePayloads: sourcePayloads, scenes: scenes)
         output = applyingStinger(output, stinger: stinger, canvas: canvas)
+        pruneTextTimingAnchors()
         return finish(output, canvas: canvas, width: outWidth, height: outHeight,
                       presentationTime: presentationTime, frameDuration: frameDuration,
                       sequence: sequence)
@@ -252,6 +298,8 @@ final class SceneRenderer {
         guard outWidth > 1, outHeight > 1 else { return nil }
         let canvas = CGRect(x: 0, y: 0, width: outWidth, height: outHeight)
         currentFrameIntervalMs = max(1, CMTimeGetSeconds(frameDuration) * 1000)
+        currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
+        textTimingSeen.removeAll()
 
         let fromImage = sceneComposite(from, overlayContext: overlayContext, canvas: canvas,
                                        frames: frames, sourcePayloads: sourcePayloads,
@@ -263,6 +311,7 @@ final class SceneRenderer {
         output = applyingOverlays(output, overlayContext: overlayContext, scene: to,
                                   canvas: canvas, frames: frames,
                                   sourcePayloads: sourcePayloads, scenes: scenes)
+        pruneTextTimingAnchors()
         return finish(output, canvas: canvas, width: outWidth, height: outHeight,
                       presentationTime: presentationTime, frameDuration: frameDuration,
                       sequence: sequence)
@@ -500,8 +549,12 @@ final class SceneRenderer {
                   let buffer = frames.media?(key) else { return nil }
             return place(source: CIImage(cvPixelBuffer: buffer),
                          layer: layer, canvas: canvas, isCamera: false)
-        case .shape, .text:
+        case .shape:
             return placeGenerated(payload: layer.payload, layer: layer, canvas: canvas)
+        case .text(let text):
+            // G02 (issue #110): the full title path — style surface, token
+            // resolution, auto/fixed box, timed visibility.
+            return placeText(text, layer: layer, canvas: canvas)
         case .scene(let reference):
             return placeNested(reference: reference, layer: layer, canvas: canvas,
                                frames: frames, sourcePayloads: sourcePayloads,
@@ -571,11 +624,12 @@ final class SceneRenderer {
         }
     }
 
-    // MARK: - Generated content (S07: shapes and text)
+    // MARK: - Generated content (S07: shapes)
 
-    /// The placed, styled image for a generated-content layer (shape/text):
+    /// The placed, styled image for a generated-content shape layer:
     /// rasterized at the transform rect's pixel size (cached), translated
     /// into canvas position, then rotated and effect-styled like any layer.
+    /// (Text layers take the G02 `placeText` path.)
     private func placeGenerated(payload: LayerPayload, layer: LayerNode, canvas: CGRect) -> CIImage? {
         let pixelWidth = Int((layer.transform.size.width * canvas.width).rounded())
         let pixelHeight = Int((layer.transform.size.height * canvas.height).rounded())
@@ -600,23 +654,160 @@ final class SceneRenderer {
                     context.fillEllipse(in: rect)
                 }
             }
-        case .text(let text):
-            guard !text.text.isEmpty else { return nil }
-            // `fontSize` is points on the 1080p reference canvas; scale with
-            // the actual output height so text tracks the render resolution.
-            let scaledFontSize = text.fontSize * (canvas.height / 1080)
-            let descriptor = "text|\(text.text)|\(text.fontName ?? "")|\(scaledFontSize)|\(text.colorHex)"
-            content = generated(key: GeneratedKey(descriptor: descriptor,
-                                                  width: pixelWidth, height: pixelHeight)) { context, rect in
-                drawText(text.text, fontName: text.fontName, fontSize: scaledFontSize,
-                         colorHex: text.colorHex, in: rect, context: context)
-            }
         default:
             return nil
         }
         guard let image = content else { return nil }
         return stylePlaced(content: image, layer: layer, canvas: canvas,
                            pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+    }
+
+    // MARK: - G02 text layers (issue #110)
+
+    /// The placed, styled image for a text layer: resolves `{token}` names,
+    /// sizes the raster (auto-sized to the measured text, or the transform's
+    /// fixed box with the overflow policy applied), draws through CoreText
+    /// with the pinned font fallback, styles like any generated layer, then
+    /// applies the renderer-side timed/fly-in visibility pass. Nil — paint
+    /// nothing — for an empty string or an expired timed title.
+    private func placeText(_ text: TextSourcePayload, layer: LayerNode, canvas: CGRect) -> CIImage? {
+        let resolvedText = TitleTemplate.resolve(text.text, with: tokenProvider())
+        guard !resolvedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        // Reference-canvas scale: fontSize/padding are 1080p reference units
+        // (the standing text/style precedent).
+        let scale = styleScale(canvas)
+        let scaledFontSize = max(1, CGFloat(text.fontSize) * scale)
+        let scaledPadding = max(0, CGFloat(text.padding) * scale)
+        let transformWidth = max(1, layer.transform.size.width * canvas.width)
+        let transformHeight = max(1, layer.transform.size.height * canvas.height)
+
+        var font = TitleFontFallback.makeFont(requested: text.fontName, size: scaledFontSize)
+        var effectiveFontSize = scaledFontSize
+        let contentWidth: CGFloat
+        let contentHeight: CGFloat
+        switch text.boxSizing {
+        case .auto:
+            // Hug the measured text: width up to the transform's width when
+            // wrapping (unbounded single line when not), height to the lines.
+            let maxTextWidth = text.wraps
+                ? max(1, transformWidth - scaledPadding * 2)
+                : CGFloat.greatestFiniteMagnitude
+            let measured = TextMeasurement.measuredSize(text: resolvedText, font: font,
+                                                        maxWidth: maxTextWidth,
+                                                        alignment: text.alignment,
+                                                        wraps: text.wraps)
+            contentWidth = max(1, measured.width)
+            contentHeight = max(1, measured.height)
+        case .fixed:
+            // The transform rect is authoritative; scale-down shrinks the
+            // font until the text fits (floor 25%), clip/ellipsis draw into
+            // the box as-is.
+            let boxWidth = max(1, transformWidth - scaledPadding * 2)
+            let boxHeight = max(1, transformHeight - scaledPadding * 2)
+            if text.overflow == .scaleDown {
+                let measured = TextMeasurement.measuredSize(text: resolvedText, font: font,
+                                                            maxWidth: boxWidth,
+                                                            alignment: text.alignment,
+                                                            wraps: text.wraps)
+                let factor = CGFloat(TextMeasurement.scaleDownFactor(
+                    measured: measured, box: CGSize(width: boxWidth, height: boxHeight)))
+                if factor < 1 {
+                    effectiveFontSize = max(1, scaledFontSize * factor)
+                    font = TitleFontFallback.makeFont(requested: text.fontName,
+                                                      size: effectiveFontSize)
+                }
+            }
+            contentWidth = boxWidth
+            contentHeight = boxHeight
+        }
+
+        // Cap the raster: a pathological unwrapped line must not allocate an
+        // unbounded bitmap (the generated cache would churn it away anyway).
+        let pixelWidth = Int((contentWidth + scaledPadding * 2).rounded(.up))
+        let pixelHeight = Int((contentHeight + scaledPadding * 2).rounded(.up))
+        guard pixelWidth > 0, pixelHeight > 0,
+              pixelWidth <= 16384, pixelHeight <= 16384 else { return nil }
+
+        // The cache descriptor covers everything the raster depends on —
+        // resolved text (tokens included), the RESOLVED font, colors,
+        // geometry — but never the timing, which animates the placed image.
+        let fontPostScriptName = CTFontCopyPostScriptName(font) as String
+        let descriptor = [
+            "text2", resolvedText, fontPostScriptName, String(Double(effectiveFontSize)),
+            text.colorHex, text.backgroundColorHex ?? "-", String(Double(scaledPadding)),
+            text.alignment.rawValue, text.verticalAlignment.rawValue,
+            text.boxSizing.rawValue, String(text.wraps), text.overflow.rawValue
+        ].joined(separator: "|")
+        let content = generated(key: GeneratedKey(descriptor: descriptor,
+                                                  width: pixelWidth,
+                                                  height: pixelHeight)) { context, rect in
+            drawText(resolvedText, font: font,
+                     colorHex: text.colorHex,
+                     backgroundColorHex: text.backgroundColorHex,
+                     alignment: text.alignment,
+                     verticalAlignment: text.verticalAlignment,
+                     padding: scaledPadding,
+                     wraps: text.wraps,
+                     overflow: text.overflow,
+                     in: rect, context: context)
+        }
+        guard let content else { return nil }
+        var image = stylePlaced(content: content, layer: layer, canvas: canvas,
+                                pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+
+        // Timed/fly-in visibility: anchored to the first tick this layer
+        // painted after being absent, sampled against the engine clock.
+        if let timing = text.timing, timing.isActive {
+            textTimingSeen.insert(layer.id)
+            let start: Double
+            if let anchored = textTimingStart[layer.id] {
+                start = anchored
+            } else {
+                start = currentPresentationSeconds
+                textTimingStart[layer.id] = start
+            }
+            let state = timing.state(atElapsed: currentPresentationSeconds - start)
+            if state.isExpired { return nil }
+            if state.travel > 0.001 {
+                let offset = flyInOffset(direction: timing.flyInDirection,
+                                         travel: state.travel,
+                                         width: CGFloat(pixelWidth),
+                                         height: CGFloat(pixelHeight))
+                image = image.transformed(by: CGAffineTransform(translationX: offset.dx,
+                                                                y: offset.dy))
+            }
+            if state.opacity < 0.999 {
+                image = applyingAlpha(image, state.opacity)
+            }
+        }
+        return image
+    }
+
+    /// The fly-in displacement for a travel fraction (1 = fully offset,
+    /// 0 = at rest), in CI's bottom-left-origin space: "from bottom" starts
+    /// the title BELOW its resting position (negative y).
+    private func flyInOffset(direction: TitleFlyInDirection,
+                             travel: Double,
+                             width: CGFloat,
+                             height: CGFloat) -> CGVector {
+        let t = CGFloat(travel)
+        switch direction {
+        case .none: return CGVector(dx: 0, dy: 0)
+        case .left: return CGVector(dx: -width * t, dy: 0)
+        case .right: return CGVector(dx: width * t, dy: 0)
+        case .top: return CGVector(dx: 0, dy: height * t)
+        case .bottom: return CGVector(dx: 0, dy: -height * t)
+        }
+    }
+
+    /// Drops the timing anchors of layers that didn't paint this render call
+    /// (hidden, removed, or off the transitioned-away scene), so their next
+    /// appearance re-anchors and replays the fly-in.
+    private func pruneTextTimingAnchors() {
+        guard !textTimingStart.isEmpty else { return }
+        textTimingStart = textTimingStart.filter { textTimingSeen.contains($0.key) }
     }
 
     /// The shared placement/styling tail for rasterized-content layers
@@ -670,34 +861,53 @@ final class SceneRenderer {
         return image
     }
 
-    /// Rasterizes text into the (already canvas-upright) bitmap context using
-    /// Core Text — thread-safe off-main, unlike AppKit string drawing. The
-    /// text is frame-set into the layer rect, clipped, and vertically
-    /// centered within the frame it measures to.
+    /// Rasterizes a G02 text layer into the (already canvas-upright) bitmap
+    /// context using Core Text — thread-safe off-main, unlike AppKit string
+    /// drawing. Order: the background bar fills the whole raster (padding
+    /// included), then the text frame-sets into the padded inset with the
+    /// horizontal/vertical alignment and the wrap/overflow line-break mode.
+    /// The font arrives already resolved through the pinned fallback chain,
+    /// so Unicode/emoji cascade deterministically.
     private func drawText(_ string: String,
-                          fontName: String?,
-                          fontSize: Double,
+                          font: CTFont,
                           colorHex: String,
+                          backgroundColorHex: String?,
+                          alignment: TextHorizontalAlignment,
+                          verticalAlignment: TextVerticalAlignment,
+                          padding: CGFloat,
+                          wraps: Bool,
+                          overflow: TextOverflow,
                           in rect: CGRect,
                           context: CGContext) {
-        let font = CTFontCreateWithName((fontName ?? "Helvetica") as CFString,
-                                        max(1, CGFloat(fontSize)), nil)
+        if let backgroundColorHex {
+            context.setFillColor(cgColor(backgroundColorHex))
+            context.fill(rect)
+        }
+        let inset = rect.insetBy(dx: padding, dy: padding)
+        guard inset.width > 0, inset.height > 0 else { return }
         let attributes: [CFString: Any] = [
             kCTFontAttributeName: font,
-            kCTForegroundColorAttributeName: cgColor(colorHex)
+            kCTForegroundColorAttributeName: cgColor(colorHex),
+            kCTParagraphStyleAttributeName: TextMeasurement.paragraphStyle(
+                alignment: alignment, wraps: wraps, overflow: overflow)
         ]
         guard let attributed = CFAttributedStringCreate(nil, string as CFString,
                                                         attributes as CFDictionary)
         else { return }
         let framesetter = CTFramesetterCreateWithAttributedString(attributed)
-        // Vertically center the measured text block inside the layer rect.
+        // Vertically place the measured text block inside the padded box.
         let measured = CTFramesetterSuggestFrameSizeWithConstraints(
             framesetter, CFRange(location: 0, length: 0), nil,
-            CGSize(width: rect.width, height: .greatestFiniteMagnitude), nil)
-        let textRect = CGRect(x: rect.minX,
-                              y: rect.minY + (rect.height - min(measured.height, rect.height)) / 2,
-                              width: rect.width,
-                              height: min(measured.height, rect.height))
+            CGSize(width: inset.width, height: .greatestFiniteMagnitude), nil)
+        let blockHeight = min(measured.height, inset.height)
+        let blockMinY: CGFloat
+        switch verticalAlignment {
+        case .top: blockMinY = inset.maxY - blockHeight
+        case .center: blockMinY = inset.minY + (inset.height - blockHeight) / 2
+        case .bottom: blockMinY = inset.minY
+        }
+        let textRect = CGRect(x: inset.minX, y: blockMinY,
+                              width: inset.width, height: blockHeight)
         context.saveGState()
         context.textMatrix = .identity
         context.translateBy(x: 0, y: rect.height)
@@ -796,6 +1006,10 @@ final class SceneRenderer {
             switch layer.payload {
             case .camera, .screen, .syphon, .media:
                 return false
+            case .text(let text):
+                // G02 (issue #110): a timed/fly-in title animates per tick —
+                // it must never bake into the static nested-scene cache.
+                if text.timing?.isActive == true { return false }
             case .scene(let reference):
                 guard !visited.contains(reference.sceneID),
                       let child = scenes[reference.sceneID] else { continue }

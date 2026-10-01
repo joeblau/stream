@@ -275,6 +275,24 @@ enum StudioCommand: Equatable, Sendable {
     case updateStylePreset(LayerStylePreset)
     case removeStylePreset(LayerStylePresetID)
 
+    // G02 text layers (issue #110): text content + title style. LAYER
+    // payloads are staged scene content (same targeting, lock,
+    // Take/revert/undo rules as `.setLayerStyle`); OVERLAY payloads are
+    // project-level and apply immediately to staged AND program (the S07
+    // overlay-edit precedent); title-style presets are project-level
+    // documents (the E01/G03 preset precedent — outside the S12 undo
+    // snapshot).
+    /// Replaces a STAGED-scene text layer's payload (the string + the whole
+    /// style surface; a complete value). The target must be a text layer.
+    case setLayerText(LayerID, TextSourcePayload, in: SceneID?)
+    /// Replaces a project text overlay's payload (applies immediately, like
+    /// `.setOverlayStyle`). The target must be a text overlay.
+    case setOverlayText(LayerID, TextSourcePayload)
+    /// Saves a reusable named title-style preset (project-level).
+    case addTextStylePreset(TextStylePreset)
+    case updateTextStylePreset(TextStylePreset)
+    case removeTextStylePreset(TextStylePresetID)
+
     // A02 media transport (issue #97): play/pause/stop/restart/seek for a
     // registry media source. These are SESSION state — playback position is
     // never part of a scene document — so they are not undoable scene edits,
@@ -597,6 +615,11 @@ enum StudioCommand: Equatable, Sendable {
         case .addStylePreset: return "Save Style Preset"
         case .updateStylePreset: return "Update Style Preset"
         case .removeStylePreset: return "Remove Style Preset"
+        case .setLayerText(let id, _, _): return "Layer \(id) Text"
+        case .setOverlayText: return "Overlay Text"
+        case .addTextStylePreset: return "Save Title Style Preset"
+        case .updateTextStylePreset: return "Update Title Style Preset"
+        case .removeTextStylePreset: return "Remove Title Style Preset"
         case .mediaPlay: return "Play Media"
         case .mediaPause: return "Pause Media"
         case .mediaStop: return "Stop Media"
@@ -1450,6 +1473,48 @@ final class StudioCommandDispatcher: ObservableObject {
             return sceneStore.stylePreset(withID: id) != nil
                 ? nil : .invalidTarget("Style preset \(id) does not exist.")
 
+        // G02 (issue #110): text payloads follow the `.setLayerStyle` /
+        // `.setOverlayStyle` targeting + lock rules (plus the payload must
+        // stay a TEXT edit on a text layer — never a kind change), with range
+        // validation the style model owns; title-style presets mirror the
+        // G03 preset rules.
+        case .setLayerText(let layerID, let payload, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                guard scene.layers[index].payload.isText else {
+                    return .invalidTarget("Layer \"\(scene.layers[index].name)\" is not a text layer.")
+                }
+                return payload.validationError.map { .invalidValue($0) }
+            case .failure(let error): return error
+            }
+        case .setOverlayText(let overlayID, let payload):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay):
+                if let error = overlayLockError(for: overlay) { return error }
+                guard overlay.payload.isText else {
+                    return .invalidTarget("Overlay \"\(overlay.name)\" is not a text overlay.")
+                }
+                return payload.validationError.map { .invalidValue($0) }
+            case .failure(let error): return error
+            }
+        case .addTextStylePreset(let preset):
+            if preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .invalidValue("A preset name can't be empty.")
+            }
+            return preset.style.validationError.map { .invalidValue($0) }
+        case .updateTextStylePreset(let preset):
+            guard sceneStore.textStylePreset(withID: preset.id) != nil else {
+                return .invalidTarget("Title style preset \(preset.id) does not exist.")
+            }
+            if preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .invalidValue("A preset name can't be empty.")
+            }
+            return preset.style.validationError.map { .invalidValue($0) }
+        case .removeTextStylePreset(let id):
+            return sceneStore.textStylePreset(withID: id) != nil
+                ? nil : .invalidTarget("Title style preset \(id) does not exist.")
+
         // A02 media transport: session state — the target must be a
         // registered media source; locks and staging don't apply.
         case .mediaPlay(let id), .mediaPause(let id),
@@ -2049,6 +2114,21 @@ final class StudioCommandDispatcher: ObservableObject {
             sceneStore.updateStylePreset(preset)
         case .removeStylePreset(let id):
             sceneStore.removeStylePreset(id)
+
+        // G02 (issue #110): the text payload is staged scene content (and
+        // implicitly takes in direct-live) like any layer edit; overlay
+        // payloads write the project overlay list (immediate, live-safe);
+        // presets write the project document directly.
+        case .setLayerText(let layerID, let payload, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.payload = .text(payload) }
+        case .setOverlayText(let overlayID, let payload):
+            editOverlay(overlayID) { $0.payload = .text(payload) }
+        case .addTextStylePreset(let preset):
+            sceneStore.addTextStylePreset(preset)
+        case .updateTextStylePreset(let preset):
+            sceneStore.updateTextStylePreset(preset)
+        case .removeTextStylePreset(let id):
+            sceneStore.removeTextStylePreset(id)
 
         case .mediaPlay(let id): controller.capturePool.playMedia(id)
         case .mediaPause(let id): controller.capturePool.pauseMedia(id)
@@ -2798,7 +2878,8 @@ final class StudioCommandDispatcher: ObservableObject {
              .captureSceneAudioSnapshot(let id),
              .setSceneMediaBehavior(_, let id),
              .setLayerSourceEffects(_, _, let id),
-             .setLayerStyle(_, _, let id):
+             .setLayerStyle(_, _, let id),
+             .setLayerText(_, _, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
         default:
             return nil
@@ -3096,8 +3177,9 @@ private extension StudioCommand {
     /// E01's source effect defaults and effect presets are excluded too:
     /// the registry and the preset list live outside the undo snapshot (the
     /// mixer-document precedent), unlike layer effect OVERRIDES, which are
-    /// staged scene content and undo with it. G03's style presets follow the
-    /// same rule; layer/overlay STYLES are content and undo.
+    /// staged scene content and undo with it. G03's style presets and G02's
+    /// title-style presets follow the same rule; layer/overlay STYLES and
+    /// text payloads are content and undo.
     /// G11 (issue #117): annotation commands are excluded — strokes,
     /// visibility, and the program gate live in the annotation document
     /// outside the S12 snapshot (the mixer/soundboard-document precedent).
@@ -3127,7 +3209,8 @@ private extension StudioCommand {
              .setSceneSoundBindings,
              .setSceneAudioSnapshot, .captureSceneAudioSnapshot, .setSceneMediaBehavior,
              .setLayerSourceEffects,
-             .setLayerStyle, .setOverlayStyle:
+             .setLayerStyle, .setOverlayStyle,
+             .setLayerText, .setOverlayText:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording,
@@ -3156,6 +3239,7 @@ private extension StudioCommand {
              .setSourceEffectDefaults,
              .addEffectPreset, .updateEffectPreset, .removeEffectPreset,
              .addStylePreset, .updateStylePreset, .removeStylePreset,
+             .addTextStylePreset, .updateTextStylePreset, .removeTextStylePreset,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
              .undo, .redo:
@@ -3182,6 +3266,10 @@ private extension StudioCommand {
             return "layer-source-effects.\(id)"
         case .setLayerStyle(let id, _, _):
             return "layer-style.\(id)"
+        case .setLayerText(let id, _, _):
+            return "layer-text.\(id)"
+        case .setOverlayText(let id, _):
+            return "overlay-text.\(id)"
         case .setOverlayStyle(let id, _):
             return "overlay-style.\(id)"
         case .setLayerAudio(let id, _, _):

@@ -232,6 +232,12 @@ final class SceneStore: ObservableObject {
     @Published private(set) var stylePresets: [LayerStylePreset] {
         didSet { scheduleSceneAutosave() }
     }
+    /// G02 (issue #110): reusable named TITLE-style presets, persisted in the
+    /// scene document. Project-level — apply immediately, never staged (the
+    /// G03 preset precedent).
+    @Published private(set) var textStylePresets: [TextStylePreset] {
+        didSet { scheduleSceneAutosave() }
+    }
     /// S02 browser metadata: folders, scene → folder membership, and scene
     /// locks. Immediate (never staged), persisted in the browser document.
     @Published private(set) var folders: [SceneFolder] = [] {
@@ -273,6 +279,7 @@ final class SceneStore: ObservableObject {
         defaultTransition = document.defaultTransition
         effectPresets = document.effectPresets
         stylePresets = document.stylePresets
+        textStylePresets = document.textStylePresets
         scenes = document.scenes
         selectedID = document.scenes.contains(where: { $0.id == document.selectedID })
             ? document.selectedID
@@ -317,7 +324,8 @@ final class SceneStore: ObservableObject {
                       defaultBackground: defaultBackground,
                       defaultTransition: defaultTransition,
                       effectPresets: effectPresets,
-                      stylePresets: stylePresets)
+                      stylePresets: stylePresets,
+                      textStylePresets: textStylePresets)
     }
 
     var selected: Scene? {
@@ -473,6 +481,32 @@ final class SceneStore: ObservableObject {
 
     func removeStylePreset(_ id: LayerStylePresetID) {
         stylePresets.removeAll { $0.id == id }
+    }
+
+    // MARK: - Title style presets (G02, issue #110)
+
+    func textStylePreset(withID id: TextStylePresetID) -> TextStylePreset? {
+        textStylePresets.first(where: { $0.id == id })
+    }
+
+    /// Registers a reusable title-style preset (project-level, applies
+    /// immediately, like style presets).
+    @discardableResult
+    func addTextStylePreset(_ preset: TextStylePreset) -> TextStylePreset {
+        textStylePresets.append(preset)
+        return preset
+    }
+
+    /// Replaces a title-style preset in place (rename/style edits). Applying
+    /// a preset copies its VALUE, so editing it never re-points existing
+    /// users.
+    func updateTextStylePreset(_ preset: TextStylePreset) {
+        guard let index = textStylePresets.firstIndex(where: { $0.id == preset.id }) else { return }
+        textStylePresets[index] = preset
+    }
+
+    func removeTextStylePreset(_ id: TextStylePresetID) {
+        textStylePresets.removeAll { $0.id == id }
     }
 
     // MARK: - Project overlays and default background (S07, issue #74)

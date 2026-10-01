@@ -414,11 +414,125 @@ struct ImageSourcePayload: Hashable, Codable, Sendable {
     var assetIdentifier: String? = nil
 }
 
+/// G02 (issue #110): a text/title layer — editable broadcast titles, lower
+/// thirds, and host/guest name captions. The legacy four fields (text, font,
+/// size, color) are the tip; the full style surface (alignment, background
+/// bar, padding, auto vs fixed box, wrapping, overflow, timed/fly-in
+/// visibility) is the StreamCore `TextTitleStyle` value model — same ranges,
+/// same additive-wire rules. The string may carry `{host}`/`{guest}` tokens
+/// resolved at render time (see `TitleTemplate`); the pinned font fallback
+/// chain (`TitleFontFallback`) makes a reopened/exported document render
+/// deterministically on a machine missing the requested font.
+///
+/// SEAM for G04 (countdown/clock) and G05 (ticker): both build on THIS
+/// payload and the generated-content render path — a per-tick text provider
+/// keyed by layer ID (the `TitleTokenStore` pattern) feeds dynamic strings
+/// without new layer kinds; the raster cache already re-renders only when
+/// the resolved string changes.
 struct TextSourcePayload: Hashable, Codable, Sendable {
     var text: String = ""
     var fontName: String? = nil
     var fontSize: Double = 48
     var colorHex: String = "#FFFFFF"
+    // G02 style surface (see TextTitleStyle for ranges/semantics).
+    var alignment: TextHorizontalAlignment = .leading
+    var verticalAlignment: TextVerticalAlignment = .center
+    var backgroundColorHex: String? = nil
+    var padding: Double = 0
+    var boxSizing: TextBoxSizing = .fixed
+    var wraps: Bool = true
+    var overflow: TextOverflow = .clip
+    var timing: TitleTiming? = nil
+
+    init(text: String = "",
+         fontName: String? = nil,
+         fontSize: Double = 48,
+         colorHex: String = "#FFFFFF",
+         alignment: TextHorizontalAlignment = .leading,
+         verticalAlignment: TextVerticalAlignment = .center,
+         backgroundColorHex: String? = nil,
+         padding: Double = 0,
+         boxSizing: TextBoxSizing = .fixed,
+         wraps: Bool = true,
+         overflow: TextOverflow = .clip,
+         timing: TitleTiming? = nil) {
+        self.text = text
+        self.fontName = fontName
+        self.fontSize = fontSize
+        self.colorHex = colorHex
+        self.alignment = alignment
+        self.verticalAlignment = verticalAlignment
+        self.backgroundColorHex = backgroundColorHex
+        self.padding = padding
+        self.boxSizing = boxSizing
+        self.wraps = wraps
+        self.overflow = overflow
+        self.timing = timing
+    }
+
+    /// Every G02 field was added after v2 shipped; decode each with its
+    /// default so pre-G02 documents keep loading (the established
+    /// additive-wire pattern, same as `LayerNode.isLocked`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        fontName = try container.decodeIfPresent(String.self, forKey: .fontName)
+        fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize) ?? 48
+        colorHex = try container.decodeIfPresent(String.self, forKey: .colorHex) ?? "#FFFFFF"
+        alignment = try container.decodeIfPresent(TextHorizontalAlignment.self, forKey: .alignment)
+            ?? .leading
+        verticalAlignment = try container.decodeIfPresent(TextVerticalAlignment.self,
+                                                          forKey: .verticalAlignment) ?? .center
+        backgroundColorHex = try container.decodeIfPresent(String.self, forKey: .backgroundColorHex)
+        padding = try container.decodeIfPresent(Double.self, forKey: .padding) ?? 0
+        boxSizing = try container.decodeIfPresent(TextBoxSizing.self, forKey: .boxSizing) ?? .fixed
+        wraps = try container.decodeIfPresent(Bool.self, forKey: .wraps) ?? true
+        overflow = try container.decodeIfPresent(TextOverflow.self, forKey: .overflow) ?? .clip
+        timing = try container.decodeIfPresent(TitleTiming.self, forKey: .timing)
+    }
+
+    /// The payload's styling fields as one `TextTitleStyle` value — what a
+    /// preset/template captures and applies. Setting writes every styling
+    /// field and leaves `text` untouched.
+    var style: TextTitleStyle {
+        get {
+            var style = TextTitleStyle()
+            style.fontName = fontName
+            style.fontSize = fontSize
+            style.colorHex = colorHex
+            style.alignment = alignment
+            style.verticalAlignment = verticalAlignment
+            style.backgroundColorHex = backgroundColorHex
+            style.padding = padding
+            style.boxSizing = boxSizing
+            style.wraps = wraps
+            style.overflow = overflow
+            style.timing = timing
+            return style
+        }
+        set {
+            fontName = newValue.fontName
+            fontSize = newValue.fontSize
+            colorHex = newValue.colorHex
+            alignment = newValue.alignment
+            verticalAlignment = newValue.verticalAlignment
+            backgroundColorHex = newValue.backgroundColorHex
+            padding = newValue.padding
+            boxSizing = newValue.boxSizing
+            wraps = newValue.wraps
+            overflow = newValue.overflow
+            timing = newValue.timing
+        }
+    }
+
+    /// The style model owns the ranges.
+    var validationError: String? { style.validationError }
+
+    func clamped() -> TextSourcePayload {
+        var copy = self
+        copy.style = style.clamped()
+        return copy
+    }
 }
 
 struct ShapeSourcePayload: Hashable, Codable, Sendable {
@@ -1503,6 +1617,11 @@ struct SceneDocument: Hashable, Codable, Sendable {
     /// borders, shadows, opacity, perspective), stored once at project level
     /// and applied by writing their value as a layer's/overlay's style.
     var stylePresets: [LayerStylePreset]
+    /// G02 (issue #110): reusable named TITLE-style presets (font, size,
+    /// color, alignment, background, padding, box, wrapping, overflow,
+    /// timing — everything but the string), stored once at project level
+    /// and applied by writing their value onto a text layer's payload.
+    var textStylePresets: [TextStylePreset]
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
@@ -1514,7 +1633,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
          defaultBackground: SceneBackground? = nil,
          defaultTransition: SceneTransition = .default,
          effectPresets: [SourceEffectPreset] = [],
-         stylePresets: [LayerStylePreset] = []) {
+         stylePresets: [LayerStylePreset] = [],
+         textStylePresets: [TextStylePreset] = []) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
@@ -1526,12 +1646,13 @@ struct SceneDocument: Hashable, Codable, Sendable {
         self.defaultTransition = defaultTransition
         self.effectPresets = effectPresets
         self.stylePresets = stylePresets
+        self.textStylePresets = textStylePresets
     }
 
     /// `overlays`/`defaultBackground` were added within v2; decode them with
     /// defaults so pre-S07 v2 documents keep loading (additive wire change).
-    /// S09's `defaultTransition`, E01's `effectPresets`, and G03's
-    /// `stylePresets` follow the same pattern.
+    /// S09's `defaultTransition`, E01's `effectPresets`, G03's
+    /// `stylePresets`, and G02's `textStylePresets` follow the same pattern.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
@@ -1545,6 +1666,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
         defaultTransition = try container.decodeIfPresent(SceneTransition.self, forKey: .defaultTransition) ?? .default
         effectPresets = try container.decodeIfPresent([SourceEffectPreset].self, forKey: .effectPresets) ?? []
         stylePresets = try container.decodeIfPresent([LayerStylePreset].self, forKey: .stylePresets) ?? []
+        textStylePresets = try container.decodeIfPresent([TextStylePreset].self, forKey: .textStylePresets) ?? []
     }
 
     /// The S07 render context the engine composites every scene inside.

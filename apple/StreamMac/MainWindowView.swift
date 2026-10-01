@@ -534,6 +534,10 @@ struct MainWindowView: View {
             // staged scene's override — rendered only on Take (program);
             // direct-live uses the same transitions.
             TransitionSettingsSectionView()
+            // G02 (issue #110): text/title editing for the selected text
+            // layer — content, the full style surface, timed/fly-in
+            // visibility, templates, and reusable title-style presets.
+            TextLayerSectionView()
             // G03 (issue #106): layer styling for the selected layer —
             // masks, borders, shadows, opacity, perspective (staged scene
             // content), plus reusable style presets.
