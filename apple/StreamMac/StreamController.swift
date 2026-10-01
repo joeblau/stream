@@ -222,6 +222,10 @@ final class StreamController: ObservableObject {
         self.previewEngine = CompositionEngine(
             screenProvider: { frames.latestScreenFrame() },
             cameraProvider: { frames.freshestCameraFrame() },
+            // G11 (issue #117): preview shows annotations as SwiftUI chrome in
+            // CanvasInteractionView — painting them into the image too would
+            // double-draw them.
+            annotationProvider: { .empty },
             canvasSize: persisted.outputProfile.canvasSize,
             frameRate: persisted.outputProfile.frameRate)
 

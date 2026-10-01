@@ -250,7 +250,8 @@ final class SceneRenderer {
                 sequence: Int64,
                 layerOpacity: [LayerID: Double] = [:],
                 exitingLayers: [LayerNode] = [],
-                stinger: CVPixelBuffer? = nil) -> CompositedFrame? {
+                stinger: CVPixelBuffer? = nil,
+                annotations: AnnotationRenderSnapshot = .empty) -> CompositedFrame? {
         let outWidth = Int(canvasSize.width.rounded())
         let outHeight = Int(canvasSize.height.rounded())
         guard outWidth > 1, outHeight > 1 else { return nil }
@@ -269,6 +270,12 @@ final class SceneRenderer {
         output = applyingOverlays(output, overlayContext: overlayContext, scene: scene,
                                   canvas: canvas, frames: frames,
                                   sourcePayloads: sourcePayloads, scenes: scenes)
+        // G11 (issue #117): program annotations composite above the scene and
+        // project overlays, below the stinger mask.
+        output = AnnotationRenderer.composite(strokes: annotations.strokes[scene.id] ?? [],
+                                              pointer: annotations.pointer?.sceneID == scene.id
+                                                  ? annotations.pointer?.point : nil,
+                                              onto: output, canvas: canvas)
         output = applyingStinger(output, stinger: stinger, canvas: canvas)
         pruneTextTimingAnchors()
         return finish(output, canvas: canvas, width: outWidth, height: outHeight,

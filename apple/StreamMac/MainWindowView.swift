@@ -286,6 +286,10 @@ struct MainWindowView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1)
             Divider()
+            // G11 (issue #117): pen/highlighter/pointer annotation toolbar —
+            // preview chrome only; program inclusion is an explicit toggle.
+            AnnotationToolbarView()
+            Divider()
             transitionControls
             if showDiagnostics {
                 Divider()
