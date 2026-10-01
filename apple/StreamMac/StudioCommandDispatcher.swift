@@ -58,6 +58,25 @@ enum StudioCommand: Equatable, Sendable {
     /// compatibility surface; the graph stays the source of truth).
     case updateScene(Scene)
 
+    // Scene browser organization (S02, issue #70). Folders, ordering, and
+    // locks are browser-side metadata in SceneStore: they apply immediately
+    // and are NOT staged preview/program content. A LOCKED scene rejects
+    // rename/delete/reorder and every content edit — the lock toggle itself
+    // is the one command it still accepts.
+    /// Copies the scene (new stable scene/layer/group IDs, unlocked) right
+    /// after the original, in the same folder.
+    case duplicateScene(SceneID)
+    /// Moves a scene in the browser: `toFolder` re-files it (nil = top
+    /// level), `before` anchors it ahead of a sibling (nil = end of the
+    /// destination folder, or end of the list when unfiled).
+    case moveScene(SceneID, toFolder: SceneFolderID?, before: SceneID?)
+    case addSceneFolder(named: String?)
+    case renameSceneFolder(SceneFolderID, to: String)
+    /// Removes the folder only; its scenes become unfiled.
+    case deleteSceneFolder(SceneFolderID)
+    case setSceneFolderCollapsed(SceneFolderID, collapsed: Bool)
+    case setSceneLocked(SceneID, locked: Bool)
+
     // Layer set-value commands (W03: they mutate the STAGED scene; `in: nil`
     // targets it, an explicit ID must name it).
     case setLayerVisibility(LayerID, visible: Bool, in: SceneID?)
@@ -161,6 +180,15 @@ enum StudioCommand: Equatable, Sendable {
         case .renameScene: return "Rename Scene"
         case .deleteScene: return "Delete Scene"
         case .updateScene: return "Edit Scene"
+        case .duplicateScene: return "Duplicate Scene"
+        case .moveScene: return "Move Scene"
+        case .addSceneFolder: return "Add Folder"
+        case .renameSceneFolder: return "Rename Folder"
+        case .deleteSceneFolder: return "Delete Folder"
+        case .setSceneFolderCollapsed(_, let collapsed):
+            return "\(collapsed ? "Collapse" : "Expand") Folder"
+        case .setSceneLocked(_, let locked):
+            return "\(locked ? "Lock" : "Unlock") Scene"
         case .setLayerVisibility(let id, let visible, _):
             return "\(visible ? "Show" : "Hide") Layer \(id)"
         case .setLayerTransform: return "Move Layer"
@@ -279,6 +307,9 @@ struct StudioState: Equatable, Sendable {
     /// staged scene or unpublished edits (W03). Drives the Take/Revert
     /// controls and the pending-changes indication.
     var hasPendingStagedEdits = false
+    /// Browser scene locks (S02): scenes rejecting edits, removal, and
+    /// reordering until unlocked.
+    var lockedSceneIDs: Set<SceneID> = []
     /// Direct-live editing mode (W03): edits apply straight to program.
     var directLiveEditing = false
     /// Visibility of the STAGED scene's layers, keyed by stable LayerID.
@@ -383,6 +414,10 @@ final class StudioCommandDispatcher: ObservableObject {
     // MARK: Validation (against current session state, before any execution)
 
     private func validate(_ command: StudioCommand) -> StudioCommandError? {
+        // S02: a locked scene rejects every edit to its CONTENT (whole-scene
+        // replacement plus all layer/group edits addressed to it). Selection,
+        // browser organization, and the lock toggle stay available.
+        if let error = sceneContentLockError(for: command) { return error }
         switch command {
         case .startStream:
             guard controller.streamState.canStart else {
@@ -420,12 +455,14 @@ final class StudioCommandDispatcher: ObservableObject {
             guard sceneStore.scenes.contains(where: { $0.id == id }) else {
                 return .invalidTarget("Scene \(id) does not exist.")
             }
+            if let error = sceneLockError(for: id, action: "rename") { return error }
             return name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? .invalidValue("A scene name can't be empty.") : nil
         case .deleteScene(let id):
             guard sceneStore.scenes.contains(where: { $0.id == id }) else {
                 return .invalidTarget("Scene \(id) does not exist.")
             }
+            if let error = sceneLockError(for: id, action: "delete") { return error }
             return sceneStore.scenes.count > 1
                 ? nil : .unavailable("The last remaining scene can't be deleted.")
         case .updateScene(let scene):
@@ -436,6 +473,48 @@ final class StudioCommandDispatcher: ObservableObject {
             // scene edit must address the scene staged in preview.
             return previewProgram.stagedScene?.id == scene.id
                 ? nil : .invalidTarget("Scene \"\(scene.name)\" is not staged in preview — select it first.")
+
+        case .duplicateScene(let id):
+            // Duplicating never modifies the original, so a locked scene
+            // still duplicates (the copy starts unlocked) — same rule as
+            // layer duplication.
+            return sceneStore.scenes.contains(where: { $0.id == id })
+                ? nil : .invalidTarget("Scene \(id) does not exist.")
+        case .moveScene(let id, let folderID, let anchorID):
+            guard sceneStore.scenes.contains(where: { $0.id == id }) else {
+                return .invalidTarget("Scene \(id) does not exist.")
+            }
+            if let error = sceneLockError(for: id, action: "move") { return error }
+            if let folderID, !sceneStore.folders.contains(where: { $0.id == folderID }) {
+                return .invalidTarget("Folder \(folderID) does not exist.")
+            }
+            if let anchorID {
+                guard anchorID != id else {
+                    return .invalidValue("A scene can't be moved relative to itself.")
+                }
+                guard sceneStore.scenes.contains(where: { $0.id == anchorID }) else {
+                    return .invalidTarget("Scene \(anchorID) does not exist.")
+                }
+            }
+            return nil
+        case .addSceneFolder(let name):
+            if let name, name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .invalidValue("A folder name can't be empty.")
+            }
+            return nil
+        case .renameSceneFolder(let id, let name):
+            guard sceneStore.folders.contains(where: { $0.id == id }) else {
+                return .invalidTarget("Folder \(id) does not exist.")
+            }
+            return name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .invalidValue("A folder name can't be empty.") : nil
+        case .deleteSceneFolder(let id),
+             .setSceneFolderCollapsed(let id, _):
+            return sceneStore.folders.contains(where: { $0.id == id })
+                ? nil : .invalidTarget("Folder \(id) does not exist.")
+        case .setSceneLocked(let id, _):
+            return sceneStore.scenes.contains(where: { $0.id == id })
+                ? nil : .invalidTarget("Scene \(id) does not exist.")
 
         case .setLayerVisibility(let layerID, _, let sceneID),
              .setLayerTransform(let layerID, _, let sceneID),
@@ -677,6 +756,21 @@ final class StudioCommandDispatcher: ObservableObject {
             previewProgram.applyStagedEdit(scene)
             takeStagedIfDirectLive()
 
+        case .duplicateScene(let id):
+            sceneStore.duplicateScene(id)
+        case .moveScene(let id, let folderID, let anchorID):
+            sceneStore.moveScene(id, toFolder: folderID, before: anchorID)
+        case .addSceneFolder(let name):
+            sceneStore.addFolder(named: name)
+        case .renameSceneFolder(let id, let name):
+            sceneStore.renameFolder(id, to: name)
+        case .deleteSceneFolder(let id):
+            sceneStore.deleteFolder(id)
+        case .setSceneFolderCollapsed(let id, let collapsed):
+            sceneStore.setFolderCollapsed(id, collapsed: collapsed)
+        case .setSceneLocked(let id, let locked):
+            sceneStore.setSceneLocked(id, locked: locked)
+
         case .setLayerVisibility(let layerID, let visible, let sceneID):
             editLayer(layerID, in: sceneID) { $0.isVisible = visible }
         case .setLayerTransform(let layerID, let transform, let sceneID):
@@ -887,6 +981,48 @@ final class StudioCommandDispatcher: ObservableObject {
         return nil
     }
 
+    /// S02: the rejection for touching a locked scene (rename/delete/move).
+    /// Nil when the scene is unlocked.
+    private func sceneLockError(for id: SceneID, action: String) -> StudioCommandError? {
+        guard sceneStore.isLocked(id) else { return nil }
+        let name = sceneStore.scenes.first(where: { $0.id == id })?.name ?? "\(id)"
+        return .unavailable("Scene \"\(name)\" is locked — unlock it to \(action) it.")
+    }
+
+    /// S02: the rejection for a command that would edit a locked scene's
+    /// CONTENT — a whole-scene replacement or any layer/group edit addressed
+    /// to it (explicitly, or implicitly via the staged scene). Nil for
+    /// non-content commands and unlocked scenes.
+    private func sceneContentLockError(for command: StudioCommand) -> StudioCommandError? {
+        let sceneID: SceneID?
+        switch command {
+        case .updateScene(let scene):
+            sceneID = scene.id
+        case .setLayerVisibility(_, _, let id),
+             .setLayerTransform(_, _, let id),
+             .setLayerEffects(_, _, let id),
+             .setLayerAudio(_, _, let id),
+             .addLayer(_, let id),
+             .removeLayer(_, let id),
+             .duplicateLayer(_, let id),
+             .renameLayer(_, _, let id),
+             .setLayerLocked(_, _, let id),
+             .moveLayer(_, _, _, let id),
+             .groupLayers(_, _, let id),
+             .ungroupLayers(_, let id),
+             .renameGroup(_, _, let id),
+             .setGroupVisibility(_, _, let id),
+             .setGroupLocked(_, _, let id),
+             .setOverlayHiddenInScene(_, _, let id),
+             .setSceneBackground(_, let id):
+            sceneID = id ?? previewProgram.stagedScene?.id
+        default:
+            return nil
+        }
+        guard let sceneID else { return nil }
+        return sceneLockError(for: sceneID, action: "edit")
+    }
+
     /// Builds a new front-of-stack layer for `.addLayer`, binding the
     /// matching project-level source when one is registered. A second camera
     /// lands as a PIP instead of covering the existing fullscreen camera.
@@ -1006,6 +1142,7 @@ final class StudioCommandDispatcher: ObservableObject {
             stagedSceneID: staged?.id,
             programSceneID: previewProgram.programScene?.id,
             hasPendingStagedEdits: previewProgram.hasPendingEdits,
+            lockedSceneIDs: sceneStore.lockedSceneIDs,
             directLiveEditing: previewProgram.directLiveEditing,
             layerVisibility: Dictionary(
                 uniqueKeysWithValues: (staged?.layers ?? []).map { ($0.id, $0.isVisible) }),

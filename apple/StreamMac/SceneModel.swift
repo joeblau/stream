@@ -102,6 +102,85 @@ extension Scene {
     }
 }
 
+// MARK: - Scene browser model (S02, issue #70)
+//
+// Folders, membership, and locks are BROWSER-side organization metadata: they
+// live in `SceneStore` (not in the layer graph), apply immediately rather
+// than staging through preview/program, and persist in their own additive
+// document beside the v2 scene document, so the LayerGraph wire format is
+// untouched.
+
+enum SceneFolderTag {}
+typealias SceneFolderID = GraphID<SceneFolderTag>
+
+/// A named folder grouping scenes in the browser. Membership is a
+/// `SceneID → SceneFolderID` map on `SceneStore`, keeping the scene list
+/// itself flat and ordered.
+struct SceneFolder: Identifiable, Hashable, Codable, Sendable {
+    var id: SceneFolderID
+    var name: String
+    var isCollapsed: Bool
+
+    init(id: SceneFolderID = SceneFolderID(), name: String, isCollapsed: Bool = false) {
+        self.id = id
+        self.name = name
+        self.isCollapsed = isCollapsed
+    }
+
+    /// `isCollapsed` may be absent in older browser files; decode it with a
+    /// default so they keep loading (additive wire change).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(SceneFolderID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        isCollapsed = try container.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? false
+    }
+}
+
+/// One top-level row of the scene browser: an unfiled scene, or a folder
+/// (whose members render beneath it when expanded).
+enum SceneBrowserRow: Identifiable, Hashable, Sendable {
+    case folder(SceneFolder)
+    case scene(Scene)
+
+    var id: String {
+        switch self {
+        case .folder(let folder): return "folder:\(folder.id.rawValue.uuidString)"
+        case .scene(let scene): return "scene:\(scene.id.rawValue.uuidString)"
+        }
+    }
+}
+
+/// The persisted browser state (folders, membership, locks). Every field
+/// decodes with a default so older/partial files keep loading.
+struct SceneBrowserDocument: Hashable, Codable, Sendable {
+    static let currentVersion = 1
+
+    var version: Int
+    var folders: [SceneFolder]
+    var membership: [SceneID: SceneFolderID]
+    var lockedSceneIDs: [SceneID]
+
+    init(version: Int = SceneBrowserDocument.currentVersion,
+         folders: [SceneFolder],
+         membership: [SceneID: SceneFolderID],
+         lockedSceneIDs: [SceneID]) {
+        self.version = version
+        self.folders = folders
+        self.membership = membership
+        self.lockedSceneIDs = lockedSceneIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decodeIfPresent(Int.self, forKey: .version)
+            ?? SceneBrowserDocument.currentVersion
+        folders = try container.decodeIfPresent([SceneFolder].self, forKey: .folders) ?? []
+        membership = try container.decodeIfPresent([SceneID: SceneFolderID].self, forKey: .membership) ?? [:]
+        lockedSceneIDs = try container.decodeIfPresent([SceneID].self, forKey: .lockedSceneIDs) ?? []
+    }
+}
+
 /// The scene list + selection, persisted as the versioned `SceneDocument`
 /// (v2) in the shared App Group container (same storage pattern as
 /// `SettingsStore`: a plain file, never the UserDefaults suite, so
@@ -134,11 +213,25 @@ final class SceneStore: ObservableObject {
     @Published private(set) var defaultBackground: SceneBackground? {
         didSet { persist() }
     }
+    /// S02 browser metadata: folders, scene → folder membership, and scene
+    /// locks. Immediate (never staged), persisted in the browser document.
+    @Published private(set) var folders: [SceneFolder] = [] {
+        didSet { persistBrowser() }
+    }
+    @Published private(set) var sceneMembership: [SceneID: SceneFolderID] = [:] {
+        didSet { persistBrowser() }
+    }
+    /// Locked scenes reject edits, deletion, and reordering via the
+    /// dispatcher (the lock toggle itself stays available).
+    @Published private(set) var lockedSceneIDs: Set<SceneID> = [] {
+        didSet { persistBrowser() }
+    }
     private var projectID: ProjectID
     private var projectName: String
 
     private static let fileNameV2 = "stream.scenes.v2.json"
     private static let fileNameV1 = "stream.scenes.v1.json"
+    private static let browserFileName = "stream.sceneBrowser.v1.json"
 
     init() {
         let loaded = Self.loadV2().flatMap { $0.scenes.isEmpty ? nil : $0 }
@@ -154,7 +247,14 @@ final class SceneStore: ObservableObject {
         selectedID = document.scenes.contains(where: { $0.id == document.selectedID })
             ? document.selectedID
             : document.scenes[0].id
+        let browser = Self.loadBrowser()
+        folders = browser.folders
+        sceneMembership = browser.membership
+        lockedSceneIDs = Set(browser.lockedSceneIDs)
+        pruneBrowserMetadata()
+        normalizeOrder()
         persist()
+        persistBrowser()
     }
 
     /// The whole persisted model, for consumers that work at document level.
@@ -315,6 +415,8 @@ final class SceneStore: ObservableObject {
     func delete(_ id: Scene.ID) {
         guard scenes.count > 1 else { return }   // never leave zero scenes
         scenes.removeAll { $0.id == id }
+        sceneMembership.removeValue(forKey: id)
+        lockedSceneIDs.remove(id)
         if !scenes.contains(where: { $0.id == selectedID }) {
             selectedID = scenes[0].id
         }
@@ -345,6 +447,185 @@ final class SceneStore: ObservableObject {
         selectedID = scenes[index].id
     }
 
+    // MARK: - Scene browser (S02, issue #70)
+    //
+    // The browser's manual order IS the `scenes` array order:
+    // `normalizeOrder()` keeps every folder's members contiguous (each block
+    // anchored at its first member), so expanding every browser row
+    // reproduces the flat array exactly — which is what `select(number:)`
+    // reads, keeping ⌘1…⌘9 position-valid no matter how the browser is
+    // rearranged.
+
+    func scene(withID id: SceneID) -> Scene? {
+        scenes.first(where: { $0.id == id })
+    }
+
+    func isLocked(_ id: SceneID) -> Bool {
+        lockedSceneIDs.contains(id)
+    }
+
+    func setSceneLocked(_ id: SceneID, locked: Bool) {
+        guard scenes.contains(where: { $0.id == id }) else { return }
+        if locked {
+            lockedSceneIDs.insert(id)
+        } else {
+            lockedSceneIDs.remove(id)
+        }
+    }
+
+    /// The folder a scene is filed in, if the membership resolves.
+    func folder(containing id: SceneID) -> SceneFolder? {
+        guard let folderID = sceneMembership[id] else { return nil }
+        return folders.first(where: { $0.id == folderID })
+    }
+
+    /// Members of a folder in display order.
+    func members(of folderID: SceneFolderID) -> [Scene] {
+        scenes.filter { sceneMembership[$0.id] == folderID }
+    }
+
+    /// Scenes with no folder, in display order (the top-level siblings a
+    /// drag targets when moving a scene out of a folder).
+    var unfiledScenes: [Scene] {
+        scenes.filter { sceneMembership[$0.id] == nil }
+    }
+
+    /// The browser's top-level rows in display order: unfiled scenes in
+    /// `scenes` order, each folder at its first member's position, and empty
+    /// folders last (they have no member to anchor to).
+    var browserRows: [SceneBrowserRow] {
+        var rows: [SceneBrowserRow] = []
+        var emitted: Set<SceneFolderID> = []
+        for scene in scenes {
+            guard let folderID = sceneMembership[scene.id],
+                  let folder = folders.first(where: { $0.id == folderID }) else {
+                rows.append(.scene(scene))
+                continue
+            }
+            if emitted.insert(folderID).inserted {
+                rows.append(.folder(folder))
+            }
+        }
+        for folder in folders where !emitted.contains(folder.id) {
+            rows.append(.folder(folder))
+        }
+        return rows
+    }
+
+    @discardableResult
+    func addFolder(named name: String? = nil) -> SceneFolder {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let folder = SceneFolder(name: trimmed.isEmpty ? "Folder \(folders.count + 1)" : trimmed)
+        folders.append(folder)
+        return folder
+    }
+
+    func renameFolder(_ id: SceneFolderID, to name: String) {
+        guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[index].name = name
+    }
+
+    /// Removes the folder only; its scenes become unfiled and keep their
+    /// relative order.
+    func deleteFolder(_ id: SceneFolderID) {
+        folders.removeAll { $0.id == id }
+        sceneMembership = sceneMembership.filter { $0.value != id }
+    }
+
+    func setFolderCollapsed(_ id: SceneFolderID, collapsed: Bool) {
+        guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[index].isCollapsed = collapsed
+    }
+
+    /// Copies a scene (new stable scene/layer/group/canvas IDs, so nothing
+    /// aliases the original) and inserts it right after the original in the
+    /// same folder. Mirrors the layer-panel rule: a locked original still
+    /// duplicates, and the copy starts unlocked.
+    @discardableResult
+    func duplicateScene(_ id: SceneID) -> Scene? {
+        guard let index = scenes.firstIndex(where: { $0.id == id }) else { return nil }
+        let original = scenes[index]
+        var groupIDs: [GroupID: GroupID] = [:]
+        let groups = original.groups.map { group -> LayerGroup in
+            var copy = group
+            let newID = GroupID()
+            groupIDs[group.id] = newID
+            copy.id = newID
+            return copy
+        }
+        let layers = original.layers.map { layer -> LayerNode in
+            var copy = layer
+            copy.id = LayerID()
+            copy.groupID = layer.groupID.flatMap { groupIDs[$0] }
+            return copy
+        }
+        var canvas = original.canvas
+        canvas.id = CanvasID()
+        let copy = Scene(name: "\(original.name) copy", canvas: canvas, groups: groups, layers: layers)
+        scenes.insert(copy, at: index + 1)
+        if let folderID = sceneMembership[id] {
+            sceneMembership[copy.id] = folderID
+        }
+        normalizeOrder()
+        return copy
+    }
+
+    /// Moves a scene in the browser: `folderID` re-files it (nil = top
+    /// level); `anchorID` places it directly ahead of that sibling, nil lands
+    /// it at the end of the destination folder (or the end of the list when
+    /// unfiled). Validation (existence, locks) is the dispatcher's job.
+    func moveScene(_ id: SceneID, toFolder folderID: SceneFolderID?, before anchorID: SceneID?) {
+        guard let scene = scenes.first(where: { $0.id == id }) else { return }
+        if let folderID {
+            guard folders.contains(where: { $0.id == folderID }) else { return }
+            sceneMembership[id] = folderID
+        } else {
+            sceneMembership.removeValue(forKey: id)
+        }
+        scenes.removeAll { $0.id == id }
+        if let anchorID, let anchorIndex = scenes.firstIndex(where: { $0.id == anchorID }) {
+            scenes.insert(scene, at: anchorIndex)
+        } else if let folderID,
+                  let lastMember = scenes.lastIndex(where: { sceneMembership[$0.id] == folderID }) {
+            scenes.insert(scene, at: lastMember + 1)
+        } else {
+            scenes.append(scene)
+        }
+        normalizeOrder()
+    }
+
+    /// Keeps every folder's members contiguous in `scenes` (each block
+    /// anchored at its first member's current position), preserving relative
+    /// order — the invariant that makes the flat array order equal the
+    /// browser's visual order.
+    private func normalizeOrder() {
+        var ordered: [Scene] = []
+        var placedFolders: Set<SceneFolderID> = []
+        for scene in scenes {
+            guard let folderID = sceneMembership[scene.id] else {
+                ordered.append(scene)
+                continue
+            }
+            if placedFolders.insert(folderID).inserted {
+                ordered.append(contentsOf: scenes.filter { sceneMembership[$0.id] == folderID })
+            }
+        }
+        if ordered != scenes {
+            scenes = ordered
+        }
+    }
+
+    /// Drops browser metadata whose scene or folder no longer exists (e.g. an
+    /// older browser file loaded against a migrated scene document).
+    private func pruneBrowserMetadata() {
+        let sceneIDs = Set(scenes.map(\.id))
+        let folderIDs = Set(folders.map(\.id))
+        sceneMembership = sceneMembership.filter {
+            sceneIDs.contains($0.key) && folderIDs.contains($0.value)
+        }
+        lockedSceneIDs = lockedSceneIDs.intersection(sceneIDs)
+    }
+
     // MARK: - Persistence
 
     private static func fileURL(_ fileName: String) -> URL? {
@@ -372,6 +653,24 @@ final class SceneStore: ObservableObject {
         // first so a failed file write never stalls the live path.
         ProjectOverlayStore.shared.publish(document.overlayContext)
         guard let url = Self.fileURL(Self.fileNameV2),
+              let data = try? JSONEncoder().encode(document) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private static func loadBrowser() -> SceneBrowserDocument {
+        guard let url = fileURL(browserFileName),
+              let data = try? Data(contentsOf: url),
+              let document = try? JSONDecoder().decode(SceneBrowserDocument.self, from: data) else {
+            return SceneBrowserDocument(folders: [], membership: [:], lockedSceneIDs: [])
+        }
+        return document
+    }
+
+    private func persistBrowser() {
+        let document = SceneBrowserDocument(folders: folders,
+                                            membership: sceneMembership,
+                                            lockedSceneIDs: Array(lockedSceneIDs))
+        guard let url = Self.fileURL(Self.browserFileName),
               let data = try? JSONEncoder().encode(document) else { return }
         try? data.write(to: url, options: .atomic)
     }

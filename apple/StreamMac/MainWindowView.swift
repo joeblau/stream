@@ -7,7 +7,8 @@ import StreamCore
 ///
 ///     ┌──────────┬───────────────────────────┬──────────┬────────────┬───────────┐
 ///     │  Scenes  │  PREVIEW + PROGRAM (W03)  │   Chat   │ Inspector  │ Settings  │
-///     │  column  │  Take / Revert / Direct   │  column  │  column    │ (W04, ⌘,) │
+///     │  browser │  Take / Revert / Direct   │  column  │  column    │ (W04, ⌘,) │
+///     │  (S02)   │  Live controls            │          │            │           │
 ///     │          │  Live controls            │          │            │           │
 ///     │          │  ──────────────────────── │          │            │           │
 ///     │          │  Diagnostics strip        │          │            │           │
@@ -63,8 +64,6 @@ struct MainWindowView: View {
     @AppStorage("studio.showSettingsPanel") private var showSettingsPanel = false
 
     @State private var inspectorTab: InspectorTab = .layers
-    @State private var renamingScene: Scene?
-    @State private var draftName = ""
 
     /// Keyboard-focus tracking per panel, so dismissing settings returns
     /// focus to wherever it was (W04 acceptance).
@@ -86,7 +85,7 @@ struct MainWindowView: View {
     var body: some View {
         HSplitView {
             if showScenesPanel {
-                scenesPanel
+                SceneBrowserView()
                     .frame(minWidth: 180, idealWidth: 220, maxWidth: 320)
                     .focusable()
                     .focused($focusedPanel, equals: .scenes)
@@ -182,15 +181,6 @@ struct MainWindowView: View {
                 panelBeforeSettings = nil
             }
         }
-        .alert("Rename Scene", isPresented: renameBinding) {
-            TextField("Scene name", text: $draftName)
-            Button("Rename") {
-                if let scene = renamingScene {
-                    dispatcher.execute(.renameScene(scene.id, to: draftName))
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
         .alert("Stream",
                isPresented: Binding(
                    get: { controller.errorMessage != nil },
@@ -259,12 +249,6 @@ struct MainWindowView: View {
         showDiagnostics = true
     }
 
-    private var renameBinding: Binding<Bool> {
-        Binding(
-            get: { renamingScene != nil },
-            set: { if !$0 { renamingScene = nil } })
-    }
-
     /// W06 just-in-time gating: when the selected scene starts using a source
     /// whose OS permission is missing, surface the explainer sheet (purpose
     /// copy + request/repair). Never during first run — the onboarding flow
@@ -280,55 +264,11 @@ struct MainWindowView: View {
     }
 
     // MARK: - Scenes panel
-
-    /// `List` wants an optional selection; the store never leaves zero scenes,
-    /// so a deselect is ignored and a select writes straight through.
-    private var sceneSelection: Binding<Scene.ID?> {
-        Binding(
-            get: { sceneStore.selectedID },
-            set: { if let id = $0 { dispatcher.execute(.selectScene(id)) } })
-    }
-
-    private var scenesPanel: some View {
-        VStack(spacing: 0) {
-            Text("Scenes")
-                .font(.callout.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-
-            List(selection: sceneSelection) {
-                ForEach(sceneStore.scenes) { scene in
-                    SceneRow(scene: scene,
-                             isStaged: dispatcher.state.stagedSceneID == scene.id,
-                             isProgram: dispatcher.state.programSceneID == scene.id)
-                        .tag(scene.id)
-                        .contextMenu {
-                            Button("Rename…") {
-                                draftName = scene.name
-                                renamingScene = scene
-                            }
-                            Button("Delete", role: .destructive) {
-                                dispatcher.execute(.deleteScene(scene.id))
-                            }
-                            .disabled(sceneStore.scenes.count <= 1)
-                        }
-                }
-            }
-
-            Divider()
-            Button {
-                dispatcher.execute(.addScene)
-            } label: {
-                Label("Add Scene", systemImage: "plus")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-    }
+    //
+    // The scenes column is the S02 scene browser (SceneBrowserView.swift,
+    // issue #70): thumbnails, folders, drag-to-reorder, locks, search, and
+    // list/grid modes. The ⌘1…⌘9 shortcuts above keep working because the
+    // browser's manual order IS the store's scene order.
 
     // MARK: - Canvas panel
 
@@ -692,44 +632,5 @@ struct MainWindowView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .keyboardShortcut("l", modifiers: .command)
-    }
-}
-
-/// A single scene row in the scenes panel. W03 markers show which scene is
-/// staged in PREVIEW and which is on PROGRAM — the two are independent.
-private struct SceneRow: View {
-    let scene: Scene
-    var isStaged = false
-    var isProgram = false
-
-    var body: some View {
-        HStack {
-            Label(scene.name, systemImage: icon)
-                .lineLimit(1)
-            Spacer()
-            if isStaged {
-                marker("PVW", color: .green)
-            }
-            if isProgram {
-                marker("PGM", color: .red)
-            }
-        }
-    }
-
-    private func marker(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.bold))
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(color.opacity(0.25), in: Capsule())
-            .foregroundStyle(color)
-    }
-
-    private var icon: String {
-        switch scene.layout {
-        case .cameraSolo: return "person.fill"
-        case .screenSolo: return "display"
-        case .screenPlusCam: return "rectangle.inset.bottomright.filled"
-        }
     }
 }
