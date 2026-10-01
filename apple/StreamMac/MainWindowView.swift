@@ -5,18 +5,20 @@ import StreamCore
 /// The persistent studio shell (W01): one window holding every production
 /// control in dedicated, collapsible panels —
 ///
-///     ┌──────────┬───────────────────────────┬──────────┬────────────┐
-///     │  Scenes  │  Canvas (program preview) │   Chat   │ Inspector  │
-///     │  column  │  ──────────────────────── │  column  │  column    │
-///     │          │  Diagnostics strip        │          │            │
-///     │          │  Transport bar            │          │            │
-///     └──────────┴───────────────────────────┴──────────┴────────────┘
+///     ┌──────────┬───────────────────────────┬──────────┬────────────┬───────────┐
+///     │  Scenes  │  Canvas (program preview) │   Chat   │ Inspector  │ Settings  │
+///     │  column  │  ──────────────────────── │  column  │  column    │ (W04, ⌘,) │
+///     │          │  Diagnostics strip        │          │            │           │
+///     │          │  Transport bar            │          │            │           │
+///     └──────────┴───────────────────────────┴──────────┴────────────┴───────────┘
 ///
 /// The columns are `HSplitView` panes, so they resize by dragging and
 /// collapse/restore from the toolbar toggles; pane visibility persists in
-/// `UserDefaults` (`@AppStorage`). Settings is a toolbar-presented sheet on
-/// this window until W04 embeds it as a first-class panel — swap
-/// `settingsSheet` for an inspector tab or dedicated pane then. W02 session
+/// `UserDefaults` (`@AppStorage`). Settings (W04, issue #67) is an embedded
+/// fifth pane — no longer a sheet — editing the shared `SettingsSession`
+/// draft: ⌘, (menu) or the toolbar toggle opens it, Escape/close dismisses it
+/// and returns keyboard focus to the previously focused panel, and edits only
+/// reach the store/pipeline via its explicit Apply. W02 session
 /// states surface in the diagnostics strip (StatsHUD + recording status) and
 /// the transport bar (acknowledged-connection LIVE badge, per-state Go Live
 /// button); window close while an output is active is confirmed in-window via
@@ -24,19 +26,30 @@ import StreamCore
 struct MainWindowView: View {
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var controller: StreamController
+    @EnvironmentObject private var session: SettingsSession
     @StateObject private var recorder = RecordingController()
+    /// Shared Restream chat connection: the sidebar shows it and the settings
+    /// pane edits its credentials (W04 — one instance, one sign-in).
+    @State private var chat = RestreamChat()
 
     // Panel visibility, persisted so the layout restores across launches.
     @AppStorage("studio.showScenesPanel") private var showScenesPanel = true
     @AppStorage("studio.showChatPanel") private var showChatPanel = true
     @AppStorage("studio.showInspectorPanel") private var showInspectorPanel = true
     @AppStorage("studio.showDiagnostics") private var showDiagnostics = true
+    @AppStorage("studio.showSettingsPanel") private var showSettingsPanel = false
 
     @State private var inspectorTab: InspectorTab = .sources
-    @State private var showSettings = false
-    @State private var settings = SettingsStore().load()
     @State private var renamingScene: Scene?
     @State private var draftName = ""
+
+    /// Keyboard-focus tracking per panel, so dismissing settings returns
+    /// focus to wherever it was (W04 acceptance).
+    private enum StudioPanel: Hashable {
+        case scenes, canvas, chat, inspector, settings
+    }
+    @FocusState private var focusedPanel: StudioPanel?
+    @State private var panelBeforeSettings: StudioPanel?
 
     private enum InspectorTab: String, CaseIterable {
         case sources = "Sources"
@@ -51,17 +64,31 @@ struct MainWindowView: View {
             if showScenesPanel {
                 scenesPanel
                     .frame(minWidth: 180, idealWidth: 220, maxWidth: 320)
+                    .focusable()
+                    .focused($focusedPanel, equals: .scenes)
             }
             canvasPanel
                 .frame(minWidth: 320)
                 .layoutPriority(1)
+                .focusable()
+                .focused($focusedPanel, equals: .canvas)
             if showChatPanel {
-                ChatSidebarView()
+                ChatSidebarView(chat: chat)
                     .frame(maxWidth: 420)
+                    .focusable()
+                    .focused($focusedPanel, equals: .chat)
             }
             if showInspectorPanel {
                 inspectorPanel
                     .frame(minWidth: 240, idealWidth: 300, maxWidth: 420)
+                    .focusable()
+                    .focused($focusedPanel, equals: .inspector)
+            }
+            if session.isPresented {
+                settingsPane
+                    .frame(minWidth: 300, idealWidth: 360, maxWidth: 480)
+                    .focusable()
+                    .focused($focusedPanel, equals: .settings)
             }
         }
         .background {
@@ -88,17 +115,22 @@ struct MainWindowView: View {
                 stopPreview: { controller.stopPreview() })
         }
         .toolbar { panelToggles }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(settings: $settings,
-                         outputActive: controller.streamState.isActive || recorder.state.isActive) {
-                SettingsStore().save(settings)
-                // Applies immediately when idle; staged ("next session") while
-                // a stream or recording owns the encode geometry (W07).
-                controller.applyOutputProfile(settings.outputProfile,
-                                              destination: settings.selectedProtocol)
+        .onAppear {
+            controller.startPreview()
+            // Restore a settings pane left open last launch.
+            session.isPresented = showSettingsPanel
+        }
+        .onChange(of: session.isPresented) { _, presented in
+            // Persist the layout, and move keyboard focus in/out of the pane.
+            showSettingsPanel = presented
+            if presented {
+                panelBeforeSettings = focusedPanel
+                focusedPanel = .settings
+            } else {
+                focusedPanel = panelBeforeSettings
+                panelBeforeSettings = nil
             }
         }
-        .onAppear { controller.startPreview() }
         .alert("Rename Scene", isPresented: renameBinding) {
             TextField("Scene name", text: $draftName)
             Button("Rename") {
@@ -148,13 +180,29 @@ struct MainWindowView: View {
             .toggleStyle(.button)
             .help("Show or hide the inspector panel")
 
-            Button {
-                showSettings = true
-            } label: {
+            Toggle(isOn: $session.isPresented) {
                 Label("Settings", systemImage: "gear")
             }
-            .help("Open settings")
+            .toggleStyle(.button)
+            .help("Show or hide the settings panel (⌘,)")
         }
+    }
+
+    // MARK: - Settings pane (W04)
+
+    private var settingsPane: some View {
+        SettingsView(session: session,
+                     chat: chat,
+                     onClose: { session.isPresented = false },
+                     onResetLayout: resetPanelLayout)
+    }
+
+    /// Application section action: back to the all-panels-visible layout.
+    private func resetPanelLayout() {
+        showScenesPanel = true
+        showChatPanel = true
+        showInspectorPanel = true
+        showDiagnostics = true
     }
 
     private var renameBinding: Binding<Bool> {

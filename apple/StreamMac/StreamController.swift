@@ -296,9 +296,36 @@ final class StreamController: ObservableObject {
         streamState.isActive || recordingDemand > 0
     }
 
-    /// Entry point for settings edits (the settings sheet calls this after
-    /// persisting, passing its current protocol — the controller's own
-    /// `settings` snapshot is only refreshed at session start). With a stream
+    /// Public read for the W04 settings session: while this is true,
+    /// connection and canvas/fps edits stage for the next session.
+    var outputSessionActive: Bool { outputsOwnProfile }
+
+    /// Applies a just-saved settings snapshot from the shared settings
+    /// session (W04, issue #67). Updates the controller's working copy so no
+    /// consumer reads a stale snapshot, then applies what is safe RIGHT NOW:
+    /// the output profile follows the W07 staged/active rules, a mic-volume
+    /// change reaches a live publisher in place, and a preferred-input change
+    /// restarts mic capture only while no output owns the session. Everything
+    /// else (connection, bitrate, codec, voice polish) is read at the next
+    /// session start, exactly as before.
+    func applySavedSettings(_ newSettings: StreamSettings) {
+        let previous = settings
+        settings = newSettings
+        applyOutputProfile(newSettings.outputProfile,
+                           destination: newSettings.selectedProtocol)
+        if newSettings.micVolume != previous.micVolume,
+           let publisher = publisherBox.publisher {
+            Task { await publisher.setMicVolume(newSettings.micVolume) }
+        }
+        if newSettings.preferredAudioInputUID != previous.preferredAudioInputUID,
+           isPipelineRunning, !outputsOwnProfile {
+            startAudioInput()
+        }
+    }
+
+    /// Entry point for settings edits (W04: `applySavedSettings(_:)` routes
+    /// here after the shared settings session persists; the controller's own
+    /// `settings` snapshot is also refreshed at session start). With a stream
     /// or recording active the edit is STAGED and surfaces via `stagedProfile`
     /// ("applies on next session"); otherwise it applies immediately,
     /// reconfiguring the preview pipeline in place.
@@ -336,9 +363,20 @@ final class StreamController: ObservableObject {
 
     private func startPipeline() {
         isPipelineRunning = true
-        audio.start()
+        startAudioInput()
         applySceneSources()
         startRenderLoop()
+    }
+
+    /// Starts mic capture on the preferred input from settings, falling back
+    /// to the system default when none is chosen or the chosen device is gone.
+    private func startAudioInput() {
+        if let uid = settings.preferredAudioInputUID,
+           let device = audio.devices.first(where: { $0.uniqueID == uid }) {
+            audio.start(device: device)
+        } else {
+            audio.start()
+        }
     }
 
     private func stopPipeline() {
