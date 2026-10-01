@@ -288,6 +288,19 @@ enum StudioCommand: Equatable, Sendable {
     /// Replaces a project text overlay's payload (applies immediately, like
     /// `.setOverlayStyle`). The target must be a text overlay.
     case setOverlayText(LayerID, TextSourcePayload)
+
+    // G01 image layers (issue #81): image payload (asset/file binding +
+    // content mode). Same targeting, lock, Take/revert/undo rules as the G02
+    // text payloads: LAYER payloads are staged scene content; OVERLAY
+    // payloads are project-level and apply immediately. Format validation
+    // happened at the pick/drop (`ImageAssetValidator`) — an unsupported
+    // file never gets this far.
+    /// Replaces a STAGED-scene image layer's payload (a complete value). The
+    /// target must be an image layer.
+    case setLayerImage(LayerID, ImageSourcePayload, in: SceneID?)
+    /// Replaces a project image overlay's payload (applies immediately, like
+    /// `.setOverlayText`). The target must be an image overlay.
+    case setOverlayImage(LayerID, ImageSourcePayload)
     /// Saves a reusable named title-style preset (project-level).
     case addTextStylePreset(TextStylePreset)
     case updateTextStylePreset(TextStylePreset)
@@ -648,6 +661,8 @@ enum StudioCommand: Equatable, Sendable {
         case .removeStylePreset: return "Remove Style Preset"
         case .setLayerText(let id, _, _): return "Layer \(id) Text"
         case .setOverlayText: return "Overlay Text"
+        case .setLayerImage(let id, _, _): return "Layer \(id) Image"
+        case .setOverlayImage: return "Overlay Image"
         case .setLayerWeb(let id, _, _): return "Layer \(id) Browser Source"
         case .setOverlayWeb: return "Overlay Browser Source"
         case .addTextStylePreset: return "Save Title Style Preset"
@@ -1400,14 +1415,16 @@ final class StudioCommandDispatcher: ObservableObject {
         // S07 project overlays: validated against the SceneStore overlay
         // list (project level — never the staged scene).
         case .addOverlay(let payload):
-            // Branding overlays only: text/shape render without a capture.
-            // Camera/screen overlays would need the S05 demand reconciliation
-            // to watch the overlay list (it watches scenes today); the other
-            // kinds have no renderer yet. Media overlays go through
-            // `.addMediaOverlay` (G09), which also registers their source.
-            return payload.isText || payload.isShape
+            // Branding overlays only: text/shape render without a capture,
+            // and G01 (issue #81) image overlays composite a decoded asset
+            // (the logo case). Camera/screen overlays would need the S05
+            // demand reconciliation to watch the overlay list (it watches
+            // scenes today); the other kinds have no renderer yet. Media
+            // overlays go through `.addMediaOverlay` (G09), which also
+            // registers their source.
+            return payload.isText || payload.isShape || payload.isImage
                 ? nil
-                : .invalidValue("\(payload.displayName) overlays aren't supported yet — add a Text or Shape overlay.")
+                : .invalidValue("\(payload.displayName) overlays aren't supported yet — add a Text, Shape, or Image overlay.")
         case .addMediaOverlay(_, let payload):
             // The panel's file pick already validated the format
             // (`MediaOverlayClassifier`); the command only enforces that a
@@ -1555,6 +1572,27 @@ final class StudioCommandDispatcher: ObservableObject {
                     return .invalidTarget("Overlay \"\(overlay.name)\" is not a text overlay.")
                 }
                 return payload.validationError.map { .invalidValue($0) }
+            case .failure(let error): return error
+            }
+        // G01 (issue #81): image payloads follow the G02 text targeting +
+        // lock rules (a payload edit never changes the layer KIND; format
+        // validation happened at the pick/drop — `ImageAssetValidator`).
+        case .setLayerImage(let layerID, _, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .success(let (scene, index)):
+                if let error = lockError(for: scene.layers[index], in: scene) { return error }
+                return scene.layers[index].payload.isImage
+                    ? nil
+                    : .invalidTarget("Layer \"\(scene.layers[index].name)\" is not an image layer.")
+            case .failure(let error): return error
+            }
+        case .setOverlayImage(let overlayID, _):
+            switch resolveOverlay(overlayID) {
+            case .success(let overlay):
+                if let error = overlayLockError(for: overlay) { return error }
+                return overlay.payload.isImage
+                    ? nil
+                    : .invalidTarget("Overlay \"\(overlay.name)\" is not an image overlay.")
             case .failure(let error): return error
             }
         case .setLayerWeb(let layerID, _, let sceneID):
@@ -2217,6 +2255,11 @@ final class StudioCommandDispatcher: ObservableObject {
             editLayer(layerID, in: sceneID) { $0.payload = .text(payload) }
         case .setOverlayText(let overlayID, let payload):
             editOverlay(overlayID) { $0.payload = .text(payload) }
+        // G01 (issue #81): same staging rules as the text payloads above.
+        case .setLayerImage(let layerID, let payload, let sceneID):
+            editLayer(layerID, in: sceneID) { $0.payload = .image(payload) }
+        case .setOverlayImage(let overlayID, let payload):
+            editOverlay(overlayID) { $0.payload = .image(payload) }
         case .setLayerWeb(let layerID, let payload, let sceneID):
             // G08: normalization is fail-closed (the payload shim clamps
             // fps/viewport and clears unsupported URL schemes), so the
@@ -3033,7 +3076,8 @@ final class StudioCommandDispatcher: ObservableObject {
              .setSceneMediaBehavior(_, let id),
              .setLayerSourceEffects(_, _, let id),
              .setLayerStyle(_, _, let id),
-             .setLayerText(_, _, let id):
+             .setLayerText(_, _, let id),
+             .setLayerImage(_, _, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
         default:
             return nil
@@ -3071,6 +3115,18 @@ final class StudioCommandDispatcher: ObservableObject {
                                 position: GraphPoint(x: 0.98, y: 0.02),
                                 size: GraphSize(width: 0.12, height: 0.07),
                                 anchor: .topRight))
+        case .image(let image):
+            // G01 (issue #81): a logo-style bug anchored bottom-right. The
+            // renderer aspect-fits, so the height is nominal until the image
+            // decodes; the user repositions/resizes on canvas like any layer.
+            return LayerNode(name: image.fileName.map {
+                                 ($0 as NSString).deletingPathExtension
+                             } ?? payload.displayName,
+                             payload: payload,
+                             transform: LayerTransform(
+                                position: GraphPoint(x: 0.98, y: 0.98),
+                                size: GraphSize(width: 0.2, height: 0.2),
+                                anchor: .bottomRight))
         case .scene(let reference):
             // S06: nest the referenced scene at full canvas (the classic
             // "branded base layout" reuse); the user repositions/resizes it
@@ -3122,6 +3178,17 @@ final class StudioCommandDispatcher: ObservableObject {
                                 position: GraphPoint(x: 0.5, y: 0.94),
                                 size: GraphSize(width: 0.5, height: 0.07),
                                 anchor: .center))
+        case .image(let image):
+            // G01 (issue #81): a corner branding bug — small, top-right,
+            // aspect-fit (the height is nominal until the image decodes).
+            return LayerNode(name: image.fileName.map {
+                                 ($0 as NSString).deletingPathExtension
+                             } ?? "Image Overlay",
+                             payload: payload,
+                             transform: LayerTransform(
+                                position: GraphPoint(x: 0.98, y: 0.02),
+                                size: GraphSize(width: 0.12, height: 0.08),
+                                anchor: .topRight))
         default:
             // Shape: a small solid block in the top-right corner.
             return LayerNode(name: "\(payload.displayName) Overlay", payload: payload,
@@ -3368,7 +3435,9 @@ private extension StudioCommand {
              .setSceneAudioSnapshot, .captureSceneAudioSnapshot, .setSceneMediaBehavior,
              .setLayerSourceEffects,
              .setLayerStyle, .setOverlayStyle,
+             .setLayerText, .setOverlayText,
              .setLayerWeb, .setOverlayWeb,
+             .setLayerImage, .setOverlayImage:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording,
@@ -3433,6 +3502,10 @@ private extension StudioCommand {
             return "layer-web.\(id)"
         case .setOverlayWeb(let id, _):
             return "overlay-web.\(id)"
+        case .setLayerImage(let id, _, _):
+            return "layer-image.\(id)"
+        case .setOverlayImage(let id, _):
+            return "overlay-image.\(id)"
         case .setOverlayStyle(let id, _):
             return "overlay-style.\(id)"
         case .setLayerAudio(let id, _, _):

@@ -24,10 +24,20 @@ import StreamCore
 /// Source fallback (documented contract): a visible layer whose source has no
 /// current pixels — screen capture not started, camera stalled past
 /// `LatestCameraFrame`'s freshness window, media playout loading/errored/
-/// stopped (A02), or a payload kind with no renderer yet (image/pdf/guest/…)
-/// — paints NOTHING, so the background shows
-/// through. The tick is never gated on a source: the composition always
-/// renders at the output fps from the latest sample each source produced.
+/// stopped (A02), an image layer whose asset is missing/unresolved (G01), or
+/// a payload kind with no renderer yet (pdf/guest/…) — paints NOTHING, so
+/// the background shows through. The tick is never gated on a source: the
+/// composition always renders at the output fps from the latest sample each
+/// source produced.
+///
+/// Image layers (G01, issue #81): the payload names a decoded asset in the
+/// shared `ImageLayerImageStore` (library-published or decoded on demand
+/// from the payload's own security-scoped bookmark). The full-resolution
+/// decode composites with alpha, color space, and pixel aspect preserved —
+/// `.fit` keeps transparent margins transparent (the logo case), `.fill`
+/// crops through the alpha. G03 styling applies unchanged (the placement
+/// tail is the sourced-layer one), and image backgrounds take the same
+/// provider, aspect-FILL covering the canvas.
 ///
 /// Media layers (A02, issue #97) take the standard transform path: the pulled
 /// frame aspect-FITS centered into the layer's anchor-resolved rect, exactly
@@ -166,6 +176,16 @@ final class SceneRenderer {
     /// fixed map.
     private let tokenProvider: () -> [String: String]
 
+    /// G01 (issue #81): where the renderer resolves an image layer's payload
+    /// to its decoded image (alpha/color space/pixel aspect preserved by the
+    /// ImageIO decode). Defaults to the shared `ImageLayerImageStore` — fed
+    /// by the `ImageLayerCoordinator` for library-registered assets and
+    /// self-decoding for bookmark-carrying payloads; tests can inject a
+    /// fixed lookup. Nil = the documented paint-nothing fallback (a missing
+    /// or unresolved asset NEVER paints black or crashes — the G03
+    /// custom-mask precedent).
+    private let imageProvider: (ImageSourcePayload) -> CIImage?
+
     /// E03: the current tick's frame interval in milliseconds, set by
     /// `render`/`renderTransition` before any layer work so the segmentation
     /// governor budgets against the real cadence. Renderer state is
@@ -206,10 +226,13 @@ final class SceneRenderer {
             { SourceEffectsStore.shared.snapshot() },
          segmentation: PersonSegmentationCoordinator = .shared,
          tokenProvider: @escaping () -> [String: String] =
-            { TitleTokenStore.shared.snapshot() }) {
+            { TitleTokenStore.shared.snapshot() },
+         imageProvider: @escaping (ImageSourcePayload) -> CIImage? =
+            { ImageLayerImageStore.shared.image(for: $0) }) {
         self.sourceEffectsProvider = sourceEffectsProvider
         self.segmentation = segmentation
         self.tokenProvider = tokenProvider
+        self.imageProvider = imageProvider
         let options: [CIContextOption: Any] = [
             .workingColorSpace: NSNull(),
             .cacheIntermediates: false
@@ -566,6 +589,12 @@ final class SceneRenderer {
             return placeNested(reference: reference, layer: layer, canvas: canvas,
                                frames: frames, sourcePayloads: sourcePayloads,
                                scenes: scenes, depth: depth, visited: visited)
+        case .image(let image):
+            // G01 (issue #81): the decoded image comes from the image store
+            // (library-published or self-contained bookmark decode); a
+            // missing/unresolved asset is the documented paint-nothing
+            // fallback.
+            return placeImage(image, layer: layer, canvas: canvas)
         case .web(let web):
             // G07 (issue #114) prototype seam: with the explicit prototype
             // flag on, pull the widget's latest snapshot frame (published by
@@ -578,9 +607,9 @@ final class SceneRenderer {
             return place(source: CIImage(cvPixelBuffer: buffer),
                          layer: layer, canvas: canvas, isCamera: false)
         default:
-            // Payload kinds without a renderer yet (image, pdf,
-            // guest): documented fallback is the background showing through;
-            // later waves add renderers behind this switch.
+            // Payload kinds without a renderer yet (pdf, guest): documented
+            // fallback is the background showing through; later waves add
+            // renderers behind this switch.
             return nil
         }
     }
@@ -609,8 +638,9 @@ final class SceneRenderer {
     // MARK: - Backgrounds (S07)
 
     /// The canvas-sized background image. Nil background = the documented
-    /// implicit black canvas; an image background has no render path yet (no
-    /// asset store), so it paints the same black fallback.
+    /// implicit black canvas. G01 (issue #81): an image background paints its
+    /// decoded image aspect-FILL covering the canvas; an unresolved/missing
+    /// asset falls back to the same black (never a stale or partial paint).
     private func backgroundImage(_ background: SceneBackground?, canvas: CGRect) -> CIImage {
         switch background {
         case .solid(let colorHex):
@@ -626,7 +656,21 @@ final class SceneRenderer {
             filter.setValue(CIVector(x: canvas.midX, y: canvas.minY), forKey: "inputPoint1")
             filter.setValue(ciColor(bottomColorHex), forKey: "inputColor1")
             return (filter.outputImage ?? CIImage(color: ciColor(topColorHex))).cropped(to: canvas)
-        case .image, nil:
+        case .image(let payload):
+            guard let source = imageProvider(payload) else {
+                return CIImage(color: .black).cropped(to: canvas)
+            }
+            let extent = source.extent
+            guard extent.width > 0, extent.height > 0, !extent.isInfinite else {
+                return CIImage(color: .black).cropped(to: canvas)
+            }
+            let fill = max(canvas.width / extent.width, canvas.height / extent.height)
+            var image = source.transformed(by: CGAffineTransform(scaleX: fill, y: fill))
+            image = image.transformed(by: CGAffineTransform(
+                translationX: canvas.midX - image.extent.midX,
+                y: canvas.midY - image.extent.midY))
+            return image.cropped(to: canvas)
+        case nil:
             return CIImage(color: .black).cropped(to: canvas)
         }
     }
@@ -667,6 +711,52 @@ final class SceneRenderer {
         guard let image = content else { return nil }
         return stylePlaced(content: image, layer: layer, canvas: canvas,
                            pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+    }
+
+    // MARK: - G01 image layers (issue #81)
+
+    /// The placed, styled image for an image/logo layer: the decoded source
+    /// (full native resolution — CI's Metal-backed scaling keeps high-res
+    /// quality at any layer size) scaled per the payload's content mode into
+    /// the anchor-resolved rect, then the same corner-radius/shape-style/
+    /// rotation/effects tail sourced layers get. Aspect is always preserved
+    /// (never stretched); alpha composites through untouched, so a
+    /// transparent-background logo floats over the scene. Nil — paint
+    /// nothing — when the payload has no resolvable image.
+    private func placeImage(_ payload: ImageSourcePayload, layer: LayerNode, canvas: CGRect) -> CIImage? {
+        guard let source = imageProvider(payload) else { return nil }
+        let extent = source.extent
+        guard extent.width > 0, extent.height > 0, !extent.isInfinite else { return nil }
+        let rect = rectInCanvas(for: layer.transform, canvas: canvas,
+                                width: layer.transform.size.width * canvas.width,
+                                height: layer.transform.size.height * canvas.height)
+        guard rect.width > 0, rect.height > 0 else { return nil }
+
+        let scale: CGFloat
+        switch payload.contentMode {
+        case .fit:
+            scale = min(rect.width / extent.width, rect.height / extent.height)
+        case .fill:
+            scale = max(rect.width / extent.width, rect.height / extent.height)
+        }
+        var image = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        image = image.transformed(by: CGAffineTransform(
+            translationX: rect.midX - image.extent.midX,
+            y: rect.midY - image.extent.midY))
+        if payload.contentMode == .fill {
+            // The crop clips through the layer's alpha — never flattens it.
+            image = image.cropped(to: rect)
+        }
+        let cornerRadius = layer.effects.compactMap { effect -> CGFloat? in
+            if case .cornerRadius(let value) = effect { return CGFloat(value) }
+            return nil
+        }.first
+        if let cornerRadius, cornerRadius > 0 {
+            image = applyRoundedCorners(image, radius: cornerRadius, rect: rect)
+        }
+        image = applyingShapeStyle(layer.style, to: image, rect: rect, canvas: canvas)
+        image = rotated(image, degrees: layer.transform.rotationDegrees, around: rect)
+        return applyEffects(image, layer: layer, canvas: canvas)
     }
 
     // MARK: - G02 text layers (issue #110)
@@ -1003,15 +1093,22 @@ final class SceneRenderer {
 
     /// True when every visible layer of the scene (transitively, through
     /// nested references) paints without a live source — text/shape and
-    /// unpainted model-only kinds only. Camera/screen/syphon/media layers
-    /// make the scene dynamic: its content changes per frame and must not
-    /// be cached.
+    /// unpainted model-only kinds only. Camera/screen/syphon/media/image
+    /// layers make the scene dynamic: its content changes per frame and must
+    /// not be cached.
     private func isStaticContent(_ scene: Scene,
                                  scenes: [SceneID: Scene],
                                  visited: Set<SceneID>) -> Bool {
         for layer in scene.layers where layer.isVisible {
             switch layer.payload {
             case .camera, .screen, .syphon, .media:
+                return false
+            case .image:
+                // G01 (issue #81): the layer's VALUE (the payload) is static,
+                // but its pixels live in the shared image store — a library
+                // replace/relink republishes under the same cache key, which
+                // the fingerprint can't see. Re-composite every frame (the
+                // image itself is a cached texture, so this costs one draw).
                 return false
             case .text(let text):
                 // G02 (issue #110): a timed/fly-in title animates per tick —

@@ -410,8 +410,89 @@ extension ScreenSourcePayload {
     }
 }
 
+/// G01 (issue #81): how an image layer scales its source into the transform
+/// rect. Both modes preserve the source's pixel aspect (no stretch) and its
+/// alpha (transparent margins stay transparent under `.fit`; a `.fill` crop
+/// clips through the layer's alpha, never flattening it).
+enum ImageContentMode: String, Codable, CaseIterable, Sendable {
+    /// Aspect-FIT centered in the rect — the logo/bug default: the whole
+    /// image shows, transparent padding fills the mismatch.
+    case fit
+    /// Aspect-FILL centered, cropped to the rect — full-bleed backgrounds.
+    case fill
+
+    var displayName: String {
+        switch self {
+        case .fit: return "Fit (Preserve Aspect)"
+        case .fill: return "Fill (Crop)"
+        }
+    }
+}
+
+/// G01 (issue #81): a static image or logo layer — PNG/JPEG/HEIF/TIFF pixels
+/// or a natively rendered vector/PDF page (format validation is the import
+/// path's `ImageAssetValidator` gate). The persisted identity mirrors A02's
+/// media sources: a SECURITY-SCOPED BOOKMARK is the self-contained access
+/// grant (the layer renders even if the P03 asset library is unavailable),
+/// and `assetIdentifier` registers the file in the P03 asset library
+/// (`AssetLibraryStore`) for recoverable project references and usage
+/// tracking. Alpha, color space, and pixel aspect ride the decoded CGImage
+/// into the renderer untouched; the transform/contentMode own all scaling.
 struct ImageSourcePayload: Hashable, Codable, Sendable {
+    /// The P03 asset library registration (`AssetID` string); nil when the
+    /// library wasn't wired at import time.
     var assetIdentifier: String? = nil
+    /// Security-scoped bookmark for the picked file (the access grant).
+    var bookmarkData: Data? = nil
+    /// The picked file's display name (bookmarks don't round-trip one).
+    var fileName: String? = nil
+    /// How the image scales into the layer rect.
+    var contentMode: ImageContentMode = .fit
+    /// Pixel dimensions recorded at import (the renderer reads the decoded
+    /// image's own size; these are the UI's aspect hint before first paint).
+    var pixelWidth: Int? = nil
+    var pixelHeight: Int? = nil
+
+    init(assetIdentifier: String? = nil,
+         bookmarkData: Data? = nil,
+         fileName: String? = nil,
+         contentMode: ImageContentMode = .fit,
+         pixelWidth: Int? = nil,
+         pixelHeight: Int? = nil) {
+        self.assetIdentifier = assetIdentifier
+        self.bookmarkData = bookmarkData
+        self.fileName = fileName
+        self.contentMode = contentMode
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+    }
+
+    /// Every G01 field beyond `assetIdentifier` was added after v2 shipped;
+    /// decode each with a default so older persisted documents keep loading
+    /// (additive wire change, same pattern as `MediaSourcePayload`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        assetIdentifier = try container.decodeIfPresent(String.self, forKey: .assetIdentifier)
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        contentMode = try container.decodeIfPresent(ImageContentMode.self, forKey: .contentMode) ?? .fit
+        pixelWidth = try container.decodeIfPresent(Int.self, forKey: .pixelWidth)
+        pixelHeight = try container.decodeIfPresent(Int.self, forKey: .pixelHeight)
+    }
+
+    /// The image cache/store identity: the P03 asset registration wins (it
+    /// survives relink/replace — same asset, new file), then the bookmark
+    /// bytes (self-contained layers), then "unconfigured".
+    var cacheKey: String {
+        if let assetIdentifier { return "asset/\(assetIdentifier)" }
+        if let bookmarkData { return "bookmark/\(AssetContentHasher.sha256(of: bookmarkData))" }
+        return "unconfigured"
+    }
+
+    /// True when the payload names an image to paint (a configured layer).
+    var isConfigured: Bool {
+        assetIdentifier != nil || bookmarkData != nil
+    }
 }
 
 /// G02 (issue #110): a text/title layer — editable broadcast titles, lower
@@ -784,6 +865,12 @@ enum LayerPayload: Hashable, Sendable {
         return false
     }
 
+    /// G01 (issue #81): a static image/logo layer.
+    var isImage: Bool {
+        if case .image = self { return true }
+        return false
+    }
+
     /// A06 (issue #118): an app/system audio-only registry source.
     var isAppAudio: Bool {
         if case .appAudio = self { return true }
@@ -808,13 +895,14 @@ enum LayerPayload: Hashable, Sendable {
     /// True when the current render path can actually paint this kind:
     /// camera/screen through the capture pipeline (S03), solid-color shapes
     /// and text generated directly by `SceneRenderer` (S07), nested
-    /// scenes rendered recursively (S06), and media (A02, issue #97: video
-    /// file playout pulled per tick from the pool's playback engines). The
-    /// rest are model-only until the composition engine grows source
-    /// support. UI must mark non-renderable kinds rather than implying they
-    /// show on output.
+    /// scenes rendered recursively (S06), media (A02, issue #97: video
+    /// file playout pulled per tick from the pool's playback engines), and
+    /// image layers (G01, issue #81: decoded ImageIO assets composited with
+    /// alpha through the image store). The rest are model-only until the
+    /// composition engine grows source support. UI must mark non-renderable
+    /// kinds rather than implying they show on output.
     var isRenderable: Bool {
-        isCamera || isScreen || isText || isShape || isScene || isSyphon || isMedia
+        isCamera || isScreen || isText || isShape || isScene || isSyphon || isMedia || isImage
     }
 
     /// Short human name for layer-panel rows and add-layer menus.
@@ -1130,9 +1218,9 @@ struct SourceDefinition: Identifiable, Hashable, Codable, Sendable {
 enum SceneBackground: Hashable, Sendable {
     case solid(colorHex: String)
     case gradient(topColorHex: String, bottomColorHex: String)
-    /// Model-only until an asset store exists: no render path resolves
-    /// `assetIdentifier` yet, so an image background paints the documented
-    /// black fallback.
+    /// G01 (issue #81): an image background composites through the same
+    /// image store as image layers (aspect-FILL covering the canvas); an
+    /// unresolved/missing asset paints the documented black fallback.
     case image(ImageSourcePayload)
 
     /// Short human name for background pickers.
