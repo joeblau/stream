@@ -100,4 +100,27 @@ import StreamCore
             _ = try decode(#"{"selectedProtocol": "quic"}"#)
         }
     }
+
+    @Test("A blob written before the capture-privacy settings existed gets their defaults")
+    func missingCapturePrivacyDefaults() throws {
+        // C03 (issue #78): snapshots from builds predating the privacy keys
+        // must decode to cursor shown / audio included / no default
+        // exclusions — never throw and wipe the user's other settings.
+        let s = try decode(#"{"videoBitrate": 6000000}"#)
+        #expect(s.captureShowsCursor)
+        #expect(s.captureIncludesAudio)
+        #expect(s.captureExcludedBundleIDs.isEmpty)
+    }
+
+    @Test("Capture-privacy settings round-trip through encode/decode")
+    func capturePrivacyRoundTrips() throws {
+        let original = StreamSettings(
+            captureShowsCursor: false,
+            captureIncludesAudio: false,
+            captureExcludedBundleIDs: ["com.1password.1password", "com.apple.keychainaccess"])
+        let data = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(StreamSettings.self, from: data)
+        #expect(restored == original)
+        #expect(restored.captureExcludedBundleIDs == ["com.1password.1password", "com.apple.keychainaccess"])
+    }
 }

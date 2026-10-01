@@ -221,7 +221,190 @@ struct ScreenSourcePayload: Hashable, Codable, Sendable {
     var target: Target = .display
     /// Restorable identifier of the specific display/window/app;
     /// nil = ask through the system content picker on first use.
+    /// - display: decimal `CGDirectDisplayID` string;
+    /// - window: decimal `CGWindowID` string (volatile — see `windowTitle`);
+    /// - application: the app's bundle identifier.
     var targetIdentifier: String? = nil
+    /// C02 (issue #77): the owning app's bundle identifier for window
+    /// targets. A `CGWindowID` is volatile — it changes every time the app
+    /// relaunches or recreates the window — so relinking matches the owning
+    /// app (this) plus `windowTitle` instead. C10 owns full relinking.
+    var applicationBundleID: String? = nil
+    /// C02: the window title persisted alongside `targetIdentifier`; the
+    /// second half of the window relink key (owning app + title).
+    var windowTitle: String? = nil
+    /// C03 (issue #78): per-source capture privacy (cursor/audio overrides
+    /// and app/window exclusions). Part of the payload identity, so editing
+    /// it re-keys the capture pool and restarts the capture with the new
+    /// filter — exclusions apply deliberately, never mid-frame.
+    var privacy: CapturePrivacyOptions = CapturePrivacyOptions()
+    /// C04 (issue #104): a user-drawn capture region on a display target.
+    /// Part of the payload identity, so editing it re-keys the capture
+    /// deliberately, exactly like privacy edits.
+    var region: CaptureRegion? = nil
+    /// C04: follow-the-cursor zoom on a display/region capture.
+    var zoom: ScreenZoomOptions = ScreenZoomOptions()
+    /// C04: opt-in frontmost-app tracking on a display/region capture.
+    var appTracking: ActiveAppTrackingOptions = ActiveAppTrackingOptions()
+
+    init(target: Target = .display,
+         targetIdentifier: String? = nil,
+         applicationBundleID: String? = nil,
+         windowTitle: String? = nil,
+         privacy: CapturePrivacyOptions = CapturePrivacyOptions(),
+         region: CaptureRegion? = nil,
+         zoom: ScreenZoomOptions = ScreenZoomOptions(),
+         appTracking: ActiveAppTrackingOptions = ActiveAppTrackingOptions()) {
+        self.target = target
+        self.targetIdentifier = targetIdentifier
+        self.applicationBundleID = applicationBundleID
+        self.windowTitle = windowTitle
+        self.privacy = privacy
+        self.region = region
+        self.zoom = zoom
+        self.appTracking = appTracking
+    }
+
+    /// The C02 relink fields were added after v2 shipped; decode every field
+    /// with a default so older persisted documents keep loading (additive
+    /// wire change, same pattern as `LayerNode.isLocked`). C03's `privacy`
+    /// and C04's `region`/`zoom`/`appTracking` follow the same pattern.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        target = try container.decodeIfPresent(Target.self, forKey: .target) ?? .display
+        targetIdentifier = try container.decodeIfPresent(String.self, forKey: .targetIdentifier)
+        applicationBundleID = try container.decodeIfPresent(String.self, forKey: .applicationBundleID)
+        windowTitle = try container.decodeIfPresent(String.self, forKey: .windowTitle)
+        privacy = try container.decodeIfPresent(CapturePrivacyOptions.self, forKey: .privacy)
+            ?? CapturePrivacyOptions()
+        region = try container.decodeIfPresent(CaptureRegion.self, forKey: .region)
+        zoom = try container.decodeIfPresent(ScreenZoomOptions.self, forKey: .zoom)
+            ?? ScreenZoomOptions()
+        appTracking = try container.decodeIfPresent(ActiveAppTrackingOptions.self, forKey: .appTracking)
+            ?? ActiveAppTrackingOptions()
+    }
+
+    /// C04: true when this payload carries any region/zoom/tracking
+    /// configuration (drives the source-row indicator and decides whether a
+    /// display capture builds the dynamics runtime).
+    var hasRegionDynamics: Bool {
+        region != nil || zoom.isEnabled || appTracking.isEnabled
+    }
+}
+
+/// C04 (issue #104): a user-drawn capture region on a display target.
+struct CaptureRegion: Hashable, Codable, Sendable {
+    /// The region in display points, relative to the display's top-left.
+    var rect: CGRect
+    /// The display's point size when the region was drawn. Capture
+    /// resolution changes rescale `rect` proportionally against the live
+    /// size, so the region's RELATIVE geometry persists across scale/display
+    /// changes; a region that no longer fits the display fails closed
+    /// (error + black, never a silent re-point).
+    var displaySize: CGSize
+}
+
+/// C04 (issue #104): follow-the-cursor zoom for display/region captures.
+/// Applied live through `SCStream.updateConfiguration` — no capture restart
+/// per cursor move; editing the options themselves re-keys the capture.
+struct ScreenZoomOptions: Hashable, Codable, Sendable {
+    var isEnabled: Bool = false
+    /// 1.5...4.0; the crop is the base region shrunk by this factor.
+    var zoomFactor: Double = 2.0
+    /// true: the zoomed crop pans after the cursor (exponentially smoothed;
+    /// a still cursor converges and stops emitting updates). false: a static
+    /// centered zoom of the base region.
+    var followsCursor: Bool = true
+    /// true: holding ⌃ freezes panning mid-capture.
+    var pauseWithControlKey: Bool = true
+}
+
+/// C04 (issue #104): opt-in frontmost-app tracking for display/region
+/// captures. The region follows the frontmost app's main window, restricted
+/// to `allowedBundleIDs`. Stream itself can never be allowed — switching
+/// back to the studio leaves the region where it is and (display filters
+/// always exclude studio windows) never captures its controls. An allowed
+/// app the privacy options exclude fails closed (error + black), never a
+/// silent re-point.
+struct ActiveAppTrackingOptions: Hashable, Codable, Sendable {
+    var isEnabled: Bool = false
+    /// Only these apps may move the region.
+    var allowedBundleIDs: [String] = []
+}
+
+/// C03 (issue #78): per-source capture privacy persisted on
+/// `ScreenSourcePayload`. `nil` cursor/audio means "inherit the global
+/// default from settings"; exclusions are additive on top of the global
+/// default exclusion list (a source can always hide MORE than the default,
+/// never less — that is what keeps global "never capture these apps" picks
+/// trustworthy).
+struct CapturePrivacyOptions: Hashable, Codable, Sendable {
+    /// One specific window a display (or application) capture excludes.
+    /// `windowID` is volatile — it changes when the owning app recreates the
+    /// window — so filter resolution falls back to the owning app + title
+    /// relink key, exactly like pinned window targets (C02).
+    struct ExcludedWindow: Hashable, Codable, Sendable {
+        /// Decimal `CGWindowID` string (volatile; see above).
+        var windowID: String
+        var applicationBundleID: String?
+        var windowTitle: String?
+    }
+
+    /// nil = inherit `StreamSettings.captureShowsCursor`.
+    var showsCursor: Bool? = nil
+    /// nil = inherit `StreamSettings.captureIncludesAudio`.
+    var capturesAudio: Bool? = nil
+    /// Additional apps (bundle identifiers) this capture excludes, on top of
+    /// the global `StreamSettings.captureExcludedBundleIDs`.
+    var excludedBundleIDs: [String] = []
+    /// Specific windows this capture excludes (display captures; for
+    /// application targets, windows of the target app).
+    var excludedWindows: [ExcludedWindow] = []
+
+    /// True when any per-source option is set (drives the source-row
+    /// privacy indicator).
+    var hasOverrides: Bool {
+        showsCursor != nil || capturesAudio != nil
+            || !excludedBundleIDs.isEmpty || !excludedWindows.isEmpty
+    }
+}
+
+/// C03: the privacy state one capture start actually applies — the source's
+/// per-source overrides resolved against the global settings defaults.
+struct EffectiveCapturePrivacy: Hashable, Sendable {
+    var showsCursor: Bool
+    var capturesAudio: Bool
+    /// Global defaults ∪ per-source additions, deduplicated and sorted for
+    /// deterministic equality.
+    var excludedBundleIDs: [String]
+    var excludedWindows: [CapturePrivacyOptions.ExcludedWindow]
+
+    /// No privacy configuration at all (cursor shown, audio captured,
+    /// nothing excluded beyond the studio's own windows, which
+    /// `ScreenSourceCapture` always excludes on display captures).
+    static let standard = EffectiveCapturePrivacy(
+        showsCursor: true, capturesAudio: true,
+        excludedBundleIDs: [], excludedWindows: [])
+
+    /// True when anything deviates from a plain capture (drives the
+    /// source-row privacy indicator).
+    var isActive: Bool {
+        !showsCursor || !capturesAudio
+            || !excludedBundleIDs.isEmpty || !excludedWindows.isEmpty
+    }
+}
+
+extension ScreenSourcePayload {
+    /// Resolves this payload's per-source options against the applied global
+    /// settings: cursor/audio inherit when unset; exclusions are the union
+    /// of the global default list and the source's own additions.
+    func effectivePrivacy(defaults: StreamSettings) -> EffectiveCapturePrivacy {
+        EffectiveCapturePrivacy(
+            showsCursor: privacy.showsCursor ?? defaults.captureShowsCursor,
+            capturesAudio: privacy.capturesAudio ?? defaults.captureIncludesAudio,
+            excludedBundleIDs: Array(Set(defaults.captureExcludedBundleIDs + privacy.excludedBundleIDs)).sorted(),
+            excludedWindows: privacy.excludedWindows)
+    }
 }
 
 struct ImageSourcePayload: Hashable, Codable, Sendable {
@@ -262,6 +445,30 @@ struct GuestSourcePayload: Hashable, Codable, Sendable {
     var sessionIdentifier: String? = nil
 }
 
+/// C09 (issue #163): a Syphon feed published by a local creative/titling
+/// app (OBS, MadMapper, Resolume, VDMX, …). The persisted identity is the
+/// server name + owning app name pair — what a relaunch of the same app
+/// restores — so a saved source survives server app restarts. The server's
+/// instance UUID is volatile (a new one per launch) and is deliberately NOT
+/// part of the payload: matching by it would defeat C10 auto-recovery.
+struct SyphonSourcePayload: Hashable, Codable, Sendable {
+    /// `SyphonServerDescriptionNameKey` at registration; may be empty (some
+    /// servers publish no name — the app name alone identifies them).
+    var serverName: String = ""
+    /// `SyphonServerDescriptionAppNameKey` at registration.
+    var appName: String = ""
+
+    /// The display title for source rows and discovery lists.
+    var displayTitle: String {
+        switch (serverName.isEmpty, appName.isEmpty) {
+        case (false, false): return "\(appName) — \(serverName)"
+        case (false, true): return serverName
+        case (true, false): return appName
+        case (true, true): return "Unnamed Syphon Server"
+        }
+    }
+}
+
 struct SceneReferencePayload: Hashable, Codable, Sendable {
     /// The scene this layer nests (cycles are rejected at edit time).
     var sceneID: SceneID
@@ -280,6 +487,7 @@ enum LayerPayload: Hashable, Sendable {
     case pdf(PDFSourcePayload)
     case web(WebSourcePayload)
     case guest(GuestSourcePayload)
+    case syphon(SyphonSourcePayload)
     case scene(SceneReferencePayload)
 
     /// Stable discriminator used on the wire.
@@ -294,6 +502,7 @@ enum LayerPayload: Hashable, Sendable {
         case .pdf: return "pdf"
         case .web: return "web"
         case .guest: return "guest"
+        case .syphon: return "syphon"
         case .scene: return "scene"
         }
     }
@@ -305,6 +514,11 @@ enum LayerPayload: Hashable, Sendable {
 
     var isScreen: Bool {
         if case .screen = self { return true }
+        return false
+    }
+
+    var isSyphon: Bool {
+        if case .syphon = self { return true }
         return false
     }
 
@@ -330,7 +544,7 @@ enum LayerPayload: Hashable, Sendable {
     /// composition engine grows source support. UI must mark non-renderable
     /// kinds rather than implying they show on output.
     var isRenderable: Bool {
-        isCamera || isScreen || isText || isShape || isScene
+        isCamera || isScreen || isText || isShape || isScene || isSyphon
     }
 
     /// Short human name for layer-panel rows and add-layer menus.
@@ -345,6 +559,7 @@ enum LayerPayload: Hashable, Sendable {
         case .pdf: return "PDF"
         case .web: return "Web"
         case .guest: return "Guest"
+        case .syphon: return "Syphon"
         case .scene: return "Scene"
         }
     }
@@ -361,6 +576,7 @@ enum LayerPayload: Hashable, Sendable {
         case .pdf: return "doc.fill"
         case .web: return "globe"
         case .guest: return "person.2.fill"
+        case .syphon: return "app.connected.to.app.below.fill"
         case .scene: return "rectangle.on.rectangle"
         }
     }
@@ -368,7 +584,7 @@ enum LayerPayload: Hashable, Sendable {
 
 extension LayerPayload: Codable {
     private enum Kind: String, Codable {
-        case camera, screen, image, text, shape, media, pdf, web, guest, scene
+        case camera, screen, image, text, shape, media, pdf, web, guest, syphon, scene
     }
     private enum CodingKeys: String, CodingKey {
         case kind, payload
@@ -395,6 +611,8 @@ extension LayerPayload: Codable {
             self = .web(try container.decode(WebSourcePayload.self, forKey: .payload))
         case .guest:
             self = .guest(try container.decode(GuestSourcePayload.self, forKey: .payload))
+        case .syphon:
+            self = .syphon(try container.decode(SyphonSourcePayload.self, forKey: .payload))
         case .scene:
             self = .scene(try container.decode(SceneReferencePayload.self, forKey: .payload))
         }
@@ -429,6 +647,9 @@ extension LayerPayload: Codable {
             try container.encode(payload, forKey: .payload)
         case .guest(let payload):
             try container.encode(Kind.guest, forKey: .kind)
+            try container.encode(payload, forKey: .payload)
+        case .syphon(let payload):
+            try container.encode(Kind.syphon, forKey: .kind)
             try container.encode(payload, forKey: .payload)
         case .scene(let payload):
             try container.encode(Kind.scene, forKey: .kind)

@@ -353,6 +353,24 @@ final class SceneStore: ObservableObject {
         }
     }
 
+    /// C10 (issue #79): the relink write path — re-points a source at a
+    /// replacement device/display when its original identity can't be
+    /// restored (the device is gone for good). Routes through `updateSource`,
+    /// so every bound layer in every scene follows, and the controller's
+    /// `$sources` observation re-keys the physical capture. Kind-mismatched
+    /// payloads are rejected: a camera source only takes a camera payload.
+    func relinkSource(_ id: SourceDefinitionID, to payload: LayerPayload) {
+        guard var definition = source(withID: id) else { return }
+        switch (definition.payload, payload) {
+        case (.camera, .camera), (.screen, .screen), (.syphon, .syphon):
+            break
+        default:
+            return
+        }
+        definition.payload = payload
+        updateSource(definition)
+    }
+
     /// Removes a source from the registry. Bound layers keep their inline
     /// payload (the render authority) and simply become unbound, so their
     /// rendered content is unchanged until re-pointed.
@@ -799,6 +817,9 @@ final class SceneStore: ObservableObject {
         // edits persist through the store, this is exactly the Take-policy
         // propagation of shared child-scene edits to every nesting site.
         SceneRegistryStore.shared.publish(scenes)
+        // C01 (issue #76): the source payload index the engines resolve a
+        // bound layer's capture identity against (per-source frame routing).
+        SourcePayloadStore.shared.publish(sources)
         sceneAutosaveTask?.cancel()
         sceneAutosaveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.autosaveDelay * 1_000_000_000))

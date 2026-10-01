@@ -27,6 +27,12 @@ packages:
     # reorder frames and then silently drop them as invalid RTMP timestamps).
     # Update by advancing the submodule pointer, not an SPM revision.
     path: Vendor/HaishinKit.swift
+  Syphon:
+    # C09 (issue #163): Syphon inter-app video, vendored as a prebuilt
+    # xcframework with a local binary-target package (upstream ships no
+    # Package.swift, so remote SPM resolution is impossible). See
+    # Vendor/Syphon/Package.swift for the pinned commit and rebuild steps.
+    path: Vendor/Syphon
 
 targets:
 
@@ -177,6 +183,15 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         # The project base carries iOS-only settings; they do not apply here.
         TARGETED_DEVICE_FAMILY: ""
+        # C05 (issue #105): opt in to the explicit Continuity Camera device
+        # type. Without this key continuity cameras report as
+        # .builtInWideAngleCamera and a DiscoverySession asking for
+        # .continuityCamera finds nothing.
+        INFOPLIST_KEY_NSCameraUseContinuityCameraDeviceType: YES
+        # Without usage descriptions macOS silently denies camera/mic prompts
+        # (the sandbox entitlements alone are not enough).
+        INFOPLIST_KEY_NSCameraUsageDescription: Stream uses your cameras (including iPhone via Continuity Camera) as live sources in your broadcast scenes.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Stream uses the microphone (including connected Bluetooth mics) to capture audio for your broadcast.
     entitlements:
       path: StreamMac/StreamMac.entitlements
       properties:
@@ -201,6 +216,10 @@ targets:
         product: SRTHaishinKit
       - package: HaishinKit
         product: RTCHaishinKit
+      # C09 (issue #163): Syphon client (server discovery + Metal frame
+      # receive). macOS-only — the iOS target never links it.
+      - package: Syphon
+        product: Syphon
 
 # ---------------------------------------------------------------
 # Shared scheme so `xcodegen generate` produces a deterministic,

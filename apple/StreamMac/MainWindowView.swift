@@ -274,6 +274,11 @@ struct MainWindowView: View {
 
     private var canvasPanel: some View {
         VStack(spacing: 0) {
+            // C01 (issue #76): the thumbnail camera switcher — live tiles for
+            // every camera source; clicking assigns a camera to the selected
+            // camera layer (or adds one).
+            CameraSwitcherView()
+            Divider()
             monitorsRow
                 .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -473,6 +478,17 @@ struct MainWindowView: View {
 
     private var sourcesInspector: some View {
         Form {
+            // C01 (issue #76): the camera-source registry — add (system
+            // default or any connected device), rename, retarget, remove,
+            // and per-source capture status.
+            CameraSourcesSectionView()
+            // C02 (issue #77): the screen-source registry — add (pinned
+            // display/window/application picker), rename, retarget, remove,
+            // and per-source capture status.
+            ScreenSourcesSectionView()
+            // C09 (issue #163): Syphon server sources — discovered servers,
+            // add/rename/relink/remove, and per-source receive status.
+            SyphonSourcesSectionView()
             // W03: the inspector edits the STAGED scene (what PREVIEW shows);
             // changes reach program only via Take.
             if let scene = previewProgram.stagedScene {

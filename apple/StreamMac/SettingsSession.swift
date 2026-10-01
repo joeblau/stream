@@ -33,6 +33,8 @@ final class SettingsSession: ObservableObject {
     /// The settings pane's top-level sections, for deep-linking (W06).
     enum Section: String, Sendable {
         case connection, video, audio, chat, application
+        /// C03 (issue #78): global capture-privacy defaults.
+        case capturePrivacy
     }
 
     /// Opens the settings pane, optionally scrolled to a section — the entry
