@@ -22,10 +22,18 @@ import Metal
 ///
 /// Source fallback (documented contract): a visible layer whose source has no
 /// current pixels — screen capture not started, camera stalled past
-/// `LatestCameraFrame`'s freshness window, or a payload kind with no renderer
-/// yet (image/media/web/guest/…) — paints NOTHING, so the background shows
+/// `LatestCameraFrame`'s freshness window, media playout loading/errored/
+/// stopped (A02), or a payload kind with no renderer yet (image/web/guest/…)
+/// — paints NOTHING, so the background shows
 /// through. The tick is never gated on a source: the composition always
 /// renders at the output fps from the latest sample each source produced.
+///
+/// Media layers (A02, issue #97) take the standard transform path: the pulled
+/// frame aspect-FITS centered into the layer's anchor-resolved rect, exactly
+/// like screen layers — a fullscreen media layer letterboxes a mismatched
+/// file aspect rather than cropping it (fill-crop remains the camera PIP
+/// behavior only). Pause and the HOLD end action keep painting the last
+/// pulled frame; the STOP end action and missing/unlinked sources clear it.
 ///
 /// Generated content (S07): solid-color shape and text layers have no
 /// external source — the renderer rasterizes them itself (Core Graphics /
@@ -212,6 +220,16 @@ final class SceneRenderer {
                 camera.position == .front ? .upMirrored : .up
             return place(source: CIImage(cvPixelBuffer: camera.buffer).oriented(orientation),
                          layer: layer, canvas: canvas, isCamera: true)
+        case .media:
+            // A02 (issue #97): media frames are PULLED per tick from the
+            // pool's playback engine (the render tick is the cadence — no
+            // second clock). A loading/errored/stopped source yields nil —
+            // the documented paint-nothing fallback — while pause and the
+            // HOLD end action keep serving the last pulled frame.
+            guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
+                  let buffer = frames.media?(key) else { return nil }
+            return place(source: CIImage(cvPixelBuffer: buffer),
+                         layer: layer, canvas: canvas, isCamera: false)
         case .shape, .text:
             return placeGenerated(payload: layer.payload, layer: layer, canvas: canvas)
         case .scene(let reference):
@@ -219,7 +237,7 @@ final class SceneRenderer {
                                frames: frames, sourcePayloads: sourcePayloads,
                                scenes: scenes, depth: depth, visited: visited)
         default:
-            // Payload kinds without a renderer yet (image, media, pdf, web,
+            // Payload kinds without a renderer yet (image, pdf, web,
             // guest): documented fallback is the background showing through;
             // later waves add renderers behind this switch.
             return nil
@@ -237,6 +255,12 @@ final class SceneRenderer {
         case .camera(let camera): return .camera(camera)
         case .screen(let screen): return .screen(screen)
         case .syphon(let syphon): return .syphon(syphon)
+        case .media:
+            // A02: media keys are the registry source ID (playout/audio are
+            // keyed by source, not payload — the payload can be edited
+            // without restarting playback). Unbound media layers have no
+            // key and paint the documented fallback.
+            return layer.sourceID.map { .media($0) }
         default: return nil
         }
     }
@@ -480,14 +504,15 @@ final class SceneRenderer {
 
     /// True when every visible layer of the scene (transitively, through
     /// nested references) paints without a live source — text/shape and
-    /// unpainted model-only kinds only. Camera/screen/syphon layers make the
-    /// scene dynamic: its content changes per frame and must not be cached.
+    /// unpainted model-only kinds only. Camera/screen/syphon/media layers
+    /// make the scene dynamic: its content changes per frame and must not
+    /// be cached.
     private func isStaticContent(_ scene: Scene,
                                  scenes: [SceneID: Scene],
                                  visited: Set<SceneID>) -> Bool {
         for layer in scene.layers where layer.isVisible {
             switch layer.payload {
-            case .camera, .screen, .syphon:
+            case .camera, .screen, .syphon, .media:
                 return false
             case .scene(let reference):
                 guard !visited.contains(reference.sceneID),

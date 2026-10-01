@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import StreamCore
+import UniformTypeIdentifiers
 
 /// The S03 ordered layer panel (issue #71): every layer of the STAGED scene
 /// in compositing order, front (top of list) to back, with groups, per-row
@@ -39,6 +40,15 @@ struct LayerPanelView: View {
     @State private var draftName = ""
     /// C02: presents the screen-source picker for "New Screen Source…".
     @State private var screenSourcePickerPresented = false
+    /// A02 (issue #97): presents the media file picker — registering a new
+    /// media source (+ binding a layer), or relinking an existing one.
+    @State private var mediaPick: MediaPick?
+
+    /// A02: what the media file picker is picking FOR.
+    private enum MediaPick {
+        case newSourceAndLayer
+        case relink(SourceDefinitionID)
+    }
 
     private enum RenameTarget {
         case layer(LayerNode)
@@ -73,6 +83,13 @@ struct LayerPanelView: View {
                 .listStyle(.sidebar)
                 Divider()
                 bottomBar
+                // A02 (issue #97): per-source media transport (play/pause/
+                // stop/seek, loop, trim, time display) for every registered
+                // media source.
+                if sceneStore.sources.contains(where: { $0.payload.isMedia }) {
+                    Divider()
+                    MediaSourcesSectionView()
+                }
             } else {
                 ContentUnavailableView("No Scene Staged",
                                        systemImage: "rectangle.on.rectangle.slash",
@@ -92,6 +109,12 @@ struct LayerPanelView: View {
                     SourceDefinition(name: name, payload: .screen(payload)))
                 addScreenLayer(boundTo: source)
             }
+        }
+        // A02: pick a video file — either registering a new media source
+        // (and binding a layer to it) or relinking an existing source.
+        .fileImporter(isPresented: mediaPickPresented,
+                      allowedContentTypes: [.movie, .mpeg4Movie, .quickTimeMovie]) { result in
+            handleMediaPick(result)
         }
         // Keep the shared selection pointing at layers that still exist
         // (scene switch, deletion, revert).
@@ -179,7 +202,7 @@ struct LayerPanelView: View {
                     .padding(.vertical, 1)
                     .background(.quaternary, in: Capsule())
                     .foregroundStyle(.secondary)
-                    .help("\(layer.payload.displayName) layers are model-only — the render path composites camera, screen, text, shape, and nested scene layers today.")
+                    .help("\(layer.payload.displayName) layers are model-only — the render path composites camera, screen, syphon, media, text, shape, and nested scene layers today.")
             }
             if let missing = missingReason(for: layer) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -266,6 +289,14 @@ struct LayerPanelView: View {
         case .camera, .screen, .syphon:
             guard let key = captureSourceKey(for: layer) else { return nil }
             return capturePool.problem(for: key)
+        case .media:
+            // A02: unbound media layers have no file to play; bound ones
+            // surface the playback engine's error state.
+            guard let sourceID = layer.sourceID else {
+                return "This media layer isn't linked to a media source — it renders black."
+            }
+            let status = capturePool.mediaStatus(for: sourceID)
+            return status.phase == .error ? status.errorMessage : nil
         case .scene(let reference):
             return sceneStore.scenes.contains(where: { $0.id == reference.sceneID })
                 ? nil : "The referenced scene no longer exists."
@@ -417,6 +448,13 @@ struct LayerPanelView: View {
                     }
                 }
                 .help("Point \"\(definition.name)\" at a different Syphon server — every layer using it follows.")
+            case .media:
+                // A02: re-point at a different video file; the playback
+                // policy (loop/autoplay/end action/trim) survives.
+                Button("Relink Media File…") {
+                    mediaPick = .relink(sourceID)
+                }
+                .help("Point \"\(definition.name)\" at a different video file — every layer using it follows.")
             default:
                 EmptyView()
             }
@@ -547,6 +585,23 @@ struct LayerPanelView: View {
                     }
                 }
                 Divider()
+                // A02 (issue #97): a media layer binds a registered media
+                // source (each plays independently through the pool), or
+                // creates one from a user-picked video file.
+                Menu("Media") {
+                    ForEach(sceneStore.sources.filter { $0.payload.isMedia }) { source in
+                        Button(source.name) {
+                            addMediaLayer(boundTo: source)
+                        }
+                    }
+                    if sceneStore.sources.contains(where: { $0.payload.isMedia }) {
+                        Divider()
+                    }
+                    Button("New Media Source…") {
+                        mediaPick = .newSourceAndLayer
+                    }
+                }
+                Divider()
                 // S07: text and shape render now (generated by the compositor).
                 Button("Text") {
                     dispatcher.execute(.addLayer(.text(TextSourcePayload(text: "Text")), in: nil))
@@ -600,7 +655,6 @@ struct LayerPanelView: View {
     private var modelOnlyKinds: [LayerPayload] {
         [
             .image(ImageSourcePayload()),
-            .media(MediaSourcePayload()),
             .pdf(PDFSourcePayload()),
             .web(WebSourcePayload()),
             .guest(GuestSourcePayload()),
@@ -653,6 +707,51 @@ struct LayerPanelView: View {
                               payload: source.payload, transform: .fullscreen)
         scene.layers.append(layer)
         dispatcher.execute(.updateScene(scene))
+    }
+
+    // MARK: - Source-bound media layers (A02, issue #97)
+
+    /// Adds a fullscreen layer bound to a registered media `source` at the
+    /// front of the staged scene. Routes through `.updateScene` (the
+    /// dispatcher's lock and undo path), exactly like the camera/screen/
+    /// syphon variants. Fullscreen = full-frame playout; the user resizes
+    /// the layer for overlay (PIP-style) playout, and the renderer
+    /// aspect-fits either way.
+    private func addMediaLayer(boundTo source: SourceDefinition) {
+        guard var scene = previewProgram.stagedScene else { return }
+        let layer = LayerNode(name: source.name, sourceID: source.id,
+                              payload: source.payload, transform: .fullscreen)
+        scene.layers.append(layer)
+        dispatcher.execute(.updateScene(scene))
+    }
+
+    /// Handles the media file picker: registering a new media source and
+    /// binding a layer to it, or relinking an existing source's file
+    /// (playback policy survives a relink — only the file identity changes).
+    private func handleMediaPick(_ result: Result<URL, any Error>) {
+        defer { mediaPick = nil }
+        guard let mediaPick,
+              case .success(let url) = result,
+              let payload = MediaSourceFactory.payload(forPickedFile: url) else { return }
+        switch mediaPick {
+        case .newSourceAndLayer:
+            let source = sceneStore.addSource(SourceDefinition(
+                name: url.deletingPathExtension().lastPathComponent,
+                payload: .media(payload)))
+            addMediaLayer(boundTo: source)
+        case .relink(let sourceID):
+            guard let existing = sceneStore.source(withID: sourceID),
+                  case .media(var existingPayload) = existing.payload else { return }
+            existingPayload.bookmarkData = payload.bookmarkData
+            existingPayload.fileName = payload.fileName
+            sceneStore.relinkSource(sourceID, to: .media(existingPayload))
+        }
+    }
+
+    private var mediaPickPresented: Binding<Bool> {
+        Binding(
+            get: { mediaPick != nil },
+            set: { if !$0 { mediaPick = nil } })
     }
 
     // MARK: - Rename alert

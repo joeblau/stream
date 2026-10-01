@@ -199,6 +199,11 @@ targets:
         com.apple.security.device.camera: true
         com.apple.security.device.microphone: true
         com.apple.security.network.client: true
+        # A02 (issue #97): media file playout — the file picker grants
+        # read-only access to user-picked videos, persisted across launches
+        # as app-scope security-scoped bookmarks.
+        com.apple.security.files.user-selected.read-only: true
+        com.apple.security.files.bookmarks.app-scope: true
         # Same App Group + keychain access group as the iOS app so settings
         # and stream credentials are shared via StreamCore's stores.
         com.apple.security.application-groups:

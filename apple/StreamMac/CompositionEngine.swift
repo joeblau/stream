@@ -206,6 +206,17 @@ actor CompositionEngine {
                 return frames.hasScreenSource(for: key)
                     ? frames.screenFrame(for: key)
                     : screenProvider()
+            },
+            // A02 (issue #97): media layers pull their frame (and top up
+            // their mix-engine audio) from the pool's playback engines on
+            // this very tick — playout cadence IS the render tick, so media
+            // adds no second clock. An unknown key means no playback engine
+            // exists: the documented paint-nothing fallback.
+            media: { key in
+                let frames = SourceFrameProviders.shared
+                return frames.hasMediaSource(for: key)
+                    ? frames.mediaFrame(for: key)
+                    : nil
             })
         self.sourcePayloadProvider = sourcePayloadProvider
         self.overlayContextProvider = overlayContextProvider

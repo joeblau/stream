@@ -187,6 +187,22 @@ enum StudioCommand: Equatable, Sendable {
     /// immediately, like overlay edits.
     case setDefaultBackground(SceneBackground?)
 
+    // A02 media transport (issue #97): play/pause/stop/restart/seek for a
+    // registry media source. These are SESSION state — playback position is
+    // never part of a scene document — so they are not undoable scene edits,
+    // and scene/layer locks don't gate them (they edit no scene content).
+    // They act on the ONE shared playback instance per source (the pool's),
+    // so transport can never fork preview vs program playback.
+    case mediaPlay(SourceDefinitionID)
+    case mediaPause(SourceDefinitionID)
+    /// Rewind to the trim-in point and clear the frame (black fallback).
+    case mediaStop(SourceDefinitionID)
+    /// Rewind to the trim-in point and keep playing.
+    case mediaRestart(SourceDefinitionID)
+    /// Seek to an absolute file position in seconds (clamped to the trim
+    /// range by the playback engine).
+    case mediaSeek(SourceDefinitionID, to: Double)
+
     // Output profile (W07 staged-vs-active rules live in the controller).
     case setOutputProfile(OutputProfile, destination: StreamProtocol?)
 
@@ -303,6 +319,11 @@ enum StudioCommand: Equatable, Sendable {
             return "\(hidden ? "Hide" : "Show") Overlay in Scene"
         case .setSceneBackground: return "Set Scene Background"
         case .setDefaultBackground: return "Set Project Background"
+        case .mediaPlay: return "Play Media"
+        case .mediaPause: return "Pause Media"
+        case .mediaStop: return "Stop Media"
+        case .mediaRestart: return "Restart Media"
+        case .mediaSeek: return "Seek Media"
         case .setOutputProfile: return "Set Output Profile"
         case .setChannelVolume(let id, _): return "Set \(id.label) Volume"
         case .setChannelMuted(let id, let muted):
@@ -855,6 +876,17 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDefaultBackground:
             return nil
 
+        // A02 media transport: session state — the target must be a
+        // registered media source; locks and staging don't apply.
+        case .mediaPlay(let id), .mediaPause(let id),
+             .mediaStop(let id), .mediaRestart(let id):
+            return mediaTransportError(for: id)
+        case .mediaSeek(let id, let seconds):
+            if let error = mediaTransportError(for: id) { return error }
+            return seconds.isFinite && seconds >= 0
+                ? nil
+                : .invalidValue("Seek position must be a non-negative number of seconds.")
+
         case .setOutputProfile:
             // Always acceptable: the controller clamps to hardware/destination
             // and stages the edit while outputs own the geometry (W07).
@@ -1105,6 +1137,13 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDefaultBackground(let background):
             sceneStore.setDefaultBackground(background)
 
+        case .mediaPlay(let id): controller.capturePool.playMedia(id)
+        case .mediaPause(let id): controller.capturePool.pauseMedia(id)
+        case .mediaStop(let id): controller.capturePool.stopMedia(id)
+        case .mediaRestart(let id): controller.capturePool.restartMedia(id)
+        case .mediaSeek(let id, let seconds):
+            controller.capturePool.seekMedia(id, toSeconds: seconds)
+
         case .setOutputProfile(let profile, let destination):
             controller.applyOutputProfile(profile, destination: destination)
 
@@ -1302,6 +1341,19 @@ final class StudioCommandDispatcher: ObservableObject {
         }
         if let group = scene.group(for: layer), group.isLocked {
             return .unavailable("Layer \"\(layer.name)\" belongs to locked group \"\(group.name)\" — unlock the group first.")
+        }
+        return nil
+    }
+
+    /// A02 (issue #97): the rejection for a media transport command — the
+    /// target must be a REGISTERED media source (transport is keyed by
+    /// registry source ID, the same identity playout and the mix engine use).
+    private func mediaTransportError(for id: SourceDefinitionID) -> StudioCommandError? {
+        guard let source = sceneStore.source(withID: id) else {
+            return .invalidTarget("Media source \(id) does not exist.")
+        }
+        guard source.payload.isMedia else {
+            return .invalidTarget("Source \"\(source.name)\" is not a media source.")
         }
         return nil
     }
@@ -1695,6 +1747,7 @@ private extension StudioCommand {
              .setOutputProfile,
              .setChannelVolume, .setChannelMuted, .setChannelSolo,
              .setChannelAuxSend, .setBusGain, .setBusMuted,
+             .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
              .undo, .redo:

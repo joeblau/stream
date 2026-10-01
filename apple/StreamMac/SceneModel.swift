@@ -362,7 +362,7 @@ final class SceneStore: ObservableObject {
     func relinkSource(_ id: SourceDefinitionID, to payload: LayerPayload) {
         guard var definition = source(withID: id) else { return }
         switch (definition.payload, payload) {
-        case (.camera, .camera), (.screen, .screen), (.syphon, .syphon):
+        case (.camera, .camera), (.screen, .screen), (.syphon, .syphon), (.media, .media):
             break
         default:
             return

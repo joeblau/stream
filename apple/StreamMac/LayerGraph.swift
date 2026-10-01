@@ -426,9 +426,77 @@ struct ShapeSourcePayload: Hashable, Codable, Sendable {
     var fillColorHex: String = "#FFFFFF"
 }
 
+/// A02 (issue #97): what a media source does when playback reaches the
+/// trim-out point (or the file's natural end). The issue's
+/// return-to-previous-scene / advance-the-rundown actions are scene-control
+/// decisions that belong to S08; this enum is the seam for them.
+enum MediaEndAction: String, Codable, CaseIterable, Sendable {
+    /// Freeze on the last frame (the renderer keeps painting it).
+    case hold
+    /// Rewind to the trim-in point and clear the frame (black fallback).
+    case stop
+
+    var displayName: String {
+        switch self {
+        case .hold: return "Hold Last Frame"
+        case .stop: return "Stop (Black)"
+        }
+    }
+}
+
+/// A02 (issue #97): a local video file (MP4/MOV/ProRes — anything
+/// AVFoundation reads) as a named, reusable source. The app is sandboxed, so
+/// the persisted identity is a SECURITY-SCOPED BOOKMARK created from the
+/// user's file pick, not the raw URL. Transport position/play state is
+/// session state and deliberately NOT here; the payload owns the durable
+/// playback policy (loop, autoplay, end action, trim points).
 struct MediaSourcePayload: Hashable, Codable, Sendable {
     var assetIdentifier: String? = nil
+    /// Security-scoped bookmark for the picked video file (the access grant).
+    var bookmarkData: Data? = nil
+    /// The picked file's display name (bookmarks don't round-trip one).
+    var fileName: String? = nil
     var loops: Bool = true
+    /// Start playing as soon as the source is loaded (first reference).
+    var autoplay: Bool = true
+    var endAction: MediaEndAction = .hold
+    /// Trim-in point in seconds (nil = file start).
+    var trimInSeconds: Double? = nil
+    /// Trim-out point in seconds (nil = natural end).
+    var trimOutSeconds: Double? = nil
+
+    init(assetIdentifier: String? = nil,
+         bookmarkData: Data? = nil,
+         fileName: String? = nil,
+         loops: Bool = true,
+         autoplay: Bool = true,
+         endAction: MediaEndAction = .hold,
+         trimInSeconds: Double? = nil,
+         trimOutSeconds: Double? = nil) {
+        self.assetIdentifier = assetIdentifier
+        self.bookmarkData = bookmarkData
+        self.fileName = fileName
+        self.loops = loops
+        self.autoplay = autoplay
+        self.endAction = endAction
+        self.trimInSeconds = trimInSeconds
+        self.trimOutSeconds = trimOutSeconds
+    }
+
+    /// The A02 fields were added after v2 shipped; decode every field with a
+    /// default so older persisted documents keep loading (additive wire
+    /// change, same pattern as `LayerNode.isLocked`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        assetIdentifier = try container.decodeIfPresent(String.self, forKey: .assetIdentifier)
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        loops = try container.decodeIfPresent(Bool.self, forKey: .loops) ?? true
+        autoplay = try container.decodeIfPresent(Bool.self, forKey: .autoplay) ?? true
+        endAction = try container.decodeIfPresent(MediaEndAction.self, forKey: .endAction) ?? .hold
+        trimInSeconds = try container.decodeIfPresent(Double.self, forKey: .trimInSeconds)
+        trimOutSeconds = try container.decodeIfPresent(Double.self, forKey: .trimOutSeconds)
+    }
 }
 
 struct PDFSourcePayload: Hashable, Codable, Sendable {
@@ -522,6 +590,11 @@ enum LayerPayload: Hashable, Sendable {
         return false
     }
 
+    var isMedia: Bool {
+        if case .media = self { return true }
+        return false
+    }
+
     var isText: Bool {
         if case .text = self { return true }
         return false
@@ -539,12 +612,14 @@ enum LayerPayload: Hashable, Sendable {
 
     /// True when the current render path can actually paint this kind:
     /// camera/screen through the capture pipeline (S03), solid-color shapes
-    /// and text generated directly by `SceneRenderer` (S07), and nested
-    /// scenes rendered recursively (S06). The rest are model-only until the
-    /// composition engine grows source support. UI must mark non-renderable
-    /// kinds rather than implying they show on output.
+    /// and text generated directly by `SceneRenderer` (S07), nested
+    /// scenes rendered recursively (S06), and media (A02, issue #97: video
+    /// file playout pulled per tick from the pool's playback engines). The
+    /// rest are model-only until the composition engine grows source
+    /// support. UI must mark non-renderable kinds rather than implying they
+    /// show on output.
     var isRenderable: Bool {
-        isCamera || isScreen || isText || isShape || isScene || isSyphon
+        isCamera || isScreen || isText || isShape || isScene || isSyphon || isMedia
     }
 
     /// Short human name for layer-panel rows and add-layer menus.

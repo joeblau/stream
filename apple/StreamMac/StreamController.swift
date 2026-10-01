@@ -272,6 +272,12 @@ final class StreamController: ObservableObject {
         capturePool.onScreenAudioSample = { key, sample in
             audioEngine.enqueue(.capture(key), sample)
         }
+        // A02 (issue #97): media-source audio (pulled on the composition
+        // tick, already retimed onto the shared host clock) rides the same
+        // ingest, keyed by registry source ID — the `.media` channel kind.
+        capturePool.onMediaAudioSample = { id, sample in
+            audioEngine.enqueue(.media(id), sample)
+        }
         audio.onMicSampleOffMain = { sample in
             audioEngine.enqueue(.microphone(deviceUID: nil), sample)
         }
@@ -830,8 +836,12 @@ final class StreamController: ObservableObject {
         // stop delivering, and their channels (rings, converters, FX state)
         // are torn down here; pending gains survive so a re-created channel
         // keeps its mix position.
-        let keep = Set(demand.map { AudioChannelID.capture($0) })
-            .union([.microphone(deviceUID: nil)])
+        let keep = Set(demand.map { key -> AudioChannelID in
+            // A02: media playout keys map onto `.media` channels (keyed by
+            // registry source ID), not capture channels.
+            if case .media(let id) = key { return .media(id) }
+            return .capture(key)
+        }).union([.microphone(deviceUID: nil)])
         let audioEngine = self.audioEngine
         Task { await audioEngine.pruneChannels(keeping: keep) }
     }
@@ -874,6 +884,38 @@ final class StreamController: ObservableObject {
         }
         let audioEngine = self.audioEngine
         Task { await audioEngine.applyProgramCaptureGains(gains) }
+        // A02 (issue #97): media channels follow the same program-binding
+        // rule — a visible media layer's `AudioBinding` becomes its
+        // channel's program gain; every other DEMANDED media channel ramps
+        // to silence (a staged-only source must never leak into the outgoing
+        // mix — the same W03 reading the capture-gain call applies above).
+        // `applyProgramCaptureGains` only covers `.capture` channels, so
+        // media gains go through the documented per-channel gain API here.
+        let staged = previewState == .active ? previewProgram.stagedScene : nil
+        let demandLayers = [previewProgram.programScene, staged].compactMap { $0 }
+            .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
+        let demandedMedia: Set<SourceDefinitionID> = Set(
+            CaptureSourceKey.demanded(layers: demandLayers, sources: sceneStore.sources)
+                .compactMap { key -> SourceDefinitionID? in
+                    guard case .media(let id) = key else { return nil }
+                    return id
+                })
+        var mediaBindings: [SourceDefinitionID: (volume: Float, isMuted: Bool)] = [:]
+        for layer in layers {
+            guard let sourceID = layer.sourceID,
+                  mediaBindings[sourceID] == nil else { continue }
+            let payload = sceneStore.source(withID: sourceID)?.payload ?? layer.payload
+            guard payload.isMedia else { continue }
+            mediaBindings[sourceID] = (Float(layer.audio.volume), layer.audio.isMuted)
+        }
+        Task {
+            for id in demandedMedia {
+                let binding = mediaBindings[id] ?? (volume: 0, isMuted: false)
+                await audioEngine.setChannelGain(.media(id),
+                                                 volume: binding.volume,
+                                                 isMuted: binding.isMuted)
+            }
+        }
     }
 
     // MARK: - Permission transitions (C10, issue #79)

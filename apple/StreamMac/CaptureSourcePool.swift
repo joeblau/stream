@@ -18,6 +18,12 @@ enum CaptureSourceKey: Hashable, Sendable {
     /// name+app identity (the server instance UUID is volatile and never
     /// part of the key, so an app relaunch re-keys onto the SAME capture).
     case syphon(SyphonSourcePayload)
+    /// A02 (issue #97): a media (video file) source, keyed by its REGISTRY
+    /// source ID — the persisted security-scoped bookmark lives on the
+    /// `SourceDefinition`, and the A01 audio channel is `.media(sourceID)`,
+    /// so the registry ID is the one stable identity across payload edits
+    /// (loop/trim/relink never re-key playout).
+    case media(SourceDefinitionID)
 
     /// The system-default camera (no pinned device).
     static let defaultCamera = CaptureSourceKey.camera(CameraSourcePayload())
@@ -29,7 +35,7 @@ enum CaptureSourceKey: Hashable, Sendable {
         switch self {
         case .camera(let payload): return payload.deviceID == nil
         case .screen(let payload): return payload.targetIdentifier == nil
-        case .syphon: return false
+        case .syphon, .media: return false
         }
     }
 }
@@ -41,7 +47,9 @@ extension CaptureSourceKey {
     /// the registry is the identity authority, so reconfiguring a source
     /// re-keys its capture — while unbound layers fall back to their inline
     /// payload (the render authority). Payload kinds without a physical
-    /// capture (image/text/media/web/guest/…) produce no key.
+    /// capture (image/text/web/guest/…) produce no key. A02: media layers
+    /// demand playout by their registry source ID; an UNBOUND media layer
+    /// has no file to play and demands nothing.
     ///
     /// S06: callers flatten nested-scene references first
     /// (`SceneGraph.flattenedVisibleLayers` — cycle-guarded), so a camera
@@ -69,6 +77,11 @@ extension CaptureSourceKey {
             case .camera(let camera): keys.insert(.camera(camera))
             case .screen(let screen): keys.insert(.screen(screen))
             case .syphon(let syphon): keys.insert(.syphon(syphon))
+            case .media:
+                // A02 (issue #97): media playout is keyed by the registry
+                // source (the bookmark lives there); unbound media layers
+                // paint the documented fallback instead.
+                if let sourceID = layer.sourceID { keys.insert(.media(sourceID)) }
             default: break
             }
         }
@@ -103,6 +116,10 @@ final class SourceFrameProviders: @unchecked Sendable {
     private var cameraHolders: [LatestCameraFrame] = []
     private var screenHoldersByKey: [CaptureSourceKey: LatestScreenFrame] = [:]
     private var cameraHoldersByKey: [CaptureSourceKey: LatestCameraFrame] = [:]
+    /// A02 (issue #97): media playout is PULL-based (the render tick pulls
+    /// the frame for the player's current item time), so this maps keys to
+    /// the playback engines themselves, not latest-frame holders.
+    private var mediaSourcesByKey: [CaptureSourceKey: any MediaFrameSource] = [:]
 
     func update(screenHolders: [LatestScreenFrame], cameraHolders: [LatestCameraFrame]) {
         os_unfair_lock_lock(&lock)
@@ -118,6 +135,14 @@ final class SourceFrameProviders: @unchecked Sendable {
         os_unfair_lock_lock(&lock)
         self.screenHoldersByKey = screenHolders
         self.cameraHoldersByKey = cameraHolders
+        os_unfair_lock_unlock(&lock)
+    }
+
+    /// A02 (issue #97): the keyed media playout sources, published with the
+    /// other keyed holder sets (same known-key/never-substitute semantics).
+    func updateKeyedMedia(_ sources: [CaptureSourceKey: any MediaFrameSource]) {
+        os_unfair_lock_lock(&lock)
+        self.mediaSourcesByKey = sources
         os_unfair_lock_unlock(&lock)
     }
 
@@ -181,6 +206,29 @@ final class SourceFrameProviders: @unchecked Sendable {
         os_unfair_lock_unlock(&lock)
         return holder?.latest()
     }
+
+    // MARK: - Media playout (A02, issue #97)
+
+    /// True when the pool holds a playback engine for this exact media key.
+    /// A known key NEVER substitutes another source's frames; its nil reads
+    /// (loading, error, Stop end action) are the renderer's documented
+    /// paint-nothing fallback.
+    func hasMediaSource(for key: CaptureSourceKey) -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return mediaSourcesByKey[key] != nil
+    }
+
+    /// PULLS the current frame from the media playback for exactly this key
+    /// (and tops up the source's mix-engine audio — the render tick is the
+    /// playout cadence, so audio and video ride one clock). Call only from
+    /// the render tick, and only when `hasMediaSource(for:)` is true.
+    func mediaFrame(for key: CaptureSourceKey) -> CVPixelBuffer? {
+        os_unfair_lock_lock(&lock)
+        let source = mediaSourcesByKey[key]
+        os_unfair_lock_unlock(&lock)
+        return source?.pullFrame()
+    }
 }
 
 /// C01 (issue #76): the per-source frame read path `SceneRenderer` composites
@@ -192,6 +240,10 @@ final class SourceFrameProviders: @unchecked Sendable {
 struct SourceFrameLookup: Sendable {
     let camera: @Sendable (CaptureSourceKey) -> LatestCameraFrame.Frame?
     let screen: @Sendable (CaptureSourceKey) -> CVPixelBuffer?
+    /// A02 (issue #97): the media playout read path — PULLED per tick from
+    /// the pool's per-source playback engines. Nil (no media path wired)
+    /// means media layers paint the documented nothing fallback.
+    var media: (@Sendable (CaptureSourceKey) -> CVPixelBuffer?)? = nil
 }
 
 /// Holds the newest screen frame for one screen capture. Unlike the pre-W08
@@ -296,6 +348,20 @@ final class CaptureSourcePool: ObservableObject {
     /// addable-server list and the missing/recovery signal for syphon
     /// sources (servers appear/disappear like hot-plugged devices, C10).
     let syphonDiscovery = SyphonServerDiscovery()
+    /// A02 (issue #97): one playback engine per media key. Instances persist
+    /// across demand loss (like screen captures and their remembered
+    /// selections): pausing holds the position, so a re-referenced source —
+    /// and a Take between scenes sharing it — resumes mid-file and never
+    /// restarts playback.
+    private var mediaPlaybacks: [CaptureSourceKey: MediaSourcePlayback] = [:]
+    /// A02: the transport UI's per-source status (loaded/playing/paused/
+    /// ended/error + position/duration), mirrored from each playback engine.
+    @Published private(set) var mediaStates: [SourceDefinitionID: MediaSourceStatus] = [:]
+    /// A02: media-source audio, fired on the composition engines' render
+    /// tick with each buffer already retimed onto the shared host clock. The
+    /// controller forwards this to `AudioMixEngine.enqueue` as `.media(id)`
+    /// channels (the media twin of `onScreenAudioSample`).
+    var onMediaAudioSample: (@Sendable (SourceDefinitionID, CMSampleBuffer) -> Void)?
     private var cancellables: Set<AnyCancellable> = []
     /// C10: the physical camera each camera key's capture is actually using —
     /// the pinned device ID, or the system default resolved at start — so a
@@ -460,6 +526,8 @@ final class CaptureSourcePool: ObservableObject {
             }
         case .syphon(let payload):
             startSyphon(key, payload: payload)
+        case .media(let id):
+            startMedia(key, id: id)
         }
     }
 
@@ -480,6 +548,11 @@ final class CaptureSourcePool: ObservableObject {
         case .syphon:
             // Synchronous disconnect; clears its frame holder.
             syphonCaptures[key]?.stop()
+        case .media:
+            // A02: last reference removed — pause mid-file (the position
+            // holds; playout follows demand per the issue's lifecycle
+            // criterion). Explicit transport Stop is what rewinds.
+            mediaPlaybacks[key]?.pause()
         }
     }
 
@@ -504,6 +577,9 @@ final class CaptureSourcePool: ObservableObject {
         frames.updateKeyed(
             screenHolders: screenFrames.merging(syphonCaptures.mapValues(\.frames)) { current, _ in current },
             cameraHolders: cameras.mapValues(\.latest))
+        // A02: the keyed media playout sources (pull-based — the render tick
+        // reads `frames.media(key)` straight from each playback engine).
+        frames.updateKeyedMedia(mediaPlaybacks.mapValues { $0 as any MediaFrameSource })
     }
 
     /// The capture instance for a syphon key, created (and wired) on first
@@ -648,6 +724,10 @@ final class CaptureSourcePool: ObservableObject {
             case .syphon(let payload):
                 missingSources.remove(key)
                 startSyphon(key, payload: payload)
+            case .media(let id):
+                missingSources.remove(key)
+                sourceErrors[key] = nil
+                startMedia(key, id: id)
             }
         }
     }
@@ -743,6 +823,8 @@ final class CaptureSourcePool: ObservableObject {
             }
         case .syphon:
             syphonCaptures[key]?.stop()
+        case .media:
+            mediaPlaybacks[key]?.pause()
         }
     }
 
@@ -822,6 +904,103 @@ final class CaptureSourcePool: ObservableObject {
                 startSyphon(key, payload: payload)
             }
         }
+    }
+
+    // MARK: - Media playout (A02, issue #97)
+    //
+    // Media sources follow the pool's demand model exactly like captures: a
+    // playback engine loads on its first scene reference (program, or staged
+    // while the monitors are visible) and pauses mid-file when the last
+    // reference goes away. The engine instance persists, so a Take between
+    // scenes sharing the source — and the preview/program engines reading it
+    // simultaneously — never restarts playback: audio and video stay
+    // synchronized through scene changes because there is exactly ONE player
+    // per source, pulled per tick on the shared host clock.
+
+    /// Starts (or resumes) a media source's playout: resolves the engine
+    /// (creating it on first use) and kicks the bookmark-resolution load.
+    /// Autoplay is the payload's decision, honored at load completion.
+    private func startMedia(_ key: CaptureSourceKey, id: SourceDefinitionID) {
+        guard let playback = mediaPlayback(for: key, id: id) else { return }
+        sourceErrors[key] = nil
+        playback.load()
+        // Optimistic like cameras: frames/status age in through mediaStates;
+        // a load failure flips the error surface via the status callback.
+        activeSources.insert(key)
+    }
+
+    /// The playback engine for a media key, created (and wired) on first use
+    /// and stable thereafter. The payload provider reads the registry's live
+    /// payload index (`SourcePayloadStore`), so loop/end-action edits take
+    /// effect at the next loop point and a relink (bookmark change) reloads
+    /// the file on the pull path — the source ID key never changes.
+    private func mediaPlayback(for key: CaptureSourceKey,
+                               id: SourceDefinitionID) -> MediaSourcePlayback? {
+        if let existing = mediaPlaybacks[key] { return existing }
+        let playback = MediaSourcePlayback(sourceID: id) {
+            guard case .media(let payload) = SourcePayloadStore.shared.snapshot()[id]
+            else { return nil }
+            return payload
+        }
+        // The handler value is captured (not the MainActor pool) so the
+        // engine-tick @Sendable closure stays isolation-clean. The controller
+        // assigns `onMediaAudioSample` before any playback exists, so the
+        // value read here is always the live one (the C01 screen pattern).
+        let audioHandler = onMediaAudioSample
+        playback.onAudioSample = { sample in
+            audioHandler?(id, sample)
+        }
+        playback.onStatus = { [weak self] sourceID, status in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.mediaStates[sourceID] = status
+                if status.phase == .error {
+                    self.activeSources.remove(key)
+                    self.sourceErrors[key] = status.errorMessage
+                } else if status.phase == .playing || status.phase == .ready {
+                    self.sourceErrors[key] = nil
+                }
+            }
+        }
+        mediaPlaybacks[key] = playback
+        publishFrameHolders()
+        return playback
+    }
+
+    // MARK: - Media transport (W05 dispatcher commands)
+
+    /// The playback engine for a registry media source, creating it on
+    /// explicit transport intent (play/restart) — audition before the source
+    /// is referenced anywhere. Explicit transport acts on the ONE shared
+    /// instance, so it can never fork program vs preview playback.
+    func playMedia(_ id: SourceDefinitionID) {
+        guard let playback = mediaPlayback(for: .media(id), id: id) else { return }
+        playback.load()
+        playback.play()
+    }
+
+    func pauseMedia(_ id: SourceDefinitionID) {
+        mediaPlaybacks[.media(id)]?.pause()
+    }
+
+    func stopMedia(_ id: SourceDefinitionID) {
+        mediaPlaybacks[.media(id)]?.stop()
+    }
+
+    func restartMedia(_ id: SourceDefinitionID) {
+        guard let playback = mediaPlayback(for: .media(id), id: id) else { return }
+        playback.load()
+        playback.restart()
+    }
+
+    func seekMedia(_ id: SourceDefinitionID, toSeconds seconds: Double) {
+        mediaPlaybacks[.media(id)]?.seek(toSeconds: seconds)
+    }
+
+    /// The current status for one media source (idle when never loaded) —
+    /// the transport UI's read path.
+    func mediaStatus(for id: SourceDefinitionID) -> MediaSourceStatus {
+        mediaStates[id] ?? MediaSourceStatus()
     }
 
     /// Collapses keys that name the SAME physical device the default source
