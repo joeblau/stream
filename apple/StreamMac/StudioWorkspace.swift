@@ -40,6 +40,7 @@ final class StudioRuntime {
         controllers.bind(to: dispatcher)
         chat = StudioChatCoordinator(dispatcher: dispatcher, previewProgram: previewProgram)
         dispatcher.bindChatCoordinator(chat)
+        recorder.bindChat(chat)
         providerAccounts = ProviderAccountSession(restream: chat.restream)
         adapters = StudioAdapterManager()
         adapters.bind(to: localControl)
