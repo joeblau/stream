@@ -324,6 +324,7 @@ final class TransitionController: ObservableObject {
     private var stingerBookmark: Data?
     /// The transition awaiting its end notice (blend timer or stinger end).
     private var pendingEndTarget: SceneID?
+    var hasActiveTransition: Bool { pendingEndTarget != nil }
     private var endNoticeTask: Task<Void, Never>?
 
     /// One fixed mix-channel identity for every stinger (one plays at a

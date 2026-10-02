@@ -13,7 +13,7 @@ struct StudioPaletteAction: Identifiable {
 extension StudioCommandDispatcher {
     /// Rebuilt at invocation time: mappings follow UUIDs through rename and
     /// reorder; layer toggles always use the latest staged visibility.
-    func paletteActions(scenes: [Scene], sources: [SourceDefinition], stagedScene: Scene?) -> [StudioPaletteAction] {
+    func paletteActions(scenes: [Scene], sources: [SourceDefinition], stagedScene: Scene?, includeMacros: Bool = true) -> [StudioPaletteAction] {
         var result: [StudioPaletteAction] = []
         func add(_ id: String, _ title: String, _ category: String, _ command: StudioCommand) {
             result.append(StudioPaletteAction(id: id, title: title, category: category,
@@ -70,6 +70,12 @@ extension StudioCommandDispatcher {
             add("playlist.\(id).pause", "Pause \(playlist.name)", "Sound", .playlistPause(playlist.id))
             add("playlist.\(id).stop", "Stop \(playlist.name)", "Sound", .playlistStop(playlist.id))
             add("playlist.\(id).next", "Next Track — \(playlist.name)", "Sound", .playlistNext(playlist.id))
+        }
+        if includeMacros {
+        for macro in macros.document.macros {
+            add("macro.\(macro.id.uuidString).run", "Run \(macro.name)", "Macros", .runMacro(macro.id))
+        }
+        add("macro.cancel", "Cancel Running Macro", "Macros", .cancelMacro)
         }
         // These are discoverability notices, never assignable fake commands.
         result.append(StudioPaletteAction(id: "unavailable.comments", title: "Put Comment on Program", category: "Comments", command: nil,

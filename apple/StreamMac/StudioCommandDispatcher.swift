@@ -547,6 +547,9 @@ enum StudioCommand: Equatable, Sendable {
     case ptzRemoveSceneRecall(UUID)
 
     // S11: one persisted rundown and one transport clock.
+    case setShowMacros(ShowMacroDocument)
+    case runMacro(UUID)
+    case cancelMacro
     case setRundown(ShowRundownDocument)
     case rundownPlay
     case rundownPause
@@ -749,6 +752,9 @@ enum StudioCommand: Equatable, Sendable {
         case .ptzSetSceneRecall(let link):
             return link.recallOnProgramEntry ? "Arm Scene PTZ Recall" : "Set Scene PTZ Recall"
         case .ptzRemoveSceneRecall: return "Remove Scene PTZ Recall"
+        case .setShowMacros: return "Edit Show Macros"
+        case .runMacro: return "Run Show Macro"
+        case .cancelMacro: return "Cancel Show Macro"
         case .setRundown: return "Edit Rundown"
         case .rundownPlay: return "Play Rundown"
         case .rundownPause: return "Pause Rundown"
@@ -1005,6 +1011,8 @@ final class StudioCommandDispatcher: ObservableObject {
     /// MainWindowView needs no new environment plumbing.
     let assetLibrary: AssetLibraryStore
     let rundown: ShowRundownController
+    let macros: ShowMacroController
+    private var executingMacroStep = false
     let lutLibrary = LUTLibraryController()
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
@@ -1054,6 +1062,7 @@ final class StudioCommandDispatcher: ObservableObject {
         self.pdfDecks = PDFDeckStore()
         self.assetLibrary = AssetLibraryStore()
         self.rundown = ShowRundownController()
+        self.macros = ShowMacroController()
         // G06: the pool's PDF engines resolve documents through the library.
         controller.capturePool.assetLibrary = assetLibrary
         // G08 (issue #115): web widget hosts reach the asset library through
@@ -1086,6 +1095,7 @@ final class StudioCommandDispatcher: ObservableObject {
                     .contains(sourceID) else { return }
             self.rundown.noteMediaEnd(at: endedAt)
         }
+        configureMacros()
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
         refreshState()
@@ -1132,6 +1142,61 @@ final class StudioCommandDispatcher: ObservableObject {
             .store(in: &cancellables)
     }
 
+    func catalogueActions(includeMacros: Bool = true) -> [StudioPaletteAction] {
+        paletteActions(scenes: sceneStore.scenes, sources: sceneStore.sources, stagedScene: previewProgram.stagedScene, includeMacros: includeMacros)
+    }
+    private func configureMacros() {
+        macros.resolve = { [weak self] id in
+            self?.catalogueActions(includeMacros: false).contains(where: { $0.id == id && $0.command != nil }) == true
+                ? nil : "The macro command target no longer exists: \(id)"
+        }
+        macros.conditionMet = { [weak self] condition, id in
+            guard let self else { return false }
+            switch condition {
+            case .always: return true
+            case .commandAvailable:
+                self.executingMacroStep = true
+                defer { self.executingMacroStep = false }
+                return self.catalogueActions(includeMacros: false).first { $0.id == id }?.unavailableReason == nil
+            case .streamLive: return self.state.stream.isLive
+            case .recordingActive: return self.state.recording.isRecording
+            case .sceneStaged(let uuid): return self.state.stagedSceneID?.rawValue == uuid
+            }
+        }
+        macros.execute = { [weak self] id in
+            guard let self, let command = self.catalogueActions(includeMacros: false).first(where: { $0.id == id })?.command else { return "The macro target no longer exists." }
+            self.executingMacroStep = true
+            defer { self.executingMacroStep = false }
+            if case .rejected(let error) = self.execute(command).outcome { return error.description }
+            return nil
+        }
+        macros.settle = { [weak self] id in
+            guard let self else { throw CancellationError() }
+            let deadline = Date().addingTimeInterval(30)
+            while self.outputTransitionInFlight {
+                try Task.checkCancellation()
+                if Date() >= deadline { throw ShowMacroRunError(description: "Timed out waiting for output transitions.") }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            if id == "output.stream.start", case .failed(let message) = self.state.stream {
+                throw ShowMacroRunError(description: message)
+            }
+            if id == "output.record.start", case .failed(let message) = self.state.recording {
+                throw ShowMacroRunError(description: message)
+            }
+        }
+        macros.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.objectWillChange.send() }
+        }.store(in: &cancellables)
+    }
+    var outputTransitionInFlight: Bool {
+        switch state.stream {
+        case .connecting, .reconnecting, .stopping: return true
+        default: break
+        }
+        return state.recording == .stopping || transitions.hasActiveTransition
+    }
+
     // MARK: Execution
 
     /// Validates, then executes, one command — synchronously on the main
@@ -1143,6 +1208,12 @@ final class StudioCommandDispatcher: ObservableObject {
         if let error = validate(command) {
             postRejection(command: command, error: error)
             return StudioCommandResult(outcome: .rejected(error), state: state)
+        }
+        if !executingMacroStep {
+            switch command {
+            case .stopStream, .stopRecording: macros.cancel()
+            default: break
+            }
         }
         // S12: snapshot the undoable state around undoable scene edits. The
         // record happens only when the command actually changed something
@@ -1174,6 +1245,13 @@ final class StudioCommandDispatcher: ObservableObject {
     // MARK: Validation (against current session state, before any execution)
 
     private func validate(_ command: StudioCommand) -> StudioCommandError? {
+        if macros.isRunning && !executingMacroStep {
+            switch command {
+            case .startStream, .startRecording, .take, .runRundownCue, .rundownPlay:
+                return .unavailable("A show macro owns output transitions. Cancel it before starting a conflicting action.")
+            default: break
+            }
+        }
         // S02: a locked scene rejects every edit to its CONTENT (whole-scene
         // replacement plus all layer/group edits addressed to it). Selection,
         // browser organization, and the lock toggle stay available.
@@ -2004,6 +2082,13 @@ final class StudioCommandDispatcher: ObservableObject {
             return ptzStore.recallLink(withID: id) != nil
                 ? nil : .invalidTarget("Scene PTZ recall link \(id) does not exist.")
 
+        case .setShowMacros(let document):
+            return macros.isRunning ? .unavailable("Cancel the running macro before editing.")
+                : document.validationError.map { .invalidValue($0) }
+        case .runMacro(let id):
+            return macros.availability(for: id).map { .unavailable($0) }
+        case .cancelMacro:
+            return macros.isRunning ? nil : .unavailable("No macro is running.")
         case .setRundown(let document):
             return document.validationError.map { .invalidValue($0) }
         case .rundownPlay:
@@ -2621,6 +2706,10 @@ final class StudioCommandDispatcher: ObservableObject {
         case .ptzRemoveSceneRecall(let id):
             ptzStore.removeRecallLink(id)
 
+        case .setShowMacros(let document):
+            if let error = macros.update(document) { postTransientNotice(command: "Save Macros", message: error) }
+        case .runMacro(let id): macros.start(id)
+        case .cancelMacro: macros.cancel()
         case .setRundown(let document): rundown.update(document)
         case .rundownPlay: rundown.play()
         case .rundownPause: rundown.pause()
@@ -3580,6 +3669,7 @@ private extension StudioCommand {
              .addEffectPreset, .updateEffectPreset, .removeEffectPreset,
              .addStylePreset, .updateStylePreset, .removeStylePreset,
              .addTextStylePreset, .updateTextStylePreset, .removeTextStylePreset,
+             .setShowMacros, .runMacro, .cancelMacro,
              .setRundown, .rundownPlay, .rundownPause, .rundownStop, .rundownSkip, .runRundownCue,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,
