@@ -1157,6 +1157,39 @@ final class StudioCommandDispatcher: ObservableObject {
     func catalogueActions(includeMacros: Bool = true) -> [StudioPaletteAction] {
         paletteActions(scenes: sceneStore.scenes, sources: sceneStore.sources, stagedScene: previewProgram.stagedScene, includeMacros: includeMacros)
     }
+    /// Stable numeric controller targets are deliberately a small typed set.
+    /// Capture-layer gain retains its scene/layer ownership on the inspector.
+    func controllerTargets() -> [StudioControllerTarget] {
+        var result: [StudioControllerTarget] = []
+        for action in catalogueActions() where action.command != nil {
+            var feedback = action.unavailableReason == nil ? 1.0 : 0
+            if case .selectScene(let id) = action.command { feedback = state.stagedSceneID == id ? 1 : 0 }
+            if action.id.hasPrefix("output.stream.") { feedback = state.stream.isActive ? 1 : 0 }
+            if action.id.hasPrefix("output.record.") { feedback = state.recording.isActive ? 1 : 0 }
+            if action.id.hasPrefix("output.preview.") { feedback = state.preview == .active ? 1 : 0 }
+            result.append(.init(id: action.id, title: action.title, kind: .command, normalizedValue: feedback,
+                                unavailableReason: action.unavailableReason, execute: { [weak self] _ in
+                guard let self, let command = self.catalogueActions().first(where: { $0.id == action.id })?.command else { return "The stable command target no longer exists." }
+                return self.execute(command).error?.description
+            }))
+        }
+        func gain(_ id: String, _ title: String, _ current: Double, _ command: @escaping (Double) -> StudioCommand) {
+            result.append(.init(id: id, title: title, kind: .value, normalizedValue: max(0, min(2, current)) / 2,
+                                unavailableReason: availabilityError(for: command(current))?.description, execute: { [weak self] value in
+                guard let self, let value, value.isFinite, value >= 0, value <= 1 else { return "A numeric input must be normalized from 0 to 1." }
+                return self.execute(command(value * 2)).error?.description
+            }))
+        }
+        gain("audio.microphone.gain", "Microphone Gain (0–2)", state.micVolume) { .setChannelVolume(.microphone(deviceUID: nil), $0) }
+        for bus in [AudioBus.program, .monitor, .aux] {
+            gain("audio.bus.\(bus.rawValue).gain", "\(bus.rawValue.capitalized) Bus Gain (0–2)", state.mixer.busGains[bus.rawValue] ?? 1) { .setBusGain(bus, $0) }
+        }
+        for source in sceneStore.sources where source.payload.isMedia {
+            let channel = AudioChannelID.media(source.id)
+            gain("media.\(source.id.rawValue.uuidString).gain", "\(source.name) Gain (0–2)", state.mixer.channelVolumes[channel.label] ?? 1) { .setChannelVolume(channel, $0) }
+        }
+        return result
+    }
     /// Foreground automation uses the pipeline's nested-scene/source demand
     /// rules, including the proposed scene/visibility change, before capture.
     func automationCapturePermissions(for command: StudioCommand?) -> Set<PermissionsManager.Kind> {
