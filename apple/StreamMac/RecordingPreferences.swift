@@ -48,11 +48,12 @@ struct RecordingPreferences: Codable, Equatable, Sendable {
     var splitAfterMinutes = 0
     var splitAfterMegabytes = 0
     var isolatedTracks: [IsolatedRecordingSelection] = []
+    var isolatedVideoTracks: [IsolatedVideoSelection] = []
 
     init() {}
     private enum CodingKeys: String, CodingKey {
         case container, codec, quality, filenamePrefix, autoRecordOnGoLive
-        case countdownSeconds, splitAfterMinutes, splitAfterMegabytes, isolatedTracks
+        case countdownSeconds, splitAfterMinutes, splitAfterMegabytes, isolatedTracks, isolatedVideoTracks
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -65,6 +66,7 @@ struct RecordingPreferences: Codable, Equatable, Sendable {
         splitAfterMinutes = try c.decodeIfPresent(Int.self, forKey: .splitAfterMinutes) ?? 0
         splitAfterMegabytes = try c.decodeIfPresent(Int.self, forKey: .splitAfterMegabytes) ?? 0
         isolatedTracks = try c.decodeIfPresent([IsolatedRecordingSelection].self, forKey: .isolatedTracks) ?? []
+        isolatedVideoTracks = try c.decodeIfPresent([IsolatedVideoSelection].self, forKey: .isolatedVideoTracks) ?? []
     }
 }
 

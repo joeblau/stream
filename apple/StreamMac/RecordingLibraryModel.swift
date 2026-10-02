@@ -53,6 +53,17 @@ private struct IsolatedJournalSummary: Decodable, Sendable {
     let progress: IsolatedTrackProgress
     struct Gap: Decodable, Sendable { let reason: String; let missingFrames: Int64 }
 }
+private struct IsolatedVideoJournalSummary: Decodable, Sendable {
+    let sessionID: String
+    let segmentIndex: Int
+    let programFile: String
+    let selection: IsolatedVideoSelection
+    let context: RecordingContext
+    let sourceStartOffsetSeconds: Double?
+    let gaps: [Gap]
+    let progress: IsolatedVideoProgress
+    struct Gap: Decodable, Sendable { let reason: String; let durationSeconds: Double }
+}
 
 enum RecordingMarkerFormat: String, CaseIterable {
     case json, csv, txt
@@ -98,6 +109,8 @@ enum RecordingMarkerFormat: String, CaseIterable {
                 .flatMap { try? JSONDecoder().decode(RecordingJournalSummary.self, from: $0) }
             let isolated = (try? Data(contentsOf: url.appendingPathExtension("isolated.json")))
                 .flatMap { try? JSONDecoder().decode(IsolatedJournalSummary.self, from: $0) }
+            let video = (try? Data(contentsOf: url.appendingPathExtension("video-isolated.json")))
+                .flatMap { try? JSONDecoder().decode(IsolatedVideoJournalSummary.self, from: $0) }
             if journal == nil, let isolated,
                URL(fileURLWithPath: isolated.programFile).lastPathComponent == isolated.programFile {
                 journal = (try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent(isolated.programFile).appendingPathExtension("recording.json")))
@@ -108,10 +121,15 @@ enum RecordingMarkerFormat: String, CaseIterable {
                 return (try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent(name).appendingPathExtension("isolated.json")))
                     .flatMap { try? JSONDecoder().decode(IsolatedJournalSummary.self, from: $0) }
             }
+            let linkedVideo = (journal?.isolatedFiles ?? []).compactMap { name -> IsolatedVideoJournalSummary? in
+                guard URL(fileURLWithPath: name).lastPathComponent == name else { return nil }
+                return (try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent(name).appendingPathExtension("video-isolated.json")))
+                    .flatMap { try? JSONDecoder().decode(IsolatedVideoJournalSummary.self, from: $0) }
+            }
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
             let bytes = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
             let date = attributes?[.creationDate] as? Date ?? .distantPast
-            return (journal, bytes, date, isolated, linked)
+            return (journal, bytes, date, isolated, linked, video, linkedVideo)
         }.value
         let asset = AVURLAsset(url: url)
         var duration = 0.0
@@ -142,14 +160,24 @@ enum RecordingMarkerFormat: String, CaseIterable {
         }
         let journal = metadata.0
         let isolated = metadata.3
-        let storedStatus = isolated?.progress.status ?? journal?.status ?? "unclassified"
+        let video = metadata.5
+        let storedStatus = video?.progress.status ?? isolated?.progress.status ?? journal?.status ?? "unclassified"
         let status: String
         if active { status = "recording" }
         else if readable && storedStatus != "complete" { status = "recoverable" }
         else if !readable { status = "partial" }
         else { status = "complete" }
         var manifestParts: [String] = []
-        if let isolated {
+        if let video {
+            manifestParts.append("\(video.selection.name): \(video.selection.processing.title)")
+            manifestParts.append("Source: \(video.selection.targetID)")
+            manifestParts.append("\(video.selection.resolution.title) · \(video.selection.frameRate) fps")
+            manifestParts.append("Audio: \(video.selection.audioName ?? video.selection.audioTargetID ?? "Video Only")")
+            if let offset = video.sourceStartOffsetSeconds { manifestParts.append(String(format: "starts %.3fs", offset)) }
+            if video.progress.missingVideoFrames > 0 { manifestParts.append("\(video.progress.missingVideoFrames) missing source frames") }
+            if video.progress.renderDrops > 0 { manifestParts.append("\(video.progress.renderDrops) dropped source frames") }
+            if !video.gaps.isEmpty { manifestParts.append("\(video.gaps.count) documented gap windows") }
+        } else if let isolated {
             manifestParts.append("\(isolated.selection.name): \(isolated.selection.processing.title)")
             manifestParts.append("Source: \(isolated.selection.targetID)")
             if let offset = isolated.startOffsetSeconds { manifestParts.append(String(format: "starts %.3fs", offset)) }
@@ -163,17 +191,21 @@ enum RecordingMarkerFormat: String, CaseIterable {
             if let offset = journal?.audioStartOffsetSeconds { manifestParts.append(String(format: "audio starts %.3fs", offset)) }
             if let dropped = journal?.progress?.droppedVideo, dropped > 0 { manifestParts.append("\(dropped) dropped video frames") }
             if let dropped = journal?.progress?.droppedAudio, dropped > 0 { manifestParts.append("\(dropped) audio gaps") }
-            if let files = journal?.isolatedFiles, !files.isEmpty { manifestParts.append("\(files.count) isolated audio files") }
+            if let files = journal?.isolatedFiles, !files.isEmpty { manifestParts.append("\(files.count) isolated media files") }
             for track in metadata.4 {
+                manifestParts.append("\(track.selection.name): \(track.progress.status)\(track.progress.error.map { " (" + $0 + ")" } ?? "")")
+            }
+            for track in metadata.6 {
                 manifestParts.append("\(track.selection.name): \(track.progress.status)\(track.progress.error.map { " (" + $0 + ")" } ?? "")")
             }
         }
         return RecordingLibraryEntry(url: url,
-            sessionID: isolated?.sessionID ?? journal?.sessionID ?? url.lastPathComponent, segmentIndex: isolated?.segmentIndex ?? journal?.segmentIndex ?? 1,
-            startedAt: journal?.startedAt ?? metadata.2, context: isolated?.context ?? journal?.context ?? .init(),
+            sessionID: video?.sessionID ?? isolated?.sessionID ?? journal?.sessionID ?? url.lastPathComponent,
+            segmentIndex: video?.segmentIndex ?? isolated?.segmentIndex ?? journal?.segmentIndex ?? 1,
+            startedAt: journal?.startedAt ?? metadata.2, context: video?.context ?? isolated?.context ?? journal?.context ?? .init(),
             duration: duration.isFinite ? max(0, duration) : 0, bytes: metadata.1,
             tracks: trackNames, manifestSummary: manifestParts.joined(separator: " · "), status: status,
-            error: (isolated == nil ? journal?.error : isolated?.progress.error) ?? mediaError,
+            error: (video != nil ? video?.progress.error : isolated == nil ? journal?.error : isolated?.progress.error) ?? mediaError,
             markers: journal?.markers ?? [], thumbnail: thumbnail, canExport: readable && !active)
     }
 

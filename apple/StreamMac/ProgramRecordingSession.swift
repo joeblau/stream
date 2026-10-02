@@ -16,6 +16,10 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var segmentIndex = 1
         var context = RecordingContext()
         var isolatedFiles: [String] = []
+        var requiresAudio = true
+        /// ISO writers retain the program origin rather than starting each
+        /// file at its first received source frame.
+        var sourceStartTime: CMTime?
         var lowSpaceWarningBytes: Int64 = 1_000_000_000
         var minimumSpaceBytes: Int64 = 100_000_000
         var videoCapacity: Int = 30
@@ -23,7 +27,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var audioCapacity: Int = 128
     }
 
-    enum TrackStatus: String, Codable, Sendable { case waiting, writing, stalled, failed, complete }
+    enum TrackStatus: String, Codable, Sendable { case waiting, writing, stalled, failed, complete, notRequested }
 
     struct Progress: Codable, Sendable {
         var videoStatus: TrackStatus = .waiting
@@ -141,6 +145,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         self.outputURL = outputURL
         self.timeline = timeline
         self.configuration = configuration
+        if !configuration.requiresAudio { progress.audioStatus = .notRequested }
         self.spaceProbe = spaceProbe
         self.event = event
         queue.async { [self] in
@@ -154,7 +159,10 @@ final class ProgramRecordingSession: @unchecked Sendable {
     }
 
     func appendVideo(_ sample: CMSampleBuffer) { enqueue(sample, isVideo: true) }
-    func appendAudio(_ sample: CMSampleBuffer) { enqueue(sample, isVideo: false) }
+    func appendAudio(_ sample: CMSampleBuffer) {
+        guard configuration.requiresAudio else { return }
+        enqueue(sample, isVideo: false)
+    }
 
     private func enqueue(_ sample: CMSampleBuffer, isVideo: Bool) {
         lock.lock()
@@ -237,7 +245,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 let firstAudio = audio.first
                 lock.unlock()
                 // Audio arriving before video remains bounded and retained.
-                if let firstVideo, firstAudio != nil || finishRequested || Date().timeIntervalSince(createdAt) > 1 {
+                if let firstVideo, !configuration.requiresAudio || firstAudio != nil || finishRequested || Date().timeIntervalSince(createdAt) > 1 {
                     configure(video: firstVideo, audio: firstAudio)
                 }
             }
@@ -273,7 +281,8 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 AVVideoCodecKey: configuration.codec == .h264 ? AVVideoCodecType.h264 : AVVideoCodecType.hevc,
                 AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height),
                 AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: bitrate,
-                    AVVideoExpectedSourceFrameRateKey: fps, AVVideoMaxKeyFrameIntervalKey: fps * 2]
+                    AVVideoExpectedSourceFrameRateKey: fps, AVVideoMaxKeyFrameIntervalKey: fps * 2,
+                    AVVideoAllowFrameReorderingKey: false]
             ])
             input.expectsMediaDataInRealTime = true
             let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: [
@@ -281,14 +290,15 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 160_000
             ])
             audioInput.expectsMediaDataInRealTime = true
-            guard writer.canAdd(input), writer.canAdd(audioInput) else {
+            guard writer.canAdd(input), !configuration.requiresAudio || writer.canAdd(audioInput) else {
                 fail("The selected audio/video encoding settings are unavailable."); return
             }
-            writer.add(input); writer.add(audioInput)
-            self.writer = writer; self.videoInput = input; self.audioInput = audioInput
+            writer.add(input)
+            if configuration.requiresAudio { writer.add(audioInput); self.audioInput = audioInput }
+            self.writer = writer; self.videoInput = input
             guard writer.startWriting() else { fail(writer.error?.localizedDescription ?? "Cannot open recording writer."); return }
             let videoPTS = CMSampleBufferGetPresentationTimeStamp(video)
-            sessionStart = audio.map { CMTimeMinimum(videoPTS, CMSampleBufferGetPresentationTimeStamp($0)) } ?? videoPTS
+            sessionStart = configuration.sourceStartTime ?? audio.map { CMTimeMinimum(videoPTS, CMSampleBufferGetPresentationTimeStamp($0)) } ?? videoPTS
             writer.startSession(atSourceTime: sessionStart)
             timeline.begin(at: sessionStart)
             started = true
@@ -296,15 +306,15 @@ final class ProgramRecordingSession: @unchecked Sendable {
     }
 
     private func drain() {
-        guard let writer, let videoInput, let audioInput else { return }
+        guard let writer, let videoInput else { return }
         if resumePending {
             lock.lock()
             let firstVideo = video.first; let firstAudio = audio.first
             lock.unlock()
             // Both taps share a clock. Use the earliest resumed timestamp to
             // remove only the paused interval from both tracks.
-            guard let firstVideo, let firstAudio else { return }
-            let rawStart = CMTimeMinimum(firstVideo.presentationTimeStamp, firstAudio.presentationTimeStamp)
+            guard let firstVideo, !configuration.requiresAudio || firstAudio != nil else { return }
+            let rawStart = firstAudio.map { CMTimeMinimum(firstVideo.presentationTimeStamp, $0.presentationTimeStamp) } ?? firstVideo.presentationTimeStamp
             let gap = CMTimeMaximum(.zero, rawStart - timestampOffset - endTime)
             pauses.append(PauseGap(sourceStartSeconds: (endTime + timestampOffset).seconds, durationSeconds: gap.seconds))
             timestampOffset = timestampOffset + gap
@@ -318,7 +328,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
             }
             lock.lock()
             let nextVideo = videoInput.isReadyForMoreMediaData ? video.first : nil
-            let nextAudio = audioInput.isReadyForMoreMediaData ? audio.first : nil
+            let nextAudio = audioInput?.isReadyForMoreMediaData == true ? audio.first : nil
             let isVideo: Bool
             if let nextVideo, let nextAudio {
                 isVideo = CMSampleBufferGetPresentationTimeStamp(nextVideo) <= CMSampleBufferGetPresentationTimeStamp(nextAudio)
@@ -341,7 +351,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 continue
             }
             let input = isVideo ? videoInput : audioInput
-            guard input.append(sample) else {
+            guard input?.append(sample) == true else {
                 fail("\(isVideo ? "Video" : "Program audio") track failed: \(writer.error?.localizedDescription ?? "encoder rejected media")", videoTrack: isVideo)
                 return
             }
@@ -361,7 +371,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 progress.audioStatus = .writing
                 if !firstAudioPTS.isValid { firstAudioPTS = pts }
             }
-            if !announcedRecording, progress.videoSamples > 0, progress.audioSamples > 0 {
+            if !announcedRecording, progress.videoSamples > 0, !configuration.requiresAudio || progress.audioSamples > 0 {
                 announcedRecording = true
                 event(.recording)
             }
@@ -389,7 +399,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         progress.warning = nil
         if failure == nil, !finishRequested, !paused, Date().timeIntervalSince(createdAt) > 3 {
             if Date().timeIntervalSince(lastVideoWrite) > 3 { progress.videoStatus = .stalled }
-            if Date().timeIntervalSince(lastAudioWrite) > 3 { progress.audioStatus = .stalled }
+            if configuration.requiresAudio, Date().timeIntervalSince(lastAudioWrite) > 3 { progress.audioStatus = .stalled }
         }
         do {
             progress.availableBytes = try spaceProbe(outputURL)
@@ -403,11 +413,11 @@ final class ProgramRecordingSession: @unchecked Sendable {
             let sinceStart = Date().timeIntervalSince(createdAt)
             if !finishRequested, !paused, sinceStart > 10 {
                 if Date().timeIntervalSince(lastVideoWrite) > 10 { fail("No video was written for ten seconds.") }
-                else if Date().timeIntervalSince(lastAudioWrite) > 10 { fail("No program audio was written for ten seconds.") }
+                else if configuration.requiresAudio, Date().timeIntervalSince(lastAudioWrite) > 10 { fail("No program audio was written for ten seconds.") }
             }
             if !finishRequested, !paused, sinceStart > 3 {
-                if !announcedRecording { progress.warning = "Waiting for program audio and video." }
-                else if Date().timeIntervalSince(lastVideoWrite) > 3 || Date().timeIntervalSince(lastAudioWrite) > 3 {
+                if !announcedRecording { progress.warning = configuration.requiresAudio ? "Waiting for program audio and video." : "Waiting for source video." }
+                else if Date().timeIntervalSince(lastVideoWrite) > 3 || (configuration.requiresAudio && Date().timeIntervalSince(lastAudioWrite) > 3) {
                     progress.warning = "Recording write progress has stalled; check disk and encoder load."
                 }
             }
@@ -434,6 +444,17 @@ final class ProgramRecordingSession: @unchecked Sendable {
 
     private func fail(_ message: String, videoTrack: Bool? = nil) {
         guard failure == nil else { return }
+        logEncoderError()
+        failure = message
+        if videoTrack != false { progress.videoStatus = .failed; progress.videoError = message }
+        if configuration.requiresAudio, videoTrack != true { progress.audioStatus = .failed; progress.audioError = message }
+        lock.lock(); accepting = false; video.removeAll(); audio.removeAll(); lock.unlock()
+        updateProgress()
+        writeManifest(status: "partial")
+        event(.failed(message))
+    }
+
+    private func logEncoderError() {
         // Domain/code chains aid local codec/storage diagnosis without
         // including media paths, capture names or arbitrary userInfo values.
         if let error = writer?.error as NSError? {
@@ -445,13 +466,6 @@ final class ProgramRecordingSession: @unchecked Sendable {
             }
             NSLog("Program recording encoder error: %@", chain.joined(separator: " -> "))
         }
-        failure = message
-        if videoTrack != false { progress.videoStatus = .failed; progress.videoError = message }
-        if videoTrack != true { progress.audioStatus = .failed; progress.audioError = message }
-        lock.lock(); accepting = false; video.removeAll(); audio.removeAll(); lock.unlock()
-        updateProgress()
-        writeManifest(status: "partial")
-        event(.failed(message))
     }
 
     private func finalize() {
@@ -468,8 +482,9 @@ final class ProgramRecordingSession: @unchecked Sendable {
         writeManifest(status: "finishing")
         writer.finishWriting { [self] in
             queue.async { [self] in
+                if self.writer?.status != .completed { logEncoderError() }
                 let error = failure ?? (self.writer?.status == .completed ? nil : self.writer?.error?.localizedDescription ?? "Recording finalization failed.")
-                complete(error: error ?? (progress.videoSamples == 0 || progress.audioSamples == 0 ? "The recording is missing program audio or video." : nil))
+                complete(error: error ?? (progress.videoSamples == 0 || (configuration.requiresAudio && progress.audioSamples == 0) ? "The recording is missing requested audio or video." : nil))
             }
         }
     }
@@ -477,12 +492,12 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private func complete(error: String?) {
         failure = error
         updateProgress()
-        if error == nil { progress.videoStatus = .complete; progress.audioStatus = .complete }
+        if error == nil { progress.videoStatus = .complete; progress.audioStatus = configuration.requiresAudio ? .complete : .notRequested }
         else {
             if progress.videoStatus != .failed { progress.videoStatus = progress.videoSamples > 0 ? .complete : .failed }
-            if progress.audioStatus != .failed { progress.audioStatus = progress.audioSamples > 0 ? .complete : .failed }
+            if configuration.requiresAudio, progress.audioStatus != .failed { progress.audioStatus = progress.audioSamples > 0 ? .complete : .failed }
         }
-        let recoverable = error != nil && writer?.status == .completed && progress.audioSamples > 0 && progress.videoSamples > 0
+        let recoverable = error != nil && writer?.status == .completed && (!configuration.requiresAudio || progress.audioSamples > 0) && progress.videoSamples > 0
         writeManifest(status: error == nil ? "complete" : recoverable ? "recoverable" : "partial")
         let result = Result(url: outputURL, completed: error == nil, error: error, progress: progress, recoverable: recoverable)
         self.result = result

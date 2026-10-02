@@ -203,3 +203,83 @@ Completed program writers release AVAssetWriter and both inputs before invoking
 finish callbacks, even if a client retains the finished session. Local encoder
 failure logs include NSError domain/code chains only; exported diagnostics do
 not gain arbitrary error userInfo or recording paths.
+
+## Isolated camera and screen video
+
+Recording Options can select two camera/screen source IDs independently of the
+program scene, with separate 720p/1080p, 15/30 fps, H.264/HEVC, quality, source
+processing, and optional channel/bus audio association. Choices persist in the
+active profile. No Source Effects records scaled, unmirrored capture pixels;
+Source Effects applies that registry source's current defaults and camera
+orientation. Layer transforms, scene overlays, annotations, and transitions
+are excluded. OS capture processing already present in pixels cannot be undone.
+
+Each source resolves through CaptureSourcePool's normalized physical identity
+and strict SourceFrameProviders keyed lookup. An unavailable source records
+marked black frames; it never falls back to an unrelated default camera/screen.
+A static screen holder remains recordable. Source subscriptions retain capture
+demand through all segment finalization, then release only recorder demand.
+Physical source identity is snapshotted when recording starts; retargeting a
+registry source applies to the next recording. Guest video capture is not yet
+implemented: the UI disables it with that reason, and an existing guest
+selection fails visibly without substituting another source or stopping the
+program recording.
+
+The app budgets program + active publisher + isolated encoder sessions before
+start and write-tests the selected folder using an exclusive 8 MB temporary
+file plus fsync. Required measured throughput is twice the estimated program,
+isolated video, and isolated audio writes. The test file is removed afterward.
+This establishes start headroom; it does not qualify sustained or removable
+storage. Go Live/add-destination integration must honor
+`maximumPublishingEncodersWhileRecording` to retain that session budget.
+
+| Measured Mac class | Program maximum | Isolated maximum | Total native encoders |
+| --- | --- | --- | --- |
+| Apple M3 Max, Mac15,8, 16 CPUs | 1080p30 | Two 1080p30 camera/screen sources | Four including program and publishers |
+| Other models/variants, including Intel | Awaiting native qualification | Start is rejected with the detected class | No inferred limit |
+
+Each isolated source owns its serial render queue and independent Apple writer:
+six video frames/48 MB and 128 associated-audio chunks maximum. Every segment
+gets a fresh renderer and writer. It follows the program's accepted shared host
+origin, pause offset, and ending time; audio cannot extend that window. Missing
+source, source render overload/backpressure, and associated-audio underrun/gap
+windows are journaled separately in `<file>.video-isolated.json`, with source
+profile/ID/name, audio association, session/segment/project/profile metadata,
+start offset, budget measurements, counts, and per-source failure. Journals
+retain 10,000 coalesced gap windows and count later omitted events. Backpressure
+can produce a counted black gap or a held-frame timeline gap; the app warns.
+A failing source writer closes and preserves its partial media while other
+writers and program/network consumers continue. Completed tracks release their
+native encoder and renderer pixel pools even while the session retains status.
+
+`run_isolated_video_harness.zsh` builds actual StreamMac source/renderer/writer
+code and uses native generated camera/screen holders without hardware capture
+permissions. On the named Mac, macOS 27.0.1, Xcode 27.2 beta, repeated seven-second
+four-encoder 1080p30 workloads pass for H.264 standard and HEVC high. The fixture
+uses a refreshed camera with a flash, a deliberately static screen, and an
+unrelated bright default camera. Decoded checks verify exact source identity,
+unmirrored/no-effect pixels, +0.2 source brightness, black disconnect/recovery,
+optional AAC presence/video-only absence, common origin/duration and profile
+metadata. Flash/tone differences are 0.0000417–0.0000625 seconds. The final pair
+had six H.264 and one HEVC source startup/render gaps per source, explicitly
+counted; a later complete pair counted two H.264 and one HEVC source gaps per
+source. This is not a zero-loss or endurance claim.
+
+The fragmented writers disable frame reordering. Earlier variable-host-PTS
+runs intermittently rejected media at append/finalization with native error
+codes, including -11800/-16341. Repeated runs passed after this setting; copying
+shared PCM did not resolve the failures and was removed. The observed mitigation
+does not identify a private OSStatus meaning. Native camera/screen permissions,
+device/guest adapters, complex processed effects, long workloads, physical
+volume removal/sudden kill, mixed codecs, and other Mac classes remain release
+qualification. The source harness also passes shared pause/segment timing,
+independent low-storage playable partial preservation, library session/gap/error
+inspection, active-file export guards, and decoded video-only range export.
+
+The program harness reports every supplied sample as written or counted dropped
+and retains actual duration, decoded A/V sync, bounded overload, and partial
+recovery checks. Its initial flash/tone occurs at two seconds after warmup.
+Local runs additionally require zero dropped samples; hosted CI VMs exercise
+portable writer contracts and report loss without claiming physical-Mac cadence.
+`STREAM_RECORDING_REQUIRE_REALTIME=1` enforces the cadence requirement everywhere
+(`0` explicitly disables it); the wrapper defaults to `0` only when `CI=true`.

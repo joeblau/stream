@@ -7,11 +7,16 @@ import StreamCore
 @MainActor final class StreamController {
     struct FrameSubscription: Hashable { let id = UUID() }
     struct AudioTapSubscription: Hashable { let id = UUID() }
+    struct RecordingVideoSubscription: Hashable { let id = UUID() }
     struct Frame: @unchecked Sendable { let sampleBuffer: CMSampleBuffer }
     var activeProfile = OutputProfile(canvasWidth: 320, canvasHeight: 180, frameRate: 50)
     var demands = 0
     var networkPackets = 0
     var noisyVideo = false
+    var activePublishingEncoderCount: Int { 1 }
+    func recordingVideoSources() -> [RecordingVideoSource] { [] }
+    func addRecordingVideoSource(targetID: String) -> (RecordingVideoSubscription, IsolatedVideoSource)? { nil }
+    func removeRecordingVideoSource(_ subscription: RecordingVideoSubscription) {}
     private var videos: [FrameSubscription: @Sendable (Frame) -> Void] = [:]
     private var audios: [AudioTapSubscription: @Sendable (CMSampleBuffer) -> Void] = [:]
     func addFrameSink(sink: @escaping @Sendable (Frame) -> Void) -> FrameSubscription {

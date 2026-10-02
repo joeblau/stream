@@ -378,6 +378,10 @@ final class LatestScreenFrame: @unchecked Sendable {
 /// when the same stable identity returns — see the hot-plug section below.
 @MainActor
 final class CaptureSourcePool: ObservableObject {
+    /// Recording pins the same normalized physical identity as capture.
+    /// Unlike the legacy composition lookup, ISO never falls back to a
+    /// different default camera when this exact holder is missing.
+    func recordingCaptureKey(for key: CaptureSourceKey) -> CaptureSourceKey { normalized(key) }
     /// The last start/run failure per source identity, for future per-source
     /// UI badges. Cleared per source on a successful (re)start.
     @Published private(set) var sourceErrors: [CaptureSourceKey: String] = [:]

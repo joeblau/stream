@@ -580,6 +580,53 @@ final class StreamController: ObservableObject {
     }
 
     private var isolatedCaptureSubscriptions: [AudioTapSubscription: CaptureSourceKey] = [:]
+    struct RecordingVideoSubscription: Hashable { let id = UUID() }
+    private var isolatedVideoCaptureSubscriptions: [RecordingVideoSubscription: CaptureSourceKey] = [:]
+
+    // Root's multi-destination integration counts each publisher's encoder.
+    var activePublishingEncoderCount: Int { streamState.isActive ? 1 : 0 }
+
+    func recordingVideoSources() -> [RecordingVideoSource] {
+        let defaults = [SourceDefinition(name: "Default Camera", payload: .camera(CameraSourcePayload())),
+                        SourceDefinition(name: "Selected Screen", payload: .screen(ScreenSourcePayload()))]
+        let catalog = [("video.defaultCamera", defaults[0]), ("video.defaultScreen", defaults[1])] + sceneStore.sources.compactMap { source -> (String, SourceDefinition)? in
+            switch source.payload { case .camera, .screen, .guest: return ("source.\(source.id)", source); default: return nil }
+        }
+        return catalog.map { id, source in
+            guard let key = Self.videoCaptureKey(source.payload) else {
+                return .init(id: id, name: source.name, isAvailable: false, unsupportedReason: "Guest video capture is not implemented.")
+            }
+            let normalized = capturePool.recordingCaptureKey(for: key)
+            let available: Bool
+            switch normalized {
+            case .camera: available = capturePool.frames.cameraFrame(for: normalized) != nil
+            case .screen: available = capturePool.frames.screenFrame(for: normalized) != nil
+            default: available = false
+            }
+            return .init(id: id, name: source.name, isAvailable: available)
+        }
+    }
+
+    func addRecordingVideoSource(targetID: String) -> (RecordingVideoSubscription, IsolatedVideoSource)? {
+        let source: SourceDefinition?
+        switch targetID {
+        case "video.defaultCamera": source = .init(name: "Default Camera", payload: .camera(CameraSourcePayload()))
+        case "video.defaultScreen": source = .init(name: "Selected Screen", payload: .screen(ScreenSourcePayload()))
+        default:
+            source = sceneStore.sources.first { "source.\($0.id)" == targetID }
+        }
+        guard let source, let key = Self.videoCaptureKey(source.payload) else { return nil }
+        let token = RecordingVideoSubscription()
+        isolatedVideoCaptureSubscriptions[token] = key; reconcileSourceDemand()
+        return (token, RecordingVideoSourceFactory.make(source: source,
+            key: capturePool.recordingCaptureKey(for: key), frames: capturePool.frames))
+    }
+    func removeRecordingVideoSource(_ subscription: RecordingVideoSubscription) {
+        isolatedVideoCaptureSubscriptions.removeValue(forKey: subscription); reconcileSourceDemand()
+    }
+    private static func videoCaptureKey(_ payload: LayerPayload) -> CaptureSourceKey? {
+        switch payload { case .camera(let camera): return .camera(camera); case .screen(let screen): return .screen(screen); default: return nil }
+    }
 
     func removeAudioTap(_ subscription: AudioTapSubscription) {
         Task { await audioEngine.removeTap(subscription.token) }
@@ -1414,6 +1461,7 @@ final class StreamController: ObservableObject {
             // `stopAll` still govern their lifecycle.
             .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
             .union(isolatedCaptureSubscriptions.values)
+            .union(isolatedVideoCaptureSubscriptions.values)
         capturePool.reconcile(demand: demand, settings: settings)
         configureResilientFrames(demand: demand)
         // A01: the audio engine keeps exactly the channels its captures can

@@ -14,6 +14,8 @@ final class RecordingController: ObservableObject {
     @Published private(set) var progress = ProgramRecordingSession.Progress()
     @Published private(set) var countdownRemaining = 0
     @Published private(set) var isolatedProgress: [IsolatedTrackProgress] = []
+    @Published private(set) var isolatedVideoProgress: [IsolatedVideoProgress] = []
+    @Published private(set) var videoBudget: IsolatedVideoBudget?
     @Published var context = RecordingContext()
     @Published private(set) var folderLabel = "App Group Recordings"
     @Published var preferences: RecordingPreferences {
@@ -27,7 +29,7 @@ final class RecordingController: ObservableObject {
         guard let session else { return finishingURLs }
         return finishingURLs.union([session.outputURL]).union((isolatedGroup?.files ?? []).map {
             session.outputURL.deletingLastPathComponent().appendingPathComponent($0)
-        })
+        }).union((isolatedVideoGroup?.files ?? []).map { session.outputURL.deletingLastPathComponent().appendingPathComponent($0) })
     }
     var canStop: Bool { state.isActive && state != .stopping }
 
@@ -41,6 +43,22 @@ final class RecordingController: ObservableObject {
     private var isolatedGroup: IsolatedRecordingGroup?
     private var isolatedSubscriptions: [StreamController.AudioTapSubscription] = []
     private var unavailableTrackIDs: Set<String> = []
+    private let isolatedVideoRouter = IsolatedVideoRouter()
+    private var isolatedVideoGroup: IsolatedVideoGroup?
+    private var videoSources: [String: IsolatedVideoSource] = [:]
+    private var unavailableVideoSourceReasons: [String: String] = [:]
+    private var videoSubscriptions: [StreamController.RecordingVideoSubscription] = []
+    private var unavailableVideoAudioIDs: Set<String> = []
+    private var videoPreflightTask: Task<Void, Never>?
+    private weak var demandStream: StreamController?
+    private var ownsPipelineDemand = false
+    var activeIsolatedVideoEncoderCount: Int { state.isActive ? videoSources.count : 0 }
+    /// Go Live/add-destination preflight can reject a new publisher before
+    /// it consumes encoder sessions already owned by isolated recording.
+    var maximumPublishingEncodersWhileRecording: Int? {
+        guard state.isActive, !videoSources.isEmpty, let videoBudget else { return nil }
+        return max(0, videoBudget.maximumEncoderSessions - 1 - videoSources.count)
+    }
     private var session: ProgramRecordingSession?
     private weak var stream: StreamController?
     private var frameSubscription: StreamController.FrameSubscription?
@@ -171,7 +189,8 @@ final class RecordingController: ObservableObject {
 
     func start(stream: StreamController, useCountdown: Bool = true) {
         guard !state.isActive, session == nil, finishingSegments == 0 else { return }
-        lastError = nil; warning = nil; progress = .init(); isolatedProgress = []; unavailableTrackIDs = []
+        lastError = nil; warning = nil; progress = .init(); isolatedProgress = []; isolatedVideoProgress = []
+        unavailableTrackIDs = []; unavailableVideoAudioIDs = []; videoBudget = nil
         self.stream = stream
         recordingID = UUID(); segmentIndex = 0
         activePreferences = preferences
@@ -197,10 +216,51 @@ final class RecordingController: ObservableObject {
         do {
             store = try resolveStore()
             guard store.hasSufficientSpace() else { throw RecordingError.message("Not enough disk space to record (1 GB minimum).") }
+            guard !activePreferences.isolatedVideoTracks.isEmpty else { try beginPrepared(stream: stream); return }
+            var budget = IsolatedVideoBudget.current
+            budget.publishingEncoders = stream.activePublishingEncoderCount
+            budget.selectedEncoders = activePreferences.isolatedVideoTracks.count
+            // Program maximum plus ISO bitrates and all independently
+            // selected audio files; include room for two-second fragments.
+            budget.estimatedDiskMegabytesPerSecond = Double(24_000_000 + activePreferences.isolatedVideoTracks.reduce(0) { $0 + $1.bitrate + 160_000 }
+                + activePreferences.isolatedTracks.reduce(0) { $0 + ($1.format == .wav ? 3_072_000 : 160_000) }) / 8_000_000
+            if let error = budget.rejection(programWidth: stream.activeProfile.canvasWidth, programHeight: stream.activeProfile.canvasHeight,
+                programFPS: stream.activeProfile.frameRate, selections: activePreferences.isolatedVideoTracks) { throw RecordingError.message(error) }
+            guard let directory = storagePreflight().directory else { throw RecordingError.message("The recording folder is unavailable.") }
+            let id = recordingID
+            videoPreflightTask = Task { @MainActor [weak self, weak stream] in
+                do {
+                    let measured = try await Task.detached(priority: .utility) { try RecordingVideoStorageProbe.measure(directory) }.value
+                    guard let self, let stream, !Task.isCancelled, self.recordingID == id, self.state == .preparing else { return }
+                    budget.measuredDiskMegabytesPerSecond = measured; budget.publishingEncoders = stream.activePublishingEncoderCount
+                    self.videoBudget = budget; self.videoPreflightTask = nil
+                    if let error = budget.rejection(programWidth: stream.activeProfile.canvasWidth, programHeight: stream.activeProfile.canvasHeight,
+                        programFPS: stream.activeProfile.frameRate, selections: self.activePreferences.isolatedVideoTracks) { throw RecordingError.message(error) }
+                    try self.beginPrepared(stream: stream)
+                } catch {
+                    guard let self, !Task.isCancelled, self.recordingID == id else { return }
+                    self.lastError = error.localizedDescription; self.state = .failed(error.localizedDescription)
+                    self.videoPreflightTask = nil; self.stream = nil; self.completeStopsIfReady()
+                }
+            }
+        } catch {
+            lastError = error.localizedDescription; state = .failed(lastError!); self.stream = nil; completeStopsIfReady()
+        }
+    }
+
+    private func beginPrepared(stream: StreamController) throws {
+            demandStream = stream
+            let catalog = stream.recordingVideoSources()
+            for selection in activePreferences.isolatedVideoTracks {
+                if let (token, source) = stream.addRecordingVideoSource(targetID: selection.targetID) {
+                    videoSubscriptions.append(token); videoSources[selection.targetID] = source
+                } else { unavailableVideoSourceReasons[selection.targetID] = catalog.first { $0.id == selection.targetID }?.unsupportedReason }
+            }
             let session = try makeSegment(stream: stream)
             self.session = session
             router.install(session)
             isolatedRouter.install(isolatedGroup)
+            isolatedVideoRouter.install(isolatedVideoGroup)
             let router = router
             frameSubscription = stream.addFrameSink { frame in router.appendVideo(frame.sampleBuffer) }
             audioSubscription = stream.addProgramAudioTap { sample in router.appendAudio(sample) }
@@ -215,13 +275,19 @@ final class RecordingController: ObservableObject {
                     isolatedGroup?.fail(targetID: targetID, message: "The selected audio source is unavailable or was deleted.")
                 }
             }
+            let videoRouter = isolatedVideoRouter
+            for selection in activePreferences.isolatedVideoTracks {
+                guard let audioID = selection.audioTargetID else { continue }
+                if let tap = stream.addRecordingAudioTap(targetID: audioID, processing: .afterEffects, sink: { sample in
+                    videoRouter.appendAudio(sample, videoTargetID: selection.targetID)
+                }) { isolatedSubscriptions.append(tap) }
+                else {
+                    unavailableVideoAudioIDs.insert(selection.targetID)
+                    isolatedVideoGroup?.fail(targetID: selection.targetID, message: "The associated audio source is unavailable or was deleted.")
+                }
+            }
             stream.noteRecordingStarted()
-        } catch {
-            lastError = error.localizedDescription
-            state = .failed(lastError!)
-            self.stream = nil
-            completeStopsIfReady()
-        }
+            ownsPipelineDemand = true
     }
 
     private func resolveStore() throws -> RecordingStore {
@@ -275,7 +341,22 @@ final class RecordingController: ObservableObject {
         for targetID in unavailableTrackIDs {
             group.fail(targetID: targetID, message: "The selected audio source is unavailable or was deleted.")
         }
-        isolatedGroup = group; configuration.isolatedFiles = group.files
+        isolatedVideoProgress = activePreferences.isolatedVideoTracks.map { .init(id: $0.targetID, name: $0.name, file: "") }
+        let videoGroup = IsolatedVideoGroup(programURL: url, selections: activePreferences.isolatedVideoTracks, sources: videoSources,
+            unavailableSourceReasons: unavailableVideoSourceReasons,
+            sessionID: recordingID.uuidString, segmentIndex: segmentIndex, context: activeContext, budget: videoBudget ?? .current,
+            timeline: timeline) { [weak self] progress in
+                Task { @MainActor in
+                    guard let self else { return }
+                    guard self.sessionID == id else {
+                        if progress.error != nil { self.warning = "Previous isolated video failed: \(progress.name): \(progress.error!)" }; return
+                    }
+                    if let index = self.isolatedVideoProgress.firstIndex(where: { $0.id == progress.id }) { self.isolatedVideoProgress[index] = progress }
+                    if let error = progress.error ?? progress.warning { self.warning = "\(progress.name): \(error)" }
+                }
+            }
+        for targetID in unavailableVideoAudioIDs { videoGroup.fail(targetID: targetID, message: "The associated audio source is unavailable or was deleted.") }
+        isolatedGroup = group; isolatedVideoGroup = videoGroup; configuration.isolatedFiles = group.files + videoGroup.files
         return ProgramRecordingSession(outputURL: url, configuration: configuration, timeline: timeline, event: { [weak self] event in
             Task { @MainActor in
                 guard let self, self.sessionID == id else { return }
@@ -287,6 +368,7 @@ final class RecordingController: ObservableObject {
                 case .progress(let progress):
                     self.progress = progress
                     self.warning = progress.warning ?? self.isolatedProgress.first(where: { $0.error != nil }).map { "\($0.name): \($0.error!)" }
+                        ?? self.isolatedVideoProgress.first(where: { $0.error != nil || $0.warning != nil }).map { "\($0.name): \($0.error ?? $0.warning!)" }
                     if self.canSplit,
                        (self.activePreferences.splitAfterMinutes > 0 && progress.durationSeconds >= Double(self.activePreferences.splitAfterMinutes) * 60)
                         || (self.activePreferences.splitAfterMegabytes > 0 && progress.bytesWritten >= Int64(self.activePreferences.splitAfterMegabytes) * 1_000_000) {
@@ -314,18 +396,20 @@ final class RecordingController: ObservableObject {
     func startNewFile() {
         guard canSplit, let previous = session, let stream else { return }
         let previousIsolated = isolatedGroup
-        let previousURLs = Set([previous.outputURL] + (previousIsolated?.files ?? []).map {
+        let previousVideo = isolatedVideoGroup
+        let previousURLs = Set([previous.outputURL] + ((previousIsolated?.files ?? []) + (previousVideo?.files ?? [])).map {
             previous.outputURL.deletingLastPathComponent().appendingPathComponent($0)
         })
         do {
             let next = try makeSegment(stream: stream)
             session = next; router.install(next)
             isolatedRouter.install(isolatedGroup); previousIsolated?.deactivate()
+            isolatedVideoRouter.install(isolatedVideoGroup); previousVideo?.deactivate()
             finishingSegments += 1
             finishingURLs.formUnion(previousURLs)
             previous.finish { [weak self, store] result in
                 if result.completed { store.markComplete(result.url) }
-                previousIsolated?.finish {
+                RecordingController.finishAssociated(audio: previousIsolated, video: previousVideo) {
                     Task { @MainActor in
                         guard let self else { return }
                         self.finishingSegments -= 1
@@ -343,6 +427,7 @@ final class RecordingController: ObservableObject {
     func stop(completion: (() -> Void)? = nil) {
         if let completion { stopCompletions.append(completion) }
         countdownTask?.cancel(); countdownTask = nil; countdownRemaining = 0
+        videoPreflightTask?.cancel(); videoPreflightTask = nil
         guard let session else {
             if state == .preparing { state = .idle; stream = nil }
             completeStopsIfReady(); return
@@ -351,20 +436,22 @@ final class RecordingController: ObservableObject {
         state = .stopping
         router.install(nil)
         isolatedRouter.install(nil); isolatedGroup?.deactivate()
+        isolatedVideoRouter.install(nil); isolatedVideoGroup?.deactivate()
         for subscription in isolatedSubscriptions { stream?.removeAudioTap(subscription) }
         isolatedSubscriptions.removeAll()
         if let frameSubscription { stream?.removeFrameSink(frameSubscription) }
         if let audioSubscription { stream?.removeAudioTap(audioSubscription) }
         frameSubscription = nil; audioSubscription = nil
-        stream?.noteRecordingStopped(); stream = nil
+        stream = nil
         let id = sessionID
         let isolated = isolatedGroup
+        let video = isolatedVideoGroup
         session.finish { [weak self, store] result in
             if result.completed { store.markComplete(result.url) }
-            isolated?.finish {
+            RecordingController.finishAssociated(audio: isolated, video: video) {
                 Task { @MainActor in
                     guard let self, self.sessionID == id else { return }
-                    self.session = nil; self.isolatedGroup = nil
+                    self.session = nil; self.isolatedGroup = nil; self.isolatedVideoGroup = nil
                     self.progress = result.progress
                     self.acceptFinished(result, final: true)
                     self.completeStopsIfReady()
@@ -386,11 +473,23 @@ final class RecordingController: ObservableObject {
     }
 
     private func completeStopsIfReady() {
-        guard session == nil, countdownTask == nil, finishingSegments == 0 else { return }
+        guard session == nil, countdownTask == nil, videoPreflightTask == nil, finishingSegments == 0 else { return }
+        for subscription in videoSubscriptions { demandStream?.removeRecordingVideoSource(subscription) }
+        videoSubscriptions.removeAll(); videoSources.removeAll(); unavailableVideoSourceReasons.removeAll()
+        if ownsPipelineDemand { demandStream?.noteRecordingStopped() }
+        ownsPipelineDemand = false; demandStream = nil
         folderAccess?.stopAccessingSecurityScopedResource(); folderAccess = nil
         if state == .stopping { state = pendingStopState }
         let completions = stopCompletions; stopCompletions.removeAll()
         completions.forEach { $0() }
+    }
+
+    nonisolated private static func finishAssociated(audio: IsolatedRecordingGroup?, video: IsolatedVideoGroup?,
+        completion: @escaping @Sendable () -> Void) {
+        let group = DispatchGroup()
+        if let audio { group.enter(); audio.finish { group.leave() } }
+        if let video { group.enter(); video.finish { group.leave() } }
+        group.notify(queue: .global(qos: .utility), execute: completion)
     }
 }
 
