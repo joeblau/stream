@@ -57,6 +57,9 @@ final class RecordingController: ObservableObject {
     private var unavailableVideoAudioIDs: Set<String> = []
     private var videoPreflightTask: Task<Void, Never>?
     private weak var demandStream: StreamController?
+    private weak var reservationStream: StreamController?
+    private let encoderReservationID = UUID()
+    let outputCanvas: OutputCanvas
     private var ownsPipelineDemand = false
     var activeIsolatedVideoEncoderCount: Int { state.isActive ? videoSources.count : 0 }
     /// Go Live/add-destination preflight can reject a new publisher before
@@ -81,7 +84,8 @@ final class RecordingController: ObservableObject {
     private var activeContext = RecordingContext()
     private var stopCompletions: [() -> Void] = []
 
-    init(defaults: UserDefaults = .standard, defaultDirectory: URL? = nil) {
+    init(defaults: UserDefaults = .standard, defaultDirectory: URL? = nil, outputCanvas: OutputCanvas = .program) {
+        self.outputCanvas = outputCanvas
         self.defaults = defaults
         self.defaultDirectory = defaultDirectory
         self.store = RecordingStore(directory: defaultDirectory)
@@ -100,7 +104,7 @@ final class RecordingController: ObservableObject {
     /// the profile. Migrate old machine presets into the first profile once.
     func loadPreferences(directory: URL) {
         guard !state.isActive, session == nil else { return }
-        let url = directory.appendingPathComponent("recording-preferences.json")
+        let url = directory.appendingPathComponent(outputCanvas == .program ? "recording-preferences.json" : "secondary-recording-preferences.json")
         guard url != preferencesURL else { return }
         loadingPreferences = true
         defer { loadingPreferences = false }
@@ -110,11 +114,12 @@ final class RecordingController: ObservableObject {
                 preferences = try JSONDecoder().decode(RecordingPreferences.self, from: Data(contentsOf: url))
             } else {
                 let migrated = defaults.bool(forKey: "recording.profilePreferencesMigrated.v1")
-                preferences = migrated ? .init() : defaults.data(forKey: "recording.preferences.v1")
+                preferences = migrated || outputCanvas == .secondary ? .init() : defaults.data(forKey: "recording.preferences.v1")
                     .flatMap { try? JSONDecoder().decode(RecordingPreferences.self, from: $0) } ?? .init()
+                if outputCanvas == .secondary { preferences.filenamePrefix = "Secondary" }
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 try JSONEncoder().encode(preferences).write(to: url, options: .atomic)
-                defaults.set(true, forKey: "recording.profilePreferencesMigrated.v1")
+                if outputCanvas == .program { defaults.set(true, forKey: "recording.profilePreferencesMigrated.v1") }
             }
         } catch {
             preferences = .init()
@@ -195,6 +200,10 @@ final class RecordingController: ObservableObject {
 
     func start(stream: StreamController, useCountdown: Bool = true) {
         guard !state.isActive, session == nil, finishingSegments == 0 else { return }
+        if let error = stream.reserveRecordingEncoders(encoderReservationID, count: 1 + preferences.isolatedVideoTracks.count, canvas: outputCanvas) {
+            lastError = error; state = .failed(error); return
+        }
+        reservationStream = stream
         lastError = nil; warning = nil; progress = .init(); isolatedProgress = []; isolatedVideoProgress = []
         unavailableTrackIDs = []; unavailableVideoAudioIDs = []; videoBudget = nil
         self.stream = stream
@@ -269,7 +278,7 @@ final class RecordingController: ObservableObject {
             isolatedRouter.install(isolatedGroup)
             isolatedVideoRouter.install(isolatedVideoGroup)
             let router = router
-            frameSubscription = stream.addFrameSink { frame in router.appendVideo(frame.sampleBuffer) }
+            frameSubscription = stream.addFrameSink(canvas: outputCanvas) { frame in router.appendVideo(frame.sampleBuffer) }
             audioSubscription = stream.addProgramAudioTap { sample in router.appendAudio(sample) }
             let isolatedRouter = isolatedRouter
             for selection in activePreferences.isolatedTracks {
@@ -293,7 +302,7 @@ final class RecordingController: ObservableObject {
                     isolatedVideoGroup?.fail(targetID: selection.targetID, message: "The associated audio source is unavailable or was deleted.")
                 }
             }
-            stream.noteRecordingStarted()
+            stream.noteRecordingStarted(canvas: outputCanvas)
             ownsPipelineDemand = true
     }
 
@@ -423,6 +432,10 @@ final class RecordingController: ObservableObject {
 
     func startNewFile() {
         guard canSplit, let previous = session, let stream else { return }
+        let rotationReservation = UUID()
+        if let error = stream.reserveRecordingEncoders(rotationReservation, count: 1 + videoSources.count, canvas: outputCanvas) {
+            warning = "Cannot rotate recording: \(error)"; return
+        }
         let previousIsolated = isolatedGroup
         let previousVideo = isolatedVideoGroup
         let previousChat = chatArchive
@@ -442,13 +455,17 @@ final class RecordingController: ObservableObject {
                     Task { @MainActor in
                         guard let self else { return }
                         self.finishingSegments -= 1
+                        stream.releaseRecordingEncoders(rotationReservation)
                         self.finishingURLs.subtract(previousURLs)
                         self.acceptFinished(result, final: false)
                         self.completeStopsIfReady()
                     }
                 }
             }
-        } catch { warning = "Cannot start a new recording file: \(error.localizedDescription)" }
+        } catch {
+            stream.releaseRecordingEncoders(rotationReservation)
+            warning = "Cannot start a new recording file: \(error.localizedDescription)"
+        }
     }
 
     /// Normal app termination waits for this completion, including any previous
@@ -504,9 +521,10 @@ final class RecordingController: ObservableObject {
 
     private func completeStopsIfReady() {
         guard session == nil, countdownTask == nil, videoPreflightTask == nil, finishingSegments == 0 else { return }
+        reservationStream?.releaseRecordingEncoders(encoderReservationID); reservationStream = nil
         for subscription in videoSubscriptions { demandStream?.removeRecordingVideoSource(subscription) }
         videoSubscriptions.removeAll(); videoSources.removeAll(); unavailableVideoSourceReasons.removeAll()
-        if ownsPipelineDemand { demandStream?.noteRecordingStopped() }
+        if ownsPipelineDemand { demandStream?.noteRecordingStopped(canvas: outputCanvas) }
         ownsPipelineDemand = false; demandStream = nil
         folderAccess?.stopAccessingSecurityScopedResource(); folderAccess = nil
         if state == .stopping { state = pendingStopState }

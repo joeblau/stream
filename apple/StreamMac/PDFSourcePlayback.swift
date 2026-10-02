@@ -381,10 +381,9 @@ final class PDFSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// The held P03 access grant for the loaded document.
     private var accessToken: ResolvedAssetAccess?
     private var pageCount = 0
-    /// Raster cache by page index for the CURRENT render configuration
-    /// (framing + canvas aspect); a configuration change clears it.
-    private var pageBuffers: [Int: CVPixelBuffer] = [:]
-    private var cacheSignature = ""
+    /// Bounded rasters by page, framing and canvas aspect. Two canvases share
+    /// page state without evicting each other's fill crop every render tick.
+    private var pageBuffers: [String: CVPixelBuffer] = [:]
     private var status = PDFSourceStatus()
     private var didLoad = false
     private var loadedAssetIdentifier: String?
@@ -501,7 +500,8 @@ final class PDFSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// deck state names right now. A source with no pixels (loading, error,
     /// missing document) returns nil — the renderer's paint-nothing fallback,
     /// so page controls and chrome never enter the output.
-    func pullFrame() -> CVPixelBuffer? {
+    func pullFrame() -> CVPixelBuffer? { pullFrame(canvasSize: nil) }
+    func pullFrame(canvasSize: CGSize?) -> CVPixelBuffer? {
         os_unfair_lock_lock(&lock)
         // A relink (the registry payload points at a different asset) reloads
         // the document in place; no other source is disturbed.
@@ -522,19 +522,16 @@ final class PDFSourcePlayback: MediaFrameSource, @unchecked Sendable {
         }
         let page = currentPageLocked()
         let framing = deckStateProvider()?.framing ?? .fit
-        let canvas = canvasSizeProvider?()
-        let signature = "\(framing.rawValue):\(Int(canvas?.width ?? 0))x\(Int(canvas?.height ?? 0))"
-        if signature != cacheSignature {
-            cacheSignature = signature
-            pageBuffers = [:]
-        }
-        if let cached = pageBuffers[page] {
+        let canvas = canvasSize ?? canvasSizeProvider?()
+        let signature = "\(page):\(framing.rawValue):\(Int(canvas?.width ?? 0))x\(Int(canvas?.height ?? 0))"
+        if let cached = pageBuffers[signature] {
             os_unfair_lock_unlock(&lock)
             return cached
         }
         let rendered = renderPageLocked(page, framing: framing, canvas: canvas)
         if let rendered {
-            pageBuffers[page] = rendered
+            if pageBuffers.count >= 16 { pageBuffers = [:] }
+            pageBuffers[signature] = rendered
         }
         if status.currentPage != page {
             status.currentPage = page

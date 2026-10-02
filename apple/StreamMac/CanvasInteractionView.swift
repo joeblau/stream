@@ -246,6 +246,9 @@ struct CanvasInteractionView: View {
     let imageRect: CGRect
     /// The pixel canvas the PREVIEW engine renders at (the active profile).
     let canvasSize: CGSize
+    var canvas: OutputCanvas = .program
+
+    private var editingScene: Scene? { previewProgram.stagedScene.map { $0.composition(for: canvas) } }
 
     @AppStorage("studio.canvasSnappingEnabled") private var snappingEnabled = true
     /// Snap distance in VIEW points (resolution-independent for the user).
@@ -293,7 +296,7 @@ struct CanvasInteractionView: View {
     var body: some View {
         ZStack {
             if isLive {
-                annotationChrome
+                if canvas == .program { annotationChrome }
                 safeMarginsChrome
                 selectionChrome
                 marqueeChrome
@@ -310,13 +313,18 @@ struct CanvasInteractionView: View {
         .focused($isFocused)
         .focusEffectDisabled()
         .onKeyPress(phases: .down, action: keyPressed)
-        .contextMenu { canvasContextMenu }
+        .contextMenu {
+            if canvas == .program { canvasContextMenu }
+            else {
+                Button("Follow Program Geometry") { linkSelectedGeometry() }
+            }
+        }
         .onContinuousHover(coordinateSpace: .local, perform: hoverChanged)
     }
 
     /// Interactive only while a scene is staged and the monitor has an image.
     private var isLive: Bool {
-        previewProgram.stagedScene != nil && imageRect.width > 1 && imageRect.height > 1
+        editingScene != nil && imageRect.width > 1 && imageRect.height > 1
             && canvasSize.width > 1 && canvasSize.height > 1
     }
 
@@ -326,7 +334,7 @@ struct CanvasInteractionView: View {
     /// state (nil = normal selection mode). Reading `dispatcher.state` keeps
     /// the overlay reactive.
     private var annotationTool: AnnotationTool? {
-        dispatcher.state.annotations.activeTool
+        canvas == .program ? dispatcher.state.annotations.activeTool : nil
     }
 
     private var annotations: AnnotationStore { dispatcher.annotations }
@@ -361,6 +369,20 @@ struct CanvasInteractionView: View {
         Set(scene.layers.filter {
             $0.isVisible && CanvasGeometry.rect(for: $0.transform, canvas: canvasSize).intersects(rect)
         }.map(\.id))
+    }
+
+    private func sendTransform(_ id: LayerID, _ transform: LayerTransform) {
+        if canvas == .program { dispatcher.execute(.setLayerTransform(id, transform, in: nil)); return }
+        guard let original = previewProgram.stagedScene, var layout = original.secondaryCanvas,
+              let layer = editingScene?.layers.first(where: { $0.id == id }) else { return }
+        layout.placements[id] = .init(transform: transform, isVisible: layer.isVisible)
+        dispatcher.execute(.setSecondaryCanvas(layout, in: original.id))
+    }
+
+    private func linkSelectedGeometry() {
+        guard let original = previewProgram.stagedScene, var layout = original.secondaryCanvas else { return }
+        for id in sceneStore.selectedLayerIDs { layout.placements[id] = nil }
+        dispatcher.execute(.setSecondaryCanvas(layout, in: original.id))
     }
 
     // MARK: Gesture handling
@@ -403,7 +425,7 @@ struct CanvasInteractionView: View {
     /// the laser dot. Points are normalized canvas coordinates, clamped into
     /// the canvas on commit.
     private func annotationDragChanged(_ value: DragGesture.Value, tool: AnnotationTool) {
-        guard let scene = previewProgram.stagedScene else { return }
+        guard let scene = editingScene else { return }
         if tool.leavesStroke {
             if inProgressStroke.isEmpty {
                 inProgressStroke = [normalizedPoint(value.startLocation)]
@@ -433,7 +455,7 @@ struct CanvasInteractionView: View {
     /// canvas while the pointer tool is active and clears when it leaves.
     private func hoverChanged(_ phase: HoverPhase) {
         guard annotationTool == .pointer, isLive,
-              let scene = previewProgram.stagedScene else { return }
+              let scene = editingScene else { return }
         switch phase {
         case .active(let location):
             annotations.updatePointer(sceneID: scene.id, point: normalizedPoint(location))
@@ -451,7 +473,7 @@ struct CanvasInteractionView: View {
     /// Mouse-down: resolve what the press grabbed — a selection handle, a
     /// layer, or empty canvas (marquee) — and capture the drag's start state.
     private func beginSession(at start: CGPoint) -> DragSession? {
-        guard let scene = previewProgram.stagedScene else { return nil }
+        guard let scene = editingScene else { return nil }
         let modifiers = NSEvent.modifierFlags
         let shift = modifiers.contains(.shift)
         let tolerance = 10 * canvasPointsPerViewPoint
@@ -522,7 +544,7 @@ struct CanvasInteractionView: View {
     }
 
     private func updateSession(to point: CGPoint) {
-        guard var current = session, let scene = previewProgram.stagedScene else { return }
+        guard var current = session, let scene = editingScene else { return }
         if !current.moved,
            CanvasGeometry.distance(point, current.startPoint) > 2 * canvasPointsPerViewPoint {
             current.moved = true
@@ -572,7 +594,7 @@ struct CanvasInteractionView: View {
             transform.position = GraphPoint(
                 x: start.position.x + Double(delta.width / canvasSize.width),
                 y: start.position.y + Double(delta.height / canvasSize.height))
-            dispatcher.execute(.setLayerTransform(layerID, transform, in: nil))
+            sendTransform(layerID, transform)
         }
     }
 
@@ -660,7 +682,7 @@ struct CanvasInteractionView: View {
                                    height: Double(resized.height / canvasSize.height))
         transform.position = GraphPoint(x: Double(anchorCanvas.x / canvasSize.width),
                                         y: Double(anchorCanvas.y / canvasSize.height))
-        dispatcher.execute(.setLayerTransform(layerID, transform, in: nil))
+        sendTransform(layerID, transform)
     }
 
     /// The unrotated-rect point that stays fixed during a resize.
@@ -696,7 +718,7 @@ struct CanvasInteractionView: View {
                 degrees = (degrees / 15).rounded() * 15
             }
             transform.rotationDegrees = degrees
-            dispatcher.execute(.setLayerTransform(layerID, transform, in: nil))
+            sendTransform(layerID, transform)
         }
     }
 
@@ -719,7 +741,7 @@ struct CanvasInteractionView: View {
             dispatcher.execute(.setAnnotationTool(nil))
             return .handled
         }
-        guard let scene = previewProgram.stagedScene else { return .ignored }
+        guard let scene = editingScene else { return .ignored }
         let step = press.modifiers.contains(.shift) ? 10.0 : 1.0
         let delta: CGSize
         switch press.key {
@@ -736,7 +758,7 @@ struct CanvasInteractionView: View {
             transform.position = GraphPoint(
                 x: transform.position.x + Double(delta.width / canvasSize.width),
                 y: transform.position.y + Double(delta.height / canvasSize.height))
-            dispatcher.execute(.setLayerTransform(layer.id, transform, in: nil))
+            sendTransform(layer.id, transform)
         }
         return .handled
     }
@@ -793,7 +815,7 @@ struct CanvasInteractionView: View {
 
     @ViewBuilder
     private var selectionChrome: some View {
-        if let scene = previewProgram.stagedScene {
+        if let scene = editingScene {
             let selected = scene.layers.filter { sceneStore.selectedLayerIDs.contains($0.id) && $0.isVisible }
             let editable = editableSelection(scene)
             ForEach(selected) { layer in
@@ -935,7 +957,7 @@ struct CanvasInteractionView: View {
 
     @ViewBuilder
     private var annotationChrome: some View {
-        if let scene = previewProgram.stagedScene {
+        if let scene = editingScene {
             let uiState = dispatcher.state.annotations
             let sceneAnnotations = annotations.annotations(for: scene.id)
             if sceneAnnotations.isVisible {

@@ -7,8 +7,9 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
     public var name: String
     public var transport: StreamProtocol
     public var isEnabled: Bool
-    /// All destinations consume the program canvas; a separate output profile
-    /// may resize that canvas for an ingest without changing local recording.
+    /// Select the actual composed layout independently of the ingest profile.
+    /// Optional for compatibility with pre-dual-canvas project documents.
+    public var canvas: OutputCanvas?
     public var followsProgramProfile: Bool
     public var outputProfile: OutputProfile
     public var videoCodec: VideoCodec
@@ -23,6 +24,7 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
 
     public init(id: UUID = UUID(), name: String, transport: StreamProtocol = .rtmps,
                 isEnabled: Bool = true, followsProgramProfile: Bool = true,
+                canvas: OutputCanvas? = nil,
                 outputProfile: OutputProfile = .default, videoCodec: VideoCodec = .h264,
                 videoBitrate: Int = 4_000_000, audioBitrate: Int = 128_000, ingestLimits: DestinationIngestLimits? = nil, keyframeSeconds: Double? = nil,
                 providerTemplateID: String? = nil, providerBinding: ProviderDestinationBinding? = nil) {
@@ -31,6 +33,7 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
         self.transport = transport
         self.isEnabled = isEnabled
         self.followsProgramProfile = followsProgramProfile
+        self.canvas = canvas
         self.outputProfile = outputProfile
         self.videoCodec = videoCodec
         self.videoBitrate = videoBitrate

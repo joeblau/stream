@@ -741,6 +741,13 @@ final class SceneStore: ObservableObject {
             copy.groupID = layer.groupID.flatMap { groupIDs[$0] }
             return copy
         }
+        let layerIDs = Dictionary(uniqueKeysWithValues: zip(original.layers, layers).map { ($0.0.id, $0.1.id) })
+        var secondaryCanvas = original.secondaryCanvas
+        if let placements = secondaryCanvas?.placements {
+            secondaryCanvas?.placements = Dictionary(uniqueKeysWithValues: placements.compactMap { id, placement in
+                layerIDs[id].map { ($0, placement) }
+            })
+        }
         var canvas = original.canvas
         canvas.id = CanvasID()
         // A03 (issue #98): sound bindings copy with FRESH IDs (new mix
@@ -759,7 +766,7 @@ final class SceneStore: ObservableObject {
                          mediaBehavior: original.mediaBehavior,
                          // S09 (issue #100): the transition override is a
                          // plain value too — it copies verbatim.
-                         transition: original.transition)
+                         transition: original.transition, secondaryCanvas: secondaryCanvas)
         scenes.insert(copy, at: index + 1)
         if let folderID = sceneMembership[id] {
             sceneMembership[copy.id] = folderID

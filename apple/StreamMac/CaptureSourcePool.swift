@@ -298,10 +298,11 @@ final class SourceFrameProviders: @unchecked Sendable {
     /// (and tops up the source's mix-engine audio — the render tick is the
     /// playout cadence, so audio and video ride one clock). Call only from
     /// the render tick, and only when `hasMediaSource(for:)` is true.
-    func mediaFrame(for key: CaptureSourceKey) -> CVPixelBuffer? {
+    func mediaFrame(for key: CaptureSourceKey, canvasSize: CGSize? = nil) -> CVPixelBuffer? {
         os_unfair_lock_lock(&lock)
         let source = mediaSourcesByKey[key]
         os_unfair_lock_unlock(&lock)
+        if let pdf = source as? PDFSourcePlayback { return pdf.pullFrame(canvasSize: canvasSize) }
         return source?.pullFrame()
     }
 }
@@ -319,6 +320,7 @@ struct SourceFrameLookup: Sendable {
     /// the pool's per-source playback engines. Nil (no media path wired)
     /// means media layers paint the documented nothing fallback.
     var media: (@Sendable (CaptureSourceKey) -> CVPixelBuffer?)? = nil
+    var pdf: (@Sendable (CaptureSourceKey, CGSize) -> CVPixelBuffer?)? = nil
 }
 
 /// Holds the newest screen frame for one screen capture. Unlike the pre-W08

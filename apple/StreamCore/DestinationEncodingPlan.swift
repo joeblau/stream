@@ -61,6 +61,8 @@ public struct DestinationIngestLimits: Codable, Equatable, Sendable {
 /// A compatibility key includes every encoder-affecting setting. Sharing by
 /// codec alone would silently lower another destination's quality or frame rate.
 public struct DestinationEncoderKey: Hashable, Sendable {
+    /// Equal encoder settings cannot share pixels from different compositions.
+    public var canvas: OutputCanvas
     public var width: Int
     public var height: Int
     public var frameRate: Int
@@ -72,6 +74,7 @@ public struct DestinationEncoderKey: Hashable, Sendable {
 
     public init(destination: StreamDestination, program: OutputProfile) {
         let profile = destination.effectiveProfile(program: program)
+        canvas = destination.canvas ?? .program
         width = profile.canvasWidth
         height = profile.canvasHeight
         frameRate = profile.frameRate
