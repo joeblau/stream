@@ -42,6 +42,7 @@ final class StudioRuntime {
         dispatcher.bindChatCoordinator(chat)
         recorder.bindChat(chat)
         providerAccounts = ProviderAccountSession(restream: chat.restream)
+        chat.bindAccounts(providerAccounts)
         adapters = StudioAdapterManager()
         adapters.bind(to: localControl)
         StudioAutomationEndpoint.shared.bind(dispatcher: dispatcher, permissions: permissions,
