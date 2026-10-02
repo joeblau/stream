@@ -47,6 +47,25 @@ struct RecordingPreferences: Codable, Equatable, Sendable {
     /// Zero disables automatic rotation.
     var splitAfterMinutes = 0
     var splitAfterMegabytes = 0
+    var isolatedTracks: [IsolatedRecordingSelection] = []
+
+    init() {}
+    private enum CodingKeys: String, CodingKey {
+        case container, codec, quality, filenamePrefix, autoRecordOnGoLive
+        case countdownSeconds, splitAfterMinutes, splitAfterMegabytes, isolatedTracks
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        container = try c.decodeIfPresent(RecordingContainer.self, forKey: .container) ?? .mp4
+        codec = try c.decodeIfPresent(RecordingCodec.self, forKey: .codec) ?? .h264
+        quality = try c.decodeIfPresent(RecordingQuality.self, forKey: .quality) ?? .standard
+        filenamePrefix = try c.decodeIfPresent(String.self, forKey: .filenamePrefix) ?? "Stream"
+        autoRecordOnGoLive = try c.decodeIfPresent(Bool.self, forKey: .autoRecordOnGoLive) ?? false
+        countdownSeconds = try c.decodeIfPresent(Int.self, forKey: .countdownSeconds) ?? 0
+        splitAfterMinutes = try c.decodeIfPresent(Int.self, forKey: .splitAfterMinutes) ?? 0
+        splitAfterMegabytes = try c.decodeIfPresent(Int.self, forKey: .splitAfterMegabytes) ?? 0
+        isolatedTracks = try c.decodeIfPresent([IsolatedRecordingSelection].self, forKey: .isolatedTracks) ?? []
+    }
 }
 
 struct RecordingStoragePreflight: Sendable {

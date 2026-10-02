@@ -4,7 +4,7 @@ import CoreVideo
 import Foundation
 
 enum ProgramRecordingFixtures {
-    static func video(at seconds: Double, noisy: Bool = false) throws -> CMSampleBuffer {
+    static func video(at seconds: Double, noisy: Bool = false, timestampBase: Double = 10_000) throws -> CMSampleBuffer {
         var pixel: CVPixelBuffer?
         guard CVPixelBufferCreate(nil, 320, 180, kCVPixelFormatType_32BGRA, nil, &pixel) == kCVReturnSuccess, let pixel else { throw CocoaError(.fileReadUnknown) }
         CVPixelBufferLockBaseAddress(pixel, [])
@@ -20,17 +20,17 @@ enum ProgramRecordingFixtures {
         CVPixelBufferUnlockBaseAddress(pixel, [])
         var format: CMVideoFormatDescription?
         CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pixel, formatDescriptionOut: &format)
-        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 60), presentationTimeStamp: CMTime(seconds: 10_000 + seconds, preferredTimescale: 48_000), decodeTimeStamp: .invalid)
+        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 60), presentationTimeStamp: CMTime(seconds: timestampBase + seconds, preferredTimescale: 48_000), decodeTimeStamp: .invalid)
         var sample: CMSampleBuffer?
         let status = CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: pixel, formatDescription: format!, sampleTiming: &timing, sampleBufferOut: &sample)
         guard status == noErr, let sample else { throw CocoaError(.fileReadUnknown) }
         return sample
     }
 
-    static func audio(at seconds: Double) throws -> CMSampleBuffer {
+    static func audio(at seconds: Double, timestampBase: Double = 10_000, constantTone: Bool = false, amplitude: Float = 0.8) throws -> CMSampleBuffer {
         let floats: [Float] = (0..<960).map { index in
             let time = seconds + Double(index / 2) / 48_000
-            return (0.5..<0.6).contains(time) ? Float(sin(time * 2 * .pi * 1000)) * 0.8 : 0
+            return constantTone || (0.5..<0.6).contains(time) ? Float(sin(time * 2 * .pi * 1000)) * amplitude : 0
         }
         var asbd = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
             mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
@@ -50,7 +50,7 @@ enum ProgramRecordingFixtures {
         var sample: CMSampleBuffer?
         CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block!,
             formatDescription: format!, sampleCount: 480,
-            presentationTimeStamp: CMTime(seconds: 10_000 + seconds, preferredTimescale: 48_000),
+            presentationTimeStamp: CMTime(seconds: timestampBase + seconds, preferredTimescale: 48_000),
             packetDescriptions: nil, sampleBufferOut: &sample)
         guard let sample else { throw CocoaError(.fileReadUnknown) }
         return sample

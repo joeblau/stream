@@ -29,6 +29,7 @@ private struct RecordingJournalSummary: Decodable, Sendable {
     let status: String?
     let error: String?
     let markers: [RecordingMarker]?
+    let isolatedFiles: [String]?
     let videoStartOffsetSeconds: Double?
     let audioStartOffsetSeconds: Double?
     let progress: TrackSummary?
@@ -38,6 +39,19 @@ private struct RecordingJournalSummary: Decodable, Sendable {
         let droppedVideo: Int?
         let droppedAudio: Int?
     }
+}
+
+private struct IsolatedJournalSummary: Decodable, Sendable {
+    let sessionID: String
+    let segmentIndex: Int
+    let programFile: String
+    let selection: IsolatedRecordingSelection
+    let context: RecordingContext
+    let startOffsetSeconds: Double?
+    let pauseOffsetSeconds: Double
+    let gaps: [Gap]
+    let progress: IsolatedTrackProgress
+    struct Gap: Decodable, Sendable { let reason: String; let missingFrames: Int64 }
 }
 
 enum RecordingMarkerFormat: String, CaseIterable {
@@ -64,7 +78,7 @@ enum RecordingMarkerFormat: String, CaseIterable {
             let urls = try await Task.detached(priority: .utility) {
                 try FileManager.default.contentsOfDirectory(at: access.url,
                     includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])
-                    .filter { ["mp4", "mov"].contains($0.pathExtension.lowercased()) }
+                    .filter { ["mp4", "mov", "wav", "m4a"].contains($0.pathExtension.lowercased()) }
                     .sorted { $0.lastPathComponent > $1.lastPathComponent }
             }.value
             var loaded: [RecordingLibraryEntry] = []
@@ -80,12 +94,24 @@ enum RecordingMarkerFormat: String, CaseIterable {
 
     private func inspect(_ url: URL, active: Bool) async -> RecordingLibraryEntry {
         let metadata = await Task.detached(priority: .utility) {
-            let journal = (try? Data(contentsOf: url.appendingPathExtension("recording.json")))
+            var journal = (try? Data(contentsOf: url.appendingPathExtension("recording.json")))
                 .flatMap { try? JSONDecoder().decode(RecordingJournalSummary.self, from: $0) }
+            let isolated = (try? Data(contentsOf: url.appendingPathExtension("isolated.json")))
+                .flatMap { try? JSONDecoder().decode(IsolatedJournalSummary.self, from: $0) }
+            if journal == nil, let isolated,
+               URL(fileURLWithPath: isolated.programFile).lastPathComponent == isolated.programFile {
+                journal = (try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent(isolated.programFile).appendingPathExtension("recording.json")))
+                    .flatMap { try? JSONDecoder().decode(RecordingJournalSummary.self, from: $0) }
+            }
+            let linked = (journal?.isolatedFiles ?? []).compactMap { name -> IsolatedJournalSummary? in
+                guard URL(fileURLWithPath: name).lastPathComponent == name else { return nil }
+                return (try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent(name).appendingPathExtension("isolated.json")))
+                    .flatMap { try? JSONDecoder().decode(IsolatedJournalSummary.self, from: $0) }
+            }
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
             let bytes = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
             let date = attributes?[.creationDate] as? Date ?? .distantPast
-            return (journal, bytes, date)
+            return (journal, bytes, date, isolated, linked)
         }.value
         let asset = AVURLAsset(url: url)
         var duration = 0.0
@@ -115,24 +141,39 @@ enum RecordingMarkerFormat: String, CaseIterable {
             } catch { mediaError = error.localizedDescription }
         }
         let journal = metadata.0
-        let storedStatus = journal?.status ?? "unclassified"
+        let isolated = metadata.3
+        let storedStatus = isolated?.progress.status ?? journal?.status ?? "unclassified"
         let status: String
         if active { status = "recording" }
         else if readable && storedStatus != "complete" { status = "recoverable" }
         else if !readable { status = "partial" }
         else { status = "complete" }
         var manifestParts: [String] = []
-        if let video = journal?.progress?.videoStatus { manifestParts.append("Video: \(video)") }
-        if let audio = journal?.progress?.audioStatus { manifestParts.append("Audio: \(audio)") }
-        if let offset = journal?.videoStartOffsetSeconds { manifestParts.append(String(format: "video starts %.3fs", offset)) }
-        if let offset = journal?.audioStartOffsetSeconds { manifestParts.append(String(format: "audio starts %.3fs", offset)) }
-        if let dropped = journal?.progress?.droppedVideo, dropped > 0 { manifestParts.append("\(dropped) dropped video frames") }
-        if let dropped = journal?.progress?.droppedAudio, dropped > 0 { manifestParts.append("\(dropped) audio gaps") }
+        if let isolated {
+            manifestParts.append("\(isolated.selection.name): \(isolated.selection.processing.title)")
+            manifestParts.append("Source: \(isolated.selection.targetID)")
+            if let offset = isolated.startOffsetSeconds { manifestParts.append(String(format: "starts %.3fs", offset)) }
+            if isolated.progress.missingSourceFrames > 0 { manifestParts.append("\(isolated.progress.missingSourceFrames) missing source frames") }
+            if isolated.progress.droppedChunks > 0 { manifestParts.append("\(isolated.progress.droppedChunks) dropped chunks") }
+            if !isolated.gaps.isEmpty { manifestParts.append("\(isolated.gaps.count) documented gap windows") }
+        } else {
+            if let video = journal?.progress?.videoStatus { manifestParts.append("Video: \(video)") }
+            if let audio = journal?.progress?.audioStatus { manifestParts.append("Audio: \(audio)") }
+            if let offset = journal?.videoStartOffsetSeconds { manifestParts.append(String(format: "video starts %.3fs", offset)) }
+            if let offset = journal?.audioStartOffsetSeconds { manifestParts.append(String(format: "audio starts %.3fs", offset)) }
+            if let dropped = journal?.progress?.droppedVideo, dropped > 0 { manifestParts.append("\(dropped) dropped video frames") }
+            if let dropped = journal?.progress?.droppedAudio, dropped > 0 { manifestParts.append("\(dropped) audio gaps") }
+            if let files = journal?.isolatedFiles, !files.isEmpty { manifestParts.append("\(files.count) isolated audio files") }
+            for track in metadata.4 {
+                manifestParts.append("\(track.selection.name): \(track.progress.status)\(track.progress.error.map { " (" + $0 + ")" } ?? "")")
+            }
+        }
         return RecordingLibraryEntry(url: url,
-            sessionID: journal?.sessionID ?? url.lastPathComponent, segmentIndex: journal?.segmentIndex ?? 1,
-            startedAt: journal?.startedAt ?? metadata.2, context: journal?.context ?? .init(),
+            sessionID: isolated?.sessionID ?? journal?.sessionID ?? url.lastPathComponent, segmentIndex: isolated?.segmentIndex ?? journal?.segmentIndex ?? 1,
+            startedAt: journal?.startedAt ?? metadata.2, context: isolated?.context ?? journal?.context ?? .init(),
             duration: duration.isFinite ? max(0, duration) : 0, bytes: metadata.1,
-            tracks: trackNames, manifestSummary: manifestParts.joined(separator: " · "), status: status, error: journal?.error ?? mediaError,
+            tracks: trackNames, manifestSummary: manifestParts.joined(separator: " · "), status: status,
+            error: (isolated == nil ? journal?.error : isolated?.progress.error) ?? mediaError,
             markers: journal?.markers ?? [], thumbnail: thumbnail, canExport: readable && !active)
     }
 
@@ -172,11 +213,14 @@ enum RecordingMarkerFormat: String, CaseIterable {
             error = "Choose an unused output file name."; return
         }
         let asset = AVURLAsset(url: entry.url)
-        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+        let audioOnly = !entry.tracks.contains { $0.hasPrefix("Video") }
+        guard let exporter = AVAssetExportSession(asset: asset,
+            presetName: audioOnly ? AVAssetExportPresetAppleM4A : AVAssetExportPresetHighestQuality) else {
             error = "This recording cannot be exported with the available encoder."; return
         }
         exporter.outputURL = output
-        let type: AVFileType = output.pathExtension.lowercased() == "mov" ? .mov : .mp4
+        let type: AVFileType = audioOnly ? .m4a : output.pathExtension.lowercased() == "mov" ? .mov : .mp4
+        guard !audioOnly || output.pathExtension.lowercased() == "m4a" else { error = "Choose M4A for an audio clip."; return }
         guard exporter.supportedFileTypes.contains(type) else { error = "The selected clip container is unavailable."; return }
         exporter.outputFileType = type
         exporter.timeRange = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 48_000),
