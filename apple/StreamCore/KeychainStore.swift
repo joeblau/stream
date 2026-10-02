@@ -1,6 +1,10 @@
 import Foundation
 import Security
 
+public enum DestinationCredentialField: String, CaseIterable, Sendable {
+    case endpoint, streamKey, srtStreamID, srtPassphrase
+}
+
 /// Stores the sensitive connection secrets (RTMP/RTMPS URL + stream key) in the
 /// Keychain instead of `UserDefaults`, so they survive relaunches without the user
 /// re-typing them and are never persisted in plaintext.
@@ -12,10 +16,6 @@ import Security
 ///
 /// `kSecAttrAccessibleAfterFirstUnlock` keeps secrets available during a
 /// background capture after the device has been unlocked once.
-public enum DestinationCredentialField: String, CaseIterable, Sendable {
-    case endpoint, streamKey, srtStreamID, srtPassphrase
-}
-
 public struct KeychainStore: Sendable {
 
     /// The secrets this store manages, keyed per transport protocol so each of
@@ -23,8 +23,9 @@ public struct KeychainStore: Sendable {
     public enum Item: Sendable {
         case url(StreamProtocol)
         case key(StreamProtocol)
-        /// Pre-multiprotocol single slots, kept only for one-time migration.
+        /// Per-destination slots survive display-name and transport changes.
         case destination(UUID, field: DestinationCredentialField)
+        /// Pre-multiprotocol single slots, kept only for one-time migration.
         case legacyURL
         case legacyKey
 
@@ -49,16 +50,20 @@ public struct KeychainStore: Sendable {
     @discardableResult
     public func set(_ value: String, for item: Item) -> Bool {
         let base = baseQuery(for: item)
-        SecItemDelete(base as CFDictionary)
-
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else {
-            return true   // empty => treated as "cleared"
+            let status = SecItemDelete(base as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
         }
-
+        // Update an existing item in place. Delete-and-add could erase the old
+        // credential if adding the replacement fails (locked/denied Keychain).
+        let values: [String: Any] = [kSecValueData as String: data,
+                                    kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+        let updated = SecItemUpdate(base as CFDictionary, values as CFDictionary)
+        if updated == errSecSuccess { return true }
+        guard updated == errSecItemNotFound else { return false }
         var attributes = base
-        attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        for (key, value) in values { attributes[key] = value }
         return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
     }
 

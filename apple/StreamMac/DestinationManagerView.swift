@@ -150,7 +150,7 @@ struct DestinationManagerView: View {
             Text("Applied output estimate: \(plan.encoderSessions) encoder sessions, \(Double(plan.aggregateBitrate) / 1_000_000, specifier: "%.1f") Mbps payload; allow \(plan.requiredUplinkMbps, specifier: "%.1f") Mbps uplink.")
             Text("\(plan.compatibleGroups.count) compatible profile groups. This transport backend uses a separate encoder per destination; local recording needs its own session.")
             TextField("Measured uplink Mbps (0 = unknown)", value: $session.measuredUplinkMbps, format: .number)
-            TextField("Tested encoder session budget (0 = unknown)", value: $session.measuredSessionLimit, format: .number)
+            TextField("Tested publishing encoder budget (0 = unknown)", value: $session.measuredSessionLimit, format: .number)
             ForEach(plan.issues, id: \.self) { Text($0).foregroundStyle(.orange) }
         }.font(.caption).foregroundStyle(.secondary)
     }

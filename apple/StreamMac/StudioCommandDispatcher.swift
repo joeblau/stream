@@ -75,6 +75,8 @@ enum StudioCommand: Equatable, Sendable {
     case pauseRecording
     case resumeRecording
     case startNewRecordingFile
+    case startRehearsal
+    case stopRehearsal
 
     // Scenes (S01 layer graph).
     case selectScene(SceneID)
@@ -602,6 +604,8 @@ enum StudioCommand: Equatable, Sendable {
         case .pauseRecording: return "Pause Recording"
         case .resumeRecording: return "Resume Recording"
         case .startNewRecordingFile: return "Start New Recording File"
+        case .startRehearsal: return "Begin Local Rehearsal"
+        case .stopRehearsal: return "End Local Rehearsal"
         case .selectScene, .selectSceneAt: return "Select Scene"
         case .addScene, .insertScene: return "Add Scene"
         case .renameScene: return "Rename Scene"
@@ -1264,6 +1268,7 @@ final class StudioCommandDispatcher: ObservableObject {
         if let error = sceneContentLockError(for: command) { return error }
         switch command {
         case .startStream:
+            guard !controller.isRehearsing else { return .unavailable("End local rehearsal before public Go Live.") }
             guard controller.streamState.canStart else {
                 return .unavailable("The stream is already \(controller.streamState.busyLabel).")
             }
@@ -1295,6 +1300,11 @@ final class StudioCommandDispatcher: ObservableObject {
             return recorder.state == .paused ? nil : .unavailable("Recording is not paused.")
         case .startNewRecordingFile:
             return recorder.canSplit ? nil : .unavailable("Wait for recording and the previous file to finish preparing.")
+        case .startRehearsal:
+            return !controller.streamState.isActive && !recorder.state.isActive && !controller.isRehearsing
+                ? nil : .unavailable("End active outputs before beginning a local rehearsal.")
+        case .stopRehearsal:
+            return controller.isRehearsing ? nil : .unavailable("No local rehearsal is running.")
 
         case .selectScene(let id):
             return sceneStore.scenes.contains(where: { $0.id == id })
@@ -2176,6 +2186,10 @@ final class StudioCommandDispatcher: ObservableObject {
         case .pauseRecording: recorder.pause()
         case .resumeRecording: recorder.resume()
         case .startNewRecordingFile: recorder.startNewFile()
+        case .startRehearsal:
+            controller.beginLocalRehearsal(recorder: recorder)
+            soundboard.syncProgramScene(previewProgram.programScene)
+        case .stopRehearsal: controller.endLocalRehearsal(recorder: recorder)
 
         case .selectScene(let id):
             sceneStore.selectedID = id
@@ -3659,6 +3673,7 @@ private extension StudioCommand {
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
              .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile,
+             .startRehearsal, .stopRehearsal,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,
              .setOutputProfile,
              .setChannelVolume, .setChannelMuted, .setChannelSolo,

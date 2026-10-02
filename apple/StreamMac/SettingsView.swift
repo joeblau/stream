@@ -228,8 +228,7 @@ struct SettingsView: View {
                                                     frameRate: session.draft.outputProfile.frameRate)
                         Text(preset.displayName)
                             .tag(preset)
-                            .disabled(capabilities.gateReason(for: profile,
-                                                              destination: session.draft.selectedProtocol) != nil)
+                            .disabled(capabilities.hardwareGateReason(for: profile) != nil)
                     } else {
                         Text(preset.displayName).tag(preset)
                     }
@@ -258,13 +257,13 @@ struct SettingsView: View {
 
             Picker("Frame Rate", selection: Binding(
                 get: { min(session.draft.outputProfile.frameRate,
-                           capabilities.maxFrameRate(for: session.draft.selectedProtocol)) },
+                           capabilities.hardwareMaxFrameRate) },
                 set: { setProfile(session.draft.outputProfile.with(frameRate: $0)) }
             )) {
                 ForEach(OutputCapabilities.supportedFrameRates, id: \.self) { fps in
                     Text("\(fps) fps")
                         .tag(fps)
-                        .disabled(fps > capabilities.maxFrameRate(for: session.draft.selectedProtocol))
+                        .disabled(fps > capabilities.hardwareMaxFrameRate)
                 }
             }
 
@@ -299,9 +298,8 @@ struct SettingsView: View {
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 effectBadge(.immediateOrStaged)
-                if let reason = capabilities.gateReason(for: session.draft.outputProfile,
-                                                        destination: session.draft.selectedProtocol) {
-                    Label("The current profile exceeds this \(session.draft.selectedProtocol.displayName) destination: \(reason). It will be reduced when the next session starts.",
+                if let reason = capabilities.hardwareGateReason(for: session.draft.outputProfile) {
+                    Label("The program profile exceeds this Mac's estimated limit: \(reason). It will be reduced when the next session starts.",
                           systemImage: "exclamationmark.triangle")
                 }
                 Text("The canvas is fixed by this profile — a camera or screen source changing size never resizes the program; sources are fit into the canvas. Bitrate is a maximum and drops automatically when the uplink is congested. H.264 is recommended for Restream — traditional RTMP ingests do not accept HEVC.")

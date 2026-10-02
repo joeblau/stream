@@ -57,6 +57,7 @@ struct MainWindowView: View {
     /// Shared Restream chat connection: the sidebar shows it and the settings
     /// pane edits its credentials (W04 — one instance, one sign-in).
     @State private var chat = RestreamChat()
+    @State private var showPreflight = false
 
     /// W06 first-run gating (persisted by the app): while false, the studio
     /// window presents the setup-guide sheet.
@@ -676,6 +677,9 @@ struct MainWindowView: View {
                 ScrollView {
                     DestinationManagerView(session: controller.destinations,
                                            programProfile: controller.activeProfile)
+                    DisclosureGroup("Preflight and Local Rehearsal", isExpanded: $showPreflight) {
+                        StreamPreflightView()
+                    }.padding(10)
                 }
             }
         }
@@ -857,6 +861,14 @@ struct MainWindowView: View {
 
             streamStatusBadge
 
+            Button {
+                inspectorTab = .destinations
+                showInspectorPanel = true
+                showPreflight = true
+            } label: { Label("Preflight", systemImage: "checklist") }
+            if controller.isRehearsing {
+                Label("LOCAL REHEARSAL", systemImage: "record.circle").foregroundStyle(.orange)
+            }
             goLiveButton
         }
         .padding(.horizontal, 16)
@@ -908,7 +920,7 @@ struct MainWindowView: View {
                 Button {
                     dispatcher.execute(.startStream)
                 } label: {
-                    Text(dispatcher.state.stream == .idle ? "Go Live" : "Retry Go Live")
+                    Text(dispatcher.state.stream == .idle ? "Public Go Live" : "Retry Public Go Live")
                 }
                 .tint(.green)
             case .connecting:
@@ -936,6 +948,7 @@ struct MainWindowView: View {
         .frame(minWidth: 120)
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
+        .disabled(controller.isRehearsing)
     }
 }
 

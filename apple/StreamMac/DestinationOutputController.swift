@@ -12,6 +12,9 @@ final class DestinationOutputController: ObservableObject {
     @Published private(set) var names: [UUID: String] = [:]
     let fanout = DestinationMediaFanout()
     var stateDidChange: (() -> Void)?
+    /// Rehearsal disables publisher creation at the output boundary as well as
+    /// the command/UI entry points, so no public transport can be started.
+    var isPublishingAllowed = true
 
     private struct Runtime {
         var generation: UUID
@@ -44,6 +47,7 @@ final class DestinationOutputController: ObservableObject {
 
     func start(_ destination: StreamDestination, settings: StreamSettings) {
         let id = destination.id
+        guard isPublishingAllowed else { return }
         guard !(states[id]?.isActive ?? false) else { return }
         guard activeCount < 10 else { states[id] = .failed("Ten destinations are already active."); changed(); return }
         let generation = UUID()

@@ -1467,6 +1467,17 @@ final class CaptureSourcePool: ObservableObject {
     /// Collapses keys that name the SAME physical device the default source
     /// already covers, so "the default camera" and "the default camera by
     /// unique ID" never open the device twice.
+    /// Passive readiness probe: never pulls media playout (that would alter
+    /// its render cadence). Camera reads enforce the existing freshness TTL.
+    func frameAvailability(for key: CaptureSourceKey) -> Bool? {
+        let key = normalized(key)
+        switch key {
+        case .camera: return frames.cameraFrame(for: key) != nil
+        case .screen: return frames.screenFrame(for: key) != nil
+        default: return nil
+        }
+    }
+
     private func normalized(_ key: CaptureSourceKey) -> CaptureSourceKey {
         guard case .camera(let payload) = key, let deviceID = payload.deviceID,
               let defaultDevice = AVCaptureDevice.default(for: .video),

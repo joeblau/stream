@@ -75,6 +75,10 @@ final class StreamController: ObservableObject {
     /// The latest PROGRAM composition for the PROGRAM monitor, ~30 fps.
     @Published private(set) var programImage: CGImage?
     @Published var errorMessage: String?
+    @Published private(set) var isRehearsing = false
+    private var rehearsalOwnsPreview = false
+    private var rehearsalObserver: AnyCancellable?
+
 
     /// Convenience for UI; `streamState` carries the full picture.
     var isLive: Bool { streamState.isLive }
@@ -643,6 +647,7 @@ final class StreamController: ObservableObject {
     }
 
     func goLive() {
+        guard !isRehearsing else { errorMessage = "End local rehearsal before public Go Live."; return }
         guard streamState.canStart else { return }
         settings = settingsStore.load()
         let plan = destinations.encodingPlan(program: settings.outputProfile)
@@ -653,6 +658,7 @@ final class StreamController: ObservableObject {
     }
 
     func startDestination(_ id: UUID) {
+        guard !isRehearsing else { errorMessage = "End local rehearsal before starting a public destination."; return }
         guard let destination = destinations.saved.first(where: { $0.id == id }) else { return }
         let base = settingsStore.load()
         let credentials = destinations.savedCredentials(for: id)
@@ -689,6 +695,142 @@ final class StreamController: ObservableObject {
         if streamState.isLive { errorMessage = nil }
         promoteStagedProfileIfOutputsIdle()
         updatePipelineDemand()
+    }
+
+    func beginLocalRehearsal(recorder: RecordingController) {
+        guard !streamState.isActive, !recorder.state.isActive else { return }
+        rehearsalOwnsPreview = previewState == .idle
+        if rehearsalOwnsPreview { startPreview() }
+        recorder.start(stream: self)
+        guard recorder.state.isRecording else { return }
+        isRehearsing = true
+        destinationOutputs.isPublishingAllowed = false
+        rehearsalObserver = recorder.$state.sink { [weak self] state in
+            guard let self else { return }
+            if !state.isActive {
+                self.isRehearsing = false
+                self.destinationOutputs.isPublishingAllowed = true
+            }
+        }
+    }
+
+    func endLocalRehearsal(recorder: RecordingController) {
+        guard isRehearsing else { return }
+        recorder.stop()
+        isRehearsing = false
+        destinationOutputs.isPublishingAllowed = true
+        rehearsalObserver = nil
+        if rehearsalOwnsPreview { stopPreview() }
+        rehearsalOwnsPreview = false
+    }
+
+    func preflightFacts(programAudioPeak: Float?, assetAvailability: (AssetID) -> AssetAvailability = { _ in .unknown }) -> StreamPreflightFacts {
+        var facts = StreamPreflightFacts()
+        let scene = previewProgram.programScene
+        var layers = scene.map { SceneGraph.flattenedVisibleLayers(of: $0, in: SceneGraph.index(sceneStore.scenes)) } ?? []
+        layers += sceneStore.overlays.filter { $0.isVisible && !(scene?.hiddenOverlayIDs.contains($0.id) ?? false) }
+        func checkAsset(_ identifier: String?, hasBookmark: Bool, description: String) {
+            if let identifier, let uuid = UUID(uuidString: identifier) {
+                switch assetAvailability(AssetID(uuid)) {
+                case .available: break
+                case .unknown: facts.unverifiedSources.append("\(description) asset availability has not been verified.")
+                case .missing: facts.missingSources.append("\(description) asset is missing or its access was revoked; relink it in Assets.")
+                }
+            } else if !hasBookmark {
+                facts.missingSources.append("\(description) has no configured asset.")
+            } else {
+                facts.unverifiedSources.append("\(description) uses a linked file; verify it in the local rehearsal.")
+            }
+        }
+        for layer in layers {
+            let payload = layer.sourceID.flatMap { id in sceneStore.sources.first { $0.id == id } }?.payload ?? layer.payload
+            switch payload {
+            case .image(let image): checkAsset(image.assetIdentifier, hasBookmark: image.bookmarkData != nil, description: "Image")
+            case .media(let media):
+                if layer.sourceID == nil { facts.missingSources.append("A media layer is not linked to a registered source.") }
+                checkAsset(media.assetIdentifier, hasBookmark: media.bookmarkData != nil, description: "Media")
+            case .pdf(let pdf): checkAsset(pdf.assetIdentifier, hasBookmark: false, description: "Slide deck")
+            case .web(let web):
+                if !web.browserOverlay.hasWidgetContent { facts.missingSources.append("A browser source has no configured content.") }
+                if let asset = web.browserOverlay.localHTMLAssetIdentifier { checkAsset(asset, hasBookmark: false, description: "Browser HTML") }
+            default: break
+            }
+        }
+        if case .image(let image) = scene?.background ?? sceneStore.defaultBackground {
+            checkAsset(image.assetIdentifier, hasBookmark: image.bookmarkData != nil, description: "Background image")
+        }
+        if let uid = settings.preferredAudioInputUID, !deviceMonitor.connectedAudioDeviceIDs.contains(uid) {
+            facts.missingSources.append("The selected microphone is disconnected; relink it in Audio.")
+        }
+        for input in settings.audioInputs where input.isEnabled && !deviceMonitor.connectedAudioDeviceIDs.contains(input.deviceUID) {
+            facts.missingSources.append("An enabled additional audio input is disconnected; relink it in Audio.")
+        }
+        let demanded = CaptureSourceKey.demanded(layers: layers, sources: sceneStore.sources)
+            .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
+        var required: Set<PermissionsManager.Kind> = []
+        if settings.micVolume > 0 { required.insert(.microphone) }
+        for key in demanded {
+            switch key {
+            case .camera(let camera):
+                required.insert(.camera)
+                if let id = camera.deviceID, !deviceMonitor.connectedCameraIDs.contains(id) {
+                    facts.missingSources.append("A configured camera is disconnected.")
+                } else if camera.deviceID == nil && deviceMonitor.connectedCameraIDs.isEmpty {
+                    facts.missingSources.append("No camera is connected.")
+                }
+            case .screen(let screen):
+                required.insert(.screenCapture)
+                if screen.target == .display, let rawID = screen.targetIdentifier,
+                   let displayID = UInt32(rawID), !deviceMonitor.connectedDisplayIDs.contains(displayID) {
+                    facts.missingSources.append("A configured display is disconnected.")
+                }
+            case .appAudio: required.insert(.screenCapture)
+            default: break
+            }
+            if isPipelineRunning, capturePool.frameAvailability(for: key) == false {
+                facts.unverifiedSources.append("A camera or screen source has not delivered a usable frame; verify it in Sources.")
+            }
+            if capturePool.problem(for: key) != nil || capturePool.isMissing(key) {
+                // Source errors can carry private paths/URLs. Show a safe repair
+                // instruction; the source inspector contains the detailed status.
+                facts.missingSources.append("A program source reports an availability problem; repair it in Sources.")
+            }
+        }
+        facts.permissionIssues = required.sorted { $0.rawValue < $1.rawValue }.compactMap { kind in
+            permissions.status(for: kind) == .granted ? nil : "\(kind.title) permission is required; repair it in Settings."
+        }
+        facts.sourceCount = layers.count
+        facts.previewRunning = isPipelineRunning
+        facts.programAudioPeak = programAudioPeak
+        facts.destinationCount = destinations.enabled.count
+        for destination in destinations.enabled {
+            let credentials = destinations.savedCredentials(for: destination.id)
+            var errors = DestinationValidator.errors(destination, credentials: credentials)
+            if credentials.endpoint.isEmpty { errors.append("Missing endpoint URL.") }
+            if destination.transport.requiresKey && credentials.streamKey.isEmpty { errors.append("Missing stream key.") }
+            facts.destinationErrors += errors.map { "\(destination.name): \($0)" }
+            let profile = destination.effectiveProfile(program: settings.outputProfile)
+            facts.profileErrors += (destination.ingestLimits ?? .conservative(for: destination.transport))
+                .errors(profile: profile, codec: destination.videoCodec,
+                        keyframeSeconds: destination.keyframeSeconds ?? 2, audioBitrate: destination.audioBitrate)
+            if !destination.transport.supports(destination.videoCodec) {
+                facts.profileErrors.append("\(destination.name): unsupported transport codec.")
+            }
+            if !capabilities.hardwareTier.fits(width: profile.canvasWidth, height: profile.canvasHeight) ||
+                profile.frameRate > capabilities.hardwareMaxFrameRate {
+                facts.profileErrors.append("\(destination.name): exceeds this Mac's estimated hardware limits.")
+            }
+        }
+        if !capabilities.hardwareTier.fits(width: activeProfile.canvasWidth, height: activeProfile.canvasHeight) ||
+            activeProfile.frameRate > capabilities.hardwareMaxFrameRate {
+            facts.profileErrors.append("Program canvas exceeds this Mac's estimated hardware limits.")
+        }
+        let plan = destinations.encodingPlan(program: settings.outputProfile)
+        facts.encoderCount = plan.encoderSessions
+        facts.testedEncoderBudget = destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil
+        facts.requiredUplinkMbps = plan.requiredUplinkMbps
+        facts.measuredUplinkMbps = destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil
+        return facts
     }
 
     // MARK: - Pipeline demand (preview / stream / recording independence)
@@ -818,7 +960,7 @@ final class StreamController: ObservableObject {
     /// reconfiguring the preview pipeline in place.
     func applyOutputProfile(_ profile: OutputProfile,
                             destination proto: StreamCore.StreamProtocol? = nil) {
-        let clamped = capabilities.clamped(profile, destination: proto ?? settings.selectedProtocol)
+        let clamped = capabilities.clampedToHardware(profile)
         if outputsOwnProfile {
             stagedProfile = clamped == activeProfile ? nil : clamped
             return

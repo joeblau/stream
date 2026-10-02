@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 readonly DESTINATIONS_BUILD_PATH="${DESTINATIONS_BUILD_PATH:-build/destinations-validation}"
+mkdir -p "$DESTINATIONS_BUILD_PATH"
 xcodegen generate
 xcodebuild -project Stream.xcodeproj -scheme StreamCoreTests -destination 'platform=macOS' \
     -derivedDataPath "$DESTINATIONS_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build > "$DESTINATIONS_BUILD_PATH.log" 2>&1

@@ -66,3 +66,18 @@ import Testing
         #expect(DestinationValidator.errors(destination, credentials: .init()).contains { $0.contains("whole number") })
     }
 }
+
+@Suite struct ProgramCanvasIsolationTests {
+    @Test("A lower-resolution RTMP destination cannot lower a 4K local program canvas")
+    func programRemains4K() {
+        let capabilities = OutputCapabilities(hardwareTier: .uhd4K, hardwareMaxFrameRate: 60)
+        let program = OutputProfile(canvasWidth: 3840, canvasHeight: 2160, frameRate: 60)
+        #expect(capabilities.clampedToHardware(program) == program)
+        #expect(capabilities.hardwareGateReason(for: program) == nil)
+        #expect(capabilities.gateReason(for: program, destination: .rtmps) != nil)
+        let destination = StreamDestination(name: "HD endpoint", followsProgramProfile: false,
+            outputProfile: .init(canvasWidth: 1920, canvasHeight: 1080, frameRate: 30))
+        #expect(destination.effectiveProfile(program: program) != program)
+        #expect(capabilities.clampedToHardware(program) == program)
+    }
+}

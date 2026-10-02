@@ -45,6 +45,11 @@ actor FakeDestinationPublisher: Publisher {
         var pending: [FakeDestinationPublisher] = [slow, healthy, retry]
         let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() })
         let a = StreamDestination(name: "Slow"), b = StreamDestination(name: "Healthy")
+        outputs.isPublishingAllowed = false
+        outputs.start(a, settings: .default)
+        precondition(pending.count == 3 && outputs.states.isEmpty,
+                     "Local rehearsal must prevent publisher allocation at the output boundary")
+        outputs.isPublishingAllowed = true
         outputs.start(a, settings: .default)
         outputs.start(b, settings: .default)
         precondition(outputs.states[a.id] == .connecting && outputs.states[b.id] == .connecting)
@@ -85,7 +90,17 @@ actor FakeDestinationPublisher: Publisher {
         outputs.stopAll()
         await settle { outputs.activeCount == 0 }
         precondition(outputs.aggregateState == .idle)
-        print("PASS: actual destination controller, independent failure/reconnect/stop/retry, stable ID, stale event rejection, secret-safe failures, bounded slow queue and healthy fanout")
+        var allocations = 0
+        let capacity = DestinationOutputController(factory: { _ in
+            allocations += 1
+            return FakeDestinationPublisher()
+        })
+        for number in 0..<11 { capacity.start(.init(name: "Output \(number)"), settings: .default) }
+        precondition(allocations == 10 && capacity.activeCount == 10)
+        precondition(capacity.states.values.filter { if case .failed = $0 { return true }; return false }.count == 1)
+        capacity.stopAll()
+        await settle { capacity.activeCount == 0 }
+        print("PASS: rehearsal prevents public publisher allocation; up-to-ten session boundary; actual destination controller, independent failure/reconnect/stop/retry, stable ID, stale event rejection, secret-safe failures, bounded slow queue and healthy fanout")
     }
 
     @MainActor static func settle(_ condition: () -> Bool) async {

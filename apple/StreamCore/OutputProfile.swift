@@ -243,6 +243,22 @@ public struct OutputCapabilities: Equatable, Sendable {
         min(hardwareMaxFrameRate, Self.destinationMaxFrameRate(for: proto))
     }
 
+    /// Program/local outputs are constrained by this Mac, independently of
+    /// any destination ingest. Each destination validates its own profile.
+    public func hardwareGateReason(for profile: OutputProfile) -> String? {
+        if !hardwareTier.fits(width: profile.canvasWidth, height: profile.canvasHeight) {
+            return "This Mac encodes up to \(hardwareTier.displayName)"
+        }
+        if profile.frameRate > hardwareMaxFrameRate {
+            return "This Mac supports up to \(hardwareMaxFrameRate) fps"
+        }
+        return nil
+    }
+
+    public func clampedToHardware(_ profile: OutputProfile) -> OutputProfile {
+        fitted(profile, tier: hardwareTier, maxFPS: hardwareMaxFrameRate)
+    }
+
     /// Nil when the profile is offerable for the destination; otherwise a
     /// short human reason the UI shows next to the disabled option.
     public func gateReason(for profile: OutputProfile,
@@ -267,16 +283,19 @@ public struct OutputCapabilities: Equatable, Sendable {
     /// protocol switches under a profile the new destination cannot carry.
     public func clamped(_ profile: OutputProfile,
                         destination proto: StreamProtocol) -> OutputProfile {
+        fitted(profile, tier: maxTier(for: proto), maxFPS: maxFrameRate(for: proto))
+    }
+
+    private func fitted(_ profile: OutputProfile, tier: ResolutionTier, maxFPS: Int) -> OutputProfile {
         var width = profile.canvasWidth
         var height = profile.canvasHeight
-        let tier = maxTier(for: proto)
         if !tier.fits(width: width, height: height) {
             let scale = min(Double(tier.longEdge) / Double(max(width, height)),
                             Double(tier.shortEdge) / Double(min(width, height)))
             width = OutputProfile.evenDimension(Int((Double(width) * scale).rounded()))
             height = OutputProfile.evenDimension(Int((Double(height) * scale).rounded()))
         }
-        let fps = min(profile.frameRate, maxFrameRate(for: proto))
+        let fps = min(profile.frameRate, maxFPS)
         return OutputProfile(canvasWidth: width, canvasHeight: height, frameRate: fps)
     }
 }

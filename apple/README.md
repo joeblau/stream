@@ -127,3 +127,19 @@ for both codecs.
 ## License
 
 See the repository license.
+
+### Destination management and preflight
+
+The Destinations inspector and embedded connection settings share a native draft editor. Create, name, duplicate or remove RTMP, RTMPS, SRT caller and experimental WHIP destinations; select the program canvas or an independent output size/frame rate, codec, bitrate and enabled state. Apply Destinations saves metadata in the active desktop project and connection credentials in machine Keychain accounts addressed by stable UUID. Duplicates start disabled. Legacy per-protocol credentials migrate once, preserving the iOS slots. Endpoint URLs (including query tokens), stream keys and SRT passphrases never enter project JSON.
+
+Each destination has its own acknowledged connection state and Start/Stop/Retry actions. Bounded video/audio ingress prevents a stalled endpoint from holding up other endpoints or recording. Public Go Live starts enabled destinations, supports partial success, and caps sessions at ten subject to tested uplink/session budgets. The current publisher backend uses one encoder per destination; the plan identifies compatible profiles but does **not** claim actual encoded-media sharing. HEVC on RTMP requires an explicitly verified enhanced ingest; WHIP is H.264/Opus and currently cannot set a bearer Authorization header.
+
+Preflight checks required permissions, program source availability, recently audible program audio, local credential completeness, canvas/ingest constraints, recording storage, tested encoder budgets and uplink headroom. Its explicit upload test sends up to 32 MiB of synthetic data to [Cloudflare's documented speed-test endpoint](https://github.com/cloudflare/speedtest#configuration), lasts about ten seconds and can be canceled. It estimates that route rather than provider ingest acceptance. Local Rehearsal starts preview and local recording and blocks publisher allocation until it ends. Provider-private/test broadcasts are not configured by this version; Public Go Live and individual destination Start publish to their configured endpoints.
+
+Run the deterministic controller/media isolation harness with:
+
+```sh
+zsh apple/scripts/run_destinations_harness.zsh
+```
+
+It injects fake publishers into the shipping destination controller, verifies isolated failure/reconnection/stop/retry and rejection of obsolete lifecycle events, saturates one video mailbox while the healthy endpoint advances, checks the ten-session boundary, and verifies that rehearsal disallows public publisher allocation. StreamCore tests additionally cover credential redaction and migration, protocol fields, encoder compatibility, profile isolation, explicit ingest limits, resource estimates, checklist evaluation and upload cancellation/deadlines. These tests do not claim acceptance by a real provider ingest.

@@ -112,3 +112,17 @@ enum KeychainAvailability {
         #expect(store.string(for: .url(.whip)) == nil)
     }
 }
+
+@Suite struct KeychainReplacementTests {
+    @Test("Replacing an existing credential updates its value in place", .enabled(if: KeychainAvailability.isWritable))
+    func replacement() {
+        let store = KeychainStore(service: "com.joeblau.Stream.tests.replacement")
+        let item = KeychainStore.Item.key(.rtmps)
+        defer { store.remove(item) }
+        #expect(store.set("old", for: item))
+        #expect(store.set("replacement", for: item))
+        #expect(store.string(for: item) == "replacement")
+        #expect(store.set("", for: item))
+        #expect(store.string(for: item) == nil)
+    }
+}
