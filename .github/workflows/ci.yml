@@ -31,7 +31,7 @@ jobs:
           sw_vers
           uname -m
       - name: Install XcodeGen
-        run: brew install xcodegen cmake openssl@3
+        run: brew install xcodegen cmake
       - name: Generate project
         run: xcodegen generate
       - name: Resolve and verify native transport implementations

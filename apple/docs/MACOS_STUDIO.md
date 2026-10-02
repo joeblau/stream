@@ -1,7 +1,16 @@
 # Stream Studio for macOS
 
 Generate the project with `cd apple && xcodegen generate`, open `Stream.xcodeproj`,
-and run the StreamMac scheme. The deployment floor is macOS 14. CI builds the
+and run the StreamMac scheme. The deployment floor is macOS 14.
+The pinned transport archives omit SRT/WebRTC implementation symbols in their
+Intel slices. CI resolves packages into its own derived-data directory, then
+`python3 scripts/repair_desktop_transport_archives.py build/desktop` rebuilds
+missing implementations from pinned sources with static OpenSSL at the same
+macOS 14 floor. Install CMake for this step. Source revisions and license notices
+remain in `build/desktop/TransportSourceBuild/<architecture>`. Use the same
+resolve/repair step before an Intel local build. The script changes only that
+build's downloaded artifacts and retains the other architecture's slice.
+CI builds the
 desktop app and runs the shared logic suite on Apple Silicon and Intel hosted
 macOS 26 runners; the existing iOS simulator job is retained. Unsigned local
 validation uses `xcodebuild -scheme StreamMac -destination 'platform=macOS'
@@ -105,7 +114,9 @@ Distribution is a Developer ID-signed, hardened-runtime, notarized ZIP outside
 the Mac App Store. With a Developer ID identity and saved notarytool keychain
 profile, run `STREAM_SIGNING_IDENTITY='Developer ID Application: …'
 STREAM_NOTARY_PROFILE=stream-notary zsh scripts/package_desktop_release.zsh`.
-The script archives, exports, verifies, notarizes, staples, and assesses the app.
+The script resolves and repairs transport artifacts, then archives the host's
+native architecture, exports, verifies, notarizes, staples, and assesses the app.
+Build Intel and Apple Silicon release artifacts on their respective hosts.
 Signing credentials are never committed. Updates replace the app bundle while
 retaining Application Support projects and Keychain data; there is no automatic
 updater. Uninstall by removing the app. Keeping/removing project data is an

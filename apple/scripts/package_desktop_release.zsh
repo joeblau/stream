@@ -6,8 +6,13 @@ cd "${0:A:h:h}"
 readonly RELEASE_DIR="${STREAM_RELEASE_DIR:-$PWD/build/release}"
 mkdir -p "$RELEASE_DIR"
 xcodegen generate
+readonly RELEASE_ARCH="$(uname -m)"
+xcodebuild -resolvePackageDependencies -project Stream.xcodeproj -scheme StreamMac \
+  -derivedDataPath "$RELEASE_DIR/derived"
+python3 scripts/repair_desktop_transport_archives.py "$RELEASE_DIR/derived"
 xcodebuild archive -project Stream.xcodeproj -scheme StreamMac \
   -destination 'generic/platform=macOS' -archivePath "$RELEASE_DIR/StreamMac.xcarchive" \
+  -derivedDataPath "$RELEASE_DIR/derived" ARCHS="$RELEASE_ARCH" ONLY_ACTIVE_ARCH=YES \
   CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$STREAM_SIGNING_IDENTITY" \
   ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS=--timestamp
 python3 - "$RELEASE_DIR/ExportOptions.plist" <<'PY'

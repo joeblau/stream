@@ -8,13 +8,14 @@ versions with static dependencies. No vendor checkout or global cache is edited.
 import argparse
 import json
 import platform
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
 
 
-def run(*args, capture=False):
-    return subprocess.run(args, check=True, text=True,
+def run(*args, capture=False, cwd=None):
+    return subprocess.run(args, check=True, text=True, cwd=cwd,
                           stdout=subprocess.PIPE if capture else None).stdout
 
 
@@ -60,14 +61,28 @@ def main():
     if not needed:
         print(f"macOS {args.architecture} transport implementations are present.")
         return
-    openssl = args.openssl_prefix or Path(run("brew", "--prefix", "openssl@3", capture=True).strip())
+    work = root / "TransportSourceBuild" / args.architecture
+    work.mkdir(parents=True, exist_ok=True)
+    # Homebrew static archives can require the build host's macOS version.
+    # Build crypto at the app's deployment floor instead of raising that floor.
+    openssl_commit = "c8bd5a57108599ac650bbae77fcabe3109dab2e8"
+    openssl = args.openssl_prefix
+    if openssl is None:
+        openssl = work / "openssl-install"
+        source = work / "openssl-source"
+        checkout(source, "https://github.com/openssl/openssl.git", openssl_commit)
+        build = work / "openssl-build"
+        build.mkdir(exist_ok=True)
+        target = "darwin64-arm64-cc" if args.architecture == "arm64" else "darwin64-x86_64-cc"
+        run("perl", str(source / "Configure"), target, "no-shared", "no-tests",
+            "--prefix=" + str(openssl), "-mmacosx-version-min=14.0", cwd=build)
+        run("make", "-j4", cwd=build)
+        run("make", "install_sw", cwd=build)
     crypto = openssl / "lib/libcrypto.a"
     ssl = openssl / "lib/libssl.a"
     for library in [crypto, ssl]:
         run("lipo", str(library), "-verify_arch", args.architecture)
-    work = root / "TransportSourceBuild" / args.architecture
-    work.mkdir(parents=True, exist_ok=True)
-    receipt = {"architecture": args.architecture, "openssl": run(str(openssl / "bin/openssl"), "version", capture=True).strip(), "transports": []}
+    receipt = {"architecture": args.architecture, "openssl": run(str(openssl / "bin/openssl"), "version", capture=True).strip(), "opensslSourceCommit": openssl_commit if args.openssl_prefix is None else None, "deploymentTarget": "14.0", "transports": []}
     for name, symbol, repository, commit, version in needed:
         source = work / (name + "-source")
         checkout(source, repository, commit, recursive=name == "libdatachannel")
@@ -108,6 +123,40 @@ def main():
         if not has_symbol(original, args.architecture, symbol):
             raise RuntimeError("Installed archive lost its transport implementation")
         receipt["transports"].append({"name": name, "version": version, "repository": repository, "commit": commit})
+    smoke = work / "TransportSmoke.cpp"
+    smoke.write_text("""#include <srt.h>
+#include <rtc/rtc.h>
+int main() {
+    if (srt_startup() != 0) return 1;
+    SRTSOCKET socket = srt_create_socket();
+    if (socket == SRT_INVALID_SOCK) return 2;
+    srt_close(socket); srt_cleanup();
+    rtcConfiguration configuration{};
+    int connection = rtcCreatePeerConnection(&configuration);
+    if (connection < 0) return 3;
+    rtcDeletePeerConnection(connection); rtcCleanup();
+    return 0;
+}
+""")
+    executable = work / "transport-smoke"
+    # Both sources are available when repairing the pinned Intel distribution.
+    # A forced rebuild also exercises this path on native Apple Silicon.
+    if len(needed) == 2:
+        includes = [work / "libsrt-source/srtcore", work / "libsrt-source/common",
+                    work / "libsrt-build", work / "libdatachannel-source/include"]
+        run("xcrun", "clang++", "-std=c++17", "-arch", args.architecture,
+            "-mmacosx-version-min=14.0", *["-I" + str(path) for path in includes],
+            str(smoke), *map(str, paths.values()), "-framework", "Security",
+            "-framework", "CoreFoundation", "-lz", "-o", str(executable))
+        if args.architecture == platform.machine():
+            run(str(executable))
+    notices = work / "licenses"
+    notices.mkdir(exist_ok=True)
+    for source in work.glob("*-source"):
+        for license in list(source.glob("LICENSE*")) + list(source.glob("deps/*/LICENSE*")):
+            if license.is_file():
+                name = source.name + "-" + str(license.relative_to(source)).replace("/", "-")
+                shutil.copyfile(license, notices / name)
     (work / "sources.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(f"Rebuilt and verified {len(needed)} static macOS {args.architecture} transport archives.")
 
