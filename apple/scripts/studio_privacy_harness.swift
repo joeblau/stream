@@ -44,31 +44,36 @@ private final class PrivacyPixels: @unchecked Sendable {
             annotationProvider: { gate.annotations() }, canvasSize: CGSize(width: 320, height: 180), frameRate: 30,
             frameOverrideProvider: { gate.sceneSnapshot() })
         await engine.addSink(token: UUID(), capacity: 2, sink: pixels.receive)
-        await engine.run(scene: visible, canvasSize: CGSize(width: 320, height: 180), frameRate: 30)
-        try await Task.sleep(for: .milliseconds(250))
-        let controlStart = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        await engine.updateScene(hidden)
-        try await Task.sleep(for: .milliseconds(150))
-        precondition(pixels.values(after: controlStart).contains { $0 > 20 }, "Control must actually render an exiting comment fade")
-        await engine.stop()
+        let size = CGSize(width: 320, height: 180)
+        func time(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 60_000) }
+        func render(_ seconds: Double) async throws -> [Double] {
+            let pts = time(seconds)
+            for _ in 0..<100 {
+                await engine.renderValidationFrame(at: pts)
+                let values = pixels.values(after: pts.seconds - 0.00001, before: pts.seconds + 0.00001)
+                if !values.isEmpty { return values }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let metrics = await engine.metricsSnapshot()
+            preconditionFailure("Native compositor did not deliver a frame at \(seconds); metrics=\(metrics); observed=\(pixels.values(after: 0))")
+        }
+        await engine.prepareValidation(scene: visible, canvasSize: size, frameRate: 30, at: time(1))
+        let visibleValues = try await render(1)
+        precondition(visibleValues.contains { $0 > 20 }, "Control must paint the visible comment")
+        await engine.setValidationTime(time(2)); await engine.updateScene(hidden)
+        let controlValues = try await render(2.1)
+        precondition(controlValues.contains { $0 > 20 }, "Control must actually render an exiting comment fade")
 
-        await engine.run(scene: visible, canvasSize: CGSize(width: 320, height: 180), frameRate: 30)
-        try await Task.sleep(for: .milliseconds(150))
-        await engine.updateScene(hidden)
-        gate.setScene(slate)
-        let privateStart = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        try await Task.sleep(for: .milliseconds(300))
-        // Ignore a frame whose override snapshot preceded the gate change.
-        // The remaining window still overlaps the 250 ms exit fade.
-        let privateValues = pixels.values(after: privateStart + 1.0 / 30, before: privateStart + 0.23)
-        // Correctness covers every delivered frame; hosted runners may miss
-        // cadence deadlines, so this does not assert a real-time frame budget.
-        precondition(!privateValues.isEmpty, "The regression must inspect a native rendered frame during the fade")
-        precondition(privateValues.allSatisfy { $0 < 1 }, "An exiting comment must never paint over the private slate: \(privateValues)")
+        await engine.prepareValidation(scene: visible, canvasSize: size, frameRate: 30, at: time(3))
+        _ = try await render(3)
+        await engine.setValidationTime(time(4)); await engine.updateScene(hidden); gate.setScene(slate)
+        for seconds in [4.01, 4.05, 4.1, 4.2] {
+            let values = try await render(seconds)
+            precondition(values.allSatisfy { $0 < 1 }, "An exiting comment must never paint over the private slate: \(values)")
+        }
         gate.setScene(nil)
-        let reopened = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        try await Task.sleep(for: .milliseconds(150))
-        precondition(pixels.values(after: reopened + 1.0 / 30).allSatisfy { $0 < 1 }, "An expired fade cannot reappear on reopening")
+        let reopenedValues = try await render(4.4)
+        precondition(reopenedValues.allSatisfy { $0 < 1 }, "An expired fade cannot reappear on reopening")
         await engine.stop()
         // Deliberately miss output deadlines: a fade must expire in media
         // time even when fewer than eight frames have actually rendered.
