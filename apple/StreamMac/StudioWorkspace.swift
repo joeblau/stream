@@ -14,6 +14,8 @@ final class StudioRuntime {
     let diagnostics: StudioDiagnosticsMonitor
     let localControl: StudioLocalControlServer
     let dispatcher: StudioCommandDispatcher
+    let controllers: StudioControllerManager
+    let chat: StudioChatCoordinator
     let adapters: StudioAdapterManager
 
     init() {
@@ -30,6 +32,9 @@ final class StudioRuntime {
         diagnostics = StudioDiagnosticsMonitor(controller: controller, recorder: recorder)
         dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: sceneStore,
             session: settings, recorder: recorder, previewProgram: previewProgram)
+        controllers = StudioControllerManager()
+        controllers.bind(to: dispatcher)
+        chat = StudioChatCoordinator(dispatcher: dispatcher, previewProgram: previewProgram)
         adapters = StudioAdapterManager()
         adapters.bind(to: localControl)
         StudioAutomationEndpoint.shared.bind(dispatcher: dispatcher, permissions: permissions,
@@ -115,6 +120,8 @@ final class StudioWorkspace: ObservableObject {
         guard let next = pending, next != selection, canSwitch else { return }
         isSwitching = true
         StudioAutomationEndpoint.shared.unbind()
+        runtime.controllers.shutdown()
+        runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.rundown.stop()
         runtime.dispatcher.macros.cancel()
@@ -239,6 +246,8 @@ final class StudioWorkspace: ObservableObject {
         guard canSwitch else { return }
         isSwitching = true
         StudioAutomationEndpoint.shared.unbind()
+        runtime.controllers.shutdown()
+        runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.macros.cancel()
         runtime.dispatcher.rundown.stop()

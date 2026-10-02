@@ -56,7 +56,7 @@ struct MainWindowView: View {
     @Environment(\.assetLibraryStore) private var assetLibrary
     /// Shared Restream chat connection: the sidebar shows it and the settings
     /// pane edits its credentials (W04 — one instance, one sign-in).
-    @State private var chat = RestreamChat()
+    private var chat: RestreamChat { workspace.runtime.chat.restream }
     @State private var showPreflight = false
 
     /// W06 first-run gating (persisted by the app): while false, the studio
@@ -140,7 +140,7 @@ struct MainWindowView: View {
                 .accessibilityLabel("Preview and program panel")
                 .accessibilitySortPriority(4)
             if showChatPanel {
-                ChatSidebarView(chat: chat)
+                ChatSidebarView(coordinator: workspace.runtime.chat)
                     .frame(maxWidth: 420)
                     .focusable()
                     .focused($focusedPanel, equals: .chat)
@@ -200,6 +200,7 @@ struct MainWindowView: View {
                 if let command = action.command { dispatcher.execute(command) }
             }
             localControl.interactionBlocked = { !firstRunCompleted || permissionPrompt != nil }
+            workspace.runtime.controllers.interactionBlocked = { !firstRunCompleted || permissionPrompt != nil }
             localControl.bind(to: dispatcher)
             shortcuts.seedScenes(sceneStore.scenes.map { "scene.\($0.id.rawValue.uuidString).select" })
             dispatcher.execute(.startPreview)
@@ -368,7 +369,7 @@ struct MainWindowView: View {
                      chat: chat,
                      onClose: { dispatcher.execute(.closeSettings) },
                      onResetLayout: resetPanelLayout,
-                     localControl: localControl, adapters: workspace.runtime.adapters)
+                     localControl: localControl, adapters: workspace.runtime.adapters, controllers: workspace.runtime.controllers)
     }
 
     /// Application section action: back to the all-panels-visible layout.
