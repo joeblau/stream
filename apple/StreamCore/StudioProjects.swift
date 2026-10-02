@@ -58,7 +58,8 @@ public enum ProjectDocumentHistory {
         if let old = try? Data(contentsOf: url), old != data,
            (try? JSONSerialization.jsonObject(with: old)) != nil {
             try manager.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
-            let name = "\(Int64(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString).json"
+            let order = String(format: "%020llu", DispatchTime.now().uptimeNanoseconds)
+            let name = "\(Int64(Date().timeIntervalSince1970 * 1000))-\(order)-\(UUID().uuidString).json"
             try old.write(to: backupDirectory.appendingPathComponent(name), options: .atomic)
         }
         try data.write(to: url, options: .atomic)

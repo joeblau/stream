@@ -267,6 +267,6 @@ import Network
         switch state { case .idle: "idle"; case .connecting: "connecting"; case .live: "live"; case .reconnecting: "reconnecting"; case .stopping: "stopping"; case .failed: "failed" }
     }
     private static func recordingLabel(_ state: RecordingSessionState) -> String {
-        switch state { case .idle: "idle"; case .recording: "recording"; case .stopping: "stopping"; case .failed: "failed" }
+        switch state { case .idle: "idle"; case .preparing: "preparing"; case .recording: "recording"; case .paused: "paused"; case .stopping: "stopping"; case .failed: "failed" }
     }
 }

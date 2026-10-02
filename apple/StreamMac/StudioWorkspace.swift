@@ -11,9 +11,11 @@ final class StudioRuntime {
     let controller: StreamController
     let settings: SettingsSession
     let recorder: RecordingController
+    let localControl: StudioLocalControlServer
     let dispatcher: StudioCommandDispatcher
 
     init() {
+        localControl = StudioLocalControlServer()
         sceneStore = SceneStore()
         previewProgram = PreviewProgramModel(selected: sceneStore.selected)
         permissions = PermissionsManager()
@@ -45,6 +47,7 @@ final class StudioWorkspace: ObservableObject {
     @Published private(set) var isSwitching = false
     @Published var showProjects = false
     @Published var recoveryFile: URL?
+    @Published var sceneRecovery: Backup?
     @Published var importPreview: ShowPackagePreview?
     @Published var packageBusy = false
 
@@ -81,7 +84,9 @@ final class StudioWorkspace: ObservableObject {
         try? DesktopStorage.prepare(directory)
         if firstLaunch { Self.copyLegacyFiles(to: directory) }
         DesktopSettingsStore().migrateLegacyIfNeeded()
+        let sceneBackup = Self.recoveryCandidate(in: directory)
         runtime = StudioRuntime()
+        sceneRecovery = sceneBackup
         runtime.sceneStore.setProjectIdentity(catalog.selectedProjectID, name: catalog.projects.first { $0.id == catalog.selectedProjectID }!.name)
         recoveryFile = recovery
         if recovery == nil { saveCatalog() }
@@ -100,6 +105,7 @@ final class StudioWorkspace: ObservableObject {
     func applyPending() async {
         guard let next = pending, next != selection, canSwitch else { return }
         isSwitching = true
+        runtime.localControl.shutdown()
         runtime.dispatcher.rundown.stop()
         runtime.dispatcher.macros.cancel()
         runtime.dispatcher.soundboard.stopAllSoundEffects()
@@ -110,7 +116,9 @@ final class StudioWorkspace: ObservableObject {
             try DesktopStorage.prepare(directory(for: next))
             catalog.selectedProjectID = next.project
             catalog.selectedProfileID = next.profile
+            let sceneBackup = Self.recoveryCandidate(in: directory(for: next))
             runtime = StudioRuntime()
+            sceneRecovery = sceneBackup
             observeRuntime()
             runtime.sceneStore.setProjectIdentity(currentProject.id, name: currentProject.name)
             pending = nil
@@ -194,6 +202,20 @@ final class StudioWorkspace: ObservableObject {
         }
     }
 
+    /// Inspect before SceneStore quarantines unreadable bytes. Loading never
+    /// silently restores a backup; the producer previews and accepts it first.
+    private static func recoveryCandidate(in directory: URL) -> Backup? {
+        let current = directory.appendingPathComponent("stream.scenes.v2.json")
+        guard let data = try? Data(contentsOf: current) else { return nil }
+        if case .success(let migrated) = SceneDocumentMigration.migrateToCurrent(data),
+           let document = try? JSONDecoder().decode(SceneDocument.self, from: migrated), !document.scenes.isEmpty { return nil }
+        return ((try? ProjectDocumentHistory.validBackups(for: current)) ?? []).compactMap { candidate in
+            guard let data = try? Data(contentsOf: candidate), case .success(let migrated) = SceneDocumentMigration.migrateToCurrent(data),
+                  let document = try? JSONDecoder().decode(SceneDocument.self, from: migrated), !document.scenes.isEmpty else { return nil }
+            return Backup(url: candidate, document: document)
+        }.first
+    }
+
     var sceneBackups: [Backup] {
         let url = directory(for: selection).appendingPathComponent("stream.scenes.v2.json")
         return ((try? ProjectDocumentHistory.validBackups(for: url)) ?? []).compactMap { candidate in
@@ -206,6 +228,7 @@ final class StudioWorkspace: ObservableObject {
     func restore(_ backup: Backup) async {
         guard canSwitch else { return }
         isSwitching = true
+        runtime.localControl.shutdown()
         runtime.dispatcher.macros.cancel()
         runtime.dispatcher.rundown.stop()
         runtime.flush()
@@ -216,6 +239,7 @@ final class StudioWorkspace: ObservableObject {
             runtime = StudioRuntime()
             observeRuntime()
             runtime.sceneStore.setProjectIdentity(currentProject.id, name: currentProject.name)
+            sceneRecovery = nil
         } catch { self.error = error.localizedDescription }
         isSwitching = false
     }

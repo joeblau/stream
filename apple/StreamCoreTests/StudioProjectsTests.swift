@@ -38,6 +38,8 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("show.json")
         for n in 0..<30 { try ProjectDocumentHistory.write(Data("{\"n\":\(n)}".utf8), to: url) }
+        let newest = try #require(ProjectDocumentHistory.validBackups(for: url).first)
+        #expect(try Data(contentsOf: newest) == Data("{\"n\":28}".utf8))
         #expect(try ProjectDocumentHistory.validBackups(for: url).count == ProjectDocumentHistory.limit)
         try ProjectDocumentHistory.write(Data("{\"n\":29}".utf8), to: url)
         #expect(try ProjectDocumentHistory.validBackups(for: url).count == ProjectDocumentHistory.limit)

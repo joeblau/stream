@@ -48,7 +48,7 @@ struct MainWindowView: View {
     /// section and the canvas drop share one instance.
     @StateObject private var imageLayers = ImageLayerCoordinator()
     @StateObject private var shortcuts = StudioShortcutController()
-    @StateObject private var localControl = StudioLocalControlServer()
+    @EnvironmentObject private var localControl: StudioLocalControlServer
     @Environment(\.studioReduceMotion) private var reduceMotion
     @State private var panelBeforeCommands: StudioPanel?
     @State private var panelBeforeSheet: StudioPanel?

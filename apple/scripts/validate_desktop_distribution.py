@@ -9,7 +9,7 @@ app = pathlib.Path(sys.argv[1])
 source = pathlib.Path(__file__).resolve().parents[1]
 with (source / "StreamMac/StreamMac.entitlements").open("rb") as file:
     entitlements = plistlib.load(file)
-required = ["app-sandbox", "device.camera", "device.microphone", "network.client",
+required = ["app-sandbox", "device.camera", "device.microphone", "network.client", "network.server",
             "files.user-selected.read-write", "files.bookmarks.app-scope"]
 for suffix in required:
     assert entitlements.get("com.apple.security." + suffix) is True, suffix

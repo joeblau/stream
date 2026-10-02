@@ -59,6 +59,30 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try require(try Data(contentsOf: importedLUT) == fixture, "Imported LUT bytes are missing")
         _ = try CubeLUT.parse(Data(contentsOf: importedLUT))
         try require(importedDocument.scenes[0].id != document.scenes[0].id, "Imported scene IDs were not remapped")
+        // A truncated current scene file must offer explicit recovery, retain
+        // the unreadable original, and never start an output after relaunch.
+        workspace.runtime.flush()
+        let selectedDirectory = workspace.directory(for: workspace.selection)
+        let currentURL = selectedDirectory.appendingPathComponent("stream.scenes.v2.json")
+        _ = workspace.runtime.dispatcher.execute(.renameScene(workspace.runtime.sceneStore.scenes[0].id, to: "Last Saved"))
+        workspace.runtime.flush()
+        try Data("truncated-scene-document".utf8).write(to: currentURL)
+        let restarted = StudioWorkspace(root: root)
+        let recovery = try restarted.sceneRecovery.unwrap("Corrupt scenes did not offer backup recovery")
+        try require(!restarted.runtime.controller.streamState.isActive && !restarted.runtime.recorder.state.isActive, "Recovery started an output")
+        let preserved = try FileManager.default.contentsOfDirectory(at: selectedDirectory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.contains("corrupt") }
+        try require(preserved.contains { (try? Data(contentsOf: $0)) == Data("truncated-scene-document".utf8) }, "Corrupt original was not preserved")
+        await restarted.restore(recovery)
+        try require(restarted.sceneRecovery == nil, "Successful restore kept recovery pending")
+        try require(restarted.runtime.sceneStore.scenes.map(\.name) == recovery.document.scenes.map(\.name), "Accepted backup did not restore scenes")
         print("PASS: project/profile switching, captured store paths, duplication, package preview, consistent ID remapping and packaged LUT bytes")
+    }
+}
+
+private extension Optional {
+    func unwrap(_ message: String) throws -> Wrapped {
+        guard let value = self else { throw NSError(domain: "WorkspaceHarness", code: 2, userInfo: [NSLocalizedDescriptionKey: message]) }
+        return value
     }
 }

@@ -41,6 +41,11 @@ struct StreamMacApp: App {
                 .environmentObject(permissions)
                 .environmentObject(recorder)
                 .environmentObject(dispatcher)
+                .environmentObject(workspace.runtime.localControl)
+                .sheet(item: $workspace.sceneRecovery) { backup in
+                    SceneRecoveryView(backup: backup)
+                        .environmentObject(workspace)
+                }
                 // P03 (issue #80): the asset library — parked on the
                 // dispatcher, injected for the library panel (environment
                 // object) and the G01 image-layer views (environment key).
