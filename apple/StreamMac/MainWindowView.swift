@@ -211,6 +211,7 @@ struct MainWindowView: View {
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
         .onDisappear {
+            controller.stopExternalDisplayOutput()
             dispatcher.macros.cancel()
             localControl.shutdown()
             shortcuts.uninstall()
@@ -675,6 +676,9 @@ struct MainWindowView: View {
                             message: "Remote guest management lands here in a later workstream.")
             case .destinations:
                 ScrollView {
+                    DisclosureGroup("External Display Output") {
+                        ExternalDisplayOutputView(output: controller.externalDisplayOutput)
+                    }.padding(10)
                     DestinationManagerView(session: controller.destinations,
                                            programProfile: controller.activeProfile)
                     DisclosureGroup("Preflight and Local Rehearsal", isExpanded: $showPreflight) {

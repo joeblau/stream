@@ -181,6 +181,30 @@ final class StreamController: ObservableObject {
     private var isPipelineRunning = false
     /// Count of recording outputs tapping the composited frames (0 or 1 today).
     private var recordingDemand = 0
+    private var externalDisplayDemand = 0
+    private var externalDisplayController: ExternalDisplayOutputController?
+    var externalDisplayOutput: ExternalDisplayOutputController {
+        if let existing = externalDisplayController { return existing }
+        let output = ExternalDisplayOutputController { [weak self] profile, sink in
+            guard let self else { return nil }
+            let converter = ExternalProgramImageConverter(profile: profile)
+            self.externalDisplayDemand += 1
+            let subscription = self.addFrameSink(capacity: 1) { frame in
+                if let image = converter.image(frame) { sink(image) }
+            }
+            self.updatePipelineDemand()
+            return { [weak self] in
+                guard let self else { return }
+                self.removeFrameSink(subscription)
+                self.externalDisplayDemand = max(0, self.externalDisplayDemand - 1)
+                self.promoteStagedProfileIfOutputsIdle()
+                self.updatePipelineDemand()
+            }
+        }
+        externalDisplayController = output
+        return output
+    }
+    func stopExternalDisplayOutput() { externalDisplayController?.stop() }
     /// The PREVIEW monitor's preview-engine subscription (staged composition).
     private var previewMonitorSubscription: FrameSubscription?
     /// The PROGRAM monitor's program-engine subscription (registered while the
@@ -265,7 +289,7 @@ final class StreamController: ObservableObject {
         OutputCanvasStore.shared.publish(persisted.outputProfile.canvasSize)
         resilience.stopOutputs = { [weak self] in
             guard let self else { return }
-            self.stopStream(); self.stopRecordingForLifecycle?(); self.stopPreview()
+            self.stopStream(); self.stopRecordingForLifecycle?(); self.stopExternalDisplayOutput(); self.stopPreview()
             self.resilientFrames.clear()
         }
         resilience.showOfflineSlate = { [weak self] in self?.enterPrivacySlate() }
@@ -916,7 +940,7 @@ final class StreamController: ObservableObject {
     }
 
     private var pipelineNeeded: Bool {
-        previewState == .active || streamState.isActive || recordingDemand > 0
+        previewState == .active || streamState.isActive || recordingDemand > 0 || externalDisplayDemand > 0
     }
 
     private func updatePipelineDemand() {
@@ -934,7 +958,7 @@ final class StreamController: ObservableObject {
     /// mid-program, and the recording writer's input is locked to the size of
     /// its first frame).
     private var outputsOwnProfile: Bool {
-        streamState.isActive || recordingDemand > 0
+        streamState.isActive || recordingDemand > 0 || externalDisplayDemand > 0
     }
 
     /// Public read for the W04 settings session: while this is true,
