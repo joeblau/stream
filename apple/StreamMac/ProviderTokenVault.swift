@@ -11,7 +11,13 @@ protocol ProviderCredentialStore: Sendable {
 extension KeychainStore: ProviderCredentialStore {}
 
 actor ProviderTokenVault {
+    #if STREAM_NATIVE_VALIDATION
+    static let shared = ProviderTokenVault(keychain: NativeValidationProviderCredentials(), transport: { _ in
+        throw ProviderFailure(.unavailable)
+    })
+    #else
     static let shared = ProviderTokenVault()
+    #endif
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
     private let keychain: any ProviderCredentialStore
     private let transport: Transport
@@ -132,3 +138,11 @@ actor ProviderTokenVault {
         return data
     }
 }
+
+#if STREAM_NATIVE_VALIDATION
+private struct NativeValidationProviderCredentials: ProviderCredentialStore {
+    func string(for item: KeychainStore.Item) -> String? { nil }
+    func set(_ value: String, for item: KeychainStore.Item) -> Bool { false }
+    func remove(_ item: KeychainStore.Item) {}
+}
+#endif

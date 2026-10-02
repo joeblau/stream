@@ -536,6 +536,9 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
     var ticker: TickerOverlayConfiguration? = nil
     /// Accepted public message identity stages and Takes with its caption.
     var recordingChatMessageID: String? = nil
+    var commentHeaderUTF16Length: Int? = nil
+    var commentPageIndex = 0
+    var commentAvatarKey: String? = nil
 
     init(text: String = "",
          fontName: String? = nil,
@@ -589,6 +592,9 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
         timer = try container.decodeIfPresent(TimerOverlayConfiguration.self, forKey: .timer)
         ticker = try container.decodeIfPresent(TickerOverlayConfiguration.self, forKey: .ticker)
         recordingChatMessageID = try container.decodeIfPresent(String.self, forKey: .recordingChatMessageID)
+        commentHeaderUTF16Length = try container.decodeIfPresent(Int.self, forKey: .commentHeaderUTF16Length)
+        commentPageIndex = try container.decodeIfPresent(Int.self, forKey: .commentPageIndex) ?? 0
+        commentAvatarKey = try container.decodeIfPresent(String.self, forKey: .commentAvatarKey)
     }
 
     /// The payload's styling fields as one `TextTitleStyle` value — what a

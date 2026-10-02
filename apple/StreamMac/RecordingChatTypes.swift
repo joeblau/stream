@@ -31,10 +31,24 @@ struct RecordingChatPaint: Codable, Hashable, Sendable {
     let slotID: String
     let messageID: String
     let fingerprint: String
+    var bodyUTF16Start: Int? = nil
+    var bodyUTF16Length: Int? = nil
+    var pageIndex: Int? = nil
+    var pageCount: Int? = nil
+    var bindingKey: Self { .init(slotID: slotID, messageID: messageID, fingerprint: fingerprint) }
     static func fingerprint(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
-    var isValid: Bool { slotID.utf8.count <= 64 && !slotID.isEmpty && messageID.utf8.count <= 128 && !messageID.isEmpty && fingerprint.count == 64 }
+    var isValid: Bool {
+        slotID.utf8.count <= 64 && !slotID.isEmpty && messageID.utf8.count <= 128 && !messageID.isEmpty && fingerprint.count == 64
+            && ((bodyUTF16Start == nil) == (bodyUTF16Length == nil))
+            && ((pageIndex == nil) == (pageCount == nil))
+            && (pageIndex == nil || pageIndex! < pageCount!)
+            && (bodyUTF16Start.map { $0 >= 0 && $0 <= 20_000 } ?? true)
+            && (bodyUTF16Length.map { $0 >= 0 && $0 <= 20_000 } ?? true)
+            && (pageIndex.map { $0 >= 0 && $0 < 256 } ?? true)
+            && (pageCount.map { $0 > 0 && $0 <= 256 } ?? true)
+    }
     private static var key: CFString { "com.joeblau.Stream.recording.publicChatPaint.v1" as CFString }
     static func attach(_ value: [Self], to sample: CMSampleBuffer) {
         guard let data = try? JSONEncoder().encode(Array(value.filter(\.isValid).prefix(32))), !value.isEmpty else { return }
@@ -94,12 +108,31 @@ struct RecordingChatRecord: Codable, Sendable {
     var messageID: String?
     var whilePaused: Bool?
     var title: String?
+    var bodyUTF16Start: Int? = nil
+    var bodyUTF16Length: Int? = nil
+    var pageIndex: Int? = nil
+    var pageCount: Int? = nil
+    var paintedBody: String? {
+        guard let message else { return nil }
+        let value = message.text as NSString
+        guard let start = bodyUTF16Start, let length = bodyUTF16Length else { return message.text }
+        guard start >= 0, length >= 0, start <= value.length, length <= value.length - start else { return nil }
+        return value.substring(with: NSRange(location: start, length: length))
+    }
     var isValid: Bool {
         seconds.isFinite && seconds >= 0 && seconds < 31_536_000
             && ["message", "show", "hide", "marker"].contains(type)
             && (message == nil || message!.isValid)
             && (slotID?.utf8.count ?? 0) <= 64 && (messageID?.utf8.count ?? 0) <= 128
             && (title?.utf8.count ?? 0) <= 4_096
+            && ((bodyUTF16Start == nil) == (bodyUTF16Length == nil))
+            && ((pageIndex == nil) == (pageCount == nil))
+            && (pageIndex == nil || pageIndex! < pageCount!)
+            && (bodyUTF16Start == nil || (bodyUTF16Start! >= 0 && bodyUTF16Start! <= 20_000))
+            && (bodyUTF16Length == nil || (bodyUTF16Length! >= 0 && bodyUTF16Length! <= 20_000))
+            && (pageIndex == nil || (pageIndex! >= 0 && pageIndex! < 256))
+            && (pageCount == nil || (pageCount! > 0 && pageCount! <= 256))
+            && (type != "show" || paintedBody != nil)
             && (type != "message" || message != nil)
             && (type != "show" || (message != nil && slotID?.isEmpty == false && messageID == message?.id))
             && (type != "hide" || (messageID?.isEmpty == false && slotID?.isEmpty == false))
@@ -129,8 +162,8 @@ final class RecordingChatFeed: @unchecked Sendable {
     func bind(_ binding: RecordingChatBinding) {
         guard binding.paint.isValid, binding.message.isValid, binding.paint.messageID == binding.message.id else { return }
         lock.lock(); defer { lock.unlock() }
-        if bindings[binding.paint] == nil { bindingOrder.append(binding.paint) }
-        bindings[binding.paint] = binding.message
+        if bindings[binding.paint.bindingKey] == nil { bindingOrder.append(binding.paint.bindingKey) }
+        bindings[binding.paint.bindingKey] = binding.message
         while bindingOrder.count > 128 { bindings.removeValue(forKey: bindingOrder.removeFirst()) }
     }
     func install(_ archive: RecordingChatArchive?) { lock.lock(); self.archive = archive; lock.unlock() }
@@ -141,7 +174,7 @@ final class RecordingChatFeed: @unchecked Sendable {
     }
     func frame(_ frame: RecordingChatFrame, into target: RecordingChatArchive) {
         lock.lock()
-        let bound = frame.painted.prefix(32).compactMap { paint in bindings[paint].map { RecordingChatBinding(paint: paint, message: $0) } }
+        let bound = frame.painted.prefix(32).compactMap { paint in bindings[paint.bindingKey].map { RecordingChatBinding(paint: paint, message: $0) } }
         lock.unlock()
         target.frame(frame, bindings: bound)
     }

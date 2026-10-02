@@ -40,6 +40,7 @@ private enum RestreamKeychain {
     /// Copy once, preserving legacy iOS/shared credentials. A marker in the new
     /// service prevents sign-out from resurrecting the old access token.
     private static func migrateLegacyIfNeeded() {
+        #if !STREAM_NATIVE_VALIDATION
         let flag = "restream.desktopCredentialMigration.v1"
         if UserDefaults.standard.bool(forKey: flag) || read("desktopMigration", service: service) != nil { return }
         // Record the attempt before copying. Even if Keychain is locked or an
@@ -53,6 +54,7 @@ private enum RestreamKeychain {
             }
         }
         _ = write("1", for: "desktopMigration")
+        #endif
     }
     #else
     private static let service = "com.joeblau.Stream.restream"
@@ -65,6 +67,9 @@ private enum RestreamKeychain {
         _ = write(value, for: account)
     }
     private static func write(_ value: String?, for account: String) -> Bool {
+        #if STREAM_NATIVE_VALIDATION
+        return false
+        #else
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service, kSecAttrAccount as String: account]
         guard let value, !value.isEmpty else {
@@ -79,6 +84,7 @@ private enum RestreamKeychain {
         var attrs = base
         for (key, value) in values { attrs[key] = value }
         return SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess
+        #endif
     }
     static func get(_ account: String) -> String? {
         #if os(macOS)
@@ -87,6 +93,9 @@ private enum RestreamKeychain {
         return read(account, service: service)
     }
     private static func read(_ account: String, service: String) -> String? {
+        #if STREAM_NATIVE_VALIDATION
+        return nil
+        #else
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service, kSecAttrAccount as String: account,
             kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
@@ -94,6 +103,7 @@ private enum RestreamKeychain {
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
+        #endif
     }
 }
 
