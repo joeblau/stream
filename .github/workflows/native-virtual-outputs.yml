@@ -1,0 +1,30 @@
+name: Native Virtual Outputs
+
+on:
+  pull_request:
+    paths:
+      - 'apple/StreamCameraExtension/**'
+      - 'apple/VirtualOutputShared/**'
+      - 'apple/prototypes/VirtualMicrophone/**'
+      - 'apple/scripts/*virtual_camera*'
+      - 'apple/scripts/*virtual_microphone*'
+      - '.github/workflows/native-virtual-outputs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-contracts:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26-intel, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test actual CMIO classes without installation
+        run: apple/scripts/run_studio_virtual_camera_harness.zsh
+      - name: Build universal HAL prototype and test actual driver callbacks
+        run: apple/scripts/run_studio_virtual_microphone_harness.zsh

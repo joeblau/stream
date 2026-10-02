@@ -119,6 +119,13 @@ System-wide HAL installation, signed packaging, permission and client tests
 remain separate from camera extension activation. No microphone feature is
 advertised merely because the camera compiles or activates.
 
+The reproducible [HAL prototype and decision record](../prototypes/VirtualMicrophone/README.md)
+builds a universal `.driver` and tests its actual AudioServerPlugIn interface,
+timestamp-indexed stereo PCM, bounds, underrun/stop silence and clock/session
+lifecycle without installing it. #173 remains open for signed installation and
+real client measurements; #174 does not proceed as a shipping implementation
+until that route is validated.
+
 ## Primary sources
 
 - [Apple: creating a camera extension](https://developer.apple.com/documentation/coremediaio/creating-a-camera-extension-with-core-media-i-o)
