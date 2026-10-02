@@ -56,3 +56,24 @@ mixer sliders, restore focus after all native import/permission/settings sheets,
 read chat with Follow disabled, and test 1024×640 at every text size/contrast
 setting. Check global registration and ordinary text input while another app is
 foreground. These manual checks are not represented as completed by the harness.
+
+## Show macros
+
+Inspector > Macros creates named ordered sequences from the shared command
+catalog. Edit a step's delay, condition and Stop/Continue failure policy, and
+move steps with keyboard buttons. Preview / Run lists every step and its current
+availability before running. Future steps are checked again at execution time;
+a currently stopped output may become available after an earlier step starts it.
+
+Only one macro runs at a time. Output/Take transitions settle before the next
+step, with a 30-second timeout; publisher or recording failures stop the sequence
+unless that step explicitly uses Continue. Conflicting manual Start/Take/rundown
+actions are rejected while a macro owns the sequence. Emergency Stop cancels the
+macro before stopping its output. Cancel prevents delayed future steps, retains
+completed actions and reports progress. Macros cannot invoke macros or use the
+output toggle command. Launching a project never resumes an old macro run.
+
+Macro documents contain stable command/resource IDs and policy only, stored in
+`stream.macros.v1.json` within the project. Macro Run and Cancel are available in
+the same shortcut catalog that hardware controllers consume. Test with
+`apple/scripts/run_show_macros_harness.zsh`.

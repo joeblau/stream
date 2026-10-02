@@ -90,6 +90,7 @@ struct MainWindowView: View {
         case mixer = "Mixer"
         // A03 (issue #98): the sound panel (soundboard, music, scene sounds).
         case media = "Sound"
+        case macros = "Macros"
         // P03 (issue #80): the asset library — every referenced file, its
         // availability, and missing-asset repair.
         case assets = "Assets"
@@ -186,6 +187,7 @@ struct MainWindowView: View {
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
         .onDisappear {
+            dispatcher.macros.cancel()
             shortcuts.uninstall()
             shortcuts.actions = { [] }; shortcuts.onExecute = { _ in }
         }
@@ -608,6 +610,8 @@ struct MainWindowView: View {
                 SoundboardPanelView()
                     .environmentObject(dispatcher.soundboardStore)
                     .environmentObject(dispatcher.soundboard)
+            case .macros:
+                ShowMacroPanelView(macros: dispatcher.macros)
             case .assets:
                 // P03 (issue #80): the asset library panel — inventory,
                 // availability badges, and missing-asset repair.
