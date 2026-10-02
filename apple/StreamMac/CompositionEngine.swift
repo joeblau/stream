@@ -224,6 +224,7 @@ actor CompositionEngine {
     /// engine (re)start.
     private var transition: ActiveTransition?
     /// S09: in-flight per-layer visibility fades (same-scene edits). Keyed
+    /// elapsed time follows the host clock even when rendering skips ticks. Keyed
     /// by stable LayerID so an interrupted fade reverses from its current
     /// opacity — the defined final state is always the latest scene value.
     private var layerFades: [LayerID: LayerFade] = [:]
@@ -399,7 +400,7 @@ actor CompositionEngine {
         /// The resolved style — a stinger whose media is missing resolves
         /// to `.dissolve` here (the documented honest fallback).
         var style: SceneTransitionStyle
-        var startSequence: Int64
+        var startedAt: CMTime
         var durationFrames: Int
         var direction: TransitionDirection
         var dipColorHex: String
@@ -418,7 +419,7 @@ actor CompositionEngine {
         var backToFrontIndex: Int
         var fromOpacity: Double
         var toOpacity: Double
-        var startSequence: Int64
+        var startedAt: CMTime
         var durationFrames: Int
     }
 
@@ -451,7 +452,7 @@ actor CompositionEngine {
                                            style: .dissolve, config: config, fps: fps)
             }
             return ActiveTransition(from: previous, to: scene, style: .stinger,
-                                    startSequence: frameSequence, durationFrames: 0,
+                                    startedAt: CMClockGetTime(CMClockGetHostTimeClock()), durationFrames: 0,
                                     direction: config.direction,
                                     dipColorHex: config.dipColorHex,
                                     stingerCutPointSeconds: max(0, config.stingerCutPointSeconds),
@@ -470,7 +471,7 @@ actor CompositionEngine {
         let durationFrames = Int((config.durationSeconds * Double(fps)).rounded())
         guard durationFrames > 0 else { return nil }
         return ActiveTransition(from: from, to: to, style: style,
-                                startSequence: frameSequence,
+                                startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
                                 durationFrames: durationFrames,
                                 direction: config.direction,
                                 dipColorHex: config.dipColorHex,
@@ -513,8 +514,8 @@ actor CompositionEngine {
                                    sequence: frameSequence,
                                    stinger: stingerFrame)
         }
-        let progress = Double(frameSequence - active.startSequence)
-            / Double(max(1, active.durationFrames))
+        let progress = max(0, CMTimeSubtract(pts, active.startedAt).seconds)
+            * Double(max(1, frameRate)) / Double(max(1, active.durationFrames))
         guard progress < 1 else { return nil }
         return renderer.renderTransition(from: active.from, to: active.to,
                                          blend: SceneBlend(style: active.style,
@@ -552,7 +553,7 @@ actor CompositionEngine {
                                              backToFrontIndex: 0,
                                              fromOpacity: current,
                                              toOpacity: 1,
-                                             startSequence: frameSequence,
+                                             startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
                                              durationFrames: durationFrames)
         }
         for (index, layer) in old.layers.enumerated()
@@ -562,7 +563,7 @@ actor CompositionEngine {
                                              backToFrontIndex: index,
                                              fromOpacity: current,
                                              toOpacity: 0,
-                                             startSequence: frameSequence,
+                                             startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
                                              durationFrames: durationFrames)
         }
     }
@@ -571,8 +572,8 @@ actor CompositionEngine {
     /// the duration (nil when no fade is in flight for the layer).
     private func currentFadeValue(_ id: LayerID) -> Double? {
         guard let fade = layerFades[id] else { return nil }
-        let progress = Double(frameSequence - fade.startSequence)
-            / Double(max(1, fade.durationFrames))
+        let progress = max(0, CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), fade.startedAt).seconds)
+            * Double(max(1, frameRate)) / Double(max(1, fade.durationFrames))
         guard progress < 1 else { return fade.toOpacity }
         return fade.fromOpacity + (fade.toOpacity - fade.fromOpacity) * max(0, progress)
     }
@@ -581,14 +582,14 @@ actor CompositionEngine {
     /// layer and the exiting layers (old content, old back-to-front order).
     /// Completed fades leave the map here — fade-ins end at full opacity,
     /// fade-outs drop their layer.
-    private func layerFadeOverrides() -> (opacity: [LayerID: Double], exiting: [LayerNode]) {
+    private func layerFadeOverrides(at pts: CMTime) -> (opacity: [LayerID: Double], exiting: [LayerNode]) {
         guard !layerFades.isEmpty else { return ([:], []) }
         var opacity: [LayerID: Double] = [:]
         var exiting: [(index: Int, layer: LayerNode)] = []
         var completed: [LayerID] = []
         for (id, fade) in layerFades {
-            let progress = Double(frameSequence - fade.startSequence)
-                / Double(max(1, fade.durationFrames))
+            let progress = max(0, CMTimeSubtract(pts, fade.startedAt).seconds)
+                * Double(max(1, frameRate)) / Double(max(1, fade.durationFrames))
             guard progress < 1 else {
                 completed.append(id)
                 continue
@@ -696,7 +697,7 @@ actor CompositionEngine {
             transition = nil   // completed this tick → settled render below
         }
 
-        let fades = layerFadeOverrides()
+        let fades = layerFadeOverrides(at: pts)
         guard let frame = renderer.render(scene: scene,
                                           overlayContext: overlayContext,
                                           canvasSize: canvasSize,
