@@ -56,6 +56,7 @@ jobs:
           zsh scripts/run_show_macros_harness.zsh
           zsh scripts/run_studio_local_control_harness.zsh
           zsh scripts/run_studio_automation_harness.zsh
+          PROVIDERS_BUILD_PATH=build/tests zsh scripts/run_provider_accounts_harness.zsh
       - name: Test private program slate rendering
         run: PRIVACY_BUILD_PATH=build/desktop zsh scripts/run_studio_privacy_harness.zsh
       - name: Test public chat and recovery metadata boundaries
