@@ -20,6 +20,7 @@ final class StudioRuntime {
         controller = StreamController(sceneStore: sceneStore, previewProgram: previewProgram, permissions: permissions)
         settings = SettingsSession(controller: controller)
         recorder = RecordingController()
+        RecordingTerminationDelegate.recorder = recorder
         dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: sceneStore,
             session: settings, recorder: recorder, previewProgram: previewProgram)
     }
