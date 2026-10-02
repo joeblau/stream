@@ -27,6 +27,7 @@ struct StreamMacApp: App {
             MainWindowView(firstRunCompleted: $hasCompletedFirstRun)
                 .id(workspace.currentProfile.id)
                 .environmentObject(workspace)
+                .onOpenURL { workspace.previewPackage($0) }
                 .environmentObject(sceneStore)
                 .environmentObject(previewProgram)
                 .environmentObject(streamController)

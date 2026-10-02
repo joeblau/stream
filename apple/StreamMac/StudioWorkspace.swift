@@ -31,6 +31,7 @@ final class StudioRuntime {
         dispatcher.assetLibrary.flushPendingWrites()
         dispatcher.soundboardStore.flushPendingWrites()
         dispatcher.annotations.flushPendingWrites()
+        dispatcher.pdfDecks.flushPendingWrites()
         dispatcher.ptzStore.flushPendingWrites()
     }
 }
@@ -44,6 +45,8 @@ final class StudioWorkspace: ObservableObject {
     @Published private(set) var isSwitching = false
     @Published var showProjects = false
     @Published var recoveryFile: URL?
+    @Published var importPreview: ShowPackagePreview?
+    @Published var packageBusy = false
 
     struct Selection: Equatable {
         var project: UUID
@@ -217,6 +220,90 @@ final class StudioWorkspace: ObservableObject {
     private func observeRuntime() {
         stateObservation = runtime.controller.$streamState.combineLatest(runtime.recorder.$state)
             .sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+
+    func choosePackage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.streamShow]
+        panel.canChooseDirectories = true
+        panel.treatsFilePackagesAsDirectories = false
+        if panel.runModal() == .OK, let url = panel.url { previewPackage(url) }
+    }
+
+    func previewPackage(_ url: URL) {
+        packageBusy = true
+        Task {
+            do { importPreview = try await Task.detached { try ShowPackageIO.preview(url) }.value }
+            catch { self.error = String(describing: error); showProjects = true }
+            packageBusy = false
+        }
+    }
+
+    func importPreviewedPackage() async {
+        guard let preview = importPreview, !packageBusy else { return }
+        packageBusy = true
+        let project = StudioProject(name: preview.name)
+        let target = Selection(project: project.id, profile: project.profiles[0].id)
+        let destination = directory(for: target)
+        do {
+            try await Task.detached { try ShowPackageIO.importFiles(from: preview.url, to: destination) }.value
+            catalog.projects.append(project)
+            pending = target
+            importPreview = nil
+            showProjects = true
+            saveCatalog()
+        } catch { self.error = String(describing: error) }
+        packageBusy = false
+    }
+
+    func exportPackage(includeMedia: Bool, selectedSceneOnly: Bool) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.streamShow]
+        panel.nameFieldStringValue = currentProject.name + ".streamshow"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        runtime.flush()
+        var document = runtime.sceneStore.document
+        if selectedSceneOnly {
+            var required: Set<SceneID> = [document.selectedID]
+            var changed = true
+            while changed {
+                let previous = required
+                for scene in document.scenes where required.contains(scene.id) {
+                    for layer in scene.layers { if case .scene(let reference) = layer.payload { required.insert(reference.sceneID) } }
+                }
+                changed = previous != required
+            }
+            document.scenes.removeAll { !required.contains($0.id) }
+            let sourceIDs = Set((document.scenes.flatMap(\.layers) + document.overlays).compactMap(\.sourceID))
+            document.sources.removeAll { !sourceIDs.contains($0.id) }
+        }
+        var documents: [String: Data] = [:]
+        let directory = directory(for: selection)
+        for name in PortableShow.documentNames {
+            if let data = try? Data(contentsOf: directory.appendingPathComponent(name)) { documents[name] = data }
+        }
+        documents["stream.scenes.v2.json"] = try? JSONEncoder().encode(document)
+        var assets = runtime.dispatcher.assetLibrary.assets
+        var media: [ShowPackageIO.Media] = []
+        for i in assets.indices {
+            let path = "Assets/\(assets[i].id)/\(URL(fileURLWithPath: assets[i].fileName).lastPathComponent)"
+            if includeMedia, let access = runtime.dispatcher.assetLibrary.access(for: assets[i].id), access.isAccessible {
+                assets[i].storage = .projectCopy
+                assets[i].relativePath = path
+                media.append(.init(access: access, relativePath: path))
+            } else { assets[i].storage = .linked; assets[i].relativePath = nil }
+            assets[i].bookmarkData = nil; assets[i].lastKnownPath = ""
+        }
+        documents["stream.assets.v1.json"] = try? JSONEncoder().encode(AssetLibraryDocument(assets: assets, usage: [:]))
+        let packageDocuments = documents, packageMedia = media, name = currentProject.name
+        packageBusy = true
+        Task {
+            do {
+                try await Task.detached { try ShowPackageIO.export(documents: packageDocuments, media: packageMedia,
+                    name: name, includeMedia: includeMedia, to: url) }.value
+            } catch { self.error = String(describing: error) }
+            packageBusy = false
+        }
     }
 
     private static func copyCredentials(from source: URL, to target: URL) {

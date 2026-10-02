@@ -6,6 +6,9 @@ struct ProjectBrowserView: View {
     @State private var name = ""
     @State private var includeArchived = false
     @State private var showHistory = false
+    @State private var includeMedia = true
+    @State private var selectedSceneOnly = false
+    @State private var showTemplates = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -49,6 +52,15 @@ struct ProjectBrowserView: View {
             }.frame(maxHeight: 140)
             Toggle("Show archived projects", isOn: $includeArchived)
             Button("Backup History…") { showHistory = true }
+            Button("Starter Scenes…") { showTemplates = true }
+            HStack {
+                Button("Import Show…") { workspace.choosePackage() }
+                Toggle("Include media", isOn: $includeMedia)
+                Toggle("Selected scene only", isOn: $selectedSceneOnly)
+                Button("Export Show…") { workspace.exportPackage(includeMedia: includeMedia, selectedSceneOnly: selectedSceneOnly) }
+            }.disabled(workspace.packageBusy)
+            Text("Transfers exclude credentials, device identities, remote widget URLs, and sandbox bookmarks. Missing assets can be relinked in Assets.")
+                .font(.caption).foregroundStyle(.secondary)
             if workspace.pending != nil {
                 HStack {
                     Text(workspace.canSwitch ? "Apply opens the staged show and stops local preview." : "Stop streaming and recording before applying the staged show.")
@@ -67,6 +79,22 @@ struct ProjectBrowserView: View {
         }
         .padding(12)
         .background(.regularMaterial)
+        .sheet(isPresented: $showTemplates) { StarterSceneGallery() }
+        .sheet(item: $workspace.importPreview) { preview in
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Import \(preview.name)").font(.headline)
+                Text("\(preview.fileCount) files · \(preview.includedMedia ? "Media included" : "Relink media after importing")")
+                List(preview.sceneNames, id: \.self) { Text($0) }
+                Text("Import creates a separate show and remaps resource IDs. Apply the staged show when outputs are stopped; review source and destination settings before production.")
+                HStack {
+                    Button("Cancel") { workspace.importPreview = nil }
+                    Spacer()
+                    Button("Import as New Show") { Task { await workspace.importPreviewedPackage() } }
+                        .disabled(workspace.packageBusy)
+                }
+                if let error = workspace.error { Text(error).foregroundStyle(.orange) }
+            }.padding(20).frame(width: 620, height: 420)
+        }
         .sheet(isPresented: $showHistory) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Scene Backup History").font(.headline)

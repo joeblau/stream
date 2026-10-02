@@ -76,6 +76,7 @@ struct MainWindowView: View {
     @AppStorage("studio.showSettingsPanel") private var showSettingsPanel = false
 
     @State private var inspectorTab: InspectorTab = .layers
+    @State private var showStudioHelp = false
 
     /// Keyboard-focus tracking per panel, so dismissing settings returns
     /// focus to wherever it was (W04 acceptance).
@@ -108,6 +109,10 @@ struct MainWindowView: View {
                 Button { workspace.showProjects.toggle() } label: {
                     Label(workspace.currentProject.name + " · " + workspace.currentProfile.name, systemImage: "folder")
                 }.help("Open shows and production profiles")
+            }
+            ToolbarItem(placement: .automatic) {
+                Button { showStudioHelp.toggle() } label: { Label("Studio Help", systemImage: "questionmark.circle") }
+                    .popover(isPresented: $showStudioHelp) { StudioHelpView() }
             }
         }
     }
