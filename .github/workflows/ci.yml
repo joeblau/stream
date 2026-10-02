@@ -59,6 +59,7 @@ jobs:
           zsh scripts/run_studio_virtual_camera_harness.zsh
           PROVIDERS_BUILD_PATH=build/tests zsh scripts/run_provider_accounts_harness.zsh
           CHAT_BUILD_PATH=build/tests zsh scripts/run_direct_chat_harness.zsh
+          ENDING_BUILD_PATH=build/tests zsh scripts/run_studio_ending_harness.zsh
       - name: Test private program slate rendering
         run: PRIVACY_BUILD_PATH=build/desktop zsh scripts/run_studio_privacy_harness.zsh
       - name: Test public chat and recovery metadata boundaries
@@ -67,6 +68,7 @@ jobs:
           RECOVERY_BUILD_PATH=build/tests zsh scripts/run_session_recovery_harness.zsh
       - name: Qualify recorded public chat timing
         run: CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh
+
       - name: Qualify generated program recordings
         run: zsh scripts/run_program_recording_harness.zsh
       - name: Validate sandbox declaration

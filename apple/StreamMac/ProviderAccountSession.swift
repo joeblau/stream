@@ -41,6 +41,12 @@ final class ProviderAccountSession: ObservableObject {
     private var receivers: [ManagedProvider: OAuthLoopbackReceiver] = [:]
     private var hourlyValidation: Task<Void, Never>?
     private var boot: Task<Void, Never>?
+    private var endingEpochs: [ManagedProvider: UUID] = [:]
+    private func endingEpoch(_ provider: ManagedProvider) -> UUID {
+        if let epoch = endingEpochs[provider] { return epoch }
+        let epoch = UUID(); endingEpochs[provider] = epoch; return epoch
+    }
+    private func hasEndingEpoch(_ provider: ManagedProvider, _ epoch: UUID) -> Bool { endingEpoch(provider) == epoch }
     init(restream: any ProviderRestreamBoundary, vault: ProviderTokenVault = .shared,
          transport: @escaping ProviderTokenVault.Transport = ProviderTokenVault.network,
          openBrowser: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
@@ -129,11 +135,13 @@ final class ProviderAccountSession: ObservableObject {
         accounts[provider]?.isWorking = false; accounts[provider]?.devicePrompt = nil
     }
     func shutdown() {
+        for provider in ManagedProvider.allCases { endingEpochs[provider] = UUID() }
         directChat?.shutdown()
         boot?.cancel(); boot = nil; hourlyValidation?.cancel(); hourlyValidation = nil
         for provider in ManagedProvider.allCases { cancel(provider); cooldowns[provider]?.cancel(); cooldowns[provider] = nil }
     }
     func forget(_ provider: ManagedProvider) {
+        endingEpochs[provider] = UUID()
         directChat?.stop(provider)
         let generation = begin(provider, action: "Forgetting local authorization")
         jobs[provider] = Task { [weak self] in
@@ -149,6 +157,7 @@ final class ProviderAccountSession: ObservableObject {
     }
     func authorize(_ provider: ManagedProvider, clientID: String, additionalScopes: [String] = []) {
         guard [.youtube, .twitch].contains(provider) else { return }
+        endingEpochs[provider] = UUID()
         directChat?.stop(provider)
         let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
         let generation = begin(provider, action: "Waiting for provider authorization")
@@ -317,6 +326,50 @@ final class ProviderAccountSession: ObservableObject {
         mutateYouTube { try await $0.editYouTubeEvent(id: eventID, title: draft.title, description: draft.description, scheduledAt: draft.scheduledAt) }
     }
     func completeYouTube(eventID: String) { mutateYouTube { try await $0.completeYouTubeEvent(id: eventID) } }
+    /// Independent explicit ending operations do not cancel metadata work or
+    /// another target's completion. OAuth replacement still invalidates them.
+    func endRemote(_ binding: ProviderDestinationBinding, reviewOnly: Bool = false) async -> ProviderCompletionReceipt {
+        guard binding.provider == .youtube, let id = binding.eventID else { return .init(.unsupported) }
+        guard canRequest(.youtube) else { return .init(.blocked, failure: .init(.rateLimited)) }
+        let epoch = endingEpoch(.youtube), credential = await vault.generation(.youtube)
+        let scopes = await vault.scopes(.youtube)
+        let canWrite = scopes.contains("https://www.googleapis.com/auth/youtube") || scopes.contains("https://www.googleapis.com/auth/youtube.force-ssl")
+        guard canWrite || (reviewOnly && scopes.contains("https://www.googleapis.com/auth/youtube.readonly")) else {
+            return .init(.blocked, failure: .init(.permission))
+        }
+        let vault = vault
+        let boundary = ProviderAPI { [weak self] provider, request in
+            guard await self?.hasEndingEpoch(provider, epoch) == true,
+                  await vault.generation(provider) == credential, !Task.isCancelled else { throw CancellationError() }
+            return try await vault.send(provider, request: request)
+        }
+        let result = reviewOnly ? await boundary.reviewYouTubeEnd(id: id, expectedChannelID: binding.channelID)
+            : await boundary.endYouTubeEvent(id: id, expectedChannelID: binding.channelID)
+        guard endingEpoch(.youtube) == epoch, await vault.generation(.youtube) == credential, !Task.isCancelled else {
+            return .init(.unconfirmed, failure: .init(.unavailable))
+        }
+        if let event = result.event {
+            accounts[.youtube]?.events = Self.merge((accounts[.youtube]?.events ?? []).filter { $0.id != event.id } + [event])
+            accounts[.youtube]?.verifiedAt = result.receivedAt
+        } else if let index = accounts[.youtube]?.events.firstIndex(where: { $0.id == id }) {
+            accounts[.youtube]?.events[index].state = .unknown
+        }
+        accounts[.youtube]?.failure = result.failure
+        if let failure = result.failure {
+            accounts[.youtube]?.verifiedAt = nil
+            if failure.kind == .authorization { accounts[.youtube]?.hasCredential = false; directChat?.stop(.youtube) }
+            if failure.kind == .rateLimited {
+                let delay = max(1, failure.retryAfter ?? 60)
+                accounts[.youtube]?.retryUntil = Date().addingTimeInterval(delay)
+                cooldowns[.youtube]?.cancel()
+                cooldowns[.youtube] = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                    self?.accounts[.youtube]?.retryUntil = nil; self?.cooldowns[.youtube] = nil
+                }
+            }
+        }
+        return result
+    }
     func canRequest(_ provider: ManagedProvider) -> Bool { (accounts[provider]?.retryUntil ?? .distantPast) <= Date() }
     private func mutateYouTube(_ operation: @escaping @Sendable (ProviderAPI) async throws -> ProviderEvent) {
         guard canRequest(.youtube) else { return }

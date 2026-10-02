@@ -19,12 +19,16 @@ final class DestinationOutputController: ObservableObject {
 
     private struct Runtime {
         var generation: UUID
+        var destination: StreamDestination
         var publisher: any Publisher
         var video: DestinationVideoMailbox
         var startTask: Task<Void, Never>
         var eventTask: Task<Void, Never>
     }
     private var runtimes: [UUID: Runtime] = [:]
+    private var pendingStops: [UUID: (generation: UUID, task: Task<Void, Never>)] = [:]
+    private var completedStops: Set<UUID> = []
+    private var completedStopOrder: [UUID] = []
     private let factory: (StreamCore.StreamProtocol) -> any Publisher
 
     init(factory: @escaping (StreamCore.StreamProtocol) -> any Publisher) {
@@ -76,7 +80,7 @@ final class DestinationOutputController: ObservableObject {
                 self.fail(id: id, message: "The destination could not connect. Check its endpoint, credentials and ingest availability.")
             }
         }
-        runtimes[id] = Runtime(generation: generation, publisher: publisher, video: mailbox,
+        runtimes[id] = Runtime(generation: generation, destination: destination, publisher: publisher, video: mailbox,
                                startTask: startTask, eventTask: eventTask)
         fanout.add(id: id, publisher: publisher, video: mailbox)
         changed()
@@ -91,6 +95,9 @@ final class DestinationOutputController: ObservableObject {
 
     func stop(_ id: UUID) {
         guard let runtime = runtimes.removeValue(forKey: id) else {
+            // Repeated disconnect requests must not fabricate an idle receipt
+            // while the original publisher is still finishing its stop.
+            if pendingStops[id] != nil { return }
             states[id] = .idle
             changed()
             return
@@ -102,13 +109,43 @@ final class DestinationOutputController: ObservableObject {
         runtime.eventTask.cancel()
         runtime.video.stop()
         changed()
-        Task { [weak self] in
+        let task = Task { [weak self] in
             await runtime.publisher.stop()
-            // A fresh session may already own this ID. Never stop that session.
-            guard let self, self.runtimes[id] == nil, self.states[id] == .stopping else { return }
+            guard let self else { return }
+            self.completedStops.insert(runtime.generation); self.completedStopOrder.append(runtime.generation)
+            while self.completedStopOrder.count > 128 { self.completedStops.remove(self.completedStopOrder.removeFirst()) }
+            let ownsStop = self.pendingStops[id]?.generation == runtime.generation
+            if ownsStop { self.pendingStops[id] = nil }
+            // A fresh session or teardown may already own this ID.
+            guard ownsStop, self.runtimes[id] == nil, self.states[id] == .stopping else { return }
             self.states[id] = .idle
             self.changed()
         }
+        pendingStops[id] = (runtime.generation, task)
+    }
+
+    struct EndingSession: Sendable { let destination: StreamDestination; let token: UUID }
+    enum LocalStopResult: String, Sendable { case stopped, superseded, unconfirmed }
+    /// The routing snapshot belongs to the session that actually started;
+    /// applying edits for a future start cannot end the wrong remote event.
+    var endingSessions: [EndingSession] { runtimes.values.map { .init(destination: $0.destination, token: $0.generation) } }
+    func sessionToken(_ id: UUID) -> UUID? { runtimes[id]?.generation }
+    func stopReceipt(_ id: UUID, token: UUID) -> LocalStopResult {
+        if completedStops.contains(token) { return .stopped }
+        if let current = runtimes[id]?.generation, current != token { return .superseded }
+        return .unconfirmed
+    }
+    func stopIfCurrent(_ id: UUID, token: UUID, timeout: Double = 10) async -> LocalStopResult {
+        if completedStops.contains(token) { return .stopped }
+        if runtimes[id]?.generation == token { stop(id) }
+        else if pendingStops[id]?.generation != token { return .superseded }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(max(0, min(30, timeout))))
+        while ContinuousClock.now < deadline {
+            if completedStops.contains(token) { return .stopped }
+            if let current = runtimes[id]?.generation, current != token { return .superseded }
+            do { try await Task.sleep(for: .milliseconds(20)) } catch { return .unconfirmed }
+        }
+        return completedStops.contains(token) ? .stopped : .unconfirmed
     }
 
     func stopAll() { for id in Array(states.keys) { stop(id) } }

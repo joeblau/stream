@@ -231,7 +231,10 @@ public extension ProviderAPI {
         request.httpMethod = "POST"
         let data = try await send(.youtube, request)
         guard data.count <= 2_097_152, let row = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure(.invalidResponse) }
-        return try Self.youtubeEvent(row)
+        let completed = try Self.youtubeEvent(row)
+        guard completed.id == id, completed.state == .ended,
+              (row["status"] as? [String: Any])?["lifeCycleStatus"] as? String == "complete" else { throw ProviderFailure(.invalidResponse) }
+        return completed
     }
     /// Only an existing, bound RTMP/RTMPS stream is importable. Stream does not
     /// guess an endpoint or create/bind a stream behind the operator's back.
@@ -256,5 +259,44 @@ public extension ProviderAPI {
         request.httpMethod = "PATCH"; request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["title": title])
         _ = try await send(.twitch, request)
+    }
+}
+
+public extension ProviderAPI {
+    /// Ownership and lifecycle are read immediately before a single explicit
+    /// mutation. Never retries, completes another ID, or deletes an upcoming
+    /// event as a substitute for ending a live event.
+    func endYouTubeEvent(id: String, expectedChannelID: String) async -> ProviderCompletionReceipt {
+        var attempted = false
+        do {
+            try Task.checkCancellation()
+            guard ProviderChannel.validID(id), ProviderChannel.validID(expectedChannelID) else { throw ProviderFailure(.invalidRequest) }
+            let fresh = try await youtubeEvent(id: id)
+            guard fresh.channelID == expectedChannelID else { throw ProviderFailure(.permission) }
+            if fresh.state == .ended { return .init(.alreadyEnded, event: fresh) }
+            guard fresh.state == .live else { throw ProviderFailure(.invalidRequest) }
+            var call = try Self.request(.youtube, path: "/youtube/v3/liveBroadcasts/transition",
+                query: ["id": id, "part": "snippet,status", "broadcastStatus": "complete"])
+            call.httpMethod = "POST"
+            try Task.checkCancellation(); attempted = true
+            let data = try await send(.youtube, call)
+            guard data.count <= 2_097_152, let row = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw ProviderFailure(.invalidResponse)
+            }
+            let result = try Self.youtubeEvent(row)
+            guard result.id == id, result.channelID == expectedChannelID, result.state == .ended,
+                  (row["status"] as? [String: Any])?["lifeCycleStatus"] as? String == "complete" else { throw ProviderFailure(.invalidResponse) }
+            return .init(.ended, event: result)
+        } catch {
+            return .init(attempted ? .unconfirmed : .blocked, failure: error as? ProviderFailure ?? .init(.unavailable))
+        }
+    }
+    func reviewYouTubeEnd(id: String, expectedChannelID: String) async -> ProviderCompletionReceipt {
+        do {
+            try Task.checkCancellation()
+            let fresh = try await youtubeEvent(id: id)
+            guard fresh.channelID == expectedChannelID else { throw ProviderFailure(.permission) }
+            return .init(.observed, event: fresh)
+        } catch { return .init(.blocked, failure: error as? ProviderFailure ?? .init(.unavailable)) }
     }
 }
