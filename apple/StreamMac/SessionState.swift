@@ -47,6 +47,8 @@ enum StreamSessionState: Equatable, Sendable {
 /// Lifecycle of the local recording output.
 enum RecordingSessionState: Equatable, Sendable {
     case idle
+    /// Waiting for the writer to accept actual program audio and video.
+    case preparing
     /// The writer is open and receiving composited frames.
     case recording
     /// Stop requested; the writer is finishing the .mp4.
@@ -60,7 +62,7 @@ enum RecordingSessionState: Equatable, Sendable {
     var isActive: Bool {
         switch self {
         case .idle, .failed: return false
-        case .recording, .stopping: return true
+        case .preparing, .recording, .stopping: return true
         }
     }
 }

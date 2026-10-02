@@ -4,6 +4,7 @@ import SwiftUI
 @main
 @MainActor
 struct StreamMacApp: App {
+    @NSApplicationDelegateAdaptor(RecordingTerminationDelegate.self) private var applicationDelegate
     @StateObject private var sceneStore: SceneStore
     /// The W03 preview/program model (issue #66): owns the staged scene (what
     /// PREVIEW shows and edits mutate) vs the program snapshot (what the
@@ -52,6 +53,7 @@ struct StreamMacApp: App {
         _permissions = StateObject(wrappedValue: permissions)
         _settingsSession = StateObject(wrappedValue: settingsSession)
         _recorder = StateObject(wrappedValue: recorder)
+        RecordingTerminationDelegate.recorder = recorder
         _dispatcher = StateObject(wrappedValue: StudioCommandDispatcher(
             controller: streamController,
             sceneStore: sceneStore,

@@ -1195,7 +1195,7 @@ final class StudioCommandDispatcher: ObservableObject {
             return !recorder.state.isActive
                 ? nil : .unavailable("Recording is already \(recorder.state == .stopping ? "stopping" : "in progress").")
         case .stopRecording:
-            return recorder.state.isRecording
+            return recorder.state == .preparing || recorder.state.isRecording
                 ? nil : .unavailable("No recording is in progress.")
 
         case .selectScene(let id):
