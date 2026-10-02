@@ -80,7 +80,7 @@ struct ChatSidebarView: View {
                 }
             }
             if let error = coordinator.error { Text(error).font(.caption).foregroundStyle(.orange) }
-            Text("Restream-connected public chats. Direct provider sessions, avatars, image emotes, reply/moderation and viewer metrics are unavailable here.")
+            Text("Restream-connected public chats. Direct provider sessions, image emotes, reply/moderation and viewer metrics are unavailable here.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(10).frame(minWidth: 260, idealWidth: 330)
@@ -110,10 +110,27 @@ struct ChatSidebarView: View {
                 Text("Choose a slot").tag(Optional<LayerID>.none)
                 ForEach(coordinator.availableSlots) { Text($0.name).tag(Optional($0.id)) }
             }
+            .dropDestination(for: String.self) { values, _ in
+                guard values.count == 1, let id = values.first else { return false }
+                return coordinator.dropMessage(id)
+            }
             Button("Create Comment Slot") { coordinator.createSlot() }
+            if let layout = coordinator.selectedCommentPresentation {
+                if layout.needsLargerBox { Text("Enlarge this slot to show the comment.").font(.caption).foregroundStyle(.orange) }
+                else if layout.pages.count > 1 {
+                    HStack {
+                        Button("Previous Page") { coordinator.advanceCommentPage(-1) }
+                        Button("Next Page") { coordinator.advanceCommentPage(1) }
+                        Text("\(coordinator.selectedCommentPage + 1) / \(layout.pages.count)").font(.caption)
+                    }.controlSize(.small)
+                    Text("Each page is staged. Take publishes it; the original message stays intact.").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
             HStack {
                 Toggle("Author", isOn: $coordinator.includeAuthor).toggleStyle(.checkbox)
                 Toggle("Platform", isOn: $coordinator.includePlatform).toggleStyle(.checkbox)
+                Toggle("Avatar", isOn: $coordinator.includeAvatar).toggleStyle(.checkbox)
+                    .help("Load a public avatar from supported provider image servers when showing a comment; Take publishes the loaded image.")
             }
             Text("Show/replace/hide edit the staged scene; Take publishes them. Direct Live Editing applies them immediately. Style and resize the slot in the layer inspector.")
                 .font(.caption2).foregroundStyle(.secondary)
@@ -153,6 +170,7 @@ struct ChatSidebarView: View {
             }.controlSize(.small)
         }
         .padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .draggable(message.id)
         .accessibilityElement(children: .contain)
     }
 }

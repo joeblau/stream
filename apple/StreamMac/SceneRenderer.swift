@@ -227,6 +227,12 @@ final class SceneRenderer {
     /// upper-layer occlusion as the pixels. They contain IDs/hashes only.
     private var chatMasks: [RecordingChatPaint: CIImage] = [:]
     private var collectingChat = false
+    private struct CommentLayoutKey: Hashable {
+        let text: String, fontName: String?, fontSize: Double, headerLength: Int, width: Double, height: Double
+        let alignment: TextHorizontalAlignment
+    }
+    private var commentLayouts: [CommentLayoutKey: CommentTextLayout] = [:]
+    private var renderedCommentPages: [LayerID: (NSRange, Int, Int)] = [:]
     private var placedNestedChat: [LayerID: [RecordingChatPaint: CIImage]] = [:]
 
     /// S06 raster cache for STATIC nested scenes (transitively text/shape
@@ -311,6 +317,7 @@ final class SceneRenderer {
         textTimingSeen.removeAll()
         chatMasks.removeAll(keepingCapacity: true)
         placedNestedChat.removeAll(keepingCapacity: true)
+        renderedCommentPages.removeAll(keepingCapacity: true)
         collectingChat = RecordingChatPaintDemand.shared.isRequested
         layerMotionPlan = nil
 
@@ -367,6 +374,7 @@ final class SceneRenderer {
         textTimingSeen.removeAll()
         chatMasks.removeAll(keepingCapacity: true)
         placedNestedChat.removeAll(keepingCapacity: true)
+        renderedCommentPages.removeAll(keepingCapacity: true)
         collectingChat = RecordingChatPaintDemand.shared.isRequested
         layerMotionPlan = nil
         defer { layerMotionPlan = nil }
@@ -621,9 +629,13 @@ final class SceneRenderer {
         }
         guard case .text(let text) = layer.payload, let id = text.recordingChatMessageID,
               text.timer == nil, text.ticker == nil, text.text.utf8.count <= 20_000 else { return }
-        let resolved = TitleTemplate.resolve(text.text, with: tokenProvider())
-        let paint = RecordingChatPaint(slotID: layer.id.description, messageID: id,
+        let resolved = text.recordingChatMessageID == nil ? TitleTemplate.resolve(text.text, with: tokenProvider()) : text.text
+        var paint = RecordingChatPaint(slotID: layer.id.description, messageID: id,
             fingerprint: RecordingChatPaint.fingerprint(resolved))
+        if let (range, index, count) = renderedCommentPages[layer.id] {
+            paint.bodyUTF16Start = range.location; paint.bodyUTF16Length = range.length
+            paint.pageIndex = index; paint.pageCount = count
+        }
         guard paint.isValid, chatMasks[paint] != nil || chatMasks.count < 32 else { return }
         let alpha = image.cropped(to: canvas).applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
@@ -928,7 +940,7 @@ final class SceneRenderer {
             else { return nil }
             resolvedText = value
         } else {
-            resolvedText = TitleTemplate.resolve(text.text, with: tokenProvider())
+            resolvedText = text.recordingChatMessageID == nil ? TitleTemplate.resolve(text.text, with: tokenProvider()) : text.text
         }
         guard !resolvedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
@@ -941,6 +953,9 @@ final class SceneRenderer {
         let scale = styleScale(canvas)
         let scaledFontSize = max(1, CGFloat(text.fontSize) * scale)
         let scaledPadding = max(0, CGFloat(text.padding) * scale)
+        var paintedText = resolvedText
+        let avatar = CommentAvatarStore.shared.image(text.commentAvatarKey)
+        let avatarInset = avatar == nil ? CGFloat.zero : 64 * scale + scaledPadding
         let transformWidth = max(1, layer.transform.size.width * canvas.width)
         let transformHeight = max(1, layer.transform.size.height * canvas.height)
 
@@ -948,7 +963,7 @@ final class SceneRenderer {
         var effectiveFontSize = scaledFontSize
         let contentWidth: CGFloat
         let contentHeight: CGFloat
-        switch text.boxSizing {
+        switch text.commentHeaderUTF16Length != nil && text.recordingChatMessageID != nil ? TextBoxSizing.fixed : text.boxSizing {
         case .auto:
             // Hug the measured text: width up to the transform's width when
             // wrapping (unbounded single line when not), height to the lines.
@@ -962,12 +977,29 @@ final class SceneRenderer {
             contentWidth = max(1, measured.width)
             contentHeight = max(1, measured.height)
         case .fixed:
-            // The transform rect is authoritative; scale-down shrinks the
-            // font until the text fits (floor 25%), clip/ellipsis draw into
-            // the box as-is.
-            let boxWidth = max(1, transformWidth - scaledPadding * 2)
+            // Comments prove complete CoreText fit or use staged pages.
+            // Ordinary titles retain their established overflow behavior.
+            let boxWidth = max(1, transformWidth - scaledPadding * 2 - avatarInset)
             let boxHeight = max(1, transformHeight - scaledPadding * 2)
-            if text.overflow == .scaleDown {
+            if let headerLength = text.commentHeaderUTF16Length, text.recordingChatMessageID != nil {
+                let key = CommentLayoutKey(text: resolvedText, fontName: text.fontName, fontSize: Double(scaledFontSize),
+                    headerLength: headerLength, width: Double(boxWidth), height: Double(boxHeight), alignment: text.alignment)
+                let layout: CommentTextLayout
+                if let cached = commentLayouts[key] { layout = cached }
+                else {
+                    layout = CommentTextLayout.make(text: resolvedText, headerLength: headerLength,
+                        requestedFontSize: scaledFontSize, minimumFontSize: 24 * scale, fontName: text.fontName,
+                        box: CGSize(width: boxWidth, height: boxHeight), alignment: text.alignment)
+                    if commentLayouts.count >= 32 { commentLayouts.removeAll() }
+                    commentLayouts[key] = layout
+                }
+                guard !layout.needsLargerBox, !layout.pages.isEmpty else { return nil }
+                let pageIndex = max(0, min(text.commentPageIndex, layout.pages.count - 1))
+                let page = layout.pages[pageIndex]
+                paintedText = page.displayedText; effectiveFontSize = layout.fontSize
+                font = TitleFontFallback.makeFont(requested: text.fontName, size: effectiveFontSize)
+                renderedCommentPages[layer.id] = (page.bodyRange, pageIndex, layout.pages.count)
+            } else if text.overflow == .scaleDown {
                 let measured = TextMeasurement.measuredSize(text: resolvedText, font: font,
                                                             maxWidth: boxWidth,
                                                             alignment: text.alignment,
@@ -980,7 +1012,7 @@ final class SceneRenderer {
                                                       size: effectiveFontSize)
                 }
             }
-            contentWidth = boxWidth
+            contentWidth = boxWidth + avatarInset
             contentHeight = boxHeight
         }
 
@@ -996,15 +1028,15 @@ final class SceneRenderer {
         // geometry — but never the timing, which animates the placed image.
         let fontPostScriptName = CTFontCopyPostScriptName(font) as String
         let descriptor = [
-            "text2", resolvedText, fontPostScriptName, String(Double(effectiveFontSize)),
+            "text2", paintedText, fontPostScriptName, String(Double(effectiveFontSize)),
             text.colorHex, text.backgroundColorHex ?? "-", String(Double(scaledPadding)),
             text.alignment.rawValue, text.verticalAlignment.rawValue,
-            text.boxSizing.rawValue, String(text.wraps), text.overflow.rawValue
+            text.boxSizing.rawValue, String(text.wraps), text.overflow.rawValue, avatar == nil ? "-" : text.commentAvatarKey ?? "-"
         ].joined(separator: "|")
         let content = generated(key: GeneratedKey(descriptor: descriptor,
                                                   width: pixelWidth,
                                                   height: pixelHeight)) { context, rect in
-            drawText(resolvedText, font: font,
+            drawText(paintedText, font: font,
                      colorHex: text.colorHex,
                      backgroundColorHex: text.backgroundColorHex,
                      alignment: text.alignment,
@@ -1012,6 +1044,7 @@ final class SceneRenderer {
                      padding: scaledPadding,
                      wraps: text.wraps,
                      overflow: text.overflow,
+                     avatar: avatar, avatarInset: avatarInset,
                      in: rect, context: context)
         }
         guard let content else { return nil }
@@ -1144,13 +1177,21 @@ final class SceneRenderer {
                           padding: CGFloat,
                           wraps: Bool,
                           overflow: TextOverflow,
+                          avatar: CGImage? = nil, avatarInset: CGFloat = 0,
                           in rect: CGRect,
                           context: CGContext) {
         if let backgroundColorHex {
             context.setFillColor(cgColor(backgroundColorHex))
             context.fill(rect)
         }
-        let inset = rect.insetBy(dx: padding, dy: padding)
+        var inset = rect.insetBy(dx: padding, dy: padding)
+        if let avatar, avatarInset > 0 {
+            let side = min(inset.height, max(1, avatarInset - padding))
+            let avatarRect = CGRect(x: inset.minX, y: inset.maxY - side, width: side, height: side)
+            context.saveGState(); context.addEllipse(in: avatarRect); context.clip()
+            context.draw(avatar, in: avatarRect); context.restoreGState()
+            inset.origin.x += avatarInset; inset.size.width -= avatarInset
+        }
         guard inset.width > 0, inset.height > 0 else { return }
         let attributes: [CFString: Any] = [
             kCTFontAttributeName: font,
