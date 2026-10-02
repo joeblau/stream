@@ -181,6 +181,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamMac
+        # Developer ID profiles authorize the existing App Group and Keychain claims.
+        PROVISIONING_PROFILE_SPECIFIER: $(STREAM_MAC_PROVISIONING_PROFILE)
         ENABLE_HARDENED_RUNTIME: YES
         GENERATE_INFOPLIST_FILE: YES
         MACOSX_DEPLOYMENT_TARGET: "14.0"

@@ -222,3 +222,8 @@ STREAM_NOTARIZE=0 zsh apple/scripts/package_desktop_release.zsh
 ```
 
 This explicitly produces a signed, unnotarized development qualification artifact. It does not staple or claim Gatekeeper acceptance. The default remains `STREAM_NOTARIZE=1`, requiring an existing `STREAM_NOTARY_PROFILE` and completing submission, stapling and Gatekeeper assessment.
+
+
+For the current desktop entitlements, install a **macOS Developer ID** provisioning profile authorizing `com.joeblau.StreamMac`, `group.com.joeblau.Stream`, and the declared Keychain access group. Set `STREAM_PROVISIONING_PROFILE` to its exact name or UUID; the release script passes it only to the app target and includes it in export options. An iOS development profile cannot satisfy this requirement. Keep these entitlements intact when provisioning; removing them would change access to existing credentials and legacy settings.
+
+On 2026-10-02 the local Developer ID certificate was present, but no matching macOS profile was installed and the Xcode developer-account session could not load valid credentials. Manual archive stopped at provisioning; automatic signing also rejected the explicit Developer ID identity. A signed/notarized artifact has therefore **not** been qualified. The unsigned Xcode 26.6 app and native integration fixtures do build and pass.

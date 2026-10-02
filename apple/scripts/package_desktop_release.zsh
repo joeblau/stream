@@ -18,11 +18,14 @@ xcodebuild archive -project Stream.xcodeproj -scheme StreamMac \
   -destination 'generic/platform=macOS' -archivePath "$RELEASE_DIR/StreamMac.xcarchive" \
   -derivedDataPath "$RELEASE_DIR/derived" ARCHS="$RELEASE_ARCH" ONLY_ACTIVE_ARCH=YES \
   CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$STREAM_SIGNING_IDENTITY" \
+  STREAM_MAC_PROVISIONING_PROFILE="${STREAM_PROVISIONING_PROFILE:-}" \
   ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS=--timestamp
-python3 - "$RELEASE_DIR/ExportOptions.plist" <<'PY'
+python3 - "$RELEASE_DIR/ExportOptions.plist" "${STREAM_PROVISIONING_PROFILE:-}" <<'PY'
 import plistlib, sys
 with open(sys.argv[1], 'wb') as file:
-    plistlib.dump({'method': 'developer-id', 'signingStyle': 'manual'}, file)
+    options = {'method': 'developer-id', 'signingStyle': 'manual'}
+    if sys.argv[2]: options['provisioningProfiles'] = {'com.joeblau.StreamMac': sys.argv[2]}
+    plistlib.dump(options, file)
 PY
 xcodebuild -exportArchive -archivePath "$RELEASE_DIR/StreamMac.xcarchive" \
   -exportOptionsPlist "$RELEASE_DIR/ExportOptions.plist" -exportPath "$RELEASE_DIR/export"

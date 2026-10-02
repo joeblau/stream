@@ -37,6 +37,7 @@ final class StudioRuntime {
         controllers.interactionBlocked = { true }
         controllers.bind(to: dispatcher)
         chat = StudioChatCoordinator(dispatcher: dispatcher, previewProgram: previewProgram)
+        dispatcher.bindChatCoordinator(chat)
         adapters = StudioAdapterManager()
         adapters.bind(to: localControl)
         StudioAutomationEndpoint.shared.bind(dispatcher: dispatcher, permissions: permissions,
