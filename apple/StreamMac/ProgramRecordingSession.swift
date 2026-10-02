@@ -207,7 +207,9 @@ final class ProgramRecordingSession: @unchecked Sendable {
 
     func pause() {
         timeline.pause()
-        lock.lock(); pausedAtInlet = true; video.removeAll(); audio.removeAll(); lock.unlock()
+        lock.lock(); pausedAtInlet = true
+        droppedVideo += video.count; droppedAudio += audio.count
+        video.removeAll(); audio.removeAll(); lock.unlock()
         queue.async { [self] in
             guard !finishRequested, failure == nil, started else { return }
             paused = true
@@ -216,14 +218,17 @@ final class ProgramRecordingSession: @unchecked Sendable {
         }
     }
 
-    func resume() {
+    /// A caller that needs the inlet ready can observe the actual writer-queue
+    /// transition; elapsed wall time does not guarantee a queued resume executed.
+    func resume(completion: (@Sendable (Bool) -> Void)? = nil) {
         queue.async { [self] in
-            guard paused, !finishRequested, failure == nil else { return }
+            guard paused, !finishRequested, failure == nil else { completion?(false); return }
             paused = false; resumePending = true
             timeline.awaitResume()
             announcedRecording = false
             lastVideoWrite = Date(); lastAudioWrite = Date()
             lock.lock(); pausedAtInlet = false; lock.unlock()
+            completion?(true)
         }
     }
 
