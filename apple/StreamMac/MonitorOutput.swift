@@ -3,6 +3,7 @@ import AudioToolbox
 import Combine
 import CoreAudio
 import CoreMedia
+import StreamCore
 import os.lock
 
 /// A07 (issue #119): playback-side counters for the monitor path — the A09
@@ -213,12 +214,16 @@ private final class MonitorPlayerCore: @unchecked Sendable {
     static let prebufferBuffers = 2
 
     private var lock = os_unfair_lock_s()
+    /// Scheduling and graph changes must serialize. Completion callbacks use only the short
+    /// counters lock, so player.stop() can complete queued buffers without a lock cycle.
+    private let graphLock = NSLock()
+    private var generation: UInt64 = 0
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                        sampleRate: 48_000,
                                        channels: 2,
-                                       interleaved: true)!
+                                       interleaved: false)!
     private var attached = false
     private var enabled = false
     private var isPlaying = false
@@ -239,16 +244,26 @@ private final class MonitorPlayerCore: @unchecked Sendable {
             if isEnabled { noteDropped() }
             return
         }
+        graphLock.lock()
+        defer { graphLock.unlock() }
+        os_unfair_lock_lock(&lock)
+        let canSchedule = enabled && queuedDepth < Self.maxQueuedBuffers
+        let bufferGeneration = generation
+        os_unfair_lock_unlock(&lock)
+        guard canSchedule else { return }
         let frames = Int(CMSampleBufferGetNumSamples(sample))
         guard frames > 0,
               let buffer = AVAudioPCMBuffer(pcmFormat: format,
                                             frameCapacity: AVAudioFrameCount(frames))
         else { return }
         buffer.frameLength = AVAudioFrameCount(frames)
-        guard CMSampleBufferCopyPCMDataIntoAudioBufferList(
-            sample, at: 0, frameCount: Int32(frames),
-            into: buffer.mutableAudioBufferList) == noErr
-        else { return }
+        // Player-node graph formats must be non-interleaved on native AVAudioEngine.
+        // The mix bus remains canonical interleaved PCM; split its channels for playback only.
+        guard let source = CanonicalAudioConverter.makePCMBuffer(from: sample),
+              source.format.sampleRate == 48_000, source.format.channelCount == 2,
+              let samples = CanonicalAudioConverter.interleavedFloats(source), samples.count == frames * 2,
+              let channels = buffer.floatChannelData else { return }
+        for frame in 0..<frames { channels[0][frame] = samples[frame * 2]; channels[1][frame] = samples[frame * 2 + 1] }
 
         os_unfair_lock_lock(&lock)
         queuedDepth += 1
@@ -259,8 +274,10 @@ private final class MonitorPlayerCore: @unchecked Sendable {
 
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [self] _ in
             os_unfair_lock_lock(&lock)
-            played += 1
-            queuedDepth = max(0, queuedDepth - 1)
+            if generation == bufferGeneration {
+                played += 1
+                queuedDepth = max(0, queuedDepth - 1)
+            }
             os_unfair_lock_unlock(&lock)
         }
         if shouldStart { player.play() }
@@ -270,8 +287,12 @@ private final class MonitorPlayerCore: @unchecked Sendable {
     /// the output node at the device and start the engine. Returns an error
     /// description on failure. Called on the main actor.
     func configure(deviceID: AudioDeviceID?) -> String? {
+        graphLock.lock()
+        defer { graphLock.unlock() }
         os_unfair_lock_lock(&lock)
-        enabled = deviceID != nil
+        // Live taps continue during setup: no PCM may reach the player before the graph is ready.
+        enabled = false
+        generation &+= 1
         isPlaying = false
         queuedDepth = 0
         scheduled = 0
@@ -304,6 +325,9 @@ private final class MonitorPlayerCore: @unchecked Sendable {
         engine.prepare()
         do {
             try engine.start()
+            os_unfair_lock_lock(&lock)
+            enabled = true
+            os_unfair_lock_unlock(&lock)
             return nil
         } catch {
             return "The monitor output could not start: \(error.localizedDescription)"
