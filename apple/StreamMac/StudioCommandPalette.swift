@@ -99,7 +99,7 @@ struct StudioCommandPalette: View {
     @State private var selection: String?
     @FocusState private var searchFocused: Bool
     private var matches: [StudioPaletteAction] {
-        actions.filter { search.isEmpty || "\($0.title) \($0.category)".localizedCaseInsensitiveContains(search) }
+        StudioPaletteValues.matches(actions, search: search)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -122,7 +122,7 @@ struct StudioCommandPalette: View {
                             Text(action.unavailableReason ?? action.category).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(shortcuts.document.bindings.filter { $0.commandID == action.id }.map { $0.chord.displayName }.joined(separator: " / "))
+                        Text(StudioPaletteValues.bindings(shortcuts.document.bindings, commandID: action.id).map { $0.chord.displayName }.joined(separator: " / "))
                             .font(.caption.monospaced())
                         Button("Run") { run(action.id) }.disabled(action.unavailableReason != nil)
                     }
@@ -155,7 +155,7 @@ struct StudioShortcutEditor: View {
     let actions: [StudioPaletteAction]
     @State private var search = ""
     private var matches: [StudioPaletteAction] {
-        actions.filter { search.isEmpty || "\($0.title) \($0.category)".localizedCaseInsensitiveContains(search) }
+        StudioPaletteValues.matches(actions, search: search)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -186,13 +186,13 @@ struct StudioShortcutEditor: View {
                                 Button("Add Shortcut") { shortcuts.record(action.id) }.disabled(action.command == nil)
                             }
                             if let reason = action.unavailableReason { Text(reason).font(.caption).foregroundStyle(.secondary) }
-                            ForEach(shortcuts.document.bindings.filter { $0.commandID == action.id }) { binding in
+                            ForEach(StudioPaletteValues.bindings(shortcuts.document.bindings, commandID: action.id)) { binding in
                                 bindingRow(binding)
                             }
                         }
                         Divider()
                     }
-                    ForEach(shortcuts.document.bindings.filter { binding in !actions.contains { $0.id == binding.commandID } }) { binding in
+                    ForEach(StudioPaletteValues.missingBindings(shortcuts.document.bindings, actions: actions)) { binding in
                         VStack(alignment: .leading) {
                             Text("Missing target — mapping retained").font(.callout)
                             bindingRow(binding)
@@ -231,4 +231,20 @@ struct StudioShortcutWindowAttachment: NSViewRepresentable {
         let view = Attachment(); view.attach = { shortcuts.install(window: $0) }; return view
     }
     func updateNSView(_ nsView: Attachment, context: Context) { shortcuts.install(window: nsView.window) }
+}
+
+/// Keep pure sequence predicates outside SwiftUI's actor-isolated body. Older
+/// supported Swift compilers crash while emitting an isolated Bool thunk for
+/// nested predicates that implicitly capture the view.
+private enum StudioPaletteValues {
+    static func matches(_ actions: [StudioPaletteAction], search: String) -> [StudioPaletteAction] {
+        actions.filter { search.isEmpty || "\($0.title) \($0.category)".localizedCaseInsensitiveContains(search) }
+    }
+    static func bindings(_ values: [StudioShortcutBinding], commandID: String) -> [StudioShortcutBinding] {
+        values.filter { $0.commandID == commandID }
+    }
+    static func missingBindings(_ values: [StudioShortcutBinding], actions: [StudioPaletteAction]) -> [StudioShortcutBinding] {
+        let ids = Set(actions.map(\.id))
+        return values.filter { !ids.contains($0.commandID) }
+    }
 }

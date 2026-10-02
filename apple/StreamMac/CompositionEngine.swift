@@ -211,6 +211,7 @@ actor CompositionEngine {
     /// engine injects `{ .empty }` because preview shows annotations as
     /// SwiftUI chrome (painting them into the image too would double-draw).
     private let annotationProvider: @Sendable () -> AnnotationRenderSnapshot
+    private let frameOverrideProvider: @Sendable () -> Scene?
 
     private var scene: Scene?
     private var canvasSize: CGSize
@@ -228,7 +229,6 @@ actor CompositionEngine {
     private var layerFades: [LayerID: LayerFade] = [:]
 
     private var tickTask: Task<Void, Never>?
-    private var clockAnchor: CMTime = .zero
     private var frameSequence: Int64 = 0
 
     private var subscribers: [UUID: FrameMailbox] = [:]
@@ -252,7 +252,8 @@ actor CompositionEngine {
          annotationProvider: @escaping @Sendable () -> AnnotationRenderSnapshot =
             { ProgramAnnotationStore.shared.snapshot() },
          canvasSize: CGSize = OutputProfile.default.canvasSize,
-         frameRate: Int = OutputProfile.default.frameRate) {
+         frameRate: Int = OutputProfile.default.frameRate,
+         frameOverrideProvider: @escaping @Sendable () -> Scene? = { nil }) {
         self.screenProvider = screenProvider
         self.cameraProvider = cameraProvider
         self.frameLookup = frameLookup ?? SourceFrameLookup(
@@ -285,6 +286,7 @@ actor CompositionEngine {
         self.transitionRequestProvider = transitionRequestProvider
         self.stingerProvider = stingerProvider
         self.annotationProvider = annotationProvider
+        self.frameOverrideProvider = frameOverrideProvider
         self.canvasSize = canvasSize
         self.frameRate = frameRate
         // A10 (issue #122): wrap the resolved lookup with the delay lines.
@@ -348,7 +350,7 @@ actor CompositionEngine {
     }
 
     /// Applies a new output geometry/fps. While running, this restarts the
-    /// tick loop and re-anchors the clock (the renderer's pool/format
+    /// tick loop; timestamps remain on the host clock (the renderer's pool/format
     /// description re-create themselves on the next frame at the new size).
     func setOutput(canvasSize: CGSize, frameRate: Int) {
         self.canvasSize = canvasSize
@@ -626,17 +628,24 @@ actor CompositionEngine {
 
     private func startTicking() {
         tickTask?.cancel()
-        // Re-anchor the shared clock: PTS = anchor + sequence / fps.
-        clockAnchor = CMClockGetTime(CMClockGetHostTimeClock())
         frameSequence = 0
-        let interval = UInt64(1_000_000_000) / UInt64(max(1, frameRate))
+        let interval = Duration.nanoseconds(Int64(1_000_000_000 / max(1, frameRate)))
         tickTask = Task { [weak self] in
+            let clock = ContinuousClock()
+            var deadline = clock.now
             while !Task.isCancelled {
                 await self?.tick()
-                try? await Task.sleep(nanoseconds: interval)
+                deadline = deadline.advanced(by: interval)
+                let now = clock.now
+                var missed = 0
+                while deadline < now { deadline = deadline.advanced(by: interval); missed += 1 }
+                if missed > 0 { await self?.noteMissedDeadlines(missed) }
+                do { try await clock.sleep(until: deadline) } catch { break }
             }
         }
     }
+
+    private func noteMissedDeadlines(_ count: Int) { metrics.missedDeadlines += count }
 
     /// One output frame: pull the latest sample from every source, composite
     /// the scene graph once, stamp it on the shared clock, and broadcast.
@@ -648,7 +657,8 @@ actor CompositionEngine {
     /// same tick, so the tick that ends a transition already paints the new
     /// composition.
     private func tick() {
-        guard let scene else { return }
+        let override = frameOverrideProvider()
+        guard let scene = override ?? self.scene else { return }
         let renderStarted = ProcessInfo.processInfo.systemUptime
         let previousCount = metrics.rendered
         metrics.attempts += 1
@@ -660,14 +670,16 @@ actor CompositionEngine {
         }
         frameSequence += 1
         let timescale = CMTimeScale(max(1, frameRate))
-        let pts = CMTimeAdd(clockAnchor, CMTime(value: frameSequence, timescale: timescale))
+        // Audio is stamped on the same host clock. A slow render skips an
+        // opportunity rather than compressing video time against audio.
+        let pts = CMClockGetTime(CMClockGetHostTimeClock())
         let duration = CMTime(value: 1, timescale: timescale)
         let overlayContext = overlayContextProvider()
         let sourcePayloads = sourcePayloadProvider()
         let scenes = sceneRegistryProvider()
         let annotations = annotationProvider()
 
-        if let active = transition {
+        if override == nil, let active = transition {
             if let frame = renderTransitionFrame(active,
                                                  overlayContext: overlayContext,
                                                  sourcePayloads: sourcePayloads,

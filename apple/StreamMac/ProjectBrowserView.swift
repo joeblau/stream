@@ -77,6 +77,7 @@ struct ProjectBrowserView: View {
             }
             if let error = workspace.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
         }
+        .onDrop(of: ["public.file-url"], isTargeted: nil) { workspace.acceptPackageDrop($0) }
         .padding(12)
         .background(.regularMaterial)
         .sheet(isPresented: $showTemplates) { StarterSceneGallery() }

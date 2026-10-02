@@ -15,7 +15,7 @@ enum StudioStarter: String, CaseIterable, Identifiable {
         switch self {
         case .desktop, .tutorial: return "Select the screen/app to share and choose a camera. Configure your microphone in the mixer."
         case .camera: return "Choose a camera in Sources and adjust the title and microphone."
-        case .slides: return "Import a PDF in Sources and replace the screen placeholder with its PDF layer. Choose a camera for PIP."
+        case .slides: return "Import a PDF in Sources and bind the Slides placeholder to its PDF source. Choose a camera for PIP."
         case .interview: return "Replace the editable participant placeholders with cameras or qualified guest sources. Guest networking needs a configured interview service."
         case .starting, .pause, .ending: return "Edit the title, colors, and timer. Add optional licensed music in Sound; no account is required."
         }
@@ -24,8 +24,13 @@ enum StudioStarter: String, CaseIterable, Identifiable {
     func scene(camera: SourceDefinitionID?, screen: SourceDefinitionID?, profile: OutputProfile) -> Scene {
         var scene: Scene
         switch self {
-        case .desktop, .tutorial, .slides:
+        case .desktop, .tutorial:
             scene = .screenPlusCam(name: rawValue, screenSourceID: screen, cameraSourceID: camera)
+        case .slides:
+            scene = .screenPlusCam(name: rawValue, screenSourceID: screen, cameraSourceID: camera)
+            scene.layers[0].payload = .pdf(PDFSourcePayload())
+            scene.layers[0].sourceID = nil
+            scene.layers[0].name = "Slides · choose a PDF source"
         case .camera:
             scene = .cameraSolo(name: rawValue, cameraSourceID: camera)
         case .interview:
@@ -54,6 +59,13 @@ enum StudioStarter: String, CaseIterable, Identifiable {
         if self == .interview {
             scene.layers.append(LayerNode(name: "Participant Name", payload: .text(TextSourcePayload(text: "Guest · choose a source", fontSize: fontSize / 2,
                 alignment: .center)), transform: LayerTransform(position: GraphPoint(x: 0.515, y: 0.87), size: GraphSize(width: 0.46, height: 0.09), anchor: .topLeft)))
+        }
+        var logo = LayerNode(name: "Optional Logo · choose a local image", payload: .image(ImageSourcePayload()),
+            transform: LayerTransform(position: GraphPoint(x: 0.84, y: 0.02), size: GraphSize(width: 0.12, height: 0.10), anchor: .topLeft))
+        logo.isVisible = false
+        scene.layers.append(logo)
+        if self == .starting || self == .pause || self == .ending {
+            scene.soundBindings.append(SceneSoundBinding(rule: .continue, name: "Optional Music · choose a local audio file", volume: 0))
         }
         return scene
     }

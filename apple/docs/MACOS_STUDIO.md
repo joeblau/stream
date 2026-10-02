@@ -40,7 +40,7 @@ Choose the selected scene (including nested scene dependencies) or the whole
 profile, and whether to include readable library media. Without media, import
 keeps repairable asset entries. Stream keys, credentials, remote widget URLs,
 machine device selections, and sandbox bookmarks are omitted. Account and PTZ
-configuration are not included. Finder opening and the Import Show button show
+configuration are not included. Finder opening, a package dropped onto Shows and Profiles, and the Import Show button show
 a preview; import creates a separate show, remaps IDs, then stages it for Apply.
 Relink missing sources/assets and configure destinations before production.
 Raw legacy media bookmarks without library registrations need importing into
@@ -132,3 +132,29 @@ end-to-end network latency are not inferred from render or socket counters.
 are documented separately. Enable the listener explicitly in embedded Controls,
 pair each client, and revoke it there. Switching shows disconnects paired client
 sessions and requires a fresh handshake; stored pairings remain machine scoped.
+
+## Repeatable workload baseline
+
+Run `zsh apple/scripts/run_studio_performance_harness.zsh` from the repository root.
+The tool builds the actual compositor and writer, then measures four ten-second
+synthetic static-screen/camera scenes with twelve editable layers, H.264/AAC
+recording, a slow secondary sink, and main-actor scheduling probes. Each run
+uses a new artifact directory and writes JSON alongside its synthetic recordings.
+[Recorded baseline](PERFORMANCE_BASELINE.json): Mac15,8, macOS 27.0.1, 720p30,
+1080p30, 1080p60 and 4K30 completed with valid tracks, zero recorder drops, about
+30/60 achieved fps and under 4 ms maximum main-actor scheduling delay in that run.
+All timestamps use the same host clock as audio; rendering skips overdue
+opportunities instead of compressing the video timeline. Slow sink drops remain
+isolated and visible.
+
+An earlier 4K30 run failed with a writer-wide encoding error while other builds
+were active; two subsequent runs completed. Completed writers now release their
+encoder objects promptly. These observations do not establish a guaranteed
+4K session budget. Physical camera/screen/media capture, simultaneous real
+network publishers, long thermal runs, unplug/suspend, Intel workload baselines,
+and signed/sandboxed deployment remain independent qualification work. The
+hardware policy is a conservative ceiling, not a benchmark certificate.
+
+[Stream Deck installation, pairing and development package](../../integrations/stream-deck/README.md)
+uses the same live command catalog and shows authoritative state. Its signed
+helper, hardware models and Marketplace release need their documented checks.

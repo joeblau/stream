@@ -12,6 +12,7 @@ struct CompositionMetrics: Codable, Sendable {
     var attempts = 0
     var rendered = 0
     var failed = 0
+    var missedDeadlines = 0
     var totalRenderMilliseconds = 0.0
     var maxRenderMilliseconds = 0.0
     var subscriberQueueDepth = 0
@@ -25,6 +26,7 @@ struct StudioDiagnosticSnapshot: Codable, Sendable {
     var version = 1
     var time = Date()
     var os = ProcessInfo.processInfo.operatingSystemVersionString
+    var hardwareModel = Self.machineModel()
     var processors = ProcessInfo.processInfo.processorCount
     var physicalMemoryBytes = ProcessInfo.processInfo.physicalMemory
     var peakMemoryBytes: Int64 = 0
@@ -56,6 +58,14 @@ struct StudioDiagnosticSnapshot: Codable, Sendable {
     var audioTapDrops: [String: Int64] = [:]
     var events: [Event] = []
     struct Event: Codable, Sendable { let time: Date; let state: String }
+
+    static func machineModel() -> String {
+        var bytes = [CChar](repeating: 0, count: 128)
+        var size = bytes.count
+        let result = bytes.withUnsafeMutableBufferPointer { sysctlbyname("hw.model", $0.baseAddress, &size, nil, 0) }
+        guard result == 0 else { return "unknown" }
+        return String(decoding: bytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
 
     mutating func sampleProcess() {
         var usage = rusage()
@@ -164,7 +174,7 @@ private struct StudioDiagnosticsContent: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading) {
                 Text(String(format: "Program %.1f / %d fps · Render %.2f ms", snapshot.program.achievedFPS, snapshot.targetFPS, snapshot.program.meanRenderMilliseconds))
-                Text("Queues \(snapshot.program.subscriberQueueDepth) · Shed \(snapshot.program.subscriberDrops) · Render failures \(snapshot.program.failed)")
+                Text("Queues \(snapshot.program.subscriberQueueDepth) · Shed \(snapshot.program.subscriberDrops) · Late ticks \(snapshot.program.missedDeadlines) · Render failures \(snapshot.program.failed)")
             }
             if let start = snapshot.outputs.compactMap(\.startedAt).min() {
                 Text(start, style: .timer).accessibilityLabel("Live session elapsed time")

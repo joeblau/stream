@@ -98,6 +98,7 @@ final class StreamController: ObservableObject {
     private var fallbackSceneID: SceneID?
     @Published private(set) var privacySlateActive = false
     private var privacySlateScene: Scene?
+    private let privacyGate: ProgramPrivacyGate
     private var programBusGain: Float = 1
 
     let destinations: DestinationSession
@@ -241,12 +242,17 @@ final class StreamController: ObservableObject {
             screen: { key in frames.hasScreenSource(for: key) ? frames.screenFrame(for: key) : frames.latestScreenFrame() },
             media: { key in frames.hasMediaSource(for: key) ? frames.mediaFrame(for: key) : nil }))
         self.resilientFrames = resilientFrames
+        let privacyGate = ProgramPrivacyGate()
+        self.privacyGate = privacyGate
         self.engine = CompositionEngine(
             screenProvider: { frames.latestScreenFrame() },
             cameraProvider: { frames.freshestCameraFrame() },
             frameLookup: resilientFrames.lookup,
+            overlayContextProvider: { privacyGate.overlays() },
+            annotationProvider: { privacyGate.annotations() },
             canvasSize: persisted.outputProfile.canvasSize,
-            frameRate: persisted.outputProfile.frameRate)
+            frameRate: persisted.outputProfile.frameRate,
+            frameOverrideProvider: { privacyGate.sceneSnapshot() })
         self.previewEngine = CompositionEngine(
             screenProvider: { frames.latestScreenFrame() },
             cameraProvider: { frames.freshestCameraFrame() },
@@ -1401,6 +1407,7 @@ final class StreamController: ObservableObject {
         failureTracker.restore()
         privacySlateActive = false
         privacySlateScene = nil
+        privacyGate.setScene(nil)
         applyMixerBusGain(.program, gain: programBusGain)
         reconcileSourceDemand(); evaluateSourceResilience()
         resilience.noteSourceFallback("Program restore requested. Outputs restart only through their explicit start controls.")
@@ -1416,6 +1423,7 @@ final class StreamController: ObservableObject {
         fallbackSceneID = slate.id
         privacySlateScene = slate
         privacySlateActive = true
+        privacyGate.setScene(slate)
         applyMixerBusGain(.program, gain: programBusGain)
         previewProgram.setResilienceProgram(slate)
     }

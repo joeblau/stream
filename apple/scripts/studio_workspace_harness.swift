@@ -10,6 +10,20 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("stream-workspace-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let workspace = StudioWorkspace(root: root)
+        for starter in StudioStarter.allCases {
+            let scene = starter.scene(camera: nil, screen: nil, profile: .default)
+            let decoded = try JSONDecoder().decode(Scene.self, from: JSONEncoder().encode(scene))
+            try require(decoded == scene && Set(scene.layers.map(\.id)).count == scene.layers.count, "Starter scene did not round trip with unique editable IDs")
+        }
+        let privacy = ProgramPrivacyGate()
+        let hidden = LayerNode(name: "Private overlay", payload: .text(TextSourcePayload(text: "Private content")), transform: .fullscreen)
+        let overlayContext = OverlayContext(overlays: [hidden], defaultBackground: nil)
+        ProjectOverlayStore.shared.publish(overlayContext)
+        privacy.setScene(Scene(name: "Offline", layers: []))
+        try require(privacy.overlays().overlays.isEmpty && privacy.sceneSnapshot()?.name == "Offline", "Offline hold leaked a new project overlay")
+        privacy.setScene(nil)
+        try require(privacy.overlays().overlays.count == 1, "Explicit privacy restore lost overlays")
+        ProjectOverlayStore.shared.publish(.empty)
         let first = workspace.selection
         try require(workspace.runtime.recorder.context.projectID == first.project.uuidString, "Recording project context is missing")
         let firstStore = workspace.runtime.sceneStore

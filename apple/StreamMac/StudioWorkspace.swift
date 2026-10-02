@@ -24,6 +24,7 @@ final class StudioRuntime {
         settings = SettingsSession(controller: controller)
         recorder = RecordingController()
         RecordingTerminationDelegate.recorder = recorder
+        controller.stopRecordingForLifecycle = { [weak recorder] in recorder?.stop() }
         diagnostics = StudioDiagnosticsMonitor(controller: controller, recorder: recorder)
         dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: sceneStore,
             session: settings, recorder: recorder, previewProgram: previewProgram)
@@ -261,7 +262,21 @@ final class StudioWorkspace: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url { previewPackage(url) }
     }
 
+    func acceptPackageDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier("public.file-url") }) else { return false }
+        provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { [weak self] item, _ in
+            let url: URL?
+            if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
+            else { url = item as? URL }
+            guard let url, url.pathExtension.lowercased() == "streamshow" else { return }
+            Task { @MainActor [weak self] in self?.previewPackage(url) }
+        }
+        return true
+    }
+
     func previewPackage(_ url: URL) {
+        guard url.isFileURL, url.pathExtension.lowercased() == "streamshow" else { return }
+        showProjects = true
         packageBusy = true
         Task {
             do { importPreview = try await Task.detached { try ShowPackageIO.preview(url) }.value }

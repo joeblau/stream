@@ -466,6 +466,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         let result = Result(url: outputURL, completed: error == nil, error: error, progress: progress, recoverable: recoverable)
         self.result = result
         writeManifest(status: result.completed ? "complete" : result.recoverable ? "recoverable" : "partial")
+        videoInput = nil; audioInput = nil; writer = nil
         let callbacks = completions; completions.removeAll()
         callbacks.forEach { $0(result) }
     }
