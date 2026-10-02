@@ -10,6 +10,6 @@ readonly CHAT_PRODUCTS="$CHAT_BUILD_PATH/Build/Products/Debug"
 xcrun swiftc -swift-version 6 -parse-as-library -F "$CHAT_PRODUCTS" -framework StreamCore \
     -Xlinker -rpath -Xlinker "${CHAT_PRODUCTS:A}" \
     StreamMac/StudioChatModel.swift StreamMac/StudioDirectChatModel.swift StreamMac/StudioChatSocket.swift \
-    StreamMac/StudioDirectChatManager.swift scripts/direct_chat_harness.swift \
+    StreamMac/StudioChatOutbox.swift StreamMac/StudioDirectChatManager.swift scripts/direct_chat_harness.swift \
     -o "$CHAT_BUILD_PATH/direct-chat-harness"
 "$CHAT_BUILD_PATH/direct-chat-harness"

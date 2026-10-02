@@ -19,7 +19,7 @@ public struct TwitchDeviceAuthorization: Sendable {
                 now: @escaping @Sendable () -> Date = { Date() }) {
         self.send = send; self.sleep = sleep; self.now = now
     }
-    public static let optionalChatScopes = ["user:read:chat", "user:write:chat", "moderator:manage:chat_messages"]
+    public static let optionalChatScopes = ["user:read:chat", "user:write:chat", "moderator:manage:chat_messages", "moderator:manage:banned_users"]
     public func authorize(clientID: String, additionalScopes: [String] = [], prompt: @escaping @Sendable (TwitchDevicePrompt) async -> Void) async throws -> ProviderOAuthToken {
         guard !clientID.isEmpty, clientID.utf8.count <= 500 else { throw ProviderFailure(.invalidRequest) }
         guard additionalScopes.allSatisfy(Self.optionalChatScopes.contains) else { throw ProviderFailure(.invalidRequest) }
