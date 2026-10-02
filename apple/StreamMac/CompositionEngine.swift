@@ -117,11 +117,10 @@ final class SceneRegistryStore: @unchecked Sendable {
 /// ONCE per output tick and broadcasts the result to any number of independent
 /// consumers — preview, recording, publishers, and future virtual/NDI outputs.
 ///
-/// Clock: one monotonic timebase for every output. At (re)start the engine
-/// anchors on the host clock (`CMClockGetTime(CMClockGetHostTimeClock())`) and
-/// derives each frame's PTS as `anchor + sequence / fps`, so every subscriber
-/// sees identical, regularly spaced presentation timestamps regardless of
-/// which source produced pixels or how jittery the tick loop is. A renderer
+/// Clock: one monotonic host timebase for every output. Each rendered frame
+/// receives its actual host-clock PTS, shared by every subscriber. Missed
+/// cadence opportunities therefore leave time gaps rather than compressing
+/// media time. A renderer
 /// restart (profile change) re-anchors; that only happens when no output owns
 /// the encode geometry (W07 staging rules).
 ///
@@ -452,7 +451,7 @@ actor CompositionEngine {
                                            style: .dissolve, config: config, fps: fps)
             }
             return ActiveTransition(from: previous, to: scene, style: .stinger,
-                                    startedAt: CMClockGetTime(CMClockGetHostTimeClock()), durationSeconds: 0,
+                                    startedAt: mediaTime(), durationSeconds: 0,
                                     direction: config.direction,
                                     dipColorHex: config.dipColorHex,
                                     stingerCutPointSeconds: max(0, config.stingerCutPointSeconds),
@@ -471,7 +470,7 @@ actor CompositionEngine {
         let durationFrames = Int((config.durationSeconds * Double(fps)).rounded())
         guard durationFrames > 0 else { return nil }
         return ActiveTransition(from: from, to: to, style: style,
-                                startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
+                                startedAt: mediaTime(),
                                 durationSeconds: Double(durationFrames) / Double(fps),
                                 direction: config.direction,
                                 dipColorHex: config.dipColorHex,
@@ -551,7 +550,7 @@ actor CompositionEngine {
                                              backToFrontIndex: 0,
                                              fromOpacity: current,
                                              toOpacity: 1,
-                                             startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
+                                             startedAt: mediaTime(),
                                              durationSeconds: Self.layerFadeDurationSeconds)
         }
         for (index, layer) in old.layers.enumerated()
@@ -561,7 +560,7 @@ actor CompositionEngine {
                                              backToFrontIndex: index,
                                              fromOpacity: current,
                                              toOpacity: 0,
-                                             startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
+                                             startedAt: mediaTime(),
                                              durationSeconds: Self.layerFadeDurationSeconds)
         }
     }
@@ -570,7 +569,7 @@ actor CompositionEngine {
     /// the duration (nil when no fade is in flight for the layer).
     private func currentFadeValue(_ id: LayerID) -> Double? {
         guard let fade = layerFades[id] else { return nil }
-        let progress = max(0, CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), fade.startedAt).seconds)
+        let progress = max(0, CMTimeSubtract(mediaTime(), fade.startedAt).seconds)
             / max(Double.ulpOfOne, fade.durationSeconds)
         guard progress < 1 else { return fade.toOpacity }
         return fade.fromOpacity + (fade.toOpacity - fade.fromOpacity) * max(0, progress)
@@ -625,6 +624,26 @@ actor CompositionEngine {
 
     // MARK: - Tick loop
 
+    private func mediaTime() -> CMTime {
+        #if STREAM_NATIVE_VALIDATION
+        if let validationTime { return validationTime }
+        #endif
+        return CMClockGetTime(CMClockGetHostTimeClock())
+    }
+
+    #if STREAM_NATIVE_VALIDATION
+    // Drive actual compositor frames at explicit media times without coupling
+    // pixel correctness to the host's scheduling or first-use shader latency.
+    private var validationTime: CMTime?
+    func prepareValidation(scene: Scene, canvasSize: CGSize, frameRate: Int, at time: CMTime) {
+        validationTime = time
+        run(scene: scene, canvasSize: canvasSize, frameRate: frameRate)
+        stop()
+    }
+    func setValidationTime(_ time: CMTime) { validationTime = time }
+    func renderValidationFrame(at time: CMTime) { validationTime = time; autoreleasepool { tick() } }
+    #endif
+
     private func startTicking() {
         tickTask?.cancel()
         frameSequence = 0
@@ -671,7 +690,7 @@ actor CompositionEngine {
         let timescale = CMTimeScale(max(1, frameRate))
         // Audio is stamped on the same host clock. A slow render skips an
         // opportunity rather than compressing video time against audio.
-        let pts = CMClockGetTime(CMClockGetHostTimeClock())
+        let pts = mediaTime()
         let duration = CMTime(value: 1, timescale: timescale)
         let overlayContext = overlayContextProvider()
         let sourcePayloads = sourcePayloadProvider()
