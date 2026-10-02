@@ -38,6 +38,10 @@ import Foundation
         try check(!mailbox.submit(input, sequence: 2, now: now), "Reject duplicate PTS")
         guard let first = source.makeSample(now: now) else { throw NSError(domain: "Harness", code: 2) }
         try check(middleRed(first.buffer) > 240 && first.pts == now && first.discontinuity, "Graph PTS and actual pixels")
+        let advanced = try pixels(pts: now + 8_000_000)
+        try check(mailbox.submit(advanced, sequence: 2, now: now + 8_000_000), "Graph PTS retained at sink")
+        let cadence = source.makeSample(now: now + 33_333_333)
+        try check(cadence?.pts == now + 33_333_333, "Source retimes graph frame to camera delivery clock")
         let settings = CMIOExtensionStreamProperties(dictionary: [:]); settings.activeFormatIndex = 1
         try source.setStreamProperties(settings)
         guard let resized = source.makeSample(now: now + 33_333_333) else { throw NSError(domain: "Harness", code: 3) }

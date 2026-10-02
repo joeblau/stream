@@ -36,8 +36,10 @@ cannot accumulate tasks or stall other subscribers. The producer is restricted
 to the signed `com.joeblau.StreamMac` process from the configured developer team;
 other camera readers are mediated by the system's camera privacy controls.
 
-New samples preserve the graph's host-clock PTS. Repeated frames and black
-fallback advance monotonically on that same clock. Invalid, duplicate, stale,
+The sink preserves the graph's host-clock PTS and validates freshness. Source
+camera samples use that same host clock at delivery, including repeated frames
+and black fallback. This adapts a 24/60-fps graph to the negotiated 30-fps camera
+without interleaving old source timestamps with newer repeats. Invalid, duplicate, stale,
 future or oversized inputs are refused. With no producer, clients continue to
 receive black video at the negotiated cadence. Disconnect clears the newest
 frame; a producer crash or stalled feed ages to black within 500 ms. The camera

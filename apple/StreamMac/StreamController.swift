@@ -186,7 +186,7 @@ final class StreamController: ObservableObject {
     var virtualCameraOutput: VirtualCameraOutputController {
         if let existing = virtualCameraController { return existing }
         let output = VirtualCameraOutputController { [weak self] sink in
-            guard let self else { return nil }
+            guard let self, !self.resilience.isLocked else { return nil }
             self.virtualCameraDemand += 1
             let subscription = self.addFrameSink(capacity: 1, sink: sink)
             self.updatePipelineDemand()

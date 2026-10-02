@@ -19,12 +19,16 @@ xcodebuild archive -project Stream.xcodeproj -scheme StreamMac \
   -derivedDataPath "$RELEASE_DIR/derived" ARCHS="$RELEASE_ARCH" ONLY_ACTIVE_ARCH=YES \
   CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$STREAM_SIGNING_IDENTITY" \
   STREAM_MAC_PROVISIONING_PROFILE="${STREAM_PROVISIONING_PROFILE:-}" \
+  STREAM_CAMERA_PROVISIONING_PROFILE="${STREAM_CAMERA_PROVISIONING_PROFILE:-}" \
   ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS=--timestamp
-python3 - "$RELEASE_DIR/ExportOptions.plist" "${STREAM_PROVISIONING_PROFILE:-}" <<'PY'
+python3 - "$RELEASE_DIR/ExportOptions.plist" "${STREAM_PROVISIONING_PROFILE:-}" "${STREAM_CAMERA_PROVISIONING_PROFILE:-}" <<'PY'
 import plistlib, sys
 with open(sys.argv[1], 'wb') as file:
     options = {'method': 'developer-id', 'signingStyle': 'manual'}
-    if sys.argv[2]: options['provisioningProfiles'] = {'com.joeblau.StreamMac': sys.argv[2]}
+    profiles = {}
+    if sys.argv[2]: profiles['com.joeblau.StreamMac'] = sys.argv[2]
+    if sys.argv[3]: profiles['com.joeblau.StreamMac.CameraExtension'] = sys.argv[3]
+    if profiles: options['provisioningProfiles'] = profiles
     plistlib.dump(options, file)
 PY
 xcodebuild -exportArchive -archivePath "$RELEASE_DIR/StreamMac.xcarchive" \
