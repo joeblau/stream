@@ -36,5 +36,6 @@ python3 scripts/repair_desktop_transport_archives.py "$PRIVACY_BUILD_PATH"
 xcodebuild -project "$PRIVACY_DIR/StudioPrivacyValidation.xcodeproj" \
   -scheme StudioPrivacyHarness -destination 'platform=macOS' \
   -derivedDataPath "$PRIVACY_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
-env DYLD_FRAMEWORK_PATH="$PWD/$PRIVACY_BUILD_PATH/Build/Products/Debug" \
-  "$PRIVACY_BUILD_PATH/Build/Products/Debug/StudioPrivacyHarness"
+readonly PRIVACY_PRODUCTS="${PRIVACY_BUILD_PATH:A}/Build/Products/Debug"
+env DYLD_FRAMEWORK_PATH="$PRIVACY_PRODUCTS" \
+  "$PRIVACY_PRODUCTS/StudioPrivacyHarness"
