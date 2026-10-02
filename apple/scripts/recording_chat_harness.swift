@@ -57,12 +57,15 @@ private final class ChatTestSummary: @unchecked Sendable {
             spaceProbe: { _ in 8_000_000_000 })
         let renderer = SceneRenderer()
         let base = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        let deadline = ContinuousClock.now
+        var deadline = ContinuousClock.now
         var firstID = "", secondID = ""
         var whiteFrames = 0, blackFrames = 0
         let slate = Scene(name: "Private", layers: [], background: .solid(colorHex: "#000000"))
         for tick in 0..<360 {
             let seconds = Double(tick) / 100
+            // Receipt and generated samples must share the fixture's media
+            // clock, independent of hosted renderer/encoder startup latency.
+            feed.setValidationTime(CMTime(seconds: base + seconds, preferredTimescale: 48_000))
             if tick == 20 {
                 runtime.chat.receive(try event("first")); firstID = runtime.chat.queue.messages.last!.id
                 runtime.chat.receive(try event("first")) // Replayed delivery must stay deduplicated.
@@ -103,6 +106,14 @@ private final class ChatTestSummary: @unchecked Sendable {
                 }
             }
             writer.appendAudio(try ProgramRecordingFixtures.audio(at: seconds, timestampBase: base))
+            if tick == 0 {
+                for _ in 0..<150 {
+                    if timeline.snapshot().origin.isNumeric { break }
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                try check(timeline.snapshot().origin.isNumeric, "Native writer must establish its media timeline before chat receipts")
+                deadline = ContinuousClock.now
+            }
             try await ContinuousClock().sleep(until: deadline + .milliseconds((tick + 1) * 10))
         }
         let result = await withCheckedContinuation { continuation in writer.finish { continuation.resume(returning: $0) } }
@@ -113,7 +124,7 @@ private final class ChatTestSummary: @unchecked Sendable {
         var records: [RecordingChatRecord] = []
         let inspection = try RecordingChatReader.scan(archive.url, record: { records.append($0) })
         try check(!inspection.recovered, "Completed archive was misclassified as interrupted")
-        try check(records.filter { $0.type == "message" }.count == 4, "Public replay/private filtering failed")
+        try check(records.filter { $0.type == "message" }.count == 4, "Public replay/private filtering failed: \(records.filter { $0.type == "message" }.map { ($0.message?.id ?? "missing", $0.seconds) })")
         let shows = records.filter { $0.type == "show" }
         try check(shows.count == 3, "Expected Take(first), Take(second), private-slate restore only: \(shows)")
         try check(shows[0].messageID == firstID && abs(shows[0].seconds - 0.5) < 0.001, "First feature did not align with accepted Take frame")

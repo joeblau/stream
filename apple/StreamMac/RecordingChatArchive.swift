@@ -119,9 +119,11 @@ final class RecordingChatArchive: @unchecked Sendable {
             summary.header.sourceStartSeconds = clock.origin.seconds
             write(summary.header); headerWritten = !failed
         }
+        // A first accepted frame can arrive after the clock snapshot above.
+        // Keep its bounded batch until the next pump can write the header.
+        guard headerWritten else { return }
         lock.lock(); let batch = incoming; incoming.removeAll(keepingCapacity: true); incomingBytes = 0
         summary.droppedEvents = dropped + otherDrops; lock.unlock()
-        guard headerWritten else { return }
         for value in batch {
             switch value {
             case .message(var message, let seconds, let paused):
