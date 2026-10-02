@@ -1157,6 +1157,30 @@ final class StudioCommandDispatcher: ObservableObject {
     func catalogueActions(includeMacros: Bool = true) -> [StudioPaletteAction] {
         paletteActions(scenes: sceneStore.scenes, sources: sceneStore.sources, stagedScene: previewProgram.stagedScene, includeMacros: includeMacros)
     }
+    /// Foreground automation uses the pipeline's nested-scene/source demand
+    /// rules, including the proposed scene/visibility change, before capture.
+    func automationCapturePermissions(for command: StudioCommand?) -> Set<PermissionsManager.Kind> {
+        var staged = previewProgram.stagedScene
+        if case .selectScene(let id) = command { staged = sceneStore.scenes.first { $0.id == id } }
+        if case .setLayerVisibility(let id, let visible, let sceneID) = command,
+           sceneID == nil || sceneID == staged?.id, let index = staged?.layers.firstIndex(where: { $0.id == id }) {
+            staged?.layers[index].isVisible = visible
+        }
+        let registry = SceneGraph.index(sceneStore.scenes)
+        let layers = [previewProgram.programScene, staged].compactMap { $0 }
+            .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
+        let demand = CaptureSourceKey.demanded(layers: layers + sceneStore.overlays.filter(\.isVisible), sources: sceneStore.sources)
+            .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
+        var required: Set<PermissionsManager.Kind> = [.microphone]
+        for source in demand {
+            switch source {
+            case .camera: required.insert(.camera)
+            case .screen, .appAudio: required.insert(.screenCapture)
+            default: break
+            }
+        }
+        return required
+    }
     private func configureMacros() {
         macros.resolve = { [weak self] id in
             self?.catalogueActions(includeMacros: false).contains(where: { $0.id == id && $0.command != nil }) == true
