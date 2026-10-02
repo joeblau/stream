@@ -94,6 +94,8 @@ struct StudioChatQueue: Sendable {
     private(set) var queue: [String] = []
     private(set) var selectedID: String?
     private(set) var featuredID: String?
+    private(set) var readingID: String?
+    mutating func retainReadingPosition(_ id: String?) { readingID = id.flatMap { message($0)?.id } }
     private var seen: Set<String> = []
     private var seenOrder: [String] = []
     var current: StudioChatMessage? { selectedID.flatMap(message) }
@@ -110,7 +112,7 @@ struct StudioChatQueue: Sendable {
         if seenOrder.count > 4_000 { seen.remove(seenOrder.removeFirst()) }
         messages.append(message)
         while messages.count > 1_000 {
-            if let index = messages.firstIndex(where: { !favorites.contains($0.id) && !queue.contains($0.id) && $0.id != featuredID }) {
+            if let index = messages.firstIndex(where: { !favorites.contains($0.id) && !queue.contains($0.id) && $0.id != featuredID && $0.id != readingID }) {
                 messages.remove(at: index)
             } else { break }
         }
@@ -137,10 +139,10 @@ struct StudioChatQueue: Sendable {
     }
     mutating func show(_ id: String) { if message(id) != nil { featuredID = id } }
     mutating func hide() { featuredID = nil }
-    func filtered(search: String, platform: String? = nil, author: String? = nil, kind: String? = nil, favoritesOnly: Bool = false) -> [StudioChatMessage] {
+    func filtered(search: String, platform: String? = nil, connectionID: String? = nil, author: String? = nil, kind: String? = nil, favoritesOnly: Bool = false) -> [StudioChatMessage] {
         messages.filter {
             (!favoritesOnly || favorites.contains($0.id)) && (platform == nil || $0.platform == platform)
-                && (author == nil || $0.author == author) && (kind == nil || $0.kind == kind)
+                && (connectionID == nil || $0.connectionID == connectionID) && (author == nil || $0.author == author) && (kind == nil || $0.kind == kind)
                 && (search.isEmpty || "\($0.author) \($0.text)".localizedCaseInsensitiveContains(search))
         }
     }

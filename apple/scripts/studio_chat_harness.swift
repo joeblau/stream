@@ -29,6 +29,7 @@ import Foundation
         precondition(queue.messages.count == 2)
         let second = message(try event("2", text: "Next"))
         queue.receive(second); queue.favorite(first.id); queue.enqueue(first.id); queue.enqueue(second.id)
+        queue.retainReadingPosition(first.id)
         queue.show(first.id)
         precondition(queue.current?.id == first.id && queue.next?.id == second.id)
         queue.advance(1)
@@ -46,6 +47,8 @@ import Foundation
         precondition(a.id != b.id)
         queue.receive(a); queue.receive(b)
         precondition(queue.message(a.id) != nil && queue.message(b.id) != nil)
+        precondition(queue.readingID == first.id && queue.message(first.id) != nil)
+        precondition(queue.filtered(search: "", connectionID: "another/channel").allSatisfy { $0.connectionID == "another/channel" })
         print("PASS: documented Restream public events, provider identity/scope deduplication, private/unknown/oversize rejection, Unicode, bounded queue/favorites, selection under message churn and reconnect replay, independent featured state")
     }
 }

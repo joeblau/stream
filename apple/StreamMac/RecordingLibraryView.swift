@@ -12,6 +12,7 @@ private struct RecordingSessionGroup: Identifiable {
 /// deliberate local controls, never a second required production window.
 struct RecordingLibraryView: View {
     @ObservedObject var recorder: RecordingController
+    var openRequest: Binding<Bool>? = nil
     let addMarker: (String) -> Void
     @StateObject private var model = RecordingLibraryModel()
     @State private var presented = false
@@ -40,6 +41,9 @@ struct RecordingLibraryView: View {
         Button("Recording Library", systemImage: "film.stack") { presented.toggle() }
             .labelStyle(.iconOnly)
             .help("Recording library, markers, and clip export")
+            .onChange(of: openRequest?.wrappedValue ?? false, initial: true) { _, requested in
+                if requested { presented = true; openRequest?.wrappedValue = false }
+            }
             .popover(isPresented: $presented, arrowEdge: .bottom) {
                 library
                     .task { await reload() }

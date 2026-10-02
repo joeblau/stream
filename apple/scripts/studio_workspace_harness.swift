@@ -45,6 +45,37 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         await workspace.applyPending()
         try require(workspace.runtime.sceneStore.scenes[0].name == "Old Store Late Write", "Profile duplicate lost scenes")
 
+        let runtime = workspace.runtime
+        runtime.previewProgram.setDirectLiveEditing(false)
+        let publicEvent = try JSONSerialization.data(withJSONObject: ["action": "event", "timestamp": 1_800_000_000,
+            "payload": ["connectionIdentifier": "fixture/channel", "eventTypeId": 5,
+                "eventPayload": ["liveChatMessageId": "fixture", "text": "Hello 世界", "author": ["displayName": "Producer"]]]])
+        runtime.chat.receive(publicEvent)
+        let message = try runtime.chat.queue.messages.first.unwrap("Shared chat did not ingest public message")
+        runtime.chat.enqueue(message.id); runtime.chat.createSlot()
+        let slot = try runtime.chat.selectedSlot.unwrap("Comment slot was not created in staged scene")
+        let programBefore = runtime.previewProgram.programScene
+        runtime.chat.show(message.id)
+        try require(runtime.previewProgram.programScene == programBefore, "Showing a staged comment changed Program before Take")
+        try require(runtime.previewProgram.stagedScene?.layers.first(where: { $0.id == slot })?.isVisible == true, "Queued comment was not shown in staged scene")
+        _ = runtime.dispatcher.execute(.take)
+        try require(runtime.previewProgram.programScene?.layers.first(where: { $0.id == slot })?.isVisible == true, "Take did not publish the selected comment")
+        runtime.chat.hide()
+        try require(runtime.previewProgram.stagedScene?.layers.first(where: { $0.id == slot })?.isVisible == false, "Comment Hide missed the staged slot")
+        try require(runtime.previewProgram.programScene?.layers.first(where: { $0.id == slot })?.isVisible == true, "Comment Hide changed Program without Take")
+        runtime.recoveryBinding?.checkpoint()
+        await workspace.recovery.flush()
+        let recoveryURL = root.appendingPathComponent("SessionRecovery/current.v1.json")
+        let snapshot = try JSONDecoder().decode(SessionRecoverySnapshot.self, from: Data(contentsOf: recoveryURL))
+        try require(snapshot.projectID == workspace.selection.project && snapshot.profileID == workspace.selection.profile, "Recovery checkpoint captured wrong context")
+        var altered = runtime.previewProgram.stagedScene!
+        altered.layers[0].isVisible.toggle(); runtime.previewProgram.stage(altered)
+        await workspace.recovery.restoreLocalContext?(snapshot)
+        try require(runtime.previewProgram.stagedScene?.layers.first?.isVisible == snapshot.stagedLayers.first?.isVisible, "Explicit recovery failed to restore staged geometry/visibility")
+        try require(!runtime.controller.outputSessionActive && !runtime.recorder.state.isActive, "Recovery started an output")
+        workspace.recovery.reviewRecordings?()
+        try require(workspace.showRecordingLibrary, "Recovery did not open attached recording library")
+
         let package = root.appendingPathComponent("Test.streamshow")
         let imported = root.appendingPathComponent("imported", isDirectory: true)
         let assetID = AssetID()
@@ -91,7 +122,8 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         await restarted.restore(recovery)
         try require(restarted.sceneRecovery == nil, "Successful restore kept recovery pending")
         try require(restarted.runtime.sceneStore.scenes.map(\.name) == recovery.document.scenes.map(\.name), "Accepted backup did not restore scenes")
-        print("PASS: project/profile switching, captured store paths, duplication, package preview, consistent ID remapping and packaged LUT bytes")
+        await RecordingTerminationDelegate.finishSession?()
+        print("PASS: shared chat staging/Take, recovery binding and attached library, project/profile switching, captured store paths, duplication, package preview, consistent ID remapping and packaged LUT bytes")
     }
 }
 

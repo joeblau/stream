@@ -14,6 +14,7 @@ import StreamCore
     private let recordings: @MainActor () async throws -> SessionRecoveryRecordingInventory
     private var inventory = SessionRecoveryRecordingInventory()
     private var recordingActive = false
+    private var isShutdown = false
     private var observations: Set<AnyCancellable> = []
     private var poll: Task<Void, Never>?
     init(coordinator: SessionRecoveryCoordinator, projectID: UUID, profileID: UUID, sceneStore: SceneStore,
@@ -43,12 +44,19 @@ import StreamCore
         checkpoint()
     }
     deinit { poll?.cancel() }
+    func shutdown() { isShutdown = true; poll?.cancel(); poll = nil; observations.removeAll() }
     func refreshRecordings() async {
-        do { inventory = try await recordings() }
+        guard !isShutdown else { return }
+        do {
+            let result = try await recordings()
+            guard !isShutdown else { return }
+            inventory = result
+        }
         catch { inventory.isVerified = false }
         checkpoint()
     }
     func checkpoint() {
+        guard !isShutdown else { return }
         var value = SessionRecoverySnapshot(projectID: projectID, profileID: profileID)
         value.programSceneID = preview.programScene?.id.rawValue
         value.stagedSceneID = preview.stagedScene?.id.rawValue

@@ -306,13 +306,16 @@ final class RestreamChat: NSObject {
                 case .success(.string(let text)):
                     self.ingest(text)
                     self.reconnectAttempts = 0
+                self.status = .connected
                     self.receive(from: socket)
                 case .success(.data(let data)):
                     self.ingest(String(decoding: data, as: UTF8.self))
                     self.reconnectAttempts = 0
+                self.status = .connected
                     self.receive(from: socket)
                 case .success:
                     self.reconnectAttempts = 0
+                self.status = .connected
                     self.receive(from: socket)
                 case .failure(let error):
                     chatLog.error("Chat socket closed with code \((error as NSError).code)")
@@ -332,6 +335,7 @@ final class RestreamChat: NSObject {
                     }
                 @unknown default:
                     self.reconnectAttempts = 0
+                self.status = .connected
                     self.receive(from: socket)
                 }
             }

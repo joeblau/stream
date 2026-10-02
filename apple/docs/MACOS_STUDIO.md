@@ -197,3 +197,18 @@ hardware policy is a conservative ceiling, not a benchmark certificate.
 [Stream Deck installation, pairing and development package](../../integrations/stream-deck/README.md)
 uses the same live command catalog and shows authoritative state. Its signed
 helper, hardware models and Marketplace release need their documented checks.
+
+
+## Public chat and comment preparation
+
+The sidebar and Settings share one runtime-owned Restream session. Configure the Restream app in Settings, then connect the sidebar. Only public documented events enter the feed; private whispers and unknown event kinds are excluded. Connection identifiers separate destinations, with provider message IDs used for replay deduplication when available.
+
+Filter by platform, destination, author or event type; search author/message text and favorite messages. Queue a message and use Previous/Next to select it. Selection remains independent of the displayed comment. Disable Follow to retain a reading anchor while messages arrive; the feed is bounded to 1,000 messages, 200 favorites and 100 queued items.
+
+Create a Comment Slot in the staged scene, choose it, and use Show to replace its text. Hide changes staged visibility. Take publishes those changes; Direct Live Editing applies them immediately. Resize and style the text layer in the inspector. Avatars, image emotes, automatic long-message layout, direct provider sessions, replies, moderation and viewer metrics remain unavailable. The queue is session-local; only slot IDs persist with the production profile.
+
+## Interrupted-session review
+
+At launch, Recovery reviews the last unclean session without starting streams, recordings, macros or cues. The machine-local checkpoint contains project/profile IDs, scene/layer geometry and visibility, paused media/PDF positions, output IDs and bounded recording journal basenames. It excludes tokens, endpoints, source payloads and machine grants.
+
+Choose Restore Local Context to explicitly open the saved project/profile and restore available references. Missing or deleted content needs Backup History or relinking; recovery does not recreate unsaved layers, text or effects. Review Recordings opens the attached library. Local connection state cannot establish whether a remote provider event ended or can reconnect. Normal Quit drains the recorder, stops outputs and saves final metadata; a blocked writer or inaccessible drive retains a conservative recovery record.

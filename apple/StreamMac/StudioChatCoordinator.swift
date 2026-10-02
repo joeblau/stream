@@ -41,6 +41,7 @@ import StreamCore
     var availableSlots: [LayerNode] {
         previewProgram?.stagedScene?.layers.filter { slots.contains($0.id) && $0.payload.isText } ?? []
     }
+    func retainReadingPosition(_ id: String?) { queue.retainReadingPosition(id) }
     func favorite(_ id: String) { queue.favorite(id) }
     func enqueue(_ id: String) { queue.enqueue(id) }
     func dequeue(_ id: String) { queue.remove(id) }

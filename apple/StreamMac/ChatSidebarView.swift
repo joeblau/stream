@@ -6,11 +6,15 @@ struct ChatSidebarView: View {
     @State private var followMessages = true
     @State private var search = ""
     @State private var platform = "All"
+    @State private var author = "All"
+    @State private var connection = "All"
+    @State private var scrollAnchor: String?
     @State private var kind = "All"
     @State private var favoritesOnly = false
     private var chat: RestreamChat { coordinator.restream }
     private var messages: [StudioChatMessage] {
         coordinator.queue.filtered(search: search, platform: platform == "All" ? nil : platform,
+            connectionID: connection == "All" ? nil : connection, author: author == "All" ? nil : author,
             kind: kind == "All" ? nil : kind, favoritesOnly: favoritesOnly)
     }
     var body: some View {
@@ -33,6 +37,21 @@ struct ChatSidebarView: View {
                 }
             }
             HStack {
+                Picker("Destination", selection: $connection) {
+                    Text("All destinations").tag("All")
+                    ForEach(Array(Set(coordinator.queue.messages.map(\.connectionID))).sorted(), id: \.self) { Text($0).tag($0) }
+                }
+                Picker("Author", selection: $author) {
+                    Text("All authors").tag("All")
+                    ForEach(Array(Set(coordinator.queue.messages.map(\.author))).sorted(), id: \.self) { Text($0).tag($0) }
+                }
+            }
+            ForEach(coordinator.connections.keys.sorted(), id: \.self) { id in
+                if let item = coordinator.connections[id] {
+                    Text("\(item.platform) · \(id) · \(item.state)").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            HStack {
                 Toggle("Favorites", isOn: $favoritesOnly).toggleStyle(.checkbox)
                 Toggle("Follow", isOn: $followMessages).toggleStyle(.checkbox)
                     .help("Disable to keep your scroll position while messages arrive")
@@ -43,9 +62,15 @@ struct ChatSidebarView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(messages) { message in row(message).id(message.id) }
-                    }.padding(.horizontal, 4)
+                    }.scrollTargetLayout().padding(.horizontal, 4)
                 }
                 .defaultScrollAnchor(.bottom)
+                .scrollPosition(id: $scrollAnchor)
+                .onChange(of: scrollAnchor) { _, id in coordinator.retainReadingPosition(followMessages ? nil : id) }
+                .onChange(of: followMessages) { _, follow in
+                    coordinator.retainReadingPosition(follow ? nil : scrollAnchor)
+                    if follow, let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
                 .overlay {
                     if messages.isEmpty { Text(chat.hasCredentials ? "Waiting for matching public messages…" : "Add your Restream app in Settings.").font(.caption).foregroundStyle(.secondary) }
                 }

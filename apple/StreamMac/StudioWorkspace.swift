@@ -16,6 +16,7 @@ final class StudioRuntime {
     let dispatcher: StudioCommandDispatcher
     let controllers: StudioControllerManager
     let chat: StudioChatCoordinator
+    var recoveryBinding: SessionRecoveryRuntimeBinding?
     let adapters: StudioAdapterManager
 
     init() {
@@ -33,6 +34,7 @@ final class StudioRuntime {
         dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: sceneStore,
             session: settings, recorder: recorder, previewProgram: previewProgram)
         controllers = StudioControllerManager()
+        controllers.interactionBlocked = { true }
         controllers.bind(to: dispatcher)
         chat = StudioChatCoordinator(dispatcher: dispatcher, previewProgram: previewProgram)
         adapters = StudioAdapterManager()
@@ -64,6 +66,9 @@ final class StudioWorkspace: ObservableObject {
     @Published var sceneRecovery: Backup?
     @Published var importPreview: ShowPackagePreview?
     @Published var packageBusy = false
+    @Published var showRecordingLibrary = false
+    var permissionChoicePending = false
+    let recovery: SessionRecoveryCoordinator
 
     struct Selection: Equatable {
         var project: UUID
@@ -79,6 +84,7 @@ final class StudioWorkspace: ObservableObject {
 
     init(root: URL = DesktopStorage.machineDirectory) {
         self.root = root
+        self.recovery = SessionRecoveryCoordinator(directory: root.appendingPathComponent("SessionRecovery"))
         catalogURL = root.appendingPathComponent("projects.v1.json")
         var catalog = StudioProjectCatalog()
         var recovery: URL?
@@ -120,6 +126,7 @@ final class StudioWorkspace: ObservableObject {
         guard let next = pending, next != selection, canSwitch else { return }
         isSwitching = true
         StudioAutomationEndpoint.shared.unbind()
+        runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
         runtime.chat.shutdown()
         runtime.localControl.shutdown()
@@ -246,6 +253,7 @@ final class StudioWorkspace: ObservableObject {
         guard canSwitch else { return }
         isSwitching = true
         StudioAutomationEndpoint.shared.unbind()
+        runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
         runtime.chat.shutdown()
         runtime.localControl.shutdown()
@@ -265,6 +273,55 @@ final class StudioWorkspace: ObservableObject {
     }
 
     private func observeRuntime() {
+        runtime.controllers.interactionBlocked = { [weak self] in
+            guard let self else { return true }
+            return !UserDefaults.standard.bool(forKey: "onboarding.hasCompletedFirstRun") || self.permissionChoicePending || self.isSwitching || self.packageBusy
+        }
+        let projectID = currentProject.id, profileID = currentProfile.id
+        runtime.recoveryBinding = SessionRecoveryRuntimeBinding(coordinator: recovery,
+            projectID: projectID, profileID: profileID, sceneStore: runtime.sceneStore,
+            previewProgram: runtime.previewProgram, controller: runtime.controller, pdfDecks: runtime.dispatcher.pdfDecks,
+            recordingActivity: runtime.recorder.$state.map { $0.isActive }.eraseToAnyPublisher(),
+            recordings: { [weak recorder = runtime.recorder] in
+                guard let recorder else { throw SessionRecoveryDiskStore.Failure.invalid }
+                let access = try recorder.libraryAccess()
+                return try await SessionRecordingJournalReader.read(
+                    grant: SessionRecoveryDirectoryGrant(url: access.url, retaining: access),
+                    projectID: projectID, profileID: profileID,
+                    activeFiles: Set(recorder.activeOutputURLs.map(\.lastPathComponent)))
+            })
+        recovery.contextLabel = { [weak self] project, profile in
+            guard let project = self?.catalog.projects.first(where: { $0.id == project }),
+                  let profile = project.profiles.first(where: { $0.id == profile }) else { return nil }
+            return "\(project.name) · \(profile.name)"
+        }
+        recovery.reviewRecordings = { [weak self] in self?.recovery.showReview = false; self?.showRecordingLibrary = true }
+        recovery.restoreLocalContext = { [weak self] snapshot in
+            guard let self, self.canSwitch, self.catalog.projects.contains(where: {
+                $0.id == snapshot.projectID && $0.profiles.contains(where: { $0.id == snapshot.profileID })
+            }) else { self?.recovery.reportError("The saved project/profile is unavailable or outputs are still active."); return }
+            let target = Selection(project: snapshot.projectID, profile: snapshot.profileID)
+            if self.selection != target { self.stage(project: target.project, profile: target.profile); await self.applyPending() }
+            guard self.selection == target, let binding = self.runtime.recoveryBinding else {
+                self.recovery.reportError("The saved project/profile could not be opened."); return
+            }
+            do { try binding.restoreLocal(snapshot) }
+            catch { self.recovery.reportError("Local recovery could not be applied. Review project backups and relink missing media.") }
+        }
+        RecordingTerminationDelegate.finishSession = { [weak self] in
+            guard let self else { return }
+            self.runtime.controllers.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
+            self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop()
+            self.runtime.controller.stopStream(); self.runtime.controller.stopExternalDisplayOutput()
+            self.runtime.flush()
+            for _ in 0..<50 {
+                if !self.runtime.controller.outputSessionActive { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            await self.runtime.recoveryBinding?.refreshRecordings()
+            self.runtime.recoveryBinding?.shutdown()
+            await self.recovery.finishCurrentSession()
+        }
         StudioAutomationEndpoint.shared.bind(dispatcher: runtime.dispatcher, permissions: runtime.permissions,
             profileName: currentProfile.name, stagedLayers: { [weak previewProgram = runtime.previewProgram] in previewProgram?.stagedScene?.layers ?? [] })
         runtime.recorder.context = RecordingContext(projectID: currentProject.id.uuidString, profileID: currentProfile.id.uuidString,

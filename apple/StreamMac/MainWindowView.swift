@@ -199,8 +199,11 @@ struct MainWindowView: View {
             shortcuts.onExecute = { action in
                 if let command = action.command { dispatcher.execute(command) }
             }
-            localControl.interactionBlocked = { !firstRunCompleted || permissionPrompt != nil }
-            workspace.runtime.controllers.interactionBlocked = { !firstRunCompleted || permissionPrompt != nil }
+            localControl.interactionBlocked = { [weak workspace] in
+                guard let workspace else { return true }
+                return !UserDefaults.standard.bool(forKey: "onboarding.hasCompletedFirstRun") || workspace.permissionChoicePending || workspace.isSwitching || workspace.packageBusy
+            }
+            workspace.permissionChoicePending = permissionPrompt != nil
             localControl.bind(to: dispatcher)
             shortcuts.seedScenes(sceneStore.scenes.map { "scene.\($0.id.rawValue.uuidString).select" })
             dispatcher.execute(.startPreview)
@@ -250,6 +253,7 @@ struct MainWindowView: View {
             }
         }
         .onChange(of: permissionPrompt) { _, prompt in
+            workspace.permissionChoicePending = prompt != nil
             if prompt != nil { panelBeforeSheet = focusedPanel }
             else { focusedPanel = panelBeforeSheet; panelBeforeSheet = nil }
         }
@@ -850,7 +854,7 @@ struct MainWindowView: View {
             .disabled(!dispatcher.canExecute(.startNewRecordingFile))
 
             RecordingOptionsView(recorder: recorder)
-            RecordingLibraryView(recorder: recorder) { title in
+            RecordingLibraryView(recorder: recorder, openRequest: $workspace.showRecordingLibrary) { title in
                 dispatcher.execute(.addRecordingMarker(title))
             }
 
