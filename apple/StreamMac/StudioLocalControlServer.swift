@@ -26,6 +26,10 @@ import Network
     private var cancelledRemoteRun: (UUID) -> Void = { _ in }
     private var currentRunID: () -> UUID? = { nil }
     var interactionBlocked: () -> Bool = { false }
+    /// Optional external-adapter grants, checked after authentication and
+    /// before every command. Returning nil leaves normal paired clients alone.
+    var clientAuthorization: (UUID, String?) -> StudioControlProtocolError? = { _, _ in nil }
+    var authenticatedClientIDs: Set<UUID> { Set(peers.values.compactMap { $0.session.clientID }) }
     private final class Peer {
         let id = UUID()
         let connection: NWConnection
@@ -92,6 +96,9 @@ import Network
     }
     func revoke(_ clientID: UUID) {
         guard pairingStore.revoke(clientID) else { return }
+        disconnectClient(clientID)
+    }
+    func disconnectClient(_ clientID: UUID) {
         for peer in Array(peers.values) where peer.session.clientID == clientID { disconnect(peer) }
     }
     func stop() {
@@ -188,12 +195,17 @@ import Network
         }
         if peer.session.clientID == nil {
             if let error = peer.session.authorize(request, tokenForClient: pairingStore.token) { sendError(error, id: request.id, peer: peer, close: true); return }
+            if let error = clientAuthorization(peer.session.clientID!, nil) { sendError(error, id: request.id, peer: peer, close: true); return }
             peer.handshakeTimeout?.cancel(); peer.handshakeTimeout = nil
+            objectWillChange.send()
             send(.init(type: "authenticated", id: request.id, sessionID: peer.session.sessionID, snapshot: currentSnapshot()), peer: peer)
             return
         }
         if let error = peer.session.validate(request, clientStillPaired: { pairingStore.token(for: $0) != nil }) {
             sendError(error, id: request.id, peer: peer, close: error.code == "unauthorized" || error.code == "versionMismatch" || error.code == "sessionLimit"); return
+        }
+        if let error = clientAuthorization(peer.session.clientID!, request.type == .command ? request.commandID : nil) {
+            sendError(error, id: request.id, peer: peer, close: error.code == "adapterDisabled"); return
         }
         switch request.type {
         case .authenticate: return
@@ -206,8 +218,13 @@ import Network
             let all = capabilities(), cursor = request.cursor ?? 0
             guard cursor <= all.count else { sendError(.init(code: "invalidRequest", message: "Capability cursor is outside the catalog."), id: request.id, peer: peer); return }
             let end = min(all.count, cursor + 20)
+            let page = all[cursor..<end].map { capability in
+                guard let error = clientAuthorization(peer.session.clientID!, capability.id) else { return capability }
+                var restricted = capability; restricted.available = false; restricted.unavailableReason = error.message
+                return restricted
+            }
             send(.init(type: "capabilities", id: request.id, sessionID: peer.session.sessionID,
-                       commands: Array(all[cursor..<end]), nextCursor: end < all.count ? end : nil, totalCommands: all.count), peer: peer)
+                       commands: page, nextCursor: end < all.count ? end : nil, totalCommands: all.count), peer: peer)
         case .command:
             let commandID = request.commandID!
             let previousRun = currentRunID()

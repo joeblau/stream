@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "com.joeblau.stream.sample-adapter",
+  "name": "Read-only Studio Status Adapter",
+  "vendor": "Stream",
+  "adapterVersion": "1.0.0",
+  "minimumHostProtocol": 1,
+  "roles": ["control"],
+  "resources": [],
+  "control": {
+    "version": 1,
+    "transport": "studio-ipc-jsonl",
+    "allowedCommandIDs": []
+  }
+}

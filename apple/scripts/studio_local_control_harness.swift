@@ -55,9 +55,13 @@ struct StudioPaletteAction {
 }
 @MainActor final class MemoryCredentials: StudioControlCredentials {
     var tokens: [UUID: String] = [:]
+    var deletionError: OSStatus = errSecSuccess
     func read(_ id: UUID) -> String? { tokens[id] }
     func write(_ token: String, for id: UUID) -> OSStatus { tokens[id] = token; return errSecSuccess }
-    func delete(_ id: UUID) -> OSStatus { tokens.removeValue(forKey: id); return errSecSuccess }
+    func delete(_ id: UUID) -> OSStatus {
+        guard deletionError == errSecSuccess else { return deletionError }
+        tokens.removeValue(forKey: id); return errSecSuccess
+    }
 }
 @MainActor final class WireClient {
     let connection: NWConnection
@@ -186,6 +190,68 @@ struct StudioPaletteAction {
         let malformedReply = try await malformed.read()
         precondition(malformedReply.error?.code == "malformedMessage")
         malformed.connection.cancel()
+        let manager = StudioAdapterManager(directory: directory)
+        manager.bind(to: server)
+        let adapterMacro = ShowMacro(name: "Adapter Delay", steps: [ShowMacroStep(commandID: stable, delaySeconds: 60)])
+        dispatcher.macros.resolve = { _ in nil }
+        precondition(dispatcher.macros.update(ShowMacroDocument(macros: [adapterMacro])) == nil)
+        let adapterMacroID = "macro.\(adapterMacro.id.uuidString).run"
+        dispatcher.actions.append(.init(id: adapterMacroID, title: "Adapter Delay", command: .action(adapterMacroID)))
+        let manifest = StudioAdapterManifest(id: "com.stream.test-controller", name: "Test Adapter", vendor: "Stream", adapterVersion: "1", roles: [.control], resources: [], control: .init(allowedCommandIDs: [stable, adapterMacroID]))
+        precondition(manifest.validationError == nil && manifest.hostCompatibilityError == nil)
+        var unsupported = manifest; unsupported.roles = [.source]; unsupported.control = nil
+        unsupported.source = .init(sourceID: UUID(), width: 1920, height: 1080, maximumFramesPerSecond: 30)
+        precondition(unsupported.validationError == nil && unsupported.hostCompatibilityError != nil)
+        unsupported.source?.maximumQueuedFrames = 100; precondition(unsupported.validationError != nil)
+        unsupported.roles = [.output]; unsupported.source = nil; unsupported.output = .init(outputID: UUID())
+        precondition(unsupported.validationError == nil && unsupported.hostCompatibilityError != nil)
+        store.pair(name: "Dedicated Adapter"); let adapterPair = store.pairing!
+        try manager.register(manifest, clientID: adapterPair.id)
+        let registryURL = directory.appendingPathComponent("studio.adapters.v1.json")
+        let registry = try String(contentsOf: registryURL, encoding: .utf8)
+        precondition(!registry.contains(adapterPair.token) && !registry.contains(pairing.token))
+        let disabledClient = WireClient(port: port)
+        let disabled = try await disabledClient.request(.init(type: .authenticate, id: UUID(), clientID: adapterPair.id, token: adapterPair.token))
+        precondition(disabled.error?.code == "adapterDisabled"); disabledClient.connection.cancel()
+        try manager.setEnabled(manifest.id, true)
+        dispatcher.actions.insert(.init(id: stable, title: "Restored Intro", command: .action(stable)), at: 0)
+        let adapterClient = WireClient(port: port)
+        let adapterAuth = try await adapterClient.request(.init(type: .authenticate, id: UUID(), clientID: adapterPair.id, token: adapterPair.token))
+        precondition(server.authenticatedClientIDs.contains(adapterPair.id))
+        let adapterCapabilities = try await adapterClient.request(.init(type: .capabilities, id: UUID(), sessionID: adapterAuth.sessionID))
+        precondition(adapterCapabilities.commands?.first(where: { $0.id == "output.stream.start" })?.available == false)
+        precondition(adapterCapabilities.commands?.first(where: { $0.id == stable })?.available == true)
+        let grant = try await adapterClient.request(.init(type: .command, id: UUID(), sessionID: adapterAuth.sessionID, commandID: stable))
+        precondition(grant.result?.succeeded == true)
+        let adapterRun = try await adapterClient.request(.init(type: .command, id: UUID(), sessionID: adapterAuth.sessionID, commandID: adapterMacroID))
+        precondition(adapterRun.result?.succeeded == true && dispatcher.macros.isRunning)
+        let countBeforeDenied = dispatcher.emitted.count
+        let outsideGrant = try await adapterClient.request(.init(type: .command, id: UUID(), sessionID: adapterAuth.sessionID, commandID: "output.stream.start"))
+        precondition(outsideGrant.error?.code == "adapterCapabilityDenied" && dispatcher.emitted.count == countBeforeDenied)
+        try manager.setEnabled(manifest.id, false)
+        await waitUntil { !dispatcher.macros.isRunning }
+        precondition(!server.authenticatedClientIDs.contains(adapterPair.id) && store.token(for: adapterPair.id) != nil)
+        try manager.setEnabled(manifest.id, true)
+        let adapterReconnect = WireClient(port: port)
+        let freshAdapter = try await adapterReconnect.request(.init(type: .authenticate, id: UUID(), clientID: adapterPair.id, token: adapterPair.token))
+        precondition(freshAdapter.sessionID != adapterAuth.sessionID && dispatcher.emitted.count == countBeforeDenied)
+        credentials.deletionError = errSecAuthFailed
+        do { try manager.remove(manifest.id); preconditionFailure("Failed revocation removed a restricted adapter") } catch {}
+        precondition(manager.document.adapters.first?.enabled == false && store.token(for: adapterPair.id) != nil)
+        credentials.deletionError = errSecSuccess; try manager.remove(manifest.id)
+        precondition(manager.document.adapters.isEmpty && store.token(for: adapterPair.id) == nil)
+        adapterClient.connection.cancel(); adapterReconnect.connection.cancel()
+        let futureDirectory = directory.appendingPathComponent("future")
+        try FileManager.default.createDirectory(at: futureDirectory, withIntermediateDirectories: true)
+        let futureData = Data("{\"version\":99,\"adapters\":[]}".utf8)
+        let futureURL = futureDirectory.appendingPathComponent("studio.adapters.v1.json")
+        try futureData.write(to: futureURL)
+        let futureManager = StudioAdapterManager(directory: futureDirectory); futureManager.bind(to: server)
+        precondition(server.clientAuthorization(pairing.id, nil)?.code == "adapterRegistryUnavailable")
+        do { try futureManager.register(manifest, clientID: pairing.id); preconditionFailure("Future registry overwritten") } catch {}
+        let preservedFuture = try Data(contentsOf: futureURL)
+        precondition(preservedFuture == futureData)
+        manager.bind(to: server)
         let macro = ShowMacro(name: "Remote", steps: [ShowMacroStep(commandID: "output.stream.start", delaySeconds: 60)])
         dispatcher.macros.resolve = { _ in nil }
         precondition(dispatcher.macros.update(ShowMacroDocument(macros: [macro])) == nil)
@@ -201,6 +267,6 @@ struct StudioPaletteAction {
         owner.connection.cancel()
         server.setEnabled(false)
         precondition(server.listeningPort == nil)
-        print("PASS: native loopback IPC, per-client pairing/no JSON secrets, token/version checks, fragmentation/bounds, capabilities/rename/delete, structured results, request dedup, snapshot/events, reconnect/no replay, malformed input, revoke/remote macro cancel, shutdown")
+        print("PASS: native loopback IPC, pairing/no JSON secrets, token/version/size checks, rename/delete/results/dedup/events, reconnect/no replay, adapter grants/disable/re-enable/revoke safety/future registry, malformed input, revoke/remote macro cancel, shutdown")
     }
 }
