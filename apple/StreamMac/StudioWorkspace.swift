@@ -43,6 +43,7 @@ final class StudioRuntime {
         recorder.bindChat(chat)
         providerAccounts = ProviderAccountSession(restream: chat.restream)
         chat.bindAccounts(providerAccounts)
+        controller.bindEnding(accounts: providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
         adapters = StudioAdapterManager()
         adapters.bind(to: localControl)
         StudioAutomationEndpoint.shared.bind(dispatcher: dispatcher, permissions: permissions,
@@ -134,7 +135,7 @@ final class StudioWorkspace: ObservableObject {
         StudioAutomationEndpoint.shared.unbind()
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
-        runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
+        runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.rundown.stop()
         runtime.dispatcher.macros.cancel()
@@ -261,7 +262,7 @@ final class StudioWorkspace: ObservableObject {
         StudioAutomationEndpoint.shared.unbind()
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
-        runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
+        runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.macros.cancel()
         runtime.dispatcher.rundown.stop()
@@ -320,7 +321,7 @@ final class StudioWorkspace: ObservableObject {
         }
         RecordingTerminationDelegate.finishSession = { [weak self] in
             guard let self else { return }
-            self.runtime.controllers.shutdown(); self.runtime.providerAccounts.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
+            self.runtime.controllers.shutdown(); self.runtime.controller.ending.shutdown(); self.runtime.providerAccounts.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
             self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop()
             self.runtime.controller.stopStream(); self.runtime.controller.stopExternalDisplayOutput(); self.runtime.controller.stopVirtualCameraOutput()
             self.runtime.flush()

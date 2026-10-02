@@ -188,6 +188,7 @@ struct MainWindowView: View {
                     controller.outputSessionActive || dispatcher.state.recording.isActive
                 },
                 stopAllOutputs: {
+                    controller.ending.cancelPending()
                     dispatcher.execute(.stopStream)
                     dispatcher.execute(.stopRecording)
                     controller.stopExternalDisplayOutput()
@@ -197,6 +198,9 @@ struct MainWindowView: View {
         }
         .toolbar { panelToggles }
         .onAppear {
+            if !controller.ending.isBound {
+                controller.bindEnding(accounts: workspace.runtime.providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
+            }
             shortcuts.actions = { commandActions }
             shortcuts.onExecute = { action in
                 if let command = action.command { dispatcher.execute(command) }
@@ -217,6 +221,7 @@ struct MainWindowView: View {
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
         .onDisappear {
+            controller.ending.shutdown()
             controller.stopVirtualCameraOutput()
             workspace.runtime.providerAccounts.shutdown()
             controller.stopExternalDisplayOutput()
