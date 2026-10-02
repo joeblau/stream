@@ -4,11 +4,11 @@ import CoreVideo
 import Foundation
 
 enum ProgramRecordingFixtures {
-    static func video(at seconds: Double, noisy: Bool = false, timestampBase: Double = 10_000) throws -> CMSampleBuffer {
+    static func video(at seconds: Double, noisy: Bool = false, timestampBase: Double = 10_000, eventSeconds: Double = 0.5) throws -> CMSampleBuffer {
         var pixel: CVPixelBuffer?
         guard CVPixelBufferCreate(nil, 320, 180, kCVPixelFormatType_32BGRA, nil, &pixel) == kCVReturnSuccess, let pixel else { throw CocoaError(.fileReadUnknown) }
         CVPixelBufferLockBaseAddress(pixel, [])
-        let bright: UInt8 = (0.5..<0.6).contains(seconds) ? 255 : 0
+        let bright: UInt8 = (eventSeconds..<(eventSeconds + 0.1)).contains(seconds) ? 255 : 0
         if noisy {
             let pointer = CVPixelBufferGetBaseAddress(pixel)!.assumingMemoryBound(to: UInt8.self)
             var seed = UInt64(max(0, seconds) * 100_000) + 1
@@ -27,10 +27,10 @@ enum ProgramRecordingFixtures {
         return sample
     }
 
-    static func audio(at seconds: Double, timestampBase: Double = 10_000, constantTone: Bool = false, amplitude: Float = 0.8) throws -> CMSampleBuffer {
+    static func audio(at seconds: Double, timestampBase: Double = 10_000, constantTone: Bool = false, amplitude: Float = 0.8, eventSeconds: Double = 0.5) throws -> CMSampleBuffer {
         let floats: [Float] = (0..<960).map { index in
             let time = seconds + Double(index / 2) / 48_000
-            return constantTone || (0.5..<0.6).contains(time) ? Float(sin(time * 2 * .pi * 1000)) * amplitude : 0
+            return constantTone || (eventSeconds..<(eventSeconds + 0.1)).contains(time) ? Float(sin(time * 2 * .pi * 1000)) * amplitude : 0
         }
         var asbd = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
             mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
