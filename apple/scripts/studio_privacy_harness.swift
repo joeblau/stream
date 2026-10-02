@@ -68,6 +68,30 @@ private final class PrivacyPixels: @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(150))
         precondition(pixels.values(after: reopened + 1.0 / 30).allSatisfy { $0 < 1 }, "An expired fade cannot reappear on reopening")
         await engine.stop()
+        // Deliberately miss output deadlines: a fade must expire in media
+        // time even when fewer than eight frames have actually rendered.
+        let slowPixels = PrivacyPixels()
+        let slow = CompositionEngine(screenProvider: { nil }, cameraProvider: { nil },
+            sourcePayloadProvider: { Thread.sleep(forTimeInterval: 0.12); return [:] },
+            overlayContextProvider: { gate.overlays() }, sceneRegistryProvider: { [:] },
+            transitionRequestProvider: { nil }, annotationProvider: { gate.annotations() },
+            canvasSize: CGSize(width: 320, height: 180), frameRate: 30,
+            frameOverrideProvider: { gate.sceneSnapshot() })
+        await slow.addSink(token: UUID(), capacity: 2, sink: slowPixels.receive)
+        await slow.run(scene: visible, canvasSize: CGSize(width: 320, height: 180), frameRate: 30)
+        try await Task.sleep(for: .milliseconds(300))
+        await slow.updateScene(hidden)
+        gate.setScene(slate)
+        try await Task.sleep(for: .milliseconds(350))
+        gate.setScene(nil)
+        let slowReopened = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        try await Task.sleep(for: .milliseconds(350))
+        let slowValues = slowPixels.values(after: slowReopened + 1.0 / 30)
+        precondition(!slowValues.isEmpty && slowValues.allSatisfy { $0 < 1 },
+                     "Missed render deadlines cannot extend an expired fade: \(slowValues)")
+        let slowMetrics = await slow.metricsSnapshot()
+        precondition(slowMetrics.missedDeadlines > 0, "The overload control must miss render deadlines")
+        await slow.stop()
         print("PASS: actual native comment fade control, private-slate pixel suppression during an exit fade, and no expired-layer leak on reopening")
     }
 }
