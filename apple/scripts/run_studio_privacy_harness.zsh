@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 readonly PRIVACY_DIR="build/studio-privacy-validation"
+readonly PRIVACY_BUILD_PATH="${PRIVACY_BUILD_PATH:-$PRIVACY_DIR/derived}"
 mkdir -p "$PRIVACY_DIR"
 ruby -ryaml -rjson - "$PRIVACY_DIR" <<'RUBY'
 root=Dir.pwd
@@ -27,8 +28,11 @@ spec['schemes']['StudioPrivacyHarness']={'build'=>{'targets'=>{'StudioPrivacyHar
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$PRIVACY_DIR/project.json" --project "$PRIVACY_DIR"
+xcodebuild -resolvePackageDependencies -project "$PRIVACY_DIR/StudioPrivacyValidation.xcodeproj" \
+  -scheme StudioPrivacyHarness -derivedDataPath "$PRIVACY_BUILD_PATH"
+python3 scripts/repair_desktop_transport_archives.py "$PRIVACY_BUILD_PATH"
 xcodebuild -project "$PRIVACY_DIR/StudioPrivacyValidation.xcodeproj" \
   -scheme StudioPrivacyHarness -destination 'platform=macOS' \
-  -derivedDataPath "$PRIVACY_DIR/derived" CODE_SIGNING_ALLOWED=NO build
-env DYLD_FRAMEWORK_PATH="$PWD/$PRIVACY_DIR/derived/Build/Products/Debug" \
-  "$PRIVACY_DIR/derived/Build/Products/Debug/StudioPrivacyHarness"
+  -derivedDataPath "$PRIVACY_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+env DYLD_FRAMEWORK_PATH="$PWD/$PRIVACY_BUILD_PATH/Build/Products/Debug" \
+  "$PRIVACY_BUILD_PATH/Build/Products/Debug/StudioPrivacyHarness"
