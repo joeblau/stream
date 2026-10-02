@@ -1291,6 +1291,7 @@ final class StreamController: ObservableObject {
     /// Public read for the W04 settings session: while this is true,
     /// connection and canvas/fps edits stage for the next session.
     var outputSessionActive: Bool { outputsOwnProfile }
+    var reservedRecordingEncoderCount: Int { recordingEncoderReservations.recordingCount }
     var activePublishingEncoderCount: Int { destinationOutputs.states.values.filter { $0.isActive }.count }
 
     /// Applies a just-saved settings snapshot from the shared settings
