@@ -63,6 +63,9 @@ jobs:
       - name: Qualify shared publishing encoders and bounded transport fanout
         run: SHARED_ENCODER_BUILD_PATH=build/desktop zsh scripts/run_shared_encoder_harness.zsh
 
+      - name: Qualify local rehearsal preparation and cleanup
+        run: REHEARSAL_BUILD_PATH=build/desktop zsh scripts/run_local_rehearsal_harness.zsh
+
       - name: Test private program slate rendering
         run: PRIVACY_BUILD_PATH=build/desktop zsh scripts/run_studio_privacy_harness.zsh
       - name: Qualify paired canvas rendering and recording
