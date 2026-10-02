@@ -28,6 +28,7 @@ struct StreamMacApp: App {
                 .id(workspace.currentProfile.id)
                 .environmentObject(workspace)
                 .environment(\.sessionRecovery, workspace.recovery)
+                .environment(\.providerAccounts, workspace.runtime.providerAccounts)
                 .onOpenURL { workspace.previewPackage($0) }
                 .environmentObject(sceneStore)
                 .environmentObject(previewProgram)

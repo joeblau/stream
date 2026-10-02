@@ -60,7 +60,7 @@ struct WindowCloseGuard: NSViewRepresentable {
             }
             let alert = NSAlert()
             alert.messageText = "A session is still active"
-            alert.informativeText = "Streaming or recording is in progress. Closing the window will stop all outputs first."
+            alert.informativeText = "A production output is active. Closing the window will stop all outputs first."
             alert.alertStyle = .warning
             alert.addButton(withTitle: "Stop and Close")
             alert.addButton(withTitle: "Cancel")

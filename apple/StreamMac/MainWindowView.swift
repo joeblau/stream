@@ -185,11 +185,13 @@ struct MainWindowView: View {
             // asks in-window instead of silently tearing the outputs down.
             WindowCloseGuard(
                 hasActiveOutputs: {
-                    dispatcher.state.stream.isActive || dispatcher.state.recording.isActive
+                    controller.outputSessionActive || dispatcher.state.recording.isActive
                 },
                 stopAllOutputs: {
                     dispatcher.execute(.stopStream)
                     dispatcher.execute(.stopRecording)
+                    controller.stopExternalDisplayOutput()
+                    controller.stopVirtualCameraOutput()
                 },
                 stopPreview: { dispatcher.execute(.stopPreview) })
         }
@@ -215,6 +217,8 @@ struct MainWindowView: View {
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
         .onDisappear {
+            controller.stopVirtualCameraOutput()
+            workspace.runtime.providerAccounts.shutdown()
             controller.stopExternalDisplayOutput()
             dispatcher.macros.cancel()
             localControl.shutdown()
@@ -681,6 +685,9 @@ struct MainWindowView: View {
                             message: "Remote guest management lands here in a later workstream.")
             case .destinations:
                 ScrollView {
+                    DisclosureGroup("Virtual Camera Output") {
+                        VirtualCameraOutputView(output: controller.virtualCameraOutput)
+                    }.padding(10)
                     DisclosureGroup("External Display Output") {
                         ExternalDisplayOutputView(output: controller.externalDisplayOutput)
                     }.padding(10)

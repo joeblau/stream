@@ -11,6 +11,7 @@ import StreamCore
     private let preview: PreviewProgramModel
     private let controller: StreamController
     private let pdfDecks: PDFDeckStore
+    private let remoteEvents: @MainActor ([UUID]) -> [SessionRecoveryRemoteEvent]
     private let recordings: @MainActor () async throws -> SessionRecoveryRecordingInventory
     private var inventory = SessionRecoveryRecordingInventory()
     private var recordingActive = false
@@ -20,10 +21,11 @@ import StreamCore
     init(coordinator: SessionRecoveryCoordinator, projectID: UUID, profileID: UUID, sceneStore: SceneStore,
          previewProgram: PreviewProgramModel, controller: StreamController, pdfDecks: PDFDeckStore,
          recordingActivity: AnyPublisher<Bool, Never>? = nil,
+         remoteEvents: @escaping @MainActor ([UUID]) -> [SessionRecoveryRemoteEvent] = { $0.map { SessionRecoveryRemoteEvent(outputID: $0) } },
          recordings: @escaping @MainActor () async throws -> SessionRecoveryRecordingInventory) {
         self.coordinator = coordinator; self.projectID = projectID; self.profileID = profileID
         self.scenes = sceneStore; self.preview = previewProgram; self.controller = controller
-        self.pdfDecks = pdfDecks; self.recordings = recordings
+        self.pdfDecks = pdfDecks; self.recordings = recordings; self.remoteEvents = remoteEvents
         coordinator.beginContext(projectID: projectID, profileID: profileID)
         recordingActivity?.sink { [weak self] active in
             self?.recordingActive = active
@@ -68,9 +70,8 @@ import StreamCore
                 anchor: $0.transform.anchor.rawValue, isVisible: $0.isVisible)
         }
         value.activeOutputIDs = controller.destinationOutputs.states.filter { $0.value.isActive }.map(\.key).sorted { $0.uuidString < $1.uuidString }
-        // Provider event APIs are absent. Local connection state cannot verify
-        // whether the remote event ended or is reconnectable.
-        value.remoteEvents = value.activeOutputIDs.map { SessionRecoveryRemoteEvent(outputID: $0) }
+        // Only fresh provider receipts can establish a remote terminal state.
+        value.remoteEvents = remoteEvents(value.activeOutputIDs)
         value.recordings = inventory.segments; value.recordingInventoryVerified = inventory.isVerified
         value.recordingWasActive = recordingActive
         value.media = Array(scenes.sources.prefix(2_000)).compactMap { source in
