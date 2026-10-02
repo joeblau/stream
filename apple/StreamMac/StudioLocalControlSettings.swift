@@ -5,7 +5,7 @@ struct StudioLocalControlSettings: View {
     @ObservedObject var server: StudioLocalControlServer
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Enable paired local controllers", isOn: Binding(get: { server.enabled }, set: server.setEnabled))
+            Toggle("Enable paired local controllers", isOn: Binding(get: { server.enabled }, set: { server.setEnabled($0) }))
             Text(server.status).font(.caption)
             Text("\(server.connectedClients) connected clients · Local IPC v1 · 127.0.0.1:\(StudioLocalControlServer.port)")
                 .font(.caption).foregroundStyle(.secondary)

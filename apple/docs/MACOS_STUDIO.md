@@ -71,6 +71,34 @@ virtual devices, browser interview service, and provider account integrations
 are still separate qualification work; installed AVFoundation/Continuity Camera
 and Syphon paths do not imply those integrations are supported.
 
+## Optional outputs and automation
+
+Recording presets and stable isolated-track selections belong to the active
+profile. The selected recording folder remains a machine-scoped permission.
+Isolated microphone/application/system tracks select pre- or post-insert audio;
+WAV and M4A files share program pause, rotation, and host-clock alignment. A
+missing source fails its own track while the program recording continues.
+Web-widget audio needs an actual capture channel or a selected system mix.
+
+External Display Output selects an eligible secondary display, including an
+AirPlay display that macOS exposes as an extended screen. Fit and Fill control
+presentation without changing program or network media. Unplugging stops that
+output; reconnect it explicitly. Native tests use injected display topology;
+physical AirPlay latency and consumer hardware remain unqualified.
+
+The app provides typed Shortcuts actions for state, scene selection, Take,
+Revert, local preview/recording, and staged layer visibility. Actions target the
+current profile and stable resource IDs. Finish onboarding and visible permission
+or modal choices first. Scene/profile switches invalidate stale targets. Native
+App Intent tests pass; installed, signed Shortcuts discovery and cold launch need
+release qualification.
+
+Application settings can register optional adapter manifests against dedicated
+paired local-control clients. Registrations start disabled and allow only the
+listed command IDs. Disable disconnects the client and cancels its macro;
+Remove and Revoke also removes its Keychain pairing. Media source/output roles
+are declared contracts but are not supported transports in this version.
+
 ## Distribution and support
 
 Distribution is a Developer ID-signed, hardened-runtime, notarized ZIP outside

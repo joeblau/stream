@@ -165,7 +165,7 @@ struct StudioShortcutEditor: View {
                 Button("Done") { shortcuts.cancelRecording(); shortcuts.editorPresented = false }
             }
             Toggle("Enable global shortcuts while other apps are active", isOn: Binding(
-                get: { shortcuts.document.globalEnabled }, set: shortcuts.setGlobalEnabled))
+                get: { shortcuts.document.globalEnabled }, set: { shortcuts.setGlobalEnabled($0) }))
             Text("Each global binding also needs its Global switch enabled and Command + Option or Control. macOS reports shortcuts already owned by another app. Text fields in Stream suppress production shortcuts.")
                 .font(.caption).foregroundStyle(.secondary)
             TextField("Search actions", text: $search).textFieldStyle(.roundedBorder)
