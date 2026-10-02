@@ -27,6 +27,7 @@ target['settings']['base'] ||= {}
 target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
 target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
 target['sources'] << File.join(root,'scripts/browser_audio_helper_harness.swift')
+target['sources'] << File.join(root,'scripts/browser_widget_visual_harness.swift')
 target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 spec['targets']['BrowserAudioHarness']=target
 spec['schemes']['BrowserAudioHarness']={'build'=>{'targets'=>{'BrowserAudioHarness'=>'all'}}}

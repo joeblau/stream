@@ -19,7 +19,7 @@ for role in StreamBrowserAudioHelper StreamBrowserAudioNoiseFixture; do
 </dict></plist>
 PLIST
   swiftc -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
-    StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift BrowserAudioHelper/BrowserAudioHelperMain.swift \
+    StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift BrowserAudioHelper/BrowserAudioHelperMain.swift \
     -o "$BUNDLE_PATH/Contents/MacOS/$role"
   codesign --force --sign - --identifier "com.joeblau.$role" "$BUNDLE_PATH"
 done

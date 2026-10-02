@@ -3,7 +3,7 @@ import AVFoundation
 import CoreMedia
 import StreamCore
 
-private final class HelperProcess: @unchecked Sendable {
+final class HelperProcess: @unchecked Sendable {
     let process = Process()
     let input = Pipe(), output = Pipe()
     private var application: NSRunningApplication?
@@ -65,7 +65,7 @@ private final class HelperProcess: @unchecked Sendable {
     }
 }
 
-private final class AudioTrace: @unchecked Sendable {
+final class AudioTrace: @unchecked Sendable {
     private let lock = NSLock(), converter = CanonicalAudioConverter()
     private var values: [Float] = []
     private var pts: [Double] = []
@@ -126,18 +126,29 @@ private final class AudioTrace: @unchecked Sendable {
         precondition(!BrowserWidgetAudioIdentity.productionRouteQualified)
         try protocolChecks()
         try await inletChecks()
+        if let index = CommandLine.arguments.firstIndex(of: "--inspect-visual-recording"),
+           CommandLine.arguments.indices.contains(index + 1) {
+            try await inspectVisualRecording(URL(fileURLWithPath: CommandLine.arguments[index + 1]))
+            print("PASS: retained actual H264/AAC visual recording decoded. This is artifact validation; live capture qualification was not run.")
+            return
+        }
         guard CommandLine.arguments.contains("--qualify") else {
             print("PASS: read-only inventory and bounded helper protocol. Capture was not started.")
             return
         }
-        guard report.windowServerSession, report.screenCapturePreflight, report.shareableContentAvailable, report.defaultOutputExists else {
-            print("GATED: existing WindowServer, Screen Recording permission, and output device are required. No TCC/device mutation or fallback.")
+        guard report.windowServerSession, report.screenCapturePreflight, report.shareableContentAvailable,
+              report.shareableDisplayCount > 0, report.defaultOutputExists else {
+            print("GATED / UNQUALIFIED: existing WindowServer, SCK display, Screen Recording permission, and output device are required. Capture qualification was skipped; no TCC/device mutation or fallback.")
             return
         }
         let app = NSApplication.shared; app.setActivationPolicy(.accessory)
         let build = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         let artifacts = build.appendingPathComponent("qualification-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
+        if CommandLine.arguments.contains("--visual") {
+            try await visualChecks(build: build, artifacts: artifacts)
+            return
+        }
         let helper: HelperProcess, noise: HelperProcess
         if !CommandLine.arguments.contains("--direct-process-negative") {
             helper = try await HelperProcess.launch(applicationURL: build.appendingPathComponent("StreamBrowserAudioHelper.app"))
@@ -297,7 +308,7 @@ private final class AudioTrace: @unchecked Sendable {
         try JSONEncoder().encode(stats).write(to: artifacts.appendingPathComponent("inlet-statistics.json"))
         print("PASS: actual ad hoc helper WebKit app attribution, stereo two-tone PCM, unrelated-app isolation, mixer gain/mute/program/ISO/monitor buses, monitor-return exclusion, suspend/resume/reload/stop sibling isolation, decoded CAF duration/channels and ordered host PTS. Production signing, full widget lifecycle, system-mix exclusion, speech and endurance remain gated. Artifacts: \(artifacts.path)")
     }
-    @MainActor private static func wait(_ predicate: () -> Bool) async throws {
+    @MainActor static func wait(_ predicate: () -> Bool) async throws {
         for _ in 0..<160 { if predicate() { return }; try await Task.sleep(for: .milliseconds(50)) }
         throw CocoaError(.coderInvalidValue)
     }
@@ -335,6 +346,25 @@ private final class AudioTrace: @unchecked Sendable {
             _ = try BrowserWidgetAudioCommand(action: .load, widgetID: UUID(), html: String(repeating: "\0", count: 60_000)).encodedLine()
             preconditionFailure("Encoded IPC size must also be bounded")
         } catch {}
+        let id = UUID()
+        for options in [BrowserWidgetPageOptions(width: 1_921), BrowserWidgetPageOptions(height: 1_081), BrowserWidgetPageOptions(width: -1)] {
+            do { try options.validate(); preconditionFailure("Unqualified viewports must fail before allocating") } catch {}
+        }
+        do { try BrowserWidgetInteraction(kind: .mouseDown, x: .nan).validate(); preconditionFailure("Nonfinite input must fail") } catch {}
+        do {
+            try BrowserWidgetVisualHeader(widgetID: id, generation: id, requestID: id, width: 480, height: 270,
+                requestedHostSeconds: 1, completedHostSeconds: 0).validate()
+            preconditionFailure("Invalid host intervals must fail")
+        } catch {}
+        var descriptors: [Int32] = [-1, -1]
+        precondition(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0)
+        defer { Darwin.close(descriptors[0]); Darwin.close(descriptors[1]) }
+        let oversizedHeader: [UInt8] = [255, 255, 255, 255]
+        _ = oversizedHeader.withUnsafeBytes { Darwin.write(descriptors[0], $0.baseAddress, $0.count) }
+        do {
+            _ = try BrowserWidgetVisualTransport.read(descriptor: descriptors[1])
+            preconditionFailure("Untrusted header lengths must fail before allocating")
+        } catch BrowserWidgetVisualTransport.TransportError.invalidFrame {} catch { preconditionFailure("Incorrect framing rejection") }
     }
     private static func inletChecks() async throws {
         let inlet = BrowserWidgetPCMInlet { _ in Thread.sleep(forTimeInterval: 0.01) }
@@ -350,7 +380,7 @@ private final class AudioTrace: @unchecked Sendable {
         precondition(stats.dropped > stats.discardedOnStop && stats.maximumPendingFrames <= 9_600 && stats.maximumPendingBytes <= 256 * 1_024 && stats.rejected == 1 && stats.pendingFrames == 0)
         print("PASS: actual PCM inlet overload accounting, bounded queue, stop drain and stale-generation rejection")
     }
-    private static func toneHTML(frequency: Int, pan: Int) -> String {
+    static func toneHTML(frequency: Int, pan: Int) -> String {
         """
         <!DOCTYPE html><meta charset="utf-8"><body>Named \(frequency) Hz widget fixture<script>
         const context = new AudioContext(); const oscillator = context.createOscillator();

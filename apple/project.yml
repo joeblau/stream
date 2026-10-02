@@ -249,6 +249,13 @@ targets:
         keychain-access-groups:
           - $(AppIdentifierPrefix)com.joeblau.Stream
     dependencies:
+      - target: StreamBrowserAudioHelper
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
       - target: StreamCameraExtension
         embed: true
       - target: StreamCore
@@ -265,6 +272,37 @@ targets:
       # receive). macOS-only — the iOS target never links it.
       - package: Syphon
         product: Syphon
+
+  # A12 qualification prototype only. Embedding never enables the route. The separately signed,
+  # sandboxed identity and shared-container IPC must be qualified before product use.
+  StreamBrowserAudioHelper:
+    type: application
+    platform: macOS
+    sources:
+      - BrowserAudioHelper
+      - StreamMac/BrowserWidgetAudioProtocol.swift
+      - StreamMac/BrowserWidgetAudioSocket.swift
+      - StreamMac/BrowserWidgetVisualProtocol.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamBrowserAudioHelper
+        PRODUCT_NAME: StreamBrowserAudioHelper
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        TARGETED_DEVICE_FAMILY: ""
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
+        PROVISIONING_PROFILE_SPECIFIER: $(STREAM_BROWSER_HELPER_PROVISIONING_PROFILE)
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSHighResolutionCapable: YES
+    entitlements:
+      path: BrowserAudioHelper/BrowserAudioHelper.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.network.server: true
+        com.apple.security.application-groups:
+          - group.com.joeblau.Stream
 
   StreamCameraExtension:
     type: system-extension

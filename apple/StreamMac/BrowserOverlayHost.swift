@@ -7,6 +7,13 @@ import WebKit
 
 private let browserOverlayHostLog = Logger(subsystem: "com.joeblau.StreamMac", category: "browser-overlay-host")
 
+/// Small capture-pool seam for explicit native qualification. Nil in the shipped runtime; the
+/// picker and productionRouteQualified remain gated. Install before pool demand, then stop all
+/// demanded hosts and await the session before clearing it. Never switches a running page.
+@MainActor enum BrowserOverlayHelperBackend {
+    static var qualificationSession: BrowserWidgetHelperSession?
+}
+
 /// G08 (issue #115): process-wide seam through which web widget hosts reach
 /// the P03 asset library (`AssetLibraryStore`) without the pool owning the
 /// store. WIRED exactly once, where the asset library is mounted.
@@ -167,8 +174,14 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
 
     /// The hosted webview — the inspector embeds it for deliberate
     /// interaction mode; nothing else touches it.
-    private let webView: BrowserWidgetWebView
-    private let window: WebOverlayHostingWindow
+    private let webView: BrowserWidgetWebView?
+    private let window: WebOverlayHostingWindow?
+    private let helperSession: BrowserWidgetHelperSession?
+    private let helperHTML: String?
+    private let helperWidgetID = UUID()
+    private var helperTask: Task<Void, Never>?
+    private weak var remoteInteractionView: BrowserWidgetRemoteInteractionView?
+    @Published private(set) var helperFrameHeader: BrowserWidgetVisualHeader?
     /// The P03 access token holding the local HTML asset's security-scope
     /// grant for the widget's lifetime (nil for remote widgets).
     private var assetAccess: ResolvedAssetAccess?
@@ -195,9 +208,19 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
 
     /// `configuration` is normalized by the caller (the payload shim); the
     /// store key must be the payload's `browserOverlayStoreKey`.
-    init(configuration: BrowserOverlayConfiguration, storeKey: String) {
+    init(configuration: BrowserOverlayConfiguration, storeKey: String,
+         helperSessionForQualification: BrowserWidgetHelperSession? = nil, helperHTMLForQualification: String? = nil) {
         self.configuration = configuration
         self.storeKey = storeKey
+        helperSession = configuration.audioRoute == .helperApp
+            ? (helperSessionForQualification ?? BrowserOverlayHelperBackend.qualificationSession) : nil
+        helperHTML = helperHTMLForQualification
+        if helperSession != nil {
+            webView = nil; window = nil
+            super.init()
+            routeWarning = "Independent audio is running in a qualification helper. This route remains unavailable for normal use."
+            return
+        }
 
         let webConfiguration = WKWebViewConfiguration()
         // Audio policy at construction: muted widgets require a gesture for
@@ -206,21 +229,23 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         // routes let widget media autoplay.
         webConfiguration.mediaTypesRequiringUserActionForPlayback =
             configuration.audioRoute != .systemMix ? .all : []
-        webView = BrowserWidgetWebView(
+        let localWebView = BrowserWidgetWebView(
             frame: CGRect(origin: .zero,
                           size: CGSize(width: CGFloat(configuration.pixelWidth),
                                        height: CGFloat(configuration.pixelHeight))),
             configuration: webConfiguration)
-        webView.underPageBackgroundColor = .clear
+        localWebView.underPageBackgroundColor = .clear
         // The backing-store alpha switch (macOS 14 verified in G07).
-        webView.setValue(false, forKey: "drawsBackground")
-        webView.allowsHitTesting = configuration.allowsInteraction
+        localWebView.setValue(false, forKey: "drawsBackground")
+        localWebView.allowsHitTesting = configuration.allowsInteraction
 
-        window = WebOverlayHostingWindow(pixelSize: CGSize(width: CGFloat(configuration.pixelWidth),
+        webView = localWebView
+        let localWindow = WebOverlayHostingWindow(pixelSize: CGSize(width: CGFloat(configuration.pixelWidth),
                                                            height: CGFloat(configuration.pixelHeight)))
-        window.contentView = webView
+        window = localWindow
+        localWindow.contentView = localWebView
         super.init()
-        webView.navigationDelegate = self
+        localWebView.navigationDelegate = self
 
         routeWarning = configuration.audioRoute == .helperApp
             ? "Independent widget audio is unavailable in this build. This widget stays silent; choose System Mix explicitly to hear it."
@@ -233,12 +258,12 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     guard !self.isEmbedded, self.isRunning else { return }
-                    self.isOccluded = !self.window.occlusionState.contains(.visible)
+                    self.isOccluded = !((self.window?.occlusionState ?? []).contains(.visible))
                     if self.isOccluded {
                         // Re-assert visibility: a window manager shuffle can
                         // transiently occlude the hidden window, and WebKit
                         // throttles occluded pages.
-                        self.window.orderFrontRegardless()
+                        self.window?.orderFrontRegardless()
                     }
                 }
             }
@@ -257,15 +282,16 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
 
         isRunning = true
         snapshotGeneration = UUID()
+        if helperSession != nil { startHelper(); return }
         setMediaSuspended(configuration.audioRoute != .systemMix)
-        if !isEmbedded { window.enterHiddenMode() }
+        if !isEmbedded { window?.enterHiddenMode() }
 
         if let assetID = configuration.localHTMLAssetIdentifier {
             loadLocalHTMLAsset(assetID)
         } else if let url = configuration.widgetURL {
             loadState = .loading
             armNavigationTimeout()
-            webView.load(URLRequest(url: url))
+            webView?.load(URLRequest(url: url))
         } else {
             loadState = .failed("No widget configured — set a URL or pick a local HTML asset.")
         }
@@ -277,11 +303,15 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     /// so a re-demanded widget restarts without rebuilding anything.
     func stop() {
         isRunning = false
+        helperTask?.cancel(); helperTask = nil
+        helperSession?.release(helperWidgetID)
+        helperFrameHeader = nil
+        remoteInteractionView?.needsDisplay = true
         snapshotGeneration = UUID()
         inFlight = 0
         setMediaSuspended(true)
-        webView.stopLoading()
-        webView.loadHTMLString("", baseURL: nil)
+        webView?.stopLoading()
+        webView?.loadHTMLString("", baseURL: nil)
         stopCaptureClock()
         navigationTimeout?.invalidate()
         navigationTimeout = nil
@@ -295,7 +325,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         stop()
         if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
         occlusionObserver = nil
-        window.close()
+        window?.close()
         assetAccess = nil
     }
 
@@ -312,6 +342,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     /// old widget build.
     func reload() {
         guard loadState != .idle else { return }
+        if helperSession != nil { start(); return }
         stopCaptureClock()
         snapshotGeneration = UUID()
         inFlight = 0
@@ -322,7 +353,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         } else {
             loadState = .loading
             armNavigationTimeout()
-            webView.reloadFromOrigin()
+            webView?.reloadFromOrigin()
         }
     }
 
@@ -336,7 +367,8 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     private func setMediaSuspended(_ value: Bool) {
         guard value != mediaIsSuspended else { return }
         mediaIsSuspended = value
-        webView.setAllMediaPlaybackSuspended(value, completionHandler: nil)
+        if let helperSession { helperSession.setSuspended(id: helperWidgetID, suspended: value); return }
+        webView?.setAllMediaPlaybackSuspended(value, completionHandler: nil)
     }
 
     /// Reparent the same page into the inspector; no second page, navigation,
@@ -344,6 +376,11 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     func attachInteraction(to container: NSScrollView) {
         guard configuration.allowsInteraction else { return }
         isEmbedded = true
+        if helperSession != nil {
+            let view = BrowserWidgetRemoteInteractionView(host: self, pixelSize: CGSize(width: configuration.pixelWidth, height: configuration.pixelHeight))
+            remoteInteractionView = view; container.documentView = view; return
+        }
+        guard let webView, let window else { return }
         webView.removeFromSuperview()
         window.contentView = nil
         window.orderOut(nil)
@@ -355,6 +392,8 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     func detachInteraction() {
         guard isEmbedded else { return }
         isEmbedded = false
+        if helperSession != nil { remoteInteractionView?.removeFromSuperview(); remoteInteractionView = nil; return }
+        guard let webView, let window else { return }
         webView.removeFromSuperview()
         window.contentView = webView
         if isRunning { window.enterHiddenMode() }
@@ -366,7 +405,8 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     /// channel a click-through overlay keeps (alert replays, config pushes).
     /// Returns the string value, if any.
     func evaluateTrigger(_ expression: String) async -> String? {
-        let result = try? await webView.evaluateJavaScript(expression)
+        if let helperSession { return await helperSession.evaluate(id: helperWidgetID, generation: snapshotGeneration, expression: expression) }
+        let result = try? await webView?.evaluateJavaScript(expression)
         return (result as? String) ?? result.map { String(describing: $0) }
     }
 
@@ -392,6 +432,62 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
 
     // MARK: - Content loading
 
+    private func startHelper() {
+        guard let helperSession else { return }
+        helperTask?.cancel()
+        let generation = snapshotGeneration
+        helperFrameHeader = nil
+        // HTTPS + bounded inline fixtures only. File grants/subresource ownership have not been
+        // qualified across the process boundary; an asset never silently loses its resources.
+        guard configuration.localHTMLAssetIdentifier == nil,
+              helperHTML != nil || configuration.widgetURL?.scheme?.lowercased() == "https" else {
+            loadState = .failed("The qualification helper supports HTTPS widgets and inline fixtures. Local HTML assets remain unavailable.")
+            return
+        }
+        let options = BrowserWidgetPageOptions(width: configuration.pixelWidth, height: configuration.pixelHeight,
+            allowsInteraction: configuration.allowsInteraction, hidden: true, css: configuration.cssOverrides)
+        do { try options.validate() } catch {
+            loadState = .failed("The qualification helper supports viewports up to 1920 × 1080."); return
+        }
+        helperTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await helperSession.loadForQualification(id: helperWidgetID, generation: generation,
+                    html: helperHTML, url: helperHTML == nil ? configuration.widgetURL : nil, options: options,
+                    callbacks: .init(state: { [weak self] state in
+                        guard let self, self.isRunning, self.snapshotGeneration == generation else { return }
+                        self.loadState = state
+                        if state == .ready { self.startCaptureClock() }
+                        if case .failed = state {
+                            self.stopCaptureClock(); BrowserOverlayFrameStore.shared.clear(self.storeKey)
+                            self.remoteInteractionView?.needsDisplay = true
+                        }
+                    }, frame: { [weak self] buffer, header in
+                        guard let self, self.isRunning, self.snapshotGeneration == generation else { return }
+                        let latency = (header.completedHostSeconds - header.requestedHostSeconds) * 1_000
+                        self.helperFrameHeader = header
+                        self.metrics.succeeded += 1; self.metrics.lastLatencyMs = latency; self.totalLatencyMs += latency
+                        self.metrics.averageLatencyMs = self.totalLatencyMs / Double(self.metrics.succeeded)
+                        let now = CFAbsoluteTimeGetCurrent()
+                        self.completions.append(now); self.completions.removeAll { now - $0 > 2 }
+                        self.metrics.achievedFPS = Double(self.completions.count) / 2
+                        BrowserOverlayFrameStore.shared.store(buffer, for: self.storeKey)
+                        self.remoteInteractionView?.needsDisplay = true
+                    }, snapshotFailed: { [weak self] in
+                        guard let self, self.snapshotGeneration == generation else { return }; self.metrics.failed += 1
+                    }))
+            } catch {
+                guard self.isRunning, self.snapshotGeneration == generation else { return }
+                self.loadState = .failed("The qualification helper couldn't load this widget.")
+            }
+        }
+    }
+
+    func forwardHelperInteraction(_ input: BrowserWidgetInteraction) {
+        guard configuration.allowsInteraction, isRunning, loadState == .ready else { return }
+        helperSession?.sendInteraction(id: helperWidgetID, generation: snapshotGeneration, input: input)
+    }
+
     private func loadLocalHTMLAsset(_ rawID: String) {
         guard let access = BrowserOverlayAssetResolver.access?(rawID) else {
             loadState = .failed(BrowserOverlayAssetResolver.access == nil
@@ -403,7 +499,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         BrowserOverlayAssetResolver.noteUsage?(rawID, "webOverlay/\(storeKey)")
         loadState = .loading
         armNavigationTimeout()
-        webView.loadFileURL(access.url,
+        webView?.loadFileURL(access.url,
                             allowingReadAccessTo: access.url.deletingLastPathComponent())
     }
 
@@ -419,6 +515,12 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
 
     private func snapshotTick() {
         guard isRunning, loadState == .ready else { return }
+        if let helperSession {
+            if helperSession.requestSnapshot(id: helperWidgetID, generation: snapshotGeneration) { metrics.requested += 1 }
+            else { metrics.dropped += 1 }
+            return
+        }
+        guard let webView else { return }
         guard inFlight < Self.maxInFlightSnapshots else {
             metrics.dropped += 1
             return
@@ -506,7 +608,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         let css = configuration.cssOverrides
         if !css.isEmpty, let data = try? JSONEncoder().encode(css),
            let literal = String(data: data, encoding: .utf8) {
-            webView.evaluateJavaScript("""
+            webView?.evaluateJavaScript("""
             (function() {
                 var old = document.getElementById('__streamCSSOverrides');
                 if (old) old.remove();
@@ -518,7 +620,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
             """) { _, _ in }
         }
         if configuration.audioRoute != .systemMix {
-            webView.evaluateJavaScript("""
+            webView?.evaluateJavaScript("""
             (function() {
                 function muteAll() {
                     document.querySelectorAll('audio,video').forEach(function(m) {
@@ -577,7 +679,7 @@ extension BrowserOverlayHost: WKNavigationDelegate {
             guard self.isRunning else { return }
             self.navigationTimeout?.invalidate()
             self.navigationTimeout = nil
-            guard self.webView.url?.absoluteString != "about:blank" else { return }
+            guard self.webView?.url?.absoluteString != "about:blank" else { return }
             self.applyPageInjections()
             self.loadState = .ready
             // The snapshot clock runs only while the page is alive — a failed
