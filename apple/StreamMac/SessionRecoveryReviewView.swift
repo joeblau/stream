@@ -39,14 +39,9 @@ struct SessionRecoveryReviewView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text(coordinator.contextLabel?(snapshot.projectID, snapshot.profileID)
                      ?? "Project \(snapshot.projectID.uuidString.prefix(8)) · Profile \(snapshot.profileID.uuidString.prefix(8))").font(.caption)
-                Text(snapshot.remoteEvents.contains { $0.state != .unknown }
-                     ? "\(snapshot.activeOutputIDs.count) publishing connections were active. Cached provider event states appear below; verify their current state before manually starting."
-                     : "\(snapshot.activeOutputIDs.count) publishing connections were active. Remote event state is unknown until verified with the provider; a local LIVE acknowledgement does not prove the event remains reconnectable.")
+                Text("\(snapshot.activeOutputIDs.count) publishing connections were active. Remote state remains unknown until explicitly verified with the current account. A local stop does not end a remote event.")
                     .font(.caption)
-                ForEach(snapshot.remoteEvents, id: \.outputID) { event in
-                    if event.state == .ended { Text("Event \(event.eventID ?? "unknown") ended; create a new event through the provider.").font(.caption) }
-                    else if event.state == .reconnectable { Text("Event \(event.eventID ?? "unknown") was verified reconnectable at the last checkpoint; verify again before manually starting.").font(.caption) }
-                }
+                RecoveryEventReviewList(coordinator: coordinator.remoteReview)
                 Text("\(snapshot.recordings.count) recording segments · \(snapshot.recordings.reduce(0) { $0 + $1.markers.count }) timed markers. \(snapshot.recordingInventoryVerified ? "Actual recorder journals were read." : "The recording inventory was incomplete or unavailable; relink its folder and review local files.")")
                     .font(.caption)
                 if snapshot.hasStagedEdits {
@@ -70,6 +65,36 @@ struct SessionRecoveryReviewView: View {
                 }
             } else { Text(coordinator.error == nil ? "No prior interrupted session requires review." : "No readable recovery session is available. Review project backups and recordings manually.").foregroundStyle(.secondary) }
             if let error = coordinator.error { Text(error).font(.caption).foregroundStyle(.orange) }
+        }
+    }
+}
+
+private struct RecoveryEventReviewList: View {
+    @ObservedObject var coordinator: RecoveryEventReviewCoordinator
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(coordinator.events, id: \.outputID) { event in
+                    let review = coordinator.review(event.outputID)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("\(event.provider?.name ?? "Unmanaged output") · \(event.eventID ?? event.outputID.uuidString)")
+                                .font(.caption).lineLimit(1)
+                            Spacer()
+                            Button(coordinator.verifying.contains(event.outputID) ? "Verifying…" : "Verify Remote State") {
+                                coordinator.verify(event.outputID)
+                            }.disabled(!coordinator.canVerify(event.outputID))
+                        }
+                        Text(review.state == .reconnectable ? "Live · reconnect review candidate" : review.state.rawValue.capitalized)
+                            .font(.caption).bold()
+                        Text(review.reason.message).font(.caption).foregroundStyle(.secondary)
+                        if let checkedAt = review.checkedAt {
+                            Text("Checked \(checkedAt.formatted(date: .abbreviated, time: .standard)); receipt expires after 60 seconds.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
         }
     }
 }
