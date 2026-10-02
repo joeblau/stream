@@ -32,19 +32,22 @@ struct SettingsView: View {
     var onResetLayout: () -> Void
     let localControl: StudioLocalControlServer?
     let adapters: StudioAdapterManager?
+    let controllers: StudioControllerManager?
 
     init(session: SettingsSession,
          chat: RestreamChat,
          onClose: @escaping () -> Void = {},
          onResetLayout: @escaping () -> Void = {},
          localControl: StudioLocalControlServer? = nil,
-         adapters: StudioAdapterManager? = nil) {
+         adapters: StudioAdapterManager? = nil,
+         controllers: StudioControllerManager? = nil) {
         self.session = session
         self.chat = chat
         self.onClose = onClose
         self.onResetLayout = onResetLayout
         self.localControl = localControl
         self.adapters = adapters
+        self.controllers = controllers
     }
 
     // MARK: - Chat credential fields
@@ -747,6 +750,7 @@ struct SettingsView: View {
             permissionRow(.screenCapture)
 
             StudioInterfacePreferences()
+            if let controllers { StudioControllerPanel(manager: controllers) }
             if let localControl {
                 StudioLocalControlSettings(server: localControl)
                 if let adapters { StudioAdapterPanel(manager: adapters, server: localControl) }
