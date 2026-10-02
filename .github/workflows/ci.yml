@@ -60,6 +60,9 @@ jobs:
           PROVIDERS_BUILD_PATH=build/tests zsh scripts/run_provider_accounts_harness.zsh
           CHAT_BUILD_PATH=build/tests zsh scripts/run_direct_chat_harness.zsh
           ENDING_BUILD_PATH=build/tests zsh scripts/run_studio_ending_harness.zsh
+      - name: Qualify shared publishing encoders and bounded transport fanout
+        run: SHARED_ENCODER_BUILD_PATH=build/desktop zsh scripts/run_shared_encoder_harness.zsh
+
       - name: Test private program slate rendering
         run: PRIVACY_BUILD_PATH=build/desktop zsh scripts/run_studio_privacy_harness.zsh
       - name: Qualify paired canvas rendering and recording
