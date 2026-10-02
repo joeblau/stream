@@ -37,3 +37,28 @@ jobs:
       - run: node --check public/guest.js
       - run: npm test
       - run: npm run build
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: workers/interviews
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: workers/interviews/package-lock.json
+      - run: npm install --global npm@12.2.0
+      - run: npm ci
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+      - run: node --check public/host.js
+      - run: npm run test:client
+      - run: npm run test:browser
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          CHROME_NO_SANDBOX: '1'

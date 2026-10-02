@@ -11,6 +11,8 @@
     "typegen": "wrangler types --include-runtime false",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:client": "node --test test/browser/reference-host-client.mjs",
+    "test:browser": "node test/browser/reference-host-browser.mjs",
     "build": "wrangler deploy --dry-run"
   },
   "devDependencies": {
@@ -19,6 +21,7 @@
     "@types/node": "24.10.1",
     "typescript": "5.9.3",
     "vitest": "4.1.11",
-    "wrangler": "4.147.0"
+    "wrangler": "4.147.0",
+    "ws": "8.21.0"
   }
 }

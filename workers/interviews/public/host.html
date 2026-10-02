@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stream interview reference host — test only</title>
+<link rel="stylesheet" href="host.css"><script src="host.js" type="module"></script>
+<main>
+  <p class="badge">TEST ONLY · browser protocol fixture</p>
+  <h1>Interview reference host</h1>
+  <p>This host tests guest admission and browser WebRTC. It does not connect to StreamMac, publish Program, record media, or provide a mix-minus return. Open a host invite with its capability in the URL fragment; this page removes it immediately.</p>
+  <p id="status" role="status">Connect when you are ready.</p>
+  <div class="actions"><button id="connect">Connect host</button><button id="rejoin" disabled>Reconnect host</button><button id="leave" disabled>Leave and clear invite</button><button id="end" disabled>End interview and revoke invites</button></div>
+  <fieldset id="room-controls" disabled><legend>Test room state</legend>
+    <label><input id="locked" type="checkbox"> Lock new joins</label>
+    <label><input id="program" type="checkbox"> Test Program status flag</label>
+    <label><input id="recording" type="checkbox"> Test recording status flag</label>
+    <p>Status flags only describe this protocol fixture. They never start a stream or a recording.</p>
+  </fieldset>
+  <section aria-labelledby="return-title"><h2 id="return-title">Optional host camera return</h2>
+    <p>Return is off by default. Enabling it explicitly shares your camera and microphone with admitted guests. Wear headphones; guest audio is muted here until you choose to play it.</p>
+    <button id="enable-return" disabled>Enable camera and microphone return</button><button id="stop-return" disabled>Stop return and devices</button>
+    <video id="preview" muted autoplay playsinline aria-label="Host camera preview"></video>
+  </section>
+  <section aria-labelledby="roster-title"><h2 id="roster-title">Waiting room and admitted guests</h2>
+    <p id="empty">No connected guests.</p><div id="roster"></div>
+  </section>
+  <p>Native host integration, physical devices, mobile browsers, long calls and restricted-network relay remain qualification gates.</p>
+</main>
+</html>

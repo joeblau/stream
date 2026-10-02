@@ -4,6 +4,8 @@ This Worker provides scoped, expiring invites, authenticated signaling and a bro
 
 Use Node24.15+ within major24 and npm12.2. Run `npm ci`, `npm run typegen`, `npm run typecheck`, `npm test`, and `npm run build`. The build is a deployment dry run. No deployment is authorized or performed by these checks.
 
+The optional [test-only reference host and browser fixtures](test/browser/README.md) run with `npm run test:client` and `npm run test:browser`. They exercise real local Chrome WebRTC against a loopback protocol double; the workerd suite remains the evidence for the actual signaling service.
+
 For local development, copy `.dev.vars.example` to `.dev.vars`, set a private local operator token and set `ALLOWED_ORIGIN` to the exact browser origin. A hosted deployment needs its own `OPERATOR_TOKEN` and `TURN_KEY_API_TOKEN` secrets, nonsecret Cloudflare Realtime `TURN_KEY_ID`, and exact HTTPS `ALLOWED_ORIGIN`. Never put secrets in browser code, logs, repository or query parameters. Missing TURN configuration is explicitly unavailable.
 
 ## Protocol
