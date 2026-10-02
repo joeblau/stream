@@ -1166,6 +1166,11 @@ final class StudioCommandDispatcher: ObservableObject {
         validate(command) == nil
     }
 
+    /// Authoritative rejection reason used by palettes and external controllers.
+    func availabilityError(for command: StudioCommand) -> StudioCommandError? {
+        validate(command)
+    }
+
     // MARK: Validation (against current session state, before any execution)
 
     private func validate(_ command: StudioCommand) -> StudioCommandError? {

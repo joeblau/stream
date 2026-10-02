@@ -790,6 +790,7 @@ struct SettingsView: View {
             permissionRow(.microphone)
             permissionRow(.screenCapture)
 
+            StudioInterfacePreferences()
             Button("Restore Default Panel Layout", action: onResetLayout)
         } header: {
             Text("Application")

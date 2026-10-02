@@ -45,6 +45,7 @@ struct StreamMacApp: App {
                 // object) and the G01 image-layer views (environment key).
                 .environmentObject(dispatcher.assetLibrary)
                 .environment(\.assetLibraryStore, dispatcher.assetLibrary)
+                .modifier(StudioInterfaceModifier())
                 .preferredColorScheme(.dark)
                 // The smallest supported production layout (1024×640): all
                 // panels stay usable, and any of them can collapse from there.

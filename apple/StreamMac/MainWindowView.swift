@@ -47,6 +47,10 @@ struct MainWindowView: View {
     /// registration/usage, and decode publishing. Owned here so the inspector
     /// section and the canvas drop share one instance.
     @StateObject private var imageLayers = ImageLayerCoordinator()
+    @StateObject private var shortcuts = StudioShortcutController()
+    @Environment(\.studioReduceMotion) private var reduceMotion
+    @State private var panelBeforeCommands: StudioPanel?
+    @State private var panelBeforeSheet: StudioPanel?
     /// The orchestrator-injected shared P03 asset library (nil pre-wiring).
     @Environment(\.assetLibraryStore) private var assetLibrary
     /// Shared Restream chat connection: the sidebar shows it and the settings
@@ -115,40 +119,58 @@ struct MainWindowView: View {
                     .frame(minWidth: 180, idealWidth: 220, maxWidth: 320)
                     .focusable()
                     .focused($focusedPanel, equals: .scenes)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Scenes panel")
+                    .accessibilitySortPriority(5)
             }
             canvasPanel
                 .frame(minWidth: 320)
                 .layoutPriority(1)
                 .focusable()
                 .focused($focusedPanel, equals: .canvas)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Preview and program panel")
+                .accessibilitySortPriority(4)
             if showChatPanel {
                 ChatSidebarView(chat: chat)
                     .frame(maxWidth: 420)
                     .focusable()
                     .focused($focusedPanel, equals: .chat)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Chat panel")
+                    .accessibilitySortPriority(3)
             }
             if showInspectorPanel {
                 inspectorPanel
                     .frame(minWidth: 240, idealWidth: 300, maxWidth: 420)
                     .focusable()
                     .focused($focusedPanel, equals: .inspector)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Inspector panel")
+                    .accessibilitySortPriority(2)
             }
             if session.isPresented {
                 settingsPane
                     .frame(minWidth: 300, idealWidth: 360, maxWidth: 480)
                     .focusable()
                     .focused($focusedPanel, equals: .settings)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Settings panel")
+                    .accessibilitySortPriority(1)
             }
         }
-        .background {
-            // ⌘1…⌘9 jump straight to a scene from anywhere in the window; the
-            // hidden buttons only carry the shortcuts.
-            ForEach(1...9, id: \.self) { number in
-                Button("") { dispatcher.execute(.selectSceneAt(number)) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(number)")),
-                                      modifiers: .command)
-                    .hidden()
-            }
+        .background(StudioShortcutWindowAttachment(shortcuts: shortcuts))
+        .sheet(isPresented: $shortcuts.palettePresented, onDismiss: paletteDidDismiss) {
+            StudioCommandPalette(shortcuts: shortcuts, actions: commandActions)
+        }
+        .sheet(isPresented: $shortcuts.editorPresented, onDismiss: restoreCommandFocus) {
+            StudioShortcutEditor(shortcuts: shortcuts, actions: commandActions)
+        }
+        .onChange(of: shortcuts.palettePresented) { _, presented in
+            if presented { panelBeforeCommands = focusedPanel; shortcuts.rememberCommandFocus() }
+        }
+        .onChange(of: shortcuts.editorPresented) { _, presented in
+            if presented && panelBeforeCommands == nil { panelBeforeCommands = focusedPanel; shortcuts.rememberCommandFocus() }
         }
         .background {
             // W02 session policy: closing the window while streaming/recording
@@ -165,6 +187,11 @@ struct MainWindowView: View {
         }
         .toolbar { panelToggles }
         .onAppear {
+            shortcuts.actions = { commandActions }
+            shortcuts.onExecute = { action in
+                if let command = action.command { dispatcher.execute(command) }
+            }
+            shortcuts.seedScenes(sceneStore.scenes.map { "scene.\($0.id.rawValue.uuidString).select" })
             dispatcher.execute(.startPreview)
             // Restore a settings pane left open last launch.
             session.isPresented = showSettingsPanel
@@ -173,6 +200,15 @@ struct MainWindowView: View {
             // has injected it (idempotent; nil pre-wiring).
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
+        .onDisappear {
+            shortcuts.uninstall()
+            shortcuts.actions = { [] }; shortcuts.onExecute = { _ in }
+        }
+        .alert("Keyboard Command", isPresented: Binding(
+            get: { shortcuts.message != nil && !shortcuts.editorPresented },
+            set: { if !$0 { shortcuts.message = nil } })) {
+            Button("OK") { shortcuts.message = nil }
+        } message: { Text(shortcuts.message ?? "") }
         .onChange(of: assetLibrary.map(ObjectIdentifier.init)) { _, _ in
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
@@ -199,6 +235,22 @@ struct MainWindowView: View {
                 permissionPrompt = nil
             }
         }
+        .onChange(of: permissionPrompt) { _, prompt in
+            if prompt != nil { panelBeforeSheet = focusedPanel }
+            else { focusedPanel = panelBeforeSheet; panelBeforeSheet = nil }
+        }
+        .onChange(of: firstRunCompleted) { _, complete in
+            if complete { focusedPanel = .canvas }
+        }
+        .onChange(of: showScenesPanel) { _, visible in
+            if !visible && focusedPanel == .scenes { focusedPanel = .canvas }
+        }
+        .onChange(of: showChatPanel) { _, visible in
+            if !visible && focusedPanel == .chat { focusedPanel = .canvas }
+        }
+        .onChange(of: showInspectorPanel) { _, visible in
+            if !visible && focusedPanel == .inspector { focusedPanel = .canvas }
+        }
         .onChange(of: sceneStore.selected) { _, scene in
             promptForMissingSourcePermission(in: scene)
         }
@@ -224,11 +276,43 @@ struct MainWindowView: View {
         }
     }
 
+    private var commandActions: [StudioPaletteAction] {
+        dispatcher.paletteActions(scenes: sceneStore.scenes, sources: sceneStore.sources,
+                                  stagedScene: previewProgram.stagedScene)
+    }
+    private func paletteDidDismiss() {
+        if shortcuts.openEditorAfterPalette {
+            shortcuts.openEditorAfterPalette = false
+            shortcuts.editorPresented = true
+        } else { restoreCommandFocus() }
+    }
+    private func restoreCommandFocus() {
+        guard !shortcuts.palettePresented && !shortcuts.editorPresented else { return }
+        focusedPanel = panelBeforeCommands ?? .canvas
+        panelBeforeCommands = nil
+        shortcuts.restoreCommandFocus()
+    }
+
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
     private var panelToggles: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                shortcuts.palettePresented = true
+            } label: { Label("Commands", systemImage: "command") }
+            .help("Open the command palette (⇧⌘P)")
+            Button("Shortcuts", systemImage: "keyboard") { shortcuts.editorPresented = true }
+            Button("Compact Layout", systemImage: "rectangle.compress.vertical") {
+                showChatPanel = false; showInspectorPanel = false
+                session.isPresented = false; focusedPanel = .canvas
+            }
+            Menu("Focus", systemImage: "cursorarrow.rays") {
+                Button("Scenes") { showScenesPanel = true; focusedPanel = .scenes }
+                Button("Canvas") { focusedPanel = .canvas }
+                Button("Chat") { showChatPanel = true; focusedPanel = .chat }
+                Button("Inspector") { showInspectorPanel = true; focusedPanel = .inspector }
+            }
             Toggle(isOn: $showScenesPanel) {
                 Label("Scenes", systemImage: "rectangle.on.rectangle")
             }
@@ -299,8 +383,8 @@ struct MainWindowView: View {
     //
     // The scenes column is the S02 scene browser (SceneBrowserView.swift,
     // issue #70): thumbnails, folders, drag-to-reorder, locks, search, and
-    // list/grid modes. The ⌘1…⌘9 shortcuts above keep working because the
-    // browser's manual order IS the store's scene order.
+    // list/grid modes. Keyboard mappings use scene UUIDs so browser reorder
+    // and rename preserve every configured binding.
 
     // MARK: - Canvas panel
 
@@ -387,7 +471,6 @@ struct MainWindowView: View {
             .buttonStyle(.borderedProminent)
             .tint(dispatcher.state.hasPendingStagedEdits ? .accentColor : nil)
             .disabled(!dispatcher.canExecute(.take))
-            .keyboardShortcut(.defaultAction)
             .help("Publish the previewed scene to the program output (⏎)")
 
             Button("Revert") {
@@ -415,7 +498,7 @@ struct MainWindowView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .animation(.default, value: dispatcher.state.hasPendingStagedEdits)
+        .animation(reduceMotion ? nil : .default, value: dispatcher.state.hasPendingStagedEdits)
     }
 
     private var directLiveBinding: Binding<Bool> {
@@ -536,8 +619,8 @@ struct MainWindowView: View {
                     Text(tab.rawValue).tag(tab)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .pickerStyle(.menu)
+            .accessibilityLabel("Inspector section")
             .padding(8)
 
             switch inspectorTab {
@@ -737,7 +820,7 @@ struct MainWindowView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .animation(.default, value: dispatcher.state.stream)
+        .animation(reduceMotion ? nil : .default, value: dispatcher.state.stream)
     }
 
     /// The streaming session status: LIVE only on an acknowledged publish;
@@ -812,7 +895,6 @@ struct MainWindowView: View {
         .frame(minWidth: 120)
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
-        .keyboardShortcut("l", modifiers: .command)
     }
 }
 

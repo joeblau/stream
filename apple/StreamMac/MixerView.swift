@@ -299,11 +299,14 @@ struct MixerPanelView: View {
                 // macOS SwiftUI has no vertical slider: lay out horizontal,
                 // then rotate and re-frame so the layout box matches.
                 Slider(value: Binding(get: { volume }, set: onVolume), in: range)
+                    .accessibilityLabel("\(title) volume")
+                    .accessibilityValue(Self.gainLabel(volume))
                     .frame(width: Self.faderTravel)
                     .rotationEffect(.degrees(-90))
                     .frame(width: 24, height: Self.faderTravel)
                     .disabled(!controlsEnabled)
                 MeterBar(levels: meterLevels ?? AudioLevels())
+                    .accessibilityHidden(true)
                     .frame(width: 10, height: Self.faderTravel)
             }
             Text(Self.gainLabel(volume))
@@ -313,14 +316,20 @@ struct MixerPanelView: View {
                 stripButton("M", active: isMuted, tint: .orange) { onMute(!isMuted) }
                     .disabled(!controlsEnabled)
                     .help(isMuted ? "Unmute" : "Mute")
+                    .accessibilityLabel("\(isMuted ? "Unmute" : "Mute") \(title)")
+                    .accessibilityValue(isMuted ? "Muted" : "Unmuted")
                 if showSolo {
                     stripButton("S", active: isSoloed, tint: .yellow) { onSolo(!isSoloed) }
+                        .accessibilityLabel("\(isSoloed ? "Clear solo for" : "Solo") \(title)")
+                        .accessibilityValue(isSoloed ? "Solo enabled" : "Solo disabled")
                         .help(isSoloed
                               ? "Clear solo"
                               : "Monitor-only solo — the program output is unaffected")
                 }
                 if showAux {
                     stripButton("AUX", active: auxOn, tint: .blue) { onAux(!auxOn) }
+                        .accessibilityLabel("\(title) aux send")
+                        .accessibilityValue(auxOn ? "Enabled" : "Disabled")
                         .help(auxOn ? "Remove from the aux/guest-return bus"
                                     : "Route to the aux/guest-return bus at unity")
                 }
@@ -339,7 +348,8 @@ struct MixerPanelView: View {
             .font(.caption2.weight(.semibold))
         }
         .frame(width: 76)
-        .opacity(isActive ? 1 : 0.45)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(title) audio channel, \(isActive ? "active" : "inactive")")
     }
 
     private func stripButton(_ title: String, active: Bool, tint: Color,
