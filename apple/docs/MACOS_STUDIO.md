@@ -30,6 +30,8 @@ Backup History previews valid scene snapshots and restores one explicitly while
 outputs are stopped. Up to 20 previous valid versions are retained per saved
 document. Atomic saves leave either the previous or new complete JSON. Corrupt
 or newer scene documents retain their original bytes in a quarantine backup.
+An unreadable scene file offers the last valid backup in an attached recovery
+sheet; accepting it restores the previewed scene names without starting outputs.
 Catalog recovery requires explicitly accepting the recovered catalog. Assets
 are not duplicated on every autosave.
 
@@ -105,3 +107,28 @@ and media before sharing.
 Authoritative release requirements: [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
 [Apple packaging](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution),
 and [GitHub runner architectures](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+## Diagnostics
+
+Health Details separates new camera/screen deliveries from paced compositor
+frames. Static screens may report zero new deliveries while Program and its
+recordings keep their configured cadence. Each output shows its acknowledgment
+state, measured encoder frames/bitrate when the backend reports them, socket
+queue, and independent bounded-mailbox drops. Compositor render time, subscriber
+queues, audio underruns/tap drops, recording track endpoint difference, storage,
+CPU, memory, thermal state, and estimated encoder use identify resource pressure.
+The track endpoint difference is not a clock drift or perceptual A/V sync test.
+Live clocks persist across reconnect and hidden panels. Recording clocks use
+writer progress, including pause/rotation semantics.
+
+Export Diagnostics writes a bounded JSON snapshot with hardware policy,
+configuration dimensions, stable resource IDs, aggregate counters, and the last
+256 lifecycle events. It omits names, endpoints, secrets, error descriptions,
+file paths, and captured media; audio channel labels are pseudonymized. Use the
+actual recording sync harness for decoded-media evidence. GPU utilization and
+end-to-end network latency are not inferred from render or socket counters.
+
+[Local controller pairing, revocation, protocol and sample client](LOCAL_CONTROL_IPC.md)
+are documented separately. Enable the listener explicitly in embedded Controls,
+pair each client, and revoke it there. Switching shows disconnects paired client
+sessions and requires a fresh handshake; stored pairings remain machine scoped.

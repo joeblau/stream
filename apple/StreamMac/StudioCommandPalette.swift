@@ -29,6 +29,7 @@ extension StudioCommandDispatcher {
         add("output.record.pause", "Pause Recording", "Output", .pauseRecording)
         add("output.record.resume", "Resume Recording", "Output", .resumeRecording)
         add("output.record.split", "Start New Recording File", "Output", .startNewRecordingFile)
+        add("output.record.marker", "Add Recording Marker", "Output", .addRecordingMarker("Chapter"))
         add("output.rehearsal.start", "Begin Local Rehearsal", "Output", .startRehearsal)
         add("output.rehearsal.stop", "End Local Rehearsal", "Output", .stopRehearsal)
         add("output.preview.start", "Start Preview", "Output", .startPreview)

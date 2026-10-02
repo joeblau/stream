@@ -11,6 +11,7 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         defer { try? FileManager.default.removeItem(at: root) }
         let workspace = StudioWorkspace(root: root)
         let first = workspace.selection
+        try require(workspace.runtime.recorder.context.projectID == first.project.uuidString, "Recording project context is missing")
         let firstStore = workspace.runtime.sceneStore
         let scene = firstStore.scenes[0]
         _ = workspace.runtime.dispatcher.execute(.renameScene(scene.id, to: "First Show Camera"))

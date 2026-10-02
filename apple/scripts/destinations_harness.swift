@@ -56,6 +56,8 @@ actor FakeDestinationPublisher: Publisher {
         slow.emit(.published); healthy.emit(.published)
         await settle { outputs.liveCount == 2 }
         precondition(outputs.aggregateState == .live)
+        let acknowledgedStart = outputs.acknowledgedStarts[a.id]
+        precondition(acknowledgedStart != nil)
 
         // A transport waiting forever on one frame cannot block the healthy sink.
         await slow.hold()
@@ -64,6 +66,9 @@ actor FakeDestinationPublisher: Publisher {
         await settleAsync { await healthy.frames.count >= 1 }
         for value in 1...100 { outputs.fanout.enqueueVideo(try sample(Int64(value))) }
         await settleAsync { await healthy.frames.last == 100 }
+        let diagnostics = await outputs.diagnosticsSnapshot()
+        precondition(diagnostics.allSatisfy { $0.videoQueueDepth <= 2 })
+        precondition(diagnostics.first { $0.id == a.id.uuidString }!.videoMailboxDrops >= 98)
         await slow.release()
         await settleAsync { await slow.frames.count == 3 }
         let slowFrames = await slow.frames
@@ -72,6 +77,7 @@ actor FakeDestinationPublisher: Publisher {
         slow.emit(.reconnecting(reason: "temporary"))
         await settle { if case .reconnecting = outputs.states[a.id] { return true }; return false }
         precondition(outputs.states[b.id] == .live && outputs.aggregateState == .live)
+        precondition(outputs.acknowledgedStarts[a.id] == acknowledgedStart, "Reconnect reset elapsed timer")
         slow.emit(.failed(message: "rtmps://secret.invalid/key"))
         await settle { if case .failed = outputs.states[a.id] { return true }; return false }
         precondition(outputs.states[b.id] == .live && outputs.partialSuccess)

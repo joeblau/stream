@@ -11,6 +11,7 @@ final class StudioRuntime {
     let controller: StreamController
     let settings: SettingsSession
     let recorder: RecordingController
+    let diagnostics: StudioDiagnosticsMonitor
     let localControl: StudioLocalControlServer
     let dispatcher: StudioCommandDispatcher
 
@@ -23,6 +24,7 @@ final class StudioRuntime {
         settings = SettingsSession(controller: controller)
         recorder = RecordingController()
         RecordingTerminationDelegate.recorder = recorder
+        diagnostics = StudioDiagnosticsMonitor(controller: controller, recorder: recorder)
         dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: sceneStore,
             session: settings, recorder: recorder, previewProgram: previewProgram)
     }
@@ -209,7 +211,7 @@ final class StudioWorkspace: ObservableObject {
         guard let data = try? Data(contentsOf: current) else { return nil }
         if case .success(let migrated) = SceneDocumentMigration.migrateToCurrent(data),
            let document = try? JSONDecoder().decode(SceneDocument.self, from: migrated), !document.scenes.isEmpty { return nil }
-        return ((try? ProjectDocumentHistory.validBackups(for: current)) ?? []).compactMap { candidate in
+        return ((try? ProjectDocumentHistory.validBackups(for: current)) ?? []).compactMap { candidate -> Backup? in
             guard let data = try? Data(contentsOf: candidate), case .success(let migrated) = SceneDocumentMigration.migrateToCurrent(data),
                   let document = try? JSONDecoder().decode(SceneDocument.self, from: migrated), !document.scenes.isEmpty else { return nil }
             return Backup(url: candidate, document: document)
@@ -218,7 +220,7 @@ final class StudioWorkspace: ObservableObject {
 
     var sceneBackups: [Backup] {
         let url = directory(for: selection).appendingPathComponent("stream.scenes.v2.json")
-        return ((try? ProjectDocumentHistory.validBackups(for: url)) ?? []).compactMap { candidate in
+        return ((try? ProjectDocumentHistory.validBackups(for: url)) ?? []).compactMap { candidate -> Backup? in
             guard let data = try? Data(contentsOf: candidate), case .success(let migrated) = SceneDocumentMigration.migrateToCurrent(data),
                   let document = try? JSONDecoder().decode(SceneDocument.self, from: migrated), !document.scenes.isEmpty else { return nil }
             return Backup(url: candidate, document: document)
@@ -245,6 +247,8 @@ final class StudioWorkspace: ObservableObject {
     }
 
     private func observeRuntime() {
+        runtime.recorder.context = RecordingContext(projectID: currentProject.id.uuidString, profileID: currentProfile.id.uuidString,
+            projectName: currentProject.name, profileName: currentProfile.name)
         stateObservation = runtime.controller.$streamState.combineLatest(runtime.recorder.$state)
             .sink { [weak self] _ in self?.objectWillChange.send() }
     }

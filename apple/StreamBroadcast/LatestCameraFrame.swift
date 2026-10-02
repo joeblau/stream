@@ -25,6 +25,7 @@ final class LatestCameraFrame: @unchecked Sendable {
     /// after camera capture stalls or is disabled.
     private static let maximumAgeNanoseconds: UInt64 = 500_000_000
 
+    let deliveryTelemetry = FrameTelemetry()
     private var lock = os_unfair_lock_s()
     private var buffer: CVPixelBuffer?
     private var position: CameraPosition = .front
@@ -40,6 +41,7 @@ final class LatestCameraFrame: @unchecked Sendable {
         buffer = pixelBuffer
         self.position = position
         storedAt = now
+        deliveryTelemetry.recordCaptured()
         os_unfair_lock_unlock(&lock)
     }
 

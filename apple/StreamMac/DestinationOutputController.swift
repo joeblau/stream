@@ -12,6 +12,7 @@ final class DestinationOutputController: ObservableObject {
     @Published private(set) var names: [UUID: String] = [:]
     let fanout = DestinationMediaFanout()
     var stateDidChange: (() -> Void)?
+    private(set) var acknowledgedStarts: [UUID: Date] = [:]
     /// Rehearsal disables publisher creation at the output boundary as well as
     /// the command/UI entry points, so no public transport can be started.
     var isPublishingAllowed = true
@@ -55,6 +56,7 @@ final class DestinationOutputController: ObservableObject {
         let mailbox = DestinationVideoMailbox(publisher: publisher)
         names[id] = destination.name
         states[id] = .connecting
+        acknowledgedStarts[id] = nil
         // Attach the lifecycle consumer BEFORE start so early connect failures
         // cannot be missed. Generation checks discard callbacks from old retries.
         let eventTask = Task { [weak self] in
@@ -94,6 +96,7 @@ final class DestinationOutputController: ObservableObject {
             return
         }
         states[id] = .stopping
+        acknowledgedStarts[id] = nil
         fanout.remove(id: id)
         runtime.startTask.cancel()
         runtime.eventTask.cancel()
@@ -118,12 +121,34 @@ final class DestinationOutputController: ObservableObject {
         return await runtime.publisher.statsSnapshot()
     }
 
+    func diagnosticsSnapshot() async -> [DestinationDiagnosticSnapshot] {
+        var result: [DestinationDiagnosticSnapshot] = []
+        for id in states.keys.sorted(by: { $0.uuidString < $1.uuidString }).prefix(64) {
+            let state = states[id] ?? .idle
+            let label: String = switch state {
+            case .idle: "idle"; case .connecting: "connecting"; case .live: "live"
+            case .reconnecting: "reconnecting"; case .stopping: "stopping"; case .failed: "failed"
+            }
+            let runtime = runtimes[id]
+            let stats = await runtime?.publisher.statsSnapshot()
+            let mailbox = runtime?.video.statistics()
+            result.append(.init(id: id.uuidString, state: label, startedAt: acknowledgedStarts[id],
+                targetFPS: stats?.frameRate, achievedFPS: stats?.achievedFrameRate,
+                bitrate: stats?.bitRate, socketQueueBytes: stats?.queueBytes,
+                stalledSeconds: stats?.zeroOutputSeconds, encoderCongestionDrops: stats?.droppedFrames,
+                videoQueueDepth: mailbox?.depth ?? 0, videoMailboxDrops: mailbox?.drops ?? 0))
+        }
+        return result
+    }
+
     private func handle(_ event: PublisherEvent, id: UUID, generation: UUID) {
         guard runtimes[id]?.generation == generation else { return }
         switch event {
         case .connecting:
             if case .reconnecting = states[id] {} else { states[id] = .connecting }
-        case .published: states[id] = .live
+        case .published:
+            states[id] = .live
+            if acknowledgedStarts[id] == nil { acknowledgedStarts[id] = Date() }
         case .reconnecting: states[id] = .reconnecting(reason: "Connection interrupted; this destination is retrying.")
         case .failed: fail(id: id, message: "This destination failed. Check its endpoint and credentials, then retry."); return
         case .stopped: stop(id); return
@@ -153,17 +178,22 @@ final class DestinationOutputController: ObservableObject {
 final class DestinationVideoMailbox: @unchecked Sendable {
     private let continuation: AsyncStream<CMSampleBuffer>.Continuation
     private let consumer: Task<Void, Never>
+    private let counters: DestinationMailboxCounters
     init(publisher: any Publisher) {
         let (stream, continuation) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .bufferingNewest(2))
         self.continuation = continuation
+        let counters = DestinationMailboxCounters()
+        self.counters = counters
         consumer = Task {
             for await sample in stream {
                 if Task.isCancelled { break }
+                counters.dequeued()
                 await publisher.appendVideo(sample)
             }
         }
     }
-    func enqueue(_ sample: CMSampleBuffer) { continuation.yield(sample) }
+    func enqueue(_ sample: CMSampleBuffer) { counters.enqueue(sample, continuation: continuation) }
+    func statistics() -> (depth: Int, drops: Int) { counters.snapshot() }
     func stop() { continuation.finish(); consumer.cancel() }
 }
 
@@ -190,4 +220,35 @@ final class DestinationMediaFanout: @unchecked Sendable {
     }
     func enqueueVideo(_ sample: CMSampleBuffer) { for sink in snapshot() { sink.video.enqueue(sample) } }
     func enqueueAudio(_ sample: CMSampleBuffer) { for sink in snapshot() { sink.publisher.enqueueProgram(sample) } }
+}
+
+struct DestinationDiagnosticSnapshot: Codable, Sendable {
+    var id: String
+    var state: String
+    var startedAt: Date?
+    var targetFPS: Int?
+    var achievedFPS: Int?
+    var bitrate: Int?
+    var socketQueueBytes: Int?
+    var stalledSeconds: Int?
+    var encoderCongestionDrops: Int?
+    var videoQueueDepth: Int
+    var videoMailboxDrops: Int
+}
+
+private final class DestinationMailboxCounters: @unchecked Sendable {
+    private let lock = NSLock()
+    private var depth = 0
+    private var drops = 0
+    func enqueue(_ sample: CMSampleBuffer, continuation: AsyncStream<CMSampleBuffer>.Continuation) {
+        lock.lock(); defer { lock.unlock() }
+        switch continuation.yield(sample) {
+        case .enqueued(let remaining): depth = max(0, 2 - remaining)
+        case .dropped: depth = 2; drops += 1
+        case .terminated: depth = 0
+        @unknown default: break
+        }
+    }
+    func dequeued() { lock.lock(); depth = max(0, depth - 1); lock.unlock() }
+    func snapshot() -> (depth: Int, drops: Int) { lock.lock(); defer { lock.unlock() }; return (depth, drops) }
 }

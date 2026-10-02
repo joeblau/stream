@@ -5,7 +5,7 @@ readonly DESTINATIONS_BUILD_PATH="${DESTINATIONS_BUILD_PATH:-build/destinations-
 mkdir -p "$DESTINATIONS_BUILD_PATH"
 xcodegen generate
 xcodebuild -project Stream.xcodeproj -scheme StreamCoreTests -destination 'platform=macOS' \
-    -derivedDataPath "$DESTINATIONS_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build > "$DESTINATIONS_BUILD_PATH.log" 2>&1
+    -derivedDataPath "$DESTINATIONS_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build-for-testing > "$DESTINATIONS_BUILD_PATH.log" 2>&1
 readonly DESTINATIONS_PRODUCTS="$DESTINATIONS_BUILD_PATH/Build/Products/Debug"
 xcrun swiftc -swift-version 6 -parse-as-library \
     -F "$DESTINATIONS_PRODUCTS" -framework StreamCore \
