@@ -79,6 +79,9 @@ final class StreamController: ObservableObject {
     @Published private(set) var isRehearsing = false
     private var rehearsalOwnsPreview = false
     private var rehearsalObserver: AnyCancellable?
+    private var rehearsalToken: UUID?
+    private weak var rehearsalRecorder: RecordingController?
+    private var rehearsalStopRequested = false
 
 
     /// Convenience for UI; `streamState` carries the full picture.
@@ -1118,30 +1121,54 @@ final class StreamController: ObservableObject {
     }
 
     func beginLocalRehearsal(recorder: RecordingController) {
-        guard !streamState.isActive, !recorder.state.isActive else { return }
+        guard !isRehearsing, !streamState.isActive, destinationOutputs.activeCount == 0, activePublishingEncoderCount == 0,
+              !recorder.state.isActive, reservedRecordingEncoderCount == 0 else { return }
+        let token = UUID()
+        rehearsalToken = token
+        rehearsalRecorder = recorder
+        rehearsalStopRequested = false
         rehearsalOwnsPreview = previewState == .idle
-        if rehearsalOwnsPreview { startPreview() }
-        recorder.start(stream: self)
-        guard recorder.state.isRecording else { return }
+        // Reserve local rehearsal before capture, countdown or asynchronous
+        // writer preparation can yield. A Preparing recorder is not yet
+        // Recording, but public publishers must already be blocked.
         isRehearsing = true
         destinationOutputs.isPublishingAllowed = false
-        rehearsalObserver = recorder.$state.sink { [weak self] state in
-            guard let self else { return }
-            if !state.isActive {
-                self.isRehearsing = false
-                self.destinationOutputs.isPublishingAllowed = true
+        rehearsalObserver = recorder.$state.sink { [weak self, weak recorder] _ in
+            // Published sends before the stored state changes. Inspect the
+            // current state on the next turn, and reject old-session callbacks.
+            Task { @MainActor [weak self, weak recorder] in
+                guard let self, let recorder, self.rehearsalToken == token,
+                      !recorder.state.isActive else { return }
+                self.stopLocalRehearsal(recorder: recorder, token: token)
             }
         }
+        if rehearsalOwnsPreview { startPreview() }
+        recorder.start(stream: self)
+        if !recorder.state.isActive { stopLocalRehearsal(recorder: recorder, token: token) }
     }
 
     func endLocalRehearsal(recorder: RecordingController) {
-        guard isRehearsing else { return }
-        recorder.stop()
-        isRehearsing = false
-        destinationOutputs.isPublishingAllowed = true
-        rehearsalObserver = nil
-        if rehearsalOwnsPreview { stopPreview() }
-        rehearsalOwnsPreview = false
+        guard rehearsalRecorder === recorder, let token = rehearsalToken else { return }
+        stopLocalRehearsal(recorder: recorder, token: token)
+    }
+
+    private func stopLocalRehearsal(recorder: RecordingController, token: UUID) {
+        guard rehearsalToken == token, !rehearsalStopRequested else { return }
+        rehearsalStopRequested = true
+        // The completion includes countdown/preflight cancellation, the
+        // current writer, isolated tracks and any previous segment finalizing.
+        // Publishing remains blocked until all recording ownership is released.
+        recorder.stop { [weak self] in
+            guard let self, self.rehearsalToken == token else { return }
+            self.rehearsalObserver = nil
+            self.rehearsalToken = nil
+            self.rehearsalRecorder = nil
+            self.rehearsalStopRequested = false
+            if self.rehearsalOwnsPreview { self.stopPreview() }
+            self.rehearsalOwnsPreview = false
+            self.isRehearsing = false
+            self.destinationOutputs.isPublishingAllowed = true
+        }
     }
 
     func preflightFacts(programAudioPeak: Float?, assetAvailability: (AssetID) -> AssetAvailability = { _ in .unknown }) -> StreamPreflightFacts {
@@ -1246,7 +1273,10 @@ final class StreamController: ObservableObject {
             facts.profileErrors.append("Program canvas exceeds this Mac's estimated hardware limits.")
         }
         let plan = outputEncodingPlan(program: settings.outputProfile)
-        facts.encoderCount = plan.encoderSessions
+        // Count active/finalizing encoder owners even when their destinations
+        // no longer appear in the saved plan. Recording reservations remain
+        // separate so the checklist applies the combined studio limit once.
+        facts.encoderCount = max(plan.encoderSessions, activePublishingEncoderCount)
         facts.recordingEncoderReservations = recordingEncoderReservations.recordingCount
         facts.sharedH264AAC = destinations.sharesFixedH264AAC
         facts.testedEncoderBudget = destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil
