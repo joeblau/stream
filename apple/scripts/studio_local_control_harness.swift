@@ -118,6 +118,38 @@ struct HarnessLayer { var id: HarnessID; var isVisible: Bool }
         return frames.removeFirst()
     }
 }
+private final class BoundedProcessText: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes = Data()
+    func append(_ data: Data) { lock.lock(); defer { lock.unlock() }; precondition(bytes.count + data.count <= 131_072, "External adapter exceeded fixture output bound"); bytes.append(data) }
+    var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: bytes, as: UTF8.self) }
+    var snapshots: [[String: Any]] { text.split(separator: "\n").compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] } }
+}
+
+@MainActor private final class ExternalSampleProcess {
+    let process = Process()
+    let output = BoundedProcessText(), errors = BoundedProcessText()
+    private let input = Pipe(), stdout = Pipe(), stderr = Pipe()
+    init(script: URL, clientID: UUID, token: String, port: UInt16) throws {
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["python3", "-u", script.path]
+        process.standardInput = input; process.standardOutput = stdout; process.standardError = stderr
+        let output = output, errors = errors
+        stdout.fileHandleForReading.readabilityHandler = { handle in output.append(handle.availableData) }
+        stderr.fileHandleForReading.readabilityHandler = { handle in errors.append(handle.availableData) }
+        try process.run()
+        var credential = try JSONSerialization.data(withJSONObject: ["version": 1, "clientID": clientID.uuidString,
+            "token": token, "host": "127.0.0.1", "port": Int(port)])
+        credential.append(10)
+        try input.fileHandleForWriting.write(contentsOf: credential)
+        try input.fileHandleForWriting.close()
+    }
+    func stop() {
+        if process.isRunning { process.terminate() }
+        stdout.fileHandleForReading.readabilityHandler = nil; stderr.fileHandleForReading.readabilityHandler = nil
+    }
+}
+
 @main struct StudioLocalControlHarness {
     @MainActor static func waitUntil(_ test: () -> Bool) async {
         for _ in 0..<2000 {
@@ -290,6 +322,38 @@ struct HarnessLayer { var id: HarnessID; var isVisible: Bool }
         credentials.deletionError = errSecSuccess; try manager.remove(manifest.id)
         precondition(manager.document.adapters.isEmpty && store.token(for: adapterPair.id) == nil)
         adapterClient.connection.cancel(); adapterReconnect.connection.cancel()
+        let sampleRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).deletingLastPathComponent().appendingPathComponent("integrations/sample-adapter")
+        let sampleManifest = try JSONDecoder().decode(StudioAdapterManifest.self, from: Data(contentsOf: sampleRoot.appendingPathComponent("manifest.json")))
+        store.pair(name: "Actual External Status Sample"); let samplePair = store.pairing!
+        try manager.register(sampleManifest, clientID: samplePair.id)
+        let sample = try ExternalSampleProcess(script: sampleRoot.appendingPathComponent("studio_status_adapter.py"), clientID: samplePair.id, token: samplePair.token, port: port)
+        defer { sample.stop() }
+        await waitUntil { !sample.process.isRunning }
+        precondition(sample.output.snapshots.isEmpty && sample.errors.text.contains("adapterDisabled"), "Actual external sample bypassed its disabled registration")
+        try manager.setEnabled(sampleManifest.id, true)
+        let connected = try ExternalSampleProcess(script: sampleRoot.appendingPathComponent("studio_status_adapter.py"), clientID: samplePair.id, token: samplePair.token, port: port)
+        defer { connected.stop() }
+        await waitUntil { !connected.output.snapshots.isEmpty }
+        precondition(server.authenticatedClientIDs.contains(samplePair.id) && connected.process.isRunning)
+        let originalState = dispatcher.state, commandCount = dispatcher.emitted.count
+        dispatcher.state.recording = .paused
+        await waitUntil { connected.output.snapshots.contains { $0["recording"] as? String == "paused" } }
+        try manager.setEnabled(sampleManifest.id, false)
+        await waitUntil { !connected.process.isRunning }
+        precondition(connected.errors.text.contains("Studio disconnected") && dispatcher.emitted.count == commandCount,
+            "External sample did not stop cleanly or emitted/replayed a production command")
+        precondition(!connected.output.text.contains(samplePair.token) && !connected.errors.text.contains(samplePair.token))
+        try manager.setEnabled(sampleManifest.id, true)
+        let restarted = try ExternalSampleProcess(script: sampleRoot.appendingPathComponent("studio_status_adapter.py"), clientID: samplePair.id, token: samplePair.token, port: port)
+        defer { restarted.stop() }
+        await waitUntil { restarted.output.snapshots.contains { $0["recording"] as? String == "paused" } }
+        precondition(server.authenticatedClientIDs.contains(samplePair.id) && dispatcher.emitted.count == commandCount)
+        try manager.remove(sampleManifest.id)
+        await waitUntil { !restarted.process.isRunning }
+        precondition(store.token(for: samplePair.id) == nil && !restarted.output.text.contains(samplePair.token) && !restarted.errors.text.contains(samplePair.token))
+        dispatcher.state = originalState
+        print("PASS: actual bundled external Python process against native server; disabled admission, live authoritative state, disable, explicit restart, revoke and no command/secret replay")
+
         let futureDirectory = directory.appendingPathComponent("future")
         try FileManager.default.createDirectory(at: futureDirectory, withIntermediateDirectories: true)
         let futureData = Data("{\"version\":99,\"adapters\":[]}".utf8)
