@@ -171,6 +171,13 @@ struct LayerPanelView: View {
             })
     }
 
+    private func moveAccessibleLayer(_ layer: LayerNode, in scene: Scene, offset: Int) {
+        guard let index = scene.layers.firstIndex(where: { $0.id == layer.id }) else { return }
+        let next = min(scene.layers.count - 1, max(0, index + offset))
+        guard next != index else { return }
+        dispatcher.execute(.moveLayer(layer.id, toIndex: next, group: layer.groupID, in: scene.id))
+    }
+
     // MARK: - Rows
 
     @ViewBuilder
@@ -218,10 +225,18 @@ struct LayerPanelView: View {
                            : "Lock \(layer.name)") {
                 dispatcher.execute(.setLayerLocked(layer.id, locked: !layer.isLocked, in: nil))
             }
-            eyeButton(isVisible: layer.isVisible, help: layer.isVisible ? "Hide" : "Show") {
+            eyeButton(isVisible: layer.isVisible, help: "\(layer.isVisible ? "Hide" : "Show") \(layer.name)") {
                 dispatcher.execute(.setLayerVisibility(layer.id, visible: !layer.isVisible, in: nil))
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(layer.name), \(layer.payload.displayName), \(layer.isVisible ? "visible" : "hidden"), \(scene.isEffectivelyLocked(layer) ? "locked" : "unlocked")")
+        .accessibilityAction(named: Text(layer.isVisible ? "Hide Layer" : "Show Layer")) {
+            dispatcher.execute(.setLayerVisibility(layer.id, visible: !layer.isVisible, in: nil))
+        }
+        .accessibilityAction(named: Text("Select Layer")) { sceneStore.selectedLayerIDs = [layer.id] }
+        .accessibilityAction(named: Text("Move Layer Forward")) { moveAccessibleLayer(layer, in: scene, offset: 1) }
+        .accessibilityAction(named: Text("Move Layer Backward")) { moveAccessibleLayer(layer, in: scene, offset: -1) }
         .contextMenu { layerContextMenu(layer, in: scene) }
         .draggable(layer.id.rawValue.uuidString)
         .dropDestination(for: String.self) { payload, _ in
@@ -264,6 +279,7 @@ struct LayerPanelView: View {
         }
         .buttonStyle(.borderless)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     private func lockButton(isLocked: Bool, viaGroup: Bool, help: String,
@@ -274,6 +290,7 @@ struct LayerPanelView: View {
         }
         .buttonStyle(.borderless)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     /// Why a layer's source can't paint, if it can't — hidden/missing

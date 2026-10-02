@@ -9,6 +9,8 @@ struct ChatSidebarView: View {
     /// in from either place lights up both. `RestreamChat` is `@Observable`,
     /// so a plain property tracks changes in `body`.
     private let chat: RestreamChat
+    @Environment(\.studioReduceMotion) private var reduceMotion
+    @State private var followMessages = true
 
     init(chat: RestreamChat = RestreamChat()) {
         self.chat = chat
@@ -31,10 +33,14 @@ struct ChatSidebarView: View {
             Circle()
                 .fill(statusTint)
                 .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
             Text(statusTitle)
                 .font(.callout.weight(.semibold))
                 .lineLimit(1)
             Spacer()
+            Toggle("Follow new messages", isOn: $followMessages)
+                .toggleStyle(.checkbox)
+                .help("Disable while reading earlier messages to keep the chat scroll position stable")
             switch chat.status {
             case .connected:
                 Button("Sign Out") { chat.signOut() }
@@ -122,8 +128,8 @@ struct ChatSidebarView: View {
                 }
             }
             .onChange(of: chat.messages.count) {
-                guard let last = chat.messages.last else { return }
-                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
+                guard followMessages, let last = chat.messages.last else { return }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
             }
         }
     }
