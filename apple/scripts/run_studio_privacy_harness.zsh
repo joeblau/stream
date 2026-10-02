@@ -42,4 +42,3 @@ xcodebuild -project "$PRIVACY_DIR/StudioPrivacyValidation.xcodeproj" \
 readonly PRIVACY_PRODUCTS="${PRIVACY_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="$PRIVACY_PRODUCTS" \
   "$PRIVACY_PRODUCTS/StudioPrivacyHarness"
-
