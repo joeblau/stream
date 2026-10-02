@@ -216,7 +216,6 @@ actor CompositionEngine {
     private var layerFades: [LayerID: LayerFade] = [:]
 
     private var tickTask: Task<Void, Never>?
-    private var clockAnchor: CMTime = .zero
     private var frameSequence: Int64 = 0
 
     private var subscribers: [UUID: FrameMailbox] = [:]
@@ -613,14 +612,17 @@ actor CompositionEngine {
 
     private func startTicking() {
         tickTask?.cancel()
-        // Re-anchor the shared clock: PTS = anchor + sequence / fps.
-        clockAnchor = CMClockGetTime(CMClockGetHostTimeClock())
         frameSequence = 0
-        let interval = UInt64(1_000_000_000) / UInt64(max(1, frameRate))
+        let interval = Duration.nanoseconds(Int64(1_000_000_000 / max(1, frameRate)))
         tickTask = Task { [weak self] in
+            let clock = ContinuousClock()
+            var deadline = clock.now
             while !Task.isCancelled {
                 await self?.tick()
-                try? await Task.sleep(nanoseconds: interval)
+                deadline = deadline.advanced(by: interval)
+                let now = clock.now
+                while deadline < now { deadline = deadline.advanced(by: interval) }
+                do { try await clock.sleep(until: deadline) } catch { break }
             }
         }
     }
@@ -638,7 +640,7 @@ actor CompositionEngine {
         guard let scene else { return }
         frameSequence += 1
         let timescale = CMTimeScale(max(1, frameRate))
-        let pts = CMTimeAdd(clockAnchor, CMTime(value: frameSequence, timescale: timescale))
+        let pts = CMClockGetTime(CMClockGetHostTimeClock())
         let duration = CMTime(value: 1, timescale: timescale)
         let overlayContext = overlayContextProvider()
         let sourcePayloads = sourcePayloadProvider()
