@@ -58,6 +58,7 @@ jobs:
           zsh scripts/run_studio_automation_harness.zsh
           zsh scripts/run_studio_virtual_camera_harness.zsh
           PROVIDERS_BUILD_PATH=build/tests zsh scripts/run_provider_accounts_harness.zsh
+          SCHEDULING_BUILD_PATH=build/tests zsh scripts/run_provider_scheduling_harness.zsh
           CHAT_BUILD_PATH=build/tests zsh scripts/run_direct_chat_harness.zsh
           ENDING_BUILD_PATH=build/tests zsh scripts/run_studio_ending_harness.zsh
       - name: Test private program slate rendering

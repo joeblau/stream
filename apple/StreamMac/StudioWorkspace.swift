@@ -42,7 +42,7 @@ final class StudioRuntime {
         dispatcher.bindChatCoordinator(chat)
         recorder.bindChat(chat)
         controller.bindSecondaryRecordingChat(chat)
-        providerAccounts = ProviderAccountSession(restream: chat.restream)
+        providerAccounts = ProviderAccountSession(restream: chat.restream, pendingDirectory: DesktopStorage.projectDirectory)
         chat.bindAccounts(providerAccounts)
         controller.bindEnding(accounts: providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
         adapters = StudioAdapterManager()
