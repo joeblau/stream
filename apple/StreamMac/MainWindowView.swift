@@ -48,6 +48,7 @@ struct MainWindowView: View {
     /// section and the canvas drop share one instance.
     @StateObject private var imageLayers = ImageLayerCoordinator()
     @StateObject private var shortcuts = StudioShortcutController()
+    @StateObject private var localControl = StudioLocalControlServer()
     @Environment(\.studioReduceMotion) private var reduceMotion
     @State private var panelBeforeCommands: StudioPanel?
     @State private var panelBeforeSheet: StudioPanel?
@@ -197,6 +198,8 @@ struct MainWindowView: View {
             shortcuts.onExecute = { action in
                 if let command = action.command { dispatcher.execute(command) }
             }
+            localControl.interactionBlocked = { !firstRunCompleted || permissionPrompt != nil }
+            localControl.bind(to: dispatcher)
             shortcuts.seedScenes(sceneStore.scenes.map { "scene.\($0.id.rawValue.uuidString).select" })
             dispatcher.execute(.startPreview)
             // Restore a settings pane left open last launch.
@@ -208,6 +211,7 @@ struct MainWindowView: View {
         }
         .onDisappear {
             dispatcher.macros.cancel()
+            localControl.shutdown()
             shortcuts.uninstall()
             shortcuts.actions = { [] }; shortcuts.onExecute = { _ in }
         }
@@ -361,7 +365,8 @@ struct MainWindowView: View {
         SettingsView(session: session,
                      chat: chat,
                      onClose: { dispatcher.execute(.closeSettings) },
-                     onResetLayout: resetPanelLayout)
+                     onResetLayout: resetPanelLayout,
+                     localControl: localControl)
     }
 
     /// Application section action: back to the all-panels-visible layout.
