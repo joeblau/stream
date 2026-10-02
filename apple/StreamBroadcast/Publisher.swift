@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreMedia
 import CoreGraphics
 import StreamCore
@@ -29,6 +30,11 @@ protocol Publisher: Actor {
     /// Lifecycle events for the session state machine. Single-consumer (the
     /// controller); created in `init` so it is safe to read before `start`.
     nonisolated var events: AsyncStream<PublisherEvent> { get }
+    /// Desktop-only opt-in. Existing raw capture/iOS callers never enable it.
+    nonisolated var supportsSharedH264AAC: Bool { get }
+    func configureEncodedInput() async -> Bool
+    func appendEncodedVideo(_ sample: CMSampleBuffer) async -> Bool
+    func appendEncodedAudio(_ audio: SharedEncodedAudio) async -> Bool
     func start(_ settings: StreamSettings) async throws
     func stop() async
     func pause() async
@@ -56,3 +62,21 @@ protocol Publisher: Actor {
     func statsSnapshot() async -> LiveStats?
 }
 
+
+/// Frozen after construction. The same compressed sample and packet bytes may
+/// be read by independent packetizers; neither the app nor adapters mutate them.
+final class SharedEncodedAudio: @unchecked Sendable {
+    let sample: CMSampleBuffer
+    let buffer: AVAudioCompressedBuffer
+    let when: AVAudioTime
+    init(sample: CMSampleBuffer, buffer: AVAudioCompressedBuffer, when: AVAudioTime) {
+        self.sample = sample; self.buffer = buffer; self.when = when
+    }
+}
+
+extension Publisher {
+    nonisolated var supportsSharedH264AAC: Bool { false }
+    func configureEncodedInput() async -> Bool { false }
+    func appendEncodedVideo(_ sample: CMSampleBuffer) async -> Bool { false }
+    func appendEncodedAudio(_ audio: SharedEncodedAudio) async -> Bool { false }
+}

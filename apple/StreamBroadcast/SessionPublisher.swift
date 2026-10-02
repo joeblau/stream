@@ -37,6 +37,9 @@ actor SessionPublisher: Publisher {
     private var session: (any StreamSession)?
     private var stream: (any StreamConvertible)?
     private var isRunning = false
+    private var encodedInput = false
+    private var encodedNeedsKeyframe = true
+    private var encodedAudioReady = false
     private var isPaused = false
     private var outputSizeConfigured = false
     private var outputSize: CGSize?
@@ -155,7 +158,7 @@ actor SessionPublisher: Publisher {
     /// Re-sends the last frame if capture hasn't delivered one within the target
     /// interval — a steady fps + keyframe cadence on a static screen.
     private func repeatLastFrameIfIdle(interval: UInt64) async {
-        guard outputSizeConfigured, isRunning, !isPaused, stream != nil,
+        guard !encodedInput, outputSizeConfigured, isRunning, !isPaused, stream != nil,
               let last = lastVideoBuffer else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         guard now &- lastVideoAppendAt >= interval else { return }
@@ -171,14 +174,15 @@ actor SessionPublisher: Publisher {
 
     func start(_ settings: StreamSettings) async throws {
         self.settings = settings
+        await networkController.setExternalEncoding(encodedInput)
         await Self.registerFactories()
 
-        await applyAudioMixerSettings()
+        if !encodedInput { await applyAudioMixerSettings() }
 
         var vm = await mixer.videoMixerSettings
         vm.mode = .passthrough
         await mixer.setVideoMixerSettings(vm)
-        await mixer.startRunning()
+        if !encodedInput { await mixer.startRunning() }
 
         // stop() may have interleaved during the setup awaits above (actor reentrancy)
         // and early-returned via its `guard isRunning` branch before we set isRunning.
@@ -187,8 +191,7 @@ actor SessionPublisher: Publisher {
 
         isRunning = true
         startedAt = DispatchTime.now().uptimeNanoseconds
-        startAudioConsumers()
-        startFrameRepeat()
+        if !encodedInput { startAudioConsumers(); startFrameRepeat() }
         // Path supervision spawned BEFORE the first connect so path gating covers it.
         // NWPathMonitor is Sendable + AsyncSequence on this target; cancellation ends
         // iteration at the next emission at the latest.
@@ -259,7 +262,9 @@ actor SessionPublisher: Publisher {
             )
         }
 
-        await mixer.addOutput(stream)
+        if !encodedInput { await mixer.addOutput(stream) }
+        if encodedInput, let srt = stream as? SRTStream { await srt.setExpectedMedias([.video, .audio]) }
+        encodedNeedsKeyframe = true; encodedAudioReady = false
         self.session = session
         self.stream = stream
 
@@ -600,6 +605,7 @@ actor SessionPublisher: Publisher {
     }
 
     func setThermalCeiling(bitRateScale: Double, frameRateCap: Int) async {
+        guard !encodedInput else { return }
         // Apply immediately when connected; otherwise store the ceiling so the
         // first adaptive event after connect (the `.reset`) picks it up.
         if let stream {
@@ -618,8 +624,8 @@ actor SessionPublisher: Publisher {
         guard isRunning, stream != nil else { return nil }
         let health = await networkController.healthSnapshot()
         let fps = await networkController.currentFrameRate()
-        return LiveStats(bitRate: health.targetBitRate,
-                         frameRate: fps,
+        return LiveStats(bitRate: encodedInput ? settings.videoBitrate : health.targetBitRate,
+                         frameRate: encodedInput ? settings.outputProfile.frameRate : fps,
                          queueBytes: health.queueBytes,
                          zeroOutputSeconds: health.zeroOutputSeconds)
     }
@@ -632,9 +638,9 @@ actor SessionPublisher: Publisher {
         // Seed from the adaptive controller's current target + frame interval so a
         // path or thermal ceiling learned before this (re)configuration is honored
         // immediately, instead of starting the fresh encoder at the full rate.
-        v.bitRate = min(settings.videoBitrate, await networkController.currentTargetBitRate())
+        v.bitRate = encodedInput ? settings.videoBitrate : min(settings.videoBitrate, await networkController.currentTargetBitRate())
         v.expectedFrameRate = Double(frameRate)
-        v.frameInterval = await networkController.currentFrameInterval()
+        v.frameInterval = encodedInput ? 0 : await networkController.currentFrameInterval()
         v.maxKeyFrameIntervalDuration = Int32(min(10, max(1, settings.destinationKeyframeSeconds ?? 2)))
         v.bitRateMode = .average
         // HEVC when the user opted in and the transport can packetize it (SRT);
@@ -648,8 +654,50 @@ actor SessionPublisher: Publisher {
         return v
     }
 
+    nonisolated var supportsSharedH264AAC: Bool { transport == .srt }
+    func configureEncodedInput() async -> Bool {
+        guard !isRunning, supportsSharedH264AAC else { return false }
+        encodedInput = true; encodedNeedsKeyframe = true
+        return true
+    }
+    func appendEncodedVideo(_ sample: CMSampleBuffer) async -> Bool {
+        guard encodedInput, encodedAudioReady, isRunning, !isPaused, stream != nil,
+              let format = sample.formatDescription,
+              CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_H264 else { return false }
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[String: Any]]
+        let keyframe = attachments?.first?[kCMSampleAttachmentKey_NotSync as String] as? Bool != true
+        let health = await networkController.healthSnapshot()
+        if health.queueBytes >= 524_288 {
+            let request = !encodedNeedsKeyframe
+            encodedNeedsKeyframe = true; telemetry.recordDrop(.admission)
+            return request
+        }
+        if encodedNeedsKeyframe { guard keyframe else { return true }; encodedNeedsKeyframe = false }
+        lastMediaAt = DispatchTime.now().uptimeNanoseconds
+        lastVideoAppendAt = lastMediaAt
+        telemetry.recordEncoded()
+        await stream?.append(sample)
+        return false
+    }
+    func appendEncodedAudio(_ audio: SharedEncodedAudio) async -> Bool {
+        guard encodedInput, isRunning, !isPaused, let stream else { return false }
+        lastMediaAt = DispatchTime.now().uptimeNanoseconds
+        lastMicAppendAt = lastMediaAt
+        if !encodedAudioReady {
+            // TSWriter waits for both format descriptions before writing any
+            // PES. Prime AAC format before accepting an IDR, then ask the group
+            // for a fresh IDR so no dependent references were silently omitted.
+            encodedAudioReady = true
+            await stream.append(audio.buffer, when: audio.when)
+            return true
+        }
+        guard !encodedNeedsKeyframe else { return false }
+        await stream.append(audio.buffer, when: audio.when)
+        return false
+    }
+
     func appendVideo(_ sb: CMSampleBuffer) async {
-        guard outputSizeConfigured, isRunning, !isPaused, stream != nil else { return }
+        guard !encodedInput, outputSizeConfigured, isRunning, !isPaused, stream != nil else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastVideoAppendAt = now
@@ -678,7 +726,7 @@ actor SessionPublisher: Publisher {
     }
 
     func appendMic(_ sb: CMSampleBuffer) async {
-        guard isRunning, !isPaused, stream != nil else { return }
+        guard !encodedInput, isRunning, !isPaused, stream != nil else { return }
         if settings.voicePolishEnabled, voicePolish == nil { voicePolish = VoicePolishProcessor() }
         let sb = voicePolish?.process(sb) ?? sb
         let now = DispatchTime.now().uptimeNanoseconds
@@ -698,7 +746,7 @@ actor SessionPublisher: Publisher {
     }
 
     func appendApp(_ sb: CMSampleBuffer) async {
-        guard isRunning, !isPaused, stream != nil else { return }
+        guard !encodedInput, isRunning, !isPaused, stream != nil else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastAppAppendAt = now
@@ -712,7 +760,7 @@ actor SessionPublisher: Publisher {
     /// channel's insert (no duplicate processing); the track volume stays at
     /// unity because channel gains live in the engine.
     func appendProgram(_ sb: CMSampleBuffer) async {
-        guard isRunning, !isPaused, stream != nil else { return }
+        guard !encodedInput, isRunning, !isPaused, stream != nil else { return }
         if !usesProgramAudio {
             usesProgramAudio = true
             await applyAudioMixerSettings()
@@ -755,6 +803,7 @@ actor SessionPublisher: Publisher {
     func pause() async {
         guard isRunning, !isPaused, !userInitiatedStop else { return }
         isPaused = true
+        if encodedInput { encodedNeedsKeyframe = true }
         // Tell the ABR the capture is paused so it doesn't read the draining queue
         // as congestion (parity with RTMP).
         await networkController.setCapturePaused(true)

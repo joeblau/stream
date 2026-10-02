@@ -84,26 +84,50 @@ public struct DestinationEncoderKey: Hashable, Sendable {
         keyframeSeconds = destination.keyframeSeconds ?? 2
         audioFormat = destination.transport == .whip ? "opus-48000-stereo" : "aac-48000-stereo"
     }
+
+    /// These are the actual fixed encoder's accepted settings. A custom ingest
+    /// override outside this range keeps an independent publisher reservation.
+    public func supportsFixedH264AAC(on transport: StreamProtocol, sourceFrameRate: Int? = nil) -> Bool {
+        [.rtmp, .rtmps, .srt].contains(transport) && codec == .h264 &&
+        (2...4096).contains(width) && (2...4096).contains(height) && width % 2 == 0 && height % 2 == 0 &&
+        (1...60).contains(frameRate) && (sourceFrameRate.map { (1...60).contains($0) && frameRate <= $0 } ?? true) &&
+        videoBitrate > 0 && (32_000...320_000).contains(audioBitrate) &&
+        keyframeSeconds.isFinite && (1...10).contains(keyframeSeconds) && keyframeSeconds.rounded() == keyframeSeconds
+    }
 }
 
 public struct DestinationEncodingPlan: Equatable, Sendable {
     public var compatibleGroups: [[UUID]]
-    /// The current transport backend owns an encoder per publisher. Do not
-    /// advertise the theoretical shared group count as actual hardware use.
+    /// Reserved encoder groups in the selected actual backend mode. The default
+    /// adaptive/raw backend still owns an encoder per publisher.
     public var encoderSessions: Int
+    public var sharedH264AAC = false
     public var aggregateBitrate: Int
     public var requiredUplinkMbps: Double
     public var issues: [String]
 
     public init(destinations: [StreamDestination], program: OutputProfile,
-                measuredUplinkMbps: Double? = nil, measuredSessionLimit: Int? = nil) {
+                measuredUplinkMbps: Double? = nil, measuredSessionLimit: Int? = nil,
+                shareH264AAC: Bool = false, sourceFrameRate: Int? = nil) {
         var groups: [DestinationEncoderKey: [UUID]] = [:]
         for destination in destinations {
             groups[DestinationEncoderKey(destination: destination, program: program), default: []].append(destination.id)
         }
         compatibleGroups = groups.values.map { $0.sorted { $0.uuidString < $1.uuidString } }
             .sorted { ($0.first?.uuidString ?? "") < ($1.first?.uuidString ?? "") }
-        encoderSessions = destinations.count
+        sharedH264AAC = shareH264AAC
+        // Sharing is explicitly qualified only for fixed-profile H.264/AAC on
+        // the desktop RTMP/RTMPS/SRT adapters. Other codec/transport combinations
+        // still reserve a real encoder each, even if their settings match.
+        var sharedKeys = Set<DestinationEncoderKey>()
+        var separate = 0
+        for destination in destinations {
+            let key = DestinationEncoderKey(destination: destination, program: program)
+            if shareH264AAC && key.supportsFixedH264AAC(on: destination.transport, sourceFrameRate: sourceFrameRate ?? program.frameRate) {
+                sharedKeys.insert(key)
+            } else { separate += 1 }
+        }
+        encoderSessions = shareH264AAC ? sharedKeys.count + separate : destinations.count
         aggregateBitrate = destinations.reduce(0) { $0 + $1.videoBitrate + $1.audioBitrate }
         // Protocol overhead + 25% spare capacity: an operator-visible estimate.
         requiredUplinkMbps = Double(aggregateBitrate) * 1.35 / 1_000_000

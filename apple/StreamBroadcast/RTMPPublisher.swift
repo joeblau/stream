@@ -33,6 +33,8 @@ actor RTMPPublisher: Publisher {
         frameRate: settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate)
     )
     private var isRunning = false
+    private var encodedInput = false
+    private var encodedNeedsKeyframe = true
     private var settings: StreamSettings = .default
     /// Lifecycle events for the controller's streaming state machine (W02).
     nonisolated let events: AsyncStream<PublisherEvent>
@@ -155,7 +157,7 @@ actor RTMPPublisher: Publisher {
     /// Re-sends the last frame if capture hasn't delivered one within the target
     /// interval — holding a steady fps and keyframe cadence on a static screen.
     private func repeatLastFrameIfIdle(interval: UInt64) async {
-        guard outputSizeConfigured, isRunning, !isPaused, streamAttached,
+        guard !encodedInput, outputSizeConfigured, isRunning, !isPaused, streamAttached,
               let last = lastVideoBuffer else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         guard now &- lastVideoAppendAt >= interval else { return }
@@ -202,13 +204,14 @@ actor RTMPPublisher: Publisher {
     /// size is NOT set here — it is locked from the first frame via `setOutputSize`.
     func start(_ settings: StreamSettings) async throws {
         self.settings = settings
+        await networkController.setExternalEncoding(encodedInput)
 
         // Keep AAC stable across Bluetooth HFP/built-in route changes.
         let a = AudioCodecSettings(bitRate: settings.audioBitrate,
                                    sampleRate: 48_000,
                                    format: .aac)
         try await stream.setAudioSettings(a)
-        await applyAudioMixerSettings()
+        if !encodedInput { await applyAudioMixerSettings() }
 
         // Latest-only raw video buffering keeps memory bounded under sustained
         // capture. Admission is also bounded in the capture output.
@@ -218,7 +221,7 @@ actor RTMPPublisher: Publisher {
         await stream.setVideoInputBufferCounts(1)
         await stream.setBitRateStrategy(networkController)
 
-        await mixer.startRunning()
+        if !encodedInput { await mixer.startRunning() }
 
         // stop() may have interleaved during the setup awaits above (actor reentrancy)
         // and early-returned via its `guard isRunning` branch before we set isRunning.
@@ -234,8 +237,7 @@ actor RTMPPublisher: Publisher {
         // of ending the user-owned capture session.
         isRunning = true
         startedAt = DispatchTime.now().uptimeNanoseconds
-        startAudioConsumers()
-        startFrameRepeat()
+        if !encodedInput { startAudioConsumers(); startFrameRepeat() }
         // 4th long-lived task, spawned BEFORE the first connect so path gating
         // covers it. NWPathMonitor is Sendable + AsyncSequence on this target;
         // the first element is the CURRENT path (baseline), then one per change.
@@ -315,14 +317,23 @@ actor RTMPPublisher: Publisher {
             _ = try? await connection.close()
             throw CancellationError()
         }
+        if encodedInput {
+            let metadata: [String: any Sendable] = ["width": settings.outputProfile.canvasWidth,
+                "height": settings.outputProfile.canvasHeight, "framerate": settings.outputProfile.frameRate,
+                "videocodecid": 7, "videodatarate": settings.videoBitrate / 1000,
+                "audiocodecid": 10, "audiodatarate": settings.audioBitrate / 1000,
+                "audiosamplerate": 48_000, "audiochannels": 2, "stereo": true]
+            try await stream.send("@setDataFrame", arguments: "onMetaData", metadata)
+        }
         if hasPublished {
             timeline.markDiscontinuity()
         } else {
             hasPublished = true
         }
         if !streamAttached {
-            await mixer.addOutput(stream)
+            if !encodedInput { await mixer.addOutput(stream) }
             streamAttached = true
+            encodedNeedsKeyframe = true
         }
     }
 
@@ -738,6 +749,7 @@ actor RTMPPublisher: Publisher {
     func pause() async {
         guard isRunning, !isPaused, !userInitiatedStop else { return }
         isPaused = true
+        if encodedInput { encodedNeedsKeyframe = true }
         await networkController.setCapturePaused(true)
         timeline.markDiscontinuity()
     }
@@ -769,7 +781,7 @@ actor RTMPPublisher: Publisher {
         // Seed the encoder at the ABR's current (possibly path-clamped) target
         // so a size lock landing after a path change cannot overwrite the
         // learned rate until the next 1 Hz strategy event.
-        v.bitRate = min(settings.videoBitrate, await networkController.currentTargetBitRate())
+        v.bitRate = encodedInput ? settings.videoBitrate : min(settings.videoBitrate, await networkController.currentTargetBitRate())
         v.expectedFrameRate = Double(frameRate)
         v.frameInterval = max(0, (1.0 / Double(frameRate)) - 0.001)
         v.maxKeyFrameIntervalDuration = Int32(min(10, max(1, settings.destinationKeyframeSeconds ?? 2)))
@@ -796,6 +808,7 @@ actor RTMPPublisher: Publisher {
     }
 
     func setThermalCeiling(bitRateScale: Double, frameRateCap: Int) async {
+        guard !encodedInput else { return }
         await networkController.setThermalCeiling(bitRateScale: bitRateScale,
                                                   frameRateCap: frameRateCap,
                                                   applyingTo: stream)
@@ -808,16 +821,49 @@ actor RTMPPublisher: Publisher {
         guard isRunning, streamAttached else { return nil }
         let health = await networkController.healthSnapshot()
         let fps = await networkController.currentFrameRate()
-        return LiveStats(bitRate: health.targetBitRate,
-                         frameRate: fps,
+        return LiveStats(bitRate: encodedInput ? settings.videoBitrate : health.targetBitRate,
+                         frameRate: encodedInput ? settings.outputProfile.frameRate : fps,
                          queueBytes: health.queueBytes,
                          zeroOutputSeconds: health.zeroOutputSeconds)
     }
 
     /// Appends a (raw or composited) screen video buffer. Dropped until the output
     /// size is locked, so the encoder never starts at the wrong dimensions.
+    nonisolated var supportsSharedH264AAC: Bool { true }
+    func configureEncodedInput() async -> Bool {
+        guard !isRunning, supportsSharedH264AAC else { return false }
+        encodedInput = true; encodedNeedsKeyframe = true
+        return true
+    }
+    func appendEncodedVideo(_ sample: CMSampleBuffer) async -> Bool {
+        guard encodedInput, isRunning, !isPaused, streamAttached,
+              let format = sample.formatDescription,
+              CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_H264 else { return false }
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[String: Any]]
+        let keyframe = attachments?.first?[kCMSampleAttachmentKey_NotSync as String] as? Bool != true
+        let health = await networkController.healthSnapshot()
+        if health.queueBytes >= 524_288 {
+            let request = !encodedNeedsKeyframe
+            encodedNeedsKeyframe = true; telemetry.recordDrop(.admission)
+            return request
+        }
+        if encodedNeedsKeyframe { guard keyframe else { return true }; encodedNeedsKeyframe = false }
+        lastMediaAt = DispatchTime.now().uptimeNanoseconds
+        lastVideoAppendAt = lastMediaAt
+        telemetry.recordEncoded()
+        await stream.append(sample)
+        return false
+    }
+    func appendEncodedAudio(_ audio: SharedEncodedAudio) async -> Bool {
+        guard encodedInput, !encodedNeedsKeyframe, isRunning, !isPaused, streamAttached else { return false }
+        lastMediaAt = DispatchTime.now().uptimeNanoseconds
+        lastMicAppendAt = lastMediaAt
+        await stream.append(audio.buffer, when: audio.when)
+        return false
+    }
+
     func appendVideo(_ sb: CMSampleBuffer) async {
-        guard outputSizeConfigured, isRunning, !isPaused, streamAttached else { return }
+        guard !encodedInput, outputSizeConfigured, isRunning, !isPaused, streamAttached else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastVideoAppendAt = now
@@ -853,7 +899,7 @@ actor RTMPPublisher: Publisher {
 
     /// Appends microphone audio on track 0.
     func appendMic(_ sb: CMSampleBuffer) async {
-        guard isRunning, !isPaused, streamAttached else { return }
+        guard !encodedInput, isRunning, !isPaused, streamAttached else { return }
         if settings.voicePolishEnabled, voicePolish == nil { voicePolish = VoicePolishProcessor() }
         let sb = voicePolish?.process(sb) ?? sb
         let now = DispatchTime.now().uptimeNanoseconds
@@ -874,7 +920,7 @@ actor RTMPPublisher: Publisher {
 
     /// Appends app/system audio on track 1.
     func appendApp(_ sb: CMSampleBuffer) async {
-        guard isRunning, !isPaused, streamAttached else { return }
+        guard !encodedInput, isRunning, !isPaused, streamAttached else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastAppAppendAt = now
@@ -888,7 +934,7 @@ actor RTMPPublisher: Publisher {
     /// channel's insert (no duplicate processing); the track volume stays at
     /// unity because channel gains live in the engine.
     func appendProgram(_ sb: CMSampleBuffer) async {
-        guard isRunning, !isPaused, streamAttached else { return }
+        guard !encodedInput, isRunning, !isPaused, streamAttached else { return }
         if !usesProgramAudio {
             usesProgramAudio = true
             await applyAudioMixerSettings()
@@ -1047,6 +1093,8 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     /// `AdaptiveBitRateState` (issue #21); this actor is a thin wrapper that reads/
     /// writes HaishinKit's encoder around it.
     private var abr: AdaptiveBitRateState
+    private var externalEncoding = false
+    func setExternalEncoding(_ enabled: Bool) { externalEncoding = enabled }
     private var lastEventAt = DispatchTime.now().uptimeNanoseconds   // telemetry only
 
     init(maximumBitRate: Int, frameRate: Int) {
@@ -1071,7 +1119,7 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
                 bytesOutPerSecond: report.currentBytesOutPerSecond,
                 queueBytesOut: report.currentQueueBytesOut,
                 audioBitRate: audioBitRate)
-            if decision.shouldApply {
+            if decision.shouldApply && !externalEncoding {
                 await applyDecision(decision, to: stream)
                 streamLog.warning("ABR reduced video to \(self.abr.targetBitRate) bps; queue=\(self.abr.queueBytes) bytes")
             }
@@ -1084,7 +1132,7 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
             let decision = abr.onStatus(bytesOutPerSecond: report.currentBytesOutPerSecond,
                                         queueBytesOut: report.currentQueueBytesOut,
                                         audioBitRate: audioBitRate)
-            if decision.shouldApply {
+            if decision.shouldApply && !externalEncoding {
                 await applyDecision(decision, to: stream)
                 // Match the original: only the upward-PROBE apply logs "recovered".
                 // The severe stall-halving apply (decision.severe) logged nothing —
@@ -1100,6 +1148,7 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     /// `abr.frameInterval` uses constants bit-identical to VideoCodecSettings's, so
     /// the encoder value is byte-identical to the pre-extraction controller.
     private func applyDecision(_ decision: ABRDecision, to stream: some StreamConvertible) async {
+        guard !externalEncoding else { return }
         var video = await stream.videoSettings
         video.bitRate = abr.targetBitRate
         video.frameInterval = abr.frameInterval(severe: decision.severe)
@@ -1141,6 +1190,7 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     /// a freshly-connected stream. SRT/WHIP emit no `.reset` event, so the
     /// pre-connect store path relies on this to land the ceiling on the encoder.
     func applyCurrentTarget(to stream: any StreamConvertible) async {
+        guard !externalEncoding else { return }
         var video = await stream.videoSettings
         video.bitRate = abr.targetBitRate
         video.frameInterval = abr.frameInterval(severe: false)
@@ -1154,6 +1204,7 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     func setThermalCeiling(bitRateScale: Double,
                            frameRateCap: Int,
                            applyingTo stream: any StreamConvertible) async {
+        guard !externalEncoding else { return }
         abr.onThermalCeiling(bitRateScale: bitRateScale, frameRateCap: frameRateCap)
         var video = await stream.videoSettings
         video.bitRate = abr.targetBitRate

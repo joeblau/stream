@@ -80,6 +80,7 @@ struct DestinationManagerView: View {
 
     @ViewBuilder
     private func editor(_ index: Int, id: UUID) -> some View {
+        let canvasProfile = session.draft[index].canvas == .secondary ? controller.activeSecondaryProfile : programProfile
         TextField("Name", text: $session.draft[index].name)
         if let template = session.draft[index].providerTemplate {
             DisclosureGroup("Setup Guide: \(template.name)") {
@@ -118,7 +119,8 @@ struct DestinationManagerView: View {
             Text("SRT caller mode; provide a host and port. Passphrases require 10–79 bytes.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        Text("Canvas: Program").font(.caption).foregroundStyle(.secondary)
+        Text("Canvas: \(session.draft[index].canvas == .secondary ? "Secondary layout" : "Program")")
+            .font(.caption).foregroundStyle(.secondary)
         Toggle("Use program output profile", isOn: $session.draft[index].followsProgramProfile)
         if !session.draft[index].followsProgramProfile {
             Picker("Output canvas", selection: Binding(
@@ -149,6 +151,11 @@ struct DestinationManagerView: View {
         TextField("Keyframe interval (seconds)", value: Binding(
             get: { session.draft[index].keyframeSeconds ?? 2 },
             set: { session.draft[index].keyframeSeconds = $0 }), format: .number)
+        if session.sharesFixedH264AAC,
+           !DestinationEncoderKey(destination: session.draft[index], program: canvasProfile).supportsFixedH264AAC(on: session.draft[index].transport, sourceFrameRate: controller.activeProfile.frameRate) {
+            Label("This draft reserves a separate encoder in shared mode. Fixed sharing supports RTMP/RTMPS/SRT, H.264, even dimensions up to 4096, 1–60 fps up to the taken canvas rate, AAC 32–320 kbps and whole-second keyframes from 1–10 seconds.", systemImage: "info.circle")
+                .font(.caption).foregroundStyle(.secondary)
+        }
         Toggle("Override ingest limits", isOn: Binding(
             get: { session.draft[index].ingestLimits != nil },
             set: { enabled in session.draft[index].ingestLimits = enabled ? .init() : nil }))
@@ -177,7 +184,7 @@ struct DestinationManagerView: View {
             Text(error).font(.caption).foregroundStyle(.red)
         }
         ForEach(DestinationValidator.startErrors(session.draft[index],
-                   credentials: session.credentials[id] ?? .init(), program: programProfile), id: \.self) { error in
+                   credentials: session.credentials[id] ?? .init(), program: canvasProfile), id: \.self) { error in
             Text(error).font(.caption).foregroundStyle(.orange)
         }
         HStack {
@@ -188,10 +195,15 @@ struct DestinationManagerView: View {
     }
 
     private var resourceEstimate: some View {
-        let plan = session.encodingPlan(program: programProfile)
+        let plan = controller.outputEncodingPlan(program: programProfile)
         return VStack(alignment: .leading, spacing: 5) {
             Text("Applied output estimate: \(plan.encoderSessions) encoder sessions, \(Double(plan.aggregateBitrate) / 1_000_000, specifier: "%.1f") Mbps payload; allow \(plan.requiredUplinkMbps, specifier: "%.1f") Mbps uplink.")
-            Text("\(plan.compatibleGroups.count) compatible profile groups. This transport backend uses a separate encoder per destination; local recording needs its own session.")
+            Toggle("Share compatible H.264/AAC encoders (fixed profiles)", isOn: $session.sharesFixedH264AAC)
+                .disabled(controller.outputSessionActive)
+            Text(session.sharesFixedH264AAC
+                ? "Compatible RTMP/RTMPS/SRT outputs reuse encoded media. Per-destination adaptive and thermal changes cannot reduce the shared profile. Slow or reconnecting destinations discard their own queued media and resume at a keyframe."
+                : "Adaptive publishing uses a separate encoder per destination. Sharing is off by default.")
+            Text("Actual active/finalizing publishing encoder owners: \(controller.destinationOutputs.encoderSessionCount). WHIP, other codecs and unsupported fixed settings remain separate; recording keeps its own encoder. Changing one target starts a separate profile when needed.")
             TextField("Measured uplink Mbps (0 = unknown)", value: $session.measuredUplinkMbps, format: .number)
             TextField("Tested publishing encoder budget (0 = unknown)", value: $session.measuredSessionLimit, format: .number)
             ForEach(plan.issues, id: \.self) { Text($0).foregroundStyle(.orange) }
