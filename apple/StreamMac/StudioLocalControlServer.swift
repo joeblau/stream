@@ -22,7 +22,7 @@ import Network
     private var lastCapabilities: [StudioControlCapability] = []
     private var snapshot: () -> StudioControlSnapshot = { .init(projectID: "", stream: "idle", recording: "idle", preview: "idle", pendingStagedEdits: false, layerVisibility: [:], macroProgress: .init()) }
     private var capabilities: () -> [StudioControlCapability] = { [] }
-    private var execute: (String) -> StudioControlCommandResult = { .init(commandID: $0, succeeded: false, error: .init(code: "unavailable", message: "No studio is bound.")) }
+    private var execute: (String, Double?, Double?, Int?, String?) -> StudioControlCommandResult = { id, _, _, _, _ in .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "No studio is bound.")) }
     private var cancelledRemoteRun: (UUID) -> Void = { _ in }
     private var currentRunID: () -> UUID? = { nil }
     var interactionBlocked: () -> Bool = { false }
@@ -53,9 +53,14 @@ import Network
     func bind(to dispatcher: StudioCommandDispatcher) {
         let boundProjectDirectory = DesktopStorage.projectDirectory
         capabilities = { [weak dispatcher] in
-            dispatcher?.catalogueActions().map { .init(id: $0.id, title: $0.title, category: $0.category,
+            var result: [StudioControlCapability] = dispatcher?.catalogueActions().map { .init(id: $0.id, title: $0.title, category: $0.category,
                                                       available: $0.command != nil && $0.unavailableReason == nil,
-                                                      unavailableReason: $0.unavailableReason) } ?? []
+                                                      unavailableReason: $0.unavailableReason, kind: "command",
+                                                      argument: $0.id == "output.record.marker" ? "text" : $0.id.hasPrefix("pdf.") && $0.id.hasSuffix(".goto") ? "page" : nil) } ?? []
+            for target in dispatcher?.controllerTargets() ?? [] where target.kind == .value {
+                result.append(.init(id: target.id, title: target.title, category: "Audio Levels", available: target.unavailableReason == nil, unavailableReason: target.unavailableReason, kind: "value"))
+            }
+            return result
         }
         snapshot = { [weak dispatcher] in
             guard let dispatcher else { return .init(projectID: "", stream: "idle", recording: "idle", preview: "idle", pendingStagedEdits: false, layerVisibility: [:], macroProgress: .init()) }
@@ -65,13 +70,37 @@ import Network
                          preview: state.preview == .active ? "active" : "idle", stagedSceneID: state.stagedSceneID?.rawValue,
                          programSceneID: state.programSceneID?.rawValue, pendingStagedEdits: state.hasPendingStagedEdits,
                          layerVisibility: Dictionary(uniqueKeysWithValues: state.layerVisibility.map { ($0.key.rawValue.uuidString, $0.value) }),
-                         macroProgress: dispatcher.macros.progress)
+                         macroProgress: dispatcher.macros.progress, values: dispatcher.controllerValueSnapshot(), mutes: dispatcher.controllerMuteSnapshot(),
+                         playback: dispatcher.controllerPlaybackSnapshot(), programLayerVisibility: dispatcher.controllerProgramVisibility(),
+                         groupVisibility: dispatcher.controllerGroupVisibility(),
+                         overlayVisibility: Dictionary(uniqueKeysWithValues: dispatcher.controllerOverlays().map { ($0.id.rawValue.uuidString, $0.isVisible) }),
+                         directLiveEditing: state.directLiveEditing, chat: dispatcher.controllerChatSnapshot())
         }
-        execute = { [weak self, weak dispatcher] id in
+        execute = { [weak self, weak dispatcher] id, value, delta, page, text in
             guard let self, let dispatcher else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "The studio is unavailable.")) }
             guard DesktopStorage.projectDirectory == boundProjectDirectory, !self.interactionBlocked() else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "Complete the studio's setup or permission choice before running remote commands.")) }
-            guard let command = dispatcher.catalogueActions().first(where: { $0.id == id })?.command else {
+            if let target = dispatcher.controllerTargets().first(where: { $0.id == id && $0.kind == .value }) {
+                guard value != nil || delta != nil else { return .init(commandID: id, succeeded: false, error: .init(code: "invalidValue", message: "This numeric target needs a normalized value or delta.")) }
+                if let error = target.unavailableReason { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: error)) }
+                let normalized = value ?? max(0, min(1, target.normalizedValue + delta!))
+                let error = target.execute(normalized)
+                return .init(commandID: id, succeeded: error == nil, error: error.map { .init(code: "unavailable", message: $0) })
+            }
+            guard value == nil, delta == nil else {
+                let exists = dispatcher.catalogueActions().contains(where: { $0.id == id })
+                return .init(commandID: id, succeeded: false, error: .init(code: exists ? "invalidValue" : "invalidTarget", message: "Numeric arguments require an existing typed value target."))
+            }
+            guard let action = dispatcher.catalogueActions().first(where: { $0.id == id }) else {
                 return .init(commandID: id, succeeded: false, error: .init(code: "invalidTarget", message: "The stable command/resource ID no longer exists."))
+            }
+            guard var command = action.command else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: action.unavailableReason ?? "This action is unavailable.")) }
+            if let page {
+                guard id.hasPrefix("pdf."), id.hasSuffix(".goto"), case .pdfGoToPage(let sourceID, _) = command else { return .init(commandID: id, succeeded: false, error: .init(code: "invalidValue", message: "A page argument requires a PDF jump target.")) }
+                command = .pdfGoToPage(sourceID, page: page)
+            }
+            if let text {
+                guard id == "output.record.marker", case .addRecordingMarker = command else { return .init(commandID: id, succeeded: false, error: .init(code: "invalidValue", message: "A text argument requires the recording marker command.")) }
+                command = .addRecordingMarker(text)
             }
             let result = dispatcher.execute(command)
             if case .rejected(let error) = result.outcome {
@@ -228,7 +257,7 @@ import Network
         case .command:
             let commandID = request.commandID!
             let previousRun = currentRunID()
-            let result = execute(commandID)
+            let result = execute(commandID, request.value, request.delta, request.page, request.text)
             if result.succeeded, commandID.hasPrefix("macro."), commandID.hasSuffix(".run"), currentRunID() != previousRun { peer.ownedMacroRun = currentRunID() }
             send(.init(type: "result", id: request.id, sessionID: peer.session.sessionID, snapshot: currentSnapshot(), result: result), peer: peer)
         }

@@ -3,11 +3,16 @@ import { randomUUID } from "node:crypto";
 import net from "node:net";
 
 export type Pairing = { version: 1; clientID: string; token: string; host?: string; port?: number };
-export type Capability = { id: string; title: string; category: string; available: boolean; unavailableReason?: string };
+export type Capability = { id: string; title: string; category: string; available: boolean; unavailableReason?: string; kind?: "command" | "value"; argument?: "text" | "page" };
+export type CommandArgument = { value: number } | { delta: number } | { page: number } | { text: string };
 export type Snapshot = {
   projectID: string; revision: number; stream: string; recording: string; preview: string;
   stagedSceneID?: string; programSceneID?: string; pendingStagedEdits: boolean;
   layerVisibility: Record<string, boolean>;
+  values?: Record<string, number>; mutes?: Record<string, boolean>;
+  playback?: Record<string, string>; programLayerVisibility?: Record<string, boolean>; groupVisibility?: Record<string, boolean>;
+  overlayVisibility?: Record<string, boolean>; directLiveEditing?: boolean;
+  chat?: { queuedCount: number; selectedID?: string; featuredID?: string; ready: boolean; stagedVisible: boolean; programVisible: boolean };
   macroProgress: { phase: string; macroID?: string; runID?: string; stepIndex: number; totalSteps: number; message: string };
 };
 export type Response = { version: 1; type: string; id?: string; sessionID?: string; snapshot?: Snapshot;
@@ -28,7 +33,9 @@ function validResponse(value: unknown): value is Response {
       || (value.result.error !== undefined && !validError(value.result.error)))) return false;
   if (value.type === "capabilities" && (!Array.isArray(value.commands) || value.commands.length > 10000
       || !value.commands.every(c => object(c) && typeof c.id === "string" && typeof c.title === "string" && typeof c.category === "string"
-        && typeof c.available === "boolean" && (c.unavailableReason === undefined || typeof c.unavailableReason === "string")))) return false;
+        && typeof c.available === "boolean" && (c.unavailableReason === undefined || typeof c.unavailableReason === "string")
+        && (c.kind === undefined || c.kind === "command" || c.kind === "value")
+        && (c.argument === undefined || c.argument === "text" || c.argument === "page")))) return false;
   const state = value.snapshot;
   if (["authenticated", "snapshot", "event"].includes(value.type) && !object(state)) return false;
   if (state !== undefined) {
@@ -40,6 +47,16 @@ function validResponse(value: unknown): value is Response {
     if (typeof progress.phase !== "string" || typeof progress.message !== "string"
         || !Number.isSafeInteger(progress.stepIndex) || !Number.isSafeInteger(progress.totalSteps)) return false;
     if ([state.programSceneID, state.stagedSceneID].some(id => id !== undefined && typeof id !== "string")) return false;
+    if (state.values !== undefined && (!object(state.values) || !Object.values(state.values).every(value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1))) return false;
+    if (state.mutes !== undefined && (!object(state.mutes) || !Object.values(state.mutes).every(value => typeof value === "boolean"))) return false;
+    for (const key of ["programLayerVisibility", "groupVisibility", "overlayVisibility"]) {
+      if (state[key] !== undefined && (!object(state[key]) || !Object.values(state[key]).every(value => typeof value === "boolean"))) return false;
+    }
+    if (state.playback !== undefined && (!object(state.playback) || !Object.values(state.playback).every(value => typeof value === "string"))) return false;
+    if (state.directLiveEditing !== undefined && typeof state.directLiveEditing !== "boolean") return false;
+    if (state.chat !== undefined && (!object(state.chat) || !Number.isSafeInteger(state.chat.queuedCount) || (state.chat.queuedCount as number) < 0
+        || typeof state.chat.ready !== "boolean" || typeof state.chat.stagedVisible !== "boolean" || typeof state.chat.programVisible !== "boolean"
+        || [state.chat.selectedID, state.chat.featuredID].some(id => id !== undefined && typeof id !== "string"))) return false;
   }
   return true;
 }
@@ -213,13 +230,22 @@ export class StudioClient extends EventEmitter {
       if (generation === this.generation) { this.capabilities = commands; this.emit("change"); }
     } finally { if (generation === this.generation) this.refreshing = false; }
   }
-  async execute(commandID: string, projectID: string): Promise<Response> {
+  async execute(commandID: string, projectID: string, argument?: CommandArgument): Promise<Response> {
     if (this.status !== "Connected" || !this.snapshot) throw new Error("Stream is disconnected.");
     if (this.snapshot.projectID !== projectID) throw new Error("The configured project is not open in Stream.");
     if (!this.capabilities.has(commandID) || commandID.startsWith("unavailable.")) throw new Error("The bound resource is missing or unsupported.");
+    if (argument) {
+      const capability = this.capabilities.get(commandID)!;
+      if ("value" in argument || "delta" in argument) {
+        const value = "value" in argument ? argument.value : argument.delta;
+        if (capability.kind !== "value" || !Number.isFinite(value) || value < ("value" in argument ? 0 : -1) || value > 1) throw new Error("Choose a supported normalized value target.");
+      } else if ("page" in argument) {
+        if (capability.argument !== "page" || !Number.isSafeInteger(argument.page) || argument.page < 0 || argument.page > 100000) throw new Error("Choose a valid PDF jump target and page.");
+      } else if (capability.argument !== "text" || !argument.text.trim() || Buffer.byteLength(argument.text) > 512) throw new Error("Marker text needs 1–512 UTF-8 bytes.");
+    } else if (this.capabilities.get(commandID)?.kind === "value") throw new Error("This target requires a numeric value.");
     // Availability is checked authoritatively by the app at execution, since
     // an output may have changed between catalog refreshes.
-    const response = await this.request("command", { commandID });
+    const response = await this.request("command", { commandID, ...argument });
     if (!response.result?.succeeded) throw new Error(response.result?.error?.message ?? "The command was rejected.");
     this.scheduleCatalogRefresh();
     return response;

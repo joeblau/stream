@@ -1,16 +1,6 @@
 import Combine
 import Foundation
 
-struct StudioControllerTarget: Identifiable {
-    var id: String
-    var title: String
-    var kind: StudioControllerTargetKind
-    /// Numeric targets use linear gain 0…2. Feedback is normalized 0…1.
-    var normalizedValue: Double
-    var unavailableReason: String?
-    var execute: @MainActor (Double?) -> String?
-}
-
 @MainActor final class StudioControllerManager: ObservableObject {
     @Published private(set) var document = StudioControllerMappingDocument()
     @Published private(set) var midiEnabled = false

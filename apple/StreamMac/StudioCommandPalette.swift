@@ -21,6 +21,18 @@ extension StudioCommandDispatcher {
         }
         add("studio.take", "Take Preview to Program", "Studio", .take)
         add("studio.revert", "Revert Preview", "Studio", .revert)
+        add("studio.directLive.enable", "Enable Direct Live Editing", "Studio", .setDirectLiveEditing(true))
+        add("studio.directLive.disable", "Enable Preview / Program Editing", "Studio", .setDirectLiveEditing(false))
+        let selectedID = state.stagedSceneID
+        if let index = scenes.firstIndex(where: { $0.id == selectedID }) {
+            if index + 1 < scenes.count { add("studio.scene.next", "Select Next Scene", "Scenes", .selectScene(scenes[index + 1].id)) }
+            else { result.append(.init(id: "studio.scene.next", title: "Select Next Scene", category: "Scenes", command: nil, unavailableReason: "There is no next scene.")) }
+            if index > 0 { add("studio.scene.previous", "Select Previous Scene", "Scenes", .selectScene(scenes[index - 1].id)) }
+            else { result.append(.init(id: "studio.scene.previous", title: "Select Previous Scene", category: "Scenes", command: nil, unavailableReason: "There is no previous scene.")) }
+        } else {
+            result.append(.init(id: "studio.scene.next", title: "Select Next Scene", category: "Scenes", command: nil, unavailableReason: "Select a scene first."))
+            result.append(.init(id: "studio.scene.previous", title: "Select Previous Scene", category: "Scenes", command: nil, unavailableReason: "Select a scene first."))
+        }
         add("output.stream.toggle", state.stream.isActive ? "End Stream" : "Go Live", "Output", state.stream.isActive ? .stopStream : .startStream)
         add("output.stream.start", "Start Stream", "Output", .startStream)
         add("output.stream.stop", "Stop Stream", "Output", .stopStream)
@@ -38,9 +50,27 @@ extension StudioCommandDispatcher {
         add("audio.monitor.toggle", state.monitoringEnabled ? "Disable Monitoring" : "Enable Monitoring", "Audio", .setMonitoringEnabled(!state.monitoringEnabled))
         let mic = AudioChannelID.microphone(deviceUID: nil)
         add("audio.microphone.mute", state.mixer.channelMutes[mic.label] == true ? "Unmute Microphone" : "Mute Microphone", "Audio", .setChannelMuted(mic, state.mixer.channelMutes[mic.label] != true))
+        add("audio.microphone.mute.on", "Mute Microphone", "Audio", .setChannelMuted(mic, true))
+        add("audio.microphone.mute.off", "Unmute Microphone", "Audio", .setChannelMuted(mic, false))
+        func addAudioUnitActions(prefix: String, channel: AudioChannelID, name: String) {
+            let current = state.fxChain(forLabel: channel.label)
+            for (index, slot) in current.audioUnits.enumerated() {
+                var chain = current; chain.audioUnits[index].isEnabled.toggle()
+                add("\(prefix).au.\(slot.id.uuidString).bypass", "\(slot.isEnabled ? "Bypass" : "Enable") \(slot.component.displayName) — \(name)", "Audio Effects", .setChannelFXChain(channel, chain))
+            }
+        }
+        addAudioUnitActions(prefix: "audio.microphone", channel: mic, name: "Microphone")
+        for overlay in controllerOverlays() {
+            let id = overlay.id.rawValue.uuidString
+            add("overlay.\(id).visibility", "\(overlay.isVisible ? "Hide" : "Show") Global Overlay \(overlay.name)", "Global Overlays", .setOverlayVisibility(overlay.id, visible: !overlay.isVisible))
+            add("overlay.\(id).show", "Show Global Overlay \(overlay.name)", "Global Overlays", .setOverlayVisibility(overlay.id, visible: true))
+            add("overlay.\(id).hide", "Hide Global Overlay \(overlay.name)", "Global Overlays", .setOverlayVisibility(overlay.id, visible: false))
+        }
         for bus in [AudioBus.program, .monitor, .aux] {
             let muted = state.mixer.mutedBuses.contains(bus.rawValue)
             add("audio.bus.\(bus.rawValue).mute", "\(muted ? "Unmute" : "Mute") \(bus.rawValue.capitalized) Bus", "Audio", .setBusMuted(bus, !muted))
+            add("audio.bus.\(bus.rawValue).mute.on", "Mute \(bus.rawValue.capitalized) Bus", "Audio", .setBusMuted(bus, true))
+            add("audio.bus.\(bus.rawValue).mute.off", "Unmute \(bus.rawValue.capitalized) Bus", "Audio", .setBusMuted(bus, false))
         }
         for storedScene in scenes {
             let scene = stagedScene?.id == storedScene.id ? stagedScene! : storedScene
@@ -51,9 +81,27 @@ extension StudioCommandDispatcher {
                 add("scene.\(sceneID).layer.\(layerID).visibility", "\(layer.isVisible ? "Hide" : "Show") \(layer.name) — \(scene.name)",
                     layer.payload.displayName == "Camera" ? "Camera / PIP" : "Layers",
                     .setLayerVisibility(layer.id, visible: !layer.isVisible, in: scene.id))
+                add("scene.\(sceneID).layer.\(layerID).show", "Show \(layer.name) — \(scene.name)", "Layers", .setLayerVisibility(layer.id, visible: true, in: scene.id))
+                add("scene.\(sceneID).layer.\(layerID).hide", "Hide \(layer.name) — \(scene.name)", "Layers", .setLayerVisibility(layer.id, visible: false, in: scene.id))
+                var effects = layer.effectOverrides ?? sources.first(where: { $0.id == layer.sourceID })?.effectDefaults ?? .identity
+                effects.isBypassed.toggle()
+                add("scene.\(sceneID).layer.\(layerID).effects.bypass", "\(effects.isBypassed ? "Bypass" : "Enable") Visual Effects — \(layer.name)", "Visual Effects", .setLayerSourceEffects(layer.id, effects, in: scene.id))
+                if case .text(let text) = layer.payload, text.ticker != nil || text.timer != nil {
+                    add("scene.\(sceneID).layer.\(layerID).animation.restart", "Reset Animation — \(layer.name)", "Layers", .setDynamicOverlayTransport(layer.id, .reset, in: scene.id))
+                    add("scene.\(sceneID).layer.\(layerID).animation.start", "Start Animation — \(layer.name)", "Layers", .setDynamicOverlayTransport(layer.id, .start, in: scene.id))
+                    add("scene.\(sceneID).layer.\(layerID).animation.pause", "Pause Animation — \(layer.name)", "Layers", .setDynamicOverlayTransport(layer.id, .pause, in: scene.id))
+                }
                 var audio = layer.audio
                 audio.isMuted.toggle()
                 add("scene.\(sceneID).layer.\(layerID).mute", "\(audio.isMuted ? "Mute" : "Unmute") \(layer.name) — \(scene.name)", "Audio", .setLayerAudio(layer.id, audio, in: scene.id))
+            }
+            for group in scene.groups {
+                let members = scene.layers.filter { $0.groupID == group.id }
+                let anyVisible = members.contains { $0.isVisible }
+                let prefix = "scene.\(sceneID).group.\(group.id.rawValue.uuidString)"
+                add("\(prefix).visibility", "\(anyVisible ? "Hide" : "Show") Group \(group.name) — \(scene.name)", "Layers", .setGroupVisibility(group.id, visible: !anyVisible, in: scene.id))
+                add("\(prefix).show", "Show Group \(group.name) — \(scene.name)", "Layers", .setGroupVisibility(group.id, visible: true, in: scene.id))
+                add("\(prefix).hide", "Hide Group \(group.name) — \(scene.name)", "Layers", .setGroupVisibility(group.id, visible: false, in: scene.id))
             }
         }
         for source in sources where source.payload.isMedia {
@@ -64,6 +112,23 @@ extension StudioCommandDispatcher {
             add("media.\(id).restart", "Restart \(source.name)", "Media", .mediaRestart(source.id))
             let channel = AudioChannelID.media(source.id)
             add("media.\(id).mute", "Toggle Mute \(source.name)", "Audio", .setChannelMuted(channel, state.mixer.channelMutes[channel.label] != true))
+            add("media.\(id).mute.on", "Mute \(source.name)", "Audio", .setChannelMuted(channel, true))
+            add("media.\(id).mute.off", "Unmute \(source.name)", "Audio", .setChannelMuted(channel, false))
+            addAudioUnitActions(prefix: "media.\(id)", channel: channel, name: source.name)
+        }
+        for source in sources where source.payload.isPDF {
+            let id = source.id.rawValue.uuidString
+            add("pdf.\(id).next", "Next PDF Page — \(source.name)", "PDF", .pdfNextPage(source.id))
+            add("pdf.\(id).previous", "Previous PDF Page — \(source.name)", "PDF", .pdfPreviousPage(source.id))
+            add("pdf.\(id).first", "First PDF Page — \(source.name)", "PDF", .pdfGoToPage(source.id, page: 0))
+            add("pdf.\(id).goto", "Jump to PDF Page — \(source.name)", "PDF", .pdfGoToPage(source.id, page: 0))
+        }
+        for source in sources {
+            if case .camera(let payload) = source.payload, let deviceID = payload.deviceID {
+                for reaction in CameraReaction.allCases {
+                    add("camera.\(source.id.rawValue.uuidString).reaction.\(reaction.rawValue)", "\(reaction.displayName) — \(source.name)", "Camera Reactions", .triggerCameraReaction(deviceID, reaction))
+                }
+            }
         }
         for pad in soundboardStore.pads {
             let id = pad.id.rawValue.uuidString
@@ -76,6 +141,7 @@ extension StudioCommandDispatcher {
             add("playlist.\(id).pause", "Pause \(playlist.name)", "Sound", .playlistPause(playlist.id))
             add("playlist.\(id).stop", "Stop \(playlist.name)", "Sound", .playlistStop(playlist.id))
             add("playlist.\(id).next", "Next Track — \(playlist.name)", "Sound", .playlistNext(playlist.id))
+            add("playlist.\(id).previous", "Previous Track — \(playlist.name)", "Sound", .playlistPrevious(playlist.id))
         }
         if includeMacros {
         for macro in macros.document.macros {
@@ -84,8 +150,10 @@ extension StudioCommandDispatcher {
         add("macro.cancel", "Cancel Running Macro", "Macros", .cancelMacro)
         }
         // These are discoverability notices, never assignable fake commands.
-        result.append(StudioPaletteAction(id: "unavailable.comments", title: "Put Comment on Program", category: "Comments", command: nil,
-                                          unavailableReason: "Comment presentation is not implemented in this studio."))
+        add("comments.previous", "Select Previous Queued Comment", "Comments", .selectPreviousComment)
+        add("comments.next", "Select Next Queued Comment", "Comments", .selectNextComment)
+        add("comments.show", "Show Selected Comment in Preview", "Comments", .showSelectedComment)
+        add("comments.hide", "Hide Comment in Preview", "Comments", .hideComment)
         result.append(StudioPaletteAction(id: "unavailable.guests", title: "Control Guest Slot", category: "Guests", command: nil,
                                           unavailableReason: "Guest sessions are not implemented in this studio."))
         return result

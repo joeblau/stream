@@ -11,6 +11,11 @@ struct StudioControlRequest: Codable, Sendable {
     var token: String?
     var sessionID: UUID?
     var commandID: String?
+    /// Absolute/relative normalized numeric input. Exactly one may be set.
+    var value: Double?
+    var delta: Double?
+    var page: Int?
+    var text: String?
     var cursor: Int?
 }
 struct StudioControlProtocolError: Codable, Equatable, Error, Sendable {
@@ -23,6 +28,8 @@ struct StudioControlCapability: Codable, Equatable, Sendable {
     var category: String
     var available: Bool
     var unavailableReason: String?
+    var kind: String? = nil
+    var argument: String? = nil
 }
 struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var projectID: String
@@ -35,6 +42,22 @@ struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var pendingStagedEdits: Bool
     var layerVisibility: [String: Bool]
     var macroProgress: ShowMacroProgress
+    var values: [String: Double]? = nil
+    var mutes: [String: Bool]? = nil
+    var playback: [String: String]? = nil
+    var programLayerVisibility: [String: Bool]? = nil
+    var groupVisibility: [String: Bool]? = nil
+    var overlayVisibility: [String: Bool]? = nil
+    var directLiveEditing: Bool? = nil
+    var chat: StudioControlChatState? = nil
+}
+struct StudioControlChatState: Codable, Equatable, Sendable {
+    var queuedCount: Int
+    var selectedID: String?
+    var featuredID: String?
+    var ready: Bool
+    var stagedVisible: Bool
+    var programVisible: Bool
 }
 struct StudioControlCommandResult: Codable, Sendable {
     var commandID: String
@@ -80,6 +103,14 @@ struct StudioControlSession {
         guard requests.count < Self.maxRequests else { return .init(code: "sessionLimit", message: "Reconnect and authenticate for a fresh session; do not replay old commands.") }
         if request.type == .command {
             guard let id = request.commandID, !id.isEmpty, id.utf8.count <= 512 else { return .init(code: "invalidRequest", message: "A command needs a stable command ID of at most 512 bytes.") }
+            let arguments = [request.value != nil, request.delta != nil, request.page != nil, request.text != nil]
+            guard arguments.filter({ $0 }).count <= 1 else { return .init(code: "invalidValue", message: "Choose at most one typed command argument.") }
+            if let value = request.value, !value.isFinite || value < 0 || value > 1 { return .init(code: "invalidValue", message: "A normalized value must be finite and between 0 and 1.") }
+            if let delta = request.delta, !delta.isFinite || delta < -1 || delta > 1 { return .init(code: "invalidValue", message: "A normalized delta must be finite and between -1 and 1.") }
+            if let page = request.page, page < 0 || page > 100_000 { return .init(code: "invalidValue", message: "A PDF page must be a zero-based integer from 0 to 100000.") }
+            if let text = request.text, text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.utf8.count > 512 { return .init(code: "invalidValue", message: "Marker text needs 1–512 UTF-8 bytes.") }
+        } else if request.value != nil || request.delta != nil || request.page != nil || request.text != nil {
+            return .init(code: "invalidRequest", message: "Typed arguments belong only to commands.")
         }
         if let cursor = request.cursor, cursor < 0 { return .init(code: "invalidRequest", message: "Capability cursors must be nonnegative.") }
         requests.insert(request.id)

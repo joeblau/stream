@@ -51,6 +51,57 @@
       ]
     },
     {
+      "UUID": "com.joeblau.stream-studio.level",
+      "Name": "Audio Level Dial",
+      "Tooltip": "Adjust a native microphone, media, or bus level; press/tap to mute, hold touch to reset unity gain.",
+      "Icon": "imgs/command",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/command.html",
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false,
+      "Encoder": {
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Adjust level",
+          "Push": "Toggle mute",
+          "Touch": "Toggle mute",
+          "LongTouch": "Reset to unity gain"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/key"
+        }
+      ]
+    },
+    {
+      "UUID": "com.joeblau.stream-studio.selector",
+      "Name": "Scene / Layer / Sound Dial",
+      "Tooltip": "Rotate to browse stable resources; press or tap to activate the selected resource.",
+      "Icon": "imgs/command",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/command.html",
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false,
+      "Encoder": {
+        "layout": "$A1",
+        "TriggerDescription": {
+          "Rotate": "Browse resources",
+          "Push": "Activate selection",
+          "Touch": "Activate selection"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/key"
+        }
+      ]
+    },
+    {
       "UUID": "com.joeblau.stream-studio.open",
       "Name": "Open Studio",
       "Tooltip": "Launch or focus the one native Stream Studio window.",
