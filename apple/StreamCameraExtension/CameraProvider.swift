@@ -98,9 +98,10 @@ final class StreamCameraSource: NSObject, CMIOExtensionStreamSource, @unchecked 
             let centered = scaled.transformed(by: CGAffineTransform(translationX: (rect.width - scaled.extent.width) / 2, y: (rect.height - scaled.extent.height) / 2))
             context.render(centered.composited(over: black), to: pixels, bounds: rect, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
         } else { context.render(black, to: pixels) }
-        // New frames preserve the graph's host-clock PTS. Repeat/fallback
-        // frames use that same host clock and remain strictly monotonic.
-        let pts = max(lastPTS + 1, frame.flatMap { $0.sequence == lastSequence ? nil : $0.pts } ?? now)
+        // The sink retains graph PTS for freshness validation. Retiming onto
+        // the same host clock at delivery also gives a 24/60-fps graph a valid
+        // 30-fps camera cadence, instead of mixing old source PTS with repeats.
+        let pts = max(lastPTS + 1, now)
         let discontinuity = (frame != nil) != wasFresh || (frame != nil && lastSequence != nil && frame!.sequence < lastSequence!)
         lastPTS = pts; lastSequence = frame?.sequence; wasFresh = frame != nil
         var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30), presentationTimeStamp: CMTime(value: Int64(pts), timescale: 1_000_000_000), decodeTimeStamp: .invalid)

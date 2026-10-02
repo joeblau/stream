@@ -2,6 +2,7 @@
 """Audit declared desktop sandbox and built bundle without requiring signing secrets."""
 import pathlib
 import plistlib
+import re
 import subprocess
 import sys
 
@@ -21,6 +22,26 @@ for key in ["NSCameraUsageDescription", "NSMicrophoneUsageDescription"]:
     assert info.get(key), key
 executable = app / "Contents/MacOS" / info["CFBundleExecutable"]
 assert executable.is_file(), executable
+assert entitlements.get("com.apple.developer.system-extension.install") is True
+camera = app / "Contents/Library/SystemExtensions/com.joeblau.StreamMac.CameraExtension.systemextension"
+with (camera / "Contents/Info.plist").open("rb") as file:
+    camera_info = plistlib.load(file)
+assert camera_info["CFBundleIdentifier"] == "com.joeblau.StreamMac.CameraExtension"
+team = info.get("StreamVirtualOutputTeam", "")
+assert re.fullmatch(r"[A-Z0-9]{10}", team), "Unexpanded or invalid virtual-output team"
+group = team + ".com.joeblau.Stream.VirtualOutputs"
+assert info.get("StreamVirtualOutputAppGroup") == group
+assert camera_info.get("StreamVirtualOutputTeam") == team
+assert camera_info.get("StreamVirtualOutputAppGroup") == group
+assert camera_info.get("CMIOExtension", {}).get("CMIOExtensionMachServiceName") == group + ".CameraExtension"
+assert (camera / "Contents/MacOS" / camera_info["CFBundleExecutable"]).is_file()
+with (source / "StreamCameraExtension/StreamCameraExtension.entitlements").open("rb") as file:
+    camera_entitlements = plistlib.load(file)
+assert camera_entitlements.get("com.apple.security.app-sandbox") is True
+assert camera_entitlements.get("com.apple.security.application-groups") == ["$(DEVELOPMENT_TEAM).com.joeblau.Stream.VirtualOutputs"]
+assert "$(DEVELOPMENT_TEAM).com.joeblau.Stream.VirtualOutputs" in entitlements.get("com.apple.security.application-groups", [])
+assert not camera_entitlements.get("com.apple.security.get-task-allow")
 architectures = subprocess.check_output(["lipo", "-archs", str(executable)], text=True).strip()
 print("Desktop bundle and sandbox declarations validated:", architectures)
+print("Embedded CMIO camera, matching team/App Group namespace and sandbox declarations validated.")
 print("Developer ID signature, hardened runtime and notarization require the release workflow.")
