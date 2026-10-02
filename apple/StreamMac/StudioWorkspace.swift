@@ -16,6 +16,7 @@ final class StudioRuntime {
     let dispatcher: StudioCommandDispatcher
     let controllers: StudioControllerManager
     let chat: StudioChatCoordinator
+    let providerAccounts: ProviderAccountSession
     var recoveryBinding: SessionRecoveryRuntimeBinding?
     let adapters: StudioAdapterManager
 
@@ -39,6 +40,8 @@ final class StudioRuntime {
         controllers.bind(to: dispatcher)
         chat = StudioChatCoordinator(dispatcher: dispatcher, previewProgram: previewProgram)
         dispatcher.bindChatCoordinator(chat)
+        recorder.bindChat(chat)
+        providerAccounts = ProviderAccountSession(restream: chat.restream)
         adapters = StudioAdapterManager()
         adapters.bind(to: localControl)
         StudioAutomationEndpoint.shared.bind(dispatcher: dispatcher, permissions: permissions,
@@ -130,7 +133,7 @@ final class StudioWorkspace: ObservableObject {
         StudioAutomationEndpoint.shared.unbind()
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
-        runtime.chat.shutdown()
+        runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.rundown.stop()
         runtime.dispatcher.macros.cancel()
@@ -257,7 +260,7 @@ final class StudioWorkspace: ObservableObject {
         StudioAutomationEndpoint.shared.unbind()
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
-        runtime.chat.shutdown()
+        runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.macros.cancel()
         runtime.dispatcher.rundown.stop()
@@ -284,6 +287,10 @@ final class StudioWorkspace: ObservableObject {
             projectID: projectID, profileID: profileID, sceneStore: runtime.sceneStore,
             previewProgram: runtime.previewProgram, controller: runtime.controller, pdfDecks: runtime.dispatcher.pdfDecks,
             recordingActivity: runtime.recorder.$state.map { $0.isActive }.eraseToAnyPublisher(),
+            remoteEvents: { [weak accounts = runtime.providerAccounts, weak controller = runtime.controller] ids in
+                guard let accounts, let controller else { return ids.map { SessionRecoveryRemoteEvent(outputID: $0) } }
+                return accounts.recoveryEvents(activeIDs: ids, destinations: controller.destinations.saved)
+            },
             recordings: { [weak recorder = runtime.recorder] in
                 guard let recorder else { throw SessionRecoveryDiskStore.Failure.invalid }
                 let access = try recorder.libraryAccess()
@@ -312,9 +319,9 @@ final class StudioWorkspace: ObservableObject {
         }
         RecordingTerminationDelegate.finishSession = { [weak self] in
             guard let self else { return }
-            self.runtime.controllers.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
+            self.runtime.controllers.shutdown(); self.runtime.providerAccounts.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
             self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop()
-            self.runtime.controller.stopStream(); self.runtime.controller.stopExternalDisplayOutput()
+            self.runtime.controller.stopStream(); self.runtime.controller.stopExternalDisplayOutput(); self.runtime.controller.stopVirtualCameraOutput()
             self.runtime.flush()
             for _ in 0..<50 {
                 if !self.runtime.controller.outputSessionActive { break }

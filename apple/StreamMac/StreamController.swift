@@ -181,6 +181,27 @@ final class StreamController: ObservableObject {
     private var isPipelineRunning = false
     /// Count of recording outputs tapping the composited frames (0 or 1 today).
     private var recordingDemand = 0
+    private var virtualCameraDemand = 0
+    private var virtualCameraController: VirtualCameraOutputController?
+    var virtualCameraOutput: VirtualCameraOutputController {
+        if let existing = virtualCameraController { return existing }
+        let output = VirtualCameraOutputController { [weak self] sink in
+            guard let self, !self.resilience.isLocked else { return nil }
+            self.virtualCameraDemand += 1
+            let subscription = self.addFrameSink(capacity: 1, sink: sink)
+            self.updatePipelineDemand()
+            return { [weak self] in
+                guard let self else { return }
+                self.removeFrameSink(subscription)
+                self.virtualCameraDemand = max(0, self.virtualCameraDemand - 1)
+                self.promoteStagedProfileIfOutputsIdle()
+                self.updatePipelineDemand()
+            }
+        }
+        virtualCameraController = output
+        return output
+    }
+    func stopVirtualCameraOutput() { virtualCameraController?.stop() }
     private var externalDisplayDemand = 0
     private var externalDisplayController: ExternalDisplayOutputController?
     var externalDisplayOutput: ExternalDisplayOutputController {
@@ -289,7 +310,7 @@ final class StreamController: ObservableObject {
         OutputCanvasStore.shared.publish(persisted.outputProfile.canvasSize)
         resilience.stopOutputs = { [weak self] in
             guard let self else { return }
-            self.stopStream(); self.stopRecordingForLifecycle?(); self.stopExternalDisplayOutput(); self.stopPreview()
+            self.stopStream(); self.stopRecordingForLifecycle?(); self.stopExternalDisplayOutput(); self.stopVirtualCameraOutput(); self.stopPreview()
             self.resilientFrames.clear()
         }
         resilience.showOfflineSlate = { [weak self] in self?.enterPrivacySlate() }
@@ -1073,7 +1094,7 @@ final class StreamController: ObservableObject {
     }
 
     private var pipelineNeeded: Bool {
-        previewState == .active || streamState.isActive || recordingDemand > 0 || externalDisplayDemand > 0
+        previewState == .active || streamState.isActive || recordingDemand > 0 || externalDisplayDemand > 0 || virtualCameraDemand > 0
     }
 
     private func updatePipelineDemand() {
@@ -1091,7 +1112,7 @@ final class StreamController: ObservableObject {
     /// mid-program, and the recording writer's input is locked to the size of
     /// its first frame).
     private var outputsOwnProfile: Bool {
-        streamState.isActive || recordingDemand > 0 || externalDisplayDemand > 0
+        streamState.isActive || recordingDemand > 0 || externalDisplayDemand > 0 || virtualCameraDemand > 0
     }
 
     /// Public read for the W04 settings session: while this is true,

@@ -534,6 +534,8 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
     /// lives in the shared `DynamicOverlayStore` keyed by playback ID.
     var timer: TimerOverlayConfiguration? = nil
     var ticker: TickerOverlayConfiguration? = nil
+    /// Accepted public message identity stages and Takes with its caption.
+    var recordingChatMessageID: String? = nil
 
     init(text: String = "",
          fontName: String? = nil,
@@ -586,6 +588,7 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
         timing = try container.decodeIfPresent(TitleTiming.self, forKey: .timing)
         timer = try container.decodeIfPresent(TimerOverlayConfiguration.self, forKey: .timer)
         ticker = try container.decodeIfPresent(TickerOverlayConfiguration.self, forKey: .ticker)
+        recordingChatMessageID = try container.decodeIfPresent(String.self, forKey: .recordingChatMessageID)
     }
 
     /// The payload's styling fields as one `TextTitleStyle` value — what a

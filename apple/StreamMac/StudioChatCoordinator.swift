@@ -4,6 +4,9 @@ import StreamCore
 
 @MainActor final class StudioChatCoordinator: ObservableObject {
     let restream = RestreamChat()
+    let recordingMessages = PassthroughSubject<RecordingChatMessage, Never>()
+    let recordingBindings = PassthroughSubject<RecordingChatBinding, Never>()
+    private(set) var recentRecordingBindings: [RecordingChatBinding] = []
     @Published private(set) var queue = StudioChatQueue()
     @Published private(set) var connections: [String: Connection] = [:]
     @Published var error: String?
@@ -31,7 +34,13 @@ import StreamCore
     func receive(_ data: Data) {
         guard let action = StudioRestreamDecoder.decode(data) else { return }
         switch action {
-        case .message(let message): queue.receive(message)
+        case .message(let message):
+            let before = queue.messages.count
+            let last = queue.messages.last?.id
+            queue.receive(message)
+            if queue.messages.count != before || queue.messages.last?.id != last {
+                recordingMessages.send(Self.recordingMessage(message))
+            }
         case .heartbeat: break
         case .connection(let id, let uuid, let platform, let state):
             if connections[id] != nil || connections.count < 64 { connections[id] = .init(uuid: uuid, platform: platform, state: state) }
@@ -71,6 +80,7 @@ import StreamCore
         if includeAuthor { caption.append(message.author) }
         if includePlatform { caption.append(message.platform) }
         payload.text = (caption.isEmpty ? "" : caption.joined(separator: " · ") + "\n") + message.text
+        payload.recordingChatMessageID = message.id
         let commands: [StudioCommand] = [.setLayerText(slotID, payload, in: scene.id), .setLayerVisibility(slotID, visible: true, in: scene.id)]
         guard let dispatcher else { return }
         for command in commands {
@@ -78,10 +88,19 @@ import StreamCore
         }
         for command in commands { if !run(command) { return } }
         queue.show(id)
+        let binding = RecordingChatBinding(paint: .init(slotID: slotID.description, messageID: message.id,
+            fingerprint: RecordingChatPaint.fingerprint(payload.text)), message: Self.recordingMessage(message))
+        recentRecordingBindings.append(binding)
+        if recentRecordingBindings.count > 128 { recentRecordingBindings.removeFirst() }
+        recordingBindings.send(binding)
     }
     func hide() {
         guard let scene = previewProgram?.stagedScene, let slot = selectedSlot else { return }
         if run(.setLayerVisibility(slot, visible: false, in: scene.id)) { queue.hide() }
+    }
+    private static func recordingMessage(_ message: StudioChatMessage) -> RecordingChatMessage {
+        .init(id: message.id, platform: message.platform, author: message.author, text: message.text,
+            providerTimestamp: message.timestamp, timestampIsReceiptTime: message.timestampIsReceiptTime, kind: message.kind)
     }
     func shutdown() { restream.disconnectStudioSession() }
     private func run(_ command: StudioCommand) -> Bool {

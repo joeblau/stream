@@ -146,6 +146,23 @@ struct RecordingLibraryView: View {
                 }
             }
             .frame(maxHeight: 60)
+            if let archive = entry.chatURL {
+                Divider()
+                Text("Chat archive").font(.subheadline.bold())
+                Text(entry.chatSummary.map { "\($0.records) events · \($0.status.capitalized)" } ?? "Interrupted archive · valid prefix can be exported")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let warning = entry.chatSummary?.warning { Text(warning).font(.caption).foregroundStyle(.orange) }
+                HStack {
+                    Button("Reveal Chat") { NSWorkspace.shared.activateFileViewerSelecting([archive]) }
+                    Menu("Export Chat…") {
+                        ForEach(RecordingChatFormat.allCases, id: \.self) { format in
+                            Button(format.title) { saveChat(entry, format: format) }
+                        }
+                    }.disabled(entry.status == "recording" || model.exporting)
+                }
+                Button("Move Chat Archive to Trash") { model.removeChat(entry) }.disabled(entry.status == "recording")
+            }
+            RecordingChatPreferencesView(recorder: recorder)
             Menu("Export Markers") {
                 ForEach(RecordingMarkerFormat.allCases, id: \.self) { format in
                     Button(format.title) { saveMarkers(entry, format: format) }
@@ -179,6 +196,14 @@ struct RecordingLibraryView: View {
         panel.allowedContentTypes = [format == .json ? .json : format == .csv ? .commaSeparatedText : .plainText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         model.exportMarkers(entry, format: format, to: url)
+    }
+
+    private func saveChat(_ entry: RecordingLibraryEntry, format: RecordingChatFormat) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = entry.url.deletingPathExtension().lastPathComponent + "-chat." + format.rawValue
+        panel.allowedContentTypes = [format == .json ? .json : format == .csv ? .commaSeparatedText : .plainText]
+        guard panel.runModal() == .OK, let output = panel.url else { return }
+        Task { await model.exportChat(entry, format: format, to: output) }
     }
 
     private func saveClip(_ entry: RecordingLibraryEntry) {

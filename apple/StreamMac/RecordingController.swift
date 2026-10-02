@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Combine
 import StreamCore
 
 /// Independent program recording. One pair of taps survives file changes, and
@@ -17,7 +18,11 @@ final class RecordingController: ObservableObject {
     @Published private(set) var isolatedVideoProgress: [IsolatedVideoProgress] = []
     @Published private(set) var videoBudget: IsolatedVideoBudget?
     @Published var context = RecordingContext()
-    @Published private(set) var folderLabel = "App Group Recordings"
+    @Published private(set) var chatSummary: RecordingChatSummary?
+    let chatFeed = RecordingChatFeed()
+    var chatSubscriptions: Set<AnyCancellable> = []
+    private var chatArchive: RecordingChatArchive?
+    @Published private(set) var folderLabel = "Default recordings folder"
     @Published var preferences: RecordingPreferences {
         didSet { persistPreferences() }
     }
@@ -26,10 +31,11 @@ final class RecordingController: ObservableObject {
     var canSplit: Bool { state == .recording && finishingSegments == 0 }
     var currentOutputURL: URL? { session?.outputURL }
     var activeOutputURLs: Set<URL> {
-        guard let session else { return finishingURLs }
+        guard let session else { return finishingURLs.filter { !$0.lastPathComponent.hasSuffix(".chat.jsonl") } }
         return finishingURLs.union([session.outputURL]).union((isolatedGroup?.files ?? []).map {
             session.outputURL.deletingLastPathComponent().appendingPathComponent($0)
         }).union((isolatedVideoGroup?.files ?? []).map { session.outputURL.deletingLastPathComponent().appendingPathComponent($0) })
+            .filter { !$0.lastPathComponent.hasSuffix(".chat.jsonl") }
     }
     var canStop: Bool { state.isActive && state != .stopping }
 
@@ -182,7 +188,7 @@ final class RecordingController: ObservableObject {
     func useDefaultFolder() {
         guard !state.isActive else { return }
         defaults.removeObject(forKey: "recording.folderBookmark")
-        folderLabel = "App Group Recordings"
+        folderLabel = "Default recordings folder"
     }
 
     func toggle(stream: StreamController) { canStop ? stop() : start(stream: stream) }
@@ -259,6 +265,7 @@ final class RecordingController: ObservableObject {
             let session = try makeSegment(stream: stream)
             self.session = session
             router.install(session)
+            chatFeed.install(chatArchive)
             isolatedRouter.install(isolatedGroup)
             isolatedVideoRouter.install(isolatedVideoGroup)
             let router = router
@@ -323,6 +330,27 @@ final class RecordingController: ObservableObject {
         configuration.segmentIndex = segmentIndex
         configuration.context = activeContext
         let timeline = RecordingTimeline()
+        chatSummary = nil; chatArchive = nil
+        if activePreferences.chatArchive.enabled {
+            let archive = RecordingChatArchive(programURL: url, sessionID: recordingID.uuidString, segmentIndex: segmentIndex,
+                context: activeContext, timeline: timeline, preferences: activePreferences.chatArchive) { [weak self] summary in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if self.sessionID == id { self.chatSummary = summary }
+                    if let warning = summary.warning { self.warning = warning }
+                }
+            }
+            chatArchive = archive; configuration.chatArchiveFile = archive.url.lastPathComponent
+            let feed = chatFeed
+            configuration.onVideoAccepted = { [feed, archive] frame in feed.frame(frame, into: archive) }
+            configuration.onMarkerRecorded = { [archive] marker in archive.marker(marker) }
+            if segmentIndex == 1, let directory = storagePreflight().directory {
+                let prefs = activePreferences.chatArchive, context = activeContext
+                Task.detached(priority: .utility) {
+                    try? RecordingChatReader.applyRetention(directory: directory, context: context, days: prefs.retentionDays)
+                }
+            }
+        }
         isolatedProgress = activePreferences.isolatedTracks.map {
             IsolatedTrackProgress(id: $0.targetID, name: $0.name, file: "")
         }
@@ -367,7 +395,7 @@ final class RecordingController: ObservableObject {
                     if self.state == .recording { self.state = .paused }
                 case .progress(let progress):
                     self.progress = progress
-                    self.warning = progress.warning ?? self.isolatedProgress.first(where: { $0.error != nil }).map { "\($0.name): \($0.error!)" }
+                    self.warning = progress.warning ?? self.chatSummary?.warning ?? self.isolatedProgress.first(where: { $0.error != nil }).map { "\($0.name): \($0.error!)" }
                         ?? self.isolatedVideoProgress.first(where: { $0.error != nil || $0.warning != nil }).map { "\($0.name): \($0.error ?? $0.warning!)" }
                     if self.canSplit,
                        (self.activePreferences.splitAfterMinutes > 0 && progress.durationSeconds >= Double(self.activePreferences.splitAfterMinutes) * 60)
@@ -397,19 +425,20 @@ final class RecordingController: ObservableObject {
         guard canSplit, let previous = session, let stream else { return }
         let previousIsolated = isolatedGroup
         let previousVideo = isolatedVideoGroup
+        let previousChat = chatArchive
         let previousURLs = Set([previous.outputURL] + ((previousIsolated?.files ?? []) + (previousVideo?.files ?? [])).map {
             previous.outputURL.deletingLastPathComponent().appendingPathComponent($0)
-        })
+        }).union(previousChat.map { [$0.url] } ?? [])
         do {
             let next = try makeSegment(stream: stream)
-            session = next; router.install(next)
+            session = next; router.install(next); chatFeed.install(chatArchive)
             isolatedRouter.install(isolatedGroup); previousIsolated?.deactivate()
             isolatedVideoRouter.install(isolatedVideoGroup); previousVideo?.deactivate()
             finishingSegments += 1
             finishingURLs.formUnion(previousURLs)
             previous.finish { [weak self, store] result in
                 if result.completed { store.markComplete(result.url) }
-                RecordingController.finishAssociated(audio: previousIsolated, video: previousVideo) {
+                RecordingController.finishAssociated(audio: previousIsolated, video: previousVideo, chat: previousChat, completed: result.completed) {
                     Task { @MainActor in
                         guard let self else { return }
                         self.finishingSegments -= 1
@@ -434,7 +463,7 @@ final class RecordingController: ObservableObject {
         }
         guard state != .stopping else { return }
         state = .stopping
-        router.install(nil)
+        router.install(nil); chatFeed.install(nil)
         isolatedRouter.install(nil); isolatedGroup?.deactivate()
         isolatedVideoRouter.install(nil); isolatedVideoGroup?.deactivate()
         for subscription in isolatedSubscriptions { stream?.removeAudioTap(subscription) }
@@ -446,12 +475,13 @@ final class RecordingController: ObservableObject {
         let id = sessionID
         let isolated = isolatedGroup
         let video = isolatedVideoGroup
+        let chat = chatArchive
         session.finish { [weak self, store] result in
             if result.completed { store.markComplete(result.url) }
-            RecordingController.finishAssociated(audio: isolated, video: video) {
+            RecordingController.finishAssociated(audio: isolated, video: video, chat: chat, completed: result.completed) {
                 Task { @MainActor in
                     guard let self, self.sessionID == id else { return }
-                    self.session = nil; self.isolatedGroup = nil; self.isolatedVideoGroup = nil
+                    self.session = nil; self.isolatedGroup = nil; self.isolatedVideoGroup = nil; self.chatArchive = nil
                     self.progress = result.progress
                     self.acceptFinished(result, final: true)
                     self.completeStopsIfReady()
@@ -484,11 +514,12 @@ final class RecordingController: ObservableObject {
         completions.forEach { $0() }
     }
 
-    nonisolated private static func finishAssociated(audio: IsolatedRecordingGroup?, video: IsolatedVideoGroup?,
+    nonisolated private static func finishAssociated(audio: IsolatedRecordingGroup?, video: IsolatedVideoGroup?, chat: RecordingChatArchive?, completed: Bool,
         completion: @escaping @Sendable () -> Void) {
         let group = DispatchGroup()
         if let audio { group.enter(); audio.finish { group.leave() } }
         if let video { group.enter(); video.finish { group.leave() } }
+        if let chat { group.enter(); chat.finish(completed: completed) { group.leave() } }
         group.notify(queue: .global(qos: .utility), execute: completion)
     }
 }
