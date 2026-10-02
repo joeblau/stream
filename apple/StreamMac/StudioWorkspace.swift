@@ -41,6 +41,7 @@ final class StudioRuntime {
         chat = StudioChatCoordinator(dispatcher: dispatcher, previewProgram: previewProgram)
         dispatcher.bindChatCoordinator(chat)
         recorder.bindChat(chat)
+        controller.bindSecondaryRecordingChat(chat)
         providerAccounts = ProviderAccountSession(restream: chat.restream)
         chat.bindAccounts(providerAccounts)
         controller.bindEnding(accounts: providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
@@ -288,18 +289,19 @@ final class StudioWorkspace: ObservableObject {
         runtime.recoveryBinding = SessionRecoveryRuntimeBinding(coordinator: recovery,
             projectID: projectID, profileID: profileID, sceneStore: runtime.sceneStore,
             previewProgram: runtime.previewProgram, controller: runtime.controller, pdfDecks: runtime.dispatcher.pdfDecks,
-            recordingActivity: runtime.recorder.$state.map { $0.isActive }.eraseToAnyPublisher(),
+            recordingActivity: Publishers.CombineLatest(runtime.recorder.$state, runtime.controller.secondaryRecorder.$state)
+                .map { $0.0.isActive || $0.1.isActive }.eraseToAnyPublisher(),
             remoteEvents: { [weak accounts = runtime.providerAccounts, weak controller = runtime.controller] ids in
                 guard let accounts, let controller else { return ids.map { SessionRecoveryRemoteEvent(outputID: $0) } }
                 return accounts.recoveryEvents(activeIDs: ids, destinations: controller.destinations.saved)
             },
-            recordings: { [weak recorder = runtime.recorder] in
+            recordings: { [weak recorder = runtime.recorder, weak controller = runtime.controller] in
                 guard let recorder else { throw SessionRecoveryDiskStore.Failure.invalid }
                 let access = try recorder.libraryAccess()
                 return try await SessionRecordingJournalReader.read(
                     grant: SessionRecoveryDirectoryGrant(url: access.url, retaining: access),
                     projectID: projectID, profileID: profileID,
-                    activeFiles: Set(recorder.activeOutputURLs.map(\.lastPathComponent)))
+                    activeFiles: Set(recorder.activeOutputURLs.union(controller?.secondaryRecordingActiveOutputURLs ?? []).map(\.lastPathComponent)))
             })
         recovery.contextLabel = { [weak self] project, profile in
             guard let project = self?.catalog.projects.first(where: { $0.id == project }),
@@ -323,9 +325,9 @@ final class StudioWorkspace: ObservableObject {
             guard let self else { return }
             self.runtime.controllers.shutdown(); self.runtime.controller.ending.shutdown(); self.runtime.providerAccounts.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
             self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop()
-            self.runtime.controller.stopStream(); self.runtime.controller.stopExternalDisplayOutput(); self.runtime.controller.stopVirtualCameraOutput()
+            self.runtime.controller.stopStream(); self.runtime.controller.stopSecondaryRecording(); self.runtime.controller.stopExternalDisplayOutput(); self.runtime.controller.stopVirtualCameraOutput()
             self.runtime.flush()
-            for _ in 0..<50 {
+            for _ in 0..<150 {
                 if !self.runtime.controller.outputSessionActive { break }
                 try? await Task.sleep(for: .milliseconds(100))
             }

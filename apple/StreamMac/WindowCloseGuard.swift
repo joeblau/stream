@@ -16,7 +16,7 @@ struct WindowCloseGuard: NSViewRepresentable {
     /// True while the stream or recording session is active.
     let hasActiveOutputs: () -> Bool
     /// Stops every output session (stream + recording). Called on "Stop and Close".
-    let stopAllOutputs: () -> Void
+    let stopAllOutputs: () async -> Void
     /// Stops just the presentation session. Called on a plain close.
     let stopPreview: () -> Void
 
@@ -41,11 +41,11 @@ struct WindowCloseGuard: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSWindowDelegate {
         private let hasActiveOutputs: () -> Bool
-        private let stopAllOutputs: () -> Void
+        private let stopAllOutputs: () async -> Void
         private let stopPreview: () -> Void
 
         init(hasActiveOutputs: @escaping () -> Bool,
-             stopAllOutputs: @escaping () -> Void,
+             stopAllOutputs: @escaping () async -> Void,
              stopPreview: @escaping () -> Void) {
             self.hasActiveOutputs = hasActiveOutputs
             self.stopAllOutputs = stopAllOutputs
@@ -66,9 +66,11 @@ struct WindowCloseGuard: NSViewRepresentable {
             alert.addButton(withTitle: "Cancel")
             alert.beginSheetModal(for: sender) { [weak self] response in
                 guard response == .alertFirstButtonReturn else { return }
-                self?.stopAllOutputs()
-                self?.stopPreview()
-                sender.close()
+                Task { @MainActor in
+                    await self?.stopAllOutputs()
+                    self?.stopPreview()
+                    sender.close()
+                }
             }
             return false
         }

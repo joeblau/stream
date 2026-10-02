@@ -193,6 +193,11 @@ struct MainWindowView: View {
                     dispatcher.execute(.stopRecording)
                     controller.stopExternalDisplayOutput()
                     controller.stopVirtualCameraOutput()
+                    controller.stopSecondaryRecording()
+                    for _ in 0..<150 {
+                        if !recorder.state.isActive && !controller.outputSessionActive { break }
+                        try? await Task.sleep(for: .milliseconds(100))
+                    }
                 },
                 stopPreview: { dispatcher.execute(.stopPreview) })
         }
@@ -416,6 +421,8 @@ struct MainWindowView: View {
 
     // MARK: - Canvas panel
 
+    @State private var showSecondaryCanvasPanel = false
+
     private var canvasPanel: some View {
         VStack(spacing: 0) {
             // C01 (issue #76): the thumbnail camera switcher — live tiles for
@@ -433,6 +440,11 @@ struct MainWindowView: View {
             AnnotationToolbarView()
             Divider()
             transitionControls
+            DisclosureGroup("Secondary Canvas", isExpanded: $showSecondaryCanvasPanel) {
+                if showSecondaryCanvasPanel {
+                    ScrollView { SecondaryCanvasPanelView().padding(8) }.frame(maxHeight: 420)
+                }
+            }.padding(8)
             if showDiagnostics {
                 Divider()
                 diagnosticsStrip
