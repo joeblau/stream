@@ -132,6 +132,7 @@ actor AudioMixEngine {
     private var programScratch = [Float](repeating: 0, count: chunkFrames * 2)
     private var monitorScratch = [Float](repeating: 0, count: chunkFrames * 2)
     private var auxScratch = [Float](repeating: 0, count: chunkFrames * 2)
+    private var preISOScratch = [Float](repeating: 0, count: chunkFrames * 2)
     private var isoScratch = [Float](repeating: 0, count: chunkFrames * 2)
     private var formatDescription: CMAudioFormatDescription?
 
@@ -182,7 +183,7 @@ actor AudioMixEngine {
     /// plus the union of demanded capture keys, mirroring the S05 pool).
     /// Pending gains survive, so a re-created channel keeps its mix state.
     func pruneChannels(keeping ids: Set<AudioChannelID>) {
-        registry.prune(keeping: ids)
+        registry.prune(keeping: ids.union(taps.values.compactMap(\.isolatedChannel)))
     }
 
     /// Ramped gain/mute change (S05 `AudioBinding` honored here). Recorded in
@@ -312,17 +313,22 @@ actor AudioMixEngine {
     /// Registers an isolated (pre-fader, post-insert) tap on one channel —
     /// the isolated-recording surface. Tokens share the bus-tap namespace.
     func addIsolatedTap(channel: AudioChannelID, token: UUID, capacity: Int = 8,
-                        sink: @escaping AudioSink) {
+                        processing: IsolatedAudioProcessing = .afterEffects, sink: @escaping AudioSink) {
         if cancelledTokens.remove(token) != nil { return }
+        registry.ensureChannel(channel, gain: pendingGains[channel])
+        if processing == .beforeEffects { registry.setPreEffectsEnabled(channel, enabled: true) }
         taps[token] = AudioTapMailbox(description: "iso.\(channel.label)",
-                                      bus: nil, isolatedChannel: channel,
+                                      bus: nil, isolatedChannel: channel, processing: processing,
                                       capacity: capacity, token: token, sink: sink)
     }
 
     func removeTap(_ token: UUID) {
-        if taps.removeValue(forKey: token) == nil {
-            cancelledTokens.insert(token)
-        }
+        if let removed = taps.removeValue(forKey: token) {
+            if let channel = removed.isolatedChannel, removed.processing == .beforeEffects,
+               !taps.values.contains(where: { $0.isolatedChannel == channel && $0.processing == .beforeEffects }) {
+                registry.setPreEffectsEnabled(channel, enabled: false)
+            }
+        } else { cancelledTokens.insert(token) }
     }
 
     /// Master gain for one bus (program/monitor/aux). Applied post-sum,
@@ -403,6 +409,9 @@ actor AudioMixEngine {
     /// bus tap that has subscribers. Buses with no taps are not rendered.
     private func mixChunk(at position: Int64) {
         let frames = Self.chunkFrames
+        for channel in Set(taps.values.compactMap(\.isolatedChannel)) {
+            registry.ensureChannel(channel, gain: pendingGains[channel])
+        }
         let channelIDs = registry.channelIDs()
         let wantProgram = taps.values.contains { $0.isolatedChannel == nil && $0.bus == .program }
         let wantMonitor = taps.values.contains { $0.isolatedChannel == nil && $0.bus == .monitor }
@@ -456,16 +465,20 @@ actor AudioMixEngine {
         for id in channelIDs {
             let wantsISO = taps.values.contains { $0.isolatedChannel == id }
             guard wantAnyBus || wantsISO else { continue }
-            for index in isoScratch.indices { isoScratch[index] = 0 }
-            registry.mixChannel(id, at: position, frameCount: frames,
+            for index in isoScratch.indices { isoScratch[index] = 0; preISOScratch[index] = 0 }
+            let gaps = registry.mixChannel(id, at: position, frameCount: frames,
                                 program: &programScratch, aux: &auxScratch,
-                                isolated: &isoScratch, monitor: &monitorScratch,
+                                isolated: &isoScratch, preEffects: &preISOScratch, monitor: &monitorScratch,
                                 accumulateMonitor: soloActive)
             if wantsISO {
                 let pts = chunkPTS(at: position)
-                if let sample = makeSampleBuffer(isoScratch, frames: frames, pts: pts) {
-                    for tap in taps.values where tap.isolatedChannel == id {
-                        tap.post(sample)
+                for processing in IsolatedAudioProcessing.allCases {
+                    let consumers = taps.values.filter { $0.isolatedChannel == id && $0.processing == processing }
+                    guard !consumers.isEmpty else { continue }
+                    let samples = processing == .beforeEffects ? preISOScratch : isoScratch
+                    if let sample = makeSampleBuffer(samples, frames: frames, pts: pts) {
+                        IsolatedAudioGap.attach(processing == .beforeEffects ? gaps.pre : gaps.post, to: sample)
+                        for tap in consumers { tap.post(sample) }
                     }
                 }
             }
@@ -569,6 +582,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     /// `reset` and pruning, and applies both to explicit registrations and to
     /// channels that auto-register on their first buffer.
     private var delayFramesByLabel: [String: Int] = [:]
+    private var preEffectsIDs: Set<AudioChannelID> = []
 
     func setAnchor(_ anchor: CMTime) {
         os_unfair_lock_lock(&lock)
@@ -593,7 +607,26 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         channels[id] = ChannelIngest(insert: insert,
                                      initialGain: gain?.effectiveGain ?? Self.defaultGain(for: id),
                                      soloed: soloedIDs.contains(id),
-                                     delayFrames: delayFramesByLabel[id.label] ?? 0)
+                                     delayFrames: delayFramesByLabel[id.label] ?? 0,
+                                     preEffectsEnabled: preEffectsIDs.contains(id))
+    }
+
+    func ensureChannel(_ id: AudioChannelID, gain: AudioMixEngine.ChannelGain?) {
+        os_unfair_lock_lock(&lock)
+        if channels[id] == nil {
+            channels[id] = ChannelIngest(insert: nil, initialGain: gain?.effectiveGain ?? Self.defaultGain(for: id),
+                soloed: soloedIDs.contains(id), delayFrames: delayFramesByLabel[id.label] ?? 0,
+                preEffectsEnabled: preEffectsIDs.contains(id))
+        }
+        os_unfair_lock_unlock(&lock)
+    }
+
+    func setPreEffectsEnabled(_ id: AudioChannelID, enabled: Bool) {
+        os_unfair_lock_lock(&lock)
+        if enabled { preEffectsIDs.insert(id) } else { preEffectsIDs.remove(id) }
+        let channel = channels[id]
+        os_unfair_lock_unlock(&lock)
+        channel?.setPreEffectsEnabled(enabled)
     }
 
     /// A04: toggles one channel's monitor-only solo. The ID set is the source
@@ -680,7 +713,8 @@ private final class AudioChannelRegistry: @unchecked Sendable {
             let created = ChannelIngest(insert: nil,
                                         initialGain: Self.defaultGain(for: id),
                                         soloed: soloedIDs.contains(id),
-                                        delayFrames: delayFramesByLabel[id.label] ?? 0)
+                                        delayFrames: delayFramesByLabel[id.label] ?? 0,
+                                     preEffectsEnabled: preEffectsIDs.contains(id))
             channels[id] = created
             return created
         }()
@@ -696,14 +730,14 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func mixChannel(_ id: AudioChannelID, at position: Int64, frameCount: Int,
                     program: inout [Float], aux: inout [Float],
-                    isolated: inout [Float], monitor: inout [Float],
-                    accumulateMonitor: Bool) {
+                    isolated: inout [Float], preEffects: inout [Float], monitor: inout [Float],
+                    accumulateMonitor: Bool) -> (pre: Int, post: Int) {
         os_unfair_lock_lock(&lock)
         let channel = channels[id]
         os_unfair_lock_unlock(&lock)
-        channel?.mix(at: position, frameCount: frameCount,
-                     program: &program, aux: &aux, isolated: &isolated,
-                     monitor: &monitor, accumulateMonitor: accumulateMonitor)
+        return channel?.mix(at: position, frameCount: frameCount,
+                     program: &program, aux: &aux, isolated: &isolated, preEffects: &preEffects,
+                     monitor: &monitor, accumulateMonitor: accumulateMonitor) ?? (pre: frameCount, post: frameCount)
     }
 
     func statistics() -> AudioEngineStatistics {
@@ -734,6 +768,8 @@ private final class ChannelIngest: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
     private let insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?
     private var converter = CanonicalAudioConverter()
+    private var preConverter: CanonicalAudioConverter?
+    private var preRing: AudioRingBuffer?
     private var ring = AudioRingBuffer(capacityFrames: AudioMixEngine.ringCapacityFrames)
     private var gain: ChannelGainRamp
     private var auxSend = ChannelGainRamp(gain: 0)
@@ -755,11 +791,24 @@ private final class ChannelIngest: @unchecked Sendable {
     private var duckedChunk = [Float](repeating: 0, count: AudioMixEngine.chunkFrames * 2)
 
     init(insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?, initialGain: Float,
-         soloed: Bool = false, delayFrames: Int = 0) {
+         soloed: Bool = false, delayFrames: Int = 0, preEffectsEnabled: Bool = false) {
         self.insert = insert
         self.gain = ChannelGainRamp(gain: initialGain)
         self.soloed = soloed
         self.delayFrames = max(0, delayFrames)
+        if preEffectsEnabled {
+            preConverter = CanonicalAudioConverter()
+            preRing = AudioRingBuffer(capacityFrames: AudioMixEngine.ringCapacityFrames)
+        }
+    }
+
+    func setPreEffectsEnabled(_ enabled: Bool) {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        if enabled, preRing == nil {
+            preConverter = CanonicalAudioConverter()
+            preRing = AudioRingBuffer(capacityFrames: AudioMixEngine.ringCapacityFrames)
+        } else if !enabled { preConverter = nil; preRing = nil }
     }
 
     func setGain(_ effectiveGain: Float, rampFrames: Int) {
@@ -802,6 +851,14 @@ private final class ChannelIngest: @unchecked Sendable {
     func enqueue(_ sampleBuffer: CMSampleBuffer, anchor: CMTime) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
+        if let preConverter, let pcm = preConverter.convert(sampleBuffer),
+           let raw = CanonicalAudioConverter.interleavedFloats(pcm), !raw.isEmpty {
+            let pts = sampleBuffer.presentationTimeStamp
+            let position = anchor.isNumeric && pts.isNumeric
+                ? Int64(((pts - anchor).seconds * Double(AudioMixEngine.sampleRate)).rounded())
+                : preRing?.nextWritePosition ?? 0
+            preRing?.write(raw, at: position)
+        }
         let processed = insert?(sampleBuffer) ?? sampleBuffer
         guard let pcm = converter.convert(processed),
               let samples = CanonicalAudioConverter.interleavedFloats(pcm),
@@ -829,10 +886,15 @@ private final class ChannelIngest: @unchecked Sendable {
     /// signal and isolated recording tracks stay clean of the duck.
     func mix(at position: Int64, frameCount: Int,
              program: inout [Float], aux: inout [Float],
-             isolated: inout [Float], monitor: inout [Float],
-             accumulateMonitor: Bool) {
+             isolated: inout [Float], preEffects: inout [Float], monitor: inout [Float],
+             accumulateMonitor: Bool) -> (pre: Int, post: Int) {
         os_unfair_lock_lock(&lock)
+        let postBefore = ring.underrunFrames
+        let preBefore = preRing?.underrunFrames ?? 0
+        preRing?.fill(at: position - Int64(delayFrames), frameCount: frameCount, into: &preEffects)
+        let preGaps = preRing.map { Int($0.underrunFrames - preBefore) } ?? frameCount
         ring.fill(at: position - Int64(delayFrames), frameCount: frameCount, into: &chunk)
+        let postGaps = Int(ring.underrunFrames - postBefore)
         meter.ingest(interleaved: chunk)
         for index in 0..<(frameCount * 2) { isolated[index] = chunk[index] }
         let source: [Float]
@@ -857,6 +919,7 @@ private final class ChannelIngest: @unchecked Sendable {
                                       program: &program, aux: &aux)
         }
         os_unfair_lock_unlock(&lock)
+        return (pre: preGaps, post: postGaps)
     }
 
     /// A04: the channel's current pre-fader meter reading.
@@ -888,6 +951,7 @@ private final class AudioTapMailbox: @unchecked Sendable {
     let bus: AudioBus?
     /// The channel this tap isolates (nil for bus taps).
     let isolatedChannel: AudioChannelID?
+    let processing: IsolatedAudioProcessing
     private let sink: AudioMixEngine.AudioSink
     private let queue: DispatchQueue
     private var lock = os_unfair_lock_s()
@@ -898,11 +962,12 @@ private final class AudioTapMailbox: @unchecked Sendable {
     private var droppedCount: Int64 = 0
 
     init(description: String, bus: AudioBus?, isolatedChannel: AudioChannelID?,
-         capacity: Int, token: UUID,
+         processing: IsolatedAudioProcessing = .afterEffects, capacity: Int, token: UUID,
          sink: @escaping AudioMixEngine.AudioSink) {
         self.description = description
         self.bus = bus
         self.isolatedChannel = isolatedChannel
+        self.processing = processing
         self.capacity = max(1, capacity)
         self.sink = sink
         self.queue = DispatchQueue(label: "com.joeblau.StreamMac.audio.tap.\(token.uuidString)",

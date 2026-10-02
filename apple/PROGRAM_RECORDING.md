@@ -69,8 +69,7 @@ Xcode 27.2 beta:
 The injected storage probes make failures reproducible; they do not replace a
 physical external-drive unplug or a simultaneous network-stream workload test.
 Those, sudden process termination/container recovery, other Mac/OS encoders,
-and sustained high-resolution load remain release qualification work. Isolated
-source-track recording and a recording library are separate output features.
+and sustained high-resolution load remain release qualification work.
 
 ## Recording options and file changes
 
@@ -80,6 +79,14 @@ record-only countdown, and duration/size splitting. Recording always uses an
 independent encoder at the active program canvas size/frame rate; sharing the
 network encoder is not supported. Selected-folder bookmarks are local machine
 preferences and are not silently replaced when a volume disappears.
+
+Recording presets, naming, countdown, splits, auto-record, and isolated-source
+choices live in `recording-preferences.json` in the active profile directory.
+The app shell calls `recorder.loadPreferences(directory:)` on profile activation.
+Old machine presets migrate into the first profile once; later profiles start
+with defaults. The native controller harness verifies migration, independent
+profiles, and persistence when switching back. Changing a profile cannot
+rewrite the preferences or context captured by an active recording.
 
 Auto-record on Go Live is opt-in and starts without the record-only countdown.
 A failed network connection does not stop its recording. Pause removes the same
@@ -131,3 +138,68 @@ origin, each accepted track's ending media time, and their endpoint difference.
 The endpoint difference measures current write alignment; it is not an estimate
 of hardware clock drift. The journal retains per-track starting offsets and
 source-clock pause gaps for downstream reconciliation.
+
+## Isolated audio tracks
+
+Recording Options selects up to eight channel/bus taps, each as 48 kHz stereo
+Float32 WAV or AAC M4A. Microphone/device, guest, media/soundboard, screen-audio,
+app/system-audio channels and program/monitor/aux buses use stable source or
+channel IDs. Selecting a pooled audio source holds its capture demand for the
+recording; stopping/rotating releases only the recorder's subscriptions. Channel
+taps can capture before or after the app's insert chain; both precede fader,
+mute, and ducking. Capture-level OS processing is already in the input and
+cannot be undone. Bus taps contain their mixed bus processing.
+
+WebKit widgets currently have no independent audio tap. Their explicit System
+Mix route can be recorded through that system channel or a mixed bus. The
+popover states this limitation; it does not offer an artificial web channel
+that would silently record no widget audio.
+
+Each isolated writer has its own serial file queue and bounded 128-chunk
+mailbox. It waits for the program's common origin, pause offset, and accepted
+ending media time, pads timeline gaps with counted silence, and finalizes with
+the program segment. It cannot write beyond the program's accepted window.
+Source underrun windows, shed chunks, start offset, processing/format/name/ID,
+profile context, and per-track errors are written to `<file>.isolated.json`.
+The program journal links all selected isolated files, including failed tracks.
+Missing targets remain failed through segment rotation. A failing isolated
+writer closes and preserves its partial file without stopping program encoding
+or unrelated audio consumers. A clock jump over five seconds fails that track
+instead of performing an unbounded silence write. Gap journals retain up to
+10,000 coalesced windows and count later omitted events explicitly.
+
+The library inspects actual WAV/M4A media and isolated journals, groups them with
+their program session/profile, displays source/processing/gap/error metadata,
+and exports audio ranges to a new AAC M4A. Missing/unreadable files remain
+partial; readable failed tracks remain recoverable. Active and finishing
+isolated files cannot be exported.
+
+`run_isolated_recording_harness.zsh` exercises the actual AudioMixEngine insert
+and pre/post taps, AVAudioFile WAV/AAC writers, and the actual program writer.
+The only source stand-ins are opaque capture identities and timestamped PCM/
+video fixtures; it acquires no screen/microphone permissions. Native checks on
+the named local Mac include:
+
+- Intended 4x insert attenuation decodes at approximately 4x RMS in pre-WAV and
+  post-M4A; decoded onset difference is 0.000125 seconds. Program flash/tone
+  difference is 0.000167 seconds, with one common session origin and duration.
+- A disconnected source produces over 40,000 counted missing frames while the
+  program and another bus consumer continue advancing.
+- Injected isolated low capacity preserves a playable partial WAV; an actual
+  existing-file collision preserves its original bytes. Healthy isolated and
+  H.264/AAC program files still finalize.
+- Overload counts shed chunks and aligned silence, while three seconds of
+  supplied isolated data cannot extend the accepted two-second program window.
+- The actual controller harness verifies WAV/M4A duration alignment through
+  pause/resume/manual rotation and a missing target's independent failure.
+
+Pass an isolated harness output directory as the optional argument to
+`run_recording_library_harness.zsh` to also qualify real isolated media/context/
+gap inspection and a trimmed AAC audio export. Native device/guest disconnects,
+physical volume removal, sudden-kill recovery of each audio format, sustained
+eight-track workloads, and native picker/editor handoff remain release checks.
+
+Completed program writers release AVAssetWriter and both inputs before invoking
+finish callbacks, even if a client retains the finished session. Local encoder
+failure logs include NSError domain/code chains only; exported diagnostics do
+not gain arbitrary error userInfo or recording paths.

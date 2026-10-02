@@ -15,6 +15,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var sessionID = UUID().uuidString
         var segmentIndex = 1
         var context = RecordingContext()
+        var isolatedFiles: [String] = []
         var lowSpaceWarningBytes: Int64 = 1_000_000_000
         var minimumSpaceBytes: Int64 = 100_000_000
         var videoCapacity: Int = 30
@@ -73,6 +74,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var pauses: [PauseGap]
         let context: RecordingContext
         var markers: [RecordingMarker]
+        var isolatedFiles: [String]
         let file: String
         let startedAt: Date
         var status: String
@@ -83,6 +85,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var progress: Progress
     }
 
+    let timeline: RecordingTimeline
     let outputURL: URL
     private let configuration: Configuration
     private let event: @Sendable (Event) -> Void
@@ -129,13 +132,14 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private var pauses: [PauseGap] = []
     private var markers: [RecordingMarker] = []
 
-    init(outputURL: URL, configuration: Configuration = .init(),
+    init(outputURL: URL, configuration: Configuration = .init(), timeline: RecordingTimeline = RecordingTimeline(),
          spaceProbe: @escaping @Sendable (URL) throws -> Int64? = { url in
              let values = try url.deletingLastPathComponent().resourceValues(
                  forKeys: [.volumeAvailableCapacityKey])
              return values.volumeAvailableCapacity.map(Int64.init)
          }, event: @escaping @Sendable (Event) -> Void = { _ in }) {
         self.outputURL = outputURL
+        self.timeline = timeline
         self.configuration = configuration
         self.spaceProbe = spaceProbe
         self.event = event
@@ -189,6 +193,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
     }
 
     func pause() {
+        timeline.pause()
         lock.lock(); pausedAtInlet = true; video.removeAll(); audio.removeAll(); lock.unlock()
         queue.async { [self] in
             guard !finishRequested, failure == nil, started else { return }
@@ -202,6 +207,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         queue.async { [self] in
             guard paused, !finishRequested, failure == nil else { return }
             paused = false; resumePending = true
+            timeline.awaitResume()
             announcedRecording = false
             lastVideoWrite = Date(); lastAudioWrite = Date()
             lock.lock(); pausedAtInlet = false; lock.unlock()
@@ -284,6 +290,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
             let videoPTS = CMSampleBufferGetPresentationTimeStamp(video)
             sessionStart = audio.map { CMTimeMinimum(videoPTS, CMSampleBufferGetPresentationTimeStamp($0)) } ?? videoPTS
             writer.startSession(atSourceTime: sessionStart)
+            timeline.begin(at: sessionStart)
             started = true
         } catch { fail("Cannot open recording: \(error.localizedDescription)") }
     }
@@ -301,6 +308,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
             let gap = CMTimeMaximum(.zero, rawStart - timestampOffset - endTime)
             pauses.append(PauseGap(sourceStartSeconds: (endTime + timestampOffset).seconds, durationSeconds: gap.seconds))
             timestampOffset = timestampOffset + gap
+            timeline.resume(offset: timestampOffset)
             resumePending = false
         }
         // Bounded work per tick also gives finish/health commands time to run.
@@ -340,6 +348,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
             let duration = CMSampleBufferGetDuration(sample)
             let sampleEnd = pts + (duration.isNumeric ? duration : CMTime(value: 1, timescale: Int32(max(1, configuration.frameRate))))
             endTime = endTime.isValid ? CMTimeMaximum(endTime, sampleEnd) : sampleEnd
+            timeline.update(end: endTime)
             if isVideo {
                 videoEnd = sampleEnd
                 lastVideoPTS = pts; lastVideoWrite = Date(); progress.videoSamples += 1
@@ -425,10 +434,21 @@ final class ProgramRecordingSession: @unchecked Sendable {
 
     private func fail(_ message: String, videoTrack: Bool? = nil) {
         guard failure == nil else { return }
+        // Domain/code chains aid local codec/storage diagnosis without
+        // including media paths, capture names or arbitrary userInfo values.
+        if let error = writer?.error as NSError? {
+            var chain = ["\(error.domain):\(error.code)"]
+            var current = error
+            for _ in 0..<4 {
+                guard let underlying = current.userInfo[NSUnderlyingErrorKey] as? NSError else { break }
+                chain.append("\(underlying.domain):\(underlying.code)"); current = underlying
+            }
+            NSLog("Program recording encoder error: %@", chain.joined(separator: " -> "))
+        }
         failure = message
         if videoTrack != false { progress.videoStatus = .failed; progress.videoError = message }
         if videoTrack != true { progress.audioStatus = .failed; progress.audioError = message }
-        lock.lock(); accepting = false; lock.unlock()
+        lock.lock(); accepting = false; video.removeAll(); audio.removeAll(); lock.unlock()
         updateProgress()
         writeManifest(status: "partial")
         event(.failed(message))
@@ -463,16 +483,19 @@ final class ProgramRecordingSession: @unchecked Sendable {
             if progress.audioStatus != .failed { progress.audioStatus = progress.audioSamples > 0 ? .complete : .failed }
         }
         let recoverable = error != nil && writer?.status == .completed && progress.audioSamples > 0 && progress.videoSamples > 0
+        writeManifest(status: error == nil ? "complete" : recoverable ? "recoverable" : "partial")
         let result = Result(url: outputURL, completed: error == nil, error: error, progress: progress, recoverable: recoverable)
         self.result = result
-        writeManifest(status: result.completed ? "complete" : result.recoverable ? "recoverable" : "partial")
+        // A retained session/result must not retain the hardware encoder after
+        // finishWriting. Releasing inputs as well as the writer releases their
+        // codec sessions before clients begin another recording workload.
         videoInput = nil; audioInput = nil; writer = nil
         let callbacks = completions; completions.removeAll()
         callbacks.forEach { $0(result) }
     }
 
     private func writeManifest(status: String) {
-        let manifest = Manifest(version: 1, sessionID: configuration.sessionID, segmentIndex: configuration.segmentIndex, codec: configuration.codec, container: configuration.container, pauses: pauses, context: configuration.context, markers: markers, file: outputURL.lastPathComponent, startedAt: createdAt,
+        let manifest = Manifest(version: 1, sessionID: configuration.sessionID, segmentIndex: configuration.segmentIndex, codec: configuration.codec, container: configuration.container, pauses: pauses, context: configuration.context, markers: markers, isolatedFiles: configuration.isolatedFiles, file: outputURL.lastPathComponent, startedAt: createdAt,
             status: status, error: failure,
             sourceStartSeconds: sessionStart.isNumeric ? sessionStart.seconds : nil,
             videoStartOffsetSeconds: firstVideoPTS.isNumeric ? (firstVideoPTS - sessionStart).seconds : nil,

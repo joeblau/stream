@@ -56,6 +56,33 @@ import Foundation
         await model.exportClip(item, from: 0, to: 1, output: output)
         precondition(model.error != nil)
         print("PASS: actual trimmed H.264/AAC clip duration/sync, source preservation, invalid-range and overwrite rejection")
+        if CommandLine.arguments.count > 2, !CommandLine.arguments[2].isEmpty {
+            let isolatedFolder = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
+            for name in ["before.wav", "after.m4a", "actual-mix.mp4"] {
+                let source = isolatedFolder.appendingPathComponent(name), destination = folder.appendingPathComponent(name)
+                try FileManager.default.copyItem(at: source, to: destination)
+                let suffix = name.hasSuffix("mp4") ? "recording.json" : "isolated.json"
+                try FileManager.default.copyItem(at: source.appendingPathExtension(suffix), to: destination.appendingPathExtension(suffix))
+            }
+            await model.refresh(access: RecordingDirectoryAccess(url: folder, scoped: false), activeURLs: [])
+            let isolated = model.entries.first { $0.url.lastPathComponent == "before.wav" }!
+            let processed = model.entries.first { $0.url.lastPathComponent == "after.m4a" }!
+            let program = model.entries.first { $0.url.lastPathComponent == "actual-mix.mp4" }!
+            precondition(isolated.status == "complete" && isolated.canExport && isolated.tracks.count == 1)
+            precondition(processed.status == "complete" && processed.canExport && processed.tracks.count == 1)
+            precondition(isolated.sessionID == program.sessionID && processed.sessionID == program.sessionID)
+            precondition(isolated.context == program.context && isolated.context.profileID == "profile")
+            precondition(isolated.manifestSummary.contains("Before Inserts") && isolated.manifestSummary.contains("missing source frames"))
+            precondition(processed.manifestSummary.contains("After Inserts"))
+            let audioClip = folder.appendingPathComponent("audio-clip.m4a")
+            await model.exportClip(isolated, from: 0.4, to: 0.9, output: audioClip)
+            precondition(model.error == nil, model.error ?? "Audio clip failed")
+            let clippedAsset = AVURLAsset(url: audioClip)
+            let audioTracks = try await clippedAsset.loadTracks(withMediaType: .audio)
+            let clipDuration = try await clippedAsset.load(.duration).seconds
+            precondition(audioTracks.count == 1 && abs(clipDuration - 0.5) < 0.025)
+            print("PASS: real isolated WAV/M4A library media, source/processing/gap manifests, profile/session grouping and trimmed AAC audio export")
+        }
     }
 
     static func feed(_ writer: ProgramRecordingSession, offset: Double) async throws {

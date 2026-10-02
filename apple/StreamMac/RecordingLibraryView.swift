@@ -179,8 +179,9 @@ struct RecordingLibraryView: View {
 
     private func saveClip(_ entry: RecordingLibraryEntry) {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = entry.url.deletingPathExtension().lastPathComponent + "-clip.mp4"
-        panel.allowedContentTypes = [.mpeg4Movie, .quickTimeMovie]
+        let audioOnly = !entry.tracks.contains { $0.hasPrefix("Video") }
+        panel.nameFieldStringValue = entry.url.deletingPathExtension().lastPathComponent + (audioOnly ? "-clip.m4a" : "-clip.mp4")
+        panel.allowedContentTypes = audioOnly ? [.mpeg4Audio] : [.mpeg4Movie, .quickTimeMovie]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await model.exportClip(entry, from: clipStart, to: clipEnd, output: url) }
     }
@@ -202,7 +203,7 @@ private struct RecordingLibraryRow: View {
     var body: some View {
         HStack(spacing: 8) {
             if let thumbnail = entry.thumbnail { Image(nsImage: thumbnail).resizable().aspectRatio(contentMode: .fit).frame(width: 76, height: 43) }
-            else { Image(systemName: "film").frame(width: 76, height: 43) }
+            else { Image(systemName: entry.tracks.contains(where: { $0.hasPrefix("Video") }) ? "film" : "waveform").frame(width: 76, height: 43) }
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.url.lastPathComponent).font(.caption).lineLimit(2)
                 Text("\(entry.duration, specifier: "%.1f")s · \(entry.status.capitalized)").font(.caption2)

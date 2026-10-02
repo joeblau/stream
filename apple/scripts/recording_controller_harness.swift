@@ -20,6 +20,11 @@ import StreamCore
     func addProgramAudioTap(sink: @escaping @Sendable (CMSampleBuffer) -> Void) -> AudioTapSubscription {
         let token = AudioTapSubscription(); audios[token] = sink; return token
     }
+    func addRecordingAudioTap(targetID: String, processing: IsolatedAudioProcessing,
+                              sink: @escaping @Sendable (CMSampleBuffer) -> Void) -> AudioTapSubscription? {
+        guard targetID != "missing" else { return nil }
+        return addProgramAudioTap(sink: sink)
+    }
     func removeFrameSink(_ token: FrameSubscription) { videos.removeValue(forKey: token) }
     func removeAudioTap(_ token: AudioTapSubscription) { audios.removeValue(forKey: token) }
     func noteRecordingStarted() { demands += 1 }
@@ -47,8 +52,26 @@ import StreamCore
         let suite = "com.joeblau.Stream.recording-validation.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data(#"{"quality":"high","filenamePrefix":"Legacy"}"#.utf8), forKey: "recording.preferences.v1")
         let recorder = RecordingController(defaults: defaults, defaultDirectory: folder)
+        let profileA = folder.appendingPathComponent("ProfileA"), profileB = folder.appendingPathComponent("ProfileB")
+        recorder.loadPreferences(directory: profileA)
+        precondition(recorder.preferences.quality == .high && recorder.preferences.filenamePrefix == "Legacy")
+        recorder.preferences.filenamePrefix = "ShowA"
+        recorder.loadPreferences(directory: profileB)
+        precondition(recorder.preferences.quality == .standard && recorder.preferences.filenamePrefix == "Stream")
+        recorder.preferences.filenamePrefix = "ShowB"
+        recorder.loadPreferences(directory: profileA)
+        precondition(recorder.preferences.filenamePrefix == "ShowA" && recorder.preferences.quality == .high)
+        recorder.preferences.filenamePrefix = "Stream"
+        recorder.preferences.quality = .standard
+        print("PASS: legacy preset migration once, independent profile preferences, and reload persistence")
         let source = StreamController()
+        recorder.preferences.isolatedTracks = [
+            .init(targetID: "microphone", name: "Microphone", processing: .beforeEffects, format: .wav),
+            .init(targetID: "bus.program", name: "Program Bus", processing: .afterEffects, format: .m4a),
+            .init(targetID: "missing", name: "Disconnected Guest", processing: .afterEffects, format: .wav)
+        ]
         recorder.preferences.countdownSeconds = 1
         recorder.start(stream: source)
         precondition(recorder.state == .preparing && recorder.countdownRemaining == 1 && source.demands == 0)
@@ -82,8 +105,24 @@ import StreamCore
             let video = try await asset.loadTracks(withMediaType: .video)
             let audio = try await asset.loadTracks(withMediaType: .audio)
             precondition(video.count == 1 && audio.count == 1)
+            let duration = try await asset.load(.duration).seconds
+            let journal = try JSONSerialization.jsonObject(with: Data(contentsOf: file.appendingPathExtension("recording.json"))) as! [String: Any]
+            for name in journal["isolatedFiles"] as! [String] {
+                let isolated = folder.appendingPathComponent(name)
+                let trackJournal = try JSONSerialization.jsonObject(with: Data(contentsOf: isolated.appendingPathExtension("isolated.json"))) as! [String: Any]
+                let selection = trackJournal["selection"] as! [String: Any]
+                let progress = trackJournal["progress"] as! [String: Any]
+                if selection["targetID"] as? String == "missing" {
+                    precondition(progress["status"] as? String == "failed")
+                } else {
+                    precondition(progress["status"] as? String == "complete", "Isolated finalization: \(progress)")
+                    let audioFile = try AVAudioFile(forReading: isolated)
+                    precondition(abs(Double(audioFile.length) / audioFile.fileFormat.sampleRate - duration) < 0.06)
+                }
+            }
         }
-        print("PASS: actual controller prepare/write/pause/resume/rotate/stop, real finalized program tracks, and unrelated consumer progress")
+        print("PASS: actual controller pause/resume/rotation with synchronized WAV/M4A files; unresolved track fails independently; unrelated consumer advances")
+        recorder.preferences.isolatedTracks = []
 
         recorder.preferences.countdownSeconds = 0
         recorder.preferences.splitAfterMinutes = 1

@@ -579,8 +579,84 @@ final class StreamController: ObservableObject {
         return subscription
     }
 
+    private var isolatedCaptureSubscriptions: [AudioTapSubscription: CaptureSourceKey] = [:]
+
     func removeAudioTap(_ subscription: AudioTapSubscription) {
         Task { await audioEngine.removeTap(subscription.token) }
+        if isolatedCaptureSubscriptions.removeValue(forKey: subscription) != nil { reconcileSourceDemand() }
+    }
+
+    /// Stable registry source IDs survive rename/retarget. Non-registry mixer
+    /// channels use their stable mic/device/media/app/guest identities.
+    func recordingAudioSources() async -> [RecordingAudioSource] {
+        let statistics = await audioEngine.statsSnapshot()
+        let active = Set(await audioEngine.levelsSnapshot().channels.keys)
+        var result = AudioBus.allCases.map {
+            RecordingAudioSource(id: "bus.\($0.rawValue)", name: "\($0.rawValue.capitalized) Bus", isBus: true, isAvailable: true)
+        }
+        var seen: Set<AudioChannelID> = []
+        func add(_ id: String, _ name: String, _ channel: AudioChannelID) {
+            guard seen.insert(channel).inserted else { return }
+            result.append(RecordingAudioSource(id: id, name: name, isBus: false,
+                isAvailable: (statistics.channels[channel.label]?.receivedFrames ?? 0) > 0))
+        }
+        add("channel.mic.default", "Microphone", .microphone(deviceUID: nil))
+        for input in audio.additionalInputs {
+            add("channel.mic.\(input.deviceUID)", audio.deviceNamesByUID[input.deviceUID] ?? "Audio Input", .microphone(deviceUID: input.deviceUID))
+        }
+        for source in sceneStore.sources {
+            let id = "source.\(source.id)"
+            if let target = resolveRecordingAudioTarget(id), let channel = target.channel { add(id, source.name, channel) }
+        }
+        for channel in active.sorted(by: { $0.label < $1.label }) where !seen.contains(channel) {
+            switch channel {
+            case .microphone(let uid): add("channel.\(channel.label)", audio.deviceNamesByUID[uid ?? ""] ?? "Microphone", channel)
+            case .media(let id): add("channel.\(channel.label)", "Media / Sound \(id.description.prefix(8))", channel)
+            case .application(let bundle): add("channel.\(channel.label)", bundle.components(separatedBy: ".").last ?? "Application", channel)
+            case .guest(let id): add("channel.\(channel.label)", "Guest \(id.prefix(8))", channel)
+            case .capture: break // Registered sources provide a stable, secret-free ID.
+            }
+        }
+        return result
+    }
+
+    func addRecordingAudioTap(targetID: String, processing: IsolatedAudioProcessing,
+                              sink: @escaping @Sendable (CMSampleBuffer) -> Void) -> AudioTapSubscription? {
+        guard let target = resolveRecordingAudioTarget(targetID) else { return nil }
+        let subscription = AudioTapSubscription()
+        if let bus = target.bus {
+            Task { await audioEngine.addTap(bus: bus, token: subscription.token, capacity: 16, sink: sink) }
+        } else if let channel = target.channel {
+            Task { await audioEngine.addIsolatedTap(channel: channel, token: subscription.token,
+                capacity: 16, processing: processing, sink: sink) }
+        }
+        if let demand = target.demand {
+            isolatedCaptureSubscriptions[subscription] = demand
+            reconcileSourceDemand()
+        }
+        return subscription
+    }
+
+    private func resolveRecordingAudioTarget(_ id: String) -> (bus: AudioBus?, channel: AudioChannelID?, demand: CaptureSourceKey?)? {
+        if id.hasPrefix("bus."), let bus = AudioBus(rawValue: String(id.dropFirst(4))) { return (bus, nil, nil) }
+        if id.hasPrefix("source."), let uuid = UUID(uuidString: String(id.dropFirst(7))),
+           let source = sceneStore.sources.first(where: { $0.id.rawValue == uuid }) {
+            switch source.payload {
+            case .screen(let payload): return (nil, .capture(.screen(payload)), .screen(payload))
+            case .appAudio(let payload): return (nil, .application(bundleID: payload.channelBundleID), .appAudio(payload))
+            case .media: return (nil, .media(source.id), .media(source.id))
+            default: return nil
+            }
+        }
+        guard id.hasPrefix("channel.") else { return nil }
+        let label = String(id.dropFirst(8))
+        if label.hasPrefix("mic.") {
+            let uid = String(label.dropFirst(4)); return (nil, .microphone(deviceUID: uid == "default" ? nil : uid), nil)
+        }
+        if label.hasPrefix("media."), let uuid = UUID(uuidString: String(label.dropFirst(6))) { return (nil, .media(SourceDefinitionID(uuid)), nil) }
+        if label.hasPrefix("app.") { return (nil, .application(bundleID: String(label.dropFirst(4))), nil) }
+        if label.hasPrefix("guest.") { return (nil, .guest(id: String(label.dropFirst(6))), nil) }
+        return nil
     }
 
     /// Loss/underrun counters for the audio engine (per channel + per tap),
@@ -1335,6 +1411,7 @@ final class StreamController: ObservableObject {
             // is staged/program — unioned here so the W02 pipeline gate and
             // `stopAll` still govern their lifecycle.
             .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
+            .union(isolatedCaptureSubscriptions.values)
         capturePool.reconcile(demand: demand, settings: settings)
         configureResilientFrames(demand: demand)
         // A01: the audio engine keeps exactly the channels its captures can
