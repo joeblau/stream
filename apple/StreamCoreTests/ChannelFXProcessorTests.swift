@@ -155,7 +155,10 @@ import StreamCore
         // response shift the measured whole-chain result slightly. Keep a
         // narrow tolerance that still rejects bypass or the wrong gain.
         let boost = 20 * log10(chest / reference)
-        #expect((2.5...3.5).contains(boost))
+        // Platform math implementations differ by less than 0.001 dB at
+        // this boundary (hosted ARM measured 3.500069 dB). Preserve the
+        // gain assertion with 0.01 dB numerical headroom.
+        #expect((2.49...3.51).contains(boost))
     }
 
     @Test("Voice preset: 1150 Hz dips below the 2.5 kHz reference")

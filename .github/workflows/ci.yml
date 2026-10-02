@@ -31,9 +31,14 @@ jobs:
           sw_vers
           uname -m
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: brew install xcodegen cmake openssl@3
       - name: Generate project
         run: xcodegen generate
+      - name: Resolve and verify native transport implementations
+        run: |
+          xcodebuild -resolvePackageDependencies -project Stream.xcodeproj -scheme StreamMac \
+            -derivedDataPath build/desktop -skipPackagePluginValidation
+          python3 scripts/repair_desktop_transport_archives.py build/desktop
       - name: Build desktop studio
         run: |
           xcodebuild build -project Stream.xcodeproj -scheme StreamMac \
