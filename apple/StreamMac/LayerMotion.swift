@@ -68,7 +68,7 @@ struct LayerMotionPlan {
         // without changing source content; they use the selected fallback.
         let a = old.effectiveSourceEffects(defaults: sourceDefaults) ?? .identity
         let b = new.effectiveSourceEffects(defaults: sourceDefaults) ?? .identity
-        return a.isMirrored == b.isMirrored && a.isBypassed == b.isBypassed && a.background == b.background
+        return a.isMirrored == b.isMirrored && a.isBypassed == b.isBypassed && a.background == b.background && a.chromaKey == b.chromaKey && a.lut == b.lut
     }
 
     private static func interpolate(_ old: LayerNode, _ new: LayerNode, at t: Double,
