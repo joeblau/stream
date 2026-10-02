@@ -212,3 +212,13 @@ Create a Comment Slot in the staged scene, choose it, and use Show to replace it
 At launch, Recovery reviews the last unclean session without starting streams, recordings, macros or cues. The machine-local checkpoint contains project/profile IDs, scene/layer geometry and visibility, paused media/PDF positions, output IDs and bounded recording journal basenames. It excludes tokens, endpoints, source payloads and machine grants.
 
 Choose Restore Local Context to explicitly open the saved project/profile and restore available references. Missing or deleted content needs Backup History or relinking; recovery does not recreate unsaved layers, text or effects. Review Recordings opens the attached library. Local connection state cannot establish whether a remote provider event ended or can reconnect. Normal Quit drains the recorder, stops outputs and saves final metadata; a blocked writer or inaccessible drive retains a conservative recovery record.
+
+
+A local Developer ID signing check can run before notarization credentials are available:
+
+```sh
+STREAM_SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
+STREAM_NOTARIZE=0 zsh apple/scripts/package_desktop_release.zsh
+```
+
+This explicitly produces a signed, unnotarized development qualification artifact. It does not staple or claim Gatekeeper acceptance. The default remains `STREAM_NOTARIZE=1`, requiring an existing `STREAM_NOTARY_PROFILE` and completing submission, stapling and Gatekeeper assessment.
