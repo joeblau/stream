@@ -4,6 +4,7 @@ import StreamCore
 
 @MainActor final class StudioChatCoordinator: ObservableObject {
     let restream = RestreamChat()
+    @Published private(set) var directChat: StudioDirectChatManager?
     @Published private(set) var queue = StudioChatQueue()
     @Published private(set) var connections: [String: Connection] = [:]
     @Published var error: String?
@@ -26,16 +27,35 @@ import StreamCore
             slots = Set(saved.slots)
         }
         restream.onStudioEnvelope = { [weak self] data in self?.receive(data) }
-        restream.onStudioReset = { [weak self] in self?.queue = .init(); self?.connections = [:] }
+        // Signing out of one adapter cannot clear another adapter's messages,
+        // curated queue, favorites, or reading position.
+        restream.onStudioReset = { [weak self] in
+            self?.connections = self?.connections.filter { $0.key.hasPrefix("direct:") } ?? [:]
+        }
+    }
+    func bindAccounts(_ accounts: ProviderAccountSession) {
+        directChat?.shutdown()
+        let manager = StudioDirectChatManager(request: { [weak accounts] provider, request in
+            guard let accounts else { throw CancellationError() }; return try await accounts.chatRequest(provider, request)
+        }, identity: { [weak accounts] provider in
+            guard let accounts else { throw CancellationError() }; return try await accounts.chatIdentity(provider)
+        }, emit: { [weak self] action in self?.receive(action) })
+        directChat = manager; accounts.directChat = manager
     }
     func receive(_ data: Data) {
         guard let action = StudioRestreamDecoder.decode(data) else { return }
+        receive(action)
+    }
+    func receive(_ action: StudioChatAction) {
         switch action {
         case .message(let message): queue.receive(message)
         case .heartbeat: break
         case .connection(let id, let uuid, let platform, let state):
             if connections[id] != nil || connections.count < 64 { connections[id] = .init(uuid: uuid, platform: platform, state: state) }
         case .closed(let uuid): connections = connections.filter { $0.value.uuid != uuid }
+        case .removed(let ids):
+            if let featured = queue.featuredID, ids.contains(featured) { hide() }
+            queue.discard(ids)
         }
     }
     var availableSlots: [LayerNode] {
@@ -83,7 +103,7 @@ import StreamCore
         guard let scene = previewProgram?.stagedScene, let slot = selectedSlot else { return }
         if run(.setLayerVisibility(slot, visible: false, in: scene.id)) { queue.hide() }
     }
-    func shutdown() { restream.disconnectStudioSession() }
+    func shutdown() { directChat?.shutdown(); restream.disconnectStudioSession() }
     private func run(_ command: StudioCommand) -> Bool {
         guard let dispatcher else { return false }
         if let reason = dispatcher.execute(command).error { error = reason.description; return false }

@@ -149,4 +149,22 @@ private final class ProviderClock: @unchecked Sendable {
         #expect(body.contains("device_code=device%2B%26") && !body.contains("client_secret"))
         #expect(body.contains("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code"))
     }
+    @Test("Twitch chat grants are explicit and unsupported scopes never reach OAuth")
+    func chatScopes() async throws {
+        let fixture = ProviderFixture([#"{"device_code":"device","user_code":"ABCD","verification_uri":"https://www.twitch.tv/activate","expires_in":60,"interval":1}"#,
+            #"{"access_token":"access","expires_in":3600,"scope":["user:read:chat","user:write:chat"]}"#])
+        let clock = ProviderClock()
+        let flow = TwitchDeviceAuthorization(send: { request in
+            let data = try await fixture.send(.twitch, request)
+            return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, sleep: { clock.advance($0) }, now: clock.now)
+        let token = try await flow.authorize(clientID: "public", additionalScopes: ["user:read:chat", "user:write:chat", "user:read:chat"]) { _ in }
+        #expect(token.scopes == ["user:read:chat", "user:write:chat"])
+        let requests = await fixture.allRequests()
+        let form = String(decoding: requests[0].httpBody!, as: UTF8.self)
+        #expect(form.contains("user%3Aread%3Achat") && form.contains("user%3Awrite%3Achat"))
+        #expect(!form.contains("moderator%3Amanage%3Achat_messages"))
+        await #expect(throws: ProviderFailure.self) { try await flow.authorize(clientID: "public", additionalScopes: ["unknown:scope"]) { _ in } }
+        #expect(await fixture.allRequests().count == 2)
+    }
 }

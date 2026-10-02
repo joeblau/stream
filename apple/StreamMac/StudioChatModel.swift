@@ -1,7 +1,13 @@
 import Foundation
 import CryptoKit
 
-/// Provider identifiers are scoped to the connection, never to display names.
+enum StudioChatMessageIdentity {
+    static func make(provider: String, messageID: String) -> String {
+        let data = try! JSONEncoder().encode([provider.lowercased(), messageID])
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+/// Public provider message IDs are independent of adapter/socket identity.
 struct StudioChatMessage: Identifiable, Equatable, Codable, Sendable {
     let id: String
     let connectionID: String
@@ -20,6 +26,7 @@ enum StudioChatAction: Sendable {
     case connection(id: String, uuid: String, platform: String, state: String)
     case closed(uuid: String)
     case heartbeat
+    case removed(ids: [String])
 }
 
 /// Documented public Restream events only. Unknown events and private whispers
@@ -57,8 +64,7 @@ enum StudioRestreamDecoder {
             ?? bounded(event["twitchMessageId"], limit: 512)
         let identity: String
         if let providerID {
-            let scoped = try! JSONEncoder().encode([connection, name.0, providerID])
-            identity = SHA256.hash(data: scoped).map { String(format: "%02x", $0) }.joined()
+            identity = StudioChatMessageIdentity.make(provider: name.0, messageID: providerID)
         } else { identity = UUID().uuidString }
         let seconds = object["timestamp"] as? Double
         let validTime = seconds.flatMap { $0.isFinite && $0 > 0 && $0 < 253_402_300_800 ? Date(timeIntervalSince1970: $0) : nil }
@@ -139,6 +145,18 @@ struct StudioChatQueue: Sendable {
     }
     mutating func show(_ id: String) { if message(id) != nil { featuredID = id } }
     mutating func hide() { featuredID = nil }
+    /// Keep tombstones in the bounded identity cache, so reconnect replay cannot
+    /// resurrect a moderated message. Queue/favorites never retain removed text.
+    mutating func discard(_ ids: [String]) {
+        let removed = Set(ids.prefix(4_000))
+        messages.removeAll { removed.contains($0.id) }
+        favorites.subtract(removed); queue.removeAll { removed.contains($0) }
+        if let id = selectedID, removed.contains(id) { selectedID = queue.first }
+        if let id = featuredID, removed.contains(id) { featuredID = nil }
+        if let id = readingID, removed.contains(id) { readingID = nil }
+        for id in removed where seen.insert(id).inserted { seenOrder.append(id) }
+        while seenOrder.count > 4_000 { seen.remove(seenOrder.removeFirst()) }
+    }
     func filtered(search: String, platform: String? = nil, connectionID: String? = nil, author: String? = nil, kind: String? = nil, favoritesOnly: Bool = false) -> [StudioChatMessage] {
         messages.filter {
             (!favoritesOnly || favorites.contains($0.id)) && (platform == nil || $0.platform == platform)
