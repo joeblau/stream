@@ -1,0 +1,37 @@
+# Optional MIDI and OSC controllers
+
+Issue #179 adds native CoreMIDI input and a deliberately local OSC 1.0 subset. New installations have both inputs disabled. Enable each input explicitly in the studio controls panel after selecting its endpoint. OSC listens exclusively on `127.0.0.1`; it does not expose the studio to a LAN. Any local process able to send to the configured port can run its mapped commands, so enable it only for trusted local controller software.
+
+Project bindings live in `stream.controllers.v1.json` beneath `DesktopStorage.projectDirectory`. A binding stores its own UUID, the literal OSC address or CoreMIDI source unique ID/group/channel/note or CC number, and a stable command/value ID. Names are presentation only: renaming a scene, source, or MIDI endpoint keeps the binding. Deleted targets remain visible as missing and reject input; bindings never fall back to an index or another resource. Multiple inputs can address the same target, while duplicate input addresses are rejected. Documents are versioned and limited to 256 mappings/256 KB. Future, corrupt, and conflicting documents remain untouched and cannot arm inputs.
+
+Input enable flags, selected MIDI endpoints, feedback channel, and OSC ports use machine preferences. Project import cannot enable a controller or open a port on another Mac. A previously authorized Mac may restore its input settings across project switches, while each newly bound runtime loads only its own project mappings.
+
+## MIDI
+
+Select a source by its CoreMIDI `kMIDIPropertyUniqueID`; Stream never substitutes an enumeration index when a device disappears. Choose a command or value and click **MIDI Learn**. The next positive note/CC from that source creates a binding without executing a command. Numeric targets accept CC only. Learning stops after one input and does not enable MIDI control. Cancel Learn to discard it.
+
+The modern protocol-aware port asks CoreMIDI for MIDI 1.0 UMP. CoreMIDI can translate compatible MIDI 2.0 input; the application accepts only translated note-on/off and CC messages, not arbitrary SysEx or device-specific MIDI 2.0 features. UMP packet boundaries are respected, so SysEx/data payload words cannot be interpreted as commands. Events copy through a 256-event mailbox from CoreMIDI's receive thread into one main-actor task. Stream does not run capture, rendering, or studio commands on the MIDI callback thread.
+
+Command mappings execute on the first positive note/CC value, then require note-off/note-on-zero/CC-zero before another press. A numeric CC maps `0…127` to normalized `0…1`; invert is optional. Inputs coalesce at 20 Hz and values equal to the authoritative value are ignored. Gain targets convert normalized input to linear `0…2`: the default microphone, program/monitor/aux buses, and each existing media source. Capture-layer audio remains owned by its scene inspector.
+
+Optional feedback requires an explicitly selected destination with a different unique ID and a channel without input mappings. It sends note-on/CC values on that separate channel, keeping its original group and number. Controllers must support independent feedback channels; an omni-mode device that remaps feedback onto its input channel does not satisfy this contract. Imported projects that use the feedback channel disable MIDI output rather than creating a loop. Disconnect state is refreshed each second; reconnecting the same source identity clears held input and publishes fresh feedback. Changing/disabling inputs, project teardown, or source disconnect cancels a macro started by that manager; it does not cancel an unrelated run.
+
+## OSC
+
+Configure a nonzero UDP input port (default `32146`), then enable input. Feedback is off at port `0`; an explicit feedback port must differ from the input port and also targets `127.0.0.1`. Mappings use exact literal ASCII addresses, for example `/studio/take` or `/audio/mic/gain`. Wildcards/pattern matching, strings, blobs, multiple arguments, and future-timetag scheduling are unsupported.
+
+Messages accept exactly one `i`, `f`, `T`, or `F` argument, normalized from zero to one. Commands require a positive press followed by zero/release, like MIDI. Numeric values use the same typed gain targets. Immediate OSC bundles (timetag `1`) can contain messages or immediate nested bundles. Parsing checks all packet framing before dispatch and checks all non-feedback numeric ranges before any bundle command. Malformed/unsupported/timed packets perform no work. The bound is 4096 bytes, 32 messages, four nested bundles, eight peers, and 30 datagrams per peer per second. Inactive UDP peers expire after ten seconds. Input order is main-actor order; scheduling guarantees beyond UDP delivery are not offered.
+
+Each OSC mapping exposes a feedback address such as `/_stream/feedback/<mapping-uuid>`, visible in the panel. Feedback uses one normalized float, sends changed state at up to 20 Hz, and republishes a complete snapshot once a second so feedback software can reconnect. Queued feedback is bounded to 32 sends; deferred values retry on the next tick. The entire `/_stream/` namespace is forbidden for input bindings and ignored on input, so echoed feedback cannot trigger commands.
+
+For numeric targets, feedback is the current normalized value (respecting inversion). For scene selection and output actions it reflects staged selection/active output; other command targets report current availability. Missing targets publish zero. Feedback never predicts whether a requested operation will succeed.
+
+## Integration and validation
+
+The active runtime owns `StudioControllerManager`, calls `bind(to: dispatcher)` after creating the dispatcher, sets `interactionBlocked` for setup/permission/modal boundaries, and calls `shutdown()` before replacing the project graph or ending the runtime. `StudioControllerPanel(manager:)` embeds in the controls settings section. Every event checks the bound project scope; every action/value resolves a fresh dispatcher catalogue and executes the shared typed command. No capture/rendering internals or view indices are exposed.
+
+Run `apple/scripts/run_studio_controllers_harness.zsh`. It compiles production mapping/parser/transport/manager sources under Swift 6 and exercises real loopback UDP plus native virtual CoreMIDI endpoints. Coverage includes disabled defaults, file persistence/future-version preservation, duplicate/multiple bindings, stable rename/delete, fresh availability, range and bundle validation, command edges, CC coalescing, learn isolation, feedback echo isolation, disconnect/reconnect, and late input after a project change. Passed locally with Xcode 26.6 and Xcode 27.2, plus a complete unsigned app build.
+
+Physical controller learn/LED/motor-fader qualification, sleep/wake, signed sandbox behavior, and external OSC applications still need manual checks. The virtual device and UDP tests establish software behavior; they do not claim compatibility with every MIDI device.
+
+Primary references: [Apple protocol-aware MIDI input](https://developer.apple.com/documentation/coremidi/midiinputportcreatewithprotocol(_:_:_:_:_:)), [CoreMIDI source connection](https://developer.apple.com/documentation/coremidi/midiportconnectsource(_:_:_:)), [OSC 1.0 specification](https://opensoundcontrol.stanford.edu/spec-1_0.html). UMP message layouts and native callback ownership are also checked against the installed Apple SDK `MIDIServices.h` and `MIDIMessages.h` headers.
