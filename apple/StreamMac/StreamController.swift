@@ -583,9 +583,6 @@ final class StreamController: ObservableObject {
     struct RecordingVideoSubscription: Hashable { let id = UUID() }
     private var isolatedVideoCaptureSubscriptions: [RecordingVideoSubscription: CaptureSourceKey] = [:]
 
-    // Root's multi-destination integration counts each publisher's encoder.
-    var activePublishingEncoderCount: Int { streamState.isActive ? 1 : 0 }
-
     func recordingVideoSources() -> [RecordingVideoSource] {
         let defaults = [SourceDefinition(name: "Default Camera", payload: .camera(CameraSourcePayload())),
                         SourceDefinition(name: "Selected Screen", payload: .screen(ScreenSourcePayload()))]
@@ -857,10 +854,16 @@ final class StreamController: ObservableObject {
         audio.stop()
     }
 
+    var maximumPublishingEncoders: () -> Int? = { nil }
+
     func goLive() {
         guard !resilience.isLocked else { errorMessage = "Unlock this Mac before starting public outputs."; return }
         guard !isRehearsing else { errorMessage = "End local rehearsal before public Go Live."; return }
         guard streamState.canStart else { return }
+        if let limit = maximumPublishingEncoders(), destinations.enabled.count > limit {
+            errorMessage = "Selected destinations exceed the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
+            return
+        }
         settings = settingsStore.load()
         let plan = destinations.encodingPlan(program: settings.outputProfile)
         guard plan.issues.isEmpty else { errorMessage = plan.issues.joined(separator: "\n"); return }
@@ -873,6 +876,12 @@ final class StreamController: ObservableObject {
         guard !resilience.isLocked else { errorMessage = "Unlock this Mac before starting public outputs."; return }
         guard !isRehearsing else { errorMessage = "End local rehearsal before starting a public destination."; return }
         guard let destination = destinations.saved.first(where: { $0.id == id }) else { return }
+        guard !(destinationOutputs.states[id]?.isActive ?? false) else { return }
+        if let limit = maximumPublishingEncoders(), activePublishingEncoderCount + 1 > limit {
+            let message = "This destination exceeds the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
+            errorMessage = message; destinationOutputs.recordFailure(destination, message: message)
+            return
+        }
         let base = settingsStore.load()
         let credentials = destinations.savedCredentials(for: id)
         let errors = DestinationValidator.startErrors(destination, credentials: credentials, program: base.outputProfile)

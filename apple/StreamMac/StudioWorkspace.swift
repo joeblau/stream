@@ -30,6 +30,7 @@ final class StudioRuntime {
         recorder.loadPreferences(directory: DesktopStorage.projectDirectory)
         RecordingTerminationDelegate.recorder = recorder
         controller.stopRecordingForLifecycle = { [weak recorder] in recorder?.stop() }
+        controller.maximumPublishingEncoders = { [weak recorder] in recorder?.maximumPublishingEncodersWhileRecording }
         diagnostics = StudioDiagnosticsMonitor(controller: controller, recorder: recorder)
         dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: sceneStore,
             session: settings, recorder: recorder, previewProgram: previewProgram)
