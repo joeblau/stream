@@ -79,7 +79,7 @@ final class StudioAutomationEndpoint {
         let outputActive = dispatcher.state.preview == .active || dispatcher.state.stream.isActive || dispatcher.state.recording.isActive
         if request.operation == .startPreview || request.operation == .startRecording
             || (outputActive && (request.operation == .selectScene || request.operation == .take || request.visible == true)) {
-            let missing = dispatcher.automationCapturePermissions(for: command).filter { permissions?.status(for: $0) != .granted }
+            let missing = missingPermissions(dispatcher.automationCapturePermissions(for: command))
             guard missing.isEmpty else {
                 throw StudioAutomationFailure(code: "permissionRequired", message: "Enable \(missing.map(\.title).sorted().joined(separator: ", ")) in the studio's permission controls before starting capture. Automation does not request permissions.")
             }
@@ -99,6 +99,12 @@ final class StudioAutomationEndpoint {
         for window in NSApp.windows where window.attachedSheet != nil { return true }
         return false
     }
+    private func missingPermissions(_ required: Set<PermissionsManager.Kind>) -> [PermissionsManager.Kind] {
+        var missing: [PermissionsManager.Kind] = []
+        // Keep MainActor permission checks outside a generic Bool predicate.
+        for kind in required where permissions?.status(for: kind) != .granted { missing.append(kind) }
+        return missing
+    }
     private func makeSnapshot(_ state: StudioState) -> StudioAutomationSnapshot {
         let permissions = Dictionary(uniqueKeysWithValues: PermissionsManager.Kind.allCases.map { kind in
             (kind.rawValue, String(describing: self.permissions?.status(for: kind) ?? .needsRequest))
@@ -107,7 +113,7 @@ final class StudioAutomationEndpoint {
             stream: label(state.stream), recording: label(state.recording), preview: label(state.preview),
             stagedSceneID: state.stagedSceneID?.rawValue, programSceneID: state.programSceneID?.rawValue,
             pendingStagedEdits: state.hasPendingStagedEdits, directLiveEditing: state.directLiveEditing,
-            permissions: permissions, unavailablePermissions: (dispatcher?.automationCapturePermissions(for: nil) ?? []).filter { self.permissions?.status(for: $0) != .granted }.map(\.rawValue).sorted())
+            permissions: permissions, unavailablePermissions: missingPermissions(dispatcher?.automationCapturePermissions(for: nil) ?? []).map(\.rawValue).sorted())
     }
     private func label<T>(_ state: T) -> String { String(describing: state).split(separator: "(", maxSplits: 1).first.map(String.init) ?? "unknown" }
     private func failure(_ error: StudioCommandError) -> StudioAutomationFailure {
