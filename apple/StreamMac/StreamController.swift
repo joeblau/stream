@@ -164,6 +164,15 @@ final class StreamController: ObservableObject {
     /// monitor only. Same source providers, independent tick — preview work
     /// can never delay or re-anchor the program engine.
     private let previewEngine: CompositionEngine
+    @Published private(set) var secondaryPreviewImage: CGImage?
+    @Published private(set) var secondaryProgramImage: CGImage?
+    @Published private(set) var activeSecondaryProfile = OutputProfile(canvasWidth: 720, canvasHeight: 1280, frameRate: 24)
+    private var secondaryMonitorsEnabled = false
+    private var secondaryPreviewSubscription: FrameSubscription?
+    private var secondaryProgramSubscription: FrameSubscription?
+    private var secondaryPublisherSubscription: FrameSubscription?
+    private let secondaryPreviewConverter = PreviewImageConverter()
+    private let secondaryProgramConverter = PreviewImageConverter()
     /// The W03 staged/program scene model; the engines follow its snapshots.
     private let previewProgram: PreviewProgramModel
     let destinationOutputs = DestinationOutputController(factory: { transport in
@@ -180,21 +189,63 @@ final class StreamController: ObservableObject {
     /// Captures + engine are up. Independent from preview: an active stream
     /// or recording keeps the pipeline running with the preview off (W02).
     private var isPipelineRunning = false
-    /// Count of recording outputs tapping the composited frames (0 or 1 today).
+    /// Recording outputs share capture/audio but own their bounded video taps.
     private var recordingDemand = 0
+    private var secondaryRecordingDemand = 0
+    private var recordingEncoderReservations = StudioEncoderReservations()
+    private var secondaryRecordingController: RecordingController?
+    private weak var secondaryRecordingChat: StudioChatCoordinator?
+    var secondaryRecorder: RecordingController {
+        if let existing = secondaryRecordingController { return existing }
+        let recorder = RecordingController(outputCanvas: .secondary)
+        recorder.loadPreferences(directory: DesktopStorage.projectDirectory)
+        if let secondaryRecordingChat { recorder.bindChat(secondaryRecordingChat) }
+        secondaryRecordingController = recorder
+        return recorder
+    }
+    func bindSecondaryRecordingChat(_ chat: StudioChatCoordinator) {
+        secondaryRecordingChat = chat; secondaryRecordingController?.bindChat(chat)
+    }
+    func stopSecondaryRecording(completion: (() -> Void)? = nil) {
+        if let secondaryRecordingController { secondaryRecordingController.stop(completion: completion) }
+        else { completion?() }
+    }
+    var secondaryRecordingActiveOutputURLs: Set<URL> {
+        secondaryRecordingController?.activeOutputURLs ?? []
+    }
+    func reserveRecordingEncoders(_ id: UUID, count: Int, canvas: OutputCanvas) -> String? {
+        if canvas == .secondary {
+            guard secondaryCanvasAvailable else { return "Take a configured secondary layout to Program before recording it." }
+            guard IsolatedVideoBudget.current.qualified else { return "Additional canvas recording is not yet qualified on this Mac class. Run the native multi-encoder qualification first." }
+            if let error = canvasStartError(destinations: [.init(name: "Secondary Recording", canvas: .secondary)]) { return error }
+        }
+        return recordingEncoderReservations.reserve(id, encoders: count, publishing: activePublishingEncoderCount)
+    }
+    func releaseRecordingEncoders(_ id: UUID) {
+        recordingEncoderReservations.release(id)
+        // A cancelled countdown/preflight never acquired pipeline demand, so
+        // it must also release staged geometry without waiting for a stop tap.
+        promoteStagedProfileIfOutputsIdle()
+    }
     private var virtualCameraDemand = 0
+    private var secondaryVirtualCameraDemand = 0
     private var virtualCameraController: VirtualCameraOutputController?
     var virtualCameraOutput: VirtualCameraOutputController {
         if let existing = virtualCameraController { return existing }
         let output = VirtualCameraOutputController { [weak self] sink in
             guard let self, !self.resilience.isLocked else { return nil }
+            let canvas = self.outputCanvas(for: self.virtualCameraController?.feed, destinationID: self.virtualCameraController?.selectedDestinationID)
+            if canvas == .secondary, !self.secondaryCanvasAvailable { return nil }
+            if canvas == .secondary, self.canvasStartError(destinations: [.init(name: "Virtual Camera", canvas: .secondary)]) != nil { return nil }
             self.virtualCameraDemand += 1
-            let subscription = self.addFrameSink(capacity: 1, sink: sink)
+            if canvas == .secondary { self.secondaryVirtualCameraDemand += 1 }
+            let subscription = self.addFrameSink(capacity: 1, canvas: canvas, sink: sink)
             self.updatePipelineDemand()
             return { [weak self] in
                 guard let self else { return }
                 self.removeFrameSink(subscription)
                 self.virtualCameraDemand = max(0, self.virtualCameraDemand - 1)
+                if canvas == .secondary { self.secondaryVirtualCameraDemand = max(0, self.secondaryVirtualCameraDemand - 1) }
                 self.promoteStagedProfileIfOutputsIdle()
                 self.updatePipelineDemand()
             }
@@ -204,14 +255,19 @@ final class StreamController: ObservableObject {
     }
     func stopVirtualCameraOutput() { virtualCameraController?.stop() }
     private var externalDisplayDemand = 0
+    private var secondaryExternalDisplayDemand = 0
     private var externalDisplayController: ExternalDisplayOutputController?
     var externalDisplayOutput: ExternalDisplayOutputController {
         if let existing = externalDisplayController { return existing }
         let output = ExternalDisplayOutputController { [weak self] profile, sink in
             guard let self else { return nil }
+            let canvas = self.outputCanvas(for: self.externalDisplayController?.feed, destinationID: self.externalDisplayController?.selectedDestinationID)
+            if canvas == .secondary, !self.secondaryCanvasAvailable { return nil }
+            if canvas == .secondary, self.canvasStartError(destinations: [.init(name: "External Display", canvas: .secondary)]) != nil { return nil }
             let converter = ExternalProgramImageConverter(profile: profile)
             self.externalDisplayDemand += 1
-            let subscription = self.addFrameSink(capacity: 1) { frame in
+            if canvas == .secondary { self.secondaryExternalDisplayDemand += 1 }
+            let subscription = self.addFrameSink(capacity: 1, canvas: canvas) { frame in
                 if let image = converter.image(frame) { sink(image) }
             }
             self.updatePipelineDemand()
@@ -219,6 +275,7 @@ final class StreamController: ObservableObject {
                 guard let self else { return }
                 self.removeFrameSink(subscription)
                 self.externalDisplayDemand = max(0, self.externalDisplayDemand - 1)
+                if canvas == .secondary { self.secondaryExternalDisplayDemand = max(0, self.secondaryExternalDisplayDemand - 1) }
                 self.promoteStagedProfileIfOutputsIdle()
                 self.updatePipelineDemand()
             }
@@ -311,7 +368,7 @@ final class StreamController: ObservableObject {
         OutputCanvasStore.shared.publish(persisted.outputProfile.canvasSize)
         resilience.stopOutputs = { [weak self] in
             guard let self else { return }
-            self.stopStream(); self.stopRecordingForLifecycle?(); self.stopExternalDisplayOutput(); self.stopVirtualCameraOutput(); self.stopPreview()
+            self.stopStream(); self.stopRecordingForLifecycle?(); self.stopSecondaryRecording(); self.stopExternalDisplayOutput(); self.stopVirtualCameraOutput(); self.stopPreview()
             self.resilientFrames.clear()
         }
         resilience.showOfflineSlate = { [weak self] in self?.enterPrivacySlate() }
@@ -332,6 +389,7 @@ final class StreamController: ObservableObject {
                     guard let self else { return }
                     self.reconcileSourceDemand()
                     let engine = self.previewEngine
+                    self.updateSecondaryGeometryIfIdle()
                     Task { await engine.updateScene(scene) }
                 }
             }
@@ -556,9 +614,10 @@ final class StreamController: ObservableObject {
     /// the other outputs.
     @discardableResult
     func addFrameSink(capacity: Int = 2,
+                      canvas: OutputCanvas = .program,
                       sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
         let subscription = FrameSubscription()
-        Task { await engine.addSink(token: subscription.token, capacity: capacity, sink: sink) }
+        Task { await engine.addSink(token: subscription.token, capacity: capacity, canvas: canvas, sink: sink) }
         return subscription
     }
 
@@ -791,9 +850,10 @@ final class StreamController: ObservableObject {
     /// (PREVIEW on the preview engine, PROGRAM on the program engine), while
     /// `addFrameSink` stays the program-engine fan-out for real outputs.
     private func addMonitorSink(to engine: CompositionEngine,
+                                canvas: OutputCanvas = .program,
                                 sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
         let subscription = FrameSubscription()
-        Task { await engine.addSink(token: subscription.token, capacity: 1, sink: sink) }
+        Task { await engine.addSink(token: subscription.token, capacity: 1, canvas: canvas, sink: sink) }
         return subscription
     }
 
@@ -809,6 +869,7 @@ final class StreamController: ObservableObject {
         settings = settingsStore.load()
         applyOutputProfile(settings.outputProfile)
         previewState = .active
+        refreshSecondaryMonitors()
         // PREVIEW monitor: the staged composition from the preview engine.
         // PROGRAM monitor: the outgoing composition from the program engine.
         // Both conversions run on each subscription's serial queue, off-main;
@@ -849,6 +910,7 @@ final class StreamController: ObservableObject {
         }
         programMonitorSubscription = nil
         previewState = .idle
+        refreshSecondaryMonitors()
         previewImage = nil
         programImage = nil
         let previewEngine = self.previewEngine
@@ -863,6 +925,73 @@ final class StreamController: ObservableObject {
         let canvasSize = activeProfile.canvasSize
         let fps = encodeFrameRate
         Task { await previewEngine.run(scene: staged, canvasSize: canvasSize, frameRate: fps) }
+    }
+
+    var secondaryStagedProfile: OutputProfile {
+        guard let layout = previewProgram.stagedScene?.secondaryCanvas, layout.isValid else { return activeSecondaryProfile }
+        return layout.profile(frameRate: activeProfile.frameRate)
+    }
+    var secondaryCanvasAvailable: Bool {
+        previewProgram.programScene?.secondaryCanvas?.isValid == true
+    }
+    func profileForOutputDestination(_ destination: StreamDestination?) -> OutputProfile? {
+        guard let destination else { return nil }
+        if destination.canvas == .secondary && !secondaryCanvasAvailable { return nil }
+        return destination.effectiveProfile(program: destination.canvas == .secondary ? activeSecondaryProfile : activeProfile)
+    }
+    private func outputCanvas(for feed: ExternalDisplayFeed?, destinationID: UUID?) -> OutputCanvas {
+        if feed == .secondaryCanvas { return .secondary }
+        if feed == .selectedCanvas, let destination = destinations.saved.first(where: { $0.id == destinationID }) {
+            return destination.canvas ?? .program
+        }
+        return .program
+    }
+    private var secondaryProgramOutputDemanded: Bool {
+        destinationOutputs.usesSecondaryCanvas || secondaryRecordingDemand > 0 ||
+            secondaryVirtualCameraDemand > 0 || secondaryExternalDisplayDemand > 0
+    }
+    var secondaryCanvasDemanded: Bool {
+        (secondaryMonitorsEnabled && previewState == .active) || secondaryProgramOutputDemanded
+    }
+    func setSecondaryMonitorsEnabled(_ enabled: Bool) {
+        secondaryMonitorsEnabled = enabled
+        updateSecondaryGeometryIfIdle()
+        refreshSecondaryMonitors()
+        reconcileSourceDemand()
+    }
+    private func refreshSecondaryMonitors() {
+        if secondaryMonitorsEnabled, previewState == .active {
+            if secondaryPreviewSubscription == nil {
+                let converter = secondaryPreviewConverter
+                secondaryPreviewSubscription = addMonitorSink(to: previewEngine, canvas: .secondary) { [weak self] frame in
+                    guard let image = converter.makeImage(frame, throttleNanoseconds: 33_000_000) else { return }
+                    Task { @MainActor [weak self] in self?.secondaryPreviewImage = image }
+                }
+            }
+            if secondaryProgramSubscription == nil {
+                let converter = secondaryProgramConverter
+                secondaryProgramSubscription = addMonitorSink(to: engine, canvas: .secondary) { [weak self] frame in
+                    guard let image = converter.makeImage(frame, throttleNanoseconds: 33_000_000) else { return }
+                    Task { @MainActor [weak self] in self?.secondaryProgramImage = image }
+                }
+            }
+        } else {
+            if let secondaryPreviewSubscription { removeMonitorSink(secondaryPreviewSubscription, from: previewEngine) }
+            if let secondaryProgramSubscription { removeMonitorSink(secondaryProgramSubscription, from: engine) }
+            secondaryPreviewSubscription = nil; secondaryProgramSubscription = nil
+            secondaryPreviewImage = nil; secondaryProgramImage = nil
+        }
+    }
+    private func updateSecondaryGeometryIfIdle() {
+        let previewSize = secondaryStagedProfile.canvasSize
+        Task { await previewEngine.setSecondaryOutput(canvasSize: previewSize) }
+        guard !outputsOwnProfile else { return }
+        let layout = previewProgram.programScene?.secondaryCanvas
+        activeSecondaryProfile = layout?.isValid == true
+            ? layout!.profile(frameRate: activeProfile.frameRate)
+            : OutputProfile(canvasWidth: 720, canvasHeight: 1280, frameRate: activeProfile.frameRate)
+        let size = activeSecondaryProfile.canvasSize
+        Task { await engine.setSecondaryOutput(canvasSize: size) }
     }
 
     func prepareForProjectChange() async {
@@ -882,12 +1011,18 @@ final class StreamController: ObservableObject {
         guard !resilience.isLocked else { errorMessage = "Unlock this Mac before starting public outputs."; return }
         guard !isRehearsing else { errorMessage = "End local rehearsal before public Go Live."; return }
         guard streamState.canStart else { return }
+        if let error = recordingEncoderReservations.publishingError(current: 0, starting: destinations.enabled.count) {
+            errorMessage = error; return
+        }
         if let limit = maximumPublishingEncoders(), destinations.enabled.count > limit {
             errorMessage = "Selected destinations exceed the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
             return
         }
         settings = settingsStore.load()
-        let plan = destinations.encodingPlan(program: settings.outputProfile)
+        if let error = canvasStartError(destinations: destinations.enabled) { errorMessage = error; return }
+        let plan = DestinationEncodingPlan(destinations: destinations.enabled.map(destinationForEncodingPlan), program: settings.outputProfile,
+            measuredUplinkMbps: destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil,
+            measuredSessionLimit: destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil)
         guard plan.issues.isEmpty else { errorMessage = plan.issues.joined(separator: "\n"); return }
         // Keep the program and recording canvas unchanged. Every destination's
         // encoder receives its own output geometry from its adapted settings.
@@ -899,14 +1034,21 @@ final class StreamController: ObservableObject {
         guard !isRehearsing else { errorMessage = "End local rehearsal before starting a public destination."; return }
         guard let destination = destinations.saved.first(where: { $0.id == id }) else { return }
         guard !(destinationOutputs.states[id]?.isActive ?? false) else { return }
+        if let error = recordingEncoderReservations.publishingError(current: activePublishingEncoderCount, starting: 1) {
+            errorMessage = error; destinationOutputs.recordFailure(destination, message: error); return
+        }
         if let limit = maximumPublishingEncoders(), activePublishingEncoderCount + 1 > limit {
             let message = "This destination exceeds the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
             errorMessage = message; destinationOutputs.recordFailure(destination, message: message)
             return
         }
         let base = settingsStore.load()
+        if let error = canvasStartError(destinations: [destination]) {
+            errorMessage = error; destinationOutputs.recordFailure(destination, message: error); return
+        }
+        let canvasProfile = destination.canvas == .secondary ? activeSecondaryProfile : base.outputProfile
         let credentials = destinations.savedCredentials(for: id)
-        let errors = DestinationValidator.startErrors(destination, credentials: credentials, program: base.outputProfile)
+        let errors = DestinationValidator.startErrors(destination, credentials: credentials, program: canvasProfile)
         guard errors.isEmpty else {
             let message = errors.joined(separator: "\n")
             errorMessage = message
@@ -916,14 +1058,15 @@ final class StreamController: ObservableObject {
         let activeDestinations = destinations.saved.filter {
             destinationOutputs.states[$0.id]?.isActive == true && $0.id != id
         } + [destination]
-        let plan = DestinationEncodingPlan(destinations: activeDestinations, program: base.outputProfile,
+        let plan = DestinationEncodingPlan(destinations: activeDestinations.map(destinationForEncodingPlan), program: base.outputProfile,
             measuredUplinkMbps: destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil,
             measuredSessionLimit: destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil)
         guard plan.issues.isEmpty else {
             destinationOutputs.recordFailure(destination, message: plan.issues.joined(separator: "\n"))
             return
         }
-        let adapted = DestinationValidator.settings(destination, credentials: credentials, base: base)
+        var canvasBase = base; canvasBase.outputProfile = canvasProfile
+        let adapted = DestinationValidator.settings(destination, credentials: credentials, base: canvasBase)
         resilience.acknowledgeManualRestart()
         destinationOutputs.start(destination, settings: adapted)
     }
@@ -940,6 +1083,29 @@ final class StreamController: ObservableObject {
         if streamState.isLive { errorMessage = nil }
         promoteStagedProfileIfOutputsIdle()
         updatePipelineDemand()
+        if destinationOutputs.usesSecondaryCanvas, secondaryPublisherSubscription == nil {
+            let fanout = destinationOutputs.fanout
+            secondaryPublisherSubscription = addFrameSink(capacity: 1, canvas: .secondary) { frame in
+                fanout.enqueueVideo(frame.sampleBuffer, canvas: .secondary)
+            }
+        } else if !destinationOutputs.usesSecondaryCanvas, let subscription = secondaryPublisherSubscription {
+            removeFrameSink(subscription); secondaryPublisherSubscription = nil
+        }
+        reconcileSourceDemand()
+    }
+
+    private func destinationForEncodingPlan(_ destination: StreamDestination) -> StreamDestination {
+        guard destination.canvas == .secondary, destination.followsProgramProfile else { return destination }
+        var copy = destination; copy.followsProgramProfile = false; copy.outputProfile = activeSecondaryProfile
+        return copy
+    }
+    private func canvasStartError(destinations selected: [StreamDestination]) -> String? {
+        guard selected.contains(where: { $0.canvas == .secondary }) else { return nil }
+        guard secondaryCanvasAvailable else { return "Take a configured secondary layout to Program before starting this output." }
+        let pixels = activeProfile.canvasWidth * activeProfile.canvasHeight * activeProfile.frameRate +
+            activeSecondaryProfile.canvasWidth * activeSecondaryProfile.canvasHeight * activeSecondaryProfile.frameRate
+        guard pixels <= 3840 * 2160 * 30 else { return "Both canvases exceed the compositor budget (4K30 total pixels per second). Reduce their size or frame rate before starting outputs." }
+        return nil
     }
 
     func beginLocalRehearsal(recorder: RecordingController) {
@@ -1083,13 +1249,15 @@ final class StreamController: ObservableObject {
     /// RecordingController subscribes to the engine's frames here so its
     /// output keeps the render pipeline alive even with the preview off
     /// (and vice versa).
-    func noteRecordingStarted() {
+    func noteRecordingStarted(canvas: OutputCanvas = .program) {
         recordingDemand += 1
+        if canvas == .secondary { secondaryRecordingDemand += 1 }
         updatePipelineDemand()
     }
 
-    func noteRecordingStopped() {
+    func noteRecordingStopped(canvas: OutputCanvas = .program) {
         recordingDemand = max(0, recordingDemand - 1)
+        if canvas == .secondary { secondaryRecordingDemand = max(0, secondaryRecordingDemand - 1) }
         promoteStagedProfileIfOutputsIdle()
         updatePipelineDemand()
     }
@@ -1104,6 +1272,10 @@ final class StreamController: ObservableObject {
         } else if !pipelineNeeded, isPipelineRunning {
             stopPipeline()
         }
+        if isPipelineRunning {
+            reconcileSourceDemand()
+            applyProgramAudioBindings()
+        }
     }
 
     // MARK: - Output profile (staged vs active, W07)
@@ -1113,7 +1285,7 @@ final class StreamController: ObservableObject {
     /// mid-program, and the recording writer's input is locked to the size of
     /// its first frame).
     private var outputsOwnProfile: Bool {
-        streamState.isActive || recordingDemand > 0 || externalDisplayDemand > 0 || virtualCameraDemand > 0
+        streamState.isActive || recordingDemand > 0 || !recordingEncoderReservations.recordings.isEmpty || externalDisplayDemand > 0 || virtualCameraDemand > 0
     }
 
     /// Public read for the W04 settings session: while this is true,
@@ -1217,6 +1389,7 @@ final class StreamController: ObservableObject {
     private func setActiveProfile(_ profile: OutputProfile) {
         let changed = profile != activeProfile
         activeProfile = profile
+        updateSecondaryGeometryIfIdle()
         stagedProfile = nil
         // G06 (issue #113): PDF `.fill` framing reads the output canvas off
         // the render tick via the lock-protected snapshot.
@@ -1238,8 +1411,9 @@ final class StreamController: ObservableObject {
     /// Applies a staged profile once no stream/recording owns the geometry.
     /// Safe to call from every session-end path; a no-op unless staged + idle.
     private func promoteStagedProfileIfOutputsIdle() {
-        guard let stagedProfile, !outputsOwnProfile else { return }
-        setActiveProfile(stagedProfile)
+        guard !outputsOwnProfile else { return }
+        if let stagedProfile { setActiveProfile(stagedProfile) }
+        updateSecondaryGeometryIfIdle()
     }
 
     private func startPipeline() {
@@ -1464,7 +1638,11 @@ final class StreamController: ObservableObject {
         let registry = SceneGraph.index(sceneStore.scenes)
         let standby = resilience.policy.standbySceneID.flatMap { id in sceneStore.scenes.first { $0.id.rawValue == id } }
         let layers = [previewProgram.programScene, staged, standby, fallbackOriginalScene].compactMap { $0 }
-            .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
+            .flatMap { scene in
+                var layers = SceneGraph.flattenedVisibleLayers(of: scene, in: registry)
+                if secondaryCanvasDemanded { layers += SceneGraph.flattenedVisibleLayers(of: scene.composition(for: .secondary), in: registry) }
+                return layers
+            }
         // G09 (issue #116): project overlay media (animated images / alpha
         // video) composites ABOVE every scene, so its playout demand comes
         // from the overlay list, not scene layers: an overlay demands its
@@ -1618,6 +1796,7 @@ final class StreamController: ObservableObject {
     /// Called from the controller's observation of
     /// `PreviewProgramModel.programScene`.
     func publishSceneToProgram(_ scene: Scene) {
+        updateSecondaryGeometryIfIdle()
         Task { await engine.updateScene(scene) }
         // G08 (issue #115): program scene-entry applies each web widget's
         // sceneEntryRefresh policy (the capture itself never restarts).
@@ -1640,7 +1819,8 @@ final class StreamController: ObservableObject {
     private func applyProgramAudioBindings() {
         guard let program = previewProgram.programScene else { return }
         let registry = SceneGraph.index(sceneStore.scenes)
-        let layers = SceneGraph.flattenedVisibleLayers(of: program, in: registry)
+        let layers = SceneGraph.flattenedVisibleLayers(of: program, in: registry) +
+            (secondaryProgramOutputDemanded ? SceneGraph.flattenedVisibleLayers(of: program.composition(for: .secondary), in: registry) : [])
         var gains: [AudioChannelID: (volume: Float, isMuted: Bool)] = [:]
         for layer in layers {
             let payload = layer.sourceID
@@ -1669,7 +1849,10 @@ final class StreamController: ObservableObject {
         // the demanded set is what makes that explicit instead of leaking a
         // unity-gain default onto program.
         let demandLayers = [previewProgram.programScene, staged].compactMap { $0 }
-            .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
+            .flatMap { scene in
+                SceneGraph.flattenedVisibleLayers(of: scene, in: registry) +
+                    (secondaryCanvasDemanded ? SceneGraph.flattenedVisibleLayers(of: scene.composition(for: .secondary), in: registry) : [])
+            }
             + sceneStore.overlays.filter { $0.payload.isMedia }
         let demandedMedia: Set<SourceDefinitionID> = Set(
             CaptureSourceKey.demanded(layers: demandLayers, sources: sceneStore.sources)

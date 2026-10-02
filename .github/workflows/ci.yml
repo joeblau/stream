@@ -62,6 +62,8 @@ jobs:
           ENDING_BUILD_PATH=build/tests zsh scripts/run_studio_ending_harness.zsh
       - name: Test private program slate rendering
         run: PRIVACY_BUILD_PATH=build/desktop zsh scripts/run_studio_privacy_harness.zsh
+      - name: Qualify paired canvas rendering and recording
+        run: DUAL_CANVAS_BUILD_PATH=build/desktop zsh scripts/run_studio_dual_canvas_harness.zsh
       - name: Test public chat and recovery metadata boundaries
         run: |
           zsh scripts/run_studio_chat_harness.zsh

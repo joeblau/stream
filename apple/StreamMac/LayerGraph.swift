@@ -1596,7 +1596,9 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
     var name: String
     var canvas: Canvas
     var groups: [LayerGroup]
-    var layers: [LayerNode]
+    var layers: [LayerNode] {
+        didSet { pruneSecondaryPlacements() }
+    }
     /// S07: the explicit background this scene composites onto. Nil inherits
     /// the project default (`SceneDocument.defaultBackground`); when that is
     /// also unset the documented fallback remains the implicit black canvas.
@@ -1621,6 +1623,8 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
     /// (`SceneDocument.defaultTransition`). Scene content: it stages, Takes,
     /// reverts, and undoes like any scene edit.
     var transition: SceneTransition?
+    /// #178: geometry/visibility for the second canvas, staged with the scene.
+    var secondaryCanvas: SecondaryCanvasLayout?
 
     init(id: SceneID = SceneID(),
          name: String,
@@ -1632,7 +1636,8 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
          soundBindings: [SceneSoundBinding] = [],
          audioSnapshot: SceneAudioSnapshot? = nil,
          mediaBehavior: SceneMediaBehavior = .default,
-         transition: SceneTransition? = nil) {
+         transition: SceneTransition? = nil,
+         secondaryCanvas: SecondaryCanvasLayout? = nil) {
         self.id = id
         self.name = name
         self.canvas = canvas
@@ -1644,6 +1649,8 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         self.audioSnapshot = audioSnapshot
         self.mediaBehavior = mediaBehavior
         self.transition = transition
+        self.secondaryCanvas = secondaryCanvas
+        pruneSecondaryPlacements()
     }
 
     /// `background`/`hiddenOverlayIDs` were added after v2 shipped; decode
@@ -1664,6 +1671,14 @@ struct Scene: Identifiable, Hashable, Codable, Sendable {
         audioSnapshot = try container.decodeIfPresent(SceneAudioSnapshot.self, forKey: .audioSnapshot)
         mediaBehavior = try container.decodeIfPresent(SceneMediaBehavior.self, forKey: .mediaBehavior) ?? .default
         transition = try container.decodeIfPresent(SceneTransition.self, forKey: .transition)
+        secondaryCanvas = try container.decodeIfPresent(SecondaryCanvasLayout.self, forKey: .secondaryCanvas)
+        pruneSecondaryPlacements()
+    }
+
+    private mutating func pruneSecondaryPlacements() {
+        guard let placements = secondaryCanvas?.placements, !placements.isEmpty else { return }
+        let known = Set(layers.map(\.id))
+        secondaryCanvas?.placements = placements.filter { known.contains($0.key) }
     }
 }
 

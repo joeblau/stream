@@ -766,7 +766,7 @@ final class SceneRenderer {
             // contract verbatim. `.fit` pages letterbox through the standard
             // placement; `.fill` pages arrive pre-cropped to canvas aspect.
             guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
-                  let buffer = frames.media?(key) else { return nil }
+                  let buffer = frames.pdf?(key, canvas.size) ?? frames.media?(key) else { return nil }
             return place(source: CIImage(cvPixelBuffer: buffer),
                          layer: layer, canvas: canvas, isCamera: false)
         default:

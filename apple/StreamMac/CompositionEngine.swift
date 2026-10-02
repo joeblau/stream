@@ -152,7 +152,7 @@ actor CompositionEngine {
     func metricsSnapshot() -> CompositionMetrics {
         var snapshot = metrics
         snapshot.sampledAt = ProcessInfo.processInfo.systemUptime
-        for mailbox in subscribers.values {
+        for mailbox in Array(subscribers.values) + Array(secondarySubscribers.values) {
             let health = mailbox.statistics()
             snapshot.subscriberQueueDepth += health.depth
             snapshot.subscriberDrops += health.drops
@@ -163,6 +163,8 @@ actor CompositionEngine {
     typealias FrameSink = @Sendable (CompositedFrame) -> Void
 
     private let renderer = SceneRenderer()
+    private let secondaryRenderer = SceneRenderer()
+    private var secondaryCanvasSize = CGSize(width: 720, height: 1280)
     private let screenProvider: @Sendable () -> CVPixelBuffer?
     private let cameraProvider: @Sendable () -> LatestCameraFrame.Frame?
     /// C01 (issue #76): the per-source frame read path the renderer routes
@@ -232,6 +234,7 @@ actor CompositionEngine {
     private var frameSequence: Int64 = 0
 
     private var subscribers: [UUID: FrameMailbox] = [:]
+    private var secondarySubscribers: [UUID: FrameMailbox] = [:]
     /// Tokens cancelled before their (asynchronously delivered) registration
     /// arrived; the late `addSink` is dropped instead of leaking a sink.
     private var cancelledTokens: Set<UUID> = []
@@ -279,7 +282,7 @@ actor CompositionEngine {
                 return frames.hasMediaSource(for: key)
                     ? frames.mediaFrame(for: key)
                     : nil
-            })
+            }, pdf: { key, size in SourceFrameProviders.shared.mediaFrame(for: key, canvasSize: size) })
         self.sourcePayloadProvider = sourcePayloadProvider
         self.overlayContextProvider = overlayContextProvider
         self.sceneRegistryProvider = sceneRegistryProvider
@@ -295,7 +298,7 @@ actor CompositionEngine {
         self.delayedFrameLookup = SourceFrameLookup(
             camera: { key in delayLines.cameraFrame(for: key, fresh: rawLookup.camera(key)) },
             screen: { key in delayLines.screenFrame(for: key, fresh: rawLookup.screen(key)) },
-            media: rawLookup.media)
+            media: rawLookup.media, pdf: rawLookup.pdf)
     }
 
     // MARK: - Lifecycle (driven by the W02 pipeline-demand model)
@@ -362,6 +365,9 @@ actor CompositionEngine {
             startTicking()
         }
     }
+
+    /// Owned output geometry stays fixed until all consumers are stopped.
+    func setSecondaryOutput(canvasSize: CGSize) { secondaryCanvasSize = canvasSize }
 
     // MARK: - A10 video delay alignment (issue #122)
 
@@ -488,7 +494,12 @@ actor CompositionEngine {
                                        sourcePayloads: [SourceDefinitionID: LayerPayload],
                                        scenes: [SceneID: Scene],
                                        presentationTime pts: CMTime,
-                                       frameDuration: CMTime) -> CompositedFrame? {
+                                       frameDuration: CMTime,
+                                       canvas: OutputCanvas = .program) -> CompositedFrame? {
+        let renderer = canvas == .program ? self.renderer : secondaryRenderer
+        let canvasSize = canvas == .program ? self.canvasSize : secondaryCanvasSize
+        let from = active.from.composition(for: canvas)
+        let to = active.to.composition(for: canvas)
         if active.style == .stinger {
             let stinger = stingerProvider()
             let elapsed = CMTimeSubtract(pts, active.stingerStartedAt).seconds
@@ -500,7 +511,7 @@ actor CompositionEngine {
             // The scene swaps under the stinger at the cut point; the video
             // mask (pulled per tick — the pull also tops up its mix audio)
             // covers the swap.
-            let base = elapsed < active.stingerCutPointSeconds ? active.from : active.to
+            let base = elapsed < active.stingerCutPointSeconds ? from : to
             let stingerFrame = stinger.playback?.pullFrame()
             return renderer.render(scene: base,
                                    overlayContext: overlayContext,
@@ -516,7 +527,7 @@ actor CompositionEngine {
         let progress = max(0, CMTimeSubtract(pts, active.startedAt).seconds)
             / max(Double.ulpOfOne, active.durationSeconds)
         guard progress < 1 else { return nil }
-        return renderer.renderTransition(from: active.from, to: active.to,
+        return renderer.renderTransition(from: from, to: to,
                                          blend: SceneBlend(style: active.style,
                                                            progress: progress,
                                                            direction: active.direction,
@@ -609,18 +620,22 @@ actor CompositionEngine {
     /// the token so subscription and cancellation can be issued from any
     /// context (e.g. MainActor) without awaiting the engine; a cancel that
     /// lands before its register is still honored.
-    func addSink(token: UUID, capacity: Int = 2, sink: @escaping FrameSink) {
+    func addSink(token: UUID, capacity: Int = 2, canvas: OutputCanvas = .program, sink: @escaping FrameSink) {
         if cancelledTokens.remove(token) != nil { return }
-        subscribers[token] = FrameMailbox(capacity: capacity, token: token, sink: sink)
+        let mailbox = FrameMailbox(capacity: capacity, token: token, sink: sink)
+        if canvas == .program { subscribers[token] = mailbox }
+        else { secondarySubscribers[token] = mailbox }
     }
 
     func removeSink(_ token: UUID) {
-        if subscribers.removeValue(forKey: token) == nil {
+        let primary = subscribers.removeValue(forKey: token)
+        let secondary = secondarySubscribers.removeValue(forKey: token)
+        if primary == nil && secondary == nil {
             cancelledTokens.insert(token)
         }
     }
 
-    var subscriberCount: Int { subscribers.count }
+    var subscriberCount: Int { subscribers.count + secondarySubscribers.count }
 
     // MARK: - Tick loop
 
@@ -696,6 +711,12 @@ actor CompositionEngine {
         let sourcePayloads = sourcePayloadProvider()
         let scenes = sceneRegistryProvider()
         let annotations = annotationProvider()
+        // Both layouts observe this tick's same scene, PTS and shared source
+        // registry. A secondary sink never sees staged edits on Program.
+        defer {
+            renderSecondary(scene: scene, override: override != nil, overlayContext: overlayContext,
+                sourcePayloads: sourcePayloads, scenes: scenes, pts: pts, duration: duration, annotations: annotations)
+        }
 
         if override == nil, let active = transition {
             if let frame = renderTransitionFrame(active,
@@ -732,6 +753,24 @@ actor CompositionEngine {
         for mailbox in subscribers.values {
             mailbox.post(frame)
         }
+    }
+
+    private func renderSecondary(scene: Scene, override: Bool, overlayContext: OverlayContext,
+                                 sourcePayloads: [SourceDefinitionID: LayerPayload], scenes: [SceneID: Scene],
+                                 pts: CMTime, duration: CMTime, annotations: AnnotationRenderSnapshot) {
+        guard !secondarySubscribers.isEmpty else { return }
+        let resolved = override ? scene : scene.composition(for: .secondary)
+        let overlays: OverlayContext = !override && scene.secondaryCanvas?.isValid != true ? .empty : overlayContext
+        let frame: CompositedFrame?
+        if !override, let active = transition {
+            frame = renderTransitionFrame(active, overlayContext: overlays, sourcePayloads: sourcePayloads,
+                scenes: scenes, presentationTime: pts, frameDuration: duration, canvas: .secondary)
+        } else {
+            frame = secondaryRenderer.render(scene: resolved, overlayContext: overlays,
+                canvasSize: secondaryCanvasSize, frames: delayedFrameLookup, sourcePayloads: sourcePayloads,
+                scenes: scenes, presentationTime: pts, frameDuration: duration, sequence: frameSequence, annotations: annotations)
+        }
+        if let frame { for mailbox in secondarySubscribers.values { mailbox.post(frame) } }
     }
 }
 

@@ -14,7 +14,7 @@ struct ExternalDisplayDescriptor: Identifiable, Equatable, Sendable {
     var canShowCleanOutput: Bool { !isBuiltIn && !hostsStudio }
 }
 enum ExternalDisplayScaling: String, CaseIterable, Sendable { case fit, fill }
-enum ExternalDisplayFeed: String, CaseIterable, Sendable { case program, selectedCanvas }
+enum ExternalDisplayFeed: String, CaseIterable, Sendable { case program, selectedCanvas, secondaryCanvas }
 
 @MainActor protocol ExternalDisplaySurface: AnyObject, Sendable {
     func move(to display: ExternalDisplayDescriptor)
@@ -101,15 +101,15 @@ final class ExternalDisplayOutputController: ObservableObject {
         guard let id = selectedDisplayID, let display = displays.first(where: { $0.id == id }), display.canShowCleanOutput else {
             state = .failed("Select a connected external display that does not host the studio."); return
         }
-        let profile = feed == .selectedCanvas ? selectedProfile : programProfile
+        let profile = feed == .program ? programProfile : selectedProfile
         guard let profile, profile.canvasWidth <= 4096, profile.canvasHeight <= 4096, profile.frameRate <= 60 else {
             state = .failed("Choose an available canvas up to 4096 pixels per dimension and 60 fps."); return
         }
         guard let surface = surfaceFactory(display) else { state = .failed("The video surface could not be allocated."); return }
         let mailbox = ExternalDisplayMailbox()
-        // Program needs no second raster or encoder; selected canvas converts
-        // on the independent subscription queue before bounded presentation.
-        guard let cancel = subscribe(feed == .selectedCanvas ? profile : nil, { mailbox.enqueue($0) }) else {
+        // Selected feed converts on the independent subscription queue before
+        // bounded presentation; the studio supplies its actual composed canvas.
+        guard let cancel = subscribe(feed == .program ? nil : profile, { mailbox.enqueue($0) }) else {
             mailbox.finish(); surface.close(); state = .failed("The program feed is unavailable."); return
         }
         self.surface = surface; self.mailbox = mailbox; self.cancelSubscription = cancel

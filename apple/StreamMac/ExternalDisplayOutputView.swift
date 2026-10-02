@@ -19,6 +19,7 @@ struct ExternalDisplayOutputView: View {
             Picker("Feed", selection: $output.feed) {
                 Text("Program (clean video)").tag(ExternalDisplayFeed.program)
                 Text("Destination canvas").tag(ExternalDisplayFeed.selectedCanvas)
+                Text("Secondary layout").tag(ExternalDisplayFeed.secondaryCanvas)
             }.disabled(output.isActive)
             if output.feed == .selectedCanvas {
                 Picker("Canvas", selection: $output.selectedDestinationID) {
@@ -43,7 +44,9 @@ struct ExternalDisplayOutputView: View {
                     else {
                         let selected = controller.destinations.saved.first { $0.id == output.selectedDestinationID }
                         output.start(programProfile: controller.activeProfile,
-                                     selectedProfile: selected?.effectiveProfile(program: controller.activeProfile))
+                                     selectedProfile: output.feed == .secondaryCanvas
+                                        ? (controller.secondaryCanvasAvailable ? controller.activeSecondaryProfile : nil)
+                                        : controller.profileForOutputDestination(selected))
                     }
                 }.disabled(!output.isActive && output.selectedDisplayID == nil)
             }

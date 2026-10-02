@@ -93,6 +93,7 @@ enum StudioCommand: Equatable, Sendable {
     /// Replaces a whole scene (the inspector's layout/PIP bindings edit the
     /// compatibility surface; the graph stays the source of truth).
     case updateScene(Scene)
+    case setSecondaryCanvas(SecondaryCanvasLayout?, in: SceneID?)
 
     // Scene browser organization (S02, issue #70). Folders, ordering, and
     // locks are browser-side metadata in SceneStore: they apply immediately
@@ -617,6 +618,7 @@ enum StudioCommand: Equatable, Sendable {
         case .renameScene: return "Rename Scene"
         case .deleteScene: return "Delete Scene"
         case .updateScene: return "Edit Scene"
+        case .setSecondaryCanvas: return "Edit Secondary Canvas"
         case .duplicateScene: return "Duplicate Scene"
         case .moveScene: return "Move Scene"
         case .addSceneFolder: return "Add Folder"
@@ -1259,9 +1261,18 @@ final class StudioCommandDispatcher: ObservableObject {
            sceneID == nil || sceneID == staged?.id, let index = staged?.layers.firstIndex(where: { $0.id == id }) {
             staged?.layers[index].isVisible = visible
         }
+        if case .setSecondaryCanvas(let layout, let sceneID) = command,
+           sceneID == nil || sceneID == staged?.id { staged?.secondaryCanvas = layout }
+        var secondaryRequested = controller.secondaryCanvasDemanded
+        if case .startStream = command {
+            secondaryRequested = secondaryRequested || controller.destinations.enabled.contains { $0.canvas == .secondary }
+        }
         let registry = SceneGraph.index(sceneStore.scenes)
         let layers = [previewProgram.programScene, staged].compactMap { $0 }
-            .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
+            .flatMap { scene in
+                SceneGraph.flattenedVisibleLayers(of: scene, in: registry) +
+                    (secondaryRequested ? SceneGraph.flattenedVisibleLayers(of: scene.composition(for: .secondary), in: registry) : [])
+            }
         let demand = CaptureSourceKey.demanded(layers: layers + sceneStore.overlays.filter(\.isVisible), sources: sceneStore.sources)
             .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
         var required: Set<PermissionsManager.Kind> = [.microphone]
@@ -1476,6 +1487,17 @@ final class StudioCommandDispatcher: ObservableObject {
             return previewProgram.stagedScene?.id == scene.id
                 ? nil : .invalidTarget("Scene \"\(scene.name)\" is not staged in preview — select it first.")
 
+        case .setSecondaryCanvas(let layout, let sceneID):
+            guard case .success(let scene) = resolveStagedScene(sceneID) else { return .invalidTarget("No staged scene is available.") }
+            if let layout {
+                guard layout.isValid, Set(layout.placements.keys).isSubset(of: Set(scene.layers.map(\.id))) else {
+                    return .invalidValue("Choose an even canvas up to 1920 pixels per dimension and existing layers.")
+                }
+            }
+            for layer in scene.layers where layout?.placements[layer.id] != scene.secondaryCanvas?.placements[layer.id] {
+                if let error = lockError(for: layer, in: scene) { return error }
+            }
+            return nil
         case .duplicateScene(let id):
             // Duplicating never modifies the original, so a locked scene
             // still duplicates (the copy starts unlocked) — same rule as
@@ -2363,6 +2385,8 @@ final class StudioCommandDispatcher: ObservableObject {
         case .updateScene(let scene):
             previewProgram.applyStagedEdit(scene)
             takeStagedIfDirectLive()
+        case .setSecondaryCanvas(let layout, let sceneID):
+            editStagedScene(sceneID) { $0.secondaryCanvas = layout }
 
         case .duplicateScene(let id):
             sceneStore.duplicateScene(id)
@@ -2411,6 +2435,7 @@ final class StudioCommandDispatcher: ObservableObject {
                 copy.id = LayerID()
                 copy.name += " copy"
                 copy.isLocked = false
+                if let placement = scene.secondaryCanvas?.placements[layerID] { scene.secondaryCanvas?.placements[copy.id] = placement }
                 scene.layers.insert(copy, at: index + 1)
             }
         case .renameLayer(let layerID, let name, let sceneID):
@@ -3410,6 +3435,8 @@ final class StudioCommandDispatcher: ObservableObject {
         switch command {
         case .updateScene(let scene):
             sceneID = scene.id
+        case .setSecondaryCanvas(_, let id):
+            sceneID = id ?? previewProgram.stagedScene?.id
         case .setLayerVisibility(_, _, let id),
              .setLayerTransform(_, _, let id),
              .setLayerEffects(_, _, let id),
@@ -3792,7 +3819,7 @@ private extension StudioCommand {
     /// the S12 snapshot.
     var isUndoableSceneEdit: Bool {
         switch self {
-        case .addScene, .insertScene, .renameScene, .deleteScene, .updateScene,
+        case .addScene, .insertScene, .renameScene, .deleteScene, .updateScene, .setSecondaryCanvas,
              .duplicateScene, .moveScene,
              .addSceneFolder, .renameSceneFolder, .deleteSceneFolder,
              .setSceneLocked,
@@ -3863,6 +3890,8 @@ private extension StudioCommand {
         switch self {
         case .updateScene(let scene):
             return "update-scene.\(scene.id)"
+        case .setSecondaryCanvas(_, let id):
+            return "secondary-canvas.\(id?.description ?? "staged")"
         case .renameScene(let id, _):
             return "rename-scene.\(id)"
         case .renameSceneFolder(let id, _):

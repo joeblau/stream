@@ -24,11 +24,14 @@ final class DestinationOutputController: ObservableObject {
         var video: DestinationVideoMailbox
         var startTask: Task<Void, Never>
         var eventTask: Task<Void, Never>
+        var canvas: OutputCanvas
     }
     private var runtimes: [UUID: Runtime] = [:]
     private var pendingStops: [UUID: (generation: UUID, task: Task<Void, Never>)] = [:]
     private var completedStops: Set<UUID> = []
     private var completedStopOrder: [UUID] = []
+    var usesSecondaryCanvas: Bool { runtimes.values.map(\.canvas).contains(.secondary) }
+
     private let factory: (StreamCore.StreamProtocol) -> any Publisher
 
     init(factory: @escaping (StreamCore.StreamProtocol) -> any Publisher) {
@@ -81,8 +84,8 @@ final class DestinationOutputController: ObservableObject {
             }
         }
         runtimes[id] = Runtime(generation: generation, destination: destination, publisher: publisher, video: mailbox,
-                               startTask: startTask, eventTask: eventTask)
-        fanout.add(id: id, publisher: publisher, video: mailbox)
+                               startTask: startTask, eventTask: eventTask, canvas: destination.canvas ?? .program)
+        fanout.add(id: id, publisher: publisher, video: mailbox, canvas: destination.canvas ?? .program)
         changed()
     }
 
@@ -237,12 +240,12 @@ final class DestinationVideoMailbox: @unchecked Sendable {
 /// Capture-thread fanout snapshots sinks under a lock and releases it BEFORE
 /// ingress. Both ingress methods are synchronous bounded enqueues.
 final class DestinationMediaFanout: @unchecked Sendable {
-    private struct Sink { var publisher: any Publisher; var video: DestinationVideoMailbox }
+    private struct Sink { var publisher: any Publisher; var video: DestinationVideoMailbox; var canvas: OutputCanvas }
     private var lock = os_unfair_lock_s()
     private var sinks: [UUID: Sink] = [:]
-    func add(id: UUID, publisher: any Publisher, video: DestinationVideoMailbox) {
+    func add(id: UUID, publisher: any Publisher, video: DestinationVideoMailbox, canvas: OutputCanvas = .program) {
         os_unfair_lock_lock(&lock)
-        sinks[id] = Sink(publisher: publisher, video: video)
+        sinks[id] = Sink(publisher: publisher, video: video, canvas: canvas)
         os_unfair_lock_unlock(&lock)
     }
     func remove(id: UUID) {
@@ -255,7 +258,9 @@ final class DestinationMediaFanout: @unchecked Sendable {
         defer { os_unfair_lock_unlock(&lock) }
         return Array(sinks.values)
     }
-    func enqueueVideo(_ sample: CMSampleBuffer) { for sink in snapshot() { sink.video.enqueue(sample) } }
+    func enqueueVideo(_ sample: CMSampleBuffer, canvas: OutputCanvas = .program) {
+        for sink in snapshot() where sink.canvas == canvas { sink.video.enqueue(sample) }
+    }
     func enqueueAudio(_ sample: CMSampleBuffer) { for sink in snapshot() { sink.publisher.enqueueProgram(sample) } }
 }
 
