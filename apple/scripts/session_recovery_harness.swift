@@ -85,6 +85,17 @@ private final class GrantOwner {
         let encoded = String(decoding: try JSONEncoder().encode(inventory.segments), as: UTF8.self)
         precondition(!encoded.contains("sentinel") && !encoded.contains("private.invalid"), "Actual recording journals must be allowlisted, never copied raw")
         grant = nil; precondition(counter.releases == 1)
+        let audioFixture: [String: Any] = ["sessionID": recordingID.uuidString, "segmentIndex": 2,
+            "programFile": "Segment2.mp4", "context": ["projectID": project.uuidString, "profileID": profile.uuidString],
+            "selection": ["targetID": "secret-source-name-sentinel"],
+            "progress": ["file": "Segment2-mic.wav", "status": "partial", "durationSeconds": 11.9],
+            "raw": "secret-private-sentinel"]
+        try JSONSerialization.data(withJSONObject: audioFixture).write(to: recordings.appendingPathComponent("Segment2-mic.wav.isolated.json"))
+        let withISO = try await SessionRecordingJournalReader.read(grant: .init(url: recordings), projectID: project, profileID: profile,
+            activeFiles: ["Segment2.mp4", "Segment2-mic.wav"])
+        precondition(withISO.isVerified && withISO.segments.count == 2 && withISO.segments.contains { $0.file == "Segment2-mic.wav" && $0.status == .partial })
+        let encodedISO = String(decoding: try JSONEncoder().encode(withISO.segments), as: UTF8.self)
+        precondition(!encodedISO.contains("sentinel"))
         let missing = try await SessionRecordingJournalReader.read(grant: .init(url: recordings), projectID: project, profileID: profile, activeFiles: ["Missing.mp4"])
         precondition(!missing.isVerified)
         let wrongProfile = try await SessionRecordingJournalReader.read(grant: .init(url: recordings), projectID: project, profileID: UUID())

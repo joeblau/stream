@@ -15,12 +15,12 @@ enum SessionRecordingJournalReader {
     private struct Journal: Decodable {
         struct Context: Decodable { var projectID: String?; var profileID: String? }
         struct Marker: Decodable { var id: UUID; var seconds: Double }
-        struct Progress: Decodable { var durationSeconds: Double? }
+        struct Progress: Decodable { var durationSeconds: Double?; var status: String?; var file: String? }
         var sessionID: String
         var segmentIndex: Int
-        var file: String
+        var file: String?
         var context: Context
-        var status: String
+        var status: String?
         var markers: [Marker]?
         var progress: Progress?
     }
@@ -33,7 +33,7 @@ enum SessionRecordingJournalReader {
                 var seen = 0, skipped = false
                 while let url = enumerator.nextObject() as? URL, seen < 5_000 {
                     seen += 1
-                    guard url.lastPathComponent.hasSuffix(".recording.json") else { continue }
+                    guard url.lastPathComponent.hasSuffix(".recording.json") || url.lastPathComponent.hasSuffix(".isolated.json") || url.lastPathComponent.hasSuffix(".video-isolated.json") else { continue }
                     let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
                     guard (values.fileSize ?? Int.max) <= 1_048_576 else { skipped = true; continue }
                     latest.append((url, values.contentModificationDate ?? .distantPast))
@@ -47,8 +47,10 @@ enum SessionRecordingJournalReader {
                           UUID(uuidString: journal.context.profileID ?? "") == profileID,
                           let id = UUID(uuidString: journal.sessionID) else { continue }
                     let markers = (journal.markers ?? []).suffix(min(2_000, markerBudget)).map { SessionRecoveryMarker(id: $0.id, seconds: $0.seconds) }
-                    let segment = SessionRecoverySegment(sessionID: id, index: journal.segmentIndex, file: journal.file,
-                        status: SessionRecoverySegment.Status(rawValue: journal.status) ?? .unknown,
+                    guard let file = journal.file ?? journal.progress?.file else { result.isVerified = false; continue }
+                    if recognized.contains(file) { continue }
+                    let segment = SessionRecoverySegment(sessionID: id, index: journal.segmentIndex, file: file,
+                        status: SessionRecoverySegment.Status(rawValue: journal.status ?? journal.progress?.status ?? "unknown") ?? .unknown,
                         duration: journal.progress?.durationSeconds ?? 0, markers: markers)
                     guard segment.isValid else { result.isVerified = false; continue }
                     result.segments.append(segment); recognized.insert(segment.file); markerBudget -= markers.count

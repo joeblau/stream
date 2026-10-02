@@ -21,7 +21,7 @@ xcodebuild -project "$RECORDING_CONTROLLER_BUILD_DIR/RecordingControllerValidati
 readonly RECORDING_FRAMEWORKS="$RECORDING_CONTROLLER_BUILD_DIR/derived/Build/Products/Debug"
 swiftc -swift-version 6 -strict-concurrency=complete -parse-as-library \
   -target "$(uname -m)-apple-macos14.0" -F "$RECORDING_FRAMEWORKS" -framework StreamCore \
-  StreamMac/IsolatedRecordingTypes.swift StreamMac/IsolatedVideoTypes.swift StreamMac/IsolatedAudioRecorder.swift StreamMac/IsolatedVideoRecorder.swift StreamMac/RecordingPreferences.swift StreamMac/ProgramRecordingSession.swift \
+  StreamMac/IsolatedRecordingTypes.swift StreamMac/IsolatedVideoTypes.swift StreamMac/IsolatedAudioRecorder.swift StreamMac/IsolatedVideoRecorder.swift StreamMac/RecordingChatTypes.swift StreamMac/RecordingChatArchive.swift StreamMac/RecordingChatReader.swift StreamMac/RecordingPreferences.swift StreamMac/ProgramRecordingSession.swift \
   StreamMac/SessionState.swift StreamMac/RecordingController.swift \
   scripts/program_recording_fixtures.swift scripts/recording_controller_harness.swift \
   -o "$RECORDING_CONTROLLER_BUILD_DIR/RecordingControllerHarness"
