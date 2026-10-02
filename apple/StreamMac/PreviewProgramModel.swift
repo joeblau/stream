@@ -76,6 +76,10 @@ final class PreviewProgramModel: ObservableObject {
         return stagedScene
     }
 
+    /// Runtime fallback changes only program. It never overwrites saved scenes
+    /// or unpublished preview edits and keeps all output sessions intact.
+    func setResilienceProgram(_ scene: Scene) { programScene = scene }
+
     /// Discards unpublished edits: staged becomes a copy of the program
     /// snapshot.
     func revert() {

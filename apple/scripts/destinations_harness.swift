@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import CoreMedia
 import CoreVideo
 import StreamCore
@@ -106,6 +107,71 @@ actor FakeDestinationPublisher: Publisher {
         precondition(capacity.states.values.filter { if case .failed = $0 { return true }; return false }.count == 1)
         capacity.stopAll()
         await settle { capacity.activeCount == 0 }
+        // Exercise the shipping native lifecycle coordinator against actual
+        // multi-output sessions. No lifecycle event allocates a publisher.
+        let first = FakeDestinationPublisher(), second = FakeDestinationPublisher()
+        var lifecyclePending = [first, second]
+        var allocationsAfterStart = 0, recorderStops = 0, slateRequests = 0, previewStarts = 0, refreshes = 0
+        let lifecycleOutputs = DestinationOutputController(factory: { _ in
+            allocationsAfterStart += 1
+            return lifecyclePending.removeFirst()
+        })
+        let one = StreamDestination(name: "One"), two = StreamDestination(name: "Two")
+        lifecycleOutputs.start(one, settings: .default); lifecycleOutputs.start(two, settings: .default)
+        first.emit(.published); second.emit(.published)
+        await settle { lifecycleOutputs.liveCount == 2 }
+        var health = SourceFailureTracker<String>()
+        let frameCache = SourceFailoverCache<String, Int>()
+        let videoSources: Set<String> = ["camera", "screen"]
+        frameCache.configure(active: videoSources, modes: ["camera": .freeze], failed: [])
+        _ = frameCache.frame(for: "camera", live: { 1 }, standby: { nil }, offline: { 0 })
+        let lost = health.update(active: videoSources, unavailable: [], reportedFailures: ["camera"],
+                                now: 1, graceSeconds: 2, automaticallyRestore: false)
+        frameCache.configure(active: videoSources, modes: ["camera": .freeze], failed: lost)
+        precondition(frameCache.frame(for: "camera", live: { 2 }, standby: { nil }, offline: { 0 }) == 1)
+        precondition(frameCache.frame(for: "screen", live: { 3 }, standby: { nil }, offline: { 0 }) == 3)
+        precondition(lifecycleOutputs.liveCount == 2 && frameCache.retainedCount == 2)
+        let coordinator = DesktopResilienceCoordinator(observeSystem: false)
+        coordinator.stopOutputs = { lifecycleOutputs.stopAll(); recorderStops += 1 }
+        coordinator.showOfflineSlate = { slateRequests += 1 }
+        coordinator.startPreview = { previewStarts += 1 }
+        coordinator.refreshSources = { refreshes += 1 }
+        coordinator.policy.lockAction = .continueWithOfflineSlate
+        coordinator.handle(.locked); coordinator.handle(.locked)
+        precondition(slateRequests == 1 && lifecycleOutputs.liveCount == 2 && recorderStops == 0)
+        coordinator.handle(.unlocked)
+        precondition(lifecycleOutputs.liveCount == 2 && allocationsAfterStart == 2 && refreshes == 1)
+        coordinator.handle(.sleep); coordinator.handle(.sleep)
+        await settle { lifecycleOutputs.activeCount == 0 }
+        precondition(recorderStops == 1 && coordinator.requiresManualRestart)
+        coordinator.handle(.wake)
+        precondition(previewStarts == 0 && lifecycleOutputs.activeCount == 0 && allocationsAfterStart == 2)
+        coordinator.policy.previewAfterWake = true
+        coordinator.handle(.wake)
+        precondition(previewStarts == 1 && lifecycleOutputs.activeCount == 0 && allocationsAfterStart == 2)
+        coordinator.policy.lockAction = .stopOutputs
+        coordinator.handle(.locked); coordinator.handle(.unlocked)
+        precondition(recorderStops == 2 && lifecycleOutputs.activeCount == 0 && allocationsAfterStart == 2)
+        let observed = DesktopResilienceCoordinator(observeSystem: true)
+        var observedStops = 0
+        observed.stopOutputs = { observedStops += 1 }
+        NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.willSleepNotification, object: nil)
+        await settle { observedStops == 1 }
+        NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await settle { observed.notice?.contains("Mac woke") == true }
+        precondition(observedStops == 1 && allocationsAfterStart == 2)
+        let policyURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let savedPolicy = DesktopResilienceCoordinator(url: policyURL, observeSystem: false)
+        savedPolicy.policy.sourceRules = [.init(sourceID: one.id, mode: .freeze)]
+        savedPolicy.save()
+        precondition(DesktopResilienceCoordinator(url: policyURL, observeSystem: false).policy == savedPolicy.policy)
+        let invalid = Data("broken policy".utf8)
+        try invalid.write(to: policyURL)
+        savedPolicy.save()
+        let preservedPolicy = try Data(contentsOf: policyURL)
+        precondition(preservedPolicy == invalid, "Corrupt project policy must not be replaced")
+        try FileManager.default.removeItem(at: policyURL)
+        print("PASS: native lifecycle coordinator, duplicate-event idempotence, silent-slate keeps both outputs live, sleep stops publishers/recorder once, wake/unlock never allocate publishers, opt-in preview only, persisted policy and corrupt-document protection; \(ProcessInfo.processInfo.operatingSystemVersionString)")
         print("PASS: rehearsal prevents public publisher allocation; up-to-ten session boundary; actual destination controller, independent failure/reconnect/stop/retry, stable ID, stale event rejection, secret-safe failures, bounded slow queue and healthy fanout")
     }
 

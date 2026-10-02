@@ -85,6 +85,21 @@ final class StreamController: ObservableObject {
     var isLive: Bool { streamState.isLive }
     var isPreviewing: Bool { previewState == .active }
 
+    let resilience: DesktopResilienceCoordinator
+    @Published private(set) var sourceFailoverStatus: [String] = []
+    /// StudioRuntime wires the recorder stop; the lifecycle callback requests
+    /// flushing immediately, without claiming to delay system sleep.
+    var stopRecordingForLifecycle: (() -> Void)?
+    private let resilientFrames: ResilientSourceFrames
+    private var resilienceTask: Task<Void, Never>?
+    private var failureTracker = SourceFailureTracker<CaptureSourceKey>()
+    private var resilienceDemand: Set<CaptureSourceKey> = []
+    private var fallbackOriginalScene: Scene?
+    private var fallbackSceneID: SceneID?
+    @Published private(set) var privacySlateActive = false
+    private var privacySlateScene: Scene?
+    private var programBusGain: Float = 1
+
     let destinations: DestinationSession
     let sceneStore: SceneStore
     /// The S05 keyed capture pool (issue #73): one physical capture per
@@ -210,6 +225,8 @@ final class StreamController: ObservableObject {
         // ever arrives.
         let persisted = settingsStore.load()
         self.destinations = DestinationSession(settings: persisted)
+        self.resilience = DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))
+        self.programBusGain = persisted.mixer.mutedBuses.contains(AudioBus.program.rawValue) ? 0 : Float(persisted.mixer.busGains[AudioBus.program.rawValue] ?? 1)
         self.settings = persisted
         self.activeProfile = persisted.outputProfile
 
@@ -219,9 +236,15 @@ final class StreamController: ObservableObject {
         // both the staged preview and the outgoing program; S05: the pool
         // keys those captures by source identity).
         let frames = capturePool.frames
+        let resilientFrames = ResilientSourceFrames(raw: SourceFrameLookup(
+            camera: { key in frames.hasCameraSource(for: key) ? frames.cameraFrame(for: key) : frames.freshestCameraFrame() },
+            screen: { key in frames.hasScreenSource(for: key) ? frames.screenFrame(for: key) : frames.latestScreenFrame() },
+            media: { key in frames.hasMediaSource(for: key) ? frames.mediaFrame(for: key) : nil }))
+        self.resilientFrames = resilientFrames
         self.engine = CompositionEngine(
             screenProvider: { frames.latestScreenFrame() },
             cameraProvider: { frames.freshestCameraFrame() },
+            frameLookup: resilientFrames.lookup,
             canvasSize: persisted.outputProfile.canvasSize,
             frameRate: persisted.outputProfile.frameRate)
         self.previewEngine = CompositionEngine(
@@ -234,6 +257,19 @@ final class StreamController: ObservableObject {
             canvasSize: persisted.outputProfile.canvasSize,
             frameRate: persisted.outputProfile.frameRate)
         OutputCanvasStore.shared.publish(persisted.outputProfile.canvasSize)
+        resilience.stopOutputs = { [weak self] in
+            guard let self else { return }
+            self.stopStream(); self.stopRecordingForLifecycle?(); self.stopPreview()
+            self.resilientFrames.clear()
+        }
+        resilience.showOfflineSlate = { [weak self] in self?.enterPrivacySlate() }
+        resilience.startPreview = { [weak self] in self?.startPreview() }
+        resilience.refreshSources = { [weak self] in
+            self?.permissions.refresh(); self?.reconcileSourceDemand()
+        }
+        resilience.$policy.dropFirst().sink { [weak self] _ in
+            Task { @MainActor in self?.reconcileSourceDemand(); self?.evaluateSourceResilience() }
+        }.store(in: &cancellables)
 
         // W03: scene edits and selection changes reach the engines ONLY
         // through the preview/program model's snapshots — never straight from
@@ -252,6 +288,13 @@ final class StreamController: ObservableObject {
             .sink { [weak self] scene in
                 Task { @MainActor [weak self] in
                     guard let self, let scene else { return }
+                    if self.privacySlateActive, let slate = self.privacySlateScene, scene.id != slate.id {
+                        // A Take while the privacy hold is active may update the
+                        // restore target, but cannot show private pixels on air.
+                        self.fallbackOriginalScene = scene
+                        self.previewProgram.setResilienceProgram(slate)
+                        return
+                    }
                     self.reconcileSourceDemand()
                     self.publishSceneToProgram(scene)
                 }
@@ -550,7 +593,9 @@ final class StreamController: ObservableObject {
     /// Live mixer master gain for one bus (program/monitor/aux). The
     /// dispatcher folds bus mutes into the value it passes (0 while muted).
     func applyMixerBusGain(_ bus: AudioBus, gain: Float) {
-        Task { await audioEngine.setBusGain(bus, gain: gain) }
+        if bus == .program { programBusGain = gain }
+        let effective = bus == .program && privacySlateActive ? 0 : gain
+        Task { await audioEngine.setBusGain(bus, gain: effective) }
     }
 
     /// Live monitor-only solo toggle for one channel (any kind — solo is
@@ -659,6 +704,7 @@ final class StreamController: ObservableObject {
     }
 
     func goLive() {
+        guard !resilience.isLocked else { errorMessage = "Unlock this Mac before starting public outputs."; return }
         guard !isRehearsing else { errorMessage = "End local rehearsal before public Go Live."; return }
         guard streamState.canStart else { return }
         settings = settingsStore.load()
@@ -670,6 +716,7 @@ final class StreamController: ObservableObject {
     }
 
     func startDestination(_ id: UUID) {
+        guard !resilience.isLocked else { errorMessage = "Unlock this Mac before starting public outputs."; return }
         guard !isRehearsing else { errorMessage = "End local rehearsal before starting a public destination."; return }
         guard let destination = destinations.saved.first(where: { $0.id == id }) else { return }
         let base = settingsStore.load()
@@ -692,6 +739,7 @@ final class StreamController: ObservableObject {
             return
         }
         let adapted = DestinationValidator.settings(destination, credentials: credentials, base: base)
+        resilience.acknowledgeManualRestart()
         destinationOutputs.start(destination, settings: adapted)
     }
 
@@ -1010,6 +1058,12 @@ final class StreamController: ObservableObject {
 
     private func startPipeline() {
         isPipelineRunning = true
+        resilienceTask = Task { [weak self] in
+            while !Task.isCancelled && self != nil {
+                self?.evaluateSourceResilience()
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
         startAudioEngine()
         startAudioInput()
         reconcileSourceDemand()
@@ -1044,6 +1098,7 @@ final class StreamController: ObservableObject {
         let micBox = channelFXBoxes[micID]!
         Task {
             await audioEngine.run()
+            await audioEngine.setBusGain(.program, gain: self.privacySlateActive ? 0 : self.programBusGain)
             await audioEngine.addChannel(micID) { sample in
                 micBox.process(sample)
             }
@@ -1158,6 +1213,9 @@ final class StreamController: ObservableObject {
 
     private func stopPipeline() {
         isPipelineRunning = false
+        resilienceTask?.cancel(); resilienceTask = nil
+        failureTracker.resetObservations()
+        resilientFrames.clear()
         let engine = self.engine
         Task { await engine.stop() }
         let previewEngine = self.previewEngine
@@ -1218,7 +1276,8 @@ final class StreamController: ObservableObject {
         // persisted scene registry before computing demand, so a camera used
         // only inside a nested scene still captures.
         let registry = SceneGraph.index(sceneStore.scenes)
-        let layers = [previewProgram.programScene, staged].compactMap { $0 }
+        let standby = resilience.policy.standbySceneID.flatMap { id in sceneStore.scenes.first { $0.id.rawValue == id } }
+        let layers = [previewProgram.programScene, staged, standby, fallbackOriginalScene].compactMap { $0 }
             .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
         // G09 (issue #116): project overlay media (animated images / alpha
         // video) composites ABOVE every scene, so its playout demand comes
@@ -1234,7 +1293,12 @@ final class StreamController: ObservableObject {
             let hiddenInStaged = staged?.hiddenOverlayIDs.contains(overlay.id) ?? false
             return !hiddenInProgram || (staged != nil && !hiddenInStaged)
         }
-        let demand = CaptureSourceKey.demanded(layers: layers + overlayLayers,
+        let standbyLayers = resilience.policy.sourceRules.compactMap { rule -> LayerNode? in
+            guard rule.mode == .standby, let id = rule.standbySourceID,
+                  let source = sceneStore.sources.first(where: { $0.id.rawValue == id }) else { return nil }
+            return LayerNode(name: source.name, sourceID: source.id, payload: source.payload, transform: .fullscreen)
+        }
+        let demand = CaptureSourceKey.demanded(layers: layers + overlayLayers + standbyLayers,
                                                sources: sceneStore.sources)
             // A06 (issue #118): app-audio sources demand capture by
             // REGISTRATION (registered + enabled), independent of which scene
@@ -1242,6 +1306,7 @@ final class StreamController: ObservableObject {
             // `stopAll` still govern their lifecycle.
             .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
         capturePool.reconcile(demand: demand, settings: settings)
+        configureResilientFrames(demand: demand)
         // A01: the audio engine keeps exactly the channels its captures can
         // feed — the mic plus one per demanded capture key. Stopped captures
         // stop delivering, and their channels (rings, converters, FX state)
@@ -1263,6 +1328,96 @@ final class StreamController: ObservableObject {
             .union(additionalMicChannelIDs)
         let audioEngine = self.audioEngine
         Task { await audioEngine.pruneChannels(keeping: keep) }
+    }
+
+    private func key(for source: SourceDefinition) -> CaptureSourceKey? {
+        CaptureSourceKey.demanded(layers: [LayerNode(name: source.name, sourceID: source.id,
+            payload: source.payload, transform: .fullscreen)], sources: sceneStore.sources).first
+    }
+
+    private func configureResilientFrames(demand: Set<CaptureSourceKey>) {
+        resilienceDemand = demand
+        var modes = Dictionary(uniqueKeysWithValues: demand.map { ($0, resilience.policy.defaultSourceMode) })
+        var standbys: [CaptureSourceKey: CaptureSourceKey] = [:]
+        for rule in resilience.policy.sourceRules {
+            guard let source = sceneStore.sources.first(where: { $0.id.rawValue == rule.sourceID }),
+                  let primary = key(for: source) else { continue }
+            modes[primary] = rule.mode
+            if rule.mode == .standby, let id = rule.standbySourceID,
+               let standbySource = sceneStore.sources.first(where: { $0.id.rawValue == id }),
+               let standbyKey = key(for: standbySource), standbyKey != primary,
+               !failureTracker.latched.contains(standbyKey) { standbys[primary] = standbyKey }
+        }
+        resilientFrames.configure(active: demand, modes: modes, failed: failureTracker.latched, standbys: standbys)
+    }
+
+    private func evaluateSourceResilience() {
+        guard isPipelineRunning, !privacySlateActive else { return }
+        // A deliberate operator Take supersedes an automatic standby scene.
+        if let fallbackSceneID, previewProgram.programScene?.id != fallbackSceneID {
+            fallbackOriginalScene = nil; self.fallbackSceneID = nil
+        }
+        let unavailable = Set(resilienceDemand.filter { capturePool.frameAvailability(for: $0) == false })
+        let reported = Set(resilienceDemand.filter { capturePool.isMissing($0) || capturePool.problem(for: $0) != nil })
+        let failures = failureTracker.update(active: resilienceDemand, unavailable: unavailable,
+            reportedFailures: reported, now: ProcessInfo.processInfo.systemUptime,
+            graceSeconds: resilience.policy.failureGraceSeconds,
+            automaticallyRestore: resilience.policy.automaticallyRestoreSources)
+        configureResilientFrames(demand: resilienceDemand)
+        let status = sceneStore.sources.compactMap { source -> String? in
+            guard let sourceKey = key(for: source), failures.contains(sourceKey) else { return nil }
+            let mode = resilience.policy.sourceRules.first { $0.sourceID == source.id.rawValue }?.mode
+                ?? resilience.policy.defaultSourceMode
+            return "\(source.name): \(mode.label)\(reported.contains(sourceKey) ? " (unavailable)" : " (restore when ready)")"
+        }
+        sourceFailoverStatus = status.isEmpty && !failures.isEmpty ? ["\(failures.count) inline sources use their configured fallback."] : status
+        let registry = SceneGraph.index(sceneStore.scenes)
+        let watched = fallbackOriginalScene ?? previewProgram.programScene
+        let watchedLayers = watched.map { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) } ?? []
+        let watchedOverlays = sceneStore.overlays.filter { $0.isVisible && !(watched?.hiddenOverlayIDs.contains($0.id) ?? false) }
+        let programKeys = CaptureSourceKey.demanded(layers: watchedLayers + watchedOverlays, sources: sceneStore.sources)
+        if !failures.intersection(programKeys).isEmpty,
+           let id = resilience.policy.standbySceneID,
+           let standby = sceneStore.scenes.first(where: { $0.id.rawValue == id }), standby.id != watched?.id,
+           fallbackOriginalScene == nil {
+            fallbackOriginalScene = previewProgram.programScene
+            fallbackSceneID = standby.id
+            previewProgram.setResilienceProgram(standby)
+            resilience.noteSourceFallback("Source failed: program switched to standby scene \(standby.name). Output sessions remain connected.")
+        } else if failures.intersection(programKeys).isEmpty, fallbackOriginalScene != nil,
+                  resilience.policy.automaticallyRestoreSources {
+            restoreResilienceProgram()
+        }
+    }
+
+    /// Explicit restoration never starts a publisher/recorder. Sources that
+    /// remain missing immediately re-enter their configured fallback.
+    func restoreResilienceProgram() {
+        guard !resilience.isLocked else { return }
+        if let original = fallbackOriginalScene, previewProgram.programScene?.id == fallbackSceneID {
+            previewProgram.setResilienceProgram(original)
+        }
+        fallbackOriginalScene = nil; fallbackSceneID = nil
+        failureTracker.restore()
+        privacySlateActive = false
+        privacySlateScene = nil
+        applyMixerBusGain(.program, gain: programBusGain)
+        reconcileSourceDemand(); evaluateSourceResilience()
+        resilience.noteSourceFallback("Program restore requested. Outputs restart only through their explicit start controls.")
+    }
+
+    private func enterPrivacySlate() {
+        guard !privacySlateActive else { return }
+        fallbackOriginalScene = previewProgram.programScene
+        let slate = Scene(name: "Offline", layers: [LayerNode(name: "Offline notice",
+            payload: .text(TextSourcePayload(text: "OFFLINE — RESTORE MANUALLY", alignment: .center)),
+            transform: .fullscreen)], background: .solid(colorHex: "#101010"),
+            hiddenOverlayIDs: Set(sceneStore.overlays.map(\.id)))
+        fallbackSceneID = slate.id
+        privacySlateScene = slate
+        privacySlateActive = true
+        applyMixerBusGain(.program, gain: programBusGain)
+        previewProgram.setResilienceProgram(slate)
     }
 
     /// The W03 program seam (W05 Take, issue #68; W08 swap point, issue #65):

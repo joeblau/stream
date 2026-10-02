@@ -38,6 +38,9 @@ struct DestinationManagerView: View {
                                   onStop: controller.stopDestination,
                                   onRetry: controller.retryDestination)
             resourceEstimate
+            DisclosureGroup("Session Resilience and Source Failover") {
+                DesktopResilienceView(coordinator: controller.resilience)
+            }
             if let error = session.errorMessage {
                 Text(error).font(.caption).foregroundStyle(.red)
             }

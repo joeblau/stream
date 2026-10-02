@@ -11,6 +11,6 @@ xcrun swiftc -swift-version 6 -parse-as-library \
     -F "$DESTINATIONS_PRODUCTS" -framework StreamCore \
     -Xlinker -rpath -Xlinker "${DESTINATIONS_PRODUCTS:A}" \
     StreamBroadcast/Publisher.swift StreamMac/SessionState.swift \
-    StreamMac/DestinationOutputController.swift scripts/destinations_harness.swift \
+    StreamMac/DestinationOutputController.swift StreamMac/DesktopResilienceCoordinator.swift scripts/destinations_harness.swift \
     -o "$DESTINATIONS_BUILD_PATH/destinations-harness"
 "$DESTINATIONS_BUILD_PATH/destinations-harness"
