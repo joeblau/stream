@@ -706,8 +706,8 @@ actor CompositionEngine {
                                           presentationTime: pts,
                                           frameDuration: duration,
                                           sequence: frameSequence,
-                                          layerOpacity: fades.opacity,
-                                          exitingLayers: fades.exiting,
+                                          layerOpacity: override == nil ? fades.opacity : [:],
+                                          exitingLayers: override == nil ? fades.exiting : [],
                                           annotations: annotations) else { return }
         metrics.rendered += 1
         metrics.lastPresentationSeconds = pts.seconds
