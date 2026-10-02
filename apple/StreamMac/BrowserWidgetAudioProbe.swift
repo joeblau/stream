@@ -20,6 +20,7 @@ enum BrowserWidgetAudioProbe {
         var webKitAudioProcesses: [Process] = []
         var helperShareablePIDs: [Int32] = []
         var shareableContentAvailable = false
+        var shareableDisplayCount = 0
         var failure: String?
     }
 
@@ -52,6 +53,7 @@ enum BrowserWidgetAudioProbe {
         do {
             let content = try await SCShareableContent.current
             report.shareableContentAvailable = true
+            report.shareableDisplayCount = content.displays.count
             report.helperShareablePIDs = content.applications.filter {
                 $0.bundleIdentifier == BrowserWidgetAudioIdentity.helperBundleID
             }.map(\.processID)

@@ -14,6 +14,7 @@ import ScreenCaptureKit
     let requiredSystemAudioExclusions: Set<String> = [BrowserWidgetAudioIdentity.helperBundleID]
     private(set) var isCapturing = false
     private(set) var failure: String?
+    var onFailure: (@MainActor (String) -> Void)?
     private(set) var requestedFilterIdentity: FilterIdentity?
     private var stream: SCStream?
     private var output: BrowserWidgetAudioOutput?
@@ -84,6 +85,7 @@ import ScreenCaptureKit
                 guard let self, self.activeGeneration == generation else { return }
                 self.failure = "helper_audio_capture_stopped"
                 await self.stop()
+                self.onFailure?("helper_audio_capture_stopped")
             }
         }
         let stream = SCStream(filter: filter, configuration: configuration, delegate: output)
