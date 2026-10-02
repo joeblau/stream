@@ -18,6 +18,18 @@ final class EventLog: @unchecked Sendable {
     }
 }
 
+private final class PausedWriterGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let releaseSignal = DispatchSemaphore(value: 0)
+    private var entered = false
+    var isEntered: Bool { lock.lock(); defer { lock.unlock() }; return entered }
+    func holdFirst(_ frame: RecordingChatFrame) {
+        lock.lock(); let first = !entered; entered = true; lock.unlock()
+        if first { precondition(releaseSignal.wait(timeout: .now() + 3) == .success, "Pause accounting fixture did not release the writer") }
+    }
+    func release() { releaseSignal.signal() }
+}
+
 @main struct ProgramRecordingHarness {
     static func main() async throws {
         let folder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
@@ -48,11 +60,10 @@ final class EventLog: @unchecked Sendable {
         try? FileManager.default.removeItem(at: pausedURL)
         let pausing = ProgramRecordingSession(outputURL: pausedURL, configuration: config)
         try await feed(pausing, seconds: 1)
-        try await Task.sleep(for: .milliseconds(50))
+        try await waitForMediaEnd(pausing, seconds: 1)
         pausing.pause()
         try await feed(pausing, seconds: 1, offset: 1)
-        pausing.resume()
-        try await Task.sleep(for: .milliseconds(20))
+        await resume(pausing)
         try await feed(pausing, seconds: 1, offset: 2)
         let resumedResult = await finish(pausing)
         precondition(resumedResult.completed, resumedResult.error ?? "Pause finalization failed")
@@ -80,8 +91,9 @@ final class EventLog: @unchecked Sendable {
         var videoOnlyConfig = config; videoOnlyConfig.requiresAudio = false
         let videoOnly = ProgramRecordingSession(outputURL: videoOnlyURL, configuration: videoOnlyConfig)
         try await feed(videoOnly, seconds: 1)
+        try await waitForMediaEnd(videoOnly, seconds: 1)
         videoOnly.pause(); try await feed(videoOnly, seconds: 1, offset: 1)
-        videoOnly.resume(); try await Task.sleep(for: .milliseconds(20))
+        await resume(videoOnly)
         try await feed(videoOnly, seconds: 1, offset: 2)
         let videoOnlyResult = await finish(videoOnly)
         let videoOnlyAsset = AVURLAsset(url: videoOnlyURL)
@@ -89,8 +101,24 @@ final class EventLog: @unchecked Sendable {
         let onlyAudioTracks = try await videoOnlyAsset.loadTracks(withMediaType: .audio)
         let onlyDuration = try await videoOnlyAsset.load(.duration).seconds
         precondition(videoOnlyResult.completed && videoOnlyResult.progress.audioStatus == .notRequested)
-        precondition(onlyVideoTracks.count == 1 && onlyAudioTracks.isEmpty && abs(onlyDuration - 2) < 0.04)
+        precondition(onlyVideoTracks.count == 1 && onlyAudioTracks.isEmpty && abs(onlyDuration - 2) < 0.04, "Video-only pause: tracks \(onlyVideoTracks.count)/\(onlyAudioTracks.count), duration \(onlyDuration), progress \(videoOnlyResult.progress)")
         print("PASS: video-only writer ignores unrequested audio and resumes its video clock after pause")
+
+        let accountingURL = folder.appendingPathComponent("pause-discard-accounting.mp4")
+        try? FileManager.default.removeItem(at: accountingURL)
+        let pauseGate = PausedWriterGate()
+        var accountingConfig = videoOnlyConfig; accountingConfig.onVideoAccepted = pauseGate.holdFirst
+        let accounting = ProgramRecordingSession(outputURL: accountingURL, configuration: accountingConfig)
+        accounting.appendVideo(try ProgramRecordingFixtures.video(at: 0))
+        let pauseDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !pauseGate.isEntered && ContinuousClock.now < pauseDeadline { try await Task.sleep(for: .milliseconds(5)) }
+        precondition(pauseGate.isEntered, "Pause accounting fixture did not reach actual writer acceptance")
+        for frame in 1...10 { accounting.appendVideo(try ProgramRecordingFixtures.video(at: Double(frame) / 60)) }
+        accounting.pause(); pauseGate.release()
+        let accountingResult = await finish(accounting)
+        precondition(accountingResult.completed && accountingResult.progress.videoSamples == 1 && accountingResult.progress.droppedVideo == 10,
+            "Pause must account for every discarded pre-pause queued frame: \(accountingResult.progress)")
+        print("PASS: pause discard accounting retains one actual accepted frame and counts ten queued-frame drops")
 
         let firstURL = folder.appendingPathComponent("rotation-1.mp4")
         let secondURL = folder.appendingPathComponent("rotation-2.mp4")
@@ -165,6 +193,23 @@ final class EventLog: @unchecked Sendable {
         precondition(preserved == original, "Open failure must preserve the existing file")
         print("PASS: real AVAssetWriter open failure surfaces errors and does not delete existing media")
         print("Configuration: \(ProcessInfo.processInfo.operatingSystemVersionString); \(ProcessInfo.processInfo.processorCount) CPUs; files: \(folder.path)")
+    }
+
+    static func waitForMediaEnd(_ session: ProgramRecordingSession, seconds: Double) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while ContinuousClock.now < deadline {
+            let snapshot = session.timeline.snapshot()
+            if snapshot.origin.isNumeric, snapshot.end.isNumeric,
+               (snapshot.end - snapshot.origin).seconds >= seconds - 0.00001 { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        preconditionFailure("Writer did not accept the pre-pause media tail: \(session.timeline.snapshot())")
+    }
+    static func resume(_ session: ProgramRecordingSession) async {
+        let accepted = await withCheckedContinuation { continuation in
+            session.resume { continuation.resume(returning: $0) }
+        }
+        precondition(accepted, "Resume was not accepted by the actual writer queue")
     }
 
     static func finish(_ session: ProgramRecordingSession) async -> ProgramRecordingSession.Result {
