@@ -10,6 +10,7 @@ struct DirectChatSnapshot {
     var failure: String?
     var notice: String?
     var isMutating = false
+    var retryUntil: Date?
 }
 
 /// One authenticated reader per provider feeds every workspace consumer. No
@@ -19,6 +20,8 @@ struct DirectChatSnapshot {
     typealias Identity = @MainActor (ManagedProvider) async throws -> DirectChatIdentity
     typealias Sleep = @Sendable (Double) async throws -> Void
     @Published private(set) var snapshots: [ManagedProvider: DirectChatSnapshot] = [.youtube: .init(), .twitch: .init()]
+    @Published private(set) var receipts: [DirectChatWriteReceipt] = []
+    let presets: StudioChatPresetStore
     private let request: Request
     private let identity: Identity
     private let socketFactory: @Sendable (URL) -> any StudioChatSocket
@@ -28,6 +31,10 @@ struct DirectChatSnapshot {
     private var generations: [ManagedProvider: UUID] = [:]
     private var jobs: [ManagedProvider: Task<Void, Never>] = [:]
     private var writes: [ManagedProvider: Task<Void, Never>] = [:]
+    private var writeIDs: [ManagedProvider: UUID] = [:]
+    private var writeDenials: [ManagedProvider: Set<DirectChatWriteKind>] = [:]
+    private var cooldowns: [ManagedProvider: Date] = [:]
+    private let now: @Sendable () -> Date
     private var active: [ManagedProvider: (DirectChatIdentity, String)] = [:]
     private var routes: [String: DirectChatRoute] = [:]
     private var routeOrder: [String] = []
@@ -49,18 +56,20 @@ struct DirectChatSnapshot {
     init(request: @escaping Request, identity: @escaping Identity,
          socketFactory: @escaping @Sendable (URL) -> any StudioChatSocket = { NativeStudioChatSocket($0) },
          sleep: @escaping Sleep = { try await Task.sleep(for: .seconds($0)) },
-         deadlineSleep: @escaping Sleep = { try await Task.sleep(for: .seconds($0)) }, emit: @escaping (StudioChatAction) -> Void) {
+         deadlineSleep: @escaping Sleep = { try await Task.sleep(for: .seconds($0)) },
+         presetDirectory: URL? = nil, now: @escaping @Sendable () -> Date = { Date() }, emit: @escaping (StudioChatAction) -> Void) {
         self.request = request; self.identity = identity; self.socketFactory = socketFactory; self.sleep = sleep
         self.deadlineSleep = deadlineSleep; self.emit = emit
+        self.presets = StudioChatPresetStore(directory: presetDirectory); self.now = now
     }
     func snapshot(_ provider: ManagedProvider) -> DirectChatSnapshot { snapshots[provider] ?? .init() }
     func stop(_ provider: ManagedProvider) {
         let old = generations[provider]
         generations[provider] = UUID(); jobs[provider]?.cancel(); jobs[provider] = nil
-        writes[provider]?.cancel(); writes[provider] = nil; active[provider] = nil
+        cancelWrite(provider); active[provider] = nil
         if provider == .twitch { cancelCycles(); reconnectAttempts = 0 }
         if let old { emit(.closed(uuid: old.uuidString)) }
-        snapshots[provider] = .init()
+        snapshots[provider] = .init(retryUntil: cooldowns[provider])
     }
     func shutdown() { stop(.youtube); stop(.twitch) }
     private func current(_ provider: ManagedProvider, _ generation: UUID) -> Bool {
@@ -77,6 +86,7 @@ struct DirectChatSnapshot {
     func connect(_ provider: ManagedProvider, eventID: String = "") {
         guard [.youtube, .twitch].contains(provider) else { return }
         stop(provider); let generation = UUID(); generations[provider] = generation
+        writeDenials[provider] = []
         snapshots[provider]?.state = "Verifying authorization"
         jobs[provider] = Task { [weak self] in
             guard let self else { return }
@@ -117,7 +127,17 @@ struct DirectChatSnapshot {
         while current(.youtube, generation) {
             var query = ["part": "id,snippet,authorDetails", "liveChatId": chatID, "maxResults": "200"]
             if let page { query["pageToken"] = page }
-            let data = try await request(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages", query: query))
+            let data: Data
+            do { data = try await request(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages", query: query)) }
+            catch let failure as ProviderFailure where failure.kind == .rateLimited {
+                guard current(.youtube, generation) else { return }
+                let seconds = failure.retryAfter.flatMap { $0.isFinite ? min(86400, max(1, $0)) : nil } ?? 60
+                let until = now().addingTimeInterval(seconds)
+                cooldowns[.youtube] = until; snapshots[.youtube]?.retryUntil = until
+                status(.youtube, generation, "Rate limited; waiting to resume reading")
+                snapshots[.youtube]?.notice = "The queue is retained. Only the read request resumes after cooldown; no public action is replayed."
+                try await sleep(seconds); continue
+            }
             let result = try StudioDirectChatDecoder.youtube(data, channelID: account.channelID, chatID: chatID)
             guard current(.youtube, generation) else { return }
             status(.youtube, generation, "Connected", connected: true)
@@ -153,7 +173,7 @@ struct DirectChatSnapshot {
         active[provider] = nil
         if provider == .twitch { cancelCycles() }
         generations[provider] = UUID(); jobs[provider]?.cancel(); jobs[provider] = nil
-        writes[provider]?.cancel(); writes[provider] = nil; snapshots[provider]?.isMutating = false
+        cancelWrite(provider)
         emit(.closed(uuid: generation.uuidString))
     }
     private func cancelCycles() {
@@ -240,72 +260,211 @@ struct DirectChatSnapshot {
                   transport["session_id"] as? String == sessionID else { throw ProviderFailure(.invalidResponse) }
         }
     }
-    func canSend(_ provider: ManagedProvider) -> Bool {
-        guard snapshot(provider).isConnected, !snapshot(provider).isMutating, let (account, _) = active[provider] else { return false }
-        return provider == .youtube || account.scopes.contains("user:write:chat")
+    func writeTarget(_ provider: ManagedProvider) -> DirectChatWriteTarget? {
+        guard snapshot(provider).isConnected, let (account, chatID) = active[provider], let generation = generations[provider] else { return nil }
+        return .init(provider: provider, channelID: account.channelID, chatID: chatID,
+                     broadcastID: snapshot(provider).target, generation: generation)
     }
-    func canDelete(_ id: String) -> Bool {
-        guard let route = routes[id], snapshot(route.provider).isConnected, !snapshot(route.provider).isMutating,
-              let (account, chatID) = active[route.provider], chatID == route.chatID,
-              account.channelID != route.authorID,
-              !route.roles.contains("Owner"), !route.roles.contains("Moderator") else { return false }
-        return route.provider == .youtube || (account.scopes.contains("moderator:manage:chat_messages") && Date().timeIntervalSince(route.timestamp) < 21_600)
+    func sendAvailabilityError(_ provider: ManagedProvider) -> String? { writeAvailabilityError(provider, kind: .post) }
+    private func writeAvailabilityError(_ provider: ManagedProvider, kind: DirectChatWriteKind) -> String? {
+        guard [.youtube, .twitch].contains(provider) else { return "This provider feed is read-only in Stream." }
+        guard snapshot(provider).isConnected, let (account, _) = active[provider] else { return "Connect and verify an owned direct public chat first." }
+        guard !snapshot(provider).isMutating else { return "Another action is waiting for this provider." }
+        if let until = cooldowns[provider], until > now() { return "Provider rate limit: wait until \(until.formatted(date: .omitted, time: .standard))." }
+        if writeDenials[provider]?.contains(kind) == true { return "This permission was denied. Reconnect and verify the account before retrying." }
+        let required: String?
+        switch (provider, kind) {
+        case (.twitch, .post), (.twitch, .reply): required = "user:write:chat"
+        case (.twitch, .delete): required = "moderator:manage:chat_messages"
+        case (.twitch, .timeout), (.twitch, .ban): required = "moderator:manage:banned_users"
+        default: required = nil
+        }
+        if let required, !account.scopes.contains(required) { return "Reauthorize with the optional \(required) grant." }
+        if provider == .youtube && !account.scopes.contains("https://www.googleapis.com/auth/youtube") &&
+            !account.scopes.contains("https://www.googleapis.com/auth/youtube.force-ssl") { return "A granted YouTube write scope is required." }
+        return nil
     }
+    func canSend(_ provider: ManagedProvider) -> Bool { sendAvailabilityError(provider) == nil }
+    func moderationAvailabilityError(_ id: String, kind: DirectChatWriteKind) -> String? {
+        guard [.delete, .timeout, .ban].contains(kind) else { return "Choose a supported moderation action." }
+        guard let route = routes[id] else { return "This message has no current authorized direct-provider route; this feed is read-only." }
+        if let error = writeAvailabilityError(route.provider, kind: kind) { return error }
+        guard let (account, chatID) = active[route.provider], chatID == route.chatID else { return "This message belongs to a different chat session." }
+        guard account.channelID != route.authorID, !route.roles.contains("Owner"), !route.roles.contains("Moderator") else {
+            return "Owner and moderator messages are protected. Manage their roles in the provider's controls."
+        }
+        if kind == .delete, route.provider == .twitch, now().timeIntervalSince(route.timestamp) >= 21600 {
+            return "Twitch only allows targeted deletion of messages less than six hours old."
+        }
+        return nil
+    }
+    func canDelete(_ id: String) -> Bool { moderationAvailabilityError(id, kind: .delete) == nil }
     func canReply(_ id: String) -> Bool {
         guard let route = routes[id], route.provider == .twitch, let (_, chatID) = active[.twitch], chatID == route.chatID else { return false }
-        return canSend(.twitch)
+        return writeAvailabilityError(.twitch, kind: .reply) == nil
     }
-    /// Never retries a write or synthesizes a successful local chat echo.
-    func send(_ text: String, provider: ManagedProvider, replyingTo id: String? = nil) {
-        guard canSend(provider), let (account, chatID) = active[provider], let generation = generations[provider],
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= (provider == .twitch ? 500 : 200), text.utf8.count <= 4_096,
-              id == nil || canReply(id!) else { return }
+    func targetForMessage(_ id: String) -> DirectChatWriteTarget? { routes[id].flatMap { writeTarget($0.provider) } }
+    /// A reviewed batch contains at most the two supported direct providers.
+    /// Each target executes once; a failure cannot cancel another provider.
+    @discardableResult func send(_ text: String, to targets: [DirectChatWriteTarget]) -> [UUID] {
+        guard !targets.isEmpty, targets.count <= 2, Set(targets.map(\.provider)).count == targets.count else { return [] }
+        let batch = UUID()
+        return targets.map { send(text, provider: $0.provider, expectedTarget: $0, batchID: batch) }
+    }
+    @discardableResult func send(_ text: String, provider: ManagedProvider, replyingTo id: String? = nil,
+                                expectedTarget: DirectChatWriteTarget? = nil, batchID: UUID = UUID()) -> UUID {
+        let kind: DirectChatWriteKind = id == nil ? .post : .reply
+        let target = expectedTarget ?? writeTarget(provider)
+        let receipt = appendReceipt(provider, target: target?.broadcastID ?? snapshot(provider).target, kind: kind,
+                                    summary: text, batchID: batchID)
+        let error = writeAvailabilityError(provider, kind: kind)
+        guard error == nil, let target, target.provider == provider, target == writeTarget(provider) else {
+            finishReceipt(receipt, .notSent(error ?? "The reviewed account or broadcast changed. Review its new target.")); return receipt
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              text.count <= (provider == .twitch ? 500 : 200), text.utf8.count <= 4096,
+              id == nil || (provider == .twitch && canReply(id!)) else {
+            finishReceipt(receipt, .notSent("Review the message length and current reply target.")); return receipt
+        }
         let reply = id.flatMap { routes[$0]?.providerMessageID }
-        mutate(provider, generation) { [request] in
+        mutate(target, receipt: receipt, kind: kind) { [request] in
             var call = try ProviderAPI.request(provider, path: provider == .youtube ? "/youtube/v3/liveChat/messages" : "/helix/chat/messages",
                 query: provider == .youtube ? ["part": "snippet"] : [:])
             call.httpMethod = "POST"; call.setValue("application/json", forHTTPHeaderField: "Content-Type")
             if provider == .youtube {
-                call.httpBody = try JSONSerialization.data(withJSONObject: ["snippet": ["liveChatId": chatID, "type": "textMessageEvent", "textMessageDetails": ["messageText": text]]])
+                call.httpBody = try JSONSerialization.data(withJSONObject: ["snippet": ["liveChatId": target.chatID, "type": "textMessageEvent", "textMessageDetails": ["messageText": text]]])
             } else {
-                var body: [String: Any] = ["broadcaster_id": account.channelID, "sender_id": account.channelID, "message": text]
+                var body: [String: Any] = ["broadcaster_id": target.channelID, "sender_id": target.channelID, "message": text]
                 if let reply { body["reply_parent_message_id"] = reply }
                 call.httpBody = try JSONSerialization.data(withJSONObject: body)
             }
             let result = try StudioDirectChatDecoder.object(try await request(provider, call))
             if provider == .twitch {
-                guard let rows = result["data"] as? [[String: Any]], rows.count == 1, rows[0]["is_sent"] as? Bool == true,
-                      StudioDirectChatDecoder.identifier(rows[0]["message_id"]) != nil else { throw ProviderFailure(.permission) }
+                guard let rows = result["data"] as? [[String: Any]], rows.count == 1, let sent = rows[0]["is_sent"] as? Bool else { throw ProviderFailure(.invalidResponse) }
+                guard sent else { throw WriteRefusal() }
+                guard StudioDirectChatDecoder.identifier(rows[0]["message_id"]) != nil else { throw ProviderFailure(.invalidResponse) }
             } else { guard StudioDirectChatDecoder.identifier(result["id"]) != nil else { throw ProviderFailure(.invalidResponse) } }
         }
+        return receipt
     }
-    func delete(_ id: String) {
-        guard canDelete(id), let route = routes[id], let generation = generations[route.provider] else { return }
-        mutate(route.provider, generation) { [request] in
-            let query = route.provider == .youtube ? ["id": route.providerMessageID] : ["broadcaster_id": route.channelID,
-                "moderator_id": route.channelID, "message_id": route.providerMessageID]
-            var call = try ProviderAPI.request(route.provider, path: route.provider == .youtube ? "/youtube/v3/liveChat/messages" : "/helix/moderation/chat", query: query)
-            call.httpMethod = "DELETE"; _ = try await request(route.provider, call)
-        } acknowledged: { [weak self] in self?.remove([id]) }
+    @discardableResult func delete(_ id: String, expectedTarget: DirectChatWriteTarget? = nil) -> UUID? {
+        moderate(id, kind: .delete, expectedTarget: expectedTarget)
     }
-    private func mutate(_ provider: ManagedProvider, _ generation: UUID, operation: @escaping @MainActor () async throws -> Void,
-                        acknowledged: @escaping () -> Void = {}) {
+    /// UI timeouts are deliberately fixed at ten minutes. No arbitrary numeric
+    /// value or untrusted message text can become a provider moderation command.
+    @discardableResult func moderate(_ id: String, kind: DirectChatWriteKind,
+                                    expectedTarget: DirectChatWriteTarget? = nil) -> UUID? {
+        guard [.delete, .timeout, .ban].contains(kind), let route = routes[id] else { return nil }
+        let target = expectedTarget ?? writeTarget(route.provider)
+        let receipt = appendReceipt(route.provider, target: target?.broadcastID ?? snapshot(route.provider).target,
+                                    kind: kind, summary: kind == .delete ? route.providerMessageID : route.authorID)
+        let error = moderationAvailabilityError(id, kind: kind)
+        guard error == nil, let target, target == writeTarget(route.provider), target.provider == route.provider else {
+            finishReceipt(receipt, .notSent(error ?? "The reviewed account or broadcast changed. Review its new target.")); return receipt
+        }
+        mutate(target, receipt: receipt, kind: kind) { [request] in
+            if kind == .delete {
+                let query = route.provider == .youtube ? ["id": route.providerMessageID] : ["broadcaster_id": route.channelID,
+                    "moderator_id": target.channelID, "message_id": route.providerMessageID]
+                var call = try ProviderAPI.request(route.provider, path: route.provider == .youtube ? "/youtube/v3/liveChat/messages" : "/helix/moderation/chat", query: query)
+                call.httpMethod = "DELETE"; _ = try await request(route.provider, call); return
+            }
+            var call = try ProviderAPI.request(route.provider, path: route.provider == .youtube ? "/youtube/v3/liveChat/bans" : "/helix/moderation/bans",
+                query: route.provider == .youtube ? ["part": "snippet"] : ["broadcaster_id": route.channelID, "moderator_id": target.channelID])
+            call.httpMethod = "POST"; call.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if route.provider == .youtube {
+                var snippet: [String: Any] = ["liveChatId": route.chatID, "type": kind == .ban ? "permanent" : "temporary",
+                    "bannedUserDetails": ["channelId": route.authorID]]
+                if kind == .timeout { snippet["banDurationSeconds"] = 600 }
+                call.httpBody = try JSONSerialization.data(withJSONObject: ["snippet": snippet])
+            } else {
+                var body: [String: Any] = ["user_id": route.authorID]
+                if kind == .timeout { body["duration"] = 600 }
+                call.httpBody = try JSONSerialization.data(withJSONObject: ["data": body])
+            }
+            let result = try StudioDirectChatDecoder.object(try await request(route.provider, call))
+            if route.provider == .youtube {
+                guard StudioDirectChatDecoder.identifier(result["id"]) != nil,
+                      let snippet = result["snippet"] as? [String: Any], snippet["liveChatId"] as? String == route.chatID,
+                      snippet["type"] as? String == (kind == .ban ? "permanent" : "temporary"),
+                      (snippet["bannedUserDetails"] as? [String: Any])?["channelId"] as? String == route.authorID else { throw ProviderFailure(.invalidResponse) }
+                if kind == .timeout, (snippet["banDurationSeconds"] as? NSNumber)?.doubleValue != 600 { throw ProviderFailure(.invalidResponse) }
+            } else {
+                guard let rows = result["data"] as? [[String: Any]], rows.count == 1,
+                      rows[0]["broadcaster_id"] as? String == route.channelID, rows[0]["moderator_id"] as? String == target.channelID,
+                      rows[0]["user_id"] as? String == route.authorID else { throw ProviderFailure(.invalidResponse) }
+                if kind == .ban { guard rows[0]["end_time"] is NSNull else { throw ProviderFailure(.invalidResponse) } }
+                else { guard StudioDirectChatDecoder.date(rows[0]["end_time"]) != nil else { throw ProviderFailure(.invalidResponse) } }
+            }
+        } acknowledged: { [weak self] in
+            if kind == .delete { self?.remove([id]) }
+            else { self?.clear(provider: route.provider, chatID: route.chatID, author: route.authorID) }
+        }
+        return receipt
+    }
+    private func appendReceipt(_ provider: ManagedProvider, target: String, kind: DirectChatWriteKind,
+                               summary: String, batchID: UUID = UUID()) -> UUID {
+        while receipts.count >= 64 {
+            guard let index = receipts.firstIndex(where: { !$0.state.isPending }) else { break }
+            receipts.remove(at: index)
+        }
+        let id = UUID()
+        let bounded = String(decoding: summary.utf8.prefix(4096), as: UTF8.self)
+        receipts.append(.init(id: id, batchID: batchID, provider: provider, target: target, kind: kind,
+                              summary: String(bounded.prefix(500)), createdAt: now(), state: .sending))
+        return id
+    }
+    private func finishReceipt(_ id: UUID, _ state: DirectChatWriteState) {
+        guard let index = receipts.firstIndex(where: { $0.id == id }), receipts[index].state.isPending else { return }
+        receipts[index].state = state
+    }
+    func clearReceipts() { receipts.removeAll { !$0.state.isPending } }
+    func cancelWrite(receiptID: UUID) {
+        guard let provider = writeIDs.first(where: { $0.value == receiptID })?.key else { return }
+        cancelWrite(provider)
+    }
+    private func cancelWrite(_ provider: ManagedProvider) {
+        if let id = writeIDs.removeValue(forKey: provider) { finishReceipt(id, .stopped) }
+        writes[provider]?.cancel(); writes[provider] = nil; snapshots[provider]?.isMutating = false
+    }
+    private struct WriteRefusal: Error {}
+    private func mutate(_ target: DirectChatWriteTarget, receipt: UUID, kind: DirectChatWriteKind,
+                        operation: @escaping @MainActor () async throws -> Void, acknowledged: @escaping () -> Void = {}) {
+        let provider = target.provider
         snapshots[provider]?.isMutating = true; snapshots[provider]?.failure = nil
+        writeIDs[provider] = receipt
         writes[provider] = Task { [weak self] in
-            guard let self else { return }
             do {
-                try await operation(); guard current(provider, generation) else { return }
-                snapshots[provider]?.notice = "Provider acknowledged the action. Sends appear only when delivered by the public reader."
+                try await operation()
+                guard let self, self.current(provider, target.generation), self.writeIDs[provider] == receipt else { return }
+                self.finishReceipt(receipt, .acknowledged)
+                self.snapshots[provider]?.notice = "Provider acknowledged the action. Sends appear only when delivered by the public reader."
                 acknowledged()
             } catch {
-                guard current(provider, generation) else { return }
-                if (error as? ProviderFailure)?.kind == .authorization {
-                    failed(provider, generation, error); snapshots[provider]?.isMutating = false; writes[provider] = nil; return
+                guard let self, self.current(provider, target.generation), self.writeIDs[provider] == receipt else { return }
+                if error is WriteRefusal {
+                    self.finishReceipt(receipt, .rejected("Twitch did not send this message."))
+                    self.snapshots[provider]?.failure = "Twitch did not send this message. Incoming chat continues."
+                } else {
+                    let failure = error as? ProviderFailure ?? ProviderFailure(.unavailable)
+                    let definitive = [.authorization, .permission, .rateLimited, .invalidRequest].contains(failure.kind)
+                    self.finishReceipt(receipt, definitive ? .rejected(failure.localizedDescription) : .unconfirmed(failure.localizedDescription))
+                    self.snapshots[provider]?.failure = failure.localizedDescription
+                    if failure.kind == .rateLimited {
+                        let seconds = failure.retryAfter.flatMap { $0.isFinite ? min(86400, max(1, $0)) : nil } ?? 60
+                        let until = self.now().addingTimeInterval(seconds)
+                        self.cooldowns[provider] = until; self.snapshots[provider]?.retryUntil = until
+                    }
+                    if failure.kind == .permission {
+                        let related: Set<DirectChatWriteKind> = [.post, .reply].contains(kind) ? [.post, .reply] : ([.timeout, .ban].contains(kind) ? [.timeout, .ban] : [.delete])
+                        self.writeDenials[provider, default: []].formUnion(related)
+                    }
+                    if failure.kind == .authorization { self.failed(provider, target.generation, error); return }
                 }
-                snapshots[provider]?.failure = (error as? ProviderFailure ?? ProviderFailure(.unavailable)).localizedDescription
-                snapshots[provider]?.notice = "The action was not confirmed. Refresh or inspect the provider before manually retrying."
+                self.snapshots[provider]?.notice = "No action is replayed automatically. Verify the provider before a deliberate manual retry."
             }
-            snapshots[provider]?.isMutating = false; writes[provider] = nil
+            guard let self, self.writeIDs[provider] == receipt else { return }
+            self.snapshots[provider]?.isMutating = false; self.writeIDs[provider] = nil; self.writes[provider] = nil
         }
     }
 }

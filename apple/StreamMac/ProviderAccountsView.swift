@@ -32,6 +32,7 @@ struct ProviderAccountsView: View {
     @State private var readChat = false
     @State private var writeChat = false
     @State private var moderateChat = false
+    @State private var banChat = false
     private var snapshot: ProviderAccountSnapshot { accounts.snapshot(provider) }
     private var channel: ProviderChannel? { snapshot.channels.first { $0.id == channelID } }
     private var event: ProviderEvent? { snapshot.events.first { $0.id == eventID } }
@@ -125,10 +126,11 @@ struct ProviderAccountsView: View {
                 Toggle("Request public chat reading", isOn: $readChat)
                 Toggle("Request public chat posting", isOn: $writeChat)
                 Toggle("Request targeted chat deletion", isOn: $moderateChat)
+                Toggle("Request chat timeouts and bans", isOn: $banChat)
                 Text("Optional scopes apply only after Twitch grants reauthorization; existing grants are shown below.").font(.caption)
             }
             Button(snapshot.hasCredential ? "Reauthorize Account…" : "Connect Account…") {
-                let scopes = provider == .twitch ? [(readChat, "user:read:chat"), (writeChat, "user:write:chat"), (moderateChat, "moderator:manage:chat_messages")].compactMap { $0.0 ? $0.1 : nil } : []
+                let scopes = provider == .twitch ? [(readChat, "user:read:chat"), (writeChat, "user:write:chat"), (moderateChat, "moderator:manage:chat_messages"), (banChat, "moderator:manage:banned_users")].compactMap { $0.0 ? $0.1 : nil } : []
                 accounts.authorize(provider, clientID: clientID, additionalScopes: scopes)
             }
                 .disabled(clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || snapshot.isWorking)

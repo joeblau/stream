@@ -207,7 +207,10 @@ final class ProviderAccountSession: ObservableObject {
     /// Chat shares the machine vault; no bearer credential crosses into views
     /// or a second OAuth session. Readers do not cancel metadata/event jobs.
     func chatRequest(_ provider: ManagedProvider, _ request: URLRequest) async throws -> Data {
-        guard [.youtube, .twitch].contains(provider), canRequest(provider) else { throw ProviderFailure(.unavailable) }
+        guard [.youtube, .twitch].contains(provider) else { throw ProviderFailure(.unavailable) }
+        if let until = accounts[provider]?.retryUntil, until > Date() {
+            throw ProviderFailure(.rateLimited, retryAfter: until.timeIntervalSinceNow)
+        }
         do { return try await vault.send(provider, request: request) }
         catch {
             if (error as? ProviderFailure)?.kind == .authorization {

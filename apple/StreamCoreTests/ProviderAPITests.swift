@@ -241,7 +241,24 @@ private final class ProviderClock: @unchecked Sendable {
         let form = String(decoding: requests[0].httpBody!, as: UTF8.self)
         #expect(form.contains("user%3Aread%3Achat") && form.contains("user%3Awrite%3Achat"))
         #expect(!form.contains("moderator%3Amanage%3Achat_messages"))
+        #expect(!form.contains("moderator%3Amanage%3Abanned_users"))
         await #expect(throws: ProviderFailure.self) { try await flow.authorize(clientID: "public", additionalScopes: ["unknown:scope"]) { _ in } }
         #expect(await fixture.allRequests().count == 2)
+    }
+    @Test("Twitch timeouts and bans request only the explicitly selected optional grant")
+    func banScopeOptIn() async throws {
+        let fixture = ProviderFixture([#"{"device_code":"device","user_code":"ABCD","verification_uri":"https://www.twitch.tv/activate","expires_in":60,"interval":1}"#,
+            #"{"access_token":"access","expires_in":3600,"scope":["moderator:manage:banned_users"]}"#])
+        let clock = ProviderClock()
+        let flow = TwitchDeviceAuthorization(send: { request in
+            let data = try await fixture.send(.twitch, request)
+            return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, sleep: { clock.advance($0) }, now: clock.now)
+        let token = try await flow.authorize(clientID: "public", additionalScopes: ["moderator:manage:banned_users"]) { _ in }
+        #expect(token.scopes == ["moderator:manage:banned_users"])
+        let requests = await fixture.allRequests()
+        let form = String(decoding: requests[0].httpBody!, as: UTF8.self)
+        #expect(form.contains("moderator%3Amanage%3Abanned_users"))
+        #expect(!form.contains("user%3Aread%3Achat") && !form.contains("user%3Awrite%3Achat"))
     }
 }

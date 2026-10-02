@@ -336,6 +336,15 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
         precondition(session.snapshot(.youtube).failure?.kind == .rateLimited && !session.canRequest(.youtube))
         precondition(session.snapshot(.twitch).verifiedAt != nil && session.snapshot(.twitch).failure == nil)
+        let beforeChatCooldown = await http.count(host: "www.googleapis.com")
+        do {
+            _ = try await session.chatRequest(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages"))
+            preconditionFailure("A chat GET ignored the account cooldown")
+        } catch let failure as ProviderFailure {
+            precondition(failure.kind == .rateLimited && (failure.retryAfter ?? 0) > 0)
+        }
+        let afterChatCooldown = await http.count(host: "www.googleapis.com")
+        precondition(afterChatCooldown == beforeChatCooldown)
         let calls = await http.count(host: "www.googleapis.com")
         session.refresh(.youtube)
         check(await http.count(host: "www.googleapis.com") == calls, "Cooldown must suppress repeated API reads")
