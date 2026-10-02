@@ -100,7 +100,10 @@ import StreamCore
                 scene.layers[index].transform = LayerTransform(position: GraphPoint(x: edit.x, y: edit.y),
                     size: GraphSize(width: edit.width, height: edit.height), anchor: anchor, rotationDegrees: edit.rotation)
                 scene.layers[index].isVisible = edit.isVisible
-                if let id = edit.sourceID, scenes.sources.contains(where: { $0.id.rawValue == id }) { scene.layers[index].sourceID = SourceDefinitionID(id) }
+                if let id = edit.sourceID {
+                    if scenes.sources.contains(where: { $0.id.rawValue == id }) { scene.layers[index].sourceID = SourceDefinitionID(id) }
+                    else { missing += 1 }
+                } else { scene.layers[index].sourceID = nil }
             }
             let order = snapshot.stagedLayers.map(\.id)
             if order.count == scene.layers.count && Set(order) == Set(scene.layers.map { $0.id.rawValue }) {
@@ -111,9 +114,16 @@ import StreamCore
         }
         for media in snapshot.media {
             let id = SourceDefinitionID(media.sourceID)
-            guard scenes.sources.contains(where: { $0.id == id }) else { missing += 1; continue }
-            if let page = media.page { pdfDecks.setPage(page, for: id) }
-            if let seconds = media.seconds { controller.capturePool.restorePausedMediaPosition(id, seconds: seconds) }
+            guard let source = scenes.sources.first(where: { $0.id == id }) else { missing += 1; continue }
+            switch source.payload {
+            case .pdf:
+                if let page = media.page { pdfDecks.setPage(page, for: id) }
+                if media.seconds != nil { missing += 1 }
+            case .media:
+                if let seconds = media.seconds { controller.capturePool.restorePausedMediaPosition(id, seconds: seconds) }
+                if media.page != nil { missing += 1 }
+            default: missing += 1
+            }
         }
         if missing > 0 { coordinator.reportError("\(missing) saved scene/layer/media references are missing. Restore a project backup or relink them in the studio; the available local context was restored.") }
         checkpoint()
