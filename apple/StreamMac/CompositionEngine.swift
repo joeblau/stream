@@ -401,7 +401,7 @@ actor CompositionEngine {
         /// to `.dissolve` here (the documented honest fallback).
         var style: SceneTransitionStyle
         var startedAt: CMTime
-        var durationFrames: Int
+        var durationSeconds: Double
         var direction: TransitionDirection
         var dipColorHex: String
         var stingerCutPointSeconds: Double
@@ -420,7 +420,7 @@ actor CompositionEngine {
         var fromOpacity: Double
         var toOpacity: Double
         var startedAt: CMTime
-        var durationFrames: Int
+        var durationSeconds: Double
     }
 
     /// Show/hide fades are intentionally brief — long enough to read as a
@@ -452,7 +452,7 @@ actor CompositionEngine {
                                            style: .dissolve, config: config, fps: fps)
             }
             return ActiveTransition(from: previous, to: scene, style: .stinger,
-                                    startedAt: CMClockGetTime(CMClockGetHostTimeClock()), durationFrames: 0,
+                                    startedAt: CMClockGetTime(CMClockGetHostTimeClock()), durationSeconds: 0,
                                     direction: config.direction,
                                     dipColorHex: config.dipColorHex,
                                     stingerCutPointSeconds: max(0, config.stingerCutPointSeconds),
@@ -472,7 +472,7 @@ actor CompositionEngine {
         guard durationFrames > 0 else { return nil }
         return ActiveTransition(from: from, to: to, style: style,
                                 startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
-                                durationFrames: durationFrames,
+                                durationSeconds: Double(durationFrames) / Double(fps),
                                 direction: config.direction,
                                 dipColorHex: config.dipColorHex,
                                 stingerCutPointSeconds: 0,
@@ -515,7 +515,7 @@ actor CompositionEngine {
                                    stinger: stingerFrame)
         }
         let progress = max(0, CMTimeSubtract(pts, active.startedAt).seconds)
-            * Double(max(1, frameRate)) / Double(max(1, active.durationFrames))
+            / max(Double.ulpOfOne, active.durationSeconds)
         guard progress < 1 else { return nil }
         return renderer.renderTransition(from: active.from, to: active.to,
                                          blend: SceneBlend(style: active.style,
@@ -543,8 +543,6 @@ actor CompositionEngine {
     /// interpolated opacity, so the defined final state of an interrupted
     /// transition is always the latest scene value.
     private func registerLayerFades(from old: Scene, to new: Scene) {
-        let fps = max(1, frameRate)
-        let durationFrames = max(1, Int((Self.layerFadeDurationSeconds * Double(fps)).rounded()))
         let oldVisible = Set(old.layers.filter(\.isVisible).map(\.id))
         let newVisible = Set(new.layers.filter(\.isVisible).map(\.id))
         for layer in new.layers where layer.isVisible && !oldVisible.contains(layer.id) {
@@ -554,7 +552,7 @@ actor CompositionEngine {
                                              fromOpacity: current,
                                              toOpacity: 1,
                                              startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
-                                             durationFrames: durationFrames)
+                                             durationSeconds: Self.layerFadeDurationSeconds)
         }
         for (index, layer) in old.layers.enumerated()
         where layer.isVisible && !newVisible.contains(layer.id) {
@@ -564,7 +562,7 @@ actor CompositionEngine {
                                              fromOpacity: current,
                                              toOpacity: 0,
                                              startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
-                                             durationFrames: durationFrames)
+                                             durationSeconds: Self.layerFadeDurationSeconds)
         }
     }
 
@@ -573,7 +571,7 @@ actor CompositionEngine {
     private func currentFadeValue(_ id: LayerID) -> Double? {
         guard let fade = layerFades[id] else { return nil }
         let progress = max(0, CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), fade.startedAt).seconds)
-            * Double(max(1, frameRate)) / Double(max(1, fade.durationFrames))
+            / max(Double.ulpOfOne, fade.durationSeconds)
         guard progress < 1 else { return fade.toOpacity }
         return fade.fromOpacity + (fade.toOpacity - fade.fromOpacity) * max(0, progress)
     }
@@ -589,7 +587,7 @@ actor CompositionEngine {
         var completed: [LayerID] = []
         for (id, fade) in layerFades {
             let progress = max(0, CMTimeSubtract(pts, fade.startedAt).seconds)
-                * Double(max(1, frameRate)) / Double(max(1, fade.durationFrames))
+                / max(Double.ulpOfOne, fade.durationSeconds)
             guard progress < 1 else {
                 completed.append(id)
                 continue
