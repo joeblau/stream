@@ -37,6 +37,11 @@ test("feedback uses authoritative preview/program, paused recording, and missing
   assert.equal(feedback({ commandID: "output.record.stop", projectID: state.projectID }, "Connected", state, commands).badge, "PAUSED");
   state.stream = "connecting"; commands.set("output.stream.stop", { id: "output.stream.stop", title: "Cancel", category: "Output", available: true });
   assert.equal(feedback({ commandID: "output.stream.stop", projectID: state.projectID }, "Connected", state, commands).badge, "CONNECTING");
+  const runningMacro = randomUUID(), otherMacro = randomUUID();
+  state.macroProgress = { phase: "running", macroID: runningMacro.toUpperCase(), stepIndex: 0, totalSteps: 2, message: "" };
+  for (const macroID of [runningMacro, otherMacro]) commands.set(`macro.${macroID}.run`, { id: `macro.${macroID}.run`, title: "Show Macro", category: "Macros", available: false });
+  assert.equal(feedback({ commandID: `macro.${runningMacro}.run`, projectID: state.projectID }, "Connected", state, commands).badge, "1/2");
+  assert.equal(feedback({ commandID: `macro.${otherMacro}.run`, projectID: state.projectID }, "Connected", state, commands).badge, "WAIT", "Other macros must not claim the running macro's progress");
   assert.ok(keyImage({ title: "Name", badge: "<unsafe>", color: "#000000", unavailable: false }).startsWith("data:image/svg+xml;base64,"));
 });
 

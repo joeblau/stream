@@ -25,7 +25,8 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
     const visible = Object.entries(snapshot.layerVisibility).find(([id]) => id.toLowerCase() === layer.toLowerCase())?.[1];
     if (visible !== undefined) { badge = visible ? "VISIBLE" : "HIDDEN"; color = visible ? "#266848" : "#233b4a"; }
   }
-  if (binding.commandID.startsWith("macro.")) {
+  const macro = /^macro\.([0-9a-f-]+)\.run$/i.exec(binding.commandID)?.[1];
+  if (binding.commandID === "macro.cancel" || (macro && snapshot.macroProgress.macroID?.toLowerCase() === macro.toLowerCase())) {
     badge = snapshot.macroProgress.phase.toUpperCase();
     if (snapshot.macroProgress.phase === "running") badge = `${snapshot.macroProgress.stepIndex + 1}/${snapshot.macroProgress.totalSteps}`;
   }
