@@ -14,6 +14,7 @@ final class StudioRuntime {
     let diagnostics: StudioDiagnosticsMonitor
     let localControl: StudioLocalControlServer
     let dispatcher: StudioCommandDispatcher
+    let adapters: StudioAdapterManager
 
     init() {
         localControl = StudioLocalControlServer()
@@ -23,11 +24,16 @@ final class StudioRuntime {
         controller = StreamController(sceneStore: sceneStore, previewProgram: previewProgram, permissions: permissions)
         settings = SettingsSession(controller: controller)
         recorder = RecordingController()
+        recorder.loadPreferences(directory: DesktopStorage.projectDirectory)
         RecordingTerminationDelegate.recorder = recorder
         controller.stopRecordingForLifecycle = { [weak recorder] in recorder?.stop() }
         diagnostics = StudioDiagnosticsMonitor(controller: controller, recorder: recorder)
         dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: sceneStore,
             session: settings, recorder: recorder, previewProgram: previewProgram)
+        adapters = StudioAdapterManager()
+        adapters.bind(to: localControl)
+        StudioAutomationEndpoint.shared.bind(dispatcher: dispatcher, permissions: permissions,
+            stagedLayers: { [weak previewProgram] in previewProgram?.stagedScene?.layers ?? [] })
     }
 
     func flush() {
@@ -108,6 +114,7 @@ final class StudioWorkspace: ObservableObject {
     func applyPending() async {
         guard let next = pending, next != selection, canSwitch else { return }
         isSwitching = true
+        StudioAutomationEndpoint.shared.unbind()
         runtime.localControl.shutdown()
         runtime.dispatcher.rundown.stop()
         runtime.dispatcher.macros.cancel()
@@ -231,6 +238,7 @@ final class StudioWorkspace: ObservableObject {
     func restore(_ backup: Backup) async {
         guard canSwitch else { return }
         isSwitching = true
+        StudioAutomationEndpoint.shared.unbind()
         runtime.localControl.shutdown()
         runtime.dispatcher.macros.cancel()
         runtime.dispatcher.rundown.stop()
@@ -248,6 +256,8 @@ final class StudioWorkspace: ObservableObject {
     }
 
     private func observeRuntime() {
+        StudioAutomationEndpoint.shared.bind(dispatcher: runtime.dispatcher, permissions: runtime.permissions,
+            profileName: currentProfile.name, stagedLayers: { [weak previewProgram = runtime.previewProgram] in previewProgram?.stagedScene?.layers ?? [] })
         runtime.recorder.context = RecordingContext(projectID: currentProject.id.uuidString, profileID: currentProfile.id.uuidString,
             projectName: currentProject.name, profileName: currentProfile.name)
         stateObservation = runtime.controller.$streamState.combineLatest(runtime.recorder.$state)

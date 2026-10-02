@@ -31,17 +31,20 @@ struct SettingsView: View {
     /// Application section: restores the default panel layout.
     var onResetLayout: () -> Void
     let localControl: StudioLocalControlServer?
+    let adapters: StudioAdapterManager?
 
     init(session: SettingsSession,
          chat: RestreamChat,
          onClose: @escaping () -> Void = {},
          onResetLayout: @escaping () -> Void = {},
-         localControl: StudioLocalControlServer? = nil) {
+         localControl: StudioLocalControlServer? = nil,
+         adapters: StudioAdapterManager? = nil) {
         self.session = session
         self.chat = chat
         self.onClose = onClose
         self.onResetLayout = onResetLayout
         self.localControl = localControl
+        self.adapters = adapters
     }
 
     // MARK: - Chat credential fields
@@ -744,7 +747,10 @@ struct SettingsView: View {
             permissionRow(.screenCapture)
 
             StudioInterfacePreferences()
-            if let localControl { StudioLocalControlSettings(server: localControl) }
+            if let localControl {
+                StudioLocalControlSettings(server: localControl)
+                if let adapters { StudioAdapterPanel(manager: adapters, server: localControl) }
+            }
             Button("Restore Default Panel Layout", action: onResetLayout)
         } header: {
             Text("Application")

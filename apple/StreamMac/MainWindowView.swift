@@ -368,7 +368,7 @@ struct MainWindowView: View {
                      chat: chat,
                      onClose: { dispatcher.execute(.closeSettings) },
                      onResetLayout: resetPanelLayout,
-                     localControl: localControl)
+                     localControl: localControl, adapters: workspace.runtime.adapters)
     }
 
     /// Application section action: back to the all-panels-visible layout.
