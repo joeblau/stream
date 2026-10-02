@@ -401,6 +401,34 @@ final class StreamController: ObservableObject {
         await destinationOutputs.statsSnapshot()
     }
 
+    func diagnosticSnapshot() async -> StudioDiagnosticSnapshot {
+        var snapshot = StudioDiagnosticSnapshot()
+        snapshot.profileWidth = activeProfile.canvasWidth
+        snapshot.profileHeight = activeProfile.canvasHeight
+        snapshot.targetFPS = activeProfile.frameRate
+        snapshot.program = await engine.metricsSnapshot()
+        snapshot.preview = await previewEngine.metricsSnapshot()
+        snapshot.streamState = switch streamState {
+        case .idle: "idle"
+        case .connecting: "connecting"
+        case .live: "live"
+        case .reconnecting: "reconnecting"
+        case .stopping: "stopping"
+        case .failed: "failed"
+        }
+        for source in sceneStore.sources {
+            snapshot.sourceHealth[source.id.description] = source.payload.kind
+        }
+        // Error text can contain endpoint/file details; the bundle uses categories.
+        snapshot.sourceHealth["missingCount"] = String(capturePool.missingSources.count)
+        snapshot.sourceHealth["failedCount"] = String(capturePool.sourceErrors.count)
+        let audio = await audioEngine.statsSnapshot()
+        snapshot.audioUnderruns = audio.channels.mapValues(\.underrunFrames)
+        snapshot.audioTapDrops = audio.tapDrops
+        snapshot.sampleProcess()
+        return snapshot
+    }
+
     // MARK: - Frame subscriptions (W08 fan-out)
 
     /// Opaque handle for an engine frame subscription. Cheap to create on the

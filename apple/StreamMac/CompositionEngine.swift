@@ -148,6 +148,18 @@ final class SceneRegistryStore: @unchecked Sendable {
 /// per-layer fades. Neither path blocks the tick cadence: the transition is
 /// just the frame the tick renders.
 actor CompositionEngine {
+    private var metrics = CompositionMetrics()
+
+    func metricsSnapshot() -> CompositionMetrics {
+        var snapshot = metrics
+        snapshot.sampledAt = ProcessInfo.processInfo.systemUptime
+        for mailbox in subscribers.values {
+            let health = mailbox.statistics()
+            snapshot.subscriberQueueDepth += health.depth
+            snapshot.subscriberDrops += health.drops
+        }
+        return snapshot
+    }
     /// Receives composited frames on the subscriber's private serial queue.
     typealias FrameSink = @Sendable (CompositedFrame) -> Void
 
@@ -289,6 +301,7 @@ actor CompositionEngine {
     /// Atomically (re)configures the composition and starts the tick loop.
     /// StreamController calls this when the W02 pipeline demand goes 0 → 1.
     func run(scene: Scene?, canvasSize: CGSize, frameRate: Int) {
+        metrics = CompositionMetrics()
         self.scene = scene
         self.canvasSize = canvasSize
         self.frameRate = max(1, frameRate)
@@ -636,6 +649,15 @@ actor CompositionEngine {
     /// composition.
     private func tick() {
         guard let scene else { return }
+        let renderStarted = ProcessInfo.processInfo.systemUptime
+        let previousCount = metrics.rendered
+        metrics.attempts += 1
+        defer {
+            let elapsed = (ProcessInfo.processInfo.systemUptime - renderStarted) * 1000
+            metrics.totalRenderMilliseconds += elapsed
+            metrics.maxRenderMilliseconds = max(metrics.maxRenderMilliseconds, elapsed)
+            if metrics.rendered == previousCount { metrics.failed += 1 }
+        }
         frameSequence += 1
         let timescale = CMTimeScale(max(1, frameRate))
         let pts = CMTimeAdd(clockAnchor, CMTime(value: frameSequence, timescale: timescale))
@@ -652,6 +674,8 @@ actor CompositionEngine {
                                                  scenes: scenes,
                                                  presentationTime: pts,
                                                  frameDuration: duration) {
+                metrics.rendered += 1
+                metrics.lastPresentationSeconds = pts.seconds
                 for mailbox in subscribers.values {
                     mailbox.post(frame)
                 }
@@ -673,6 +697,8 @@ actor CompositionEngine {
                                           layerOpacity: fades.opacity,
                                           exitingLayers: fades.exiting,
                                           annotations: annotations) else { return }
+        metrics.rendered += 1
+        metrics.lastPresentationSeconds = pts.seconds
         for mailbox in subscribers.values {
             mailbox.post(frame)
         }
@@ -690,6 +716,13 @@ private final class FrameMailbox: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
     private var pending: [CompositedFrame] = []
     private var isDraining = false
+    private var drops = 0
+
+    func statistics() -> (depth: Int, drops: Int) {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return (pending.count, drops)
+    }
 
     init(capacity: Int, token: UUID, sink: @escaping CompositionEngine.FrameSink) {
         self.capacity = max(1, capacity)
@@ -701,6 +734,7 @@ private final class FrameMailbox: @unchecked Sendable {
     func post(_ frame: CompositedFrame) {
         os_unfair_lock_lock(&lock)
         if pending.count >= capacity {
+            drops += 1
             pending.removeFirst()   // drop-oldest
         }
         pending.append(frame)
