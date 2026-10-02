@@ -82,6 +82,7 @@ private final class PrivacyPixels: @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(300))
         await slow.updateScene(hidden)
         gate.setScene(slate)
+        await slow.setOutput(canvasSize: CGSize(width: 320, height: 180), frameRate: 7)
         try await Task.sleep(for: .milliseconds(350))
         gate.setScene(nil)
         let slowReopened = CMClockGetTime(CMClockGetHostTimeClock()).seconds
