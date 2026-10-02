@@ -42,6 +42,9 @@ actor ProviderTokenVault {
     func accept(_ token: ProviderOAuthToken, provider: ManagedProvider, generation expected: UUID) throws {
         guard generation(provider) == expected else { throw CancellationError() }
         try save(token, provider: provider)
+        // Accepting new OAuth authorization may change the user behind an
+        // unchanged client ID. Late requests from the old user must be ignored.
+        generations[provider] = UUID(); refreshes[provider]?.cancel(); refreshes[provider] = nil
     }
     func disconnect(_ provider: ManagedProvider) {
         generations[provider] = UUID(); refreshes[provider]?.cancel(); refreshes[provider] = nil

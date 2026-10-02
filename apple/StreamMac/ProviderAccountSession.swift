@@ -29,6 +29,7 @@ struct ProviderAccountSnapshot {
 final class ProviderAccountSession: ObservableObject {
     @Published private(set) var accounts: [ManagedProvider: ProviderAccountSnapshot] = [:]
     @Published private(set) var viewers: [String: Int] = [:]
+    weak var directChat: StudioDirectChatManager?
     private var viewerDates: [String: Date] = [:]
     private let restream: any ProviderRestreamBoundary
     private let vault: ProviderTokenVault
@@ -78,6 +79,7 @@ final class ProviderAccountSession: ObservableObject {
                         guard !Task.isCancelled else { return }
                         accounts[.twitch]?.failure = Self.failure(error)
                         accounts[.twitch]?.hasCredential = present; accounts[.twitch]?.verifiedAt = nil
+                        if !present { directChat?.stop(.twitch) }
                     }
                 }
             }
@@ -107,7 +109,7 @@ final class ProviderAccountSession: ObservableObject {
         if let error {
             let failure = Self.failure(error)
             accounts[provider]?.failure = failure; accounts[provider]?.verifiedAt = nil
-            if failure.kind == .authorization { accounts[provider]?.hasCredential = false }
+            if failure.kind == .authorization { accounts[provider]?.hasCredential = false; directChat?.stop(provider) }
             if failure.kind == .rateLimited {
                 let delay = max(1, failure.retryAfter ?? 60)
                 accounts[provider]?.retryUntil = Date().addingTimeInterval(delay)
@@ -127,10 +129,12 @@ final class ProviderAccountSession: ObservableObject {
         accounts[provider]?.isWorking = false; accounts[provider]?.devicePrompt = nil
     }
     func shutdown() {
+        directChat?.shutdown()
         boot?.cancel(); boot = nil; hourlyValidation?.cancel(); hourlyValidation = nil
         for provider in ManagedProvider.allCases { cancel(provider); cooldowns[provider]?.cancel(); cooldowns[provider] = nil }
     }
     func forget(_ provider: ManagedProvider) {
+        directChat?.stop(provider)
         let generation = begin(provider, action: "Forgetting local authorization")
         jobs[provider] = Task { [weak self] in
             guard let self else { return }
@@ -143,8 +147,9 @@ final class ProviderAccountSession: ObservableObject {
             finish(provider, generation)
         }
     }
-    func authorize(_ provider: ManagedProvider, clientID: String) {
+    func authorize(_ provider: ManagedProvider, clientID: String, additionalScopes: [String] = []) {
         guard [.youtube, .twitch].contains(provider) else { return }
+        directChat?.stop(provider)
         let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
         let generation = begin(provider, action: "Waiting for provider authorization")
         accounts[provider]?.clientID = clientID
@@ -167,7 +172,7 @@ final class ProviderAccountSession: ObservableObject {
                     try ProviderFailure.check(data: data, response: response)
                     token = try ProviderOAuthToken.parse(data)
                 } else {
-                    token = try await TwitchDeviceAuthorization(send: transport).authorize(clientID: clientID) { [weak self] prompt in
+                    token = try await TwitchDeviceAuthorization(send: transport).authorize(clientID: clientID, additionalScopes: additionalScopes) { [weak self] prompt in
                         await MainActor.run {
                             guard let self, self.isCurrent(provider, generation) else { return }
                             self.accounts[provider]?.devicePrompt = prompt
@@ -185,6 +190,38 @@ final class ProviderAccountSession: ObservableObject {
                 refresh(provider)
             } catch { finish(provider, generation, error: error) }
         }
+    }
+    /// Chat shares the machine vault; no bearer credential crosses into views
+    /// or a second OAuth session. Readers do not cancel metadata/event jobs.
+    func chatRequest(_ provider: ManagedProvider, _ request: URLRequest) async throws -> Data {
+        guard [.youtube, .twitch].contains(provider), canRequest(provider) else { throw ProviderFailure(.unavailable) }
+        do { return try await vault.send(provider, request: request) }
+        catch {
+            if (error as? ProviderFailure)?.kind == .authorization {
+                accounts[provider]?.hasCredential = false; accounts[provider]?.scopes = []; accounts[provider]?.verifiedAt = nil
+                accounts[provider]?.failure = Self.failure(error)
+            }
+            if let failure = error as? ProviderFailure, failure.kind == .rateLimited {
+                let delay = max(1, failure.retryAfter ?? 60)
+                accounts[provider]?.failure = failure; accounts[provider]?.retryUntil = Date().addingTimeInterval(delay)
+                cooldowns[provider]?.cancel()
+                cooldowns[provider] = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                    self?.accounts[provider]?.retryUntil = nil; self?.cooldowns[provider] = nil
+                }
+            }
+            throw error
+        }
+    }
+    func chatIdentity(_ provider: ManagedProvider) async throws -> DirectChatIdentity {
+        guard [.youtube, .twitch].contains(provider) else { throw ProviderFailure(.unavailable) }
+        guard canRequest(provider) else { throw ProviderFailure(.rateLimited) }
+        let expected = await vault.generation(provider)
+        if provider == .twitch { try await vault.validateTwitch() }
+        let channels = try await api().channels(provider), scopes = await vault.scopes(provider)
+        guard await vault.generation(provider) == expected, !Task.isCancelled else { throw CancellationError() }
+        guard channels.count == 1 else { throw ProviderFailure(.permission) }
+        return .init(channelID: channels[0].id, scopes: scopes)
     }
     func refresh(_ provider: ManagedProvider) {
         guard canRequest(provider), [.youtube, .twitch, .restream].contains(provider) else { return }

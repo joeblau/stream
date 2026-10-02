@@ -19,9 +19,11 @@ public struct TwitchDeviceAuthorization: Sendable {
                 now: @escaping @Sendable () -> Date = { Date() }) {
         self.send = send; self.sleep = sleep; self.now = now
     }
-    public func authorize(clientID: String, prompt: @escaping @Sendable (TwitchDevicePrompt) async -> Void) async throws -> ProviderOAuthToken {
+    public static let optionalChatScopes = ["user:read:chat", "user:write:chat", "moderator:manage:chat_messages"]
+    public func authorize(clientID: String, additionalScopes: [String] = [], prompt: @escaping @Sendable (TwitchDevicePrompt) async -> Void) async throws -> ProviderOAuthToken {
         guard !clientID.isEmpty, clientID.utf8.count <= 500 else { throw ProviderFailure(.invalidRequest) }
-        let scopes = ManagedProvider.twitch.scopes.joined(separator: " ")
+        guard additionalScopes.allSatisfy(Self.optionalChatScopes.contains) else { throw ProviderFailure(.invalidRequest) }
+        let scopes = Array(Set(ManagedProvider.twitch.scopes + additionalScopes)).sorted().joined(separator: " ")
         var request = URLRequest(url: URL(string: "https://id.twitch.tv/oauth2/device")!)
         request.httpMethod = "POST"; request.timeoutInterval = 30
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
