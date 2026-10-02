@@ -23,6 +23,9 @@ spec['targets'].each_value do |target|
 end
 target=spec['targets'].delete('StreamMac')
 target['type']='tool'
+target['settings'] ||= {}
+target['settings']['base'] ||= {}
+target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
 target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
 target['sources'] << File.join(root,'scripts/studio_dual_canvas_harness.swift')
 target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')

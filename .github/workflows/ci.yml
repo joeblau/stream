@@ -70,6 +70,8 @@ jobs:
           RECOVERY_BUILD_PATH=build/tests zsh scripts/run_session_recovery_harness.zsh
       - name: Qualify recorded public chat timing
         run: CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh
+      - name: Qualify complete comment presentation and recorded pages
+        run: COMMENT_BUILD_PATH=build/desktop zsh scripts/run_comment_presentation_harness.zsh
 
       - name: Qualify generated program recordings
         run: zsh scripts/run_program_recording_harness.zsh
