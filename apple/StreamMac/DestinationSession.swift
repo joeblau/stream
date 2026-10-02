@@ -11,6 +11,18 @@ final class DestinationSession: ObservableObject {
     @Published var selectedID: UUID?
     @Published var credentials: [UUID: DestinationCredentials] = [:]
     @Published var errorMessage: String?
+    @Published var measuredUplinkMbps: Double = UserDefaults.standard.double(forKey: "destinations.measuredUplinkMbps") {
+        didSet { UserDefaults.standard.set(measuredUplinkMbps, forKey: "destinations.measuredUplinkMbps") }
+    }
+    @Published var measuredSessionLimit: Int = UserDefaults.standard.integer(forKey: "destinations.measuredSessionLimit") {
+        didSet { UserDefaults.standard.set(measuredSessionLimit, forKey: "destinations.measuredSessionLimit") }
+    }
+    func encodingPlan(program: OutputProfile) -> DestinationEncodingPlan {
+        DestinationEncodingPlan(destinations: enabled, program: program,
+            measuredUplinkMbps: measuredUplinkMbps > 0 ? measuredUplinkMbps : nil,
+            measuredSessionLimit: measuredSessionLimit > 0 ? measuredSessionLimit : nil)
+    }
+
     private var savedCredentials: [UUID: DestinationCredentials] = [:]
     private let store: DestinationStore
 
@@ -84,7 +96,7 @@ final class DestinationSession: ObservableObject {
 
     func startErrors(program: OutputProfile) -> [String] {
         if enabled.isEmpty { return ["Enable a destination in the Destinations panel before going live."] }
-        return enabled.flatMap { destination in
+        return encodingPlan(program: program).issues + enabled.flatMap { destination in
             DestinationValidator.startErrors(destination, credentials: savedCredentials(for: destination.id), program: program)
                 .map { "\(destination.name): \($0)" }
         }

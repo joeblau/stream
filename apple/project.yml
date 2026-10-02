@@ -99,6 +99,7 @@ targets:
       - Stream
       # The publishers are process-agnostic. ScreenCaptureKit now runs them in
       # the host app instead of a ReplayKit broadcast upload extension.
+      - StreamBroadcast/Publisher.swift
       - StreamBroadcast/RTMPPublisher.swift
       - StreamBroadcast/SessionPublisher.swift
       - StreamBroadcast/FacecamCapture.swift
@@ -169,6 +170,7 @@ targets:
       # The publishers + facecam pipeline are process-agnostic and shared with
       # the iOS app (FacecamCapture carries #if os(iOS) shims); the publishing
       # libraries must be loaded exactly once, into the app target only.
+      - StreamBroadcast/Publisher.swift
       - StreamBroadcast/RTMPPublisher.swift
       - StreamBroadcast/SessionPublisher.swift
       - StreamBroadcast/FacecamCapture.swift

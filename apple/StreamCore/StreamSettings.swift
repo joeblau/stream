@@ -140,6 +140,8 @@ public struct StreamSettings: Codable, Equatable, Sendable {
     public var videoQuality: Int
     public var videoBitrate: Int        // bits per second
     public var audioBitrate: Int        // bits per second
+    /// Optional per-destination publishing adapter override; old settings decode as nil.
+    public var destinationKeyframeSeconds: Double? = nil
     public var frameRate: Int           // fps hint
     /// The encoder's target video codec. HEVC is honored on SRT and
     /// enhanced-RTMP; traditional RTMP ingests fall back to H.264 (see `VideoCodec`).
@@ -318,6 +320,7 @@ public struct StreamSettings: Codable, Equatable, Sendable {
         videoQuality = try c.decodeIfPresent(Int.self, forKey: .videoQuality) ?? d.videoQuality
         videoBitrate = try c.decodeIfPresent(Int.self, forKey: .videoBitrate) ?? d.videoBitrate
         audioBitrate = try c.decodeIfPresent(Int.self, forKey: .audioBitrate) ?? d.audioBitrate
+        destinationKeyframeSeconds = try c.decodeIfPresent(Double.self, forKey: .destinationKeyframeSeconds)
         frameRate = try c.decodeIfPresent(Int.self, forKey: .frameRate) ?? d.frameRate
         videoCodec = try c.decodeIfPresent(VideoCodec.self, forKey: .videoCodec) ?? d.videoCodec
         pipEnabled = try c.decodeIfPresent(Bool.self, forKey: .pipEnabled) ?? d.pipEnabled

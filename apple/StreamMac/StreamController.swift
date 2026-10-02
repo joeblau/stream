@@ -145,14 +145,12 @@ final class StreamController: ObservableObject {
     private let previewEngine: CompositionEngine
     /// The W03 staged/program scene model; the engines follow its snapshots.
     private let previewProgram: PreviewProgramModel
-    /// Reached from the capture callbacks (arbitrary queues) and the main actor.
-    private let publisherBox = PublisherBox()
-    private var publisher: (any Publisher)? {
-        didSet { publisherBox.publisher = publisher }
-    }
-    private var publisherTask: Task<Void, Never>?
-    /// Folds the publisher's lifecycle events into `streamState`.
-    private var eventTask: Task<Void, Never>?
+    let destinationOutputs = DestinationOutputController(factory: { transport in
+        switch transport {
+        case .rtmp, .rtmps: return RTMPPublisher()
+        case .srt, .whip: return SessionPublisher(protocol: transport)
+        }
+    })
     /// Ordered publisher video path: the engine's publisher sink yields into
     /// this newest-only stream; one consumer awaits `appendVideo` in order.
     private var videoConsumer: Task<Void, Never>?
@@ -195,7 +193,6 @@ final class StreamController: ObservableObject {
     /// A profile edit waiting for the active stream/recording to end; non-nil
     /// means "applies on next session". The settings UI marks this state.
     @Published private(set) var stagedProfile: OutputProfile?
-    private var outputSizeSentToPublisher = false
     private var cancellables: Set<AnyCancellable> = []
 
     init(sceneStore: SceneStore, previewProgram: PreviewProgramModel,
@@ -317,7 +314,7 @@ final class StreamController: ObservableObject {
         // ingest; the engine mixes once and the publisher/recorder tap the
         // program bus (below), replacing the old direct enqueueMic/enqueueApp
         // path. Both hand-offs fire off the main actor.
-        let publisherBox = self.publisherBox
+        let publisherBox = destinationOutputs.fanout
         let audioEngine = self.audioEngine
         capturePool.onScreenAudioSample = { key, sample in
             audioEngine.enqueue(.capture(key), sample)
@@ -352,7 +349,7 @@ final class StreamController: ObservableObject {
         // stalling the mix, and chunks are simply dropped while no publisher
         // owns the session (same contract as the publisher video sink below).
         addProgramAudioTap { [publisherBox] sample in
-            publisherBox.publisher?.enqueueProgram(sample)
+            publisherBox.enqueueAudio(sample)
         }
         // A07 (issue #119): the monitor output taps the MONITOR bus once for
         // the controller's lifetime, the same way — while monitoring is off
@@ -380,9 +377,7 @@ final class StreamController: ObservableObject {
         videoContinuation = continuation
         videoConsumer = Task {
             for await sample in stream {
-                if let publisher = publisherBox.publisher {
-                    await publisher.appendVideo(sample)
-                }
+                publisherBox.enqueueVideo(sample)
             }
         }
         let engine = self.engine
@@ -392,6 +387,7 @@ final class StreamController: ObservableObject {
                 continuation.yield(frame.sampleBuffer)
             }
         }
+        destinationOutputs.stateDidChange = { [weak self] in self?.destinationsDidChange() }
         // A10 (issue #122): push the persisted delays/ducking onto the
         // engines once, so the first pipeline start is already aligned — the
         // engine-side maps (registry delays, delay lines, duck config) all
@@ -402,7 +398,7 @@ final class StreamController: ObservableObject {
 
     /// Live encode/uplink metrics for the stats HUD, straight from the publisher.
     func statsSnapshot() async -> LiveStats? {
-        await publisher?.statsSnapshot()
+        await destinationOutputs.statsSnapshot()
     }
 
     // MARK: - Frame subscriptions (W08 fan-out)
@@ -621,118 +617,48 @@ final class StreamController: ObservableObject {
     func goLive() {
         guard streamState.canStart else { return }
         settings = settingsStore.load()
-        let errors = destinations.startErrors(program: settings.outputProfile)
-        guard errors.isEmpty, let destination = destinations.enabled.first else {
-            errorMessage = errors.joined(separator: "\n")
+        let plan = destinations.encodingPlan(program: settings.outputProfile)
+        guard plan.issues.isEmpty else { errorMessage = plan.issues.joined(separator: "\n"); return }
+        // Keep the program and recording canvas unchanged. Every destination's
+        // encoder receives its own output geometry from its adapted settings.
+        for destination in destinations.enabled { startDestination(destination.id) }
+    }
+
+    func startDestination(_ id: UUID) {
+        guard let destination = destinations.saved.first(where: { $0.id == id }) else { return }
+        let base = settingsStore.load()
+        let credentials = destinations.savedCredentials(for: id)
+        let errors = DestinationValidator.startErrors(destination, credentials: credentials, program: base.outputProfile)
+        guard errors.isEmpty else {
+            let message = errors.joined(separator: "\n")
+            errorMessage = message
+            destinationOutputs.recordFailure(destination, message: message)
             return
         }
-        settings = DestinationValidator.settings(destination,
-            credentials: destinations.savedCredentials(for: destination.id), base: settings)
-        applyOutputProfile(settings.outputProfile)
-        // Go Live needs the render pipeline (frames to publish); the demand
-        // check below starts it even if the user never turned the preview on.
-        let publisher = makePublisher(for: settings.selectedProtocol)
-        self.publisher = publisher
-        outputSizeSentToPublisher = false
-        streamState = .connecting
-        updatePipelineDemand()
-        let settings = self.settings
-        publisherTask = Task { [weak self] in
-            do {
-                try await publisher.start(settings)
-            } catch {
-                self?.publisherDidFail(error)
-            }
-        }
-        eventTask = Task { [weak self] in
-            for await event in publisher.events {
-                self?.handlePublisherEvent(event)
-            }
-        }
-        // The canvas is known up front (profile-owned), so hand the encoder
-        // its output size immediately instead of waiting for a first frame.
-        applyOutputSizeIfPossible()
-    }
-
-    func stopStream() {
-        guard streamState.isActive else { return }
-        streamState = .stopping
-        publisherTask?.cancel()
-        publisherTask = nil
-        eventTask?.cancel()
-        eventTask = nil
-        outputSizeSentToPublisher = false
-        let ending = publisher
-        publisher = nil
-        guard let ending else {
-            streamState = .idle
-            updatePipelineDemand()
+        let activeDestinations = destinations.saved.filter {
+            destinationOutputs.states[$0.id]?.isActive == true && $0.id != id
+        } + [destination]
+        let plan = DestinationEncodingPlan(destinations: activeDestinations, program: base.outputProfile,
+            measuredUplinkMbps: destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil,
+            measuredSessionLimit: destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil)
+        guard plan.issues.isEmpty else {
+            destinationOutputs.recordFailure(destination, message: plan.issues.joined(separator: "\n"))
             return
         }
-        Task { [weak self] in
-            await ending.stop()
-            self?.streamDidStop()
-        }
+        let adapted = DestinationValidator.settings(destination, credentials: credentials, base: base)
+        destinationOutputs.start(destination, settings: adapted)
     }
 
-    // MARK: - Streaming state machine (folded from PublisherEvents)
-
-    private func handlePublisherEvent(_ event: PublisherEvent) {
-        switch event {
-        case .connecting:
-            // A retry attempt during .reconnecting keeps that state; only the
-            // acknowledged publish below ends it.
-            if !streamState.isActive {
-                streamState = .connecting
-            }
-        case .published:
-            // The ingest acknowledged the publish — the ONLY path to LIVE.
-            if streamState.isActive {
-                streamState = .live
-                errorMessage = nil
-            }
-        case .reconnecting(let reason):
-            if streamState == .live || streamState == .connecting {
-                streamState = .reconnecting(reason: reason)
-            }
-        case .failed(let message):
-            if streamState.isActive {
-                failStream(message)
-            }
-        case .stopped:
-            streamDidStop()
-        }
+    func stopDestination(_ id: UUID) { destinationOutputs.stop(id) }
+    func retryDestination(_ id: UUID) {
+        guard !(destinationOutputs.states[id]?.isActive ?? false) else { return }
+        startDestination(id)
     }
+    func stopStream() { destinationOutputs.stopAll() }
 
-    private func streamDidStop() {
-        guard streamState == .stopping else { return }
-        streamState = .idle
-        promoteStagedProfileIfOutputsIdle()
-        updatePipelineDemand()
-    }
-
-    private func publisherDidFail(_ error: Error) {
-        // `.stopping` excluded: a late error from a publisher the user already
-        // stopped must not flip the session to `.failed`.
-        guard streamState.isActive, streamState != .stopping else { return }
-        failStream(error.localizedDescription)
-    }
-
-    /// Ends the session into `.failed`: tears the publisher down and surfaces
-    /// the message. From `.failed` the transport bar offers a fresh Go Live.
-    private func failStream(_ message: String) {
-        publisherTask?.cancel()
-        publisherTask = nil
-        eventTask?.cancel()
-        eventTask = nil
-        outputSizeSentToPublisher = false
-        let ending = publisher
-        publisher = nil
-        streamState = .failed(message)
-        errorMessage = message
-        if let ending {
-            Task { await ending.stop() }
-        }
+    private func destinationsDidChange() {
+        streamState = destinationOutputs.aggregateState
+        if streamState.isLive { errorMessage = nil }
         promoteStagedProfileIfOutputsIdle()
         updatePipelineDemand()
     }
@@ -1061,7 +987,6 @@ final class StreamController: ObservableObject {
         stopFeedbackDiagnostics()
         capturePool.stopAll()
         audio.stop()
-        outputSizeSentToPublisher = false
         promoteStagedProfileIfOutputsIdle()
     }
 
@@ -1083,15 +1008,6 @@ final class StreamController: ObservableObject {
             inputUIDs.insert(preferred)
         }
         monitorFeedbackRiskDeviceUID = inputUIDs.contains(effectiveUID) ? effectiveUID : nil
-    }
-
-    private func makePublisher(for transport: StreamCore.StreamProtocol) -> any Publisher {
-        switch transport {
-        case .rtmp, .rtmps:
-            return RTMPPublisher()
-        case .srt, .whip:
-            return SessionPublisher(protocol: transport)
-        }
     }
 
     // MARK: - Scene → source routing (S05, issue #73)
@@ -1290,17 +1206,7 @@ final class StreamController: ObservableObject {
         min(max(activeProfile.frameRate, 1), max(1, capabilities.hardwareMaxFrameRate))
     }
 
-    /// Hands the profile's canvas to the publisher exactly once per broadcast
-    /// (`setOutputSize` itself also locks after the first call). The size is
-    /// known at Go Live — no first-frame wait — so the encoder never starts at
-    /// a source-derived size.
-    private func applyOutputSizeIfPossible() {
-        guard streamState.isActive, !outputSizeSentToPublisher,
-              let publisher else { return }
-        outputSizeSentToPublisher = true
-        let canvasSize = activeProfile.canvasSize
-        Task { await publisher.setOutputSize(canvasSize, nativeShortEdge: Int(min(canvasSize.width, canvasSize.height))) }
-    }
+
 }
 
 /// A08 (issue #120): carries the non-Sendable `ChannelFXProcessor` into a
@@ -1342,27 +1248,6 @@ private final class ChannelFXInsertBox: @unchecked Sendable {
     /// (plugin missing, load failure, or the channel is idle).
     func hostedAudioUnitHandles() -> [UUID: HostedAudioUnitHandle] {
         processor.hostedHandles()
-    }
-}
-
-/// Lock-protected hand-off of the current publisher to the capture callbacks,
-/// which fire on ScreenCaptureKit / audio queues (off the main actor) and call
-/// only the publisher's nonisolated, thread-safe audio ingress.
-private final class PublisherBox: @unchecked Sendable {
-    private var lock = os_unfair_lock_s()
-    private var stored: (any Publisher)?
-
-    var publisher: (any Publisher)? {
-        get {
-            os_unfair_lock_lock(&lock)
-            defer { os_unfair_lock_unlock(&lock) }
-            return stored
-        }
-        set {
-            os_unfair_lock_lock(&lock)
-            stored = newValue
-            os_unfair_lock_unlock(&lock)
-        }
     }
 }
 

@@ -14,11 +14,13 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
     public var videoCodec: VideoCodec
     public var videoBitrate: Int
     public var audioBitrate: Int
+    public var ingestLimits: DestinationIngestLimits?
+    public var keyframeSeconds: Double?
 
     public init(id: UUID = UUID(), name: String, transport: StreamProtocol = .rtmps,
                 isEnabled: Bool = true, followsProgramProfile: Bool = true,
                 outputProfile: OutputProfile = .default, videoCodec: VideoCodec = .h264,
-                videoBitrate: Int = 4_000_000, audioBitrate: Int = 128_000) {
+                videoBitrate: Int = 4_000_000, audioBitrate: Int = 128_000, ingestLimits: DestinationIngestLimits? = nil, keyframeSeconds: Double? = nil) {
         self.id = id
         self.name = name
         self.transport = transport
@@ -28,6 +30,8 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
         self.videoCodec = videoCodec
         self.videoBitrate = videoBitrate
         self.audioBitrate = audioBitrate
+        self.ingestLimits = ingestLimits
+        self.keyframeSeconds = keyframeSeconds
     }
 
     public func duplicated() -> Self {
@@ -125,6 +129,10 @@ public enum DestinationValidator {
         if !(100_000...100_000_000).contains(destination.videoBitrate) {
             errors.append("Video bitrate must be 0.1–100 Mbps.")
         }
+        if let seconds = destination.keyframeSeconds,
+           !seconds.isFinite || seconds < 1 || seconds > 10 || seconds.rounded() != seconds {
+            errors.append("Keyframe interval must be a whole number from 1–10 seconds.")
+        }
         if !(16_000...512_000).contains(destination.audioBitrate) {
             errors.append("Audio bitrate must be 16–512 kbps.")
         }
@@ -145,10 +153,16 @@ public enum DestinationValidator {
         if !destination.transport.supports(destination.videoCodec), let notice = destination.codecNotice {
             errors.append(notice)
         }
-        if let reason = capabilities.gateReason(for: destination.effectiveProfile(program: program),
-                                               destination: destination.transport) {
-            errors.append(reason)
+        let profile = destination.effectiveProfile(program: program)
+        if !capabilities.hardwareTier.fits(width: profile.canvasWidth, height: profile.canvasHeight) {
+            errors.append("This Mac's estimated hardware limit is \(capabilities.hardwareTier.displayName).")
         }
+        if profile.frameRate > capabilities.hardwareMaxFrameRate {
+            errors.append("This Mac's estimated hardware limit is \(capabilities.hardwareMaxFrameRate) fps.")
+        }
+        let limits = destination.ingestLimits ?? .conservative(for: destination.transport)
+        errors += limits.errors(profile: profile, codec: destination.videoCodec,
+                                keyframeSeconds: destination.keyframeSeconds ?? 2, audioBitrate: destination.audioBitrate)
         return errors
     }
 
@@ -164,6 +178,7 @@ public enum DestinationValidator {
         settings.videoCodec = destination.videoCodec
         settings.videoBitrate = destination.videoBitrate
         settings.audioBitrate = destination.audioBitrate
+        settings.destinationKeyframeSeconds = destination.keyframeSeconds
         return settings
     }
 }

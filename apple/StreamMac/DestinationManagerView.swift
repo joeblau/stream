@@ -5,6 +5,7 @@ import StreamCore
 struct DestinationManagerView: View {
     @ObservedObject var session: DestinationSession
     var programProfile: OutputProfile
+    @EnvironmentObject private var controller: StreamController
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -31,6 +32,12 @@ struct DestinationManagerView: View {
                     editor(index, id: id)
                 }
             }
+            DestinationStatusRows(outputs: controller.destinationOutputs,
+                                  destinations: session.saved,
+                                  onStart: controller.startDestination,
+                                  onStop: controller.stopDestination,
+                                  onRetry: controller.retryDestination)
+            resourceEstimate
             if let error = session.errorMessage {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
@@ -96,6 +103,29 @@ struct DestinationManagerView: View {
         }
         TextField("Video bitrate (bps)", value: $session.draft[index].videoBitrate, format: .number)
         TextField("Audio bitrate (bps)", value: $session.draft[index].audioBitrate, format: .number)
+        TextField("Keyframe interval (seconds)", value: Binding(
+            get: { session.draft[index].keyframeSeconds ?? 2 },
+            set: { session.draft[index].keyframeSeconds = $0 }), format: .number)
+        Toggle("Override ingest limits", isOn: Binding(
+            get: { session.draft[index].ingestLimits != nil },
+            set: { enabled in session.draft[index].ingestLimits = enabled ? .init() : nil }))
+        if session.draft[index].ingestLimits != nil {
+            Picker("Evidence", selection: limitValue(index, \.source)) {
+                Text("Custom override").tag(DestinationIngestLimits.Source.customOverride)
+                Text("Validated against ingest").tag(DestinationIngestLimits.Source.validatedIngest)
+            }
+            TextField("Ingest maximum width", value: limitValue(index, \.maxWidth), format: .number)
+            TextField("Ingest maximum height", value: limitValue(index, \.maxHeight), format: .number)
+            TextField("Ingest maximum fps", value: limitValue(index, \.maxFrameRate), format: .number)
+            TextField("Ingest maximum keyframe seconds", value: limitValue(index, \.maxKeyframeSeconds), format: .number)
+            TextField("Ingest maximum audio bps", value: limitValue(index, \.maxAudioBitrate), format: .number)
+            Toggle("Ingest accepts HEVC", isOn: Binding(
+                get: { session.draft[index].ingestLimits?.codecs.contains(.hevc) ?? false },
+                set: { enabled in session.draft[index].ingestLimits?.codecs = enabled ? [.h264, .hevc] : [.h264] }))
+        } else {
+            Text("Conservative limits: \(session.draft[index].transport == .whip ? "H.264/Opus, 1080p30" : "AAC, 2-second keyframes"). Validate custom overrides with your ingest.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
         if let notice = session.draft[index].codecNotice {
             Label(notice, systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(.orange)
@@ -103,15 +133,34 @@ struct DestinationManagerView: View {
         ForEach(DestinationValidator.errors(session.draft[index], credentials: session.credentials[id] ?? .init()), id: \.self) { error in
             Text(error).font(.caption).foregroundStyle(.red)
         }
-        if let reason = OutputCapabilities.current.gateReason(
-            for: session.draft[index].effectiveProfile(program: programProfile), destination: session.draft[index].transport) {
-            Text(reason).font(.caption).foregroundStyle(.orange)
+        ForEach(DestinationValidator.startErrors(session.draft[index],
+                   credentials: session.credentials[id] ?? .init(), program: programProfile), id: \.self) { error in
+            Text(error).font(.caption).foregroundStyle(.orange)
         }
         HStack {
             Button("Duplicate") { session.duplicate(id) }
             Spacer()
             Button("Remove", role: .destructive) { session.remove(id) }
         }
+    }
+
+    private var resourceEstimate: some View {
+        let plan = session.encodingPlan(program: programProfile)
+        return VStack(alignment: .leading, spacing: 5) {
+            Text("Applied output estimate: \(plan.encoderSessions) encoder sessions, \(Double(plan.aggregateBitrate) / 1_000_000, specifier: "%.1f") Mbps payload; allow \(plan.requiredUplinkMbps, specifier: "%.1f") Mbps uplink.")
+            Text("\(plan.compatibleGroups.count) compatible profile groups. This transport backend uses a separate encoder per destination; local recording needs its own session.")
+            TextField("Measured uplink Mbps (0 = unknown)", value: $session.measuredUplinkMbps, format: .number)
+            TextField("Tested encoder session budget (0 = unknown)", value: $session.measuredSessionLimit, format: .number)
+            ForEach(plan.issues, id: \.self) { Text($0).foregroundStyle(.orange) }
+        }.font(.caption).foregroundStyle(.secondary)
+    }
+
+    private func limitValue<Value>(_ index: Int, _ path: WritableKeyPath<DestinationIngestLimits, Value>) -> Binding<Value> {
+        Binding(get: { (session.draft[index].ingestLimits ?? .init())[keyPath: path] }, set: { value in
+            var limits = session.draft[index].ingestLimits ?? .init()
+            limits[keyPath: path] = value
+            session.draft[index].ingestLimits = limits
+        })
     }
 
     private func secret(_ id: UUID, _ path: WritableKeyPath<DestinationCredentials, String>) -> Binding<String> {
@@ -130,5 +179,49 @@ struct DestinationManagerView: View {
             else if path == \OutputProfile.canvasHeight { session.draft[index].outputProfile = profile.with(canvasHeight: value) }
             else { session.draft[index].outputProfile = profile.with(frameRate: value) }
         })
+    }
+}
+
+private struct DestinationStatusRows: View {
+    @ObservedObject var outputs: DestinationOutputController
+    var destinations: [StreamDestination]
+    var onStart: (UUID) -> Void
+    var onStop: (UUID) -> Void
+    var onRetry: (UUID) -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(outputs.liveCount) live / \(outputs.activeCount) active\(outputs.partialSuccess ? " · Partial success" : "")")
+                .font(.caption.weight(.semibold))
+            ForEach(destinations) { destination in
+                let state = outputs.states[destination.id] ?? .idle
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(destination.name).lineLimit(1)
+                        Spacer()
+                        Text(label(state)).font(.caption).foregroundStyle(state.isLive ? .green : .secondary)
+                    }
+                    HStack {
+                        if state.canStart {
+                            Button(state == .idle ? "Start" : "Retry") {
+                                if state == .idle { onStart(destination.id) } else { onRetry(destination.id) }
+                            }
+                        } else {
+                            Button("Stop") { onStop(destination.id) }.disabled(state == .stopping)
+                        }
+                        if case .failed(let reason) = state { Text(reason).font(.caption).foregroundStyle(.orange) }
+                    }
+                }
+            }
+        }
+    }
+    private func label(_ state: StreamSessionState) -> String {
+        switch state {
+        case .idle: return "Idle"
+        case .connecting: return "Connecting"
+        case .live: return "Live"
+        case .reconnecting: return "Reconnecting"
+        case .stopping: return "Stopping"
+        case .failed: return "Failed"
+        }
     }
 }

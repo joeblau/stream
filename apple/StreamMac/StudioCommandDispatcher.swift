@@ -1183,7 +1183,11 @@ final class StudioCommandDispatcher: ObservableObject {
             guard controller.streamState.canStart else {
                 return .unavailable("The stream is already \(controller.streamState.busyLabel).")
             }
-            let errors = controller.destinations.startErrors(program: session.activeSettings.outputProfile)
+            let destinations = controller.destinations
+            guard !destinations.enabled.isEmpty else {
+                return .invalidValue("Enable a destination in the Destinations panel before going live.")
+            }
+            let errors = destinations.encodingPlan(program: session.activeSettings.outputProfile).issues
             guard errors.isEmpty else { return .invalidValue(errors.joined(separator: "\n")) }
             return nil
         case .stopStream:

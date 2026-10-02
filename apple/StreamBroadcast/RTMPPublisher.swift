@@ -101,7 +101,7 @@ actor RTMPPublisher: Publisher {
         (events, eventCont) = AsyncStream.makeStream(of: PublisherEvent.self, bufferingPolicy: .unbounded)
         (micStream, micCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
         (appStream, appCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
-        (programStream, programCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .unbounded)
+        (programStream, programCont) = AsyncStream.makeStream(of: CMSampleBuffer.self, bufferingPolicy: .bufferingNewest(24))
     }
 
     nonisolated func enqueueMic(_ sb: CMSampleBuffer) { micCont.yield(sb) }
@@ -772,7 +772,7 @@ actor RTMPPublisher: Publisher {
         v.bitRate = min(settings.videoBitrate, await networkController.currentTargetBitRate())
         v.expectedFrameRate = Double(frameRate)
         v.frameInterval = max(0, (1.0 / Double(frameRate)) - 0.001)
-        v.maxKeyFrameIntervalDuration = 2
+        v.maxKeyFrameIntervalDuration = Int32(min(10, max(1, settings.destinationKeyframeSeconds ?? 2)))
         // VBR (.average), not CBR: a mostly-static screen compresses to near-
         // nothing instead of being padded to the full target, and mid-session
         // AverageBitRate changes are reliably applied so the ABR actually takes
