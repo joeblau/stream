@@ -122,7 +122,13 @@ actor ProviderTokenVault {
     func send(_ provider: ManagedProvider, request: URLRequest) async throws -> Data {
         let expected = generation(provider)
         let allowed = provider == .youtube ? "www.googleapis.com" : (provider == .twitch ? "api.twitch.tv" : "")
-        guard request.url?.scheme == "https", request.url?.host == allowed, request.url?.user == nil, request.url?.password == nil, request.url?.path.hasPrefix(provider == .youtube ? "/youtube/v3/" : "/helix/") == true else { throw ProviderFailure(.invalidRequest) }
+        let path = request.url?.path ?? ""
+        let regularAPI = path.hasPrefix(provider == .youtube ? "/youtube/v3/" : "/helix/")
+        let thumbnailUpload = provider == .youtube && path == "/upload/youtube/v3/thumbnails/set" && request.httpMethod == "POST"
+            && ["image/jpeg", "image/png"].contains(request.value(forHTTPHeaderField: "Content-Type") ?? "")
+            && (1...2_097_152).contains(request.httpBody?.count ?? 0)
+        guard request.url?.scheme == "https", request.url?.host == allowed, request.url?.user == nil, request.url?.password == nil,
+              regularAPI || thumbnailUpload else { throw ProviderFailure(.invalidRequest) }
         var token = try await current(provider), authorized = request
         authorized.setValue("Bearer \(token.access)", forHTTPHeaderField: "Authorization")
         if provider == .twitch { authorized.setValue(clientID(provider), forHTTPHeaderField: "Client-ID") }

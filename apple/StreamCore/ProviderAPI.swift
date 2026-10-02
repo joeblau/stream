@@ -186,10 +186,10 @@ public extension ProviderAPI {
         guard data.count <= 2_097_152, let row = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure(.invalidResponse) }
         return try Self.youtubeEvent(row)
     }
-    /// Update only the snippet. Preserve all writable snippet fields from a
-    /// fresh read and leave privacy/contentDetails untouched. Privacy changes
-    /// require YouTube Studio until that broader mutation is implemented.
-    func editYouTubeEvent(id: String, title: String, description: String, scheduledAt: Date) async throws -> ProviderEvent {
+    /// Preserve all writable snippet fields from a
+    /// fresh read. An explicit privacy selection adds only the writable privacy
+    /// field; contentDetails (including automatic start/stop) remain untouched.
+    func editYouTubeEvent(id: String, title: String, description: String, scheduledAt: Date, privacy: YouTubeEventDraft.Privacy? = nil) async throws -> ProviderEvent {
         try YouTubeEventDraft(title: title, description: description, scheduledAt: scheduledAt).validate()
         guard ProviderChannel.validID(id) else { throw ProviderFailure(.invalidRequest) }
         let object = try await object(.youtube, path: "/youtube/v3/liveBroadcasts", query: ["part": "snippet,status", "id": id])
@@ -203,16 +203,49 @@ public extension ProviderAPI {
         if let end = old["scheduledEndTime"] as? String, let date = Self.date(end), date <= scheduledAt { throw ProviderFailure(.invalidRequest) }
         snippet["title"] = title; snippet["description"] = description
         snippet["scheduledStartTime"] = ISO8601DateFormatter().string(from: scheduledAt)
-        var request = try Self.request(.youtube, path: "/youtube/v3/liveBroadcasts", query: ["part": "snippet"])
+        var request = try Self.request(.youtube, path: "/youtube/v3/liveBroadcasts", query: ["part": privacy == nil ? "snippet" : "snippet,status"])
         request.httpMethod = "PUT"; request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let etag = row["etag"] as? String { request.setValue(etag, forHTTPHeaderField: "If-Match") }
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["id": id, "snippet": snippet])
+        var body: [String: Any] = ["id": id, "snippet": snippet]
+        if let privacy { body["status"] = ["privacyStatus": privacy.rawValue] }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let data = try await send(.youtube, request)
         guard data.count <= 2_097_152, let updated = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure(.invalidResponse) }
         // PUT with only snippet does not return status. Reuse the verified
         // pre-update privacy/state rather than inventing a changed lifecycle.
-        var merged = updated; merged["status"] = row["status"]
+        guard updated["id"] as? String == id else { throw ProviderFailure(.invalidResponse) }
+        var merged = updated
+        if let privacy {
+            guard let status = updated["status"] as? [String: Any], status["privacyStatus"] as? String == privacy.rawValue else { throw ProviderFailure(.invalidResponse) }
+        } else { merged["status"] = row["status"] }
         return try Self.youtubeEvent(merged)
+    }
+    /// Deliberate bounded media upload. The owned upcoming event is verified before
+    /// the single POST; a lost acknowledgement is uncertain and never replayed.
+    func uploadYouTubeThumbnail(eventID: String, expectedChannelID: String, image: Data, mimeType: String) async throws -> ProviderEvent {
+        guard ProviderChannel.validID(expectedChannelID), !image.isEmpty, image.count <= 2_097_152,
+              (mimeType == "image/png" && image.starts(with: [137,80,78,71,13,10,26,10])) ||
+              (mimeType == "image/jpeg" && image.starts(with: [255,216,255])) else { throw ProviderFailure(.invalidRequest) }
+        let event = try await youtubeEvent(id: eventID)
+        guard event.channelID == expectedChannelID, event.state == .upcoming else { throw ProviderFailure(.invalidRequest) }
+        var request = try Self.request(.youtube, path: "/upload/youtube/v3/thumbnails/set", query: ["videoId": eventID, "uploadType": "media"])
+        request.httpMethod = "POST"; request.setValue(mimeType, forHTTPHeaderField: "Content-Type"); request.httpBody = image
+        let bytes = try await send(.youtube, request)
+        guard bytes.count <= 2_097_152,
+              let object = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+              object["kind"] as? String == "youtube#thumbnailSetResponse",
+              let items = object["items"] as? [[String: Any]], !items.isEmpty, items.count <= 8,
+              items.contains(where: { item in
+                  ["default", "medium", "high", "standard", "maxres"].contains { key in
+                      guard let thumbnail = item[key] as? [String: Any],
+                            let value = thumbnail["url"] as? String, value.utf8.count <= 4_096,
+                            let url = URL(string: value), url.scheme == "https", url.host != nil,
+                            url.user == nil, url.password == nil,
+                            let width = thumbnail["width"] as? Int, let height = thumbnail["height"] as? Int else { return false }
+                      return (1...16_384).contains(width) && (1...16_384).contains(height)
+                  }
+              }) else { throw ProviderFailure(.invalidResponse) }
+        return event
     }
     func deleteYouTubeEvent(id: String) async throws {
         let event = try await youtubeEvent(id: id)

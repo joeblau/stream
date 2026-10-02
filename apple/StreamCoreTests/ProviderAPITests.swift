@@ -106,6 +106,46 @@ private final class ProviderClock: @unchecked Sendable {
         #expect((body["snippet"] as? [String: String])?["categoryId"] == "20")
         #expect((body["snippet"] as? [String: String])?["scheduledEndTime"] == "2030-01-02T00:00:00Z")
     }
+    @Test("Explicit privacy edits preserve snippet fields and content settings; mismatched acknowledgements fail")
+    func privacyEdit() async throws {
+        let old = #"{"items":[{"id":"event","etag":"v1","snippet":{"categoryId":"20","scheduledEndTime":"2030-01-02T00:00:00Z"},"status":{"lifeCycleStatus":"ready","privacyStatus":"private"}}]}"#
+        let reply = #"{"id":"event","snippet":{"title":"New"},"status":{"lifeCycleStatus":"ready","privacyStatus":"unlisted"}}"#
+        let fixture = ProviderFixture([old, reply])
+        let date = ISO8601DateFormatter().date(from: "2030-01-01T01:00:00Z")!
+        let event = try await fixture.api.editYouTubeEvent(id: "event", title: "New", description: "Unicode 🎬", scheduledAt: date, privacy: .unlisted)
+        #expect(event.privacy == "unlisted" && event.state == .upcoming)
+        let request = try #require(await fixture.allRequests().last)
+        let body = try #require(JSONSerialization.jsonObject(with: request.httpBody!) as? [String: Any])
+        #expect(request.value(forHTTPHeaderField: "If-Match") == "v1")
+        #expect(body["contentDetails"] == nil)
+        #expect((body["status"] as? [String: String]) == ["privacyStatus": "unlisted"])
+        #expect((body["snippet"] as? [String: String])?["categoryId"] == "20")
+        let uncertain = ProviderFixture([old, #"{"id":"other","status":{"privacyStatus":"unlisted"}}"#])
+        await #expect(throws: ProviderFailure.self) { try await uncertain.api.editYouTubeEvent(id: "event", title: "New", description: "", scheduledAt: date, privacy: .unlisted) }
+        #expect(await uncertain.allRequests().count == 2)
+    }
+    @Test("Thumbnail upload verifies owner, sends exact bounded media once and requires a receipt")
+    func thumbnailUpload() async throws {
+        let owned = #"{"items":[{"id":"event","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"ready"}}]}"#
+        let image = Data([137,80,78,71,13,10,26,10,0])
+        let fixture = ProviderFixture([owned, #"{"kind":"youtube#thumbnailSetResponse","items":[{"default":{"url":"https://i.ytimg.com/vi/event/default.jpg","width":120,"height":90}}]}"#])
+        #expect(try await fixture.api.uploadYouTubeThumbnail(eventID: "event", expectedChannelID: "owner", image: image, mimeType: "image/png").id == "event")
+        let requests = await fixture.allRequests(), request = try #require(requests.last)
+        #expect(requests.count == 2 && request.httpMethod == "POST")
+        #expect(request.url?.path == "/upload/youtube/v3/thumbnails/set" && request.httpBody == image)
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "image/png")
+        let wrong = ProviderFixture([owned])
+        await #expect(throws: ProviderFailure.self) { try await wrong.api.uploadYouTubeThumbnail(eventID: "event", expectedChannelID: "other", image: image, mimeType: "image/png") }
+        #expect(await wrong.allRequests().count == 1)
+        let malformed = ProviderFixture([owned, #"{"kind":"youtube#thumbnailSetResponse","items":[]}"#])
+        await #expect(throws: ProviderFailure.self) { try await malformed.api.uploadYouTubeThumbnail(eventID: "event", expectedChannelID: "owner", image: image, mimeType: "image/png") }
+        #expect(await malformed.allRequests().count == 2)
+        let invalid = ProviderFixture([])
+        for data in [Data(), Data(repeating: 0, count: 2_097_153)] {
+            await #expect(throws: ProviderFailure.self) { try await invalid.api.uploadYouTubeThumbnail(eventID: "event", expectedChannelID: "owner", image: data, mimeType: "image/png") }
+        }
+        #expect(await invalid.allRequests().isEmpty)
+    }
     @Test("Complete reads live state and explicitly transitions one remote ID")
     func complete() async throws {
         let fixture = ProviderFixture([#"{"items":[{"id":"live","status":{"lifeCycleStatus":"live"}}]}"#, #"{"id":"live","status":{"lifeCycleStatus":"complete"}}"#])

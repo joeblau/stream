@@ -1,6 +1,8 @@
 import AppKit
+import ImageIO
 import StreamCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 private struct ProviderAccountsKey: EnvironmentKey {
     static let defaultValue: ProviderAccountSession? = nil
@@ -26,6 +28,7 @@ struct ProviderAccountsView: View {
     @State private var importJob: Task<Void, Never>?
     @State private var importError: String?
     @State private var importing = false
+    @State private var thumbnail: ThumbnailSelection?
     @State private var readChat = false
     @State private var writeChat = false
     @State private var moderateChat = false
@@ -90,8 +93,9 @@ struct ProviderAccountsView: View {
         }
         .onAppear { clientID = snapshot.clientID }
         .onChange(of: snapshot.clientID) { _, value in if clientID.isEmpty { clientID = value } }
-        .onChange(of: provider) { _, _ in clientID = snapshot.clientID; channelID = ""; eventID = ""; importError = nil }
-        .onChange(of: channelID) { _, _ in eventID = "" }
+        .onChange(of: provider) { _, _ in thumbnail = nil; clientID = snapshot.clientID; channelID = ""; eventID = ""; importError = nil }
+        .onChange(of: channelID) { _, _ in eventID = ""; thumbnail = nil }
+        .onChange(of: eventID) { _, _ in thumbnail = nil }
         .onDisappear { importJob?.cancel(); importJob = nil }
         .sheet(item: $edit) { selection in
             YouTubeEventEditor(selection: selection) { draft in
@@ -99,6 +103,14 @@ struct ProviderAccountsView: View {
                 else { accounts.createYouTube(draft) }
             }
         }
+        .confirmationDialog("Upload thumbnail to YouTube?", isPresented: Binding(get: { thumbnail != nil }, set: { if !$0 { thumbnail = nil } }), titleVisibility: .visible) {
+            if let thumbnail {
+                Button("Upload to \(thumbnail.title)") {
+                    accounts.uploadYouTubeThumbnail(eventID: thumbnail.eventID, channelID: thumbnail.channelID, image: thumbnail.image, mimeType: thumbnail.mimeType)
+                    self.thumbnail = nil
+                }
+            }
+        } message: { Text("This sends the selected image to the remote event. Other event settings and local outputs continue.") }
         .confirmationDialog("Delete this upcoming YouTube event?", isPresented: Binding(get: { deleteEvent != nil }, set: { if !$0 { deleteEvent = nil } }), titleVisibility: .visible) {
             if let event = deleteEvent { Button("Delete \(event.title)", role: .destructive) { accounts.deleteYouTube(eventID: event.id); eventID = ""; deleteEvent = nil } }
         } message: { Text("This deletes the selected remote event. Local recording and other destinations continue.") }
@@ -137,6 +149,7 @@ struct ProviderAccountsView: View {
                 Button("Create YouTube Event…") { edit = .init(event: nil) }
                 if let event, event.state == .upcoming {
                     Button("Edit…") { edit = .init(event: event) }
+                    Button("Choose Thumbnail…") { chooseThumbnail(event) }
                     Button("Delete…", role: .destructive) { deleteEvent = event }
                 }
             }.disabled(snapshot.isWorking || snapshot.verifiedAt == nil || channel == nil || !canManageYouTube)
@@ -144,9 +157,12 @@ struct ProviderAccountsView: View {
                 Button("Verify Selected Event") { accounts.refreshLive(.init(provider: .youtube, channelID: channel.id, eventID: event.id)) }
                     .disabled(snapshot.isWorking || !accounts.canRequest(.youtube))
             }
+            if let receipt = accounts.lastThumbnailReceipt, receipt.eventID == eventID {
+                Text("YouTube acknowledged thumbnail upload \(receipt.time.formatted(date: .omitted, time: .standard)).").font(.caption)
+            }
             Button(importing ? "Importing…" : "Add Bound Event Ingest Draft") { importDestination() }
                 .disabled(importing || snapshot.isWorking || snapshot.verifiedAt == nil || channel == nil || event == nil || event?.state == .ended)
-            Text("New events start private with automatic start/stop disabled. Configure/bind their stream in YouTube Studio, refresh, then import. Privacy edits, thumbnail upload and early start use YouTube Studio. Starting ingest can publish if an existing event has automatic start enabled; review its provider settings.")
+            Text("New events start private with automatic start/stop disabled. Configure/bind their stream in YouTube Studio, refresh, then import. Edit upcoming privacy or deliberately upload a JPEG/PNG thumbnail up to 2 MiB here. Early start uses YouTube Studio. Starting ingest can publish if an existing event has automatic start enabled; review its provider settings.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -161,6 +177,33 @@ struct ProviderAccountsView: View {
             }.disabled(snapshot.isWorking || channel == nil || twitchTitle.isEmpty || !snapshot.scopes.contains("channel:manage:broadcast"))
             Text("Twitch channel schedules are not live-event grants. Scheduling and remote event completion are unavailable; disconnecting ingest stops local delivery. No direct Twitch chat connection is granted by these scopes.").font(.caption).foregroundStyle(.secondary)
         }
+    }
+    private func chooseThumbnail(_ event: ProviderEvent) {
+        guard let channel else { return }
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.jpeg, .png]
+        panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile == true, let size = values.fileSize, size > 0, size <= 2_097_152 else { throw ProviderFailure(.invalidRequest) }
+            let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+            let image = try file.read(upToCount: 2_097_153) ?? Data()
+            guard image.count <= 2_097_152,
+                  let source = CGImageSourceCreateWithData(image as CFData, nil), CGImageSourceGetCount(source) == 1,
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                  (1...4_096).contains(width), (1...4_096).contains(height),
+                  CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 256] as CFDictionary) != nil else { throw ProviderFailure(.invalidRequest) }
+            let mime: String
+            if image.starts(with: [137,80,78,71,13,10,26,10]) { mime = "image/png" }
+            else if image.starts(with: [255,216,255]) { mime = "image/jpeg" }
+            else { throw ProviderFailure(.invalidRequest) }
+            thumbnail = .init(eventID: event.id, channelID: channel.id, title: event.title, image: image, mimeType: mime)
+            importError = nil
+        } catch { importError = "Choose a valid JPEG or PNG thumbnail no larger than 2 MiB or 4096 pixels per side." }
     }
     private func importDestination() {
         guard let channel else { return }
@@ -178,6 +221,12 @@ struct ProviderAccountsView: View {
             }
         }
     }
+}
+
+private struct ThumbnailSelection {
+    let eventID: String, channelID: String, title: String
+    let image: Data
+    let mimeType: String
 }
 
 private struct EventEditorSelection: Identifiable {
@@ -201,9 +250,8 @@ private struct YouTubeEventEditor: View {
             Picker("Timezone", selection: $timezone) { ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { Text($0).tag($0) } }
             DatePicker("Scheduled start", selection: $draft.scheduledAt, in: Date()...).environment(\.timeZone, zone)
             Text("\(draft.scheduledAt.formatted(.iso8601)) · provider receives an absolute instant.").font(.caption).foregroundStyle(.secondary)
-            if selection.event == nil {
-                Picker("Privacy", selection: $draft.privacy) { ForEach(YouTubeEventDraft.Privacy.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
-            } else { Text("Privacy and other provider settings are preserved. Change them in YouTube Studio.").font(.caption) }
+            Picker("Privacy", selection: $draft.privacy) { ForEach(YouTubeEventDraft.Privacy.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+            Text("Saving applies this privacy selection. Automatic start/stop and other content settings are preserved.").font(.caption)
             Text("A scheduled time does not authorize Stream to publish automatically. Stream sends one request; after an uncertain error, refresh before creating again.").font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("Cancel") { dismiss() }

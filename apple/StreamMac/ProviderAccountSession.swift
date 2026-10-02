@@ -28,6 +28,7 @@ struct ProviderAccountSnapshot {
 @MainActor
 final class ProviderAccountSession: ObservableObject {
     @Published private(set) var accounts: [ManagedProvider: ProviderAccountSnapshot] = [:]
+    @Published private(set) var lastThumbnailReceipt: (eventID: String, time: Date)?
     @Published private(set) var viewers: [String: Int] = [:]
     weak var directChat: StudioDirectChatManager?
     private var viewerDates: [String: Date] = [:]
@@ -135,12 +136,14 @@ final class ProviderAccountSession: ObservableObject {
         accounts[provider]?.isWorking = false; accounts[provider]?.devicePrompt = nil
     }
     func shutdown() {
+        lastThumbnailReceipt = nil
         for provider in ManagedProvider.allCases { endingEpochs[provider] = UUID() }
         directChat?.shutdown()
         boot?.cancel(); boot = nil; hourlyValidation?.cancel(); hourlyValidation = nil
         for provider in ManagedProvider.allCases { cancel(provider); cooldowns[provider]?.cancel(); cooldowns[provider] = nil }
     }
     func forget(_ provider: ManagedProvider) {
+        if provider == .youtube { lastThumbnailReceipt = nil }
         endingEpochs[provider] = UUID()
         directChat?.stop(provider)
         let generation = begin(provider, action: "Forgetting local authorization")
@@ -157,6 +160,7 @@ final class ProviderAccountSession: ObservableObject {
     }
     func authorize(_ provider: ManagedProvider, clientID: String, additionalScopes: [String] = []) {
         guard [.youtube, .twitch].contains(provider) else { return }
+        if provider == .youtube { lastThumbnailReceipt = nil }
         endingEpochs[provider] = UUID()
         directChat?.stop(provider)
         let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -323,7 +327,21 @@ final class ProviderAccountSession: ObservableObject {
     }
     func createYouTube(_ draft: YouTubeEventDraft) { mutateYouTube { try await $0.createYouTubeEvent(draft) } }
     func editYouTube(eventID: String, draft: YouTubeEventDraft) {
-        mutateYouTube { try await $0.editYouTubeEvent(id: eventID, title: draft.title, description: draft.description, scheduledAt: draft.scheduledAt) }
+        mutateYouTube { try await $0.editYouTubeEvent(id: eventID, title: draft.title, description: draft.description, scheduledAt: draft.scheduledAt, privacy: draft.privacy) }
+    }
+    func uploadYouTubeThumbnail(eventID: String, channelID: String, image: Data, mimeType: String) {
+        guard canRequest(.youtube) else { return }
+        lastThumbnailReceipt = nil
+        let generation = begin(.youtube, action: "Uploading the selected event thumbnail")
+        jobs[.youtube] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await api().uploadYouTubeThumbnail(eventID: eventID, expectedChannelID: channelID, image: image, mimeType: mimeType)
+                guard isCurrent(.youtube, generation) else { return }
+                lastThumbnailReceipt = (eventID, Date())
+                finish(.youtube, generation)
+            } catch { finish(.youtube, generation, error: error) }
+        }
     }
     func completeYouTube(eventID: String) { mutateYouTube { try await $0.completeYouTubeEvent(id: eventID) } }
     /// Independent explicit ending operations do not cancel metadata work or
