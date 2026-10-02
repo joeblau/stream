@@ -293,7 +293,7 @@ final class RestreamChat: NSObject {
         guard let url = comps.url else { return }
         let task = URLSession.shared.webSocketTask(with: url)
         webSocket = task
-        status = .connected
+        status = .connecting
         task.resume()
         receive(from: task)
     }
@@ -306,16 +306,16 @@ final class RestreamChat: NSObject {
                 case .success(.string(let text)):
                     self.ingest(text)
                     self.reconnectAttempts = 0
-                self.status = .connected
+                    self.status = .connected
                     self.receive(from: socket)
                 case .success(.data(let data)):
                     self.ingest(String(decoding: data, as: UTF8.self))
                     self.reconnectAttempts = 0
-                self.status = .connected
+                    self.status = .connected
                     self.receive(from: socket)
                 case .success:
                     self.reconnectAttempts = 0
-                self.status = .connected
+                    self.status = .connected
                     self.receive(from: socket)
                 case .failure(let error):
                     chatLog.error("Chat socket closed with code \((error as NSError).code)")
@@ -335,7 +335,7 @@ final class RestreamChat: NSObject {
                     }
                 @unknown default:
                     self.reconnectAttempts = 0
-                self.status = .connected
+                    self.status = .connected
                     self.receive(from: socket)
                 }
             }

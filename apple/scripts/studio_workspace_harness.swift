@@ -89,8 +89,9 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         document.scenes[0].layers[0].effectOverrides = effects
         let asset = LibraryAsset(id: assetID, name: "Test LUT", kind: .other, storage: .projectCopy,
             relativePath: relativePath, fileName: "look.cube", lastKnownPath: "")
-        let documents = ["stream.scenes.v2.json": try JSONEncoder().encode(document),
+        var documents = ["stream.scenes.v2.json": try JSONEncoder().encode(document),
             "stream.assets.v1.json": try JSONEncoder().encode(AssetLibraryDocument(assets: [asset]))]
+        documents["comment-slots.json"] = try Data(contentsOf: workspace.directory(for: workspace.selection).appendingPathComponent("comment-slots.json"))
         try ShowPackageIO.export(documents: documents, media: [.init(access: ResolvedAssetAccess(url: fixtureURL, needsSecurityScope: false), relativePath: relativePath)],
             name: "Transferred Show", includeMedia: true, to: package)
         let preview = try ShowPackageIO.preview(package)
@@ -98,6 +99,9 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try ShowPackageIO.importFiles(from: package, to: imported)
         let importedDocument = try JSONDecoder().decode(SceneDocument.self, from: Data(contentsOf: imported.appendingPathComponent("stream.scenes.v2.json")))
         let importedAssets = try JSONDecoder().decode(AssetLibraryDocument.self, from: Data(contentsOf: imported.appendingPathComponent("stream.assets.v1.json")))
+        let importedSlots = try JSONDecoder().decode(StudioChatCoordinator.SlotPreferences.self, from: Data(contentsOf: imported.appendingPathComponent("comment-slots.json")))
+        try require(importedSlots.slots.count == 1 && importedSlots.slots[0] != slot, "Imported comment slot ID was not remapped")
+        try require(importedDocument.scenes.flatMap(\.layers).contains(where: { $0.id == importedSlots.slots[0] }), "Imported comment slot no longer references its text layer")
         let importedID = importedAssets.assets[0].id
         try require(importedID != assetID, "Imported asset ID was not remapped")
         try require(importedDocument.scenes[0].layers[0].effectOverrides?.lut.assetID == importedID, "Imported LUT references are inconsistent")
