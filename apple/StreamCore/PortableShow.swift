@@ -38,12 +38,13 @@ public enum PortableShow {
     /// remains editable content; connection credentials and machine grants do not.
     public static func redact(_ data: Data, remappingIDs: Bool = false, idMap: inout [String: String]) throws -> Data {
         guard data.count <= 16 * 1024 * 1024 else { throw Failure.invalid("A show document exceeds 16 MiB.") }
-        func visit(_ value: Any) -> Any {
+        let literalContentKeys: Set<String> = ["text", "name", "title", "description", "displayname", "html", "css", "javascript", "fontname", "fontfamily"]
+        func visit(_ value: Any, key: String? = nil) -> Any {
             if let dictionary = value as? [String: Any] {
                 var result: [String: Any] = [:]
                 for (key, item) in dictionary where !privateKeys.contains(key.lowercased()) {
                     let mappedKey = remappingIDs ? remapIDReferences(key, idMap: &idMap) : key
-                    result[mappedKey] = visit(item)
+                    result[mappedKey] = visit(item, key: key.lowercased())
                 }
                 // A linked asset without its bookmark must remain repairable.
                 if dictionary["lastKnownPath"] != nil { result["lastKnownPath"] = "" }
@@ -51,8 +52,10 @@ public enum PortableShow {
                 if dictionary["streamKey"] != nil { result["streamKey"] = "" }
                 return result
             }
-            if let array = value as? [Any] { return array.map(visit) }
-            if let string = value as? String, remappingIDs { return remapIDReferences(string, idMap: &idMap) }
+            if let array = value as? [Any] { return array.map { visit($0, key: key) } }
+            if let string = value as? String, remappingIDs, !literalContentKeys.contains(key ?? "") {
+                return remapIDReferences(string, idMap: &idMap)
+            }
             return value
         }
         return try JSONSerialization.data(withJSONObject: visit(JSONSerialization.jsonObject(with: data)), options: [.sortedKeys])

@@ -17,6 +17,27 @@ import Testing
         #expect(PortableShow.remapIDReferences("scene.\(id)", idMap: &map) == "scene.\(map[id]!)")
     }
 
+    @Test func literalUUIDTextSurvivesWhileResourceBindingsRemap() throws {
+        let id = UUID().uuidString
+        let caption = "Receipt \(id) — keep this exact text 👩🏽‍🚀"
+        let data = try JSONSerialization.data(withJSONObject: [
+            "sceneID": id, "name": caption, "layers": [["id": id, "text": caption]],
+            "commandID": "scene.\(id).select", "slots": [id], "displayName": caption
+        ])
+        var mapping: [String: String] = [:]
+        let result = try PortableShow.redact(data, remappingIDs: true, idMap: &mapping)
+        let object = try #require(JSONSerialization.jsonObject(with: result) as? [String: Any])
+        let layers = try #require(object["layers"] as? [[String: Any]])
+        let mapped = try #require(mapping[id])
+        #expect(mapped != id)
+        #expect(object["name"] as? String == caption)
+        #expect(object["displayName"] as? String == caption)
+        #expect(layers[0]["text"] as? String == caption)
+        #expect(layers[0]["id"] as? String == mapped)
+        #expect(object["slots"] as? [String] == [mapped])
+        #expect(object["commandID"] as? String == "scene.\(mapped).select")
+    }
+
     @Test func packageRejectsTraversalSymlinksAndChangedBytes() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
