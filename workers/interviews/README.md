@@ -1,0 +1,25 @@
+# Experimental browser interviews
+
+This Worker provides scoped, expiring invites, authenticated signaling and a browser guest device check for #125–126. Native StreamMac WebRTC capture, guest audio/ISO routing, mix-minus return and measured capacity remain unimplemented. Those issues stay open.
+
+Use Node24.15+ within major24 and npm12.2. Run `npm ci`, `npm run typegen`, `npm run typecheck`, `npm test`, and `npm run build`. The build is a deployment dry run. No deployment is authorized or performed by these checks.
+
+The optional [test-only reference host and browser fixtures](test/browser/README.md) run with `npm run test:client` and `npm run test:browser`. They exercise real local Chrome WebRTC against a loopback protocol double; the workerd suite remains the evidence for the actual signaling service.
+
+For local development, copy `.dev.vars.example` to `.dev.vars`, set a private local operator token and set `ALLOWED_ORIGIN` to the exact browser origin. A hosted deployment needs its own `OPERATOR_TOKEN` and `TURN_KEY_API_TOKEN` secrets, nonsecret Cloudflare Realtime `TURN_KEY_ID`, and exact HTTPS `ALLOWED_ORIGIN`. Never put secrets in browser code, logs, repository or query parameters. Missing TURN configuration is explicitly unavailable.
+
+## Protocol
+
+Operator `POST /v1/rooms` needs bearer operator authorization and `{"capacity":1}`. The ceiling may be configured1–10; **none is qualified production capacity**. Default one guest. There is also a128-invite ceiling per room. It returns host and guest capabilities, expiring after two hours. SQLite stores only capability hashes, roles, expiry, session generations and room state. SDP, ICE and media are never persisted. Operator `POST /v1/rooms/<room>/invites` creates another guest; `POST /v1/rooms/<room>/end` ends the room and revokes invites.
+
+Guest links use `/guest.html?room=<room>#<guest capability>`. The fragment is immediately removed; the capability stays in memory. Reload requires reopening the invite. Never give a host capability to a guest. WebSockets use `/v1/rooms/<room>/socket` and subprotocols `stream-interview-v1`, `cap.<capability>`; only the public protocol is selected in the response. Each invite has one active connection generation. Rejoining supersedes its old socket and resets admission.
+
+Guests may `hello`, `ping`, and send paired `signal`. Host alone may `admit`, `stage`, `backstage`, `revoke`, `lock`, `status`, or `end`. Stage requires admission. Status reports host-agreed program/recording flags; it never starts broadcasting. Signals are limited to an admitted host/guest pair, with explicit generations and bounded payloads/rates. Every server message carries a `delivery` integer: clients must immediately send `{"type":"ack","delivery":N}`. At32 unacknowledged messages, the server closes only that receiver, bounding retained outgoing data. Normal actions are limited60/s and acknowledgments240/s. Guest-to-guest traffic and self-admission are refused. Host loss returns guests to waiting and clears program/recording flags. Media payloads use a per-offer negotiation UUID: offer/answer `{negotiation,description}`, candidate `{negotiation,candidate}`. Clients reject stale generations and negotiations. The guest caches live TURN configuration across nonterminal reconnects, and wipes capabilities on terminal leave/end/revoke.
+
+Connected peers request TURN through `POST /v1/rooms/<room>/turn`, bearer-authenticated with their capability. Server-side provider credentials issue10-minute client credentials, at most once per minute per invite. Missing/unavailable/malformed provider responses do not masquerade as a connected service. The client refreshes configuration every eight minutes, with bounded one-minute retry after failures. Real long-call recovery and provider revocation remain qualification gates.
+
+## Qualification gates
+
+Automated workerd tests and local browser checks are software evidence only. Implement the native host inside StreamMac, guest staging and resource gates, per-guest A/V alignment and mix-minus. Test current Safari/Chrome/mobile devices, permission loss, device switches, reconnect, long-call TURN refresh and relay-only restricted networks. Measure each supported Mac's guest budget before publishing capacity. The native workspace remains the production control surface; a reference browser host is test infrastructure.
+
+Primary references: [DO WebSocket hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/), [TURN credentials](https://developers.cloudflare.com/realtime/turn/generate-credentials/), [Workers Vitest](https://developers.cloudflare.com/workers/testing/vitest-integration/).
