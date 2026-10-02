@@ -190,57 +190,9 @@ struct SettingsView: View {
 
     // MARK: - Connection
 
-    @ViewBuilder
     private var connectionSection: some View {
-        Section {
-            Picker("Protocol", selection: Binding(
-                get: { session.draft.selectedProtocol },
-                set: { session.selectProtocol($0) }
-            )) {
-                ForEach(StreamProtocol.allCases, id: \.self) { proto in
-                    Text(proto.displayName).tag(proto)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            TextField("Server URL", text: $session.draft.rtmpURL,
-                      prompt: Text(session.draft.selectedProtocol.urlPlaceholder))
-                .autocorrectionDisabled(true)
-            if let error = SettingsValidator.serverURLError(
-                session.draft.rtmpURL, for: session.draft.selectedProtocol) {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            // RTMP/RTMPS need a separate stream key; SRT/WHIP embed everything
-            // (streamid, passphrase, token) in the URL query — so just one field.
-            if session.draft.selectedProtocol.requiresKey {
-                SecureField(session.draft.selectedProtocol.keyFieldLabel,
-                            text: $session.draft.streamKey)
-                    .autocorrectionDisabled(true)
-                if let error = SettingsValidator.streamKeyError(
-                    session.draft.streamKey, for: session.draft.selectedProtocol) {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
-        } header: {
-            Text("Connection")
-        } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                effectBadge(.nextSession)
-                if session.draft.isPublishable {
-                    Label(
-                        session.draft.isSecure ? "Encrypted connection." : "Unencrypted connection.",
-                        systemImage: session.draft.isSecure ? "lock.fill" : "lock.open"
-                    )
-                } else {
-                    Text("Enter a valid \(session.draft.selectedProtocol.displayName) URL\(session.draft.selectedProtocol.requiresKey ? " and stream key" : "") before going live. Get your key at restream.io.")
-                }
-                Label("Each protocol's URL + key are saved separately in your Keychain, shared with the iOS app.", systemImage: "key.fill")
-            }
+        Section("Destinations") {
+            DestinationManagerView(session: controller.destinations, programProfile: session.draft.outputProfile)
         }
     }
 

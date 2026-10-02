@@ -12,6 +12,10 @@ import Security
 ///
 /// `kSecAttrAccessibleAfterFirstUnlock` keeps secrets available during a
 /// background capture after the device has been unlocked once.
+public enum DestinationCredentialField: String, CaseIterable, Sendable {
+    case endpoint, streamKey, srtStreamID, srtPassphrase
+}
+
 public struct KeychainStore: Sendable {
 
     /// The secrets this store manages, keyed per transport protocol so each of
@@ -20,6 +24,7 @@ public struct KeychainStore: Sendable {
         case url(StreamProtocol)
         case key(StreamProtocol)
         /// Pre-multiprotocol single slots, kept only for one-time migration.
+        case destination(UUID, field: DestinationCredentialField)
         case legacyURL
         case legacyKey
 
@@ -27,6 +32,7 @@ public struct KeychainStore: Sendable {
             switch self {
             case .url(let proto): return "stream.connection.\(proto.rawValue).url"
             case .key(let proto): return "stream.connection.\(proto.rawValue).key"
+            case .destination(let id, let field): return "stream.destination.\(id.uuidString.lowercased()).\(field.rawValue)"
             case .legacyURL: return "stream.connection.url"
             case .legacyKey: return "stream.connection.key"
             }

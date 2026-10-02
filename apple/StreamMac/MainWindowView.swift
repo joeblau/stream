@@ -653,8 +653,10 @@ struct MainWindowView: View {
                 placeholder("Guests", systemImage: "person.2",
                             message: "Remote guest management lands here in a later workstream.")
             case .destinations:
-                placeholder("Destinations", systemImage: "paperplane",
-                            message: "Multi-destination output lands here in a later workstream.")
+                ScrollView {
+                    DestinationManagerView(session: controller.destinations,
+                                           programProfile: controller.activeProfile)
+                }
             }
         }
     }

@@ -80,6 +80,7 @@ final class StreamController: ObservableObject {
     var isLive: Bool { streamState.isLive }
     var isPreviewing: Bool { previewState == .active }
 
+    let destinations: DestinationSession
     let sceneStore: SceneStore
     /// The S05 keyed capture pool (issue #73): one physical capture per
     /// source identity, started/stopped purely by scene demand. Exposes the
@@ -206,6 +207,7 @@ final class StreamController: ObservableObject {
         // preview opens at the configured geometry before any source frame
         // ever arrives.
         let persisted = settingsStore.load()
+        self.destinations = DestinationSession(settings: persisted)
         self.settings = persisted
         self.activeProfile = persisted.outputProfile
 
@@ -619,10 +621,13 @@ final class StreamController: ObservableObject {
     func goLive() {
         guard streamState.canStart else { return }
         settings = settingsStore.load()
-        guard settings.isPublishable else {
-            errorMessage = "Complete the connection settings before going live."
+        let errors = destinations.startErrors(program: settings.outputProfile)
+        guard errors.isEmpty, let destination = destinations.enabled.first else {
+            errorMessage = errors.joined(separator: "\n")
             return
         }
+        settings = DestinationValidator.settings(destination,
+            credentials: destinations.savedCredentials(for: destination.id), base: settings)
         applyOutputProfile(settings.outputProfile)
         // Go Live needs the render pipeline (frames to publish); the demand
         // check below starts it even if the user never turned the preview on.
