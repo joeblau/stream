@@ -75,6 +75,23 @@ final class EventLog: @unchecked Sendable {
         precondition(CMFormatDescriptionGetMediaSubType(formats[0]) == kCMVideoCodecType_HEVC, "Selected codec must actually be HEVC")
         print("PASS: MOV/HEVC high-quality preset produces actual HEVC video and AAC audio")
 
+        let videoOnlyURL = folder.appendingPathComponent("video-only-pause.mp4")
+        try? FileManager.default.removeItem(at: videoOnlyURL)
+        var videoOnlyConfig = config; videoOnlyConfig.requiresAudio = false
+        let videoOnly = ProgramRecordingSession(outputURL: videoOnlyURL, configuration: videoOnlyConfig)
+        try await feed(videoOnly, seconds: 1)
+        videoOnly.pause(); try await feed(videoOnly, seconds: 1, offset: 1)
+        videoOnly.resume(); try await Task.sleep(for: .milliseconds(20))
+        try await feed(videoOnly, seconds: 1, offset: 2)
+        let videoOnlyResult = await finish(videoOnly)
+        let videoOnlyAsset = AVURLAsset(url: videoOnlyURL)
+        let onlyVideoTracks = try await videoOnlyAsset.loadTracks(withMediaType: .video)
+        let onlyAudioTracks = try await videoOnlyAsset.loadTracks(withMediaType: .audio)
+        let onlyDuration = try await videoOnlyAsset.load(.duration).seconds
+        precondition(videoOnlyResult.completed && videoOnlyResult.progress.audioStatus == .notRequested)
+        precondition(onlyVideoTracks.count == 1 && onlyAudioTracks.isEmpty && abs(onlyDuration - 2) < 0.04)
+        print("PASS: video-only writer ignores unrequested audio and resumes its video clock after pause")
+
         let firstURL = folder.appendingPathComponent("rotation-1.mp4")
         let secondURL = folder.appendingPathComponent("rotation-2.mp4")
         try? FileManager.default.removeItem(at: firstURL); try? FileManager.default.removeItem(at: secondURL)
