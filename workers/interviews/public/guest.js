@@ -5,6 +5,7 @@ history.replaceState(null, '', location.pathname + location.search);
 const $ = id => document.getElementById(id);
 const status = text => { $('status').textContent = text; };
 let local, shared, socket, pc, audio, analyser, meterSource, meterFrame, generation, host, hostGeneration;
+let signalQueue = {pending:0};
 let candidateQueue = [], signalChain = Promise.resolve(), left = false, name = 'Guest';
 let relayTimer, deviceEpoch = 0, activeNegotiation, cachedRelay;
 let joinEpoch = 0, admitted = false, cameraEnabled = true, microphoneEnabled = true;
@@ -77,7 +78,7 @@ async function switchDevice(kind, id) {
 }
 async function iceServers() {
   if (cachedRelay && Date.now() < cachedRelay.expires) return cachedRelay.servers;
-  const response = await fetch(`/v1/rooms/${room}/turn`,{method:'POST',headers:{Authorization:`Bearer ${secret}`}});
+  const response = await fetch(`/v1/rooms/${room}/turn`,{method:'POST',headers:{Authorization:`Bearer ${secret}`},signal:AbortSignal.timeout(10000)});
   if (!response.ok) throw new Error(response.status===503 ? 'TURN service is unavailable. The host must configure relay credentials.' : 'Unable to obtain relay credentials. Try reconnecting after a minute.');
   const data = await response.json();
   if (!Array.isArray(data.iceServers)) throw new Error('Invalid relay configuration');
@@ -93,7 +94,7 @@ async function acceptSignal(data, epoch) {
     const negotiation = payload.negotiation;
     activeNegotiation = negotiation; clearTimeout(relayTimer); stopShare();
     pc?.close(); const next = new RTCPeerConnection({iceServers:await iceServers()});
-    if (epoch!==joinEpoch || !admitted) { next.close(); return; } pc = next;
+    if (epoch!==joinEpoch || !admitted || activeNegotiation!==negotiation || hostGeneration!==data.generation || host!==data.from) { next.close(); return; } pc = next;
     local.getTracks().forEach(track=>next.addTrack(track,local));
     const refreshRelay = async () => {
       try { const servers = await iceServers(); if(pc===next) { next.setConfiguration({iceServers:servers}); relayTimer=setTimeout(refreshRelay,480000); } }
@@ -119,7 +120,7 @@ async function acceptSignal(data, epoch) {
 }
 function join() {
   if (!local || left) return;
-  const epoch = ++joinEpoch; resetPeer(); socket?.close(); name=$('name').value.trim()||'Guest';
+  const epoch = ++joinEpoch; signalQueue={pending:0}; signalChain=Promise.resolve(); resetPeer(); socket?.close(); name=$('name').value.trim()||'Guest';
   socket = new WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/v1/rooms/${room}/socket`,['stream-interview-v1',`cap.${secret}`]);
   socket.onopen=()=>{if(epoch!==joinEpoch)return;send({type:'hello',name});status('Waiting for the host to admit you.');$('join').disabled=true;$('rejoin').disabled=false;$('leave').disabled=false;};
   socket.onmessage=event=>{
@@ -131,7 +132,12 @@ function join() {
     if(data.type==='roster'){$('program').textContent=`Program ${data.program?'live':'offline'} · Recording ${data.recording?'active':'off'}`;return;}
     if(data.type==='host-disconnected'){resetPeer();status('Host disconnected. Waiting for the host to return and admit you again.');return;}
     if(data.type==='ended'){leave('The host ended this interview. Open a new invite to return.');return;}
-    if(data.type==='signal'){signalChain=signalChain.then(()=>acceptSignal(data,epoch)).catch(error=>status(error.message));}
+    if(data.type==='signal'){
+      const queue=signalQueue;
+      if(queue.pending>=32){socket.close(1008,'Signal processing capacity exceeded');resetPeer();status('Media signaling exceeded capacity. Reconnect to try again.');return;}
+      queue.pending++;
+      signalChain=signalChain.then(()=>acceptSignal(data,epoch)).catch(error=>{if(epoch===joinEpoch)status(error.message);}).finally(()=>{queue.pending--;});
+    }
   };
   socket.onclose=event=>{if(epoch!==joinEpoch)return;if(event.code===4003){leave('This invite was revoked. Open a new invite from the host.');return;}resetPeer();status('Disconnected. Reconnect with this invite while it remains valid.');$('join').disabled=false;};
   socket.onerror=()=>{if(epoch===joinEpoch)status('Connection failed. Check your network and invite.');};
