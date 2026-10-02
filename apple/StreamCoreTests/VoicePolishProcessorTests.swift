@@ -218,13 +218,17 @@ import StreamCore
                                             dataLength: bytes.count) == noErr,
               CMAudioSampleBufferCreateReadyWithPacketDescriptions(
                   allocator: nil, dataBuffer: blockBuffer, formatDescription: description,
-                  sampleCount: 1_024, presentationTimeStamp: .zero,
+                  // One compressed packet has one description. Its ASBD
+                  // declares 1,024 decoded frames; that is not the packet count.
+                  sampleCount: 1, presentationTimeStamp: .zero,
                   packetDescriptions: &packet,
                   sampleBufferOut: &sb
               ) == noErr, let sb else {
             Issue.record("failed to synthesize AAC buffer")
             return
         }
+        #expect(CMSampleBufferGetNumSamples(sb) == 1)
+        #expect(abs(CMTimeGetSeconds(CMSampleBufferGetDuration(sb)) - 1_024.0 / 48_000) < 0.000_001)
         #expect(VoicePolishProcessor().process(sb) === sb)
     }
 }
