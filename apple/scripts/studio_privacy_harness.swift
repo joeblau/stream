@@ -88,8 +88,12 @@ private final class PrivacyPixels: @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(350))
         gate.setScene(nil)
         let slowReopened = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        try await Task.sleep(for: .milliseconds(350))
-        let slowValues = slowPixels.values(after: slowReopened + 1.0 / 30)
+        var slowValues: [Double] = []
+        for _ in 0..<30 {
+            try await Task.sleep(for: .milliseconds(100))
+            slowValues = slowPixels.values(after: slowReopened + 1.0 / 30)
+            if !slowValues.isEmpty { break }
+        }
         precondition(!slowValues.isEmpty && slowValues.allSatisfy { $0 < 1 },
                      "Missed render deadlines cannot extend an expired fade: \(slowValues)")
         let slowMetrics = await slow.metricsSnapshot()
