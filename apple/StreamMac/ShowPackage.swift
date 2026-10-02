@@ -96,11 +96,9 @@ enum ShowPackageIO {
         }
         // Every imported destination needs an explicit credentials/enable step.
         let destinations = staging.appendingPathComponent("destinations.json")
-        if let data = try? Data(contentsOf: destinations), var object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-           var entries = object["destinations"] as? [[String: Any]] {
-            for i in entries.indices { entries[i]["isEnabled"] = false; entries[i]["enabled"] = false }
-            object["destinations"] = entries
-            try JSONSerialization.data(withJSONObject: object).write(to: destinations, options: .atomic)
+        if let data = try? Data(contentsOf: destinations), var entries = try? JSONDecoder().decode([StreamDestination].self, from: data) {
+            for i in entries.indices { entries[i].isEnabled = false }
+            try JSONEncoder().encode(entries).write(to: destinations, options: .atomic)
         }
         try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         try manager.moveItem(at: staging, to: destination)

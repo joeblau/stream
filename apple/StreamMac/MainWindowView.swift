@@ -521,6 +521,13 @@ struct MainWindowView: View {
     /// transiently (the dispatcher auto-clears the notice after a few
     /// seconds) — visible but never modal.
     private var diagnosticsStrip: some View {
+        VStack(spacing: 0) {
+            StudioDiagnosticsView()
+            compactDiagnosticsStrip
+        }
+    }
+
+    private var compactDiagnosticsStrip: some View {
         HStack(spacing: 16) {
             StatsHUDView(stream: controller)
 

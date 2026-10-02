@@ -101,6 +101,7 @@ final class StudioWorkspace: ObservableObject {
         guard let next = pending, next != selection, canSwitch else { return }
         isSwitching = true
         runtime.dispatcher.rundown.stop()
+        runtime.dispatcher.macros.cancel()
         runtime.dispatcher.soundboard.stopAllSoundEffects()
         for playlist in runtime.dispatcher.soundboardStore.playlists { runtime.dispatcher.soundboard.stopPlaylist(playlist) }
         runtime.flush()
@@ -127,7 +128,7 @@ final class StudioWorkspace: ObservableObject {
                 runtime.flush()
                 try FileManager.default.createDirectory(at: directory(for: target).deletingLastPathComponent(), withIntermediateDirectories: true)
                 try FileManager.default.copyItem(at: directory(for: selection), to: directory(for: target))
-                Self.copyCredentials(from: directory(for: selection), to: directory(for: target))
+                try Self.copyCredentials(from: directory(for: selection), to: directory(for: target))
             } else { try FileManager.default.createDirectory(at: directory(for: target), withIntermediateDirectories: true) }
             catalog.projects.append(project)
             pending = target
@@ -157,7 +158,7 @@ final class StudioWorkspace: ObservableObject {
             if duplicate {
                 runtime.flush()
                 try FileManager.default.copyItem(at: directory(for: selection), to: directory(for: target))
-                Self.copyCredentials(from: directory(for: selection), to: directory(for: target))
+                try Self.copyCredentials(from: directory(for: selection), to: directory(for: target))
             } else { try FileManager.default.createDirectory(at: directory(for: target), withIntermediateDirectories: true) }
             catalog.projects[index].profiles.append(profile)
             pending = target
@@ -205,6 +206,8 @@ final class StudioWorkspace: ObservableObject {
     func restore(_ backup: Backup) async {
         guard canSwitch else { return }
         isSwitching = true
+        runtime.dispatcher.macros.cancel()
+        runtime.dispatcher.rundown.stop()
         runtime.flush()
         await runtime.controller.prepareForProjectChange()
         do {
@@ -306,12 +309,39 @@ final class StudioWorkspace: ObservableObject {
         }
     }
 
-    private static func copyCredentials(from source: URL, to target: URL) {
+    private static func copyCredentials(from source: URL, to target: URL) throws {
         let sourceStore = DesktopSettingsStore(directory: source)
         let targetStore = DesktopSettingsStore(directory: target)
         for proto in StreamProtocol.allCases {
             let values = sourceStore.connectionSecrets(for: proto)
             targetStore.saveConnectionSecrets(url: values.url, key: values.key, for: proto)
+        }
+        // Independent copies get independent destination identities/secrets.
+        let sourceDestinations = DestinationStore(fileURL: source.appendingPathComponent("destinations.json"))
+        let targetDestinations = DestinationStore(fileURL: target.appendingPathComponent("destinations.json"))
+        let originals = try sourceDestinations.load()
+        if !originals.isEmpty {
+            var replacements: [String: String] = [:]
+            var copies: [StreamDestination] = []
+            var credentials: [UUID: DestinationCredentials] = [:]
+            for original in originals {
+                var copy = original
+                copy.id = UUID()
+                replacements[original.id.uuidString] = copy.id.uuidString
+                copies.append(copy)
+                credentials[copy.id] = sourceDestinations.credentials(for: original.id)
+            }
+            // Remove copied metadata before save so its cleanup cannot revoke
+            // a credential still owned by the original project.
+            let metadataURL = target.appendingPathComponent("destinations.json")
+            try? FileManager.default.removeItem(at: metadataURL)
+            try targetDestinations.save(copies, credentials: credentials)
+            for filename in ["stream.shortcuts.v1.json", "stream.macros.v1.json"] {
+                let url = target.appendingPathComponent(filename)
+                guard let data = try? Data(contentsOf: url), var text = String(data: data, encoding: .utf8) else { continue }
+                for (old, new) in replacements { text = text.replacingOccurrences(of: old, with: new) }
+                try? Data(text.utf8).write(to: url, options: .atomic)
+            }
         }
     }
 

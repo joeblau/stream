@@ -101,7 +101,7 @@ struct StudioDiagnosticsView: View {
     }
 
     private func recordingLabel(_ state: RecordingSessionState) -> String {
-        switch state { case .idle: "idle"; case .preparing: "preparing"; case .recording: "recording"; case .stopping: "finishing"; case .failed: "failed" }
+        switch state { case .idle: "idle"; case .preparing: "preparing"; case .recording: "recording"; case .paused: "paused"; case .stopping: "finishing"; case .failed: "failed" }
     }
     private func export() {
         let panel = NSSavePanel(); panel.allowedContentTypes = [.json]

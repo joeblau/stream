@@ -25,12 +25,12 @@ public enum PortableShow {
     }
     public static let documentNames: Set<String> = [
         "stream.scenes.v2.json", "stream.sceneBrowser.v1.json", "stream.assets.v1.json",
-        "stream.soundboard.v1.json", "stream.annotations.v1.json", "studio-rundown.json",
+        "stream.soundboard.v1.json", "stream.annotations.v1.json", "stream.presentations.v1.json", "studio-rundown.json",
         "stream.shortcuts.v1.json", "stream.macros.v1.json", "destinations.json", "desktop.settings.v1.json"
     ]
     private static let privateKeys: Set<String> = [
         "bookmarkdata", "lastknownpath", "rtmpurl", "streamkey", "token", "bearertoken", "passphrase", "password",
-        "deviceuniqueid", "deviceuid", "displayid", "windowid", "preferredaudioinputuid", "monitoroutputdeviceuid",
+        "deviceuniqueid", "deviceuid", "deviceid", "targetidentifier", "displayid", "windowid", "preferredaudioinputuid", "monitoroutputdeviceuid",
         "cameracontrols", "audioinputs", "url", "urlstring", "endpoint", "hostname", "host", "address", "applicationbundleidentifier"
     ]
 
