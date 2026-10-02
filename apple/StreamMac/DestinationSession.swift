@@ -66,6 +66,20 @@ final class DestinationSession: ObservableObject {
         selectedID = destination.id
     }
 
+    func createManual(_ provider: ManagedProvider) {
+        let destination = StreamDestination(name: "\(provider.name) Manual RTMPS", isEnabled: false)
+        draft.append(destination); credentials[destination.id] = .init(); selectedID = destination.id
+    }
+
+    func createManaged(provider: ManagedProvider, channel: ProviderChannel, event: ProviderEvent? = nil,
+                       connection: DestinationCredentials) {
+        let transport: StreamProtocol = URL(string: connection.endpoint)?.scheme == "rtmp" ? .rtmp : .rtmps
+        let destination = StreamDestination(name: "\(provider.name): \(event?.title ?? channel.title)",
+            transport: transport, isEnabled: false, videoCodec: .h264,
+            providerBinding: .init(provider: provider, channelID: channel.id, eventID: event?.id))
+        draft.append(destination); credentials[destination.id] = connection; selectedID = destination.id
+    }
+
     func duplicate(_ id: UUID) {
         guard let source = draft.first(where: { $0.id == id }) else { return }
         let copy = source.duplicated()

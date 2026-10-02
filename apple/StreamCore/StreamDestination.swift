@@ -19,12 +19,13 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
     /// Optional guidance identity, never an account, event ID or ingest secret.
     /// A string tolerates templates introduced by a newer application version.
     public var providerTemplateID: String?
+    public var providerBinding: ProviderDestinationBinding?
 
     public init(id: UUID = UUID(), name: String, transport: StreamProtocol = .rtmps,
                 isEnabled: Bool = true, followsProgramProfile: Bool = true,
                 outputProfile: OutputProfile = .default, videoCodec: VideoCodec = .h264,
                 videoBitrate: Int = 4_000_000, audioBitrate: Int = 128_000, ingestLimits: DestinationIngestLimits? = nil, keyframeSeconds: Double? = nil,
-                providerTemplateID: String? = nil) {
+                providerTemplateID: String? = nil, providerBinding: ProviderDestinationBinding? = nil) {
         self.id = id
         self.name = name
         self.transport = transport
@@ -37,6 +38,7 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
         self.ingestLimits = ingestLimits
         self.keyframeSeconds = keyframeSeconds
         self.providerTemplateID = providerTemplateID
+        self.providerBinding = providerBinding
     }
 
     public func duplicated() -> Self {

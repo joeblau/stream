@@ -6,6 +6,7 @@ struct DestinationManagerView: View {
     @ObservedObject var session: DestinationSession
     var programProfile: OutputProfile
     @EnvironmentObject private var controller: StreamController
+    @Environment(\.providerAccounts) private var providerAccounts
     @State private var guidedSetup: DestinationProviderTemplate?
 
     var body: some View {
@@ -25,6 +26,11 @@ struct DestinationManagerView: View {
                 Spacer()
                 Text("\(session.draft.filter(\.isEnabled).count) enabled")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            if let providerAccounts {
+                DisclosureGroup("Provider Accounts and Events") {
+                    ProviderAccountsView(accounts: providerAccounts, destinations: session)
+                }
             }
             if session.draft.isEmpty {
                 Text("Add a streaming destination. Its endpoint and credentials stay in your Keychain.")
@@ -80,6 +86,11 @@ struct DestinationManagerView: View {
             }
             Text("\(template.isRelay ? "Relay ingest only" : "Manual provider ingest") · Comments / viewer metrics / remote event state unavailable in Stream")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+        if let binding = session.draft[index].providerBinding {
+            Text("\(binding.provider.name) channel \(binding.channelID)\(binding.eventID.map { " · Event \($0)" } ?? "")")
+                .font(.caption).textSelection(.enabled)
+            Button("Unlink Provider Routing") { session.draft[index].providerBinding = nil }
         }
         Toggle("Enabled for Go Live", isOn: $session.draft[index].isEnabled)
         Picker("Protocol", selection: $session.draft[index].transport) {
@@ -212,6 +223,8 @@ private struct DestinationStatusRows: View {
     var onStart: (UUID) -> Void
     var onStop: (UUID) -> Void
     var onRetry: (UUID) -> Void
+    @Environment(\.providerAccounts) private var providerAccounts
+    @State private var diagnostics: [DestinationDiagnosticSnapshot] = []
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("\(outputs.liveCount) live / \(outputs.activeCount) active\(outputs.partialSuccess ? " · Partial success" : "")")
@@ -224,6 +237,15 @@ private struct DestinationStatusRows: View {
                         Spacer()
                         Text(label(state)).font(.caption).foregroundStyle(state.isLive ? .green : .secondary)
                     }
+                    if let diagnostic = diagnostics.first(where: { $0.id == destination.id.uuidString }) {
+                        HStack {
+                            Text(diagnostic.bitrate.map { "\($0 / 1000) kbps" } ?? "Bitrate unavailable")
+                            if let start = diagnostic.startedAt { Text(start, style: .timer) }
+                        }.font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if let binding = destination.providerBinding, let providerAccounts {
+                        ProviderBroadcastStatus(accounts: providerAccounts, binding: binding)
+                    }
                     if let template = destination.providerTemplate {
                         Text(template.isRelay ? "Relay ingest state · downstream broadcasts unavailable" : "Ingest state · verify the event in the provider")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -234,11 +256,19 @@ private struct DestinationStatusRows: View {
                                 if state == .idle { onStart(destination.id) } else { onRetry(destination.id) }
                             }
                         } else {
-                            Button("Stop") { onStop(destination.id) }.disabled(state == .stopping)
+                            Button("Disconnect Ingest") { onStop(destination.id) }.disabled(state == .stopping)
                         }
                         if case .failed(let reason) = state { Text(reason).font(.caption).foregroundStyle(.orange) }
                     }
                 }
+            }
+            Text("Disconnect Ingest stops local delivery. Remote event completion is separate; local recording continues.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .task {
+            while !Task.isCancelled {
+                diagnostics = await outputs.diagnosticsSnapshot()
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
             }
         }
     }

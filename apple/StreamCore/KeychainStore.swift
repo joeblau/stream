@@ -4,6 +4,7 @@ import Security
 public enum DestinationCredentialField: String, CaseIterable, Sendable {
     case endpoint, streamKey, srtStreamID, srtPassphrase
 }
+public enum ProviderCredentialField: String, Sendable { case clientID, clientSecret, tokens }
 
 /// Stores the sensitive connection secrets (RTMP/RTMPS URL + stream key) in the
 /// Keychain instead of `UserDefaults`, so they survive relaunches without the user
@@ -25,6 +26,7 @@ public struct KeychainStore: Sendable {
         case key(StreamProtocol)
         /// Per-destination slots survive display-name and transport changes.
         case destination(UUID, field: DestinationCredentialField)
+        case provider(ManagedProvider, field: ProviderCredentialField)
         /// Pre-multiprotocol single slots, kept only for one-time migration.
         case legacyURL
         case legacyKey
@@ -34,6 +36,7 @@ public struct KeychainStore: Sendable {
             case .url(let proto): return "stream.connection.\(proto.rawValue).url"
             case .key(let proto): return "stream.connection.\(proto.rawValue).key"
             case .destination(let id, let field): return "stream.destination.\(id.uuidString.lowercased()).\(field.rawValue)"
+            case .provider(let provider, let field): return "stream.provider.\(provider.rawValue).\(field.rawValue)"
             case .legacyURL: return "stream.connection.url"
             case .legacyKey: return "stream.connection.key"
             }
