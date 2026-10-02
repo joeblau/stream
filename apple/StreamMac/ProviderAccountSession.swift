@@ -30,6 +30,12 @@ final class ProviderAccountSession: ObservableObject {
     @Published private(set) var accounts: [ManagedProvider: ProviderAccountSnapshot] = [:]
     @Published private(set) var lastThumbnailReceipt: (eventID: String, time: Date)?
     @Published private(set) var viewers: [String: Int] = [:]
+    @Published private(set) var youtubeStreams: [YouTubeLiveStream] = []
+    @Published private(set) var bindingReview: YouTubeBindingReview?
+    @Published private(set) var lastSchedulingReceipt: ProviderSchedulingReceipt?
+    let pending: ProviderPendingCatalog
+    private var pendingScheduling: (generation: UUID, action: String, id: String, mutating: Bool)?
+    private var closed = false
     weak var directChat: StudioDirectChatManager?
     private var viewerDates: [String: Date] = [:]
     private let restream: any ProviderRestreamBoundary
@@ -50,9 +56,12 @@ final class ProviderAccountSession: ObservableObject {
     private func hasEndingEpoch(_ provider: ManagedProvider, _ epoch: UUID) -> Bool { endingEpoch(provider) == epoch }
     init(restream: any ProviderRestreamBoundary, vault: ProviderTokenVault = .shared,
          transport: @escaping ProviderTokenVault.Transport = ProviderTokenVault.network,
-         openBrowser: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
+         openBrowser: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }, pendingDirectory: URL? = nil) {
         self.restream = restream; self.vault = vault; self.transport = transport; self.openBrowser = openBrowser
+        self.pending = ProviderPendingCatalog(directory: pendingDirectory)
         for provider in ManagedProvider.allCases { accounts[provider] = .init() }
+        accounts[.youtube]?.events = pending.document.records.filter { $0.kind == .event }.map(\.cachedEvent)
+        youtubeStreams = pending.document.records.filter { $0.kind == .stream }.map(\.cachedStream)
         boot = Task { [weak self] in
             guard let self else { return }
             for provider in [ManagedProvider.youtube, .twitch] {
@@ -131,11 +140,20 @@ final class ProviderAccountSession: ObservableObject {
     }
     private static func failure(_ error: Error) -> ProviderFailure { error as? ProviderFailure ?? .init(.unavailable) }
     func cancel(_ provider: ManagedProvider) {
+        if provider == .youtube {
+            bindingReview = nil
+            if let operation = pendingScheduling {
+                lastSchedulingReceipt = .init(action: operation.action, resourceID: operation.id,
+                    state: operation.mutating ? .unconfirmed : .blocked, failure: .init(.unavailable))
+                pendingScheduling = nil
+            }
+        }
         generations[provider] = UUID(); jobs[provider]?.cancel(); jobs[provider] = nil
         receivers[provider]?.cancel(); receivers[provider] = nil
         accounts[provider]?.isWorking = false; accounts[provider]?.devicePrompt = nil
     }
     func shutdown() {
+        closed = true
         lastThumbnailReceipt = nil
         for provider in ManagedProvider.allCases { endingEpochs[provider] = UUID() }
         directChat?.shutdown()
@@ -143,6 +161,7 @@ final class ProviderAccountSession: ObservableObject {
         for provider in ManagedProvider.allCases { cancel(provider); cooldowns[provider]?.cancel(); cooldowns[provider] = nil }
     }
     func forget(_ provider: ManagedProvider) {
+        guard !closed else { return }
         if provider == .youtube { lastThumbnailReceipt = nil }
         endingEpochs[provider] = UUID()
         directChat?.stop(provider)
@@ -159,6 +178,7 @@ final class ProviderAccountSession: ObservableObject {
         }
     }
     func authorize(_ provider: ManagedProvider, clientID: String, additionalScopes: [String] = []) {
+        guard !closed else { return }
         guard [.youtube, .twitch].contains(provider) else { return }
         if provider == .youtube { lastThumbnailReceipt = nil }
         endingEpochs[provider] = UUID()
@@ -207,7 +227,7 @@ final class ProviderAccountSession: ObservableObject {
     /// Chat shares the machine vault; no bearer credential crosses into views
     /// or a second OAuth session. Readers do not cancel metadata/event jobs.
     func chatRequest(_ provider: ManagedProvider, _ request: URLRequest) async throws -> Data {
-        guard [.youtube, .twitch].contains(provider) else { throw ProviderFailure(.unavailable) }
+        guard !closed, [.youtube, .twitch].contains(provider) else { throw ProviderFailure(.unavailable) }
         if let until = accounts[provider]?.retryUntil, until > Date() {
             throw ProviderFailure(.rateLimited, retryAfter: until.timeIntervalSinceNow)
         }
@@ -298,7 +318,9 @@ final class ProviderAccountSession: ObservableObject {
                 let api = api()
                 var event: ProviderEvent?, count: Int?
                 if provider == .youtube, let id = binding.eventID {
-                    event = try await api.youtubeEvent(id: id); count = try await api.youtubeViewers(eventID: id)
+                    event = try await api.youtubeEvent(id: id)
+                    guard event?.channelID == binding.channelID else { throw ProviderFailure(.permission) }
+                    count = try await api.youtubeViewers(eventID: id)
                 } else if provider == .twitch { count = try await api.twitchViewers(channelID: binding.channelID) }
                 else { throw ProviderFailure(.unavailable) }
                 guard isCurrent(provider, generation) else { return }
@@ -328,9 +350,20 @@ final class ProviderAccountSession: ObservableObject {
         }
         throw ProviderFailure(.unavailable)
     }
-    func createYouTube(_ draft: YouTubeEventDraft) { mutateYouTube { try await $0.createYouTubeEvent(draft) } }
+    func createYouTube(_ draft: YouTubeEventDraft, channelID: String? = nil) {
+        guard pending.canCreate, let channelID = channelID ?? (snapshot(.youtube).channels.count == 1 ? snapshot(.youtube).channels.first?.id : nil) else { return }
+        runScheduling(action: "Create event") { api in
+            let owned = try await api.channels(.youtube)
+            guard owned.contains(where: { $0.id == channelID }) else { throw ProviderFailure(.permission) }
+            try Task.checkCancellation()
+            let event = try await api.createYouTubeEvent(draft)
+            guard event.channelID == channelID else { throw ProviderFailure(.invalidResponse) }
+            return .event(event)
+        }
+    }
     func editYouTube(eventID: String, draft: YouTubeEventDraft) {
-        mutateYouTube { try await $0.editYouTubeEvent(id: eventID, title: draft.title, description: draft.description, scheduledAt: draft.scheduledAt, privacy: draft.privacy) }
+        guard let owner = snapshot(.youtube).events.first(where: { $0.id == eventID })?.channelID else { return }
+        mutateYouTube { try await $0.editYouTubeEvent(id: eventID, title: draft.title, description: draft.description, scheduledAt: draft.scheduledAt, privacy: draft.privacy, expectedChannelID: owner) }
     }
     func uploadYouTubeThumbnail(eventID: String, channelID: String, image: Data, mimeType: String) {
         guard canRequest(.youtube) else { return }
@@ -347,6 +380,88 @@ final class ProviderAccountSession: ObservableObject {
         }
     }
     func completeYouTube(eventID: String) { mutateYouTube { try await $0.completeYouTubeEvent(id: eventID) } }
+    func refreshYouTubeStreams() {
+        guard canRequest(.youtube), !snapshot(.youtube).isWorking else { return }
+        let generation = begin(.youtube, action: "Reading owned YouTube streams"), boundary = api()
+        jobs[.youtube] = Task { [weak self] in
+            do {
+                let streams = try await boundary.youtubeStreams()
+                guard let self, self.isCurrent(.youtube, generation) else { return }
+                let seen = Set(streams.map(\.id))
+                let cached = self.youtubeStreams.filter { !seen.contains($0.id) }.map { stream in
+                    var value = stream; value.state = .unknown; value.verifiedAt = .distantPast; return value
+                }
+                self.youtubeStreams = Array((streams + cached).prefix(2000))
+                self.finish(.youtube, generation)
+            } catch { self?.finish(.youtube, generation, error: error) }
+        }
+    }
+    func createYouTubeStream(_ draft: YouTubeStreamDraft, channelID: String) {
+        guard pending.canCreate else { return }
+        runScheduling(action: "Create stream") { api in
+            .stream(try await api.createYouTubeStream(draft, expectedChannelID: channelID))
+        }
+    }
+    func reviewYouTubeBinding(eventID: String, streamID: String, channelID: String) {
+        runScheduling(action: "Review binding", id: eventID, mutating: false) { api in
+            .review(try await api.reviewYouTubeBinding(eventID: eventID, streamID: streamID, expectedChannelID: channelID))
+        }
+    }
+    func clearBindingReview() { bindingReview = nil }
+    func bindYouTube(_ review: YouTubeBindingReview, replacingExisting: Bool = false) {
+        guard pending.canRetain([.init(review.event), .init(review.stream)]) else { return }
+        runScheduling(action: "Bind event to stream", id: review.event.id) { api in
+            .bound(try await api.bindYouTube(review, replacingExisting: replacingExisting), review.stream,
+                   observed: review.event.boundStreamID == review.stream.id)
+        }
+    }
+    private enum SchedulingOutcome: Sendable {
+        case event(ProviderEvent), stream(YouTubeLiveStream), review(YouTubeBindingReview)
+        case bound(ProviderEvent, YouTubeLiveStream, observed: Bool)
+    }
+    private func runScheduling(action: String, id: String = "", mutating: Bool = true,
+                               operation: @escaping @Sendable (ProviderAPI) async throws -> SchedulingOutcome) {
+        guard canRequest(.youtube), !snapshot(.youtube).isWorking,
+              snapshot(.youtube).scopes.contains("https://www.googleapis.com/auth/youtube") ||
+              snapshot(.youtube).scopes.contains("https://www.googleapis.com/auth/youtube.force-ssl") else { return }
+        let generation = begin(.youtube, action: action), boundary = api()
+        pendingScheduling = (generation, action, id, mutating)
+        jobs[.youtube] = Task { [weak self] in
+            do {
+                let result = try await operation(boundary)
+                guard let self, self.isCurrent(.youtube, generation) else { return }
+                var event: ProviderEvent?, stream: YouTubeLiveStream?, state = ProviderSchedulingReceipt.State.acknowledged
+                switch result {
+                case .event(let value): event = value
+                case .stream(let value): stream = value
+                case .review(let value): self.bindingReview = value; state = .observed
+                case .bound(let value, let source, let observed): event = value; stream = source; state = observed ? .observed : .acknowledged
+                }
+                // Synchronously retain acknowledged IDs before any subsequent
+                // request; bind failure never replaces the earlier stream ID.
+                var retained: [ProviderPendingRecord] = []
+                if let event {
+                    self.accounts[.youtube]?.events = Self.merge((self.accounts[.youtube]?.events ?? []).filter { $0.id != event.id } + [event])
+                    retained.append(.init(event))
+                }
+                if let stream {
+                    self.youtubeStreams.removeAll { $0.id == stream.id }; self.youtubeStreams.insert(stream, at: 0)
+                    retained.append(.init(stream))
+                }
+                if !retained.isEmpty { self.pending.retain(retained) }
+                self.lastSchedulingReceipt = .init(action: action, resourceID: event?.id ?? stream?.id ?? id, state: state, failure: nil)
+                self.pendingScheduling = nil
+                self.finish(.youtube, generation)
+            } catch {
+                guard let self, self.isCurrent(.youtube, generation) else { return }
+                let failure = Self.failure(error)
+                self.lastSchedulingReceipt = .init(action: action, resourceID: id,
+                    state: !mutating || [.permission, .authorization, .rateLimited, .invalidRequest].contains(failure.kind) ? .blocked : .unconfirmed, failure: failure)
+                self.pendingScheduling = nil
+                self.finish(.youtube, generation, error: error)
+            }
+        }
+    }
     /// Independent explicit ending operations do not cancel metadata work or
     /// another target's completion. OAuth replacement still invalidates them.
     func endRemote(_ binding: ProviderDestinationBinding, reviewOnly: Bool = false) async -> ProviderCompletionReceipt {
@@ -391,7 +506,7 @@ final class ProviderAccountSession: ObservableObject {
         }
         return result
     }
-    func canRequest(_ provider: ManagedProvider) -> Bool { (accounts[provider]?.retryUntil ?? .distantPast) <= Date() }
+    func canRequest(_ provider: ManagedProvider) -> Bool { !closed && (accounts[provider]?.retryUntil ?? .distantPast) <= Date() }
     private func mutateYouTube(_ operation: @escaping @Sendable (ProviderAPI) async throws -> ProviderEvent) {
         guard canRequest(.youtube) else { return }
         let generation = begin(.youtube, action: "Saving a YouTube event change")
@@ -401,20 +516,24 @@ final class ProviderAccountSession: ObservableObject {
                 let event = try await operation(api())
                 guard isCurrent(.youtube, generation) else { return }
                 accounts[.youtube]?.events = Self.merge((accounts[.youtube]?.events ?? []).filter { $0.id != event.id } + [event])
+                if pending.document.records.contains(where: { $0.kind == .event && $0.providerID == event.id && $0.channelID == event.channelID }) {
+                    pending.retain([.init(event)])
+                }
                 accounts[.youtube]?.verifiedAt = Date()
                 finish(.youtube, generation)
             } catch { finish(.youtube, generation, error: error) }
         }
     }
     func deleteYouTube(eventID: String) {
-        guard canRequest(.youtube) else { return }
+        guard canRequest(.youtube), let owner = snapshot(.youtube).events.first(where: { $0.id == eventID })?.channelID else { return }
         let generation = begin(.youtube, action: "Deleting the selected upcoming YouTube event")
         jobs[.youtube] = Task { [weak self] in
             guard let self else { return }
             do {
-                try await api().deleteYouTubeEvent(id: eventID)
+                try await api().deleteYouTubeEvent(id: eventID, expectedChannelID: owner)
                 guard isCurrent(.youtube, generation) else { return }
                 accounts[.youtube]?.events.removeAll { $0.id == eventID }
+                pending.remove("youtube:event:\(eventID)")
                 finish(.youtube, generation)
             } catch { finish(.youtube, generation, error: error) }
         }

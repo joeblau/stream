@@ -12,6 +12,6 @@ xcrun swiftc -swift-version 6 -parse-as-library \
     -Xlinker -rpath -Xlinker "${PROVIDERS_PRODUCTS:A}" \
     StreamMac/ProviderHTTP.swift StreamMac/ProviderTokenVault.swift StreamMac/OAuthLoopbackReceiver.swift \
     StreamMac/StudioChatModel.swift StreamMac/StudioDirectChatModel.swift StreamMac/StudioChatSocket.swift \
-    StreamMac/StudioChatOutbox.swift StreamMac/StudioDirectChatManager.swift StreamMac/ProviderAccountSession.swift scripts/provider_accounts_harness.swift \
+    StreamMac/StudioChatOutbox.swift StreamMac/StudioDirectChatManager.swift StreamMac/ProviderPendingCatalog.swift StreamMac/ProviderAccountSession.swift scripts/provider_accounts_harness.swift \
     -o "$PROVIDERS_BUILD_PATH/providers-harness"
 "$PROVIDERS_BUILD_PATH/providers-harness"

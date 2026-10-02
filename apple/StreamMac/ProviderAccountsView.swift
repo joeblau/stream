@@ -17,6 +17,10 @@ extension EnvironmentValues {
 struct ProviderAccountsView: View {
     @ObservedObject var accounts: ProviderAccountSession
     @ObservedObject var destinations: DestinationSession
+    @ObservedObject private var pending: ProviderPendingCatalog
+    init(accounts: ProviderAccountSession, destinations: DestinationSession) {
+        self.accounts = accounts; self.destinations = destinations; self.pending = accounts.pending
+    }
     @State private var provider = ManagedProvider.youtube
     @State private var clientID = ""
     @State private var channelID = ""
@@ -86,6 +90,7 @@ struct ProviderAccountsView: View {
                 if let importError { Text(importError).font(.caption).foregroundStyle(.orange) }
             }
             Text("Cancelling a provider request stops waiting locally; it cannot undo a remote mutation. Refresh before retrying after an uncertain reply.").font(.caption).foregroundStyle(.secondary)
+            ProviderPendingControls(accounts: accounts, pending: accounts.pending)
             if let manager = accounts.directChat {
                 DisclosureGroup("Shared direct public chat session") { DirectChatControls(manager: manager) }
             }
@@ -101,7 +106,7 @@ struct ProviderAccountsView: View {
         .sheet(item: $edit) { selection in
             YouTubeEventEditor(selection: selection) { draft in
                 if let event = selection.event { accounts.editYouTube(eventID: event.id, draft: draft) }
-                else { accounts.createYouTube(draft) }
+                else { accounts.createYouTube(draft, channelID: channelID) }
             }
         }
         .confirmationDialog("Upload thumbnail to YouTube?", isPresented: Binding(get: { thumbnail != nil }, set: { if !$0 { thumbnail = nil } }), titleVisibility: .visible) {
@@ -149,12 +154,13 @@ struct ProviderAccountsView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Button("Create YouTube Event…") { edit = .init(event: nil) }
+                    .disabled(!pending.canCreate)
                 if let event, event.state == .upcoming {
                     Button("Edit…") { edit = .init(event: event) }
                     Button("Choose Thumbnail…") { chooseThumbnail(event) }
                     Button("Delete…", role: .destructive) { deleteEvent = event }
                 }
-            }.disabled(snapshot.isWorking || snapshot.verifiedAt == nil || channel == nil || !canManageYouTube)
+            }.disabled(snapshot.isWorking || snapshot.verifiedAt == nil || channel == nil || !canManageYouTube || !accounts.canRequest(.youtube))
             if let event, let channel {
                 Button("Verify Selected Event") { accounts.refreshLive(.init(provider: .youtube, channelID: channel.id, eventID: event.id)) }
                     .disabled(snapshot.isWorking || !accounts.canRequest(.youtube))
@@ -162,9 +168,12 @@ struct ProviderAccountsView: View {
             if let receipt = accounts.lastThumbnailReceipt, receipt.eventID == eventID {
                 Text("YouTube acknowledged thumbnail upload \(receipt.time.formatted(date: .omitted, time: .standard)).").font(.caption)
             }
+            if let channel {
+                YouTubeStreamControls(accounts: accounts, pending: accounts.pending, channelID: channel.id, event: event)
+            }
             Button(importing ? "Importing…" : "Add Bound Event Ingest Draft") { importDestination() }
                 .disabled(importing || snapshot.isWorking || snapshot.verifiedAt == nil || channel == nil || event == nil || event?.state == .ended)
-            Text("New events start private with automatic start/stop disabled. Configure/bind their stream in YouTube Studio, refresh, then import. Edit upcoming privacy or deliberately upload a JPEG/PNG thumbnail up to 2 MiB here. Early start uses YouTube Studio. Starting ingest can publish if an existing event has automatic start enabled; review its provider settings.")
+            Text("New events start private with automatic start/stop disabled. Create/select a stream, review its binding, then import the bound event's ingest as a disabled draft. Edit upcoming privacy or deliberately upload a JPEG/PNG thumbnail up to 2 MiB here. Early start uses YouTube Studio. Starting ingest can publish if an existing event has automatic start enabled; review its provider settings.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

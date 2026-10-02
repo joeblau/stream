@@ -75,12 +75,17 @@ public struct ProviderEvent: Codable, Equatable, Identifiable, Sendable {
     public var state: State
     public var publicURL: URL?
     public var verifiedAt: Date
+    public var boundStreamID: String?
+    public var enableAutoStart: Bool?
+    public var enableAutoStop: Bool?
     public init(id: String, provider: ManagedProvider, channelID: String? = nil, title: String,
                 description: String = "", privacy: String? = nil, scheduledAt: Date? = nil,
-                state: State = .unknown, publicURL: URL? = nil, verifiedAt: Date = Date()) {
+                state: State = .unknown, publicURL: URL? = nil, verifiedAt: Date = Date(),
+                boundStreamID: String? = nil, enableAutoStart: Bool? = nil, enableAutoStop: Bool? = nil) {
         self.id = id; self.provider = provider; self.channelID = channelID; self.title = String(title.prefix(500))
         self.description = String(description.prefix(5_000)); self.privacy = privacy; self.scheduledAt = scheduledAt
         self.state = state; self.publicURL = ProviderChannel.publicLink(publicURL); self.verifiedAt = verifiedAt
+        self.boundStreamID = boundStreamID; self.enableAutoStart = enableAutoStart; self.enableAutoStop = enableAutoStop
     }
 }
 

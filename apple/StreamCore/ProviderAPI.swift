@@ -46,7 +46,7 @@ public struct ProviderAPI: Sendable {
     /// Refresh reads existing IDs only. It cannot create, replay or start events.
     public func upcoming(_ provider: ManagedProvider) async throws -> [ProviderEvent] {
         if provider == .youtube {
-            let rows = try await youtubeRows(path: "/youtube/v3/liveBroadcasts", query: ["part": "snippet,status", "broadcastStatus": "upcoming", "maxResults": "50"])
+            let rows = try await youtubeRows(path: "/youtube/v3/liveBroadcasts", query: ["part": "snippet,status,contentDetails", "broadcastStatus": "upcoming", "maxResults": "50"])
             return try unique(rows.map(Self.youtubeEvent))
         }
         if provider == .restream {
@@ -65,7 +65,7 @@ public struct ProviderAPI: Sendable {
     }
     public func youtubeEvent(id: String) async throws -> ProviderEvent {
         guard ProviderChannel.validID(id) else { throw ProviderFailure(.invalidRequest) }
-        let object = try await object(.youtube, path: "/youtube/v3/liveBroadcasts", query: ["part": "snippet,status", "id": id])
+        let object = try await object(.youtube, path: "/youtube/v3/liveBroadcasts", query: ["part": "snippet,status,contentDetails", "id": id])
         guard let rows = object["items"] as? [[String: Any]], let row = rows.first, rows.count == 1, row["id"] as? String == id else { throw ProviderFailure(.invalidResponse) }
         return try Self.youtubeEvent(row)
     }
@@ -134,6 +134,10 @@ public struct ProviderAPI: Sendable {
     private static func youtubeEvent(_ row: [String: Any]) throws -> ProviderEvent {
         guard let id = row["id"] as? String, ProviderChannel.validID(id) else { throw ProviderFailure(.invalidResponse) }
         let snippet = row["snippet"] as? [String: Any] ?? [:], status = row["status"] as? [String: Any] ?? [:]
+        let details = row["contentDetails"] as? [String: Any] ?? [:]
+        if details["boundStreamId"] != nil && !(details["boundStreamId"] is String) { throw ProviderFailure(.invalidResponse) }
+        let bound = (details["boundStreamId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        if let bound, !ProviderChannel.validID(bound) { throw ProviderFailure(.invalidResponse) }
         let state: ProviderEvent.State
         switch status["lifeCycleStatus"] as? String {
         case "created", "ready": state = .upcoming
@@ -145,7 +149,8 @@ public struct ProviderAPI: Sendable {
             title: snippet["title"] as? String ?? id, description: snippet["description"] as? String ?? "",
             privacy: status["privacyStatus"] as? String,
             scheduledAt: (snippet["scheduledStartTime"] as? String).flatMap { Self.date($0) },
-            state: state, publicURL: URL(string: "https://www.youtube.com/watch?v=\(id)"))
+            state: state, publicURL: URL(string: "https://www.youtube.com/watch?v=\(id)"),
+            boundStreamID: bound, enableAutoStart: details["enableAutoStart"] as? Bool, enableAutoStop: details["enableAutoStop"] as? Bool)
     }
     private func unique(_ events: [ProviderEvent]) throws -> [ProviderEvent] {
         guard events.count <= 2_000 else { throw ProviderFailure(.invalidResponse) }
@@ -169,6 +174,86 @@ public struct YouTubeEventDraft: Equatable, Sendable {
 }
 
 public extension ProviderAPI {
+    func youtubeStreams() async throws -> [YouTubeLiveStream] {
+        let rows = try await youtubeRows(path: "/youtube/v3/liveStreams",
+            query: ["part": "snippet,cdn,status", "mine": "true", "maxResults": "50"])
+        var result: [String: YouTubeLiveStream] = [:]
+        for row in rows { let stream = try Self.youtubeStream(row); result[stream.id] = stream }
+        return result.values.sorted { $0.id < $1.id }
+    }
+    func youtubeStream(id: String) async throws -> YouTubeLiveStream {
+        guard ProviderChannel.validID(id) else { throw ProviderFailure(.invalidRequest) }
+        let object = try await object(.youtube, path: "/youtube/v3/liveStreams",
+            query: ["part": "snippet,cdn,status", "id": id])
+        guard let rows = object["items"] as? [[String: Any]], rows.count == 1,
+              rows[0]["id"] as? String == id else { throw ProviderFailure(.invalidResponse) }
+        return try Self.youtubeStream(rows[0])
+    }
+    /// Only one insert. Its returned ingestion credentials are not represented
+    /// in the result; an acknowledged ID survives any later binding failure.
+    func createYouTubeStream(_ draft: YouTubeStreamDraft, expectedChannelID: String) async throws -> YouTubeLiveStream {
+        try draft.validate()
+        guard ProviderChannel.validID(expectedChannelID) else { throw ProviderFailure(.invalidRequest) }
+        let owned = try await channels(.youtube)
+        guard owned.contains(where: { $0.id == expectedChannelID }) else { throw ProviderFailure(.permission) }
+        try Task.checkCancellation()
+        var call = try Self.request(.youtube, path: "/youtube/v3/liveStreams", query: ["part": "snippet,cdn,status,contentDetails"])
+        call.httpMethod = "POST"; call.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        call.httpBody = try JSONSerialization.data(withJSONObject: [
+            "snippet": ["title": draft.title],
+            "cdn": ["ingestionType": "rtmp", "resolution": draft.resolution.rawValue, "frameRate": draft.frameRate.rawValue],
+            "contentDetails": ["isReusable": draft.reusable]
+        ])
+        let data = try await send(.youtube, call)
+        guard data.count <= 2_097_152, let row = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure(.invalidResponse) }
+        let stream = try Self.youtubeStream(row)
+        guard stream.channelID == expectedChannelID else { throw ProviderFailure(.invalidResponse) }
+        return stream
+    }
+    func reviewYouTubeBinding(eventID: String, streamID: String, expectedChannelID: String) async throws -> YouTubeBindingReview {
+        guard ProviderChannel.validID(expectedChannelID) else { throw ProviderFailure(.invalidRequest) }
+        let event = try await youtubeEvent(id: eventID)
+        guard event.channelID == expectedChannelID else { throw ProviderFailure(.permission) }
+        guard event.state == .upcoming else { throw ProviderFailure(.invalidRequest) }
+        let stream = try await youtubeStream(id: streamID)
+        guard stream.channelID == expectedChannelID else { throw ProviderFailure(.permission) }
+        guard [.ready, .inactive].contains(stream.state), stream.ingestionType == "rtmp",
+              let resolution = stream.resolution.flatMap(YouTubeStreamDraft.Resolution.init(rawValue:)),
+              let rate = stream.frameRate.flatMap(YouTubeStreamDraft.FrameRate.init(rawValue:)),
+              (resolution == .variable) == (rate == .variable) else { throw ProviderFailure(.invalidRequest) }
+        try Task.checkCancellation()
+        return .init(event: event, stream: stream)
+    }
+    /// Fresh ownership, eligibility and current binding must still match the
+    /// review. Never unbind; replacing another binding is separately opted in.
+    func bindYouTube(_ review: YouTubeBindingReview, replacingExisting: Bool = false) async throws -> ProviderEvent {
+        guard review.event.provider == .youtube, let channelID = review.event.channelID, review.stream.channelID == channelID else { throw ProviderFailure(.invalidRequest) }
+        let fresh = try await reviewYouTubeBinding(eventID: review.event.id, streamID: review.stream.id, expectedChannelID: channelID)
+        guard fresh.event.boundStreamID == review.event.boundStreamID,
+              fresh.event.enableAutoStart == review.event.enableAutoStart, fresh.event.enableAutoStop == review.event.enableAutoStop,
+              !fresh.replacesExisting || replacingExisting else { throw ProviderFailure(.invalidRequest) }
+        if fresh.event.boundStreamID == fresh.stream.id { return fresh.event }
+        var call = try Self.request(.youtube, path: "/youtube/v3/liveBroadcasts/bind",
+            query: ["id": fresh.event.id, "streamId": fresh.stream.id, "part": "snippet,status,contentDetails"])
+        call.httpMethod = "POST"
+        try Task.checkCancellation()
+        let data = try await send(.youtube, call)
+        guard data.count <= 2_097_152, let row = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure(.invalidResponse) }
+        let result = try Self.youtubeEvent(row)
+        guard result.id == fresh.event.id, result.channelID == channelID, result.boundStreamID == fresh.stream.id,
+              result.state == .upcoming else { throw ProviderFailure(.invalidResponse) }
+        return result
+    }
+    private static func youtubeStream(_ row: [String: Any]) throws -> YouTubeLiveStream {
+        guard let id = row["id"] as? String, ProviderChannel.validID(id) else { throw ProviderFailure(.invalidResponse) }
+        let snippet = row["snippet"] as? [String: Any] ?? [:], cdn = row["cdn"] as? [String: Any] ?? [:]
+        let channel = snippet["channelId"] as? String
+        if let channel, !ProviderChannel.validID(channel) { throw ProviderFailure(.invalidResponse) }
+        return .init(id: id, channelID: channel, title: snippet["title"] as? String ?? id,
+            state: (row["status"] as? [String: Any])?["streamStatus"].flatMap { $0 as? String }.flatMap(YouTubeLiveStream.State.init(rawValue:)) ?? .unknown,
+            ingestionType: cdn["ingestionType"] as? String, resolution: cdn["resolution"] as? String, frameRate: cdn["frameRate"] as? String,
+            reusable: (row["contentDetails"] as? [String: Any])?["isReusable"] as? Bool)
+    }
     /// Acknowledged provider ID is returned immediately. The caller retains it
     /// before any later refresh. No mutation is retried after an uncertain reply.
     func createYouTubeEvent(_ draft: YouTubeEventDraft) async throws -> ProviderEvent {
@@ -189,13 +274,14 @@ public extension ProviderAPI {
     /// Preserve all writable snippet fields from a
     /// fresh read. An explicit privacy selection adds only the writable privacy
     /// field; contentDetails (including automatic start/stop) remain untouched.
-    func editYouTubeEvent(id: String, title: String, description: String, scheduledAt: Date, privacy: YouTubeEventDraft.Privacy? = nil) async throws -> ProviderEvent {
+    func editYouTubeEvent(id: String, title: String, description: String, scheduledAt: Date, privacy: YouTubeEventDraft.Privacy? = nil, expectedChannelID: String? = nil) async throws -> ProviderEvent {
         try YouTubeEventDraft(title: title, description: description, scheduledAt: scheduledAt).validate()
         guard ProviderChannel.validID(id) else { throw ProviderFailure(.invalidRequest) }
         let object = try await object(.youtube, path: "/youtube/v3/liveBroadcasts", query: ["part": "snippet,status", "id": id])
         guard let rows = object["items"] as? [[String: Any]], rows.count == 1, let row = rows.first,
               row["id"] as? String == id, let old = row["snippet"] as? [String: Any],
               try Self.youtubeEvent(row).state == .upcoming else { throw ProviderFailure(.invalidRequest) }
+        if let expectedChannelID, old["channelId"] as? String != expectedChannelID { throw ProviderFailure(.permission) }
         var snippet: [String: Any] = [:]
         for field in ["title", "description", "categoryId", "scheduledStartTime", "scheduledEndTime"] {
             snippet[field] = old[field]
@@ -247,9 +333,10 @@ public extension ProviderAPI {
               }) else { throw ProviderFailure(.invalidResponse) }
         return event
     }
-    func deleteYouTubeEvent(id: String) async throws {
+    func deleteYouTubeEvent(id: String, expectedChannelID: String? = nil) async throws {
         let event = try await youtubeEvent(id: id)
         guard event.state == .upcoming else { throw ProviderFailure(.invalidRequest) }
+        if let expectedChannelID, event.channelID != expectedChannelID { throw ProviderFailure(.permission) }
         var request = try Self.request(.youtube, path: "/youtube/v3/liveBroadcasts", query: ["id": id])
         request.httpMethod = "DELETE"
         _ = try await send(.youtube, request)
