@@ -147,7 +147,10 @@ struct SourceDiagnosticSnapshot: Codable, Sendable {
         current.recordingElapsedSeconds = progress.elapsedWallSeconds; current.recordingMediaSeconds = progress.durationSeconds
         current.recordingAVEndDifferenceSeconds = progress.avEndDifferenceSeconds
         current.recordingAvailableBytes = progress.availableBytes; current.recordingBytes = progress.bytesWritten
-        current.estimatedEncoderSessions = controller.destinationOutputs.activeCount + (recorder.state.isActive ? 1 : 0)
+        // The runtime ledger retains ISO/secondary/rotation reservations through
+        // countdown, preflight and writer finalization. It counts reserved
+        // recording capacity; publisher state counts active publishing sessions.
+        current.estimatedEncoderSessions = controller.activePublishingEncoderCount + controller.reservedRecordingEncoderCount
         current.events = events
         snapshot = current
     }
@@ -202,7 +205,9 @@ private struct StudioDiagnosticsContent: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Studio Health").font(.headline)
-                Text(String(format: "CPU %.1f%% · Peak memory %.0f MB · Encoder sessions %d (estimate)", snapshot.cpuPercent, Double(snapshot.peakMemoryBytes) / 1_000_000, snapshot.estimatedEncoderSessions))
+                Text(String(format: "CPU %.1f%% · Peak memory %.0f MB · Encoder sessions %d (reserved / active)", snapshot.cpuPercent, Double(snapshot.peakMemoryBytes) / 1_000_000, snapshot.estimatedEncoderSessions))
+                Text("Encoder count includes recording reservations (Program, secondary, ISO, preflight and overlapping finalization) plus active publishers; it is not measured hardware utilization.")
+                    .foregroundStyle(.secondary)
                 Text("Hardware canvas ceiling \(snapshot.hardwareCanvasCeiling), \(snapshot.hardwareFPSCeiling) fps · Thermal state \(snapshot.thermalState)")
                 ForEach(snapshot.outputs, id: \.id) { output in
                     let name = UUID(uuidString: output.id).flatMap { workspace.runtime.controller.destinationOutputs.names[$0] } ?? "Output"
