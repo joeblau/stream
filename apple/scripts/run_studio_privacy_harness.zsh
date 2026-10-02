@@ -21,6 +21,9 @@ spec['targets'].each_value do |target|
 end
 target=spec['targets'].delete('StreamMac')
 target['type']='tool'
+target['settings'] ||= {}
+target['settings']['base'] ||= {}
+target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
 target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
 target['sources'] << File.join(root,'scripts/studio_privacy_harness.swift')
 spec['targets']['StudioPrivacyHarness']=target
@@ -34,5 +37,5 @@ python3 scripts/repair_desktop_transport_archives.py "$PRIVACY_BUILD_PATH"
 xcodebuild -project "$PRIVACY_DIR/StudioPrivacyValidation.xcodeproj" \
   -scheme StudioPrivacyHarness -destination 'platform=macOS' \
   -derivedDataPath "$PRIVACY_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
-env DYLD_FRAMEWORK_PATH="$PWD/$PRIVACY_BUILD_PATH/Build/Products/Debug" \
+env DYLD_FRAMEWORK_PATH="${PRIVACY_BUILD_PATH:A}/Build/Products/Debug" \
   "$PRIVACY_BUILD_PATH/Build/Products/Debug/StudioPrivacyHarness"
