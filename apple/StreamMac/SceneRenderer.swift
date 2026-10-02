@@ -223,6 +223,11 @@ final class SceneRenderer {
     private var tickerLines: [String: CTLine] = [:]
     private var layerMotionPlan: LayerMotionPlan?
     private var layerMotionProgress = 0.0
+    /// Alpha contributions follow the same placement, opacity, transitions and
+    /// upper-layer occlusion as the pixels. They contain IDs/hashes only.
+    private var chatMasks: [RecordingChatPaint: CIImage] = [:]
+    private var collectingChat = false
+    private var placedNestedChat: [LayerID: [RecordingChatPaint: CIImage]] = [:]
 
     /// S06 raster cache for STATIC nested scenes (transitively text/shape
     /// only): keyed by the transitive content fingerprint + pixel size, with
@@ -304,6 +309,9 @@ final class SceneRenderer {
         // next appearance replays the timing).
         currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
         textTimingSeen.removeAll()
+        chatMasks.removeAll(keepingCapacity: true)
+        placedNestedChat.removeAll(keepingCapacity: true)
+        collectingChat = RecordingChatPaintDemand.shared.isRequested
         layerMotionPlan = nil
 
         var output = sceneComposite(scene, overlayContext: overlayContext, canvas: canvas,
@@ -315,6 +323,13 @@ final class SceneRenderer {
                                   sourcePayloads: sourcePayloads, scenes: scenes)
         // G11 (issue #117): program annotations composite above the scene and
         // project overlays, below the stinger mask.
+        if !chatMasks.isEmpty {
+            let clear = CIImage(color: .clear).cropped(to: canvas)
+            let annotation = AnnotationRenderer.composite(strokes: annotations.strokes[scene.id] ?? [],
+                pointer: annotations.pointer?.sceneID == scene.id ? annotations.pointer?.point : nil,
+                onto: clear, canvas: canvas)
+            occludeChat(with: annotation)
+        }
         output = AnnotationRenderer.composite(strokes: annotations.strokes[scene.id] ?? [],
                                               pointer: annotations.pointer?.sceneID == scene.id
                                                   ? annotations.pointer?.point : nil,
@@ -350,6 +365,9 @@ final class SceneRenderer {
         currentFrameIntervalMs = max(1, CMTimeGetSeconds(frameDuration) * 1000)
         currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
         textTimingSeen.removeAll()
+        chatMasks.removeAll(keepingCapacity: true)
+        placedNestedChat.removeAll(keepingCapacity: true)
+        collectingChat = RecordingChatPaintDemand.shared.isRequested
         layerMotionPlan = nil
         defer { layerMotionPlan = nil }
 
@@ -376,9 +394,13 @@ final class SceneRenderer {
             let fromImage = sceneComposite(from, overlayContext: overlayContext, canvas: canvas,
                 frames: frames, sourcePayloads: sourcePayloads,
                 scenes: scenes, layerOpacity: [:], exitingLayers: [])
+            let fromChat = chatMasks
+            chatMasks.removeAll(keepingCapacity: true)
             let toImage = sceneComposite(to, overlayContext: overlayContext, canvas: canvas,
                 frames: frames, sourcePayloads: sourcePayloads,
                 scenes: scenes, layerOpacity: [:], exitingLayers: [])
+            let toChat = chatMasks
+            chatMasks = blendedChat(from: fromChat, to: toChat, incoming: toImage, blend: blend, canvas: canvas)
             output = blended(from: fromImage, to: toImage, blend: blend, canvas: canvas)
         }
         output = applyingOverlays(output, overlayContext: overlayContext, scene: to,
@@ -482,8 +504,9 @@ final class SceneRenderer {
                                          scenes: scenes, depth: 0, visited: [scene.id]) else {
                 continue    // documented fallback: missing source → background shows through
             }
-            output = applyingAlpha(layerImage, layerOpacity[layer.id] ?? 1)
-                .composited(over: output)
+            let painted = applyingAlpha(layerImage, layerOpacity[layer.id] ?? 1)
+            collectChat(layer: layer, image: painted, canvas: canvas, alpha: layerOpacity[layer.id] ?? 1)
+            output = painted.composited(over: output)
         }
         for layer in exitingLayers {
             guard let layerImage = image(for: layer, canvas: canvas,
@@ -491,8 +514,9 @@ final class SceneRenderer {
                                          scenes: scenes, depth: 0, visited: [scene.id]) else {
                 continue    // same documented fallback
             }
-            output = applyingAlpha(layerImage, layerOpacity[layer.id] ?? 1)
-                .composited(over: output)
+            let painted = applyingAlpha(layerImage, layerOpacity[layer.id] ?? 1)
+            collectChat(layer: layer, image: painted, canvas: canvas, alpha: layerOpacity[layer.id] ?? 1)
+            output = painted.composited(over: output)
         }
         return output
     }
@@ -513,6 +537,7 @@ final class SceneRenderer {
                                            scenes: scenes, depth: 0, visited: [scene.id]) else {
                 continue    // same fallback as scene layers
             }
+            collectChat(layer: overlay, image: overlayImage, canvas: canvas)
             output = overlayImage.composited(over: output)
         }
         return output
@@ -531,6 +556,7 @@ final class SceneRenderer {
         image = image.transformed(by: CGAffineTransform(
             translationX: canvas.midX - image.extent.midX,
             y: canvas.midY - image.extent.midY))
+        occludeChat(with: image)
         return image.composited(over: output)
     }
 
@@ -571,10 +597,74 @@ final class SceneRenderer {
         guard let sample = makeSampleBuffer(from: outBuffer,
                                             presentationTime: presentationTime,
                                             frameDuration: frameDuration) else { return nil }
+        RecordingChatPaint.attach(paintedChat(canvas: canvas), to: sample)
         return CompositedFrame(sampleBuffer: sample,
                                presentationTime: presentationTime,
                                frameDuration: frameDuration,
                                sequence: sequence)
+    }
+
+    private func occludeChat(with image: CIImage) {
+        for (paint, mask) in chatMasks {
+            chatMasks[paint] = mask.applyingFilter("CISourceOutCompositing", parameters: ["inputBackgroundImage": image])
+        }
+    }
+
+    private func collectChat(layer: LayerNode, image: CIImage, canvas: CGRect, alpha: Double = 1) {
+        guard collectingChat else { return }
+        occludeChat(with: image)
+        if let nested = placedNestedChat.removeValue(forKey: layer.id) {
+            for (paint, mask) in nested.prefix(32) where chatMasks[paint] != nil || chatMasks.count < 32 {
+                let faded = applyingAlpha(mask, alpha)
+                chatMasks[paint] = chatMasks[paint].map { faded.composited(over: $0) } ?? faded
+            }
+        }
+        guard case .text(let text) = layer.payload, let id = text.recordingChatMessageID,
+              text.timer == nil, text.ticker == nil, text.text.utf8.count <= 20_000 else { return }
+        let resolved = TitleTemplate.resolve(text.text, with: tokenProvider())
+        let paint = RecordingChatPaint(slotID: layer.id.description, messageID: id,
+            fingerprint: RecordingChatPaint.fingerprint(resolved))
+        guard paint.isValid, chatMasks[paint] != nil || chatMasks.count < 32 else { return }
+        let alpha = image.cropped(to: canvas).applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0)])
+        chatMasks[paint] = chatMasks[paint].map { alpha.composited(over: $0) } ?? alpha
+    }
+
+    private func paintedChat(canvas: CGRect) -> [RecordingChatPaint] {
+        chatMasks.compactMap { paint, mask in
+            let maximum = mask.cropped(to: canvas).applyingFilter("CIAreaMaximum", parameters: ["inputExtent": CIVector(cgRect: canvas)])
+            var pixel = [UInt8](repeating: 0, count: 4)
+            ciContext.render(maximum, toBitmap: &pixel, rowBytes: 4,
+                bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBA8, colorSpace: workingColorSpace)
+            return pixel[3] > 1 ? paint : nil
+        }.sorted { ($0.slotID, $0.messageID) < ($1.slotID, $1.messageID) }
+    }
+
+    private func blendedChat(from: [RecordingChatPaint: CIImage], to: [RecordingChatPaint: CIImage],
+                             incoming: CIImage, blend: SceneBlend, canvas: CGRect) -> [RecordingChatPaint: CIImage] {
+        let progress = min(1, max(0, blend.progress))
+        let clear = CIImage(color: .clear).cropped(to: canvas)
+        var result: [RecordingChatPaint: CIImage] = [:]
+        for paint in Set(from.keys).union(to.keys) {
+            let a = from[paint] ?? clear, b = to[paint] ?? clear
+            switch blend.style {
+            case .cut: result[paint] = b
+            case .dissolve, .stinger, .layerMotion:
+                result[paint] = blended(from: a, to: b, blend: blend, canvas: canvas)
+            case .dipToColor:
+                result[paint] = progress < 0.5 ? applyingAlpha(a, 1 - progress * 2) : applyingAlpha(b, (progress - 0.5) * 2)
+            case .wipe, .slide:
+                // Apply the same reveal/translation to both the incoming
+                // pixels and its mask. Incoming pixels suppress outgoing IDs.
+                let covered = blended(from: clear, to: incoming, blend: blend, canvas: canvas)
+                let outgoing = a.applyingFilter("CISourceOutCompositing", parameters: ["inputBackgroundImage": covered])
+                let entering = blended(from: clear, to: b, blend: blend, canvas: canvas)
+                result[paint] = entering.composited(over: outgoing)
+            }
+        }
+        return result
     }
 
     // MARK: - Layer rendering
@@ -1196,7 +1286,13 @@ final class SceneRenderer {
 
         let path = visited.union([reference.sceneID])
         let content: CIImage?
-        if isStaticContent(nested, scenes: scenes, visited: path) {
+        let capturesChat = collectingChat && containsChat(nested, scenes: scenes, visited: path)
+        let outerChat = chatMasks
+        let outerCollecting = collectingChat
+        if !capturesChat { collectingChat = false }
+        defer { collectingChat = outerCollecting }
+        if capturesChat { chatMasks.removeAll(keepingCapacity: true) }
+        if !capturesChat, isStaticContent(nested, scenes: scenes, visited: path) {
             // Static nested scene: one baked raster per content+size, then a
             // texture draw per frame — a static nested scene costs ~nothing.
             let fingerprint = nestedFingerprint(nested, scenes: scenes, visited: path)
@@ -1212,9 +1308,28 @@ final class SceneRenderer {
                                     frames: frames, sourcePayloads: sourcePayloads,
                                     scenes: scenes, depth: depth + 1, visited: path)
         }
+        if capturesChat {
+            let nestedChat = chatMasks; chatMasks = outerChat
+            var maskLayer = layer; maskLayer.style.border = .init(); maskLayer.style.shadow = .init()
+            placedNestedChat[layer.id] = nestedChat.mapValues { mask in
+                stylePlaced(content: mask, layer: maskLayer, canvas: canvas, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+            }
+        }
         guard let image = content else { return nil }
         return stylePlaced(content: image, layer: layer, canvas: canvas,
                            pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+    }
+
+    private func containsChat(_ scene: Scene, scenes: [SceneID: Scene], visited: Set<SceneID>) -> Bool {
+        guard visited.count <= SceneGraph.maxNestingDepth else { return false }
+        return scene.layers.contains { layer in
+            guard layer.isVisible else { return false }
+            if case .text(let text) = layer.payload { return text.recordingChatMessageID != nil }
+            if case .scene(let reference) = layer.payload, !visited.contains(reference.sceneID), let child = scenes[reference.sceneID] {
+                return containsChat(child, scenes: scenes, visited: visited.union([reference.sceneID]))
+            }
+            return false
+        }
     }
 
     /// The nested scene's layer stack composited over its OWN canvas rect
@@ -1238,6 +1353,7 @@ final class SceneRenderer {
                                          scenes: scenes, depth: depth, visited: visited) else {
                 continue    // same documented fallback as top-level layers
             }
+            if collectingChat { collectChat(layer: layer, image: layerImage, canvas: canvas) }
             output = output.map { layerImage.composited(over: $0) } ?? layerImage
         }
         return output

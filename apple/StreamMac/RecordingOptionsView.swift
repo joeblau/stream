@@ -40,6 +40,8 @@ struct RecordingOptionsView: View {
                     .disabled(recorder.state.isActive)
                     Toggle("Auto-record on Go Live", isOn: $recorder.preferences.autoRecordOnGoLive)
                     Divider()
+                    RecordingChatPreferencesView(recorder: recorder)
+                    Divider()
                     Text("Isolated audio (up to 8 tracks)").font(.subheadline.bold())
                     Text("Widget audio follows its System Mix route. Independent widget audio taps are unavailable.")
                         .font(.caption).foregroundStyle(.secondary)
