@@ -56,6 +56,10 @@ jobs:
           zsh scripts/run_show_macros_harness.zsh
           zsh scripts/run_studio_local_control_harness.zsh
           zsh scripts/run_studio_automation_harness.zsh
+      - name: Test public chat and recovery metadata boundaries
+        run: |
+          zsh scripts/run_studio_chat_harness.zsh
+          RECOVERY_BUILD_PATH=build/tests zsh scripts/run_session_recovery_harness.zsh
       - name: Qualify generated program recordings
         run: zsh scripts/run_program_recording_harness.zsh
       - name: Validate sandbox declaration
