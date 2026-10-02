@@ -167,10 +167,21 @@ final class RecordingChatFeed: @unchecked Sendable {
         while bindingOrder.count > 128 { bindings.removeValue(forKey: bindingOrder.removeFirst()) }
     }
     func install(_ archive: RecordingChatArchive?) { lock.lock(); self.archive = archive; lock.unlock() }
+    #if STREAM_NATIVE_VALIDATION
+    private var validationTime: CMTime?
+    func setValidationTime(_ time: CMTime) { lock.lock(); validationTime = time; lock.unlock() }
+    #endif
     func receive(_ message: RecordingChatMessage, at sourceTime: CMTime = CMClockGetTime(CMClockGetHostTimeClock())) {
-        guard message.isValid, sourceTime.isNumeric else { return }
-        lock.lock(); let target = archive; lock.unlock()
-        target?.receive(message, at: sourceTime)
+        guard message.isValid else { return }
+        lock.lock(); let target = archive
+        #if STREAM_NATIVE_VALIDATION
+        let receiptTime = validationTime ?? sourceTime
+        #else
+        let receiptTime = sourceTime
+        #endif
+        lock.unlock()
+        guard receiptTime.isNumeric else { return }
+        target?.receive(message, at: receiptTime)
     }
     func frame(_ frame: RecordingChatFrame, into target: RecordingChatArchive) {
         lock.lock()
