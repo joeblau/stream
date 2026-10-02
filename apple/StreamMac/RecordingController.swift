@@ -13,6 +13,7 @@ final class RecordingController: ObservableObject {
     @Published private(set) var warning: String?
     @Published private(set) var progress = ProgramRecordingSession.Progress()
     @Published private(set) var countdownRemaining = 0
+    @Published var context = RecordingContext()
     @Published private(set) var folderLabel = "App Group Recordings"
     @Published var preferences: RecordingPreferences {
         didSet {
@@ -22,6 +23,8 @@ final class RecordingController: ObservableObject {
 
     var isRecording: Bool { state.isRecording }
     var canSplit: Bool { state == .recording && finishingSegments == 0 }
+    var currentOutputURL: URL? { session?.outputURL }
+    var activeOutputURLs: Set<URL> { finishingURLs.union(session.map { [$0.outputURL] } ?? []) }
     var canStop: Bool { state.isActive && state != .stopping }
 
     private let defaults: UserDefaults
@@ -36,10 +39,12 @@ final class RecordingController: ObservableObject {
     private var recordingID = UUID()
     private var segmentIndex = 0
     private var finishingSegments = 0
+    private var finishingURLs: Set<URL> = []
     private var pendingStopState: RecordingSessionState = .idle
     private var countdownTask: Task<Void, Never>?
     private var folderAccess: URL?
     private var activePreferences = RecordingPreferences()
+    private var activeContext = RecordingContext()
     private var stopCompletions: [() -> Void] = []
 
     init(defaults: UserDefaults = .standard, defaultDirectory: URL? = nil) {
@@ -54,6 +59,19 @@ final class RecordingController: ObservableObject {
                 folderLabel = url.path
             }
         }
+    }
+
+    func libraryAccess() throws -> RecordingDirectoryAccess {
+        if let data = defaults.data(forKey: "recording.folderBookmark") {
+            var stale = false
+            let url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale)
+            guard url.startAccessingSecurityScopedResource() else { throw RecordingError.message("Recording folder access was lost. Choose the folder again.") }
+            return RecordingDirectoryAccess(url: url, scoped: true)
+        }
+        guard let directory = RecordingStore(directory: defaultDirectory).ensureRecordingsDirectory() else {
+            throw RecordingError.message("The recordings folder is unavailable.")
+        }
+        return RecordingDirectoryAccess(url: directory, scoped: false)
     }
 
     func storagePreflight() -> RecordingStoragePreflight {
@@ -111,6 +129,7 @@ final class RecordingController: ObservableObject {
         self.stream = stream
         recordingID = UUID(); segmentIndex = 0
         activePreferences = preferences
+        activeContext = context
         state = .preparing
         let seconds = useCountdown ? min(60, max(0, activePreferences.countdownSeconds)) : 0
         if seconds > 0 {
@@ -175,6 +194,7 @@ final class RecordingController: ObservableObject {
         configuration.quality = activePreferences.quality
         configuration.sessionID = recordingID.uuidString
         configuration.segmentIndex = segmentIndex
+        configuration.context = activeContext
         return ProgramRecordingSession(outputURL: url, configuration: configuration, event: { [weak self] event in
             Task { @MainActor in
                 guard let self, self.sessionID == id else { return }
@@ -197,6 +217,11 @@ final class RecordingController: ObservableObject {
         })
     }
 
+    func addMarker(title: String) {
+        guard state == .recording || state == .paused else { return }
+        session?.addMarker(title: title)
+    }
+
     func pause() { guard state == .recording else { return }; session?.pause() }
     func resume() {
         guard state == .paused else { return }
@@ -210,11 +235,13 @@ final class RecordingController: ObservableObject {
             let next = try makeSegment(stream: stream)
             session = next; router.install(next)
             finishingSegments += 1
+            finishingURLs.insert(previous.outputURL)
             previous.finish { [weak self, store] result in
                 if result.completed { store.markComplete(result.url) }
                 Task { @MainActor in
                     guard let self else { return }
                     self.finishingSegments -= 1
+                    self.finishingURLs.remove(result.url)
                     self.acceptFinished(result, final: false)
                     self.completeStopsIfReady()
                 }

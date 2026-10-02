@@ -101,3 +101,33 @@ The duration test deliberately advances source timestamps rather than waiting
 a minute. Its unrelated-consumer counter proves the controller leaves the tap
 source running; simultaneous provider-network publication still needs release
 qualification.
+
+## Recording library and handoff
+
+The main transport's library popover groups files by session and scopes them to
+current project/profile metadata, with an All profiles view. The app shell sets
+`recorder.context` with project/profile IDs and display names; each recording
+snapshots it at start, so later profile changes cannot relabel existing files.
+The library reads actual media tracks, duration, size, and thumbnails. Readable
+orphans are recoverable; unreadable files remain partial. Files still owned by a
+current/finishing writer cannot be exported.
+
+Add Marker records the accepted local media time, including valid paused time.
+Markers remain in the recording journal and export as JSON, quoted CSV, or text.
+An inline player, Finder reveal, explicit native sharing/editor picker, and a
+trim range are available on readable recordings. Clip export uses Apple's
+highest-quality supported MP4/MOV preset, validates the range, and preserves the
+original. It requires a new output name. Native picker/share/editor interactions
+remain manual UI qualification; no sharing or editor is invoked automatically.
+
+`run_recording_library_harness.zsh` verifies actual generated media metadata and
+thumbnails, project/profile context, complete/recoverable/partial/active status,
+marker timing and all export formats, and a decoded 0.8-second H.264/AAC clip
+(48 frames, flash/tone difference 0.0000417 seconds). Invalid ranges and attempts
+to overwrite the source fail visibly. These checks pass on the named local Mac.
+
+The recorder's `progress` additionally exposes wall elapsed time, shared source
+origin, each accepted track's ending media time, and their endpoint difference.
+The endpoint difference measures current write alignment; it is not an estimate
+of hardware clock drift. The journal retains per-track starting offsets and
+source-clock pause gaps for downstream reconciliation.

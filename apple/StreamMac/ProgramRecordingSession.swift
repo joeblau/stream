@@ -14,6 +14,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var quality: RecordingQuality = .standard
         var sessionID = UUID().uuidString
         var segmentIndex = 1
+        var context = RecordingContext()
         var lowSpaceWarningBytes: Int64 = 1_000_000_000
         var minimumSpaceBytes: Int64 = 100_000_000
         var videoCapacity: Int = 30
@@ -33,6 +34,11 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var droppedVideo = 0
         var droppedAudio = 0
         var durationSeconds = 0.0
+        var elapsedWallSeconds = 0.0
+        var sessionStartSourceSeconds: Double?
+        var videoEndSeconds: Double?
+        var audioEndSeconds: Double?
+        var avEndDifferenceSeconds: Double?
         var availableBytes: Int64?
         var bytesWritten: Int64 = 0
         var warning: String?
@@ -65,6 +71,8 @@ final class ProgramRecordingSession: @unchecked Sendable {
         let codec: RecordingCodec
         let container: RecordingContainer
         var pauses: [PauseGap]
+        let context: RecordingContext
+        var markers: [RecordingMarker]
         let file: String
         let startedAt: Date
         var status: String
@@ -105,6 +113,8 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private var sessionStart: CMTime = .invalid
     private var lastVideoPTS: CMTime = .invalid
     private var lastAudioPTS: CMTime = .invalid
+    private var videoEnd: CMTime = .invalid
+    private var audioEnd: CMTime = .invalid
     private var endTime: CMTime = .invalid
     private var firstVideoPTS: CMTime = .invalid
     private var firstAudioPTS: CMTime = .invalid
@@ -117,6 +127,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private var resumePending = false
     private var timestampOffset: CMTime = .zero
     private var pauses: [PauseGap] = []
+    private var markers: [RecordingMarker] = []
 
     init(outputURL: URL, configuration: Configuration = .init(),
          spaceProbe: @escaping @Sendable (URL) throws -> Int64? = { url in
@@ -163,6 +174,17 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 audio.removeFirst(); droppedAudio += 1
             }
             audio.append(sample)
+        }
+    }
+
+    func addMarker(title: String) {
+        queue.async { [self] in
+            guard started, failure == nil, !finishRequested else { return }
+            updateProgress()
+            let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            markers.append(RecordingMarker(seconds: progress.durationSeconds,
+                title: cleaned.isEmpty ? "Marker \(markers.count + 1)" : String(cleaned.prefix(500))))
+            writeManifest(status: paused ? "paused" : "recording")
         }
     }
 
@@ -319,11 +341,13 @@ final class ProgramRecordingSession: @unchecked Sendable {
             let sampleEnd = pts + (duration.isNumeric ? duration : CMTime(value: 1, timescale: Int32(max(1, configuration.frameRate))))
             endTime = endTime.isValid ? CMTimeMaximum(endTime, sampleEnd) : sampleEnd
             if isVideo {
+                videoEnd = sampleEnd
                 lastVideoPTS = pts; lastVideoWrite = Date(); progress.videoSamples += 1
                 progress.videoStatus = .writing
                 lock.lock(); firstVideoAccepted = true; lock.unlock()
                 if !firstVideoPTS.isValid { firstVideoPTS = pts }
             } else {
+                audioEnd = sampleEnd
                 lastAudioPTS = pts; lastAudioWrite = Date(); progress.audioSamples += 1
                 progress.audioStatus = .writing
                 if !firstAudioPTS.isValid { firstAudioPTS = pts }
@@ -390,6 +414,11 @@ final class ProgramRecordingSession: @unchecked Sendable {
         lock.lock()
         progress.droppedAudio = droppedAudio; progress.droppedVideo = droppedVideo
         lock.unlock()
+        progress.elapsedWallSeconds = Date().timeIntervalSince(createdAt)
+        progress.sessionStartSourceSeconds = sessionStart.isNumeric ? sessionStart.seconds : nil
+        progress.videoEndSeconds = videoEnd.isNumeric ? (videoEnd - sessionStart).seconds : nil
+        progress.audioEndSeconds = audioEnd.isNumeric ? (audioEnd - sessionStart).seconds : nil
+        progress.avEndDifferenceSeconds = videoEnd.isNumeric && audioEnd.isNumeric ? (videoEnd - audioEnd).seconds : nil
         progress.bytesWritten = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? NSNumber)?.int64Value ?? 0
         if endTime.isValid, sessionStart.isValid { progress.durationSeconds = max(0, (endTime - sessionStart).seconds) }
     }
@@ -442,7 +471,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
     }
 
     private func writeManifest(status: String) {
-        let manifest = Manifest(version: 1, sessionID: configuration.sessionID, segmentIndex: configuration.segmentIndex, codec: configuration.codec, container: configuration.container, pauses: pauses, file: outputURL.lastPathComponent, startedAt: createdAt,
+        let manifest = Manifest(version: 1, sessionID: configuration.sessionID, segmentIndex: configuration.segmentIndex, codec: configuration.codec, container: configuration.container, pauses: pauses, context: configuration.context, markers: markers, file: outputURL.lastPathComponent, startedAt: createdAt,
             status: status, error: failure,
             sourceStartSeconds: sessionStart.isNumeric ? sessionStart.seconds : nil,
             videoStartOffsetSeconds: firstVideoPTS.isNumeric ? (firstVideoPTS - sessionStart).seconds : nil,

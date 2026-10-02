@@ -75,6 +75,7 @@ enum StudioCommand: Equatable, Sendable {
     case pauseRecording
     case resumeRecording
     case startNewRecordingFile
+    case addRecordingMarker(String)
 
     // Scenes (S01 layer graph).
     case selectScene(SceneID)
@@ -599,6 +600,7 @@ enum StudioCommand: Equatable, Sendable {
         case .pauseRecording: return "Pause Recording"
         case .resumeRecording: return "Resume Recording"
         case .startNewRecordingFile: return "Start New Recording File"
+        case .addRecordingMarker: return "Add Recording Marker"
         case .selectScene, .selectSceneAt: return "Select Scene"
         case .addScene, .insertScene: return "Add Scene"
         case .renameScene: return "Rename Scene"
@@ -1209,6 +1211,9 @@ final class StudioCommandDispatcher: ObservableObject {
             return recorder.state == .paused ? nil : .unavailable("Recording is not paused.")
         case .startNewRecordingFile:
             return recorder.canSplit ? nil : .unavailable("Wait for recording and the previous file to finish preparing.")
+        case .addRecordingMarker:
+            return recorder.state == .recording || recorder.state == .paused
+                ? nil : .unavailable("A writing or paused recording is required.")
 
         case .selectScene(let id):
             return sceneStore.scenes.contains(where: { $0.id == id })
@@ -2083,6 +2088,7 @@ final class StudioCommandDispatcher: ObservableObject {
         case .pauseRecording: recorder.pause()
         case .resumeRecording: recorder.resume()
         case .startNewRecordingFile: recorder.startNewFile()
+        case .addRecordingMarker(let title): recorder.addMarker(title: title)
 
         case .selectScene(let id):
             sceneStore.selectedID = id
@@ -3561,7 +3567,7 @@ private extension StudioCommand {
              .setLayerImage, .setOverlayImage:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
-             .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile,
+             .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile, .addRecordingMarker,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,
              .setOutputProfile,
              .setChannelVolume, .setChannelMuted, .setChannelSolo,

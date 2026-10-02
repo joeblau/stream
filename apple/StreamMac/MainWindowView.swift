@@ -720,6 +720,9 @@ struct MainWindowView: View {
             .disabled(!dispatcher.canExecute(.startNewRecordingFile))
 
             RecordingOptionsView(recorder: recorder)
+            RecordingLibraryView(recorder: recorder) { title in
+                dispatcher.execute(.addRecordingMarker(title))
+            }
 
             Button {
                 dispatcher.execute(dispatcher.state.preview == .active
