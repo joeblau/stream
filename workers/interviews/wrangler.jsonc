@@ -1,0 +1,47 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "stream-interviews",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-02",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "InterviewRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "InterviewRoom"
+      ]
+    }
+  ],
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": false
+    }
+  },
+  "secrets": {
+    "required": [
+      "OPERATOR_TOKEN",
+      "TURN_KEY_API_TOKEN"
+    ]
+  },
+  "vars": {
+    "ALLOWED_ORIGIN": "https://interviews.example.invalid",
+    "TURN_KEY_ID": ""
+  }
+}

@@ -1,0 +1,39 @@
+name: Browser interview foundations
+on:
+  pull_request:
+    paths:
+      - 'workers/interviews/**'
+      - '.github/workflows/interviews.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'workers/interviews/**'
+      - '.github/workflows/interviews.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: interviews-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  signaling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: workers/interviews
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: workers/interviews/package-lock.json
+      - run: npm install --global npm@12.2.0
+      - run: npm ci
+      - run: npm run typegen
+      - run: git diff --exit-code -- worker-configuration.d.ts
+      - run: npm run typecheck
+      - run: node --check public/guest.js
+      - run: npm test
+      - run: npm run build

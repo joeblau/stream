@@ -1,0 +1,5 @@
+# Local only; replace with a newly generated private value.
+OPERATOR_TOKEN=replace-with-a-private-local-token
+ALLOWED_ORIGIN=http://localhost:8787
+TURN_KEY_ID=
+TURN_KEY_API_TOKEN=

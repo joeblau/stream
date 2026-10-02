@@ -1,0 +1,16 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stream guest check</title><link rel="stylesheet" href="guest.css"><script src="guest.js" type="module"></script>
+<main><h1>Join a Stream interview</h1><p>This experimental guest check connects to an explicitly admitted host. Headphones prevent return audio from feeding back into your microphone.</p>
+<label>Your name <input id="name" maxlength="80" autocomplete="name"></label>
+<p id="status" role="status">Allow camera and microphone when you are ready. No media is sent before host admission.</p>
+<button id="prepare">Check camera and microphone</button>
+<div class="devices"><label>Camera <select id="camera"></select></label><label>Microphone <select id="microphone"></select></label></div>
+<video id="preview" autoplay playsinline muted aria-label="Your camera preview"></video>
+<label>Microphone level <meter id="level" min="0" max="1" value="0"></meter></label>
+<div><button id="tone" disabled>Test headphones</button><button id="mute" disabled>Mute microphone</button><button id="hide" disabled>Turn camera off</button></div>
+<p>Browser permissions can be changed in this site's settings. Check again after restoring access. Device switches keep your invite.</p>
+<button id="join" disabled>Join waiting room</button><button id="rejoin" disabled>Reconnect</button><button id="leave" disabled>Leave and stop devices</button>
+<p id="program" role="status">Program and recording status unavailable until connected.</p>
+<video id="return" autoplay playsinline controls aria-label="Host return feed"></video>
+<button id="share" disabled>Share screen with host</button><button id="stopshare" disabled>Stop screen sharing</button>
+<p>Native host media, mobile browsers and restricted networks still require qualification. The browser reference host is for testing.</p>
+</main></html>
