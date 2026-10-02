@@ -10,10 +10,18 @@ import StreamCore
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         DesktopStorage.projectDirectory = directory
+        let budgetDestination = StreamDestination(name: "Budget Fixture", transport: .rtmp)
+        try JSONEncoder().encode([budgetDestination]).write(to: directory.appendingPathComponent("destinations.json"))
         let runtime = StudioRuntime()
         runtime.controllers.shutdown(); runtime.localControl.shutdown()
         runtime.dispatcher.bindChatCoordinator(runtime.chat)
         defer { runtime.controllers.shutdown(); runtime.localControl.shutdown(); runtime.chat.shutdown(); runtime.flush() }
+        runtime.controller.maximumPublishingEncoders = { 0 }
+        runtime.controller.goLive()
+        try require(runtime.controller.errorMessage?.contains("budget reserved by isolated recording") == true, "Go Live did not honor recording reservation")
+        runtime.controller.startDestination(budgetDestination.id)
+        try require(runtime.controller.errorMessage?.contains("budget reserved by isolated recording") == true && runtime.controller.activePublishingEncoderCount == 0, "Destination start bypassed reservation")
+        runtime.controller.maximumPublishingEncoders = { nil }
         let dispatcher = runtime.dispatcher
         let first = LayerNode(name: "First Caption", payload: .text(TextSourcePayload(text: "One")), transform: .fullscreen)
         let second = LayerNode(name: "Second Caption", payload: .text(TextSourcePayload(text: "Two")), transform: .fullscreen)

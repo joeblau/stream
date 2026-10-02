@@ -230,8 +230,9 @@ start and write-tests the selected folder using an exclusive 8 MB temporary
 file plus fsync. Required measured throughput is twice the estimated program,
 isolated video, and isolated audio writes. The test file is removed afterward.
 This establishes start headroom; it does not qualify sustained or removable
-storage. Go Live/add-destination integration must honor
-`maximumPublishingEncodersWhileRecording` to retain that session budget.
+storage. Go Live/add-destination preflight honors
+`maximumPublishingEncodersWhileRecording` through a runtime-owned recorder binding.
+The native controller fixture verifies rejection before any publisher starts.
 
 | Measured Mac class | Program maximum | Isolated maximum | Total native encoders |
 | --- | --- | --- | --- |
@@ -255,7 +256,9 @@ native encoder and renderer pixel pools even while the session retains status.
 `run_isolated_video_harness.zsh` builds actual StreamMac source/renderer/writer
 code and uses native generated camera/screen holders without hardware capture
 permissions. On the named Mac, macOS 27.0.1, Xcode 27.2 beta, repeated seven-second
-four-encoder 1080p30 workloads pass for H.264 standard and HEVC high. The fixture
+four-encoder 1080p30 workloads pass for H.264 standard and HEVC high. The extra
+program consumer in this fixture is an independent native file writer; it does
+not establish concurrent RTMP/SRT/WHIP network-publisher qualification. The fixture
 uses a refreshed camera with a flash, a deliberately static screen, and an
 unrelated bright default camera. Decoded checks verify exact source identity,
 unmirrored/no-effect pixels, +0.2 source brightness, black disconnect/recovery,
