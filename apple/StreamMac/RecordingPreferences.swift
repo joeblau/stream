@@ -17,6 +17,26 @@ enum RecordingQuality: String, Codable, CaseIterable, Sendable {
     var bitsPerPixel: Double { self == .standard ? 0.12 : 0.24 }
 }
 
+struct RecordingContext: Codable, Equatable, Sendable {
+    var projectID: String?
+    var profileID: String?
+    var projectName: String?
+    var profileName: String?
+}
+
+struct RecordingMarker: Codable, Identifiable, Equatable, Sendable {
+    var id = UUID()
+    let seconds: Double
+    let title: String
+}
+
+final class RecordingDirectoryAccess: @unchecked Sendable {
+    let url: URL
+    private let scoped: Bool
+    init(url: URL, scoped: Bool) { self.url = url; self.scoped = scoped }
+    deinit { if scoped { url.stopAccessingSecurityScopedResource() } }
+}
+
 struct RecordingPreferences: Codable, Equatable, Sendable {
     var container: RecordingContainer = .mp4
     var codec: RecordingCodec = .h264

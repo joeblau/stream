@@ -56,4 +56,46 @@ enum ProgramRecordingFixtures {
         return sample
     }
 
+    static func inspect(_ url: URL, expectedDuration: Double?, checkSync: Bool) async throws {
+        let asset = AVURLAsset(url: url)
+        let videos = try await asset.loadTracks(withMediaType: .video)
+        let audios = try await asset.loadTracks(withMediaType: .audio)
+        precondition(videos.count == 1 && audios.count == 1, "Both program tracks must exist")
+        let duration = try await asset.load(.duration).seconds
+        if let expectedDuration { precondition(abs(duration - expectedDuration) < 0.08, "Unexpected duration \(duration)") }
+        let videoRange = try await videos[0].load(.timeRange)
+        let audioRange = try await audios[0].load(.timeRange)
+        precondition(abs(videoRange.start.seconds - audioRange.start.seconds) < 0.04, "Track start mismatch")
+        precondition(abs(videoRange.duration.seconds - audioRange.duration.seconds) < 0.08, "Track end mismatch")
+        let reader = try AVAssetReader(asset: asset)
+        let videoOutput = AVAssetReaderTrackOutput(track: videos[0], outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        let audioOutput = AVAssetReaderTrackOutput(track: audios[0], outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
+        reader.add(videoOutput); reader.add(audioOutput)
+        precondition(reader.startReading())
+        var flash: Double?; var tone: Double?; var frameCount = 0
+        while let sample = videoOutput.copyNextSampleBuffer() {
+            frameCount += 1
+            if let image = CMSampleBufferGetImageBuffer(sample) {
+                CVPixelBufferLockBaseAddress(image, .readOnly)
+                let value = CVPixelBufferGetBaseAddress(image)!.load(as: UInt8.self)
+                CVPixelBufferUnlockBaseAddress(image, .readOnly)
+                if value > 150 && flash == nil { flash = sample.presentationTimeStamp.seconds }
+            }
+        }
+        while let sample = audioOutput.copyNextSampleBuffer() {
+            guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
+            let length = CMBlockBufferGetDataLength(block)
+            var values = [Float](repeating: 0, count: length / 4)
+            values.withUnsafeMutableBytes { ptr in _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: ptr.baseAddress!) }
+            if tone == nil, let index = values.firstIndex(where: { abs($0) > 0.15 }) {
+                tone = sample.presentationTimeStamp.seconds + Double(index / 2) / 48_000
+            }
+        }
+        precondition(reader.status == .completed, reader.error?.localizedDescription ?? "Media decode failed")
+        if checkSync {
+            precondition(flash != nil && tone != nil, "Flash/tone must survive encoding")
+            precondition(abs(flash! - tone!) < 0.06, "Decoded audio/video event drift \(flash! - tone!)")
+        }
+        print("Media: \(url.lastPathComponent), duration \(duration), frames \(frameCount), flash \(flash ?? -1), tone \(tone ?? -1)")
+    }
 }

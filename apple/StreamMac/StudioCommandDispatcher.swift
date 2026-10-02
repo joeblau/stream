@@ -77,6 +77,7 @@ enum StudioCommand: Equatable, Sendable {
     case startNewRecordingFile
     case startRehearsal
     case stopRehearsal
+    case addRecordingMarker(String)
 
     // Scenes (S01 layer graph).
     case selectScene(SceneID)
@@ -606,6 +607,7 @@ enum StudioCommand: Equatable, Sendable {
         case .startNewRecordingFile: return "Start New Recording File"
         case .startRehearsal: return "Begin Local Rehearsal"
         case .stopRehearsal: return "End Local Rehearsal"
+        case .addRecordingMarker: return "Add Recording Marker"
         case .selectScene, .selectSceneAt: return "Select Scene"
         case .addScene, .insertScene: return "Add Scene"
         case .renameScene: return "Rename Scene"
@@ -1305,6 +1307,9 @@ final class StudioCommandDispatcher: ObservableObject {
                 ? nil : .unavailable("End active outputs before beginning a local rehearsal.")
         case .stopRehearsal:
             return controller.isRehearsing ? nil : .unavailable("No local rehearsal is running.")
+        case .addRecordingMarker:
+            return recorder.state == .recording || recorder.state == .paused
+                ? nil : .unavailable("A writing or paused recording is required.")
 
         case .selectScene(let id):
             return sceneStore.scenes.contains(where: { $0.id == id })
@@ -2190,6 +2195,7 @@ final class StudioCommandDispatcher: ObservableObject {
             controller.beginLocalRehearsal(recorder: recorder)
             soundboard.syncProgramScene(previewProgram.programScene)
         case .stopRehearsal: controller.endLocalRehearsal(recorder: recorder)
+        case .addRecordingMarker(let title): recorder.addMarker(title: title)
 
         case .selectScene(let id):
             sceneStore.selectedID = id
@@ -3672,7 +3678,7 @@ private extension StudioCommand {
              .setLayerImage, .setOverlayImage:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
-             .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile,
+             .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile, .addRecordingMarker,
              .startRehearsal, .stopRehearsal,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,
              .setOutputProfile,
