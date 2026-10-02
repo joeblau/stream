@@ -25,6 +25,8 @@ public struct StreamPreflightFacts: Sendable {
     public var storageAvailableBytes: Int64?
     public var storageWritable = false
     public var encoderCount = 0
+    public var recordingEncoderReservations = 0
+    public var sharedH264AAC = false
     public var testedEncoderBudget: Int?
     public var requiredUplinkMbps = 0.0
     public var measuredUplinkMbps: Double?
@@ -57,8 +59,9 @@ public struct StreamPreflightFacts: Sendable {
                             detail: !storageWritable ? "The recording folder is unavailable or unwritable." :
                                 storageAvailableBytes.map { "\(String(format: "%.1f", Double($0) / 1_000_000_000)) GB free; local recording requires at least 1 GB." } ?? "Free capacity could not be read."))
         checks.append(.init(id: "encoders", title: "Encoder capacity",
-                            status: testedEncoderBudget.map { encoderCount > $0 ? .failed : .passed } ?? .unverified,
-                            detail: "\(encoderCount) publishing encoders + one if recording. " +
+                            status: encoderCount + recordingEncoderReservations > 4 ? .failed : testedEncoderBudget.map { encoderCount > $0 ? .failed : .passed } ?? .unverified,
+                            detail: "\(encoderCount) planned publishing encoder owners, \(recordingEncoderReservations) reserved by current recording/ISO/finalization; four total allowed. " +
+                                (sharedH264AAC ? "Fixed-profile H.264/AAC sharing is enabled; WHIP/other codecs stay separate. " : "Adaptive separate encoding; sharing is off. ") +
                                 (testedEncoderBudget.map { "Your tested publishing budget is \($0)." } ?? "Set a tested session budget after rehearsing this Mac; capacity is not guaranteed by its hardware tier.")))
         checks.append(.init(id: "uplink", title: "Uplink headroom",
                             status: measuredUplinkMbps.map { $0 >= requiredUplinkMbps ? .passed : .failed } ?? .unverified,
