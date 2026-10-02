@@ -35,6 +35,60 @@ final class EventLog: @unchecked Sendable {
         try await inspect(url, expectedDuration: 3, checkSync: true)
         print("PASS: actual AAC/H.264 tracks, 60fps static frames, preroll audio, three-second duration and flash/tone A/V synchronization")
 
+        let pausedURL = folder.appendingPathComponent("pause-resume.mp4")
+        try? FileManager.default.removeItem(at: pausedURL)
+        let pausing = ProgramRecordingSession(outputURL: pausedURL, configuration: config)
+        try await feed(pausing, seconds: 1)
+        try await Task.sleep(for: .milliseconds(50))
+        pausing.pause()
+        try await feed(pausing, seconds: 1, offset: 1)
+        pausing.resume()
+        try await Task.sleep(for: .milliseconds(20))
+        try await feed(pausing, seconds: 1, offset: 2)
+        let resumedResult = await finish(pausing)
+        precondition(resumedResult.completed, resumedResult.error ?? "Pause finalization failed")
+        try await inspect(pausedURL, expectedDuration: 2, checkSync: true)
+        let pauseJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: pausedURL.appendingPathExtension("recording.json"))) as! [String: Any]
+        precondition((pauseJSON["pauses"] as? [[String: Any]])?.count == 1, "Manifest must retain source-clock pause gap")
+        print("PASS: pause omits one second from both tracks; resumed MP4 timestamps remain synchronized and decode")
+
+        let movURL = folder.appendingPathComponent("hevc-high.mov")
+        try? FileManager.default.removeItem(at: movURL)
+        var mov = config; mov.container = .mov; mov.codec = .hevc; mov.quality = .high
+        let alternative = ProgramRecordingSession(outputURL: movURL, configuration: mov)
+        try await feed(alternative, seconds: 1)
+        let alternativeResult = await finish(alternative)
+        precondition(alternativeResult.completed, alternativeResult.error ?? "HEVC/MOV preset failed")
+        try await inspect(movURL, expectedDuration: 1, checkSync: true)
+        let movie = AVURLAsset(url: movURL)
+        let movieTracks = try await movie.loadTracks(withMediaType: .video)
+        let formats = try await movieTracks[0].load(.formatDescriptions)
+        precondition(CMFormatDescriptionGetMediaSubType(formats[0]) == kCMVideoCodecType_HEVC, "Selected codec must actually be HEVC")
+        print("PASS: MOV/HEVC high-quality preset produces actual HEVC video and AAC audio")
+
+        let firstURL = folder.appendingPathComponent("rotation-1.mp4")
+        let secondURL = folder.appendingPathComponent("rotation-2.mp4")
+        try? FileManager.default.removeItem(at: firstURL); try? FileManager.default.removeItem(at: secondURL)
+        let router = ProgramRecordingRouter()
+        var firstConfig = config; firstConfig.sessionID = "rotation-test"
+        let first = ProgramRecordingSession(outputURL: firstURL, configuration: firstConfig)
+        router.install(first)
+        try await feed(videoSink: router.appendVideo, audioSink: router.appendAudio, seconds: 1)
+        var secondConfig = firstConfig; secondConfig.segmentIndex = 2
+        let second = ProgramRecordingSession(outputURL: secondURL, configuration: secondConfig)
+        router.install(second)
+        let firstFinish = Task { await finish(first) }
+        try await feed(videoSink: router.appendVideo, audioSink: router.appendAudio, seconds: 1, offset: 1)
+        router.install(nil)
+        let firstResult = await firstFinish.value
+        let secondResult = await finish(second)
+        precondition(firstResult.completed && secondResult.completed, "Both rotated segments must finalize")
+        try await inspect(firstURL, expectedDuration: 1, checkSync: true)
+        try await inspect(secondURL, expectedDuration: 1, checkSync: false)
+        precondition(firstResult.progress.videoSamples + secondResult.progress.videoSamples == 120, "Rotation must retain static video cadence")
+        precondition(firstResult.progress.audioSamples + secondResult.progress.audioSamples == 200, "Rotation must retain program audio cadence")
+        print("PASS: atomic tap-router rotation retains every sample while the previous file finishes independently")
+
         let failureURL = folder.appendingPathComponent("preserved-low-space.mp4")
         try? FileManager.default.removeItem(at: failureURL)
         let failureLog = EventLog(); let began = Date()
@@ -54,8 +108,8 @@ final class EventLog: @unchecked Sendable {
         var small = config; small.videoCapacity = 2; small.audioCapacity = 4
         let overloaded = ProgramRecordingSession(outputURL: overloadURL, configuration: small)
         for index in 0..<1000 {
-            overloaded.appendVideo(try video(at: Double(index) / 60))
-            overloaded.appendAudio(try audio(at: Double(index) / 100))
+            overloaded.appendVideo(try ProgramRecordingFixtures.video(at: Double(index) / 60))
+            overloaded.appendAudio(try ProgramRecordingFixtures.audio(at: Double(index) / 100))
         }
         let overloadedResult = await finish(overloaded)
         precondition(overloadedResult.progress.droppedAudio > 0 && overloadedResult.progress.droppedVideo > 0, "Overload must be bounded and counted")
@@ -88,70 +142,29 @@ final class EventLog: @unchecked Sendable {
         await withCheckedContinuation { continuation in session.finish { continuation.resume(returning: $0) } }
     }
 
-    static func feed(_ session: ProgramRecordingSession, seconds: Double) async throws {
+    static func feed(_ session: ProgramRecordingSession, seconds: Double, offset: Double = 0) async throws {
+        try await feed(videoSink: session.appendVideo, audioSink: session.appendAudio, seconds: seconds, offset: offset)
+    }
+
+    static func feed(videoSink: @escaping @Sendable (CMSampleBuffer) -> Void, audioSink: @escaping @Sendable (CMSampleBuffer) -> Void, seconds: Double, offset: Double = 0) async throws {
         let clock = ContinuousClock(); let start = clock.now
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
                 for index in 0..<Int(seconds * 60) {
                     let time = Double(index) / 60
                     try await clock.sleep(until: start.advanced(by: .seconds(time)))
-                    session.appendVideo(try video(at: time))
+                    videoSink(try ProgramRecordingFixtures.video(at: time + offset))
                 }
             }
             group.addTask {
                 for index in 0..<Int(seconds * 100) {
                     let time = Double(index) / 100
                     try await clock.sleep(until: start.advanced(by: .seconds(time)))
-                    session.appendAudio(try audio(at: time))
+                    audioSink(try ProgramRecordingFixtures.audio(at: time + offset))
                 }
             }
             try await group.waitForAll()
         }
-    }
-
-    static func video(at seconds: Double) throws -> CMSampleBuffer {
-        var pixel: CVPixelBuffer?
-        guard CVPixelBufferCreate(nil, 320, 180, kCVPixelFormatType_32BGRA, nil, &pixel) == kCVReturnSuccess, let pixel else { throw CocoaError(.fileReadUnknown) }
-        CVPixelBufferLockBaseAddress(pixel, [])
-        let bright: UInt8 = (0.5..<0.6).contains(seconds) ? 255 : 0
-        memset(CVPixelBufferGetBaseAddress(pixel), Int32(bright), CVPixelBufferGetDataSize(pixel))
-        CVPixelBufferUnlockBaseAddress(pixel, [])
-        var format: CMVideoFormatDescription?
-        CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pixel, formatDescriptionOut: &format)
-        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 60), presentationTimeStamp: CMTime(seconds: 10_000 + seconds, preferredTimescale: 48_000), decodeTimeStamp: .invalid)
-        var sample: CMSampleBuffer?
-        let status = CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: pixel, formatDescription: format!, sampleTiming: &timing, sampleBufferOut: &sample)
-        guard status == noErr, let sample else { throw CocoaError(.fileReadUnknown) }
-        return sample
-    }
-
-    static func audio(at seconds: Double) throws -> CMSampleBuffer {
-        let floats: [Float] = (0..<960).map { index in
-            let time = seconds + Double(index / 2) / 48_000
-            return (0.5..<0.6).contains(time) ? Float(sin(time * 2 * .pi * 1000)) * 0.8 : 0
-        }
-        var asbd = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
-            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
-            mBytesPerPacket: 8, mFramesPerPacket: 1, mBytesPerFrame: 8,
-            mChannelsPerFrame: 2, mBitsPerChannel: 32, mReserved: 0)
-        var format: CMAudioFormatDescription?
-        CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil,
-            magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &format)
-        var block: CMBlockBuffer?
-        CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: floats.count * 4,
-            blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: floats.count * 4,
-            flags: 0, blockBufferOut: &block)
-        let status = floats.withUnsafeBufferPointer { ptr in
-            CMBlockBufferReplaceDataBytes(with: ptr.baseAddress!, blockBuffer: block!, offsetIntoDestination: 0, dataLength: floats.count * 4)
-        }
-        precondition(status == noErr)
-        var sample: CMSampleBuffer?
-        CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block!,
-            formatDescription: format!, sampleCount: 480,
-            presentationTimeStamp: CMTime(seconds: 10_000 + seconds, preferredTimescale: 48_000),
-            packetDescriptions: nil, sampleBufferOut: &sample)
-        guard let sample else { throw CocoaError(.fileReadUnknown) }
-        return sample
     }
 
     static func inspect(_ url: URL, expectedDuration: Double?, checkSync: Bool) async throws {

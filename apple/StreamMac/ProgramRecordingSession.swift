@@ -9,9 +9,15 @@ final class ProgramRecordingSession: @unchecked Sendable {
     struct Configuration: Sendable {
         var frameRate: Int = 30
         var videoBitrate: Int? = nil
+        var container: RecordingContainer = .mp4
+        var codec: RecordingCodec = .h264
+        var quality: RecordingQuality = .standard
+        var sessionID = UUID().uuidString
+        var segmentIndex = 1
         var lowSpaceWarningBytes: Int64 = 1_000_000_000
         var minimumSpaceBytes: Int64 = 100_000_000
-        var videoCapacity: Int = 12
+        var videoCapacity: Int = 30
+        var maxVideoMemoryBytes: Int = 128_000_000
         var audioCapacity: Int = 128
     }
 
@@ -28,11 +34,13 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var droppedAudio = 0
         var durationSeconds = 0.0
         var availableBytes: Int64?
+        var bytesWritten: Int64 = 0
         var warning: String?
     }
 
     enum Event: Sendable {
         case recording
+        case paused
         case progress(Progress)
         case failed(String)
     }
@@ -45,8 +53,18 @@ final class ProgramRecordingSession: @unchecked Sendable {
         let recoverable: Bool
     }
 
+    private struct PauseGap: Codable {
+        let sourceStartSeconds: Double
+        let durationSeconds: Double
+    }
+
     private struct Manifest: Codable {
         let version: Int
+        let sessionID: String
+        let segmentIndex: Int
+        let codec: RecordingCodec
+        let container: RecordingContainer
+        var pauses: [PauseGap]
         let file: String
         let startedAt: Date
         var status: String
@@ -67,6 +85,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private var video: [CMSampleBuffer] = []
     private var audio: [CMSampleBuffer] = []
     private var accepting = true
+    private var pausedAtInlet = false
     private var droppedVideo = 0
     private var firstVideoAccepted = false
     private var droppedAudio = 0
@@ -94,6 +113,10 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private var lastAudioWrite = Date()
     private var lastHealthCheck = Date.distantPast
     private var progress = Progress()
+    private var paused = false
+    private var resumePending = false
+    private var timestampOffset: CMTime = .zero
+    private var pauses: [PauseGap] = []
 
     init(outputURL: URL, configuration: Configuration = .init(),
          spaceProbe: @escaping @Sendable (URL) throws -> Int64? = { url in
@@ -121,13 +144,15 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private func enqueue(_ sample: CMSampleBuffer, isVideo: Bool) {
         lock.lock()
         defer { lock.unlock() }
-        guard accepting else { return }
+        guard accepting, !pausedAtInlet else { return }
         guard CMSampleBufferGetPresentationTimeStamp(sample).isNumeric else {
             if isVideo { droppedVideo += 1 } else { droppedAudio += 1 }
             return
         }
         if isVideo {
-            if video.count >= max(1, configuration.videoCapacity) {
+            let imageBytes = CMSampleBufferGetImageBuffer(sample).map(CVPixelBufferGetDataSize) ?? 1
+            let capacity = max(1, min(configuration.videoCapacity, configuration.maxVideoMemoryBytes / max(1, imageBytes)))
+            if video.count >= capacity {
                 // Keep the first frame while VideoToolbox warms up so an
                 // overloaded start cannot shift the video track origin.
                 video.remove(at: !firstVideoAccepted && video.count > 1 ? 1 : 0); droppedVideo += 1
@@ -138,6 +163,26 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 audio.removeFirst(); droppedAudio += 1
             }
             audio.append(sample)
+        }
+    }
+
+    func pause() {
+        lock.lock(); pausedAtInlet = true; video.removeAll(); audio.removeAll(); lock.unlock()
+        queue.async { [self] in
+            guard !finishRequested, failure == nil, started else { return }
+            paused = true
+            writeManifest(status: "paused")
+            event(.paused)
+        }
+    }
+
+    func resume() {
+        queue.async { [self] in
+            guard paused, !finishRequested, failure == nil else { return }
+            paused = false; resumePending = true
+            announcedRecording = false
+            lastVideoWrite = Date(); lastAudioWrite = Date()
+            lock.lock(); pausedAtInlet = false; lock.unlock()
         }
     }
 
@@ -168,7 +213,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
                     configure(video: firstVideo, audio: firstAudio)
                 }
             }
-            if started { drain() }
+            if started, !paused { drain() }
             if Date().timeIntervalSince(lastHealthCheck) >= 1 { checkHealth() }
         }
         if finishRequested {
@@ -190,14 +235,14 @@ final class ProgramRecordingSession: @unchecked Sendable {
         guard size.width > 0, size.height > 0 else { fail("Invalid program video dimensions."); return }
         let fps = max(1, configuration.frameRate)
         let bitrate = configuration.videoBitrate ?? min(24_000_000,
-            max(2_000_000, Int(Double(size.width) * Double(size.height) * Double(fps) * 0.12)))
+            max(2_000_000, Int(Double(size.width) * Double(size.height) * Double(fps) * configuration.quality.bitsPerPixel)))
         do {
-            let writer = try AVAssetWriter(url: outputURL, fileType: .mp4)
+            let writer = try AVAssetWriter(url: outputURL, fileType: configuration.container == .mp4 ? .mp4 : .mov)
             // Two-second movie fragments preserve finished fragments on a
             // crash/unplug. They cannot guarantee recovery of arbitrary damage.
             writer.movieFragmentInterval = CMTime(seconds: 2, preferredTimescale: 600)
             let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoCodecKey: configuration.codec == .h264 ? AVVideoCodecType.h264 : AVVideoCodecType.hevc,
                 AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height),
                 AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: bitrate,
                     AVVideoExpectedSourceFrameRateKey: fps, AVVideoMaxKeyFrameIntervalKey: fps * 2]
@@ -223,6 +268,19 @@ final class ProgramRecordingSession: @unchecked Sendable {
 
     private func drain() {
         guard let writer, let videoInput, let audioInput else { return }
+        if resumePending {
+            lock.lock()
+            let firstVideo = video.first; let firstAudio = audio.first
+            lock.unlock()
+            // Both taps share a clock. Use the earliest resumed timestamp to
+            // remove only the paused interval from both tracks.
+            guard let firstVideo, let firstAudio else { return }
+            let rawStart = CMTimeMinimum(firstVideo.presentationTimeStamp, firstAudio.presentationTimeStamp)
+            let gap = CMTimeMaximum(.zero, rawStart - timestampOffset - endTime)
+            pauses.append(PauseGap(sourceStartSeconds: (endTime + timestampOffset).seconds, durationSeconds: gap.seconds))
+            timestampOffset = timestampOffset + gap
+            resumePending = false
+        }
         // Bounded work per tick also gives finish/health commands time to run.
         for _ in 0..<64 {
             guard writer.status == .writing else {
@@ -240,7 +298,10 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 if isVideo { video.removeFirst() } else { audio.removeFirst() }
             }
             lock.unlock()
-            guard let sample else { return }
+            guard let sourceSample = sample else { return }
+            guard let sample = retimed(sourceSample) else {
+                fail("Cannot retime recording media after a pause.", videoTrack: isVideo); return
+            }
             let pts = CMSampleBufferGetPresentationTimeStamp(sample)
             let last = isVideo ? lastVideoPTS : lastAudioPTS
             guard pts >= sessionStart, !last.isValid || pts > last else {
@@ -274,11 +335,26 @@ final class ProgramRecordingSession: @unchecked Sendable {
         }
     }
 
+    private func retimed(_ sample: CMSampleBuffer) -> CMSampleBuffer? {
+        guard timestampOffset > .zero else { return sample }
+        var count = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count) == noErr else { return nil }
+        var timings = [CMSampleTimingInfo](repeating: .invalid, count: count)
+        guard CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: count, arrayToFill: &timings, entriesNeededOut: &count) == noErr else { return nil }
+        for index in timings.indices {
+            timings[index].presentationTimeStamp = timings[index].presentationTimeStamp - timestampOffset
+            if timings[index].decodeTimeStamp.isNumeric { timings[index].decodeTimeStamp = timings[index].decodeTimeStamp - timestampOffset }
+        }
+        var copy: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sample, sampleTimingEntryCount: timings.count, sampleTimingArray: &timings, sampleBufferOut: &copy) == noErr else { return nil }
+        return copy
+    }
+
     private func checkHealth() {
         lastHealthCheck = Date()
         updateProgress()
         progress.warning = nil
-        if failure == nil, !finishRequested, Date().timeIntervalSince(createdAt) > 3 {
+        if failure == nil, !finishRequested, !paused, Date().timeIntervalSince(createdAt) > 3 {
             if Date().timeIntervalSince(lastVideoWrite) > 3 { progress.videoStatus = .stalled }
             if Date().timeIntervalSince(lastAudioWrite) > 3 { progress.audioStatus = .stalled }
         }
@@ -292,11 +368,11 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 }
             }
             let sinceStart = Date().timeIntervalSince(createdAt)
-            if !finishRequested, sinceStart > 10 {
+            if !finishRequested, !paused, sinceStart > 10 {
                 if Date().timeIntervalSince(lastVideoWrite) > 10 { fail("No video was written for ten seconds.") }
                 else if Date().timeIntervalSince(lastAudioWrite) > 10 { fail("No program audio was written for ten seconds.") }
             }
-            if !finishRequested, sinceStart > 3 {
+            if !finishRequested, !paused, sinceStart > 3 {
                 if !announcedRecording { progress.warning = "Waiting for program audio and video." }
                 else if Date().timeIntervalSince(lastVideoWrite) > 3 || Date().timeIntervalSince(lastAudioWrite) > 3 {
                     progress.warning = "Recording write progress has stalled; check disk and encoder load."
@@ -307,13 +383,14 @@ final class ProgramRecordingSession: @unchecked Sendable {
             progress.warning = "Recording dropped \(progress.droppedVideo) video frames and \(progress.droppedAudio) audio chunks; check disk and encoder load."
         }
         event(.progress(progress))
-        writeManifest(status: failure == nil ? (announcedRecording ? "recording" : "preparing") : "partial")
+        writeManifest(status: failure == nil ? (paused ? "paused" : announcedRecording ? "recording" : "preparing") : "partial")
     }
 
     private func updateProgress() {
         lock.lock()
         progress.droppedAudio = droppedAudio; progress.droppedVideo = droppedVideo
         lock.unlock()
+        progress.bytesWritten = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? NSNumber)?.int64Value ?? 0
         if endTime.isValid, sessionStart.isValid { progress.durationSeconds = max(0, (endTime - sessionStart).seconds) }
     }
 
@@ -350,6 +427,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
 
     private func complete(error: String?) {
         failure = error
+        updateProgress()
         if error == nil { progress.videoStatus = .complete; progress.audioStatus = .complete }
         else {
             if progress.videoStatus != .failed { progress.videoStatus = progress.videoSamples > 0 ? .complete : .failed }
@@ -364,7 +442,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
     }
 
     private func writeManifest(status: String) {
-        let manifest = Manifest(version: 1, file: outputURL.lastPathComponent, startedAt: createdAt,
+        let manifest = Manifest(version: 1, sessionID: configuration.sessionID, segmentIndex: configuration.segmentIndex, codec: configuration.codec, container: configuration.container, pauses: pauses, file: outputURL.lastPathComponent, startedAt: createdAt,
             status: status, error: failure,
             sourceStartSeconds: sessionStart.isNumeric ? sessionStart.seconds : nil,
             videoStartOffsetSeconds: firstVideoPTS.isNumeric ? (firstVideoPTS - sessionStart).seconds : nil,

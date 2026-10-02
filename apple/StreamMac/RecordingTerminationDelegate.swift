@@ -12,7 +12,9 @@ final class RecordingTerminationDelegate: NSObject, NSApplicationDelegate {
         guard let recorder = Self.recorder, recorder.state.isActive else { return .terminateNow }
         guard !terminationPending else { return .terminateLater }
         terminationPending = true
-        recorder.stop { [weak self] in self?.allowTermination() }
+        recorder.stop { [weak self] in
+            Task { @MainActor in self?.allowTermination() }
+        }
         // A removed drive/blocked encoder must not make the app impossible to
         // quit. The fragmented file and last saved journal remain on disk.
         Task { @MainActor [weak self] in

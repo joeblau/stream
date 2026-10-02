@@ -51,12 +51,14 @@ public struct RecordingStore: Sendable {
 
     /// A unique, timestamped `.mp4` URL for a new recording (the file is not
     /// created here). Returns nil if the container is unavailable.
-    public func makeRecordingURL(date: Date) -> URL? {
+    public func makeRecordingURL(date: Date, prefix: String = "Stream", fileExtension: String = "mp4") -> URL? {
         guard let dir = ensureRecordingsDirectory() else { return nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        let name = "Stream-\(formatter.string(from: date))-\(UUID().uuidString.prefix(8)).mp4"
+        let safePrefix = String(prefix.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }.prefix(64))
+        let suffix = fileExtension == "mov" ? "mov" : "mp4"
+        let name = "\(safePrefix.isEmpty ? "Stream" : safePrefix)-\(formatter.string(from: date))-\(UUID().uuidString.prefix(8)).\(suffix)"
         return dir.appendingPathComponent(name)
     }
 
