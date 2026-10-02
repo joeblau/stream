@@ -23,14 +23,16 @@ public struct RecordingStore: Sendable {
     /// Folder (inside the App Group container) that holds pending backups.
     private static let folderName = "Recordings"
 
-    public init() {}
+    private let directoryOverride: URL?
+
+    public init(directory: URL? = nil) { self.directoryOverride = directory }
 
     // MARK: - Locations
 
     /// The `Recordings` directory inside the shared App Group container, or nil if
     /// the container is unavailable (misconfigured entitlement).
     public func recordingsDirectory() -> URL? {
-        FileManager.default
+        directoryOverride ?? FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: AppGroup.identifier)?
             .appendingPathComponent(Self.folderName, isDirectory: true)
     }
@@ -41,8 +43,10 @@ public struct RecordingStore: Sendable {
     @discardableResult
     public func ensureRecordingsDirectory() -> URL? {
         guard let dir = recordingsDirectory() else { return nil }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir
+        } catch { return nil }
     }
 
     /// A unique, timestamped `.mp4` URL for a new recording (the file is not
@@ -52,7 +56,7 @@ public struct RecordingStore: Sendable {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        let name = "Stream-\(formatter.string(from: date)).mp4"
+        let name = "Stream-\(formatter.string(from: date))-\(UUID().uuidString.prefix(8)).mp4"
         return dir.appendingPathComponent(name)
     }
 

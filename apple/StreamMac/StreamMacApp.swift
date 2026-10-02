@@ -4,6 +4,7 @@ import SwiftUI
 @main
 @MainActor
 struct StreamMacApp: App {
+    @NSApplicationDelegateAdaptor(RecordingTerminationDelegate.self) private var applicationDelegate
     @StateObject private var workspace = StudioWorkspace()
     private var sceneStore: SceneStore { workspace.runtime.sceneStore }
     private var previewProgram: PreviewProgramModel { workspace.runtime.previewProgram }

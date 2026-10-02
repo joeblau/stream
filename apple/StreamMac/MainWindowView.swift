@@ -446,7 +446,11 @@ struct MainWindowView: View {
 
             Spacer()
 
-            if recorder.state.isRecording {
+            if recorder.state == .preparing {
+                Label("Preparing recording…", systemImage: "record.circle")
+                    .foregroundStyle(.orange)
+                    .font(.callout.weight(.semibold))
+            } else if recorder.state.isRecording {
                 Label("Recording", systemImage: "record.circle")
                     .foregroundStyle(.red)
                     .font(.callout.weight(.semibold))
@@ -463,6 +467,19 @@ struct MainWindowView: View {
                         .lineLimit(1)
                 }
                 .help("Reveal the finished recording in Finder")
+            }
+            if let warning = recorder.warning {
+                Label(warning, systemImage: "externaldrive.badge.exclamationmark")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .help(warning)
+            }
+            if let url = recorder.lastPartialRecordingURL {
+                Button("Reveal partial recording") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+                .help("Preserved fragments may be readable; arbitrary damaged files cannot be recovered.")
             }
             if let error = recorder.lastError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -691,10 +708,10 @@ struct MainWindowView: View {
     private var transportBar: some View {
         HStack(spacing: 16) {
             Button {
-                dispatcher.execute(dispatcher.state.recording.isRecording
+                dispatcher.execute((dispatcher.state.recording == .preparing || dispatcher.state.recording.isRecording)
                                    ? .stopRecording : .startRecording)
             } label: {
-                Label(dispatcher.state.recording.isRecording ? "Stop Recording"
+                Label((dispatcher.state.recording == .preparing || dispatcher.state.recording.isRecording) ? "Stop Recording"
                       : dispatcher.state.recording == .stopping ? "Stopping…" : "Record",
                       systemImage: dispatcher.state.recording.isRecording ? "stop.circle.fill" : "record.circle")
             }
