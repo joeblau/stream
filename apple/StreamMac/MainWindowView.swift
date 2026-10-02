@@ -537,12 +537,16 @@ struct MainWindowView: View {
             Spacer()
 
             if recorder.state == .preparing {
-                Label("Preparing recording…", systemImage: "record.circle")
+                Label(recorder.countdownRemaining > 0 ? "Recording in \(recorder.countdownRemaining)…" : "Preparing recording…", systemImage: "record.circle")
                     .foregroundStyle(.orange)
                     .font(.callout.weight(.semibold))
             } else if recorder.state.isRecording {
                 Label("Recording", systemImage: "record.circle")
                     .foregroundStyle(.red)
+                    .font(.callout.weight(.semibold))
+            } else if recorder.state == .paused {
+                Label("Recording paused", systemImage: "pause.circle")
+                    .foregroundStyle(.orange)
                     .font(.callout.weight(.semibold))
             } else if recorder.state == .stopping {
                 Label("Stopping…", systemImage: "record.circle")
@@ -802,15 +806,29 @@ struct MainWindowView: View {
     private var transportBar: some View {
         HStack(spacing: 16) {
             Button {
-                dispatcher.execute((dispatcher.state.recording == .preparing || dispatcher.state.recording.isRecording)
+                dispatcher.execute(recorder.canStop
                                    ? .stopRecording : .startRecording)
             } label: {
-                Label((dispatcher.state.recording == .preparing || dispatcher.state.recording.isRecording) ? "Stop Recording"
+                Label(recorder.canStop ? "Stop Recording"
                       : dispatcher.state.recording == .stopping ? "Stopping…" : "Record",
                       systemImage: dispatcher.state.recording.isRecording ? "stop.circle.fill" : "record.circle")
             }
             .tint(dispatcher.state.recording.isRecording ? .red : nil)
             .disabled(dispatcher.state.recording == .stopping)
+
+            Button {
+                dispatcher.execute(recorder.state == .paused ? .resumeRecording : .pauseRecording)
+            } label: {
+                Label(recorder.state == .paused ? "Resume" : "Pause", systemImage: recorder.state == .paused ? "play.fill" : "pause.fill")
+            }
+            .disabled(recorder.state != .recording && recorder.state != .paused)
+
+            Button("New File", systemImage: "doc.badge.plus") {
+                dispatcher.execute(.startNewRecordingFile)
+            }
+            .disabled(!dispatcher.canExecute(.startNewRecordingFile))
+
+            RecordingOptionsView(recorder: recorder)
 
             Button {
                 dispatcher.execute(dispatcher.state.preview == .active

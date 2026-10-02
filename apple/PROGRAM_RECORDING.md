@@ -12,7 +12,7 @@ and finalizing. Encoder/open/append/finalization errors appear in the main
 window. Start, stop, failure, and finalization release only recording's taps and
 pipeline demand; no recording error calls the network publisher's stop method.
 
-Each tap feeds a bounded mailbox directly: 12 video frames and 128 audio chunks
+Each tap feeds a bounded mailbox directly: at most 30 video frames/128 MB and 128 audio chunks
 by default. The writer runs on one private serial queue. It orders the available
 media by timestamp, rejects invalid/backward timestamps, and counts each track's
 loss. A slow encoder cannot build an unbounded queue of dispatch blocks. The
@@ -71,3 +71,33 @@ physical external-drive unplug or a simultaneous network-stream workload test.
 Those, sudden process termination/container recovery, other Mac/OS encoders,
 and sustained high-resolution load remain release qualification work. Isolated
 source-track recording and a recording library are separate output features.
+
+## Recording options and file changes
+
+The transport's Recording Options popover selects MP4/MOV, H.264/HEVC, standard
+or high quality, file prefix, a security-scoped destination folder, optional
+record-only countdown, and duration/size splitting. Recording always uses an
+independent encoder at the active program canvas size/frame rate; sharing the
+network encoder is not supported. Selected-folder bookmarks are local machine
+preferences and are not silently replaced when a volume disappears.
+
+Auto-record on Go Live is opt-in and starts without the record-only countdown.
+A failed network connection does not stop its recording. Pause removes the same
+source-clock interval from both tracks; the journal retains the omitted gap.
+New File and automatic size/duration rotation atomically swap the writer behind
+the existing taps. The previous file finishes independently, so composition,
+audio demand, and networking continue. Only one previous segment can finish at
+once; another split waits for it. Byte thresholds are checked on the one-second
+health heartbeat using fresh filesystem attributes; sizes may exceed the
+threshold by in-flight fragment/encoder buffers and that interval.
+
+Additional native qualification covers a two-second resumed recording after a
+one-second pause, actual MOV/HEVC output, and two gap-free MP4 segments containing
+every source frame/audio chunk. `run_recording_controller_harness.zsh` uses the
+actual app controller and writer, with a hardware-independent tap source, to
+verify countdown cancellation, writer preparation, pause/resume, manual split,
+source-clock duration split, actual byte-triggered split, and storage preflight.
+The duration test deliberately advances source timestamps rather than waiting
+a minute. Its unrelated-consumer counter proves the controller leaves the tap
+source running; simultaneous provider-network publication still needs release
+qualification.

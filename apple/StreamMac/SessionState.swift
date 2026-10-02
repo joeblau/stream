@@ -51,6 +51,8 @@ enum RecordingSessionState: Equatable, Sendable {
     case preparing
     /// The writer is open and receiving composited frames.
     case recording
+    /// Program capture continues, but the local writer omits paused time.
+    case paused
     /// Stop requested; the writer is finishing the .mp4.
     case stopping
     /// Start or finish failed (disk space, writer error); retry starts fresh.
@@ -62,7 +64,7 @@ enum RecordingSessionState: Equatable, Sendable {
     var isActive: Bool {
         switch self {
         case .idle, .failed: return false
-        case .preparing, .recording, .stopping: return true
+        case .preparing, .recording, .paused, .stopping: return true
         }
     }
 }

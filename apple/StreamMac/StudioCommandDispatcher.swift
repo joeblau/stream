@@ -72,6 +72,9 @@ enum StudioCommand: Equatable, Sendable {
     case stopPreview
     case startRecording
     case stopRecording
+    case pauseRecording
+    case resumeRecording
+    case startNewRecordingFile
 
     // Scenes (S01 layer graph).
     case selectScene(SceneID)
@@ -596,6 +599,9 @@ enum StudioCommand: Equatable, Sendable {
         case .stopPreview: return "Stop Preview"
         case .startRecording: return "Start Recording"
         case .stopRecording: return "Stop Recording"
+        case .pauseRecording: return "Pause Recording"
+        case .resumeRecording: return "Resume Recording"
+        case .startNewRecordingFile: return "Start New Recording File"
         case .selectScene, .selectSceneAt: return "Select Scene"
         case .addScene, .insertScene: return "Add Scene"
         case .renameScene: return "Rename Scene"
@@ -1281,8 +1287,14 @@ final class StudioCommandDispatcher: ObservableObject {
             return !recorder.state.isActive
                 ? nil : .unavailable("Recording is already \(recorder.state == .stopping ? "stopping" : "in progress").")
         case .stopRecording:
-            return recorder.state == .preparing || recorder.state.isRecording
+            return recorder.canStop
                 ? nil : .unavailable("No recording is in progress.")
+        case .pauseRecording:
+            return recorder.state == .recording ? nil : .unavailable("Recording is not writing media.")
+        case .resumeRecording:
+            return recorder.state == .paused ? nil : .unavailable("Recording is not paused.")
+        case .startNewRecordingFile:
+            return recorder.canSplit ? nil : .unavailable("Wait for recording and the previous file to finish preparing.")
 
         case .selectScene(let id):
             return sceneStore.scenes.contains(where: { $0.id == id })
@@ -2145,6 +2157,9 @@ final class StudioCommandDispatcher: ObservableObject {
         switch command {
         case .startStream:
             controller.goLive()
+            if recorder.preferences.autoRecordOnGoLive, !recorder.state.isActive {
+                recorder.start(stream: controller, useCountdown: false)
+            }
             // A03 (issue #98): the pipeline is up — fire the restored program
             // scene's enter rules once (idempotent; a Take already synced
             // the scene is a no-op).
@@ -2158,6 +2173,9 @@ final class StudioCommandDispatcher: ObservableObject {
         case .stopPreview: controller.stopPreview()
         case .startRecording: recorder.start(stream: controller)
         case .stopRecording: recorder.stop()
+        case .pauseRecording: recorder.pause()
+        case .resumeRecording: recorder.resume()
+        case .startNewRecordingFile: recorder.startNewFile()
 
         case .selectScene(let id):
             sceneStore.selectedID = id
@@ -3640,7 +3658,7 @@ private extension StudioCommand {
              .setLayerImage, .setOverlayImage:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
-             .startRecording, .stopRecording,
+             .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,
              .setOutputProfile,
              .setChannelVolume, .setChannelMuted, .setChannelSolo,
