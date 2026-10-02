@@ -1236,6 +1236,10 @@ final class CaptureSourcePool: ObservableObject {
         mediaPlaybacks[.media(id)]?.seek(toSeconds: seconds)
     }
 
+    func restorePausedMediaPosition(_ id: SourceDefinitionID, seconds: Double) {
+        mediaPlayback(for: .media(id), id: id)?.restorePausedPosition(seconds: seconds)
+    }
+
     /// The current status for one media source (idle when never loaded) —
     /// the transport UI's read path.
     func mediaStatus(for id: SourceDefinitionID) -> MediaSourceStatus {

@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import CoreVideo
 import Foundation
+import StreamCore
 import os.lock
 
 /// A02 (issue #97): the pull-based frame surface the composition engines read
@@ -141,6 +142,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// A play requested before the file finished loading; honored (with
     /// autoplay) at the end of `configure`.
     private var wantsPlay = false
+    private var recovery = PausedMediaRecovery()
     private var didLoad = false
     private var loadedBookmark: Data?
     /// G09 (issue #116): animated-image files (GIF/APNG/animated HEIC) have
@@ -311,11 +313,11 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         status.durationSeconds = duration.isNumeric ? duration.seconds : 0
         publishStatusLocked()
         let autoplay = payload?.autoplay ?? true
-        let shouldPlay = autoplay || wantsPlay
+        let shouldPlay = recovery.shouldPlay(autoplay: autoplay, requested: wantsPlay)
+        let recoverySeek = recovery.consumePosition()
         os_unfair_lock_unlock(&lock)
-        if shouldPlay {
-            play()
-        }
+        if let recoverySeek { pause(); seek(toSeconds: recoverySeek) }
+        if shouldPlay { play() }
         os_unfair_lock_lock(&lock)
         loadTask = nil
         os_unfair_lock_unlock(&lock)
@@ -340,9 +342,11 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         status.positionSeconds = 0
         status.durationSeconds = contents.timeline.duration
         let autoplay = payloadProvider()?.autoplay ?? true
-        let shouldPlay = autoplay || wantsPlay
+        let shouldPlay = recovery.shouldPlay(autoplay: autoplay, requested: wantsPlay)
+        let recoverySeek = recovery.consumePosition()
         os_unfair_lock_unlock(&lock)
         engine.configure(contents: contents, autoplayHint: shouldPlay)
+        if let recoverySeek { engine.pause(); engine.seek(toSeconds: recoverySeek); if shouldPlay { engine.play() } }
         os_unfair_lock_lock(&lock)
         loadTask = nil
         os_unfair_lock_unlock(&lock)
@@ -481,6 +485,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// pressing play on a finished file replays it).
     func play() {
         os_unfair_lock_lock(&lock)
+        recovery.playIntent()
         wantsPlay = true
         // G09: animated-image sources forward transport to their engine.
         if let animated {
@@ -560,6 +565,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// Restart: back to the trim-in point and playing.
     func restart() {
         os_unfair_lock_lock(&lock)
+        recovery.restartIntent()
         wantsPlay = true
         if let animated {
             os_unfair_lock_unlock(&lock)
@@ -580,6 +586,19 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         publishStatusLocked()
         os_unfair_lock_unlock(&lock)
         player.play()
+    }
+
+    /// Explicit recovery seeds local playout without honoring autoplay. Only a
+    /// subsequent operator Play/Restart releases this hold, including slow loads.
+    func restorePausedPosition(seconds: Double) {
+        guard seconds.isFinite, seconds >= 0 else { return }
+        os_unfair_lock_lock(&lock)
+        recovery.restore(seconds: seconds); wantsPlay = false
+        let loaded = didLoad
+        if loaded { _ = recovery.consumePosition() }
+        os_unfair_lock_unlock(&lock)
+        if loaded { pause(); seek(toSeconds: seconds) }
+        else { load() }
     }
 
     /// Seek to an absolute file position in seconds (clamped to the trim

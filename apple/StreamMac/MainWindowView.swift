@@ -868,6 +868,9 @@ struct MainWindowView: View {
             Spacer()
 
             streamStatusBadge
+            SessionRecoveryReviewButton(relink: {
+                inspectorTab = .assets; showInspectorPanel = true
+            })
 
             Button {
                 inspectorTab = .destinations
