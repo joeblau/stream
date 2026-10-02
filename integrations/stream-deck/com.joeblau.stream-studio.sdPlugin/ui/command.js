@@ -1,6 +1,7 @@
 /* Pairing values only cross sendToPlugin, never setSettings/localStorage/logging. */
 let socket, context, actionUUID;
 let commands = [], settings = {}, currentProject = "", signature = "";
+let mode = "key";
 const element = id => document.getElementById(id);
 function send(payload) {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ event: "sendToPlugin", context, action: actionUUID, payload }));
@@ -21,6 +22,11 @@ function updateOptions() {
   }
   element("command").replaceChildren(...options); element("command").value = selected;
   const command = commands.find(c => c.id === selected);
+  element("value-options").hidden = mode !== "key" || command?.kind !== "value";
+  element("page-options").hidden = mode !== "key" || command?.argument !== "page";
+  element("marker-options").hidden = mode !== "key" || command?.argument !== "text";
+  element("level-options").hidden = mode !== "level";
+  element("selector-options").hidden = mode !== "selector";
   element("availability").textContent = command?.unavailableReason ?? (selected ? "Available" : "Choose a command to bind this key.");
   element("project").textContent = settings.projectID && settings.projectID !== currentProject ? "This key belongs to a different project. Select a command to rebind explicitly." : `Project: ${currentProject || "not connected"}`;
 }
@@ -28,7 +34,12 @@ function update(payload) {
   if (payload.error) { element("error").textContent = payload.error; return; }
   element("error").textContent = "";
   element("status").textContent = payload.status ?? "Disconnected";
-  currentProject = payload.projectID ?? ""; settings = payload.settings ?? settings;
+  currentProject = payload.projectID ?? ""; settings = payload.settings ?? settings; mode = payload.mode ?? mode;
+  element("value").value = String((settings.value ?? 0.5) * 200);
+  element("step").value = String((settings.step ?? 0.01) * 200);
+  element("page").value = String((settings.page ?? 0) + 1);
+  element("marker").value = settings.text ?? "";
+  element("selector-category").value = settings.category ?? "Scenes";
   const nextCommands = payload.commands ?? [];
   const nextSignature = JSON.stringify(nextCommands);
   commands = nextCommands;
@@ -58,4 +69,18 @@ element("pair").onclick = () => {
 element("forget").onclick = () => send({ operation: "forget" });
 element("refresh").onclick = () => send({ operation: "refresh" });
 element("search").oninput = updateOptions; element("category").onchange = updateOptions;
-element("command").onchange = () => { const commandID = element("command").value; if (commandID) send({ operation: "bind", commandID }); };
+function bindSelected() {
+  const commandID = element("command").value;
+  if (!commandID) return;
+  const command = commands.find(c => c.id === commandID);
+  send({ operation: "bind", commandID,
+    ...(mode === "level" ? { step: Number(element("step").value) / 200 } : {}),
+    ...(mode === "selector" ? { category: element("selector-category").value } : {}),
+    ...(mode === "key" && command?.kind === "value" ? { value: Number(element("value").value) / 200 } : {}),
+    ...(mode === "key" && command?.argument === "page" ? { page: Number(element("page").value) - 1 } : {}),
+    ...(mode === "key" && command?.argument === "text" && element("marker").value ? { text: element("marker").value } : {}) });
+}
+element("command").onchange = bindSelected;
+element("apply-value").onclick = bindSelected; element("apply-step").onclick = bindSelected;
+element("apply-page").onclick = bindSelected; element("apply-marker").onclick = bindSelected;
+element("selector-category").onchange = () => send({ operation: "selector-category", category: element("selector-category").value });

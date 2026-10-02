@@ -20,10 +20,33 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
   if (binding.commandID.startsWith("output.record.")) {
     badge = snapshot.recording.toUpperCase(); color = snapshot.recording === "recording" ? "#983c4a" : snapshot.recording === "paused" ? "#766021" : "#233b4a";
   }
-  const layer = /^scene\.[0-9a-f-]+\.layer\.([0-9a-f-]+)\.visibility$/i.exec(binding.commandID)?.[1];
+  const layer = /^scene\.[0-9a-f-]+\.layer\.([0-9a-f-]+)\.(visibility|show|hide)$/i.exec(binding.commandID)?.[1];
   if (layer) {
     const visible = Object.entries(snapshot.layerVisibility).find(([id]) => id.toLowerCase() === layer.toLowerCase())?.[1];
-    if (visible !== undefined) { badge = visible ? "VISIBLE" : "HIDDEN"; color = visible ? "#266848" : "#233b4a"; }
+    if (visible !== undefined) {
+      const onProgram = Object.entries(snapshot.programLayerVisibility ?? {}).find(([id]) => id.toLowerCase() === layer.toLowerCase())?.[1];
+      badge = onProgram ? "PGM" : visible ? snapshot.programLayerVisibility ? "PVW" : "VISIBLE" : "HIDDEN";
+      color = onProgram ? "#983c4a" : visible ? "#266848" : "#233b4a";
+    }
+  }
+  const group = /^scene\.[0-9a-f-]+\.group\.([0-9a-f-]+)\.(visibility|show|hide)$/i.exec(binding.commandID)?.[1];
+  const overlay = /^overlay\.([0-9a-f-]+)\.(visibility|show|hide)$/i.exec(binding.commandID)?.[1];
+  const visible = group ? snapshot.groupVisibility?.[group] : overlay ? snapshot.overlayVisibility?.[overlay] : undefined;
+  if (visible !== undefined) { badge = visible ? overlay ? "GLOBAL ON" : "PVW ON" : "HIDDEN"; color = visible ? "#266848" : "#233b4a"; }
+  const gainID = binding.commandID.replace(/\.mute(?:\.(?:on|off))?$/, ".gain");
+  const muted = snapshot.mutes?.[gainID];
+  if (muted !== undefined && binding.commandID.includes(".mute")) { badge = muted ? "MUTED" : "ON"; color = muted ? "#5a4828" : "#266848"; }
+  const level = snapshot.values?.[binding.commandID];
+  if (level !== undefined) badge = `${Math.round(level * 200)}%`;
+  const resource = /^(media|sound|playlist)\.[0-9a-f-]+/i.exec(binding.commandID)?.[0];
+  if (resource && !binding.commandID.includes(".mute") && !binding.commandID.endsWith(".gain")) {
+    const phase = snapshot.playback?.[resource];
+    if (phase) { badge = phase.toUpperCase(); color = phase === "playing" ? "#266848" : phase === "failed" ? "#5b3340" : "#233b4a"; }
+  }
+  if (binding.commandID.startsWith("studio.directLive.") && snapshot.directLiveEditing !== undefined) badge = snapshot.directLiveEditing ? "DIRECT LIVE" : "PVW / PGM";
+  if (binding.commandID.startsWith("comments.") && snapshot.chat) {
+    badge = snapshot.chat.programVisible ? "SLOT PGM" : snapshot.chat.stagedVisible ? "SLOT PVW" : snapshot.chat.ready ? "READY" : "QUEUE EMPTY";
+    color = snapshot.chat.programVisible ? "#983c4a" : snapshot.chat.stagedVisible ? "#266848" : "#233b4a";
   }
   const macro = /^macro\.([0-9a-f-]+)\.run$/i.exec(binding.commandID)?.[1];
   if (binding.commandID === "macro.cancel" || (macro && snapshot.macroProgress.macroID?.toLowerCase() === macro.toLowerCase())) {

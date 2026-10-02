@@ -53,7 +53,9 @@ structured `result.error`, and the authoritative state after the dispatcher
 attempt. Permission/setup choices still gate execution. An accepted Start Stream
 request can return `connecting`; only an acknowledged publisher produces `live`.
 Native capture/output availability remains the shared dispatcher's decision.
-Unsupported guest/comment notices are unavailable and have no executable command.
+Unsupported guest notices are unavailable and have no executable command. Comment commands use the actual queued public chat and selected staged comment slot; Show/Hide follow Preview/Program policy and do not implicitly Take.
+
+Version 1 now includes optional capability `kind` (`command` or `value`) and `argument` (`page` or `text`) fields. Numeric commands accept exactly one finite normalized `value` (0…1) or `delta` (−1…1). Relative deltas resolve against current dispatcher state and clamp there, making multiple encoders safe. Gain targets convert normalized values to linear gain 0…2. `pdf.<UUID>.goto` accepts a zero-based integer `page` from 0 to 100000; the native deck store clamps to the actual document. `output.record.marker` accepts optional `text` with 1–512 UTF-8 bytes. Other IDs reject these arguments; arguments are forbidden outside command requests. Per-client adapter grants still check the exact stable target ID. Old clients can omit all new fields.
 
 Snapshot fields include `projectID`, monotonic `revision`, output lifecycle
 labels, staged/program scene UUIDs, pending staged edits, staged layer visibility,
@@ -97,3 +99,5 @@ subscription, request deduplication, reconnect, malformed messages, revocation,
 remote macro cancellation, and shutdown. Build `StreamMac` for the actual
 shared-dispatcher integration. Signed sandbox/Keychain and real hardware-plugin
 flows still need validation on the installed app.
+
+Optional snapshot fields now report normalized `values`, `mutes`, per-resource `playback`, staged group/global-overlay visibility, Program layer visibility, direct-live editing, and queued-comment/slot readiness and visibility. These are authoritative host values, not predicted tally or provider audience-delivery receipts. Oversize snapshots obey the same frame bound and close the connection rather than publishing a partial, misleading state.

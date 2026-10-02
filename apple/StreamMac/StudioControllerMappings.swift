@@ -14,6 +14,15 @@ enum StudioControllerInput: Codable, Hashable, Sendable {
     case osc(String)
 }
 enum StudioControllerTargetKind: String, Codable, Sendable { case command, value }
+struct StudioControllerTarget: Identifiable {
+    var id: String
+    var title: String
+    var kind: StudioControllerTargetKind
+    /// Numeric targets use linear gain 0…2. Feedback is normalized 0…1.
+    var normalizedValue: Double
+    var unavailableReason: String?
+    var execute: @MainActor (Double?) -> String?
+}
 struct StudioControllerMapping: Codable, Identifiable, Equatable, Sendable {
     var id = UUID()
     var input: StudioControllerInput

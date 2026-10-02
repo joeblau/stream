@@ -580,6 +580,10 @@ enum StudioCommand: Equatable, Sendable {
     /// Direct-live editing mode (W03, off by default): while on, scene edits
     /// and selections take immediately, applying straight to program.
     case setDirectLiveEditing(Bool)
+    case selectPreviousComment
+    case selectNextComment
+    case showSelectedComment
+    case hideComment
 
     // S12 (issue #75): undo/redo of scene edits. These restore SNAPSHOTS of
     // the undoable state (scene document + browser organization + staged
@@ -781,6 +785,10 @@ enum StudioCommand: Equatable, Sendable {
         case .revert: return "Revert"
         case .setDirectLiveEditing(let on):
             return "\(on ? "Enable" : "Disable") Direct-Live Editing"
+        case .selectPreviousComment: return "Previous Queued Comment"
+        case .selectNextComment: return "Next Queued Comment"
+        case .showSelectedComment: return "Show Selected Comment"
+        case .hideComment: return "Hide Comment"
         case .undo: return "Undo"
         case .redo: return "Redo"
         }
@@ -957,6 +965,8 @@ final class StudioCommandDispatcher: ObservableObject {
     private let recorder: RecordingController
     /// The W03 preview/program model: staged vs program scene snapshots.
     private let previewProgram: PreviewProgramModel
+    private weak var chatCoordinator: StudioChatCoordinator?
+    private var chatObservation: AnyCancellable?
     /// S12 (issue #75): the scene-edit undo stack. One entry per executed
     /// undoable command, recorded in `execute` around `perform`.
     private let undoStack = UndoStack<SceneUndoSnapshot>()
@@ -1152,16 +1162,25 @@ final class StudioCommandDispatcher: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+        Publishers.Merge(soundboard.objectWillChange, controller.capturePool.objectWillChange)
+            .sink { [weak self] _ in Task { @MainActor [weak self] in self?.refreshState() } }
+            .store(in: &cancellables)
     }
 
     func catalogueActions(includeMacros: Bool = true) -> [StudioPaletteAction] {
         paletteActions(scenes: sceneStore.scenes, sources: sceneStore.sources, stagedScene: previewProgram.stagedScene, includeMacros: includeMacros)
     }
+    func controllerOverlays() -> [LayerNode] { sceneStore.overlays }
+    func bindChatCoordinator(_ coordinator: StudioChatCoordinator) {
+        chatCoordinator = coordinator
+        chatObservation = coordinator.objectWillChange.sink { [weak self] _ in Task { @MainActor [weak self] in self?.refreshState() } }
+        refreshState()
+    }
     /// Stable numeric controller targets are deliberately a small typed set.
     /// Capture-layer gain retains its scene/layer ownership on the inspector.
     func controllerTargets() -> [StudioControllerTarget] {
         var result: [StudioControllerTarget] = []
-        for action in catalogueActions() where action.command != nil {
+        for action in catalogueActions() where !action.id.hasPrefix("unavailable.") {
             var feedback = action.unavailableReason == nil ? 1.0 : 0
             if case .selectScene(let id) = action.command { feedback = state.stagedSceneID == id ? 1 : 0 }
             if action.id.hasPrefix("output.stream.") { feedback = state.stream.isActive ? 1 : 0 }
@@ -1169,7 +1188,8 @@ final class StudioCommandDispatcher: ObservableObject {
             if action.id.hasPrefix("output.preview.") { feedback = state.preview == .active ? 1 : 0 }
             result.append(.init(id: action.id, title: action.title, kind: .command, normalizedValue: feedback,
                                 unavailableReason: action.unavailableReason, execute: { [weak self] _ in
-                guard let self, let command = self.catalogueActions().first(where: { $0.id == action.id })?.command else { return "The stable command target no longer exists." }
+                guard let self, let current = self.catalogueActions().first(where: { $0.id == action.id }) else { return "The stable command target no longer exists." }
+                guard let command = current.command else { return current.unavailableReason ?? "This action is unavailable." }
                 return self.execute(command).error?.description
             }))
         }
@@ -1189,6 +1209,46 @@ final class StudioCommandDispatcher: ObservableObject {
             gain("media.\(source.id.rawValue.uuidString).gain", "\(source.name) Gain (0–2)", state.mixer.channelVolumes[channel.label] ?? 1) { .setChannelVolume(channel, $0) }
         }
         return result
+    }
+    func controllerValueSnapshot() -> [String: Double] {
+        var result: [String: Double] = [:]
+        for target in controllerTargets() where target.kind == .value { result[target.id] = target.normalizedValue }
+        return result
+    }
+    func controllerMuteSnapshot() -> [String: Bool] {
+        var result = ["audio.microphone.gain": state.mixer.channelMutes[AudioChannelID.microphone(deviceUID: nil).label] == true]
+        for bus in [AudioBus.program, .monitor, .aux] { result["audio.bus.\(bus.rawValue).gain"] = state.mixer.mutedBuses.contains(bus.rawValue) }
+        for source in sceneStore.sources where source.payload.isMedia {
+            result["media.\(source.id.rawValue.uuidString).gain"] = state.mixer.channelMutes[AudioChannelID.media(source.id).label] == true
+        }
+        return result
+    }
+    func controllerPlaybackSnapshot() -> [String: String] {
+        var result: [String: String] = [:]
+        for source in sceneStore.sources where source.payload.isMedia {
+            result["media.\(source.id.rawValue.uuidString)"] = controller.capturePool.mediaStatus(for: source.id).phase.rawValue
+        }
+        for pad in soundboardStore.pads { result["sound.\(pad.id.rawValue.uuidString)"] = soundboard.padStatuses[pad.id]?.phase.rawValue ?? "idle" }
+        for playlist in soundboardStore.playlists { result["playlist.\(playlist.id.rawValue.uuidString)"] = soundboard.playlistStates[playlist.id]?.phase.rawValue ?? "idle" }
+        return result
+    }
+    func controllerProgramVisibility() -> [String: Bool] {
+        Dictionary(uniqueKeysWithValues: (previewProgram.programScene?.layers ?? []).map { ($0.id.rawValue.uuidString, $0.isVisible) })
+    }
+    func controllerGroupVisibility() -> [String: Bool] {
+        guard let scene = previewProgram.stagedScene else { return [:] }
+        var result: [String: Bool] = [:]
+        for group in scene.groups { result[group.id.rawValue.uuidString] = scene.layers.contains { $0.groupID == group.id && $0.isVisible } }
+        return result
+    }
+    func controllerChatSnapshot() -> StudioControlChatState? {
+        guard let chatCoordinator else { return nil }
+        let slot = chatCoordinator.selectedSlot
+        let stagedLayer = previewProgram.stagedScene?.layers.first { $0.id == slot }
+        let programLayer = previewProgram.programScene?.layers.first { $0.id == slot }
+        return .init(queuedCount: chatCoordinator.queue.queue.count, selectedID: chatCoordinator.queue.selectedID,
+                     featuredID: chatCoordinator.queue.featuredID, ready: availabilityError(for: .showSelectedComment) == nil,
+                     stagedVisible: stagedLayer?.isVisible == true, programVisible: programLayer?.isVisible == true)
     }
     /// Foreground automation uses the pipeline's nested-scene/source demand
     /// rules, including the proposed scene/visibility change, before capture.
@@ -2214,6 +2274,22 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDirectLiveEditing(let on):
             return previewProgram.directLiveEditing != on
                 ? nil : .unavailable("Direct-live editing is already \(on ? "on" : "off").")
+        case .selectPreviousComment, .selectNextComment:
+            guard let chatCoordinator else { return .unavailable("Connect and queue public chat in the studio first.") }
+            let queue = chatCoordinator.queue.queue
+            let selected = chatCoordinator.queue.selectedID
+            let index = selected.flatMap { queue.firstIndex(of: $0) } ?? 0
+            guard !queue.isEmpty else { return .unavailable("The public comment queue is empty.") }
+            if command == .selectPreviousComment, index == 0 { return .unavailable("There is no previous queued comment.") }
+            if command == .selectNextComment, index + 1 >= queue.count { return .unavailable("There is no next queued comment.") }
+            return nil
+        case .showSelectedComment, .hideComment:
+            guard let chatCoordinator, let slot = chatCoordinator.selectedSlot,
+                  chatCoordinator.availableSlots.contains(where: { $0.id == slot }), let scene = previewProgram.stagedScene else {
+                return .unavailable("Create or select a comment slot in the staged scene first.")
+            }
+            if command == .showSelectedComment, chatCoordinator.queue.current == nil { return .unavailable("Select a queued public comment first.") }
+            return availabilityError(for: .setLayerVisibility(slot, visible: command == .showSelectedComment, in: scene.id))
         case .undo:
             return undoStack.canUndo
                 ? nil : .unavailable("There is nothing to undo.")
@@ -2827,6 +2903,11 @@ final class StudioCommandDispatcher: ObservableObject {
             previewProgram.revert()
         case .setDirectLiveEditing(let on):
             previewProgram.setDirectLiveEditing(on)
+        case .selectPreviousComment: chatCoordinator?.advance(-1)
+        case .selectNextComment: chatCoordinator?.advance(1)
+        case .showSelectedComment:
+            if let id = chatCoordinator?.queue.current?.id { chatCoordinator?.show(id) }
+        case .hideComment: chatCoordinator?.hide()
         case .undo:
             if let snapshot = undoStack.undo() {
                 applyUndoSnapshot(snapshot)
@@ -3748,6 +3829,7 @@ private extension StudioCommand {
              .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .setDynamicOverlayTransport,
+             .selectPreviousComment, .selectNextComment, .showSelectedComment, .hideComment,
              .pdfNextPage, .pdfPreviousPage, .pdfGoToPage, .pdfSetFraming,
              .addSoundPad, .updateSoundPad, .removeSoundPad,
              .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,

@@ -18,8 +18,9 @@ struct HarnessState {
     var programSceneID: HarnessID?
     var hasPendingStagedEdits = false
     var layerVisibility: [HarnessID: Bool] = [:]
+    var directLiveEditing = false
 }
-enum StudioCommand { case action(String) }
+enum StudioCommand { case action(String), pdfGoToPage(UUID, page: Int), addRecordingMarker(String) }
 enum StudioCommandError: Error {
     case unavailable(String), invalidTarget(String), invalidValue(String)
     var description: String {
@@ -42,9 +43,25 @@ struct StudioPaletteAction {
     let macros = ShowMacroController()
     var actions: [StudioPaletteAction] = []
     var emitted: [String] = []
+    @Published var gain = 0.5
+    var valueTargetExists = true
+    var marker = "", page = 0
+    func controllerTargets() -> [StudioControllerTarget] {
+        guard valueTargetExists else { return [] }
+        return [.init(id: "audio.microphone.gain", title: "Mic Gain", kind: .value, normalizedValue: gain, unavailableReason: nil, execute: { [weak self] value in self?.gain = value!; return nil })]
+    }
+    func controllerValueSnapshot() -> [String: Double] { valueTargetExists ? ["audio.microphone.gain": gain] : [:] }
+    func controllerMuteSnapshot() -> [String: Bool] { ["audio.microphone.gain": false] }
+    func controllerPlaybackSnapshot() -> [String: String] { [:] }
+    func controllerProgramVisibility() -> [String: Bool] { [:] }
+    func controllerGroupVisibility() -> [String: Bool] { [:] }
+    func controllerOverlays() -> [HarnessLayer] { [] }
+    func controllerChatSnapshot() -> StudioControlChatState? { nil }
     func catalogueActions() -> [StudioPaletteAction] { actions }
     func execute(_ command: StudioCommand) -> StudioCommandResult {
         switch command {
+        case .addRecordingMarker(let text): marker = text; return .init(outcome: .success)
+        case .pdfGoToPage(_, let page): self.page = page; return .init(outcome: .success)
         case .action(let id):
             if id == "output.stream.start", state.stream.isActive { return .init(outcome: .rejected(.unavailable("Already active"))) }
             if id.hasPrefix("macro."), let uuid = UUID(uuidString: String(id.dropFirst(6).dropLast(4))) { macros.start(uuid) }
@@ -53,6 +70,7 @@ struct StudioPaletteAction {
         }
     }
 }
+struct HarnessLayer { var id: HarnessID; var isVisible: Bool }
 @MainActor final class MemoryCredentials: StudioControlCredentials {
     var tokens: [UUID: String] = [:]
     var deletionError: OSStatus = errSecSuccess
@@ -160,6 +178,37 @@ struct StudioPaletteAction {
         let capabilityRequest = StudioControlRequest(type: .capabilities, id: UUID(), sessionID: sessionID)
         let discovery = try await client.request(capabilityRequest)
         precondition(discovery.commands?.contains { $0.id == stable && $0.title == "Intro" } == true)
+        precondition(discovery.commands?.contains { $0.id == "audio.microphone.gain" && $0.kind == "value" } == true)
+        let valueRequest = StudioControlRequest(type: .command, id: UUID(), sessionID: sessionID, commandID: "audio.microphone.gain", value: 0.8)
+        let absolute = try await client.request(valueRequest)
+        precondition(absolute.result?.succeeded == true && absolute.snapshot?.values?["audio.microphone.gain"] == 0.8)
+        let duplicateValue = try await client.request(valueRequest)
+        precondition(duplicateValue.error?.code == "duplicateRequest" && dispatcher.gain == 0.8)
+        let relative = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: "audio.microphone.gain", delta: 0.1))
+        precondition(relative.result?.succeeded == true && abs(dispatcher.gain - 0.9) < 0.00001)
+        let bounded = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: "audio.microphone.gain", delta: 1))
+        precondition(bounded.result?.succeeded == true && dispatcher.gain == 1)
+        let badValue = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: "audio.microphone.gain", value: 2))
+        precondition(badValue.error?.code == "invalidValue" && dispatcher.gain == 1)
+        let conflictingValue = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: "audio.microphone.gain", value: 0.5, delta: 0.1))
+        precondition(conflictingValue.error?.code == "invalidValue")
+        let wrongKind = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: stable, value: 0.5))
+        precondition(wrongKind.result?.error?.code == "invalidValue" && dispatcher.emitted.isEmpty)
+        dispatcher.valueTargetExists = false
+        let deletedValue = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: "audio.microphone.gain", delta: 0.1))
+        precondition(deletedValue.result?.error?.code == "invalidTarget" && deletedValue.snapshot?.values?.isEmpty == true)
+        dispatcher.valueTargetExists = true
+        let pdfID = UUID(), jumpID = "pdf.\(UUID()).goto"
+        dispatcher.actions.append(.init(id: jumpID, title: "Jump PDF", command: .pdfGoToPage(pdfID, page: 0)))
+        dispatcher.actions.append(.init(id: "output.record.marker", title: "Marker", command: .addRecordingMarker("Chapter")))
+        let jumped = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: jumpID, page: 12))
+        precondition(jumped.result?.succeeded == true && dispatcher.page == 12)
+        let marked = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: "output.record.marker", text: "Interview"))
+        precondition(marked.result?.succeeded == true && dispatcher.marker == "Interview")
+        let wrongArgument = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: stable, page: 0))
+        precondition(wrongArgument.result?.error?.code == "invalidValue")
+        let oversizedMarker = try await client.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: "output.record.marker", text: String(repeating: "x", count: 513)))
+        precondition(oversizedMarker.error?.code == "invalidValue" && dispatcher.marker == "Interview")
         dispatcher.actions[0].title = "Renamed Intro"
         let renamed = try await client.request(.init(type: .capabilities, id: UUID(), sessionID: sessionID))
         precondition(renamed.commands?.contains { $0.id == stable && $0.title == "Renamed Intro" } == true)
