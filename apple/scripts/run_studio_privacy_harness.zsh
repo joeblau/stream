@@ -14,6 +14,8 @@ if ENV['STREAM_VENDOR_ROOT']
   spec['packages'].each_value{|p| p['path']=File.join(ENV['STREAM_VENDOR_ROOT'],File.basename(p['path'])) if p['path']}
 end
 spec['targets'].select!{|name,_| ['StreamCore','StreamMac'].include?(name)}
+# Tool fixtures exercise host code; they neither embed nor activate extensions.
+spec['targets'].each_value{|t| t['dependencies']&.reject!{|d| d['target'] && !spec['targets'].key?(d['target'])}}
 spec['schemes']={}
 spec['targets'].each_value do |target|
   target['sources'].map!{|s| s.is_a?(String) ? File.join(root,s) : s.merge('path'=>File.join(root,s['path']))}
