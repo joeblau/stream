@@ -16,11 +16,15 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
     public var audioBitrate: Int
     public var ingestLimits: DestinationIngestLimits?
     public var keyframeSeconds: Double?
+    /// Optional guidance identity, never an account, event ID or ingest secret.
+    /// A string tolerates templates introduced by a newer application version.
+    public var providerTemplateID: String?
 
     public init(id: UUID = UUID(), name: String, transport: StreamProtocol = .rtmps,
                 isEnabled: Bool = true, followsProgramProfile: Bool = true,
                 outputProfile: OutputProfile = .default, videoCodec: VideoCodec = .h264,
-                videoBitrate: Int = 4_000_000, audioBitrate: Int = 128_000, ingestLimits: DestinationIngestLimits? = nil, keyframeSeconds: Double? = nil) {
+                videoBitrate: Int = 4_000_000, audioBitrate: Int = 128_000, ingestLimits: DestinationIngestLimits? = nil, keyframeSeconds: Double? = nil,
+                providerTemplateID: String? = nil) {
         self.id = id
         self.name = name
         self.transport = transport
@@ -32,6 +36,7 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
         self.audioBitrate = audioBitrate
         self.ingestLimits = ingestLimits
         self.keyframeSeconds = keyframeSeconds
+        self.providerTemplateID = providerTemplateID
     }
 
     public func duplicated() -> Self {
@@ -45,6 +50,10 @@ public struct StreamDestination: Codable, Equatable, Identifiable, Sendable {
 
     public func effectiveProfile(program: OutputProfile) -> OutputProfile {
         followsProgramProfile ? program : outputProfile
+    }
+
+    public var providerTemplate: DestinationProviderTemplate? {
+        providerTemplateID.flatMap(DestinationProviderTemplate.init(rawValue:))
     }
 
     public var codecNotice: String? {
@@ -163,6 +172,9 @@ public enum DestinationValidator {
         let limits = destination.ingestLimits ?? .conservative(for: destination.transport)
         errors += limits.errors(profile: profile, codec: destination.videoCodec,
                                 keyframeSeconds: destination.keyframeSeconds ?? 2, audioBitrate: destination.audioBitrate)
+        if let template = destination.providerTemplate, !template.transports.contains(destination.transport) {
+            errors.append("This \(template.name) guide does not establish \(destination.transport.displayName) ingest support. Use its issued protocol or clear the guide for a custom destination.")
+        }
         return errors
     }
 

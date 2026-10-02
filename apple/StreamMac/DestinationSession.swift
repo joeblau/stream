@@ -59,6 +59,13 @@ final class DestinationSession: ObservableObject {
         selectedID = destination.id
     }
 
+    func create(_ template: DestinationProviderTemplate, transport: StreamProtocol) {
+        let destination = template.makeDestination(transport: transport)
+        draft.append(destination)
+        credentials[destination.id] = .init()
+        selectedID = destination.id
+    }
+
     func duplicate(_ id: UUID) {
         guard let source = draft.first(where: { $0.id == id }) else { return }
         let copy = source.duplicated()

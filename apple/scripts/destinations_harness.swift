@@ -16,11 +16,12 @@ actor FakeDestinationPublisher: Publisher {
     var gate: CheckedContinuation<Void, Never>?
     var frames: [Int64] = []
     var stopped = false
+    var startedSettings: StreamSettings?
     init() {
         (events, continuation) = AsyncStream.makeStream(of: PublisherEvent.self)
     }
     nonisolated func emit(_ event: PublisherEvent) { continuation.yield(event) }
-    func start(_ settings: StreamSettings) async throws {}
+    func start(_ settings: StreamSettings) async throws { startedSettings = settings }
     func stop() async { stopped = true; release() }
     func pause() async {}
     func resume() async {}
@@ -171,8 +172,47 @@ actor FakeDestinationPublisher: Publisher {
         let preservedPolicy = try Data(contentsOf: policyURL)
         precondition(preservedPolicy == invalid, "Corrupt project policy must not be replaced")
         try FileManager.default.removeItem(at: policyURL)
+        try await validateGuidedOutputs()
         print("PASS: native lifecycle coordinator, duplicate-event idempotence, silent-slate keeps both outputs live, sleep stops publishers/recorder once, wake/unlock never allocate publishers, opt-in preview only, persisted policy and corrupt-document protection; \(ProcessInfo.processInfo.operatingSystemVersionString)")
         print("PASS: rehearsal prevents public publisher allocation; up-to-ten session boundary; actual destination controller, independent failure/reconnect/stop/retry, stable ID, stale event rejection, secret-safe failures, bounded slow queue and healthy fanout")
+    }
+
+    @MainActor static func validateGuidedOutputs() async throws {
+        let provider = FakeDestinationPublisher(), relay = FakeDestinationPublisher(), retry = FakeDestinationPublisher()
+        var pending = [provider, relay, retry]
+        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() })
+        var x = DestinationProviderTemplate.x.makeDestination()
+        var restream = DestinationProviderTemplate.restream.makeDestination(transport: .srt)
+        // Enabling is explicit, as in the native destination editor.
+        x.isEnabled = true; restream.isEnabled = true
+        let xCredentials = DestinationCredentials(endpoint: "rtmps://provider.test.invalid/live", streamKey: "fixture-key")
+        let relayCredentials = DestinationCredentials(endpoint: "srt://relay.test.invalid:9000?streamid=fixture-route&passphrase=fixture-password")
+        let hardware = OutputCapabilities(hardwareTier: .uhd4K, hardwareMaxFrameRate: 60)
+        for (destination, credentials) in [(x, xCredentials), (restream, relayCredentials)] {
+            precondition(DestinationValidator.startErrors(destination, credentials: credentials, program: .default, capabilities: hardware).isEmpty)
+            outputs.start(destination, settings: DestinationValidator.settings(destination, credentials: credentials, base: .default))
+        }
+        await settleAsync { await provider.startedSettings != nil }
+        await settleAsync { await relay.startedSettings != nil }
+        let providerSettings = await provider.startedSettings!, relaySettings = await relay.startedSettings!
+        precondition(providerSettings.selectedProtocol == .rtmps && providerSettings.destinationKeyframeSeconds == 3)
+        precondition(relaySettings.selectedProtocol == .srt && relaySettings.rtmpURL.contains("streamid=fixture-route"))
+        provider.emit(.published); relay.emit(.published)
+        await settle { outputs.liveCount == 2 }
+        relay.emit(.failed(message: "fixture failure"))
+        await settle { outputs.partialSuccess }
+        precondition(outputs.states[x.id] == .live)
+        outputs.start(restream, settings: relaySettings)
+        relay.emit(.published)
+        await Task.yield()
+        precondition(outputs.states[restream.id] == .connecting)
+        retry.emit(.published)
+        await settle { outputs.liveCount == 2 }
+        outputs.stop(restream.id)
+        await settle { outputs.states[restream.id] == .idle }
+        precondition(outputs.states[x.id] == .live)
+        outputs.stopAll(); await settle { outputs.activeCount == 0 }
+        print("PASS: guided X and SRT relay use shipping independent output controller, actual converted profiles/keys, isolated failure/retry/stop and stable IDs; fake ingest only, provider acceptance unverified")
     }
 
     @MainActor static func settle(_ condition: () -> Bool) async {

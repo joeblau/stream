@@ -6,13 +6,20 @@ struct DestinationManagerView: View {
     @ObservedObject var session: DestinationSession
     var programProfile: OutputProfile
     @EnvironmentObject private var controller: StreamController
+    @State private var guidedSetup: DestinationProviderTemplate?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Menu {
+                    Menu("Guided Service or Relay…") {
+                        ForEach(DestinationProviderTemplate.allCases) { template in
+                            Button(template.name) { guidedSetup = template }
+                        }
+                    }
+                    Divider()
                     ForEach(StreamProtocol.allCases, id: \.self) { transport in
-                        Button("Add \(transport.displayName)") { session.create(transport) }
+                        Button("Custom \(transport.displayName)") { session.create(transport) }
                     }
                 } label: { Label("Add Destination", systemImage: "plus") }
                 Spacer()
@@ -55,11 +62,25 @@ struct DestinationManagerView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(10)
+        .sheet(item: $guidedSetup) { template in
+            GuidedDestinationSetupView(template: template) { transport in
+                session.create(template, transport: transport)
+            }
+        }
     }
 
     @ViewBuilder
     private func editor(_ index: Int, id: UUID) -> some View {
         TextField("Name", text: $session.draft[index].name)
+        if let template = session.draft[index].providerTemplate {
+            DisclosureGroup("Setup Guide: \(template.name)") {
+                DestinationProviderGuidance(template: template, transport: session.draft[index].transport)
+                Button("Use as Custom Destination") { session.draft[index].providerTemplateID = nil }
+                    .help("Remove the guidance identity while retaining this destination's ID, credentials and output settings.")
+            }
+            Text("\(template.isRelay ? "Relay ingest only" : "Manual provider ingest") · Comments / viewer metrics / remote event state unavailable in Stream")
+                .font(.caption).foregroundStyle(.secondary)
+        }
         Toggle("Enabled for Go Live", isOn: $session.draft[index].isEnabled)
         Picker("Protocol", selection: $session.draft[index].transport) {
             ForEach(StreamProtocol.allCases, id: \.self) { transport in
@@ -202,6 +223,10 @@ private struct DestinationStatusRows: View {
                         Text(destination.name).lineLimit(1)
                         Spacer()
                         Text(label(state)).font(.caption).foregroundStyle(state.isLive ? .green : .secondary)
+                    }
+                    if let template = destination.providerTemplate {
+                        Text(template.isRelay ? "Relay ingest state · downstream broadcasts unavailable" : "Ingest state · verify the event in the provider")
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                     HStack {
                         if state.canStart {
