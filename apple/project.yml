@@ -167,6 +167,7 @@ targets:
     platform: macOS
     sources:
       - StreamMac
+      - VirtualOutputShared
       # The publishers + facecam pipeline are process-agnostic and shared with
       # the iOS app (FacecamCapture carries #if os(iOS) shims); the publishing
       # libraries must be loaded exactly once, into the app target only.
@@ -184,6 +185,7 @@ targets:
         # Developer ID profiles authorize the existing App Group and Keychain claims.
         PROVISIONING_PROFILE_SPECIFIER: $(STREAM_MAC_PROVISIONING_PROFILE)
         ENABLE_HARDENED_RUNTIME: YES
+        PROVISIONING_PROFILE_SPECIFIER: $(STREAM_MAC_PROVISIONING_PROFILE)
         GENERATE_INFOPLIST_FILE: YES
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         # The project base carries iOS-only settings; they do not apply here.
@@ -200,6 +202,8 @@ targets:
     info:
       path: StreamMac/Info.plist
       properties:
+        StreamVirtualOutputAppGroup: $(DEVELOPMENT_TEAM).com.joeblau.Stream.VirtualOutputs
+        StreamVirtualOutputTeam: $(DEVELOPMENT_TEAM)
         CFBundleDocumentTypes:
           - CFBundleTypeName: Stream Show
             CFBundleTypeRole: Editor
@@ -216,6 +220,7 @@ targets:
       path: StreamMac/StreamMac.entitlements
       properties:
         com.apple.security.app-sandbox: true
+        com.apple.developer.system-extension.install: true
         # A11 (issue #123): host third-party Audio Unit effects in-process.
         # Enumerating components works sandboxed; LOADING a third-party AU
         # bundle into the process requires this documented temporary
@@ -240,9 +245,12 @@ targets:
         # and stream credentials are shared via StreamCore's stores.
         com.apple.security.application-groups:
           - group.com.joeblau.Stream
+          - $(DEVELOPMENT_TEAM).com.joeblau.Stream.VirtualOutputs
         keychain-access-groups:
           - $(AppIdentifierPrefix)com.joeblau.Stream
     dependencies:
+      - target: StreamCameraExtension
+        embed: true
       - target: StreamCore
         embed: true
       - package: HaishinKit
@@ -257,6 +265,39 @@ targets:
       # receive). macOS-only — the iOS target never links it.
       - package: Syphon
         product: Syphon
+
+  StreamCameraExtension:
+    type: system-extension
+    platform: macOS
+    sources:
+      - StreamCameraExtension
+      - VirtualOutputShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamMac.CameraExtension
+        PRODUCT_NAME: com.joeblau.StreamMac.CameraExtension
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        PROVISIONING_PROFILE_SPECIFIER: $(STREAM_CAMERA_PROVISIONING_PROFILE)
+        SKIP_INSTALL: YES
+    info:
+      path: StreamCameraExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Stream Studio Camera
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSSystemExtensionUsageDescription: Stream Studio makes its composed program available as a camera in apps you choose.
+        CMIOExtension:
+          CMIOExtensionMachServiceName: $(DEVELOPMENT_TEAM).com.joeblau.Stream.VirtualOutputs.CameraExtension
+        StreamVirtualOutputAppGroup: $(DEVELOPMENT_TEAM).com.joeblau.Stream.VirtualOutputs
+        StreamVirtualOutputTeam: $(DEVELOPMENT_TEAM)
+    entitlements:
+      path: StreamCameraExtension/StreamCameraExtension.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups:
+          - $(DEVELOPMENT_TEAM).com.joeblau.Stream.VirtualOutputs
 
 # ---------------------------------------------------------------
 # Shared scheme so `xcodegen generate` produces a deterministic,
