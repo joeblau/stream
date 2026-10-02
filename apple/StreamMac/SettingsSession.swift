@@ -44,7 +44,7 @@ final class SettingsSession: ObservableObject {
         isPresented = true
     }
 
-    private let store: SettingsStore
+    private let store: DesktopSettingsStore
     private let controller: StreamController
     private let capabilities = OutputCapabilities.current
 
@@ -53,7 +53,7 @@ final class SettingsSession: ObservableObject {
     /// Keychain on first touch of each protocol.
     private var draftCredentials: [StreamProtocol: (url: String, key: String)] = [:]
 
-    init(store: SettingsStore = SettingsStore(), controller: StreamController) {
+    init(store: DesktopSettingsStore = DesktopSettingsStore(), controller: StreamController) {
         self.store = store
         self.controller = controller
         let loaded = store.load()
@@ -255,6 +255,11 @@ final class SettingsSession: ObservableObject {
     /// engine ramps live), but the FILE write coalesces to one save per
     /// gesture instead of one per tick.
     private var mixerSaveTask: Task<Void, Never>?
+
+    func flushPendingWrites() {
+        mixerSaveTask?.cancel()
+        store.save(activeSettings)
+    }
 
     private func scheduleLiveSettingsSave() {
         mixerSaveTask?.cancel()

@@ -224,7 +224,7 @@ final class PDFDeckStore: ObservableObject {
     /// for the app's lifetime; belt-and-braces like the other stores).
     nonisolated(unsafe) private var terminationObserver: NSObjectProtocol?
 
-    init(documentStore: PresentationDeckDocumentStore? = PresentationDeckDocumentStore.default()) {
+    init(documentStore: PresentationDeckDocumentStore? = PresentationDeckDocumentStore(fileURL: DesktopStorage.projectDirectory.appendingPathComponent(PresentationDeckDocumentStore.fileName))) {
         self.documentStore = documentStore
         let document = documentStore?.load() ?? PresentationDeckDocument()
         var restored: [SourceDefinitionID: DeckPageState] = [:]

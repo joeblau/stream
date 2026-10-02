@@ -272,6 +272,16 @@ final class SourceFrameProviders: @unchecked Sendable {
         return holder?.latest()
     }
 
+    /// Capture delivery counts are read without requesting/pulling any media.
+    /// A static screen can deliver zero new frames while the compositor stays paced.
+    func deliveryCount(for key: CaptureSourceKey) -> Int? {
+        os_unfair_lock_lock(&lock)
+        let camera = cameraHoldersByKey[key]
+        let screen = screenHoldersByKey[key]
+        os_unfair_lock_unlock(&lock)
+        return camera?.deliveryTelemetry.snapshot().captured ?? screen?.deliveryTelemetry.snapshot().captured
+    }
+
     // MARK: - Media playout (A02, issue #97)
 
     /// True when the pool holds a playback engine for this exact media key.
@@ -317,12 +327,14 @@ struct SourceFrameLookup: Sendable {
 /// compositing — moving camera overlays included — without ScreenCaptureKit
 /// producing fresh frames.
 final class LatestScreenFrame: @unchecked Sendable {
+    let deliveryTelemetry = FrameTelemetry()
     private var lock = os_unfair_lock_s()
     private var buffer: CVPixelBuffer?
 
     func store(_ buffer: CVPixelBuffer) {
         os_unfair_lock_lock(&lock)
         self.buffer = buffer
+        deliveryTelemetry.recordCaptured()
         os_unfair_lock_unlock(&lock)
     }
 
@@ -366,6 +378,10 @@ final class LatestScreenFrame: @unchecked Sendable {
 /// when the same stable identity returns — see the hot-plug section below.
 @MainActor
 final class CaptureSourcePool: ObservableObject {
+    /// Recording pins the same normalized physical identity as capture.
+    /// Unlike the legacy composition lookup, ISO never falls back to a
+    /// different default camera when this exact holder is missing.
+    func recordingCaptureKey(for key: CaptureSourceKey) -> CaptureSourceKey { normalized(key) }
     /// The last start/run failure per source identity, for future per-source
     /// UI badges. Cleared per source on a successful (re)start.
     @Published private(set) var sourceErrors: [CaptureSourceKey: String] = [:]
@@ -1224,6 +1240,10 @@ final class CaptureSourcePool: ObservableObject {
         mediaPlaybacks[.media(id)]?.seek(toSeconds: seconds)
     }
 
+    func restorePausedMediaPosition(_ id: SourceDefinitionID, seconds: Double) {
+        mediaPlayback(for: .media(id), id: id)?.restorePausedPosition(seconds: seconds)
+    }
+
     /// The current status for one media source (idle when never loaded) —
     /// the transport UI's read path.
     func mediaStatus(for id: SourceDefinitionID) -> MediaSourceStatus {
@@ -1467,6 +1487,17 @@ final class CaptureSourcePool: ObservableObject {
     /// Collapses keys that name the SAME physical device the default source
     /// already covers, so "the default camera" and "the default camera by
     /// unique ID" never open the device twice.
+    /// Passive readiness probe: never pulls media playout (that would alter
+    /// its render cadence). Camera reads enforce the existing freshness TTL.
+    func frameAvailability(for key: CaptureSourceKey) -> Bool? {
+        let key = normalized(key)
+        switch key {
+        case .camera: return frames.cameraFrame(for: key) != nil
+        case .screen: return frames.screenFrame(for: key) != nil
+        default: return nil
+        }
+    }
+
     private func normalized(_ key: CaptureSourceKey) -> CaptureSourceKey {
         guard case .camera(let payload) = key, let deviceID = payload.deviceID,
               let defaultDevice = AVCaptureDevice.default(for: .video),

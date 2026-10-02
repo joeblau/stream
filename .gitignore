@@ -34,6 +34,7 @@ SourcePackages/
 # ---------------------------------------------------------------
 # Generated Info.plist / entitlements (written by XcodeGen)
 # ---------------------------------------------------------------
+apple/StreamMac/Info.plist
 apple/Stream/Info.plist
 apple/Stream/Stream.entitlements
 apple/StreamBroadcast/Info.plist

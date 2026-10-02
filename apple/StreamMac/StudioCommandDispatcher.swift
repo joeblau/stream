@@ -72,6 +72,12 @@ enum StudioCommand: Equatable, Sendable {
     case stopPreview
     case startRecording
     case stopRecording
+    case pauseRecording
+    case resumeRecording
+    case startNewRecordingFile
+    case startRehearsal
+    case stopRehearsal
+    case addRecordingMarker(String)
 
     // Scenes (S01 layer graph).
     case selectScene(SceneID)
@@ -547,6 +553,9 @@ enum StudioCommand: Equatable, Sendable {
     case ptzRemoveSceneRecall(UUID)
 
     // S11: one persisted rundown and one transport clock.
+    case setShowMacros(ShowMacroDocument)
+    case runMacro(UUID)
+    case cancelMacro
     case setRundown(ShowRundownDocument)
     case rundownPlay
     case rundownPause
@@ -571,6 +580,10 @@ enum StudioCommand: Equatable, Sendable {
     /// Direct-live editing mode (W03, off by default): while on, scene edits
     /// and selections take immediately, applying straight to program.
     case setDirectLiveEditing(Bool)
+    case selectPreviousComment
+    case selectNextComment
+    case showSelectedComment
+    case hideComment
 
     // S12 (issue #75): undo/redo of scene edits. These restore SNAPSHOTS of
     // the undoable state (scene document + browser organization + staged
@@ -593,6 +606,12 @@ enum StudioCommand: Equatable, Sendable {
         case .stopPreview: return "Stop Preview"
         case .startRecording: return "Start Recording"
         case .stopRecording: return "Stop Recording"
+        case .pauseRecording: return "Pause Recording"
+        case .resumeRecording: return "Resume Recording"
+        case .startNewRecordingFile: return "Start New Recording File"
+        case .startRehearsal: return "Begin Local Rehearsal"
+        case .stopRehearsal: return "End Local Rehearsal"
+        case .addRecordingMarker: return "Add Recording Marker"
         case .selectScene, .selectSceneAt: return "Select Scene"
         case .addScene, .insertScene: return "Add Scene"
         case .renameScene: return "Rename Scene"
@@ -749,6 +768,9 @@ enum StudioCommand: Equatable, Sendable {
         case .ptzSetSceneRecall(let link):
             return link.recallOnProgramEntry ? "Arm Scene PTZ Recall" : "Set Scene PTZ Recall"
         case .ptzRemoveSceneRecall: return "Remove Scene PTZ Recall"
+        case .setShowMacros: return "Edit Show Macros"
+        case .runMacro: return "Run Show Macro"
+        case .cancelMacro: return "Cancel Show Macro"
         case .setRundown: return "Edit Rundown"
         case .rundownPlay: return "Play Rundown"
         case .rundownPause: return "Pause Rundown"
@@ -763,6 +785,10 @@ enum StudioCommand: Equatable, Sendable {
         case .revert: return "Revert"
         case .setDirectLiveEditing(let on):
             return "\(on ? "Enable" : "Disable") Direct-Live Editing"
+        case .selectPreviousComment: return "Previous Queued Comment"
+        case .selectNextComment: return "Next Queued Comment"
+        case .showSelectedComment: return "Show Selected Comment"
+        case .hideComment: return "Hide Comment"
         case .undo: return "Undo"
         case .redo: return "Redo"
         }
@@ -939,6 +965,8 @@ final class StudioCommandDispatcher: ObservableObject {
     private let recorder: RecordingController
     /// The W03 preview/program model: staged vs program scene snapshots.
     private let previewProgram: PreviewProgramModel
+    private weak var chatCoordinator: StudioChatCoordinator?
+    private var chatObservation: AnyCancellable?
     /// S12 (issue #75): the scene-edit undo stack. One entry per executed
     /// undoable command, recorded in `execute` around `perform`.
     private let undoStack = UndoStack<SceneUndoSnapshot>()
@@ -1005,6 +1033,8 @@ final class StudioCommandDispatcher: ObservableObject {
     /// MainWindowView needs no new environment plumbing.
     let assetLibrary: AssetLibraryStore
     let rundown: ShowRundownController
+    let macros: ShowMacroController
+    private var executingMacroStep = false
     let lutLibrary = LUTLibraryController()
 
     /// A11 (issue #123): the hosted Audio Units running in one channel's FX
@@ -1054,6 +1084,7 @@ final class StudioCommandDispatcher: ObservableObject {
         self.pdfDecks = PDFDeckStore()
         self.assetLibrary = AssetLibraryStore()
         self.rundown = ShowRundownController()
+        self.macros = ShowMacroController()
         // G06: the pool's PDF engines resolve documents through the library.
         controller.capturePool.assetLibrary = assetLibrary
         // G08 (issue #115): web widget hosts reach the asset library through
@@ -1086,6 +1117,7 @@ final class StudioCommandDispatcher: ObservableObject {
                     .contains(sourceID) else { return }
             self.rundown.noteMediaEnd(at: endedAt)
         }
+        configureMacros()
         let mic = AudioChannelID.microphone(deviceUID: nil)
         channelIDsByLabel[mic.label] = mic
         refreshState()
@@ -1130,6 +1162,168 @@ final class StudioCommandDispatcher: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+        Publishers.Merge(soundboard.objectWillChange, controller.capturePool.objectWillChange)
+            .sink { [weak self] _ in Task { @MainActor [weak self] in self?.refreshState() } }
+            .store(in: &cancellables)
+    }
+
+    func catalogueActions(includeMacros: Bool = true) -> [StudioPaletteAction] {
+        paletteActions(scenes: sceneStore.scenes, sources: sceneStore.sources, stagedScene: previewProgram.stagedScene, includeMacros: includeMacros)
+    }
+    func controllerOverlays() -> [LayerNode] { sceneStore.overlays }
+    func bindChatCoordinator(_ coordinator: StudioChatCoordinator) {
+        chatCoordinator = coordinator
+        chatObservation = coordinator.objectWillChange.sink { [weak self] _ in Task { @MainActor [weak self] in self?.refreshState() } }
+        refreshState()
+    }
+    /// Stable numeric controller targets are deliberately a small typed set.
+    /// Capture-layer gain retains its scene/layer ownership on the inspector.
+    func controllerTargets() -> [StudioControllerTarget] {
+        var result: [StudioControllerTarget] = []
+        for action in catalogueActions() where !action.id.hasPrefix("unavailable.") {
+            var feedback = action.unavailableReason == nil ? 1.0 : 0
+            if case .selectScene(let id) = action.command { feedback = state.stagedSceneID == id ? 1 : 0 }
+            if action.id.hasPrefix("output.stream.") { feedback = state.stream.isActive ? 1 : 0 }
+            if action.id.hasPrefix("output.record.") { feedback = state.recording.isActive ? 1 : 0 }
+            if action.id.hasPrefix("output.preview.") { feedback = state.preview == .active ? 1 : 0 }
+            result.append(.init(id: action.id, title: action.title, kind: .command, normalizedValue: feedback,
+                                unavailableReason: action.unavailableReason, execute: { [weak self] _ in
+                guard let self, let current = self.catalogueActions().first(where: { $0.id == action.id }) else { return "The stable command target no longer exists." }
+                guard let command = current.command else { return current.unavailableReason ?? "This action is unavailable." }
+                return self.execute(command).error?.description
+            }))
+        }
+        func gain(_ id: String, _ title: String, _ current: Double, _ command: @escaping (Double) -> StudioCommand) {
+            result.append(.init(id: id, title: title, kind: .value, normalizedValue: max(0, min(2, current)) / 2,
+                                unavailableReason: availabilityError(for: command(current))?.description, execute: { [weak self] value in
+                guard let self, let value, value.isFinite, value >= 0, value <= 1 else { return "A numeric input must be normalized from 0 to 1." }
+                return self.execute(command(value * 2)).error?.description
+            }))
+        }
+        gain("audio.microphone.gain", "Microphone Gain (0–2)", state.micVolume) { .setChannelVolume(.microphone(deviceUID: nil), $0) }
+        for bus in [AudioBus.program, .monitor, .aux] {
+            gain("audio.bus.\(bus.rawValue).gain", "\(bus.rawValue.capitalized) Bus Gain (0–2)", state.mixer.busGains[bus.rawValue] ?? 1) { .setBusGain(bus, $0) }
+        }
+        for source in sceneStore.sources where source.payload.isMedia {
+            let channel = AudioChannelID.media(source.id)
+            gain("media.\(source.id.rawValue.uuidString).gain", "\(source.name) Gain (0–2)", state.mixer.channelVolumes[channel.label] ?? 1) { .setChannelVolume(channel, $0) }
+        }
+        return result
+    }
+    func controllerValueSnapshot() -> [String: Double] {
+        var result: [String: Double] = [:]
+        for target in controllerTargets() where target.kind == .value { result[target.id] = target.normalizedValue }
+        return result
+    }
+    func controllerMuteSnapshot() -> [String: Bool] {
+        var result = ["audio.microphone.gain": state.mixer.channelMutes[AudioChannelID.microphone(deviceUID: nil).label] == true]
+        for bus in [AudioBus.program, .monitor, .aux] { result["audio.bus.\(bus.rawValue).gain"] = state.mixer.mutedBuses.contains(bus.rawValue) }
+        for source in sceneStore.sources where source.payload.isMedia {
+            result["media.\(source.id.rawValue.uuidString).gain"] = state.mixer.channelMutes[AudioChannelID.media(source.id).label] == true
+        }
+        return result
+    }
+    func controllerPlaybackSnapshot() -> [String: String] {
+        var result: [String: String] = [:]
+        for source in sceneStore.sources where source.payload.isMedia {
+            result["media.\(source.id.rawValue.uuidString)"] = controller.capturePool.mediaStatus(for: source.id).phase.rawValue
+        }
+        for pad in soundboardStore.pads { result["sound.\(pad.id.rawValue.uuidString)"] = soundboard.padStatuses[pad.id]?.phase.rawValue ?? "idle" }
+        for playlist in soundboardStore.playlists { result["playlist.\(playlist.id.rawValue.uuidString)"] = soundboard.playlistStates[playlist.id]?.phase.rawValue ?? "idle" }
+        return result
+    }
+    func controllerProgramVisibility() -> [String: Bool] {
+        Dictionary(uniqueKeysWithValues: (previewProgram.programScene?.layers ?? []).map { ($0.id.rawValue.uuidString, $0.isVisible) })
+    }
+    func controllerGroupVisibility() -> [String: Bool] {
+        guard let scene = previewProgram.stagedScene else { return [:] }
+        var result: [String: Bool] = [:]
+        for group in scene.groups { result[group.id.rawValue.uuidString] = scene.layers.contains { $0.groupID == group.id && $0.isVisible } }
+        return result
+    }
+    func controllerChatSnapshot() -> StudioControlChatState? {
+        guard let chatCoordinator else { return nil }
+        let slot = chatCoordinator.selectedSlot
+        let stagedLayer = previewProgram.stagedScene?.layers.first { $0.id == slot }
+        let programLayer = previewProgram.programScene?.layers.first { $0.id == slot }
+        return .init(queuedCount: chatCoordinator.queue.queue.count, selectedID: chatCoordinator.queue.selectedID,
+                     featuredID: chatCoordinator.queue.featuredID, ready: availabilityError(for: .showSelectedComment) == nil,
+                     stagedVisible: stagedLayer?.isVisible == true, programVisible: programLayer?.isVisible == true)
+    }
+    /// Foreground automation uses the pipeline's nested-scene/source demand
+    /// rules, including the proposed scene/visibility change, before capture.
+    func automationCapturePermissions(for command: StudioCommand?) -> Set<PermissionsManager.Kind> {
+        var staged = previewProgram.stagedScene
+        if case .selectScene(let id) = command { staged = sceneStore.scenes.first { $0.id == id } }
+        if case .setLayerVisibility(let id, let visible, let sceneID) = command,
+           sceneID == nil || sceneID == staged?.id, let index = staged?.layers.firstIndex(where: { $0.id == id }) {
+            staged?.layers[index].isVisible = visible
+        }
+        let registry = SceneGraph.index(sceneStore.scenes)
+        let layers = [previewProgram.programScene, staged].compactMap { $0 }
+            .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
+        let demand = CaptureSourceKey.demanded(layers: layers + sceneStore.overlays.filter(\.isVisible), sources: sceneStore.sources)
+            .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
+        var required: Set<PermissionsManager.Kind> = [.microphone]
+        for source in demand {
+            switch source {
+            case .camera: required.insert(.camera)
+            case .screen, .appAudio: required.insert(.screenCapture)
+            default: break
+            }
+        }
+        return required
+    }
+    private func configureMacros() {
+        macros.resolve = { [weak self] id in
+            self?.catalogueActions(includeMacros: false).contains(where: { $0.id == id && $0.command != nil }) == true
+                ? nil : "The macro command target no longer exists: \(id)"
+        }
+        macros.conditionMet = { [weak self] condition, id in
+            guard let self else { return false }
+            switch condition {
+            case .always: return true
+            case .commandAvailable:
+                self.executingMacroStep = true
+                defer { self.executingMacroStep = false }
+                return self.catalogueActions(includeMacros: false).first { $0.id == id }?.unavailableReason == nil
+            case .streamLive: return self.state.stream.isLive
+            case .recordingActive: return self.state.recording.isRecording
+            case .sceneStaged(let uuid): return self.state.stagedSceneID?.rawValue == uuid
+            }
+        }
+        macros.execute = { [weak self] id in
+            guard let self, let command = self.catalogueActions(includeMacros: false).first(where: { $0.id == id })?.command else { return "The macro target no longer exists." }
+            self.executingMacroStep = true
+            defer { self.executingMacroStep = false }
+            if case .rejected(let error) = self.execute(command).outcome { return error.description }
+            return nil
+        }
+        macros.settle = { [weak self] id in
+            guard let self else { throw CancellationError() }
+            let deadline = Date().addingTimeInterval(30)
+            while self.outputTransitionInFlight {
+                try Task.checkCancellation()
+                if Date() >= deadline { throw ShowMacroRunError(description: "Timed out waiting for output transitions.") }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            if id == "output.stream.start", case .failed(let message) = self.state.stream {
+                throw ShowMacroRunError(description: message)
+            }
+            if id == "output.record.start", case .failed(let message) = self.state.recording {
+                throw ShowMacroRunError(description: message)
+            }
+        }
+        macros.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.objectWillChange.send() }
+        }.store(in: &cancellables)
+    }
+    var outputTransitionInFlight: Bool {
+        switch state.stream {
+        case .connecting, .reconnecting, .stopping: return true
+        default: break
+        }
+        return state.recording == .stopping || transitions.hasActiveTransition
     }
 
     // MARK: Execution
@@ -1143,6 +1337,12 @@ final class StudioCommandDispatcher: ObservableObject {
         if let error = validate(command) {
             postRejection(command: command, error: error)
             return StudioCommandResult(outcome: .rejected(error), state: state)
+        }
+        if !executingMacroStep {
+            switch command {
+            case .stopStream, .stopRecording: macros.cancel()
+            default: break
+            }
         }
         // S12: snapshot the undoable state around undoable scene edits. The
         // record happens only when the command actually changed something
@@ -1166,21 +1366,37 @@ final class StudioCommandDispatcher: ObservableObject {
         validate(command) == nil
     }
 
+    /// Authoritative rejection reason used by palettes and external controllers.
+    func availabilityError(for command: StudioCommand) -> StudioCommandError? {
+        validate(command)
+    }
+
     // MARK: Validation (against current session state, before any execution)
 
     private func validate(_ command: StudioCommand) -> StudioCommandError? {
+        if macros.isRunning && !executingMacroStep {
+            switch command {
+            case .startStream, .startRecording, .take, .runRundownCue, .rundownPlay:
+                return .unavailable("A show macro owns output transitions. Cancel it before starting a conflicting action.")
+            default: break
+            }
+        }
         // S02: a locked scene rejects every edit to its CONTENT (whole-scene
         // replacement plus all layer/group edits addressed to it). Selection,
         // browser organization, and the lock toggle stay available.
         if let error = sceneContentLockError(for: command) { return error }
         switch command {
         case .startStream:
+            guard !controller.isRehearsing else { return .unavailable("End local rehearsal before public Go Live.") }
             guard controller.streamState.canStart else {
                 return .unavailable("The stream is already \(controller.streamState.busyLabel).")
             }
-            guard session.activeSettings.isPublishable else {
-                return .invalidValue("Complete the connection settings before going live.")
+            let destinations = controller.destinations
+            guard !destinations.enabled.isEmpty else {
+                return .invalidValue("Enable a destination in the Destinations panel before going live.")
             }
+            let errors = destinations.encodingPlan(program: session.activeSettings.outputProfile).issues
+            guard errors.isEmpty else { return .invalidValue(errors.joined(separator: "\n")) }
             return nil
         case .stopStream:
             return controller.streamState.isActive
@@ -1195,8 +1411,22 @@ final class StudioCommandDispatcher: ObservableObject {
             return !recorder.state.isActive
                 ? nil : .unavailable("Recording is already \(recorder.state == .stopping ? "stopping" : "in progress").")
         case .stopRecording:
-            return recorder.state.isRecording
+            return recorder.canStop
                 ? nil : .unavailable("No recording is in progress.")
+        case .pauseRecording:
+            return recorder.state == .recording ? nil : .unavailable("Recording is not writing media.")
+        case .resumeRecording:
+            return recorder.state == .paused ? nil : .unavailable("Recording is not paused.")
+        case .startNewRecordingFile:
+            return recorder.canSplit ? nil : .unavailable("Wait for recording and the previous file to finish preparing.")
+        case .startRehearsal:
+            return !controller.streamState.isActive && !recorder.state.isActive && !controller.isRehearsing
+                ? nil : .unavailable("End active outputs before beginning a local rehearsal.")
+        case .stopRehearsal:
+            return controller.isRehearsing ? nil : .unavailable("No local rehearsal is running.")
+        case .addRecordingMarker:
+            return recorder.state == .recording || recorder.state == .paused
+                ? nil : .unavailable("A writing or paused recording is required.")
 
         case .selectScene(let id):
             return sceneStore.scenes.contains(where: { $0.id == id })
@@ -1996,6 +2226,13 @@ final class StudioCommandDispatcher: ObservableObject {
             return ptzStore.recallLink(withID: id) != nil
                 ? nil : .invalidTarget("Scene PTZ recall link \(id) does not exist.")
 
+        case .setShowMacros(let document):
+            return macros.isRunning ? .unavailable("Cancel the running macro before editing.")
+                : document.validationError.map { .invalidValue($0) }
+        case .runMacro(let id):
+            return macros.availability(for: id).map { .unavailable($0) }
+        case .cancelMacro:
+            return macros.isRunning ? nil : .unavailable("No macro is running.")
         case .setRundown(let document):
             return document.validationError.map { .invalidValue($0) }
         case .rundownPlay:
@@ -2037,6 +2274,22 @@ final class StudioCommandDispatcher: ObservableObject {
         case .setDirectLiveEditing(let on):
             return previewProgram.directLiveEditing != on
                 ? nil : .unavailable("Direct-live editing is already \(on ? "on" : "off").")
+        case .selectPreviousComment, .selectNextComment:
+            guard let chatCoordinator else { return .unavailable("Connect and queue public chat in the studio first.") }
+            let queue = chatCoordinator.queue.queue
+            let selected = chatCoordinator.queue.selectedID
+            let index = selected.flatMap { queue.firstIndex(of: $0) } ?? 0
+            guard !queue.isEmpty else { return .unavailable("The public comment queue is empty.") }
+            if command == .selectPreviousComment, index == 0 { return .unavailable("There is no previous queued comment.") }
+            if command == .selectNextComment, index + 1 >= queue.count { return .unavailable("There is no next queued comment.") }
+            return nil
+        case .showSelectedComment, .hideComment:
+            guard let chatCoordinator, let slot = chatCoordinator.selectedSlot,
+                  chatCoordinator.availableSlots.contains(where: { $0.id == slot }), let scene = previewProgram.stagedScene else {
+                return .unavailable("Create or select a comment slot in the staged scene first.")
+            }
+            if command == .showSelectedComment, chatCoordinator.queue.current == nil { return .unavailable("Select a queued public comment first.") }
+            return availabilityError(for: .setLayerVisibility(slot, visible: command == .showSelectedComment, in: scene.id))
         case .undo:
             return undoStack.canUndo
                 ? nil : .unavailable("There is nothing to undo.")
@@ -2052,6 +2305,9 @@ final class StudioCommandDispatcher: ObservableObject {
         switch command {
         case .startStream:
             controller.goLive()
+            if recorder.preferences.autoRecordOnGoLive, !recorder.state.isActive {
+                recorder.start(stream: controller, useCountdown: false)
+            }
             // A03 (issue #98): the pipeline is up — fire the restored program
             // scene's enter rules once (idempotent; a Take already synced
             // the scene is a no-op).
@@ -2065,6 +2321,14 @@ final class StudioCommandDispatcher: ObservableObject {
         case .stopPreview: controller.stopPreview()
         case .startRecording: recorder.start(stream: controller)
         case .stopRecording: recorder.stop()
+        case .pauseRecording: recorder.pause()
+        case .resumeRecording: recorder.resume()
+        case .startNewRecordingFile: recorder.startNewFile()
+        case .startRehearsal:
+            controller.beginLocalRehearsal(recorder: recorder)
+            soundboard.syncProgramScene(previewProgram.programScene)
+        case .stopRehearsal: controller.endLocalRehearsal(recorder: recorder)
+        case .addRecordingMarker(let title): recorder.addMarker(title: title)
 
         case .selectScene(let id):
             sceneStore.selectedID = id
@@ -2613,6 +2877,10 @@ final class StudioCommandDispatcher: ObservableObject {
         case .ptzRemoveSceneRecall(let id):
             ptzStore.removeRecallLink(id)
 
+        case .setShowMacros(let document):
+            if let error = macros.update(document) { postTransientNotice(command: "Save Macros", message: error) }
+        case .runMacro(let id): macros.start(id)
+        case .cancelMacro: macros.cancel()
         case .setRundown(let document): rundown.update(document)
         case .rundownPlay: rundown.play()
         case .rundownPause: rundown.pause()
@@ -2635,6 +2903,11 @@ final class StudioCommandDispatcher: ObservableObject {
             previewProgram.revert()
         case .setDirectLiveEditing(let on):
             previewProgram.setDirectLiveEditing(on)
+        case .selectPreviousComment: chatCoordinator?.advance(-1)
+        case .selectNextComment: chatCoordinator?.advance(1)
+        case .showSelectedComment:
+            if let id = chatCoordinator?.queue.current?.id { chatCoordinator?.show(id) }
+        case .hideComment: chatCoordinator?.hide()
         case .undo:
             if let snapshot = undoStack.undo() {
                 applyUndoSnapshot(snapshot)
@@ -3543,7 +3816,8 @@ private extension StudioCommand {
              .setLayerImage, .setOverlayImage:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
-             .startRecording, .stopRecording,
+             .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile, .addRecordingMarker,
+             .startRehearsal, .stopRehearsal,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,
              .setOutputProfile,
              .setChannelVolume, .setChannelMuted, .setChannelSolo,
@@ -3555,6 +3829,7 @@ private extension StudioCommand {
              .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
              .setDynamicOverlayTransport,
+             .selectPreviousComment, .selectNextComment, .showSelectedComment, .hideComment,
              .pdfNextPage, .pdfPreviousPage, .pdfGoToPage, .pdfSetFraming,
              .addSoundPad, .updateSoundPad, .removeSoundPad,
              .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,
@@ -3572,6 +3847,7 @@ private extension StudioCommand {
              .addEffectPreset, .updateEffectPreset, .removeEffectPreset,
              .addStylePreset, .updateStylePreset, .removeStylePreset,
              .addTextStylePreset, .updateTextStylePreset, .removeTextStylePreset,
+             .setShowMacros, .runMacro, .cancelMacro,
              .setRundown, .rundownPlay, .rundownPause, .rundownStop, .rundownSkip, .runRundownCue,
              .openSettings, .closeSettings, .applySettings, .revertSettings,
              .take, .revert, .setDirectLiveEditing,

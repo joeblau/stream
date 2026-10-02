@@ -4,61 +4,16 @@ import SwiftUI
 @main
 @MainActor
 struct StreamMacApp: App {
-    @StateObject private var sceneStore: SceneStore
-    /// The W03 preview/program model (issue #66): owns the staged scene (what
-    /// PREVIEW shows and edits mutate) vs the program snapshot (what the
-    /// outputs emit), plus the direct-live editing mode. Both snapshots start
-    /// from the persisted selection.
-    @StateObject private var previewProgram: PreviewProgramModel
-    @StateObject private var streamController: StreamController
-    /// The shared settings session (W04, issue #67): one object binding the
-    /// settings pane's draft, SettingsStore persistence, and the controller's
-    /// active values. Owned here so the menu command (⌘,), the toolbar, and
-    /// the W05 command layer / W06 first-run flow share it.
-    @StateObject private var settingsSession: SettingsSession
-    /// The shared permission center (W06, issue #69): onboarding, the
-    /// just-in-time explainers, and the settings pane all read/request
-    /// capture permissions through this one object. C10 (issue #79): the
-    /// stream controller also observes it — permission transitions drive
-    /// capture recovery, and screen-capture errors trigger its revocation
-    /// probe.
-    @StateObject private var permissions: PermissionsManager
-    /// The recording output. Owned here (not by the window) so the W05
-    /// command dispatcher drives the same instance the transport bar and the
-    /// first-run flow show.
-    @StateObject private var recorder: RecordingController
-    /// The W05 command layer (issue #68): every studio action — UI, keyboard,
-    /// and later automation/hardware — routes through this one ordered
-    /// dispatcher, which validates against current session state, executes,
-    /// and publishes the merged `StudioState`.
-    @StateObject private var dispatcher: StudioCommandDispatcher
-
-    /// W06 first-run gating: false until the setup guide is finished or
-    /// skipped; the studio window presents the onboarding sheet while false.
+    @NSApplicationDelegateAdaptor(RecordingTerminationDelegate.self) private var applicationDelegate
+    @StateObject private var workspace = StudioWorkspace()
+    private var sceneStore: SceneStore { workspace.runtime.sceneStore }
+    private var previewProgram: PreviewProgramModel { workspace.runtime.previewProgram }
+    private var streamController: StreamController { workspace.runtime.controller }
+    private var settingsSession: SettingsSession { workspace.runtime.settings }
+    private var permissions: PermissionsManager { workspace.runtime.permissions }
+    private var recorder: RecordingController { workspace.runtime.recorder }
+    private var dispatcher: StudioCommandDispatcher { workspace.runtime.dispatcher }
     @AppStorage("onboarding.hasCompletedFirstRun") private var hasCompletedFirstRun = false
-
-    init() {
-        let sceneStore = SceneStore()
-        let previewProgram = PreviewProgramModel(selected: sceneStore.selected)
-        let permissions = PermissionsManager()
-        let streamController = StreamController(sceneStore: sceneStore,
-                                                previewProgram: previewProgram,
-                                                permissions: permissions)
-        let settingsSession = SettingsSession(controller: streamController)
-        let recorder = RecordingController()
-        _sceneStore = StateObject(wrappedValue: sceneStore)
-        _previewProgram = StateObject(wrappedValue: previewProgram)
-        _streamController = StateObject(wrappedValue: streamController)
-        _permissions = StateObject(wrappedValue: permissions)
-        _settingsSession = StateObject(wrappedValue: settingsSession)
-        _recorder = StateObject(wrappedValue: recorder)
-        _dispatcher = StateObject(wrappedValue: StudioCommandDispatcher(
-            controller: streamController,
-            sceneStore: sceneStore,
-            session: settingsSession,
-            recorder: recorder,
-            previewProgram: previewProgram))
-    }
 
     // `SwiftUI.Scene` is qualified because the module also defines a `Scene`
     // model type (SceneModel.swift).
@@ -70,6 +25,10 @@ struct StreamMacApp: App {
         // separate `SwiftUI.Settings` scene.
         Window("Stream Studio", id: "studio") {
             MainWindowView(firstRunCompleted: $hasCompletedFirstRun)
+                .id(workspace.currentProfile.id)
+                .environmentObject(workspace)
+                .environment(\.sessionRecovery, workspace.recovery)
+                .onOpenURL { workspace.previewPackage($0) }
                 .environmentObject(sceneStore)
                 .environmentObject(previewProgram)
                 .environmentObject(streamController)
@@ -83,11 +42,17 @@ struct StreamMacApp: App {
                 .environmentObject(permissions)
                 .environmentObject(recorder)
                 .environmentObject(dispatcher)
+                .environmentObject(workspace.runtime.localControl)
+                .sheet(item: $workspace.sceneRecovery) { backup in
+                    SceneRecoveryView(backup: backup)
+                        .environmentObject(workspace)
+                }
                 // P03 (issue #80): the asset library — parked on the
                 // dispatcher, injected for the library panel (environment
                 // object) and the G01 image-layer views (environment key).
                 .environmentObject(dispatcher.assetLibrary)
                 .environment(\.assetLibraryStore, dispatcher.assetLibrary)
+                .modifier(StudioInterfaceModifier())
                 .preferredColorScheme(.dark)
                 // The smallest supported production layout (1024×640): all
                 // panels stay usable, and any of them can collapse from there.

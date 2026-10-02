@@ -30,15 +30,24 @@ struct SettingsView: View {
     var onClose: () -> Void
     /// Application section: restores the default panel layout.
     var onResetLayout: () -> Void
+    let localControl: StudioLocalControlServer?
+    let adapters: StudioAdapterManager?
+    let controllers: StudioControllerManager?
 
     init(session: SettingsSession,
          chat: RestreamChat,
          onClose: @escaping () -> Void = {},
-         onResetLayout: @escaping () -> Void = {}) {
+         onResetLayout: @escaping () -> Void = {},
+         localControl: StudioLocalControlServer? = nil,
+         adapters: StudioAdapterManager? = nil,
+         controllers: StudioControllerManager? = nil) {
         self.session = session
         self.chat = chat
         self.onClose = onClose
         self.onResetLayout = onResetLayout
+        self.localControl = localControl
+        self.adapters = adapters
+        self.controllers = controllers
     }
 
     // MARK: - Chat credential fields
@@ -190,57 +199,9 @@ struct SettingsView: View {
 
     // MARK: - Connection
 
-    @ViewBuilder
     private var connectionSection: some View {
-        Section {
-            Picker("Protocol", selection: Binding(
-                get: { session.draft.selectedProtocol },
-                set: { session.selectProtocol($0) }
-            )) {
-                ForEach(StreamProtocol.allCases, id: \.self) { proto in
-                    Text(proto.displayName).tag(proto)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            TextField("Server URL", text: $session.draft.rtmpURL,
-                      prompt: Text(session.draft.selectedProtocol.urlPlaceholder))
-                .autocorrectionDisabled(true)
-            if let error = SettingsValidator.serverURLError(
-                session.draft.rtmpURL, for: session.draft.selectedProtocol) {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            // RTMP/RTMPS need a separate stream key; SRT/WHIP embed everything
-            // (streamid, passphrase, token) in the URL query — so just one field.
-            if session.draft.selectedProtocol.requiresKey {
-                SecureField(session.draft.selectedProtocol.keyFieldLabel,
-                            text: $session.draft.streamKey)
-                    .autocorrectionDisabled(true)
-                if let error = SettingsValidator.streamKeyError(
-                    session.draft.streamKey, for: session.draft.selectedProtocol) {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
-        } header: {
-            Text("Connection")
-        } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                effectBadge(.nextSession)
-                if session.draft.isPublishable {
-                    Label(
-                        session.draft.isSecure ? "Encrypted connection." : "Unencrypted connection.",
-                        systemImage: session.draft.isSecure ? "lock.fill" : "lock.open"
-                    )
-                } else {
-                    Text("Enter a valid \(session.draft.selectedProtocol.displayName) URL\(session.draft.selectedProtocol.requiresKey ? " and stream key" : "") before going live. Get your key at restream.io.")
-                }
-                Label("Each protocol's URL + key are saved separately in your Keychain, shared with the iOS app.", systemImage: "key.fill")
-            }
+        Section("Destinations") {
+            DestinationManagerView(session: controller.destinations, programProfile: session.draft.outputProfile)
         }
     }
 
@@ -273,8 +234,7 @@ struct SettingsView: View {
                                                     frameRate: session.draft.outputProfile.frameRate)
                         Text(preset.displayName)
                             .tag(preset)
-                            .disabled(capabilities.gateReason(for: profile,
-                                                              destination: session.draft.selectedProtocol) != nil)
+                            .disabled(capabilities.hardwareGateReason(for: profile) != nil)
                     } else {
                         Text(preset.displayName).tag(preset)
                     }
@@ -303,13 +263,13 @@ struct SettingsView: View {
 
             Picker("Frame Rate", selection: Binding(
                 get: { min(session.draft.outputProfile.frameRate,
-                           capabilities.maxFrameRate(for: session.draft.selectedProtocol)) },
+                           capabilities.hardwareMaxFrameRate) },
                 set: { setProfile(session.draft.outputProfile.with(frameRate: $0)) }
             )) {
                 ForEach(OutputCapabilities.supportedFrameRates, id: \.self) { fps in
                     Text("\(fps) fps")
                         .tag(fps)
-                        .disabled(fps > capabilities.maxFrameRate(for: session.draft.selectedProtocol))
+                        .disabled(fps > capabilities.hardwareMaxFrameRate)
                 }
             }
 
@@ -344,9 +304,8 @@ struct SettingsView: View {
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 effectBadge(.immediateOrStaged)
-                if let reason = capabilities.gateReason(for: session.draft.outputProfile,
-                                                        destination: session.draft.selectedProtocol) {
-                    Label("The current profile exceeds this \(session.draft.selectedProtocol.displayName) destination: \(reason). It will be reduced when the next session starts.",
+                if let reason = capabilities.hardwareGateReason(for: session.draft.outputProfile) {
+                    Label("The program profile exceeds this Mac's estimated limit: \(reason). It will be reduced when the next session starts.",
                           systemImage: "exclamationmark.triangle")
                 }
                 Text("The canvas is fixed by this profile — a camera or screen source changing size never resizes the program; sources are fit into the canvas. Bitrate is a maximum and drops automatically when the uplink is congested. H.264 is recommended for Restream — traditional RTMP ingests do not accept HEVC.")
@@ -790,6 +749,12 @@ struct SettingsView: View {
             permissionRow(.microphone)
             permissionRow(.screenCapture)
 
+            StudioInterfacePreferences()
+            if let controllers { StudioControllerPanel(manager: controllers) }
+            if let localControl {
+                StudioLocalControlSettings(server: localControl)
+                if let adapters { StudioAdapterPanel(manager: adapters, server: localControl) }
+            }
             Button("Restore Default Panel Layout", action: onResetLayout)
         } header: {
             Text("Application")

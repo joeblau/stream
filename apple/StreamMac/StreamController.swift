@@ -1,3 +1,4 @@
+import CryptoKit
 import AVFoundation
 import Combine
 import CoreImage
@@ -75,11 +76,32 @@ final class StreamController: ObservableObject {
     /// The latest PROGRAM composition for the PROGRAM monitor, ~30 fps.
     @Published private(set) var programImage: CGImage?
     @Published var errorMessage: String?
+    @Published private(set) var isRehearsing = false
+    private var rehearsalOwnsPreview = false
+    private var rehearsalObserver: AnyCancellable?
+
 
     /// Convenience for UI; `streamState` carries the full picture.
     var isLive: Bool { streamState.isLive }
     var isPreviewing: Bool { previewState == .active }
 
+    let resilience: DesktopResilienceCoordinator
+    @Published private(set) var sourceFailoverStatus: [String] = []
+    /// StudioRuntime wires the recorder stop; the lifecycle callback requests
+    /// flushing immediately, without claiming to delay system sleep.
+    var stopRecordingForLifecycle: (() -> Void)?
+    private let resilientFrames: ResilientSourceFrames
+    private var resilienceTask: Task<Void, Never>?
+    private var failureTracker = SourceFailureTracker<CaptureSourceKey>()
+    private var resilienceDemand: Set<CaptureSourceKey> = []
+    private var fallbackOriginalScene: Scene?
+    private var fallbackSceneID: SceneID?
+    @Published private(set) var privacySlateActive = false
+    private var privacySlateScene: Scene?
+    private let privacyGate: ProgramPrivacyGate
+    private var programBusGain: Float = 1
+
+    let destinations: DestinationSession
     let sceneStore: SceneStore
     /// The S05 keyed capture pool (issue #73): one physical capture per
     /// source identity, started/stopped purely by scene demand. Exposes the
@@ -144,14 +166,12 @@ final class StreamController: ObservableObject {
     private let previewEngine: CompositionEngine
     /// The W03 staged/program scene model; the engines follow its snapshots.
     private let previewProgram: PreviewProgramModel
-    /// Reached from the capture callbacks (arbitrary queues) and the main actor.
-    private let publisherBox = PublisherBox()
-    private var publisher: (any Publisher)? {
-        didSet { publisherBox.publisher = publisher }
-    }
-    private var publisherTask: Task<Void, Never>?
-    /// Folds the publisher's lifecycle events into `streamState`.
-    private var eventTask: Task<Void, Never>?
+    let destinationOutputs = DestinationOutputController(factory: { transport in
+        switch transport {
+        case .rtmp, .rtmps: return RTMPPublisher()
+        case .srt, .whip: return SessionPublisher(protocol: transport)
+        }
+    })
     /// Ordered publisher video path: the engine's publisher sink yields into
     /// this newest-only stream; one consumer awaits `appendVideo` in order.
     private var videoConsumer: Task<Void, Never>?
@@ -161,6 +181,30 @@ final class StreamController: ObservableObject {
     private var isPipelineRunning = false
     /// Count of recording outputs tapping the composited frames (0 or 1 today).
     private var recordingDemand = 0
+    private var externalDisplayDemand = 0
+    private var externalDisplayController: ExternalDisplayOutputController?
+    var externalDisplayOutput: ExternalDisplayOutputController {
+        if let existing = externalDisplayController { return existing }
+        let output = ExternalDisplayOutputController { [weak self] profile, sink in
+            guard let self else { return nil }
+            let converter = ExternalProgramImageConverter(profile: profile)
+            self.externalDisplayDemand += 1
+            let subscription = self.addFrameSink(capacity: 1) { frame in
+                if let image = converter.image(frame) { sink(image) }
+            }
+            self.updatePipelineDemand()
+            return { [weak self] in
+                guard let self else { return }
+                self.removeFrameSink(subscription)
+                self.externalDisplayDemand = max(0, self.externalDisplayDemand - 1)
+                self.promoteStagedProfileIfOutputsIdle()
+                self.updatePipelineDemand()
+            }
+        }
+        externalDisplayController = output
+        return output
+    }
+    func stopExternalDisplayOutput() { externalDisplayController?.stop() }
     /// The PREVIEW monitor's preview-engine subscription (staged composition).
     private var previewMonitorSubscription: FrameSubscription?
     /// The PROGRAM monitor's program-engine subscription (registered while the
@@ -172,6 +216,7 @@ final class StreamController: ObservableObject {
     private let programConverter = PreviewImageConverter()
 
     private var settings: StreamSettings = .default
+    private let settingsStore = DesktopSettingsStore()
     /// The W06 permission center (issue #69), shared with the app root. C10:
     /// status transitions drive capture recovery (a re-granted permission
     /// retries the sources its denial blocked; a camera revocation marks the
@@ -193,7 +238,6 @@ final class StreamController: ObservableObject {
     /// A profile edit waiting for the active stream/recording to end; non-nil
     /// means "applies on next session". The settings UI marks this state.
     @Published private(set) var stagedProfile: OutputProfile?
-    private var outputSizeSentToPublisher = false
     private var cancellables: Set<AnyCancellable> = []
 
     init(sceneStore: SceneStore, previewProgram: PreviewProgramModel,
@@ -204,7 +248,10 @@ final class StreamController: ObservableObject {
         // The persisted profile is the canvas authority from launch, so the
         // preview opens at the configured geometry before any source frame
         // ever arrives.
-        let persisted = SettingsStore().load()
+        let persisted = settingsStore.load()
+        self.destinations = DestinationSession(settings: persisted)
+        self.resilience = DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))
+        self.programBusGain = persisted.mixer.mutedBuses.contains(AudioBus.program.rawValue) ? 0 : Float(persisted.mixer.busGains[AudioBus.program.rawValue] ?? 1)
         self.settings = persisted
         self.activeProfile = persisted.outputProfile
 
@@ -214,11 +261,22 @@ final class StreamController: ObservableObject {
         // both the staged preview and the outgoing program; S05: the pool
         // keys those captures by source identity).
         let frames = capturePool.frames
+        let resilientFrames = ResilientSourceFrames(raw: SourceFrameLookup(
+            camera: { key in frames.hasCameraSource(for: key) ? frames.cameraFrame(for: key) : frames.freshestCameraFrame() },
+            screen: { key in frames.hasScreenSource(for: key) ? frames.screenFrame(for: key) : frames.latestScreenFrame() },
+            media: { key in frames.hasMediaSource(for: key) ? frames.mediaFrame(for: key) : nil }))
+        self.resilientFrames = resilientFrames
+        let privacyGate = ProgramPrivacyGate()
+        self.privacyGate = privacyGate
         self.engine = CompositionEngine(
             screenProvider: { frames.latestScreenFrame() },
             cameraProvider: { frames.freshestCameraFrame() },
+            frameLookup: resilientFrames.lookup,
+            overlayContextProvider: { privacyGate.overlays() },
+            annotationProvider: { privacyGate.annotations() },
             canvasSize: persisted.outputProfile.canvasSize,
-            frameRate: persisted.outputProfile.frameRate)
+            frameRate: persisted.outputProfile.frameRate,
+            frameOverrideProvider: { privacyGate.sceneSnapshot() })
         self.previewEngine = CompositionEngine(
             screenProvider: { frames.latestScreenFrame() },
             cameraProvider: { frames.freshestCameraFrame() },
@@ -229,6 +287,19 @@ final class StreamController: ObservableObject {
             canvasSize: persisted.outputProfile.canvasSize,
             frameRate: persisted.outputProfile.frameRate)
         OutputCanvasStore.shared.publish(persisted.outputProfile.canvasSize)
+        resilience.stopOutputs = { [weak self] in
+            guard let self else { return }
+            self.stopStream(); self.stopRecordingForLifecycle?(); self.stopExternalDisplayOutput(); self.stopPreview()
+            self.resilientFrames.clear()
+        }
+        resilience.showOfflineSlate = { [weak self] in self?.enterPrivacySlate() }
+        resilience.startPreview = { [weak self] in self?.startPreview() }
+        resilience.refreshSources = { [weak self] in
+            self?.permissions.refresh(); self?.reconcileSourceDemand()
+        }
+        resilience.$policy.dropFirst().sink { [weak self] _ in
+            Task { @MainActor in self?.reconcileSourceDemand(); self?.evaluateSourceResilience() }
+        }.store(in: &cancellables)
 
         // W03: scene edits and selection changes reach the engines ONLY
         // through the preview/program model's snapshots — never straight from
@@ -247,6 +318,13 @@ final class StreamController: ObservableObject {
             .sink { [weak self] scene in
                 Task { @MainActor [weak self] in
                     guard let self, let scene else { return }
+                    if self.privacySlateActive, let slate = self.privacySlateScene, scene.id != slate.id {
+                        // A Take while the privacy hold is active may update the
+                        // restore target, but cannot show private pixels on air.
+                        self.fallbackOriginalScene = scene
+                        self.previewProgram.setResilienceProgram(slate)
+                        return
+                    }
                     self.reconcileSourceDemand()
                     self.publishSceneToProgram(scene)
                 }
@@ -314,7 +392,7 @@ final class StreamController: ObservableObject {
         // ingest; the engine mixes once and the publisher/recorder tap the
         // program bus (below), replacing the old direct enqueueMic/enqueueApp
         // path. Both hand-offs fire off the main actor.
-        let publisherBox = self.publisherBox
+        let publisherBox = destinationOutputs.fanout
         let audioEngine = self.audioEngine
         capturePool.onScreenAudioSample = { key, sample in
             audioEngine.enqueue(.capture(key), sample)
@@ -349,7 +427,7 @@ final class StreamController: ObservableObject {
         // stalling the mix, and chunks are simply dropped while no publisher
         // owns the session (same contract as the publisher video sink below).
         addProgramAudioTap { [publisherBox] sample in
-            publisherBox.publisher?.enqueueProgram(sample)
+            publisherBox.enqueueAudio(sample)
         }
         // A07 (issue #119): the monitor output taps the MONITOR bus once for
         // the controller's lifetime, the same way — while monitoring is off
@@ -377,9 +455,7 @@ final class StreamController: ObservableObject {
         videoContinuation = continuation
         videoConsumer = Task {
             for await sample in stream {
-                if let publisher = publisherBox.publisher {
-                    await publisher.appendVideo(sample)
-                }
+                publisherBox.enqueueVideo(sample)
             }
         }
         let engine = self.engine
@@ -389,6 +465,7 @@ final class StreamController: ObservableObject {
                 continuation.yield(frame.sampleBuffer)
             }
         }
+        destinationOutputs.stateDidChange = { [weak self] in self?.destinationsDidChange() }
         // A10 (issue #122): push the persisted delays/ducking onto the
         // engines once, so the first pipeline start is already aligned — the
         // engine-side maps (registry delays, delay lines, duck config) all
@@ -399,7 +476,46 @@ final class StreamController: ObservableObject {
 
     /// Live encode/uplink metrics for the stats HUD, straight from the publisher.
     func statsSnapshot() async -> LiveStats? {
-        await publisher?.statsSnapshot()
+        await destinationOutputs.statsSnapshot()
+    }
+
+    func diagnosticSnapshot() async -> StudioDiagnosticSnapshot {
+        var snapshot = StudioDiagnosticSnapshot()
+        snapshot.profileWidth = activeProfile.canvasWidth
+        snapshot.profileHeight = activeProfile.canvasHeight
+        snapshot.targetFPS = activeProfile.frameRate
+        snapshot.program = await engine.metricsSnapshot()
+        snapshot.preview = await previewEngine.metricsSnapshot()
+        snapshot.streamState = switch streamState {
+        case .idle: "idle"
+        case .connecting: "connecting"
+        case .live: "live"
+        case .reconnecting: "reconnecting"
+        case .stopping: "stopping"
+        case .failed: "failed"
+        }
+        for source in sceneStore.sources.prefix(256) {
+            var keys = CaptureSourceKey.demanded(layers: [LayerNode(name: "", sourceID: source.id, payload: source.payload, transform: .fullscreen)], sources: sceneStore.sources)
+            if case .appAudio(let payload) = source.payload { keys.insert(.appAudio(payload)) }
+            let state: String
+            if keys.contains(where: { capturePool.sourceErrors[$0] != nil }) { state = "failed" }
+            else if !keys.isDisjoint(with: capturePool.missingSources) { state = "unavailable" }
+            else if !keys.isDisjoint(with: capturePool.activeSources) { state = "capturing" }
+            else { state = keys.isEmpty ? "ready" : "inactive" }
+            let count = keys.compactMap { SourceFrameProviders.shared.deliveryCount(for: $0) }.first
+            snapshot.sources.append(.init(id: source.id.description, kind: source.payload.kind, state: state, deliveredFrames: count))
+        }
+        snapshot.outputs = await destinationOutputs.diagnosticsSnapshot()
+        let audio = await audioEngine.statsSnapshot()
+        // Audio labels can contain capture endpoints or device IDs. Export only
+        // deterministic hashes so repeated snapshots remain correlatable.
+        func pseudonym(_ label: String) -> String {
+            SHA256.hash(data: Data(label.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+        }
+        snapshot.audioUnderruns = Dictionary(uniqueKeysWithValues: audio.channels.map { (pseudonym($0.key), $0.value.underrunFrames) })
+        snapshot.audioTapDrops = Dictionary(uniqueKeysWithValues: audio.tapDrops.map { (pseudonym($0.key), $0.value) })
+        snapshot.sampleProcess()
+        return snapshot
     }
 
     // MARK: - Frame subscriptions (W08 fan-out)
@@ -463,8 +579,128 @@ final class StreamController: ObservableObject {
         return subscription
     }
 
+    private var isolatedCaptureSubscriptions: [AudioTapSubscription: CaptureSourceKey] = [:]
+    struct RecordingVideoSubscription: Hashable { let id = UUID() }
+    private var isolatedVideoCaptureSubscriptions: [RecordingVideoSubscription: CaptureSourceKey] = [:]
+
+    func recordingVideoSources() -> [RecordingVideoSource] {
+        let defaults = [SourceDefinition(name: "Default Camera", payload: .camera(CameraSourcePayload())),
+                        SourceDefinition(name: "Selected Screen", payload: .screen(ScreenSourcePayload()))]
+        let catalog = [("video.defaultCamera", defaults[0]), ("video.defaultScreen", defaults[1])] + sceneStore.sources.compactMap { source -> (String, SourceDefinition)? in
+            switch source.payload { case .camera, .screen, .guest: return ("source.\(source.id)", source); default: return nil }
+        }
+        return catalog.map { id, source in
+            guard let key = Self.videoCaptureKey(source.payload) else {
+                return .init(id: id, name: source.name, isAvailable: false, unsupportedReason: "Guest video capture is not implemented.")
+            }
+            let normalized = capturePool.recordingCaptureKey(for: key)
+            let available: Bool
+            switch normalized {
+            case .camera: available = capturePool.frames.cameraFrame(for: normalized) != nil
+            case .screen: available = capturePool.frames.screenFrame(for: normalized) != nil
+            default: available = false
+            }
+            return .init(id: id, name: source.name, isAvailable: available)
+        }
+    }
+
+    func addRecordingVideoSource(targetID: String) -> (RecordingVideoSubscription, IsolatedVideoSource)? {
+        let source: SourceDefinition?
+        switch targetID {
+        case "video.defaultCamera": source = .init(name: "Default Camera", payload: .camera(CameraSourcePayload()))
+        case "video.defaultScreen": source = .init(name: "Selected Screen", payload: .screen(ScreenSourcePayload()))
+        default:
+            source = sceneStore.sources.first { "source.\($0.id)" == targetID }
+        }
+        guard let source, let key = Self.videoCaptureKey(source.payload) else { return nil }
+        let token = RecordingVideoSubscription()
+        isolatedVideoCaptureSubscriptions[token] = key; reconcileSourceDemand()
+        return (token, RecordingVideoSourceFactory.make(source: source,
+            key: capturePool.recordingCaptureKey(for: key), frames: capturePool.frames))
+    }
+    func removeRecordingVideoSource(_ subscription: RecordingVideoSubscription) {
+        isolatedVideoCaptureSubscriptions.removeValue(forKey: subscription); reconcileSourceDemand()
+    }
+    private static func videoCaptureKey(_ payload: LayerPayload) -> CaptureSourceKey? {
+        switch payload { case .camera(let camera): return .camera(camera); case .screen(let screen): return .screen(screen); default: return nil }
+    }
+
     func removeAudioTap(_ subscription: AudioTapSubscription) {
         Task { await audioEngine.removeTap(subscription.token) }
+        if isolatedCaptureSubscriptions.removeValue(forKey: subscription) != nil { reconcileSourceDemand() }
+    }
+
+    /// Stable registry source IDs survive rename/retarget. Non-registry mixer
+    /// channels use their stable mic/device/media/app/guest identities.
+    func recordingAudioSources() async -> [RecordingAudioSource] {
+        let statistics = await audioEngine.statsSnapshot()
+        let active = Set(await audioEngine.levelsSnapshot().channels.keys)
+        var result = AudioBus.allCases.map {
+            RecordingAudioSource(id: "bus.\($0.rawValue)", name: "\($0.rawValue.capitalized) Bus", isBus: true, isAvailable: true)
+        }
+        var seen: Set<AudioChannelID> = []
+        func add(_ id: String, _ name: String, _ channel: AudioChannelID) {
+            guard seen.insert(channel).inserted else { return }
+            result.append(RecordingAudioSource(id: id, name: name, isBus: false,
+                isAvailable: (statistics.channels[channel.label]?.receivedFrames ?? 0) > 0))
+        }
+        add("channel.mic.default", "Microphone", .microphone(deviceUID: nil))
+        for input in audio.additionalInputs {
+            add("channel.mic.\(input.deviceUID)", audio.deviceNamesByUID[input.deviceUID] ?? "Audio Input", .microphone(deviceUID: input.deviceUID))
+        }
+        for source in sceneStore.sources {
+            let id = "source.\(source.id)"
+            if let target = resolveRecordingAudioTarget(id), let channel = target.channel { add(id, source.name, channel) }
+        }
+        for channel in active.sorted(by: { $0.label < $1.label }) where !seen.contains(channel) {
+            switch channel {
+            case .microphone(let uid): add("channel.\(channel.label)", audio.deviceNamesByUID[uid ?? ""] ?? "Microphone", channel)
+            case .media(let id): add("channel.\(channel.label)", "Media / Sound \(id.description.prefix(8))", channel)
+            case .application(let bundle): add("channel.\(channel.label)", bundle.components(separatedBy: ".").last ?? "Application", channel)
+            case .guest(let id): add("channel.\(channel.label)", "Guest \(id.prefix(8))", channel)
+            case .capture: break // Registered sources provide a stable, secret-free ID.
+            }
+        }
+        return result
+    }
+
+    func addRecordingAudioTap(targetID: String, processing: IsolatedAudioProcessing,
+                              sink: @escaping @Sendable (CMSampleBuffer) -> Void) -> AudioTapSubscription? {
+        guard let target = resolveRecordingAudioTarget(targetID) else { return nil }
+        let subscription = AudioTapSubscription()
+        if let bus = target.bus {
+            Task { await audioEngine.addTap(bus: bus, token: subscription.token, capacity: 16, sink: sink) }
+        } else if let channel = target.channel {
+            Task { await audioEngine.addIsolatedTap(channel: channel, token: subscription.token,
+                capacity: 16, processing: processing, sink: sink) }
+        }
+        if let demand = target.demand {
+            isolatedCaptureSubscriptions[subscription] = demand
+            reconcileSourceDemand()
+        }
+        return subscription
+    }
+
+    private func resolveRecordingAudioTarget(_ id: String) -> (bus: AudioBus?, channel: AudioChannelID?, demand: CaptureSourceKey?)? {
+        if id.hasPrefix("bus."), let bus = AudioBus(rawValue: String(id.dropFirst(4))) { return (bus, nil, nil) }
+        if id.hasPrefix("source."), let uuid = UUID(uuidString: String(id.dropFirst(7))),
+           let source = sceneStore.sources.first(where: { $0.id.rawValue == uuid }) {
+            switch source.payload {
+            case .screen(let payload): return (nil, .capture(.screen(payload)), .screen(payload))
+            case .appAudio(let payload): return (nil, .application(bundleID: payload.channelBundleID), .appAudio(payload))
+            case .media: return (nil, .media(source.id), .media(source.id))
+            default: return nil
+            }
+        }
+        guard id.hasPrefix("channel.") else { return nil }
+        let label = String(id.dropFirst(8))
+        if label.hasPrefix("mic.") {
+            let uid = String(label.dropFirst(4)); return (nil, .microphone(deviceUID: uid == "default" ? nil : uid), nil)
+        }
+        if label.hasPrefix("media."), let uuid = UUID(uuidString: String(label.dropFirst(6))) { return (nil, .media(SourceDefinitionID(uuid)), nil) }
+        if label.hasPrefix("app.") { return (nil, .application(bundleID: String(label.dropFirst(4))), nil) }
+        if label.hasPrefix("guest.") { return (nil, .guest(id: String(label.dropFirst(6))), nil) }
+        return nil
     }
 
     /// Loss/underrun counters for the audio engine (per channel + per tap),
@@ -507,7 +743,9 @@ final class StreamController: ObservableObject {
     /// Live mixer master gain for one bus (program/monitor/aux). The
     /// dispatcher folds bus mutes into the value it passes (0 while muted).
     func applyMixerBusGain(_ bus: AudioBus, gain: Float) {
-        Task { await audioEngine.setBusGain(bus, gain: gain) }
+        if bus == .program { programBusGain = gain }
+        let effective = bus == .program && privacySlateActive ? 0 : gain
+        Task { await audioEngine.setBusGain(bus, gain: effective) }
     }
 
     /// Live monitor-only solo toggle for one channel (any kind — solo is
@@ -546,7 +784,7 @@ final class StreamController: ObservableObject {
 
     func startPreview() {
         guard previewState == .idle else { return }
-        settings = SettingsStore().load()
+        settings = settingsStore.load()
         applyOutputProfile(settings.outputProfile)
         previewState = .active
         // PREVIEW monitor: the staged composition from the preview engine.
@@ -605,120 +843,217 @@ final class StreamController: ObservableObject {
         Task { await previewEngine.run(scene: staged, canvasSize: canvasSize, frameRate: fps) }
     }
 
+    func prepareForProjectChange() async {
+        guard !outputSessionActive else { return }
+        stopExternalDisplayOutput()
+        stopPreview()
+        await engine.stop()
+        await previewEngine.stop()
+        await audioEngine.stop()
+        capturePool.stopAll()
+        audio.stop()
+    }
+
+    var maximumPublishingEncoders: () -> Int? = { nil }
+
     func goLive() {
+        guard !resilience.isLocked else { errorMessage = "Unlock this Mac before starting public outputs."; return }
+        guard !isRehearsing else { errorMessage = "End local rehearsal before public Go Live."; return }
         guard streamState.canStart else { return }
-        settings = SettingsStore().load()
-        guard settings.isPublishable else {
-            errorMessage = "Complete the connection settings before going live."
+        if let limit = maximumPublishingEncoders(), destinations.enabled.count > limit {
+            errorMessage = "Selected destinations exceed the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
             return
         }
-        applyOutputProfile(settings.outputProfile)
-        // Go Live needs the render pipeline (frames to publish); the demand
-        // check below starts it even if the user never turned the preview on.
-        let publisher = makePublisher(for: settings.selectedProtocol)
-        self.publisher = publisher
-        outputSizeSentToPublisher = false
-        streamState = .connecting
-        updatePipelineDemand()
-        let settings = self.settings
-        publisherTask = Task { [weak self] in
-            do {
-                try await publisher.start(settings)
-            } catch {
-                self?.publisherDidFail(error)
-            }
-        }
-        eventTask = Task { [weak self] in
-            for await event in publisher.events {
-                self?.handlePublisherEvent(event)
-            }
-        }
-        // The canvas is known up front (profile-owned), so hand the encoder
-        // its output size immediately instead of waiting for a first frame.
-        applyOutputSizeIfPossible()
+        settings = settingsStore.load()
+        let plan = destinations.encodingPlan(program: settings.outputProfile)
+        guard plan.issues.isEmpty else { errorMessage = plan.issues.joined(separator: "\n"); return }
+        // Keep the program and recording canvas unchanged. Every destination's
+        // encoder receives its own output geometry from its adapted settings.
+        for destination in destinations.enabled { startDestination(destination.id) }
     }
 
-    func stopStream() {
-        guard streamState.isActive else { return }
-        streamState = .stopping
-        publisherTask?.cancel()
-        publisherTask = nil
-        eventTask?.cancel()
-        eventTask = nil
-        outputSizeSentToPublisher = false
-        let ending = publisher
-        publisher = nil
-        guard let ending else {
-            streamState = .idle
-            updatePipelineDemand()
+    func startDestination(_ id: UUID) {
+        guard !resilience.isLocked else { errorMessage = "Unlock this Mac before starting public outputs."; return }
+        guard !isRehearsing else { errorMessage = "End local rehearsal before starting a public destination."; return }
+        guard let destination = destinations.saved.first(where: { $0.id == id }) else { return }
+        guard !(destinationOutputs.states[id]?.isActive ?? false) else { return }
+        if let limit = maximumPublishingEncoders(), activePublishingEncoderCount + 1 > limit {
+            let message = "This destination exceeds the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
+            errorMessage = message; destinationOutputs.recordFailure(destination, message: message)
             return
         }
-        Task { [weak self] in
-            await ending.stop()
-            self?.streamDidStop()
+        let base = settingsStore.load()
+        let credentials = destinations.savedCredentials(for: id)
+        let errors = DestinationValidator.startErrors(destination, credentials: credentials, program: base.outputProfile)
+        guard errors.isEmpty else {
+            let message = errors.joined(separator: "\n")
+            errorMessage = message
+            destinationOutputs.recordFailure(destination, message: message)
+            return
         }
+        let activeDestinations = destinations.saved.filter {
+            destinationOutputs.states[$0.id]?.isActive == true && $0.id != id
+        } + [destination]
+        let plan = DestinationEncodingPlan(destinations: activeDestinations, program: base.outputProfile,
+            measuredUplinkMbps: destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil,
+            measuredSessionLimit: destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil)
+        guard plan.issues.isEmpty else {
+            destinationOutputs.recordFailure(destination, message: plan.issues.joined(separator: "\n"))
+            return
+        }
+        let adapted = DestinationValidator.settings(destination, credentials: credentials, base: base)
+        resilience.acknowledgeManualRestart()
+        destinationOutputs.start(destination, settings: adapted)
     }
 
-    // MARK: - Streaming state machine (folded from PublisherEvents)
-
-    private func handlePublisherEvent(_ event: PublisherEvent) {
-        switch event {
-        case .connecting:
-            // A retry attempt during .reconnecting keeps that state; only the
-            // acknowledged publish below ends it.
-            if !streamState.isActive {
-                streamState = .connecting
-            }
-        case .published:
-            // The ingest acknowledged the publish — the ONLY path to LIVE.
-            if streamState.isActive {
-                streamState = .live
-                errorMessage = nil
-            }
-        case .reconnecting(let reason):
-            if streamState == .live || streamState == .connecting {
-                streamState = .reconnecting(reason: reason)
-            }
-        case .failed(let message):
-            if streamState.isActive {
-                failStream(message)
-            }
-        case .stopped:
-            streamDidStop()
-        }
+    func stopDestination(_ id: UUID) { destinationOutputs.stop(id) }
+    func retryDestination(_ id: UUID) {
+        guard !(destinationOutputs.states[id]?.isActive ?? false) else { return }
+        startDestination(id)
     }
+    func stopStream() { destinationOutputs.stopAll() }
 
-    private func streamDidStop() {
-        guard streamState == .stopping else { return }
-        streamState = .idle
+    private func destinationsDidChange() {
+        streamState = destinationOutputs.aggregateState
+        if streamState.isLive { errorMessage = nil }
         promoteStagedProfileIfOutputsIdle()
         updatePipelineDemand()
     }
 
-    private func publisherDidFail(_ error: Error) {
-        // `.stopping` excluded: a late error from a publisher the user already
-        // stopped must not flip the session to `.failed`.
-        guard streamState.isActive, streamState != .stopping else { return }
-        failStream(error.localizedDescription)
+    func beginLocalRehearsal(recorder: RecordingController) {
+        guard !streamState.isActive, !recorder.state.isActive else { return }
+        rehearsalOwnsPreview = previewState == .idle
+        if rehearsalOwnsPreview { startPreview() }
+        recorder.start(stream: self)
+        guard recorder.state.isRecording else { return }
+        isRehearsing = true
+        destinationOutputs.isPublishingAllowed = false
+        rehearsalObserver = recorder.$state.sink { [weak self] state in
+            guard let self else { return }
+            if !state.isActive {
+                self.isRehearsing = false
+                self.destinationOutputs.isPublishingAllowed = true
+            }
+        }
     }
 
-    /// Ends the session into `.failed`: tears the publisher down and surfaces
-    /// the message. From `.failed` the transport bar offers a fresh Go Live.
-    private func failStream(_ message: String) {
-        publisherTask?.cancel()
-        publisherTask = nil
-        eventTask?.cancel()
-        eventTask = nil
-        outputSizeSentToPublisher = false
-        let ending = publisher
-        publisher = nil
-        streamState = .failed(message)
-        errorMessage = message
-        if let ending {
-            Task { await ending.stop() }
+    func endLocalRehearsal(recorder: RecordingController) {
+        guard isRehearsing else { return }
+        recorder.stop()
+        isRehearsing = false
+        destinationOutputs.isPublishingAllowed = true
+        rehearsalObserver = nil
+        if rehearsalOwnsPreview { stopPreview() }
+        rehearsalOwnsPreview = false
+    }
+
+    func preflightFacts(programAudioPeak: Float?, assetAvailability: (AssetID) -> AssetAvailability = { _ in .unknown }) -> StreamPreflightFacts {
+        var facts = StreamPreflightFacts()
+        let scene = previewProgram.programScene
+        var layers = scene.map { SceneGraph.flattenedVisibleLayers(of: $0, in: SceneGraph.index(sceneStore.scenes)) } ?? []
+        layers += sceneStore.overlays.filter { $0.isVisible && !(scene?.hiddenOverlayIDs.contains($0.id) ?? false) }
+        func checkAsset(_ identifier: String?, hasBookmark: Bool, description: String) {
+            if let identifier, let uuid = UUID(uuidString: identifier) {
+                switch assetAvailability(AssetID(uuid)) {
+                case .available: break
+                case .unknown: facts.unverifiedSources.append("\(description) asset availability has not been verified.")
+                case .missing: facts.missingSources.append("\(description) asset is missing or its access was revoked; relink it in Assets.")
+                }
+            } else if !hasBookmark {
+                facts.missingSources.append("\(description) has no configured asset.")
+            } else {
+                facts.unverifiedSources.append("\(description) uses a linked file; verify it in the local rehearsal.")
+            }
         }
-        promoteStagedProfileIfOutputsIdle()
-        updatePipelineDemand()
+        for layer in layers {
+            let payload = layer.sourceID.flatMap { id in sceneStore.sources.first { $0.id == id } }?.payload ?? layer.payload
+            switch payload {
+            case .image(let image): checkAsset(image.assetIdentifier, hasBookmark: image.bookmarkData != nil, description: "Image")
+            case .media(let media):
+                if layer.sourceID == nil { facts.missingSources.append("A media layer is not linked to a registered source.") }
+                checkAsset(media.assetIdentifier, hasBookmark: media.bookmarkData != nil, description: "Media")
+            case .pdf(let pdf): checkAsset(pdf.assetIdentifier, hasBookmark: false, description: "Slide deck")
+            case .web(let web):
+                if !web.browserOverlay.hasWidgetContent { facts.missingSources.append("A browser source has no configured content.") }
+                if let asset = web.browserOverlay.localHTMLAssetIdentifier { checkAsset(asset, hasBookmark: false, description: "Browser HTML") }
+            default: break
+            }
+        }
+        if case .image(let image) = scene?.background ?? sceneStore.defaultBackground {
+            checkAsset(image.assetIdentifier, hasBookmark: image.bookmarkData != nil, description: "Background image")
+        }
+        if let uid = settings.preferredAudioInputUID, !deviceMonitor.connectedAudioDeviceIDs.contains(uid) {
+            facts.missingSources.append("The selected microphone is disconnected; relink it in Audio.")
+        }
+        for input in settings.audioInputs where input.isEnabled && !deviceMonitor.connectedAudioDeviceIDs.contains(input.deviceUID) {
+            facts.missingSources.append("An enabled additional audio input is disconnected; relink it in Audio.")
+        }
+        let demanded = CaptureSourceKey.demanded(layers: layers, sources: sceneStore.sources)
+            .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
+        var required: Set<PermissionsManager.Kind> = []
+        if settings.micVolume > 0 { required.insert(.microphone) }
+        for key in demanded {
+            switch key {
+            case .camera(let camera):
+                required.insert(.camera)
+                if let id = camera.deviceID, !deviceMonitor.connectedCameraIDs.contains(id) {
+                    facts.missingSources.append("A configured camera is disconnected.")
+                } else if camera.deviceID == nil && deviceMonitor.connectedCameraIDs.isEmpty {
+                    facts.missingSources.append("No camera is connected.")
+                }
+            case .screen(let screen):
+                required.insert(.screenCapture)
+                if screen.target == .display, let rawID = screen.targetIdentifier,
+                   let displayID = UInt32(rawID), !deviceMonitor.connectedDisplayIDs.contains(displayID) {
+                    facts.missingSources.append("A configured display is disconnected.")
+                }
+            case .appAudio: required.insert(.screenCapture)
+            default: break
+            }
+            if isPipelineRunning, capturePool.frameAvailability(for: key) == false {
+                facts.unverifiedSources.append("A camera or screen source has not delivered a usable frame; verify it in Sources.")
+            }
+            if capturePool.problem(for: key) != nil || capturePool.isMissing(key) {
+                // Source errors can carry private paths/URLs. Show a safe repair
+                // instruction; the source inspector contains the detailed status.
+                facts.missingSources.append("A program source reports an availability problem; repair it in Sources.")
+            }
+        }
+        facts.permissionIssues = required.sorted { $0.rawValue < $1.rawValue }.compactMap { kind in
+            permissions.status(for: kind) == .granted ? nil : "\(kind.title) permission is required; repair it in Settings."
+        }
+        facts.sourceCount = layers.count
+        facts.previewRunning = isPipelineRunning
+        facts.programAudioPeak = programAudioPeak
+        facts.destinationCount = destinations.enabled.count
+        for destination in destinations.enabled {
+            let credentials = destinations.savedCredentials(for: destination.id)
+            var errors = DestinationValidator.errors(destination, credentials: credentials)
+            if credentials.endpoint.isEmpty { errors.append("Missing endpoint URL.") }
+            if destination.transport.requiresKey && credentials.streamKey.isEmpty { errors.append("Missing stream key.") }
+            facts.destinationErrors += errors.map { "\(destination.name): \($0)" }
+            let profile = destination.effectiveProfile(program: settings.outputProfile)
+            facts.profileErrors += (destination.ingestLimits ?? .conservative(for: destination.transport))
+                .errors(profile: profile, codec: destination.videoCodec,
+                        keyframeSeconds: destination.keyframeSeconds ?? 2, audioBitrate: destination.audioBitrate)
+            if !destination.transport.supports(destination.videoCodec) {
+                facts.profileErrors.append("\(destination.name): unsupported transport codec.")
+            }
+            if !capabilities.hardwareTier.fits(width: profile.canvasWidth, height: profile.canvasHeight) ||
+                profile.frameRate > capabilities.hardwareMaxFrameRate {
+                facts.profileErrors.append("\(destination.name): exceeds this Mac's estimated hardware limits.")
+            }
+        }
+        if !capabilities.hardwareTier.fits(width: activeProfile.canvasWidth, height: activeProfile.canvasHeight) ||
+            activeProfile.frameRate > capabilities.hardwareMaxFrameRate {
+            facts.profileErrors.append("Program canvas exceeds this Mac's estimated hardware limits.")
+        }
+        let plan = destinations.encodingPlan(program: settings.outputProfile)
+        facts.encoderCount = plan.encoderSessions
+        facts.testedEncoderBudget = destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil
+        facts.requiredUplinkMbps = plan.requiredUplinkMbps
+        facts.measuredUplinkMbps = destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil
+        return facts
     }
 
     // MARK: - Pipeline demand (preview / stream / recording independence)
@@ -738,7 +1073,7 @@ final class StreamController: ObservableObject {
     }
 
     private var pipelineNeeded: Bool {
-        previewState == .active || streamState.isActive || recordingDemand > 0
+        previewState == .active || streamState.isActive || recordingDemand > 0 || externalDisplayDemand > 0
     }
 
     private func updatePipelineDemand() {
@@ -756,12 +1091,13 @@ final class StreamController: ObservableObject {
     /// mid-program, and the recording writer's input is locked to the size of
     /// its first frame).
     private var outputsOwnProfile: Bool {
-        streamState.isActive || recordingDemand > 0
+        streamState.isActive || recordingDemand > 0 || externalDisplayDemand > 0
     }
 
     /// Public read for the W04 settings session: while this is true,
     /// connection and canvas/fps edits stage for the next session.
     var outputSessionActive: Bool { outputsOwnProfile }
+    var activePublishingEncoderCount: Int { destinationOutputs.states.values.filter { $0.isActive }.count }
 
     /// Applies a just-saved settings snapshot from the shared settings
     /// session (W04, issue #67). Updates the controller's working copy so no
@@ -848,7 +1184,7 @@ final class StreamController: ObservableObject {
     /// reconfiguring the preview pipeline in place.
     func applyOutputProfile(_ profile: OutputProfile,
                             destination proto: StreamCore.StreamProtocol? = nil) {
-        let clamped = capabilities.clamped(profile, destination: proto ?? settings.selectedProtocol)
+        let clamped = capabilities.clampedToHardware(profile)
         if outputsOwnProfile {
             stagedProfile = clamped == activeProfile ? nil : clamped
             return
@@ -886,6 +1222,12 @@ final class StreamController: ObservableObject {
 
     private func startPipeline() {
         isPipelineRunning = true
+        resilienceTask = Task { [weak self] in
+            while !Task.isCancelled && self != nil {
+                self?.evaluateSourceResilience()
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
         startAudioEngine()
         startAudioInput()
         reconcileSourceDemand()
@@ -920,6 +1262,7 @@ final class StreamController: ObservableObject {
         let micBox = channelFXBoxes[micID]!
         Task {
             await audioEngine.run()
+            await audioEngine.setBusGain(.program, gain: self.privacySlateActive ? 0 : self.programBusGain)
             await audioEngine.addChannel(micID) { sample in
                 micBox.process(sample)
             }
@@ -1034,6 +1377,9 @@ final class StreamController: ObservableObject {
 
     private func stopPipeline() {
         isPipelineRunning = false
+        resilienceTask?.cancel(); resilienceTask = nil
+        failureTracker.resetObservations()
+        resilientFrames.clear()
         let engine = self.engine
         Task { await engine.stop() }
         let previewEngine = self.previewEngine
@@ -1045,7 +1391,6 @@ final class StreamController: ObservableObject {
         stopFeedbackDiagnostics()
         capturePool.stopAll()
         audio.stop()
-        outputSizeSentToPublisher = false
         promoteStagedProfileIfOutputsIdle()
     }
 
@@ -1067,15 +1412,6 @@ final class StreamController: ObservableObject {
             inputUIDs.insert(preferred)
         }
         monitorFeedbackRiskDeviceUID = inputUIDs.contains(effectiveUID) ? effectiveUID : nil
-    }
-
-    private func makePublisher(for transport: StreamCore.StreamProtocol) -> any Publisher {
-        switch transport {
-        case .rtmp, .rtmps:
-            return RTMPPublisher()
-        case .srt, .whip:
-            return SessionPublisher(protocol: transport)
-        }
     }
 
     // MARK: - Scene → source routing (S05, issue #73)
@@ -1104,7 +1440,8 @@ final class StreamController: ObservableObject {
         // persisted scene registry before computing demand, so a camera used
         // only inside a nested scene still captures.
         let registry = SceneGraph.index(sceneStore.scenes)
-        let layers = [previewProgram.programScene, staged].compactMap { $0 }
+        let standby = resilience.policy.standbySceneID.flatMap { id in sceneStore.scenes.first { $0.id.rawValue == id } }
+        let layers = [previewProgram.programScene, staged, standby, fallbackOriginalScene].compactMap { $0 }
             .flatMap { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) }
         // G09 (issue #116): project overlay media (animated images / alpha
         // video) composites ABOVE every scene, so its playout demand comes
@@ -1120,14 +1457,22 @@ final class StreamController: ObservableObject {
             let hiddenInStaged = staged?.hiddenOverlayIDs.contains(overlay.id) ?? false
             return !hiddenInProgram || (staged != nil && !hiddenInStaged)
         }
-        let demand = CaptureSourceKey.demanded(layers: layers + overlayLayers,
+        let standbyLayers = resilience.policy.sourceRules.compactMap { rule -> LayerNode? in
+            guard rule.mode == .standby, let id = rule.standbySourceID,
+                  let source = sceneStore.sources.first(where: { $0.id.rawValue == id }) else { return nil }
+            return LayerNode(name: source.name, sourceID: source.id, payload: source.payload, transform: .fullscreen)
+        }
+        let demand = CaptureSourceKey.demanded(layers: layers + overlayLayers + standbyLayers,
                                                sources: sceneStore.sources)
             // A06 (issue #118): app-audio sources demand capture by
             // REGISTRATION (registered + enabled), independent of which scene
             // is staged/program — unioned here so the W02 pipeline gate and
             // `stopAll` still govern their lifecycle.
             .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
+            .union(isolatedCaptureSubscriptions.values)
+            .union(isolatedVideoCaptureSubscriptions.values)
         capturePool.reconcile(demand: demand, settings: settings)
+        configureResilientFrames(demand: demand)
         // A01: the audio engine keeps exactly the channels its captures can
         // feed — the mic plus one per demanded capture key. Stopped captures
         // stop delivering, and their channels (rings, converters, FX state)
@@ -1149,6 +1494,98 @@ final class StreamController: ObservableObject {
             .union(additionalMicChannelIDs)
         let audioEngine = self.audioEngine
         Task { await audioEngine.pruneChannels(keeping: keep) }
+    }
+
+    private func key(for source: SourceDefinition) -> CaptureSourceKey? {
+        CaptureSourceKey.demanded(layers: [LayerNode(name: source.name, sourceID: source.id,
+            payload: source.payload, transform: .fullscreen)], sources: sceneStore.sources).first
+    }
+
+    private func configureResilientFrames(demand: Set<CaptureSourceKey>) {
+        resilienceDemand = demand
+        var modes = Dictionary(uniqueKeysWithValues: demand.map { ($0, resilience.policy.defaultSourceMode) })
+        var standbys: [CaptureSourceKey: CaptureSourceKey] = [:]
+        for rule in resilience.policy.sourceRules {
+            guard let source = sceneStore.sources.first(where: { $0.id.rawValue == rule.sourceID }),
+                  let primary = key(for: source) else { continue }
+            modes[primary] = rule.mode
+            if rule.mode == .standby, let id = rule.standbySourceID,
+               let standbySource = sceneStore.sources.first(where: { $0.id.rawValue == id }),
+               let standbyKey = key(for: standbySource), standbyKey != primary,
+               !failureTracker.latched.contains(standbyKey) { standbys[primary] = standbyKey }
+        }
+        resilientFrames.configure(active: demand, modes: modes, failed: failureTracker.latched, standbys: standbys)
+    }
+
+    private func evaluateSourceResilience() {
+        guard isPipelineRunning, !privacySlateActive else { return }
+        // A deliberate operator Take supersedes an automatic standby scene.
+        if let fallbackSceneID, previewProgram.programScene?.id != fallbackSceneID {
+            fallbackOriginalScene = nil; self.fallbackSceneID = nil
+        }
+        let unavailable = Set(resilienceDemand.filter { capturePool.frameAvailability(for: $0) == false })
+        let reported = Set(resilienceDemand.filter { capturePool.isMissing($0) || capturePool.problem(for: $0) != nil })
+        let failures = failureTracker.update(active: resilienceDemand, unavailable: unavailable,
+            reportedFailures: reported, now: ProcessInfo.processInfo.systemUptime,
+            graceSeconds: resilience.policy.failureGraceSeconds,
+            automaticallyRestore: resilience.policy.automaticallyRestoreSources)
+        configureResilientFrames(demand: resilienceDemand)
+        let status = sceneStore.sources.compactMap { source -> String? in
+            guard let sourceKey = key(for: source), failures.contains(sourceKey) else { return nil }
+            let mode = resilience.policy.sourceRules.first { $0.sourceID == source.id.rawValue }?.mode
+                ?? resilience.policy.defaultSourceMode
+            return "\(source.name): \(mode.label)\(reported.contains(sourceKey) ? " (unavailable)" : " (restore when ready)")"
+        }
+        sourceFailoverStatus = status.isEmpty && !failures.isEmpty ? ["\(failures.count) inline sources use their configured fallback."] : status
+        let registry = SceneGraph.index(sceneStore.scenes)
+        let watched = fallbackOriginalScene ?? previewProgram.programScene
+        let watchedLayers = watched.map { SceneGraph.flattenedVisibleLayers(of: $0, in: registry) } ?? []
+        let watchedOverlays = sceneStore.overlays.filter { $0.isVisible && !(watched?.hiddenOverlayIDs.contains($0.id) ?? false) }
+        let programKeys = CaptureSourceKey.demanded(layers: watchedLayers + watchedOverlays, sources: sceneStore.sources)
+        if !failures.intersection(programKeys).isEmpty,
+           let id = resilience.policy.standbySceneID,
+           let standby = sceneStore.scenes.first(where: { $0.id.rawValue == id }), standby.id != watched?.id,
+           fallbackOriginalScene == nil {
+            fallbackOriginalScene = previewProgram.programScene
+            fallbackSceneID = standby.id
+            previewProgram.setResilienceProgram(standby)
+            resilience.noteSourceFallback("Source failed: program switched to standby scene \(standby.name). Output sessions remain connected.")
+        } else if failures.intersection(programKeys).isEmpty, fallbackOriginalScene != nil,
+                  resilience.policy.automaticallyRestoreSources {
+            restoreResilienceProgram()
+        }
+    }
+
+    /// Explicit restoration never starts a publisher/recorder. Sources that
+    /// remain missing immediately re-enter their configured fallback.
+    func restoreResilienceProgram() {
+        guard !resilience.isLocked else { return }
+        if let original = fallbackOriginalScene, previewProgram.programScene?.id == fallbackSceneID {
+            previewProgram.setResilienceProgram(original)
+        }
+        fallbackOriginalScene = nil; fallbackSceneID = nil
+        failureTracker.restore()
+        privacySlateActive = false
+        privacySlateScene = nil
+        privacyGate.setScene(nil)
+        applyMixerBusGain(.program, gain: programBusGain)
+        reconcileSourceDemand(); evaluateSourceResilience()
+        resilience.noteSourceFallback("Program restore requested. Outputs restart only through their explicit start controls.")
+    }
+
+    private func enterPrivacySlate() {
+        guard !privacySlateActive else { return }
+        fallbackOriginalScene = previewProgram.programScene
+        let slate = Scene(name: "Offline", layers: [LayerNode(name: "Offline notice",
+            payload: .text(TextSourcePayload(text: "OFFLINE — RESTORE MANUALLY", alignment: .center)),
+            transform: .fullscreen)], background: .solid(colorHex: "#101010"),
+            hiddenOverlayIDs: Set(sceneStore.overlays.map(\.id)))
+        fallbackSceneID = slate.id
+        privacySlateScene = slate
+        privacySlateActive = true
+        privacyGate.setScene(slate)
+        applyMixerBusGain(.program, gain: programBusGain)
+        previewProgram.setResilienceProgram(slate)
     }
 
     /// The W03 program seam (W05 Take, issue #68; W08 swap point, issue #65):
@@ -1274,17 +1711,7 @@ final class StreamController: ObservableObject {
         min(max(activeProfile.frameRate, 1), max(1, capabilities.hardwareMaxFrameRate))
     }
 
-    /// Hands the profile's canvas to the publisher exactly once per broadcast
-    /// (`setOutputSize` itself also locks after the first call). The size is
-    /// known at Go Live — no first-frame wait — so the encoder never starts at
-    /// a source-derived size.
-    private func applyOutputSizeIfPossible() {
-        guard streamState.isActive, !outputSizeSentToPublisher,
-              let publisher else { return }
-        outputSizeSentToPublisher = true
-        let canvasSize = activeProfile.canvasSize
-        Task { await publisher.setOutputSize(canvasSize, nativeShortEdge: Int(min(canvasSize.width, canvasSize.height))) }
-    }
+
 }
 
 /// A08 (issue #120): carries the non-Sendable `ChannelFXProcessor` into a
@@ -1326,27 +1753,6 @@ private final class ChannelFXInsertBox: @unchecked Sendable {
     /// (plugin missing, load failure, or the channel is idle).
     func hostedAudioUnitHandles() -> [UUID: HostedAudioUnitHandle] {
         processor.hostedHandles()
-    }
-}
-
-/// Lock-protected hand-off of the current publisher to the capture callbacks,
-/// which fire on ScreenCaptureKit / audio queues (off the main actor) and call
-/// only the publisher's nonisolated, thread-safe audio ingress.
-private final class PublisherBox: @unchecked Sendable {
-    private var lock = os_unfair_lock_s()
-    private var stored: (any Publisher)?
-
-    var publisher: (any Publisher)? {
-        get {
-            os_unfair_lock_lock(&lock)
-            defer { os_unfair_lock_unlock(&lock) }
-            return stored
-        }
-        set {
-            os_unfair_lock_lock(&lock)
-            stored = newValue
-            os_unfair_lock_unlock(&lock)
-        }
     }
 }
 

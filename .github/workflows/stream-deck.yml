@@ -1,0 +1,51 @@
+name: Stream Deck Plugin
+
+on:
+  pull_request:
+    paths:
+      - 'integrations/stream-deck/**'
+      - '.github/workflows/stream-deck.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'integrations/stream-deck/**'
+      - '.github/workflows/stream-deck.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stream-deck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plugin:
+    name: Native plugin build and protocol lifecycle
+    runs-on: macos-15
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: integrations/stream-deck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: integrations/stream-deck/package-lock.json
+      - name: Install pinned dependencies
+        run: npm ci --ignore-scripts
+      - name: Validate types and native protocol / SDK lifecycle
+        run: |
+          npm run check
+          npm test
+      - name: Build universal helper, validate manifest and package
+        run: npm run package
+      - name: Upload development plugin package
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-studio-stream-deck-development
+          path: integrations/stream-deck/dist/*.streamDeckPlugin
+          if-no-files-found: error
+          retention-days: 14

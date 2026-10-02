@@ -30,7 +30,7 @@ struct ShowRundownDocument: Codable, Hashable, Sendable {
     private var timer: Task<Void, Never>?
     private var pendingMediaEnd: Double?
 
-    init(url: URL? = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroup.identifier)?
+    init(url: URL? = DesktopStorage.projectDirectory
         .appendingPathComponent("studio-rundown.json"),
          clock: @escaping () -> Double = { DynamicOverlayStore.hostSeconds },
          automaticallyTicks: Bool = true) {

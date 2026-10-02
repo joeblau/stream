@@ -86,6 +86,21 @@ final class RestreamChat: NSObject {
     @ObservationIgnored private var clientSecret = RestreamKeychain.get("clientSecret") ?? ""
     @ObservationIgnored private var accessToken = RestreamKeychain.get("accessToken")
     @ObservationIgnored private var refreshToken = RestreamKeychain.get("refreshToken")
+    #if os(macOS)
+    @ObservationIgnored var onStudioEnvelope: ((Data) -> Void)?
+    @ObservationIgnored var onStudioReset: (() -> Void)?
+
+    func disconnectStudioSession() {
+        sessionGeneration = UUID(); oauthState = nil
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        authSession?.cancel(); authSession = nil
+        status = hasCredentials ? .signedOut : .needsCredentials
+    }
+    #endif
+
+    @ObservationIgnored private var sessionGeneration = UUID()
+    @ObservationIgnored private var reconnectAttempts = 0
     @ObservationIgnored private var oauthState: String?
     @ObservationIgnored private var authSession: ASWebAuthenticationSession?
     @ObservationIgnored private var webSocket: URLSessionWebSocketTask?
@@ -115,6 +130,11 @@ final class RestreamChat: NSObject {
         // OAuth tokens belong to the client credentials that issued them. Never
         // reuse an old token after the user replaces either credential.
         if credentialsChanged {
+            sessionGeneration = UUID(); oauthState = nil
+            authSession?.cancel(); authSession = nil
+            #if os(macOS)
+            onStudioReset?()
+            #endif
             webSocket?.cancel(with: .goingAway, reason: nil)
             webSocket = nil
             accessToken = nil
@@ -138,6 +158,7 @@ final class RestreamChat: NSObject {
     /// token, otherwise run the OAuth authorization-code flow first.
     func connect() {
         guard hasCredentials else { status = .needsCredentials; return }
+        reconnectAttempts = 0
         if let token = accessToken {
             openWebSocket(token: token)
         } else {
@@ -146,6 +167,11 @@ final class RestreamChat: NSObject {
     }
 
     func signOut() {
+        sessionGeneration = UUID(); oauthState = nil
+        authSession?.cancel(); authSession = nil
+        #if os(macOS)
+        onStudioReset?()
+        #endif
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         accessToken = nil
@@ -160,6 +186,7 @@ final class RestreamChat: NSObject {
 
     private func startAuthorization() {
         let state = UUID().uuidString
+        let generation = sessionGeneration
         oauthState = state
         var comps = URLComponents(string: RestreamAPI.authorizeURL)!
         comps.queryItems = [
@@ -174,7 +201,10 @@ final class RestreamChat: NSObject {
         let session = ASWebAuthenticationSession(
             url: url, callbackURLScheme: RestreamAPI.redirectScheme
         ) { [weak self] callbackURL, error in
-            Task { @MainActor in self?.handleCallback(callbackURL, error: error) }
+            Task { @MainActor in
+                guard let self, self.sessionGeneration == generation else { return }
+                self.handleCallback(callbackURL, error: error)
+            }
         }
         session.presentationContextProvider = self
         session.prefersEphemeralWebBrowserSession = false
@@ -199,29 +229,34 @@ final class RestreamChat: NSObject {
             status = .failed("Authorization failed or was tampered with.")
             return
         }
-        Task { await exchangeCode(code) }
+        let generation = sessionGeneration
+        Task { await exchangeCode(code, generation: generation) }
     }
 
-    private func exchangeCode(_ code: String) async {
+    private func exchangeCode(_ code: String, generation: UUID) async {
         do {
             let tokens = try await requestTokens(
                 body: "grant_type=authorization_code&redirect_uri=\(RestreamAPI.redirectURI)&code=\(code)")
+            guard sessionGeneration == generation else { return }
             store(tokens)
             if let token = tokens.access { openWebSocket(token: token) }
         } catch {
-            status = .failed("Token exchange failed: \(error.localizedDescription)")
+            guard sessionGeneration == generation else { return }
+            status = .failed("Token exchange failed — reconnect to retry.")
         }
     }
 
     private func refreshAccessToken() async -> Bool {
         guard let refresh = refreshToken else { return false }
+        let generation = sessionGeneration
         do {
             let tokens = try await requestTokens(
                 body: "grant_type=refresh_token&refresh_token=\(refresh)")
+            guard sessionGeneration == generation else { return false }
             store(tokens)
             return tokens.access != nil
         } catch {
-            chatLog.error("Token refresh failed: \(String(describing: error), privacy: .public)")
+            chatLog.error("Token refresh failed with code \((error as NSError).code)")
             return false
         }
     }
@@ -258,45 +293,62 @@ final class RestreamChat: NSObject {
         guard let url = comps.url else { return }
         let task = URLSession.shared.webSocketTask(with: url)
         webSocket = task
-        status = .connected
+        status = .connecting
         task.resume()
-        receive()
+        receive(from: task)
     }
 
-    private func receive() {
-        webSocket?.receive { [weak self] result in
+    private func receive(from socket: URLSessionWebSocketTask) {
+        socket.receive { [weak self] result in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.webSocket === socket else { return }
                 switch result {
                 case .success(.string(let text)):
                     self.ingest(text)
-                    self.receive()
+                    self.reconnectAttempts = 0
+                    self.status = .connected
+                    self.receive(from: socket)
                 case .success(.data(let data)):
                     self.ingest(String(decoding: data, as: UTF8.self))
-                    self.receive()
+                    self.reconnectAttempts = 0
+                    self.status = .connected
+                    self.receive(from: socket)
                 case .success:
-                    self.receive()
+                    self.reconnectAttempts = 0
+                    self.status = .connected
+                    self.receive(from: socket)
                 case .failure(let error):
-                    chatLog.error("Chat socket closed: \(String(describing: error), privacy: .public)")
-                    // A closed socket is usually an expired 1h access token — refresh once.
+                    chatLog.error("Chat socket closed with code \((error as NSError).code)")
+                    guard self.reconnectAttempts < 5 else {
+                        self.status = .failed("Chat disconnected — reconnect to retry."); return
+                    }
+                    self.reconnectAttempts += 1
+                    let delay = min(16, 1 << (self.reconnectAttempts - 1))
+                    self.status = .connecting
                     Task {
-                        if await self.refreshAccessToken(), let token = self.accessToken {
-                            self.openWebSocket(token: token)
-                        } else {
-                            self.status = .failed("Chat disconnected — reconnect to retry.")
-                        }
+                        try? await Task.sleep(for: .seconds(delay))
+                        guard self.webSocket === socket else { return }
+                        let refreshed = await self.refreshAccessToken()
+                        guard self.webSocket === socket else { return }
+                        if refreshed, let token = self.accessToken { self.openWebSocket(token: token) }
+                        else { self.status = .failed("Chat disconnected — reconnect to retry.") }
                     }
                 @unknown default:
-                    self.receive()
+                    self.reconnectAttempts = 0
+                    self.status = .connected
+                    self.receive(from: socket)
                 }
             }
         }
     }
 
-    /// The exact chat envelope is undocumented, so parse the common shapes and log
-    /// the raw JSON so the mapping can be tightened once real events are observed.
+    /// The desktop decoder consumes documented typed events. The existing
+    /// mobile feed retains its presentation mapping without logging content.
     private func ingest(_ json: String) {
-        chatLog.debug("chat: \(json, privacy: .public)")
+        guard let envelope = json.data(using: .utf8), envelope.count <= 262_144 else { return }
+        #if os(macOS)
+        onStudioEnvelope?(envelope)
+        #endif
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               (obj["action"] as? String) == "event" else { return }

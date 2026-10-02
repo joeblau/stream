@@ -265,11 +265,14 @@ final class SceneStore: ObservableObject {
     private static let fileNameV1 = "stream.scenes.v1.json"
     private static let browserFileName = "stream.sceneBrowser.v1.json"
 
-    init() {
+    private let directory: URL
+
+    init(directory: URL = DesktopStorage.projectDirectory) {
+        self.directory = directory
         // S12: every candidate file goes through the migration pipeline —
         // unreadable or newer-than-supported files are quarantined aside
         // (never crash-loop, never overwritten) before falling back.
-        let document = Self.loadDocument().flatMap { $0.scenes.isEmpty ? nil : $0 }
+        let document = Self.loadDocument(directory: directory).flatMap { $0.scenes.isEmpty ? nil : $0 }
             ?? SceneDocument.makeDefault()
         projectID = document.projectID
         projectName = document.projectName
@@ -284,7 +287,7 @@ final class SceneStore: ObservableObject {
         selectedID = document.scenes.contains(where: { $0.id == document.selectedID })
             ? document.selectedID
             : document.scenes[0].id
-        let browser = Self.loadBrowser()
+        let browser = Self.loadBrowser(directory: directory)
         folders = browser.folders
         sceneMembership = browser.membership
         lockedSceneIDs = Set(browser.lockedSceneIDs)
@@ -326,6 +329,12 @@ final class SceneStore: ObservableObject {
                       effectPresets: effectPresets,
                       stylePresets: stylePresets,
                       textStylePresets: textStylePresets)
+    }
+
+    func setProjectIdentity(_ id: UUID, name: String) {
+        projectID = ProjectID(id)
+        projectName = name
+        scheduleSceneAutosave()
     }
 
     var selected: Scene? {
@@ -867,20 +876,18 @@ final class SceneStore: ObservableObject {
     // default document — recovery never crash-loops and never overwrites data
     // it couldn't read.
 
-    private static func fileURL(_ fileName: String) -> URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: AppGroup.identifier)?
-            .appendingPathComponent(fileName)
+    private static func fileURL(_ fileName: String, directory: URL) -> URL? {
+        directory.appendingPathComponent(fileName)
     }
 
     /// Loads the scene document from the newest readable candidate: the
     /// current-version file first (migrating it if it somehow holds older
     /// bytes), then the v1 file (migrated v1 → v2 and left untouched on disk,
     //  which keeps it as the readable pre-migration snapshot).
-    private static func loadDocument() -> SceneDocument? {
+    private static func loadDocument(directory: URL) -> SceneDocument? {
         let candidates: [(url: URL?, isCurrentFile: Bool)] = [
-            (fileURL(fileNameV2), true),
-            (fileURL(fileNameV1), false)
+            (fileURL(fileNameV2, directory: directory), true),
+            (fileURL(fileNameV1, directory: directory), false)
         ]
         for (candidate, isCurrentFile) in candidates {
             guard let url = candidate, let data = try? Data(contentsOf: url) else { continue }
@@ -930,9 +937,9 @@ final class SceneStore: ObservableObject {
         return formatter.string(from: Date())
     }
 
-    private static func loadBrowser() -> SceneBrowserDocument {
+    private static func loadBrowser(directory: URL) -> SceneBrowserDocument {
         let empty = SceneBrowserDocument(folders: [], membership: [:], lockedSceneIDs: [])
-        guard let url = fileURL(browserFileName),
+        guard let url = fileURL(browserFileName, directory: directory),
               let data = try? Data(contentsOf: url) else { return empty }
         guard let document = try? JSONDecoder().decode(SceneBrowserDocument.self, from: data) else {
             quarantine(url, reason: "corrupt")
@@ -999,18 +1006,18 @@ final class SceneStore: ObservableObject {
     }
 
     private func writeSceneDocument() {
-        guard let url = Self.fileURL(Self.fileNameV2),
+        guard let url = Self.fileURL(Self.fileNameV2, directory: directory),
               let data = try? JSONEncoder().encode(document) else { return }
-        try? data.write(to: url, options: .atomic)
+        try? ProjectDocumentHistory.write(data, to: url)
     }
 
     private func writeBrowserDocument() {
         let document = SceneBrowserDocument(folders: folders,
                                             membership: sceneMembership,
                                             lockedSceneIDs: Array(lockedSceneIDs))
-        guard let url = Self.fileURL(Self.browserFileName),
+        guard let url = Self.fileURL(Self.browserFileName, directory: directory),
               let data = try? JSONEncoder().encode(document) else { return }
-        try? data.write(to: url, options: .atomic)
+        try? ProjectDocumentHistory.write(data, to: url)
     }
 }
 

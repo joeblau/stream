@@ -234,8 +234,11 @@ final class SoundboardStore: ObservableObject {
     /// for the app's lifetime; this is belt-and-braces).
     nonisolated(unsafe) private var terminationObserver: NSObjectProtocol?
 
-    init() {
-        let document = Self.loadDocument() ?? SoundboardDocument()
+    private let storageURL: URL
+
+    init(directory: URL = DesktopStorage.projectDirectory) {
+        storageURL = directory.appendingPathComponent(Self.fileName)
+        let document = Self.loadDocument(url: storageURL) ?? SoundboardDocument()
         pads = document.pads
         playlists = document.playlists
         writeDocument()
@@ -296,16 +299,10 @@ final class SoundboardStore: ObservableObject {
 
     // MARK: - Persistence
 
-    private static func fileURL() -> URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: AppGroup.identifier)?
-            .appendingPathComponent(fileName)
-    }
-
     /// Loads the document, quarantining an unreadable/newer file aside (never
     /// crash-loop, never overwrite data that couldn't be read — the S12 rule).
-    private static func loadDocument() -> SoundboardDocument? {
-        guard let url = fileURL(), let data = try? Data(contentsOf: url) else { return nil }
+    private static func loadDocument(url: URL) -> SoundboardDocument? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
         guard let document = try? JSONDecoder().decode(SoundboardDocument.self, from: data) else {
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyyMMdd-HHmmss"
@@ -334,8 +331,8 @@ final class SoundboardStore: ObservableObject {
 
     private func writeDocument() {
         let document = SoundboardDocument(pads: pads, playlists: playlists)
-        guard let url = Self.fileURL(),
-              let data = try? JSONEncoder().encode(document) else { return }
-        try? data.write(to: url, options: .atomic)
+        let url = storageURL
+        guard let data = try? JSONEncoder().encode(document) else { return }
+        try? ProjectDocumentHistory.write(data, to: url)
     }
 }

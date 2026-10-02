@@ -1,0 +1,26 @@
+name: Native Controllers
+
+on:
+  pull_request:
+    paths:
+      - 'apple/StreamMac/StudioController*.swift'
+      - 'apple/scripts/*studio_controllers*'
+      - 'apple/docs/MIDI_OSC_CONTROLLERS.md'
+      - '.github/workflows/native-controllers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-wire-tests:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test real UDP and virtual CoreMIDI
+        run: apple/scripts/run_studio_controllers_harness.zsh

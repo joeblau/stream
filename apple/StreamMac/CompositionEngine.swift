@@ -117,11 +117,10 @@ final class SceneRegistryStore: @unchecked Sendable {
 /// ONCE per output tick and broadcasts the result to any number of independent
 /// consumers — preview, recording, publishers, and future virtual/NDI outputs.
 ///
-/// Clock: one monotonic timebase for every output. At (re)start the engine
-/// anchors on the host clock (`CMClockGetTime(CMClockGetHostTimeClock())`) and
-/// derives each frame's PTS as `anchor + sequence / fps`, so every subscriber
-/// sees identical, regularly spaced presentation timestamps regardless of
-/// which source produced pixels or how jittery the tick loop is. A renderer
+/// Clock: one monotonic host timebase for every output. Each rendered frame
+/// receives its actual host-clock PTS, shared by every subscriber. Missed
+/// cadence opportunities therefore leave time gaps rather than compressing
+/// media time. A renderer
 /// restart (profile change) re-anchors; that only happens when no output owns
 /// the encode geometry (W07 staging rules).
 ///
@@ -148,6 +147,18 @@ final class SceneRegistryStore: @unchecked Sendable {
 /// per-layer fades. Neither path blocks the tick cadence: the transition is
 /// just the frame the tick renders.
 actor CompositionEngine {
+    private var metrics = CompositionMetrics()
+
+    func metricsSnapshot() -> CompositionMetrics {
+        var snapshot = metrics
+        snapshot.sampledAt = ProcessInfo.processInfo.systemUptime
+        for mailbox in subscribers.values {
+            let health = mailbox.statistics()
+            snapshot.subscriberQueueDepth += health.depth
+            snapshot.subscriberDrops += health.drops
+        }
+        return snapshot
+    }
     /// Receives composited frames on the subscriber's private serial queue.
     typealias FrameSink = @Sendable (CompositedFrame) -> Void
 
@@ -199,6 +210,7 @@ actor CompositionEngine {
     /// engine injects `{ .empty }` because preview shows annotations as
     /// SwiftUI chrome (painting them into the image too would double-draw).
     private let annotationProvider: @Sendable () -> AnnotationRenderSnapshot
+    private let frameOverrideProvider: @Sendable () -> Scene?
 
     private var scene: Scene?
     private var canvasSize: CGSize
@@ -211,12 +223,12 @@ actor CompositionEngine {
     /// engine (re)start.
     private var transition: ActiveTransition?
     /// S09: in-flight per-layer visibility fades (same-scene edits). Keyed
+    /// elapsed time follows the host clock even when rendering skips ticks. Keyed
     /// by stable LayerID so an interrupted fade reverses from its current
     /// opacity — the defined final state is always the latest scene value.
     private var layerFades: [LayerID: LayerFade] = [:]
 
     private var tickTask: Task<Void, Never>?
-    private var clockAnchor: CMTime = .zero
     private var frameSequence: Int64 = 0
 
     private var subscribers: [UUID: FrameMailbox] = [:]
@@ -240,7 +252,8 @@ actor CompositionEngine {
          annotationProvider: @escaping @Sendable () -> AnnotationRenderSnapshot =
             { ProgramAnnotationStore.shared.snapshot() },
          canvasSize: CGSize = OutputProfile.default.canvasSize,
-         frameRate: Int = OutputProfile.default.frameRate) {
+         frameRate: Int = OutputProfile.default.frameRate,
+         frameOverrideProvider: @escaping @Sendable () -> Scene? = { nil }) {
         self.screenProvider = screenProvider
         self.cameraProvider = cameraProvider
         self.frameLookup = frameLookup ?? SourceFrameLookup(
@@ -273,6 +286,7 @@ actor CompositionEngine {
         self.transitionRequestProvider = transitionRequestProvider
         self.stingerProvider = stingerProvider
         self.annotationProvider = annotationProvider
+        self.frameOverrideProvider = frameOverrideProvider
         self.canvasSize = canvasSize
         self.frameRate = frameRate
         // A10 (issue #122): wrap the resolved lookup with the delay lines.
@@ -289,6 +303,7 @@ actor CompositionEngine {
     /// Atomically (re)configures the composition and starts the tick loop.
     /// StreamController calls this when the W02 pipeline demand goes 0 → 1.
     func run(scene: Scene?, canvasSize: CGSize, frameRate: Int) {
+        metrics = CompositionMetrics()
         self.scene = scene
         self.canvasSize = canvasSize
         self.frameRate = max(1, frameRate)
@@ -335,7 +350,7 @@ actor CompositionEngine {
     }
 
     /// Applies a new output geometry/fps. While running, this restarts the
-    /// tick loop and re-anchors the clock (the renderer's pool/format
+    /// tick loop; timestamps remain on the host clock (the renderer's pool/format
     /// description re-create themselves on the next frame at the new size).
     func setOutput(canvasSize: CGSize, frameRate: Int) {
         self.canvasSize = canvasSize
@@ -384,8 +399,8 @@ actor CompositionEngine {
         /// The resolved style — a stinger whose media is missing resolves
         /// to `.dissolve` here (the documented honest fallback).
         var style: SceneTransitionStyle
-        var startSequence: Int64
-        var durationFrames: Int
+        var startedAt: CMTime
+        var durationSeconds: Double
         var direction: TransitionDirection
         var dipColorHex: String
         var stingerCutPointSeconds: Double
@@ -403,8 +418,8 @@ actor CompositionEngine {
         var backToFrontIndex: Int
         var fromOpacity: Double
         var toOpacity: Double
-        var startSequence: Int64
-        var durationFrames: Int
+        var startedAt: CMTime
+        var durationSeconds: Double
     }
 
     /// Show/hide fades are intentionally brief — long enough to read as a
@@ -436,7 +451,7 @@ actor CompositionEngine {
                                            style: .dissolve, config: config, fps: fps)
             }
             return ActiveTransition(from: previous, to: scene, style: .stinger,
-                                    startSequence: frameSequence, durationFrames: 0,
+                                    startedAt: mediaTime(), durationSeconds: 0,
                                     direction: config.direction,
                                     dipColorHex: config.dipColorHex,
                                     stingerCutPointSeconds: max(0, config.stingerCutPointSeconds),
@@ -455,8 +470,8 @@ actor CompositionEngine {
         let durationFrames = Int((config.durationSeconds * Double(fps)).rounded())
         guard durationFrames > 0 else { return nil }
         return ActiveTransition(from: from, to: to, style: style,
-                                startSequence: frameSequence,
-                                durationFrames: durationFrames,
+                                startedAt: mediaTime(),
+                                durationSeconds: Double(durationFrames) / Double(fps),
                                 direction: config.direction,
                                 dipColorHex: config.dipColorHex,
                                 stingerCutPointSeconds: 0,
@@ -498,8 +513,8 @@ actor CompositionEngine {
                                    sequence: frameSequence,
                                    stinger: stingerFrame)
         }
-        let progress = Double(frameSequence - active.startSequence)
-            / Double(max(1, active.durationFrames))
+        let progress = max(0, CMTimeSubtract(pts, active.startedAt).seconds)
+            / max(Double.ulpOfOne, active.durationSeconds)
         guard progress < 1 else { return nil }
         return renderer.renderTransition(from: active.from, to: active.to,
                                          blend: SceneBlend(style: active.style,
@@ -527,8 +542,6 @@ actor CompositionEngine {
     /// interpolated opacity, so the defined final state of an interrupted
     /// transition is always the latest scene value.
     private func registerLayerFades(from old: Scene, to new: Scene) {
-        let fps = max(1, frameRate)
-        let durationFrames = max(1, Int((Self.layerFadeDurationSeconds * Double(fps)).rounded()))
         let oldVisible = Set(old.layers.filter(\.isVisible).map(\.id))
         let newVisible = Set(new.layers.filter(\.isVisible).map(\.id))
         for layer in new.layers where layer.isVisible && !oldVisible.contains(layer.id) {
@@ -537,8 +550,8 @@ actor CompositionEngine {
                                              backToFrontIndex: 0,
                                              fromOpacity: current,
                                              toOpacity: 1,
-                                             startSequence: frameSequence,
-                                             durationFrames: durationFrames)
+                                             startedAt: mediaTime(),
+                                             durationSeconds: Self.layerFadeDurationSeconds)
         }
         for (index, layer) in old.layers.enumerated()
         where layer.isVisible && !newVisible.contains(layer.id) {
@@ -547,8 +560,8 @@ actor CompositionEngine {
                                              backToFrontIndex: index,
                                              fromOpacity: current,
                                              toOpacity: 0,
-                                             startSequence: frameSequence,
-                                             durationFrames: durationFrames)
+                                             startedAt: mediaTime(),
+                                             durationSeconds: Self.layerFadeDurationSeconds)
         }
     }
 
@@ -556,8 +569,8 @@ actor CompositionEngine {
     /// the duration (nil when no fade is in flight for the layer).
     private func currentFadeValue(_ id: LayerID) -> Double? {
         guard let fade = layerFades[id] else { return nil }
-        let progress = Double(frameSequence - fade.startSequence)
-            / Double(max(1, fade.durationFrames))
+        let progress = max(0, CMTimeSubtract(mediaTime(), fade.startedAt).seconds)
+            / max(Double.ulpOfOne, fade.durationSeconds)
         guard progress < 1 else { return fade.toOpacity }
         return fade.fromOpacity + (fade.toOpacity - fade.fromOpacity) * max(0, progress)
     }
@@ -566,14 +579,14 @@ actor CompositionEngine {
     /// layer and the exiting layers (old content, old back-to-front order).
     /// Completed fades leave the map here — fade-ins end at full opacity,
     /// fade-outs drop their layer.
-    private func layerFadeOverrides() -> (opacity: [LayerID: Double], exiting: [LayerNode]) {
+    private func layerFadeOverrides(at pts: CMTime) -> (opacity: [LayerID: Double], exiting: [LayerNode]) {
         guard !layerFades.isEmpty else { return ([:], []) }
         var opacity: [LayerID: Double] = [:]
         var exiting: [(index: Int, layer: LayerNode)] = []
         var completed: [LayerID] = []
         for (id, fade) in layerFades {
-            let progress = Double(frameSequence - fade.startSequence)
-                / Double(max(1, fade.durationFrames))
+            let progress = max(0, CMTimeSubtract(pts, fade.startedAt).seconds)
+                / max(Double.ulpOfOne, fade.durationSeconds)
             guard progress < 1 else {
                 completed.append(id)
                 continue
@@ -611,19 +624,46 @@ actor CompositionEngine {
 
     // MARK: - Tick loop
 
+    private func mediaTime() -> CMTime {
+        #if STREAM_NATIVE_VALIDATION
+        if let validationTime { return validationTime }
+        #endif
+        return CMClockGetTime(CMClockGetHostTimeClock())
+    }
+
+    #if STREAM_NATIVE_VALIDATION
+    // Drive actual compositor frames at explicit media times without coupling
+    // pixel correctness to the host's scheduling or first-use shader latency.
+    private var validationTime: CMTime?
+    func prepareValidation(scene: Scene, canvasSize: CGSize, frameRate: Int, at time: CMTime) {
+        validationTime = time
+        run(scene: scene, canvasSize: canvasSize, frameRate: frameRate)
+        stop()
+    }
+    func setValidationTime(_ time: CMTime) { validationTime = time }
+    func renderValidationFrame(at time: CMTime) { validationTime = time; autoreleasepool { tick() } }
+    #endif
+
     private func startTicking() {
         tickTask?.cancel()
-        // Re-anchor the shared clock: PTS = anchor + sequence / fps.
-        clockAnchor = CMClockGetTime(CMClockGetHostTimeClock())
         frameSequence = 0
-        let interval = UInt64(1_000_000_000) / UInt64(max(1, frameRate))
+        let interval = Duration.nanoseconds(Int64(1_000_000_000 / max(1, frameRate)))
         tickTask = Task { [weak self] in
+            let clock = ContinuousClock()
+            var deadline = clock.now
             while !Task.isCancelled {
                 await self?.tick()
-                try? await Task.sleep(nanoseconds: interval)
+                deadline = deadline.advanced(by: interval)
+                let now = clock.now
+                var missed = 0
+                while deadline < now { deadline = deadline.advanced(by: interval); missed += 1 }
+                if missed > 0 { await self?.noteMissedDeadlines(missed) }
+                do { try await clock.sleep(until: deadline) } catch { break }
             }
         }
     }
+
+    private func noteMissedDeadlines(_ count: Int) { metrics.missedDeadlines += count }
 
     /// One output frame: pull the latest sample from every source, composite
     /// the scene graph once, stamp it on the shared clock, and broadcast.
@@ -635,23 +675,37 @@ actor CompositionEngine {
     /// same tick, so the tick that ends a transition already paints the new
     /// composition.
     private func tick() {
-        guard let scene else { return }
+        let override = frameOverrideProvider()
+        guard let scene = override ?? self.scene else { return }
+        let renderStarted = ProcessInfo.processInfo.systemUptime
+        let previousCount = metrics.rendered
+        metrics.attempts += 1
+        defer {
+            let elapsed = (ProcessInfo.processInfo.systemUptime - renderStarted) * 1000
+            metrics.totalRenderMilliseconds += elapsed
+            metrics.maxRenderMilliseconds = max(metrics.maxRenderMilliseconds, elapsed)
+            if metrics.rendered == previousCount { metrics.failed += 1 }
+        }
         frameSequence += 1
         let timescale = CMTimeScale(max(1, frameRate))
-        let pts = CMTimeAdd(clockAnchor, CMTime(value: frameSequence, timescale: timescale))
+        // Audio is stamped on the same host clock. A slow render skips an
+        // opportunity rather than compressing video time against audio.
+        let pts = mediaTime()
         let duration = CMTime(value: 1, timescale: timescale)
         let overlayContext = overlayContextProvider()
         let sourcePayloads = sourcePayloadProvider()
         let scenes = sceneRegistryProvider()
         let annotations = annotationProvider()
 
-        if let active = transition {
+        if override == nil, let active = transition {
             if let frame = renderTransitionFrame(active,
                                                  overlayContext: overlayContext,
                                                  sourcePayloads: sourcePayloads,
                                                  scenes: scenes,
                                                  presentationTime: pts,
                                                  frameDuration: duration) {
+                metrics.rendered += 1
+                metrics.lastPresentationSeconds = pts.seconds
                 for mailbox in subscribers.values {
                     mailbox.post(frame)
                 }
@@ -660,7 +714,7 @@ actor CompositionEngine {
             transition = nil   // completed this tick → settled render below
         }
 
-        let fades = layerFadeOverrides()
+        let fades = layerFadeOverrides(at: pts)
         guard let frame = renderer.render(scene: scene,
                                           overlayContext: overlayContext,
                                           canvasSize: canvasSize,
@@ -670,9 +724,11 @@ actor CompositionEngine {
                                           presentationTime: pts,
                                           frameDuration: duration,
                                           sequence: frameSequence,
-                                          layerOpacity: fades.opacity,
-                                          exitingLayers: fades.exiting,
+                                          layerOpacity: override == nil ? fades.opacity : [:],
+                                          exitingLayers: override == nil ? fades.exiting : [],
                                           annotations: annotations) else { return }
+        metrics.rendered += 1
+        metrics.lastPresentationSeconds = pts.seconds
         for mailbox in subscribers.values {
             mailbox.post(frame)
         }
@@ -690,6 +746,13 @@ private final class FrameMailbox: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
     private var pending: [CompositedFrame] = []
     private var isDraining = false
+    private var drops = 0
+
+    func statistics() -> (depth: Int, drops: Int) {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return (pending.count, drops)
+    }
 
     init(capacity: Int, token: UUID, sink: @escaping CompositionEngine.FrameSink) {
         self.capacity = max(1, capacity)
@@ -701,6 +764,7 @@ private final class FrameMailbox: @unchecked Sendable {
     func post(_ frame: CompositedFrame) {
         os_unfair_lock_lock(&lock)
         if pending.count >= capacity {
+            drops += 1
             pending.removeFirst()   // drop-oldest
         }
         pending.append(frame)

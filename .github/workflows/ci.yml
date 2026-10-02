@@ -10,6 +10,69 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  macos:
+    name: StreamMac build and tests (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Show native toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+          uname -m
+      - name: Install XcodeGen
+        run: brew install xcodegen cmake
+      - name: Generate project
+        run: xcodegen generate
+      - name: Resolve and verify native transport implementations
+        run: |
+          xcodebuild -resolvePackageDependencies -project Stream.xcodeproj -scheme StreamMac \
+            -derivedDataPath build/desktop -skipPackagePluginValidation
+          python3 scripts/repair_desktop_transport_archives.py build/desktop
+      - name: Build desktop studio
+        run: |
+          xcodebuild build -project Stream.xcodeproj -scheme StreamMac \
+            -destination 'platform=macOS' -derivedDataPath build/desktop \
+            CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
+      - name: Test shared desktop logic
+        run: |
+          xcodebuild test -project Stream.xcodeproj -scheme StreamCoreTests \
+            -destination 'platform=macOS' -derivedDataPath build/tests \
+            -resultBundlePath build/desktop-tests.xcresult \
+            CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
+      - name: Test native controller and automation boundaries
+        run: |
+          zsh scripts/run_studio_shortcuts_harness.zsh
+          zsh scripts/run_show_macros_harness.zsh
+          zsh scripts/run_studio_local_control_harness.zsh
+          zsh scripts/run_studio_automation_harness.zsh
+      - name: Test private program slate rendering
+        run: PRIVACY_BUILD_PATH=build/desktop zsh scripts/run_studio_privacy_harness.zsh
+      - name: Test public chat and recovery metadata boundaries
+        run: |
+          zsh scripts/run_studio_chat_harness.zsh
+          RECOVERY_BUILD_PATH=build/tests zsh scripts/run_session_recovery_harness.zsh
+      - name: Qualify generated program recordings
+        run: zsh scripts/run_program_recording_harness.zsh
+      - name: Validate sandbox declaration
+        run: python3 scripts/validate_desktop_distribution.py build/desktop/Build/Products/Debug/StreamMac.app
+      - name: Retain test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.runner }}
+          path: apple/build/desktop-tests.xcresult
+
   test:
     name: StreamCore tests (iOS Simulator)
     runs-on: macos-26

@@ -1,176 +1,158 @@
 import SwiftUI
 
-/// macOS chat sidebar: Restream unified chat (OAuth2) aggregated across every
-/// platform connected to the user's Restream account. A condensed port of the iOS
-/// `ChatFeedView` — same feed concepts, plus a connection header since the macOS
-/// layout keeps the panel always visible (no sheet detents).
 struct ChatSidebarView: View {
-    /// Owned by the shell (W04) and shared with the settings pane, so signing
-    /// in from either place lights up both. `RestreamChat` is `@Observable`,
-    /// so a plain property tracks changes in `body`.
-    private let chat: RestreamChat
-
-    init(chat: RestreamChat = RestreamChat()) {
-        self.chat = chat
+    @ObservedObject var coordinator: StudioChatCoordinator
+    @Environment(\.studioReduceMotion) private var reduceMotion
+    @State private var followMessages = true
+    @State private var search = ""
+    @State private var platform = "All"
+    @State private var author = "All"
+    @State private var connection = "All"
+    @State private var scrollAnchor: String?
+    @State private var kind = "All"
+    @State private var favoritesOnly = false
+    private var chat: RestreamChat { coordinator.restream }
+    private var messages: [StudioChatMessage] {
+        coordinator.queue.filtered(search: search, platform: platform == "All" ? nil : platform,
+            connectionID: connection == "All" ? nil : connection, author: author == "All" ? nil : author,
+            kind: kind == "All" ? nil : kind, favoritesOnly: favoritesOnly)
     }
-
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        VStack(spacing: 8) {
+            HStack {
+                Text(status).font(.callout.weight(.semibold))
+                Spacer()
+                if chat.status == .connected { Button("Sign Out") { chat.signOut() } }
+                else { Button("Connect") { chat.connect() }.disabled(!chat.hasCredentials || chat.status == .connecting) }
+            }
+            TextField("Search messages and authors", text: $search)
+            HStack {
+                Picker("Platform", selection: $platform) {
+                    Text("All platforms").tag("All")
+                    ForEach(Array(Set(coordinator.queue.messages.map(\.platform))).sorted(), id: \.self) { Text($0).tag($0) }
+                }
+                Picker("Type", selection: $kind) {
+                    Text("All types").tag("All")
+                    ForEach(Array(Set(coordinator.queue.messages.map(\.kind))).sorted(), id: \.self) { Text($0).tag($0) }
+                }
+            }
+            HStack {
+                Picker("Destination", selection: $connection) {
+                    Text("All destinations").tag("All")
+                    ForEach(Array(Set(coordinator.queue.messages.map(\.connectionID))).sorted(), id: \.self) { Text($0).tag($0) }
+                }
+                Picker("Author", selection: $author) {
+                    Text("All authors").tag("All")
+                    ForEach(Array(Set(coordinator.queue.messages.map(\.author))).sorted(), id: \.self) { Text($0).tag($0) }
+                }
+            }
+            ForEach(coordinator.connections.keys.sorted(), id: \.self) { id in
+                if let item = coordinator.connections[id] {
+                    Text("\(item.platform) · \(id) · \(item.state)").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Toggle("Favorites", isOn: $favoritesOnly).toggleStyle(.checkbox)
+                Toggle("Follow", isOn: $followMessages).toggleStyle(.checkbox)
+                    .help("Disable to keep your scroll position while messages arrive")
+            }
+            queueControls
             Divider()
-            content
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(messages) { message in row(message).id(message.id) }
+                    }.scrollTargetLayout().padding(.horizontal, 4)
+                }
+                .defaultScrollAnchor(.bottom)
+                .scrollPosition(id: $scrollAnchor)
+                .onChange(of: scrollAnchor) { _, id in coordinator.retainReadingPosition(followMessages ? nil : id) }
+                .onChange(of: followMessages) { _, follow in
+                    coordinator.retainReadingPosition(follow ? nil : scrollAnchor)
+                    if follow, let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+                .overlay {
+                    if messages.isEmpty { Text(chat.hasCredentials ? "Waiting for matching public messages…" : "Add your Restream app in Settings.").font(.caption).foregroundStyle(.secondary) }
+                }
+                .onChange(of: coordinator.queue.messages.last?.id) {
+                    guard followMessages, let last = messages.last else { return }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+            }
+            if let error = coordinator.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            Text("Restream-connected public chats. Direct provider sessions, avatars, image emotes, reply/moderation and viewer metrics are unavailable here.")
+                .font(.caption2).foregroundStyle(.secondary)
         }
-        .frame(minWidth: 260, idealWidth: 300)
+        .padding(10).frame(minWidth: 260, idealWidth: 330)
         .onAppear { chat.autoConnect() }
     }
-
-    // MARK: - Connection header
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(statusTint)
-                .frame(width: 8, height: 8)
-            Text(statusTitle)
-                .font(.callout.weight(.semibold))
-                .lineLimit(1)
-            Spacer()
-            switch chat.status {
-            case .connected:
-                Button("Sign Out") { chat.signOut() }
-            case .connecting:
-                ProgressView()
-                    .controlSize(.small)
-            case .needsCredentials, .signedOut, .failed:
-                Button("Connect") { chat.connect() }
-                    .disabled(!chat.hasCredentials)
+    private var status: String {
+        switch chat.status {
+        case .connected: "Chat connected"
+        case .connecting: "Connecting…"
+        case .needsCredentials, .signedOut: "Chat offline"
+        case .failed: "Chat connection failed"
+        }
+    }
+    private var queueControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Comment Queue · \(coordinator.queue.queue.count)").font(.caption.weight(.semibold))
+            Text("Current: \(coordinator.queue.current?.author ?? "None") · Next: \(coordinator.queue.next?.author ?? "None")")
+                .font(.caption).lineLimit(2)
+            HStack {
+                Button("Previous") { coordinator.advance(-1) }
+                Button("Next") { coordinator.advance(1) }
+                Button("Show") { if let current = coordinator.queue.current { coordinator.show(current.id) } }
+                    .disabled(coordinator.queue.current == nil)
+                Button("Hide") { coordinator.hide() }
+            }.controlSize(.small)
+            Picker("Staged comment slot", selection: $coordinator.selectedSlot) {
+                Text("Choose a slot").tag(Optional<LayerID>.none)
+                ForEach(coordinator.availableSlots) { Text($0.name).tag(Optional($0.id)) }
             }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    private var statusTitle: String {
-        switch chat.status {
-        case .connected:  return "Chat"
-        case .connecting: return "Connecting…"
-        case .needsCredentials, .signedOut: return "Chat Offline"
-        case .failed:     return "Chat Error"
-        }
-    }
-
-    private var statusTint: Color {
-        switch chat.status {
-        case .connected:  return .green
-        case .connecting: return .yellow
-        case .failed:     return .red
-        case .needsCredentials, .signedOut: return .secondary
-        }
-    }
-
-    // MARK: - Feed
-
-    @ViewBuilder
-    private var content: some View {
-        switch chat.status {
-        case .connected:
-            messageList
-        case .connecting:
-            ProgressView("Connecting to Restream…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .needsCredentials, .signedOut, .failed:
-            ContentUnavailableView {
-                Label("Waiting for chat…", systemImage: "bubble.left.and.bubble.right")
-            } description: {
-                Text(waitingDescription)
+            Button("Create Comment Slot") { coordinator.createSlot() }
+            HStack {
+                Toggle("Author", isOn: $coordinator.includeAuthor).toggleStyle(.checkbox)
+                Toggle("Platform", isOn: $coordinator.includePlatform).toggleStyle(.checkbox)
             }
-        }
-    }
-
-    private var waitingDescription: String {
-        switch chat.status {
-        case .failed(let message):
-            return message
-        case .signedOut:
-            return "Connect with Restream to see chat from all your platforms here."
-        default:
-            return "Add your Restream app in Settings to see chat from all your connected platforms in one place."
-        }
-    }
-
-    // The feed default-anchors to the BOTTOM, so the newest line sits at the bottom
-    // on first paint and stays pinned there as chat streams in. (`onScrollGeometryChange`
-    // is macOS 15+, so unlike iOS there is no "parked at bottom" gate — new messages
-    // always follow, which matches desktop chat-client behavior.)
-    private var messageList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(chat.messages) { message in
-                        ChatRow(message: message)
-                            .id(message.id)
+            Text("Show/replace/hide edit the staged scene; Take publishes them. Direct Live Editing applies them immediately. Style and resize the slot in the layer inspector.")
+                .font(.caption2).foregroundStyle(.secondary)
+            if !coordinator.queue.queue.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack {
+                        ForEach(coordinator.queue.queue, id: \.self) { id in
+                            if let message = coordinator.queue.message(id) {
+                                Button(message.author) { coordinator.select(id) }
+                                    .buttonStyle(.bordered)
+                                    .tint(coordinator.queue.selectedID == id ? Color.accentColor : Color.secondary)
+                                    .contextMenu { Button("Remove from Queue") { coordinator.dequeue(id) } }
+                            }
+                        }
                     }
                 }
-                .padding()
-            }
-            .defaultScrollAnchor(.bottom)
-            .overlay {
-                if chat.messages.isEmpty {
-                    ContentUnavailableView("Waiting for chat…",
-                                           systemImage: "bubble.left.and.bubble.right",
-                                           description: Text("Messages from your connected platforms will appear here."))
-                }
-            }
-            .onChange(of: chat.messages.count) {
-                guard let last = chat.messages.last else { return }
-                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
             }
         }
     }
-}
-
-/// One incoming chat line: a caption (author + platform badge) above a
-/// content-hugging bubble. The body wraps freely and never truncates.
-private struct ChatRow: View {
-    let message: ChatMessage
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text(message.author)
-                    .fontWeight(.semibold)
-                if let platform = message.platform, !platform.isEmpty {
-                    Text(platform.capitalized)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(.quaternary, in: Capsule())
-                }
+    private func row(_ message: StudioChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(message.author).fontWeight(.semibold)
+                Spacer()
+                Text(message.platform).font(.caption).foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .padding(.leading, 4)
-
-            Text(message.text)
-                .font(.callout)
-                .foregroundStyle(.white)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.blue, in: .rect(cornerRadius: 14, style: .continuous))
+            HStack {
+                Text(message.timestamp, style: .time)
+                if message.timestampIsReceiptTime { Text("received") }
+                Text(message.roles.joined(separator: ", "))
+            }.font(.caption2).foregroundStyle(.secondary)
+            Text(message.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button(coordinator.queue.favorites.contains(message.id) ? "Unfavorite" : "Favorite") { coordinator.favorite(message.id) }
+                Button("Queue") { coordinator.enqueue(message.id) }
+                Button("Show") { coordinator.show(message.id) }
+            }.controlSize(.small)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
+        .padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
     }
-
-    private var accessibilityLabel: String {
-        if let platform = message.platform, !platform.isEmpty {
-            return "\(message.author) on \(platform): \(message.text)"
-        }
-        return "\(message.author): \(message.text)"
-    }
-}
-
-#Preview {
-    ChatSidebarView()
 }
