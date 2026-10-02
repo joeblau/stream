@@ -225,7 +225,6 @@ private struct YouTubeEventEditor: View {
 struct ProviderBroadcastStatus: View {
     @ObservedObject var accounts: ProviderAccountSession
     let binding: ProviderDestinationBinding
-    @State private var completing = false
     private var snapshot: ProviderAccountSnapshot { accounts.snapshot(binding.provider) }
     private var event: ProviderEvent? { snapshot.verifiedAt == nil ? nil : accounts.event(binding) }
     private var publicURL: URL? {
@@ -243,15 +242,9 @@ struct ProviderBroadcastStatus: View {
                     Link(binding.provider == .twitch ? "Open Channel" : "Open Broadcast", destination: url)
                     Button("Copy Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string) }
                 }
-                if binding.provider == .youtube, event?.state == .live, snapshot.scopes.contains("https://www.googleapis.com/auth/youtube") || snapshot.scopes.contains("https://www.googleapis.com/auth/youtube.force-ssl") {
-                    Button("Complete YouTube Event…") { completing = true }.disabled(snapshot.isWorking)
-                }
             }.font(.caption)
             if let event { Text("Remote state read \(event.verifiedAt.formatted(date: .omitted, time: .standard))").font(.caption2).foregroundStyle(.secondary) }
             if let failure = snapshot.failure { Text(failure.localizedDescription).font(.caption2).foregroundStyle(.orange) }
         }
-        .confirmationDialog("Complete this live YouTube event?", isPresented: $completing, titleVisibility: .visible) {
-            Button("Complete Remote Event", role: .destructive) { if let id = binding.eventID { accounts.completeYouTube(eventID: id) } }
-        } message: { Text("YouTube will end this event. Local ingest, other destinations and recording continue until you stop them separately.") }
     }
 }

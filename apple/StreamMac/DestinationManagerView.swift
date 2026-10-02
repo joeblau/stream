@@ -50,6 +50,9 @@ struct DestinationManagerView: View {
                                   onStart: controller.startDestination,
                                   onStop: controller.stopDestination,
                                   onRetry: controller.retryDestination)
+            DisclosureGroup("Stop Local / End Remote / End All") {
+                StudioEndingControls(coordinator: controller.ending)
+            }
             resourceEstimate
             DisclosureGroup("Session Resilience and Source Failover") {
                 DesktopResilienceView(coordinator: controller.resilience)

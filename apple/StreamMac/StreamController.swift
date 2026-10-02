@@ -172,6 +172,7 @@ final class StreamController: ObservableObject {
         case .srt, .whip: return SessionPublisher(protocol: transport)
         }
     })
+    let ending = StudioEndingCoordinator()
     /// Ordered publisher video path: the engine's publisher sink yields into
     /// this newest-only stream; one consumer awaits `appendVideo` in order.
     private var videoConsumer: Task<Void, Never>?

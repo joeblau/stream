@@ -58,6 +58,7 @@ jobs:
           zsh scripts/run_studio_automation_harness.zsh
           zsh scripts/run_provider_accounts_harness.zsh
           zsh scripts/run_direct_chat_harness.zsh
+          zsh scripts/run_studio_ending_harness.zsh
       - name: Qualify generated program recordings
         run: zsh scripts/run_program_recording_harness.zsh
       - name: Validate sandbox declaration
