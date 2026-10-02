@@ -1,0 +1,4 @@
+node_modules/
+dist/
+com.joeblau.stream-studio.sdPlugin/bin/
+com.joeblau.stream-studio.sdPlugin/logs/

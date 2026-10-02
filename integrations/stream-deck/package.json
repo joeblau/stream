@@ -1,0 +1,23 @@
+{
+  "name": "@stream/studio-stream-deck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "validate": "streamdeck validate com.joeblau.stream-studio.sdPlugin",
+    "package": "npm run build && npm run validate && streamdeck pack com.joeblau.stream-studio.sdPlugin --output dist --force"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "3.0.1",
+    "@elgato/utils": "0.6.0"
+  },
+  "devDependencies": {
+    "@elgato/cli": "1.10.1",
+    "@types/node": "24.12.0",
+    "esbuild": "0.27.4",
+    "typescript": "6.0.2"
+  }
+}

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stream Studio Command</title><style>
+body{font:13px system-ui,sans-serif;background:#292929;color:#eee;margin:16px}label{display:block;margin:12px 0 5px}input,select,textarea,button{font:inherit;color:inherit;background:#3c3c3c;border:1px solid #777;border-radius:4px;padding:7px;box-sizing:border-box}input,select,textarea{width:100%}button{cursor:pointer;margin:8px 4px 4px 0}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #8ccfff}small{display:block;color:#ccc;line-height:1.5}#error{color:#ffcf8d;white-space:pre-wrap}#status{font-weight:600}hr{border:0;border-top:1px solid #666;margin:18px 0}
+</style></head><body>
+<p id="status" role="status">Connecting to Stream Deck…</p><p id="error" role="alert"></p>
+<label for="credentials">Pairing JSON from Stream Studio</label><textarea id="credentials" rows="3" autocomplete="off" spellcheck="false" placeholder="Paste the credentials from Settings > Application > Pair Client"></textarea>
+<button id="pair">Save Pairing in Keychain</button><button id="forget">Forget Pairing</button>
+<small>The token is sent once to the native Keychain helper. It is never saved in Stream Deck action settings or exported profiles. Revoke it in Stream Studio when removing this controller.</small><hr>
+<label for="search">Search commands</label><input id="search" type="search" placeholder="Scene, Take, Record, layer, sound…">
+<label for="category">Category</label><select id="category"><option value="">All categories</option></select>
+<label for="command">Stable command / resource</label><select id="command"><option value="">Choose a command</option></select>
+<p id="availability"></p><small id="project"></small><button id="refresh">Refresh Studio Catalog</button>
+<small>A binding stays with its resource UUID after rename/reorder. Missing resources and project changes require an explicit new selection. Key feedback follows the studio; pressing a key never invents LIVE or recording state.</small>
+<script src="command.js"></script></body></html>

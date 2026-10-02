@@ -1,0 +1,71 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "Stream Studio",
+  "Author": "Joe Blau",
+  "Description": "Paired native Stream Studio commands with authoritative preview/program and output feedback.",
+  "Version": "0.1.0.0",
+  "UUID": "com.joeblau.stream-studio",
+  "SDKVersion": 3,
+  "Nodejs": {
+    "Version": "24"
+  },
+  "Software": {
+    "MinimumVersion": "7.1"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "14"
+    }
+  ],
+  "CodePath": "bin/plugin.js",
+  "Icon": "imgs/plugin",
+  "Category": "Stream Studio",
+  "CategoryIcon": "imgs/category",
+  "ApplicationsToMonitor": {
+    "mac": [
+      "com.joeblau.StreamMac"
+    ]
+  },
+  "URL": "https://github.com/joeblau/stream",
+  "SupportURL": "https://github.com/joeblau/stream/issues",
+  "Actions": [
+    {
+      "UUID": "com.joeblau.stream-studio.command",
+      "Name": "Studio Command",
+      "Tooltip": "Bind a stable scene, layer, audio, media, macro, or output command from the paired studio.",
+      "Icon": "imgs/command",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/command.html",
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": true,
+      "States": [
+        {
+          "Image": "imgs/key",
+          "TitleAlignment": "bottom",
+          "FontSize": 10
+        }
+      ]
+    },
+    {
+      "UUID": "com.joeblau.stream-studio.open",
+      "Name": "Open Studio",
+      "Tooltip": "Launch or focus the one native Stream Studio window.",
+      "Icon": "imgs/command",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/key",
+          "Title": "Open Studio",
+          "TitleAlignment": "bottom",
+          "FontSize": 10
+        }
+      ]
+    }
+  ]
+}
