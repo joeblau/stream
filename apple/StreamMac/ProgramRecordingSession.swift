@@ -17,6 +17,9 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var context = RecordingContext()
         var isolatedFiles: [String] = []
         var requiresAudio = true
+        var chatArchiveFile: String?
+        var onVideoAccepted: (@Sendable (RecordingChatFrame) -> Void)?
+        var onMarkerRecorded: (@Sendable (RecordingMarker) -> Void)?
         /// ISO writers retain the program origin rather than starting each
         /// file at its first received source frame.
         var sourceStartTime: CMTime?
@@ -79,6 +82,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         let context: RecordingContext
         var markers: [RecordingMarker]
         var isolatedFiles: [String]
+        let chatArchiveFile: String?
         let file: String
         let startedAt: Date
         var status: String
@@ -196,6 +200,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
             let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
             markers.append(RecordingMarker(seconds: progress.durationSeconds,
                 title: cleaned.isEmpty ? "Marker \(markers.count + 1)" : String(cleaned.prefix(500))))
+            if let marker = markers.last { configuration.onMarkerRecorded?(marker) }
             writeManifest(status: paused ? "paused" : "recording")
         }
     }
@@ -360,6 +365,8 @@ final class ProgramRecordingSession: @unchecked Sendable {
             endTime = endTime.isValid ? CMTimeMaximum(endTime, sampleEnd) : sampleEnd
             timeline.update(end: endTime)
             if isVideo {
+                configuration.onVideoAccepted?(.init(seconds: (pts - sessionStart).seconds,
+                    endSeconds: (sampleEnd - sessionStart).seconds, painted: RecordingChatPaint.read(sourceSample)))
                 videoEnd = sampleEnd
                 lastVideoPTS = pts; lastVideoWrite = Date(); progress.videoSamples += 1
                 progress.videoStatus = .writing
@@ -510,7 +517,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
     }
 
     private func writeManifest(status: String) {
-        let manifest = Manifest(version: 1, sessionID: configuration.sessionID, segmentIndex: configuration.segmentIndex, codec: configuration.codec, container: configuration.container, pauses: pauses, context: configuration.context, markers: markers, isolatedFiles: configuration.isolatedFiles, file: outputURL.lastPathComponent, startedAt: createdAt,
+        let manifest = Manifest(version: 1, sessionID: configuration.sessionID, segmentIndex: configuration.segmentIndex, codec: configuration.codec, container: configuration.container, pauses: pauses, context: configuration.context, markers: markers, isolatedFiles: configuration.isolatedFiles, chatArchiveFile: configuration.chatArchiveFile, file: outputURL.lastPathComponent, startedAt: createdAt,
             status: status, error: failure,
             sourceStartSeconds: sessionStart.isNumeric ? sessionStart.seconds : nil,
             videoStartOffsetSeconds: firstVideoPTS.isNumeric ? (firstVideoPTS - sessionStart).seconds : nil,

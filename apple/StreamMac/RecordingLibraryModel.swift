@@ -19,6 +19,8 @@ struct RecordingLibraryEntry: Identifiable {
     let markers: [RecordingMarker]
     let thumbnail: NSImage?
     let canExport: Bool
+    var chatURL: URL? = nil
+    var chatSummary: RecordingChatSummary? = nil
 }
 
 private struct RecordingJournalSummary: Decodable, Sendable {
@@ -30,6 +32,7 @@ private struct RecordingJournalSummary: Decodable, Sendable {
     let error: String?
     let markers: [RecordingMarker]?
     let isolatedFiles: [String]?
+    let chatArchiveFile: String?
     let videoStartOffsetSeconds: Double?
     let audioStartOffsetSeconds: Double?
     let progress: TrackSummary?
@@ -111,10 +114,12 @@ enum RecordingMarkerFormat: String, CaseIterable {
                 .flatMap { try? JSONDecoder().decode(IsolatedJournalSummary.self, from: $0) }
             let video = (try? Data(contentsOf: url.appendingPathExtension("video-isolated.json")))
                 .flatMap { try? JSONDecoder().decode(IsolatedVideoJournalSummary.self, from: $0) }
-            if journal == nil, let isolated,
-               URL(fileURLWithPath: isolated.programFile).lastPathComponent == isolated.programFile {
-                journal = (try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent(isolated.programFile).appendingPathExtension("recording.json")))
+            if let programFile = video?.programFile ?? isolated?.programFile,
+               RecordingChatReader.basename(programFile) {
+                let parent = (try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent(programFile).appendingPathExtension("recording.json")))
                     .flatMap { try? JSONDecoder().decode(RecordingJournalSummary.self, from: $0) }
+                if parent?.sessionID == (video?.sessionID ?? isolated?.sessionID),
+                   parent?.segmentIndex == (video?.segmentIndex ?? isolated?.segmentIndex) { journal = parent }
             }
             let linked = (journal?.isolatedFiles ?? []).compactMap { name -> IsolatedJournalSummary? in
                 guard URL(fileURLWithPath: name).lastPathComponent == name else { return nil }
@@ -129,7 +134,21 @@ enum RecordingMarkerFormat: String, CaseIterable {
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
             let bytes = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
             let date = attributes?[.creationDate] as? Date ?? .distantPast
-            return (journal, bytes, date, isolated, linked, video, linkedVideo)
+            var chatURL: URL?
+            var chatInfo: RecordingChatSummary?
+            if let name = journal?.chatArchiveFile, RecordingChatReader.basename(name), name.hasSuffix(".chat.jsonl") {
+                let candidate = url.deletingLastPathComponent().appendingPathComponent(name)
+                if var info = RecordingChatReader.summary(candidate), info.version == 1, info.header.sessionID == journal?.sessionID,
+                   info.header.segmentIndex == journal?.segmentIndex {
+                    if !active, info.completedAt == nil { info.status = "partial"; info.warning = info.warning ?? "Interrupted archive; export recovers its valid prefix." }
+                    chatURL = candidate; chatInfo = info
+                } else if FileManager.default.fileExists(atPath: candidate.path),
+                          let scanned = try? RecordingChatReader.scan(candidate), scanned.header.sessionID == journal?.sessionID,
+                          scanned.header.segmentIndex == journal?.segmentIndex {
+                    chatURL = candidate
+                }
+            }
+            return (journal, bytes, date, isolated, linked, video, linkedVideo, chatURL, chatInfo)
         }.value
         let asset = AVURLAsset(url: url)
         var duration = 0.0
@@ -206,7 +225,8 @@ enum RecordingMarkerFormat: String, CaseIterable {
             duration: duration.isFinite ? max(0, duration) : 0, bytes: metadata.1,
             tracks: trackNames, manifestSummary: manifestParts.joined(separator: " · "), status: status,
             error: (video != nil ? video?.progress.error : isolated == nil ? journal?.error : isolated?.progress.error) ?? mediaError,
-            markers: journal?.markers ?? [], thumbnail: thumbnail, canExport: readable && !active)
+            markers: journal?.markers ?? [], thumbnail: thumbnail, canExport: readable && !active,
+            chatURL: metadata.7, chatSummary: metadata.8)
     }
 
     private static func fourCC(_ value: FourCharCode) -> String {
@@ -231,6 +251,23 @@ enum RecordingMarkerFormat: String, CaseIterable {
     func exportMarkers(_ entry: RecordingLibraryEntry, format: RecordingMarkerFormat, to url: URL) {
         do { try Self.markerData(entry.markers, format: format).write(to: url, options: .atomic); error = nil }
         catch { self.error = error.localizedDescription }
+    }
+
+    func exportChat(_ entry: RecordingLibraryEntry, format: RecordingChatFormat, to output: URL) async {
+        guard !exporting, entry.status != "recording", let source = entry.chatURL else { return }
+        exporting = true; error = nil
+        do { try await Task.detached(priority: .utility) { try RecordingChatReader.export(source, format: format, to: output) }.value }
+        catch { self.error = error.localizedDescription }
+        exporting = false
+    }
+    func removeChat(_ entry: RecordingLibraryEntry) {
+        guard entry.status != "recording", let source = entry.chatURL else { return }
+        do {
+            try FileManager.default.trashItem(at: source, resultingItemURL: nil)
+            let summary = source.appendingPathExtension("summary.json")
+            if FileManager.default.fileExists(atPath: summary.path) { try FileManager.default.trashItem(at: summary, resultingItemURL: nil) }
+            if let index = entries.firstIndex(where: { $0.id == entry.id }) { entries[index].chatURL = nil; entries[index].chatSummary = nil }
+        } catch { self.error = error.localizedDescription }
     }
 
     func exportClip(_ entry: RecordingLibraryEntry, from start: Double, to end: Double, output: URL) async {
