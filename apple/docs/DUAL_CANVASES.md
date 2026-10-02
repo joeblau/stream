@@ -110,6 +110,8 @@ Full-resolution simultaneous cadence, service acceptance of portrait profiles,
 physical clean displays, installed/signed virtual-camera consumers, guest media,
 and manual desktop UI/a11y qualification remain separate gates. The small paired
 file fixture is software timing/lifecycle evidence, not a full-resolution
-hardware qualification. Issue #132 encoded-stream sharing remains separate:
-current publishers accept raw `CMSampleBuffer` and own their own encoders; a
-shared encoding-plan group does not imply reuse of an encoded bitstream.
+hardware qualification. Default adaptive publishers retain their own encoders.
+The desktop's explicit [fixed H.264/AAC sharing option](ENCODED_SHARING.md)
+reuses compressed samples across matching RTMP/RTMPS/SRT destinations on the
+same canvas. Different canvases always retain separate groups; recording and
+unsupported codec/transport combinations still reserve separate encoders.

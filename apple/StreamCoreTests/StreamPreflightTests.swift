@@ -58,6 +58,18 @@ import Testing
         facts.measuredUplinkMbps = 15
         #expect(facts.checks.allSatisfy { $0.status == .passed })
     }
+
+    @Test("Fixed publishing owners and real recording reservations share the four-encoder budget")
+    func aggregateReservations() {
+        var facts = StreamPreflightFacts()
+        facts.encoderCount = 1; facts.recordingEncoderReservations = 3
+        facts.sharedH264AAC = true; facts.testedEncoderBudget = 1
+        let valid = facts.checks.first { $0.id == "encoders" }
+        #expect(valid?.status == .passed)
+        #expect(valid?.detail.contains("Fixed-profile H.264/AAC") == true)
+        facts.recordingEncoderReservations = 4
+        #expect(facts.checks.first { $0.id == "encoders" }?.status == .failed)
+    }
 }
 
 private actor FakeUplink {

@@ -16,6 +16,19 @@ final class DestinationOutputController: ObservableObject {
     /// Rehearsal disables publisher creation at the output boundary as well as
     /// the command/UI entry points, so no public transport can be started.
     var isPublishingAllowed = true
+    /// Explicit fixed-profile opt-in; default retains the existing adaptive,
+    /// separate publisher encoders. Only H.264/AAC adapters participate.
+    var sharedEncodingEnabled = false
+    /// Taken compositor cadence. Unknown or requested higher rates use the
+    /// existing separate publisher path rather than claiming generated frames.
+    var sharedSourceFrameRate: Int?
+    private var encoderGroups: [DestinationSharedEncoderKey: DestinationSharedEncoder] = [:]
+    private var finishingEncoderGroups: [UUID: DestinationSharedEncoder] = [:]
+    /// Actual active or finalizing groups plus separate publisher sessions.
+    var encoderSessionCount: Int {
+        encoderGroups.count + finishingEncoderGroups.count + runtimes.values.filter { $0.encoderGroup == nil }.count
+            + finalizingRawPublishers.count
+    }
 
     private struct Runtime {
         var generation: UUID
@@ -25,9 +38,14 @@ final class DestinationOutputController: ObservableObject {
         var startTask: Task<Void, Never>
         var eventTask: Task<Void, Never>
         var canvas: OutputCanvas
+        var encoderGroup: DestinationSharedEncoder?
+        var encoded: DestinationEncodedMailbox?
     }
     private var runtimes: [UUID: Runtime] = [:]
     private var pendingStops: [UUID: (generation: UUID, task: Task<Void, Never>)] = [:]
+    // A failed target can retry under the same stable ID while its previous
+    // publisher still drains. Count by session generation, never destination ID.
+    private var finalizingRawPublishers: Set<UUID> = []
     private var completedStops: Set<UUID> = []
     private var completedStopOrder: [UUID] = []
     var usesSecondaryCanvas: Bool { runtimes.values.map(\.canvas).contains(.secondary) }
@@ -36,6 +54,17 @@ final class DestinationOutputController: ObservableObject {
 
     init(factory: @escaping (StreamCore.StreamProtocol) -> any Publisher) {
         self.factory = factory
+    }
+
+    func additionalEncoderSessions(destination: StreamDestination, settings: StreamSettings) -> Int {
+        guard sharedEncodingEnabled, let sourceFPS = sharedSourceFrameRate,
+              let key = DestinationSharedEncoderKey(destination: destination, settings: settings, sourceFrameRate: sourceFPS),
+              encoderGroups[key] != nil else { return 1 }
+        return 0
+    }
+    deinit {
+        for group in encoderGroups.values { group.stop() }
+        for group in finishingEncoderGroups.values { group.stop() }
     }
 
     var aggregateState: StreamSessionState {
@@ -61,6 +90,29 @@ final class DestinationOutputController: ObservableObject {
         let generation = UUID()
         let publisher = factory(destination.transport)
         let mailbox = DestinationVideoMailbox(publisher: publisher)
+        var encoderGroup: DestinationSharedEncoder?
+        var encoded: DestinationEncodedMailbox?
+        if sharedEncodingEnabled, publisher.supportsSharedH264AAC, let sourceFPS = sharedSourceFrameRate,
+           let key = DestinationSharedEncoderKey(destination: destination, settings: settings, sourceFrameRate: sourceFPS) {
+            if let existing = encoderGroups[key] { encoderGroup = existing }
+            else {
+                let groupID = UUID()
+                let group = DestinationSharedEncoder(key: key, id: groupID) { [weak self] in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        for (id, runtime) in self.runtimes where runtime.encoderGroup?.id == groupID {
+                            self.fail(id: id, message: "The shared H.264/AAC encoder failed. Stop these outputs and review the profile or resource load.")
+                        }
+                    }
+                }
+                encoderGroups[key] = group; encoderGroup = group
+            }
+            if let encoderGroup {
+                let sink = DestinationEncodedMailbox(publisher: publisher) { [weak encoderGroup] in encoderGroup?.requestKeyframe() }
+                encoderGroup.add(sink, id: id); encoded = sink
+            }
+        }
+        let usesEncoded = encoderGroup != nil
         names[id] = destination.name
         states[id] = .connecting
         acknowledgedStarts[id] = nil
@@ -74,6 +126,10 @@ final class DestinationOutputController: ObservableObject {
         }
         let startTask = Task { [weak self] in
             do {
+                if usesEncoded, !(await publisher.configureEncodedInput()) {
+                    throw NSError(domain: "SharedEncoder", code: 1)
+                }
+                guard !Task.isCancelled else { return }
                 try await publisher.start(settings)
                 guard !Task.isCancelled else { return }
                 let size = settings.outputProfile.canvasSize
@@ -84,8 +140,8 @@ final class DestinationOutputController: ObservableObject {
             }
         }
         runtimes[id] = Runtime(generation: generation, destination: destination, publisher: publisher, video: mailbox,
-                               startTask: startTask, eventTask: eventTask, canvas: destination.canvas ?? .program)
-        fanout.add(id: id, publisher: publisher, video: mailbox, canvas: destination.canvas ?? .program)
+                               startTask: startTask, eventTask: eventTask, canvas: destination.canvas ?? .program, encoderGroup: encoderGroup, encoded: encoded)
+        fanout.add(id: id, publisher: publisher, video: mailbox, canvas: destination.canvas ?? .program, group: encoderGroup)
         changed()
     }
 
@@ -110,17 +166,19 @@ final class DestinationOutputController: ObservableObject {
         fanout.remove(id: id)
         runtime.startTask.cancel()
         runtime.eventTask.cancel()
-        runtime.video.stop()
+        runtime.video.stop(); runtime.encoded?.stop(); releaseEncoderGroup(runtime, id: id)
+        if runtime.encoderGroup == nil { finalizingRawPublishers.insert(runtime.generation) }
         changed()
         let task = Task { [weak self] in
             await runtime.publisher.stop()
             guard let self else { return }
+            self.finalizingRawPublishers.remove(runtime.generation)
             self.completedStops.insert(runtime.generation); self.completedStopOrder.append(runtime.generation)
             while self.completedStopOrder.count > 128 { self.completedStops.remove(self.completedStopOrder.removeFirst()) }
             let ownsStop = self.pendingStops[id]?.generation == runtime.generation
             if ownsStop { self.pendingStops[id] = nil }
             // A fresh session or teardown may already own this ID.
-            guard ownsStop, self.runtimes[id] == nil, self.states[id] == .stopping else { return }
+            guard ownsStop, self.runtimes[id] == nil, self.states[id] == .stopping else { self.changed(); return }
             self.states[id] = .idle
             self.changed()
         }
@@ -171,7 +229,10 @@ final class DestinationOutputController: ObservableObject {
             }
             let runtime = runtimes[id]
             let stats = await runtime?.publisher.statsSnapshot()
-            let mailbox = runtime?.video.statistics()
+            let mailbox: (depth: Int, drops: Int)?
+            if let encoded = runtime?.encoded {
+                let counters = encoded.statistics(); mailbox = (counters.depth, counters.drops)
+            } else { mailbox = runtime?.video.statistics() }
             result.append(.init(id: id.uuidString, state: label, startedAt: acknowledgedStarts[id],
                 targetFPS: stats?.frameRate, achievedFPS: stats?.achievedFrameRate,
                 bitrate: stats?.bitRate, socketQueueBytes: stats?.queueBytes,
@@ -187,9 +248,12 @@ final class DestinationOutputController: ObservableObject {
         case .connecting:
             if case .reconnecting = states[id] {} else { states[id] = .connecting }
         case .published:
+            runtimes[id]?.encoded?.setPublished(true)
             states[id] = .live
             if acknowledgedStarts[id] == nil { acknowledgedStarts[id] = Date() }
-        case .reconnecting: states[id] = .reconnecting(reason: "Connection interrupted; this destination is retrying.")
+        case .reconnecting:
+            runtimes[id]?.encoded?.setPublished(false)
+            states[id] = .reconnecting(reason: "Connection interrupted; this destination is retrying.")
         case .failed: fail(id: id, message: "This destination failed. Check its endpoint and credentials, then retry."); return
         case .stopped: stop(id); return
         }
@@ -201,13 +265,32 @@ final class DestinationOutputController: ObservableObject {
             fanout.remove(id: id)
             runtime.startTask.cancel()
             runtime.eventTask.cancel()
-            runtime.video.stop()
-            Task { await runtime.publisher.stop() }
+            runtime.video.stop(); runtime.encoded?.stop(); releaseEncoderGroup(runtime, id: id)
+            if runtime.encoderGroup == nil { finalizingRawPublishers.insert(runtime.generation) }
+            Task { [weak self] in
+                await runtime.publisher.stop()
+                guard let self else { return }
+                self.finalizingRawPublishers.remove(runtime.generation); self.changed()
+            }
         }
         // Transport NSError descriptions sometimes include credential-bearing
         // URLs. Only a fixed, actionable public message reaches UI/project state.
         states[id] = .failed(message)
         changed()
+    }
+
+    private func releaseEncoderGroup(_ runtime: Runtime, id: UUID) {
+        guard let group = runtime.encoderGroup else { return }
+        group.remove(id)
+        guard !runtimes.values.contains(where: { $0.encoderGroup === group }) else { return }
+        guard encoderGroups[group.key] === group else { return }
+        encoderGroups[group.key] = nil; finishingEncoderGroups[group.id] = group
+        group.stop { [weak self, weak group] in
+            Task { @MainActor in
+                guard let self, let group else { return }
+                self.finishingEncoderGroups[group.id] = nil; self.changed()
+            }
+        }
     }
 
     private func changed() { stateDidChange?() }
@@ -240,12 +323,12 @@ final class DestinationVideoMailbox: @unchecked Sendable {
 /// Capture-thread fanout snapshots sinks under a lock and releases it BEFORE
 /// ingress. Both ingress methods are synchronous bounded enqueues.
 final class DestinationMediaFanout: @unchecked Sendable {
-    private struct Sink { var publisher: any Publisher; var video: DestinationVideoMailbox; var canvas: OutputCanvas }
+    private struct Sink { var publisher: any Publisher; var video: DestinationVideoMailbox; var canvas: OutputCanvas; var group: DestinationSharedEncoder? }
     private var lock = os_unfair_lock_s()
     private var sinks: [UUID: Sink] = [:]
-    func add(id: UUID, publisher: any Publisher, video: DestinationVideoMailbox, canvas: OutputCanvas = .program) {
+    func add(id: UUID, publisher: any Publisher, video: DestinationVideoMailbox, canvas: OutputCanvas = .program, group: DestinationSharedEncoder? = nil) {
         os_unfair_lock_lock(&lock)
-        sinks[id] = Sink(publisher: publisher, video: video, canvas: canvas)
+        sinks[id] = Sink(publisher: publisher, video: video, canvas: canvas, group: group)
         os_unfair_lock_unlock(&lock)
     }
     func remove(id: UUID) {
@@ -259,9 +342,19 @@ final class DestinationMediaFanout: @unchecked Sendable {
         return Array(sinks.values)
     }
     func enqueueVideo(_ sample: CMSampleBuffer, canvas: OutputCanvas = .program) {
-        for sink in snapshot() where sink.canvas == canvas { sink.video.enqueue(sample) }
+        var visited = Set<UUID>()
+        for sink in snapshot() where sink.canvas == canvas {
+            if let group = sink.group { if visited.insert(group.id).inserted { group.enqueueVideo(sample) } }
+            else { sink.video.enqueue(sample) }
+        }
     }
-    func enqueueAudio(_ sample: CMSampleBuffer) { for sink in snapshot() { sink.publisher.enqueueProgram(sample) } }
+    func enqueueAudio(_ sample: CMSampleBuffer) {
+        var visited = Set<UUID>()
+        for sink in snapshot() {
+            if let group = sink.group { if visited.insert(group.id).inserted { group.enqueueAudio(sample) } }
+            else { sink.publisher.enqueueProgram(sample) }
+        }
+    }
 }
 
 struct DestinationDiagnosticSnapshot: Codable, Sendable {

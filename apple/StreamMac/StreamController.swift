@@ -79,6 +79,9 @@ final class StreamController: ObservableObject {
     @Published private(set) var isRehearsing = false
     private var rehearsalOwnsPreview = false
     private var rehearsalObserver: AnyCancellable?
+    private var rehearsalToken: UUID?
+    private weak var rehearsalRecorder: RecordingController?
+    private var rehearsalStopRequested = false
 
 
     /// Convenience for UI; `streamState` carries the full picture.
@@ -1011,18 +1014,18 @@ final class StreamController: ObservableObject {
         guard !resilience.isLocked else { errorMessage = "Unlock this Mac before starting public outputs."; return }
         guard !isRehearsing else { errorMessage = "End local rehearsal before public Go Live."; return }
         guard streamState.canStart else { return }
-        if let error = recordingEncoderReservations.publishingError(current: 0, starting: destinations.enabled.count) {
+        settings = settingsStore.load()
+        let planned = outputEncodingPlan(program: settings.outputProfile)
+        if let error = recordingEncoderReservations.publishingError(current: activePublishingEncoderCount, starting: planned.encoderSessions) {
             errorMessage = error; return
         }
-        if let limit = maximumPublishingEncoders(), destinations.enabled.count > limit {
+        if let limit = maximumPublishingEncoders(), activePublishingEncoderCount + planned.encoderSessions > limit {
             errorMessage = "Selected destinations exceed the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
             return
         }
         settings = settingsStore.load()
         if let error = canvasStartError(destinations: destinations.enabled) { errorMessage = error; return }
-        let plan = DestinationEncodingPlan(destinations: destinations.enabled.map(destinationForEncodingPlan), program: settings.outputProfile,
-            measuredUplinkMbps: destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil,
-            measuredSessionLimit: destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil)
+        let plan = outputEncodingPlan(program: settings.outputProfile)
         guard plan.issues.isEmpty else { errorMessage = plan.issues.joined(separator: "\n"); return }
         // Keep the program and recording canvas unchanged. Every destination's
         // encoder receives its own output geometry from its adapted settings.
@@ -1034,14 +1037,6 @@ final class StreamController: ObservableObject {
         guard !isRehearsing else { errorMessage = "End local rehearsal before starting a public destination."; return }
         guard let destination = destinations.saved.first(where: { $0.id == id }) else { return }
         guard !(destinationOutputs.states[id]?.isActive ?? false) else { return }
-        if let error = recordingEncoderReservations.publishingError(current: activePublishingEncoderCount, starting: 1) {
-            errorMessage = error; destinationOutputs.recordFailure(destination, message: error); return
-        }
-        if let limit = maximumPublishingEncoders(), activePublishingEncoderCount + 1 > limit {
-            let message = "This destination exceeds the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
-            errorMessage = message; destinationOutputs.recordFailure(destination, message: message)
-            return
-        }
         let base = settingsStore.load()
         if let error = canvasStartError(destinations: [destination]) {
             errorMessage = error; destinationOutputs.recordFailure(destination, message: error); return
@@ -1060,13 +1055,24 @@ final class StreamController: ObservableObject {
         } + [destination]
         let plan = DestinationEncodingPlan(destinations: activeDestinations.map(destinationForEncodingPlan), program: base.outputProfile,
             measuredUplinkMbps: destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil,
-            measuredSessionLimit: destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil)
+            measuredSessionLimit: destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil,
+            shareH264AAC: destinations.sharesFixedH264AAC, sourceFrameRate: activeProfile.frameRate)
         guard plan.issues.isEmpty else {
             destinationOutputs.recordFailure(destination, message: plan.issues.joined(separator: "\n"))
             return
         }
         var canvasBase = base; canvasBase.outputProfile = canvasProfile
         let adapted = DestinationValidator.settings(destination, credentials: credentials, base: canvasBase)
+        destinationOutputs.sharedEncodingEnabled = destinations.sharesFixedH264AAC
+        destinationOutputs.sharedSourceFrameRate = activeProfile.frameRate
+        let additional = destinationOutputs.additionalEncoderSessions(destination: destination, settings: adapted)
+        if let error = recordingEncoderReservations.publishingError(current: activePublishingEncoderCount, starting: additional) {
+            errorMessage = error; destinationOutputs.recordFailure(destination, message: error); return
+        }
+        if let limit = maximumPublishingEncoders(), activePublishingEncoderCount + additional > limit {
+            let message = "This destination exceeds the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
+            errorMessage = message; destinationOutputs.recordFailure(destination, message: message); return
+        }
         resilience.acknowledgeManualRestart()
         destinationOutputs.start(destination, settings: adapted)
     }
@@ -1094,6 +1100,12 @@ final class StreamController: ObservableObject {
         reconcileSourceDemand()
     }
 
+    func outputEncodingPlan(program: OutputProfile) -> DestinationEncodingPlan {
+        DestinationEncodingPlan(destinations: destinations.enabled.map(destinationForEncodingPlan), program: program,
+            measuredUplinkMbps: destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil,
+            measuredSessionLimit: destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil,
+            shareH264AAC: destinations.sharesFixedH264AAC, sourceFrameRate: activeProfile.frameRate)
+    }
     private func destinationForEncodingPlan(_ destination: StreamDestination) -> StreamDestination {
         guard destination.canvas == .secondary, destination.followsProgramProfile else { return destination }
         var copy = destination; copy.followsProgramProfile = false; copy.outputProfile = activeSecondaryProfile
@@ -1109,30 +1121,54 @@ final class StreamController: ObservableObject {
     }
 
     func beginLocalRehearsal(recorder: RecordingController) {
-        guard !streamState.isActive, !recorder.state.isActive else { return }
+        guard !isRehearsing, !streamState.isActive, destinationOutputs.activeCount == 0, activePublishingEncoderCount == 0,
+              !recorder.state.isActive, reservedRecordingEncoderCount == 0 else { return }
+        let token = UUID()
+        rehearsalToken = token
+        rehearsalRecorder = recorder
+        rehearsalStopRequested = false
         rehearsalOwnsPreview = previewState == .idle
-        if rehearsalOwnsPreview { startPreview() }
-        recorder.start(stream: self)
-        guard recorder.state.isRecording else { return }
+        // Reserve local rehearsal before capture, countdown or asynchronous
+        // writer preparation can yield. A Preparing recorder is not yet
+        // Recording, but public publishers must already be blocked.
         isRehearsing = true
         destinationOutputs.isPublishingAllowed = false
-        rehearsalObserver = recorder.$state.sink { [weak self] state in
-            guard let self else { return }
-            if !state.isActive {
-                self.isRehearsing = false
-                self.destinationOutputs.isPublishingAllowed = true
+        rehearsalObserver = recorder.$state.sink { [weak self, weak recorder] _ in
+            // Published sends before the stored state changes. Inspect the
+            // current state on the next turn, and reject old-session callbacks.
+            Task { @MainActor [weak self, weak recorder] in
+                guard let self, let recorder, self.rehearsalToken == token,
+                      !recorder.state.isActive else { return }
+                self.stopLocalRehearsal(recorder: recorder, token: token)
             }
         }
+        if rehearsalOwnsPreview { startPreview() }
+        recorder.start(stream: self)
+        if !recorder.state.isActive { stopLocalRehearsal(recorder: recorder, token: token) }
     }
 
     func endLocalRehearsal(recorder: RecordingController) {
-        guard isRehearsing else { return }
-        recorder.stop()
-        isRehearsing = false
-        destinationOutputs.isPublishingAllowed = true
-        rehearsalObserver = nil
-        if rehearsalOwnsPreview { stopPreview() }
-        rehearsalOwnsPreview = false
+        guard rehearsalRecorder === recorder, let token = rehearsalToken else { return }
+        stopLocalRehearsal(recorder: recorder, token: token)
+    }
+
+    private func stopLocalRehearsal(recorder: RecordingController, token: UUID) {
+        guard rehearsalToken == token, !rehearsalStopRequested else { return }
+        rehearsalStopRequested = true
+        // The completion includes countdown/preflight cancellation, the
+        // current writer, isolated tracks and any previous segment finalizing.
+        // Publishing remains blocked until all recording ownership is released.
+        recorder.stop { [weak self] in
+            guard let self, self.rehearsalToken == token else { return }
+            self.rehearsalObserver = nil
+            self.rehearsalToken = nil
+            self.rehearsalRecorder = nil
+            self.rehearsalStopRequested = false
+            if self.rehearsalOwnsPreview { self.stopPreview() }
+            self.rehearsalOwnsPreview = false
+            self.isRehearsing = false
+            self.destinationOutputs.isPublishingAllowed = true
+        }
     }
 
     func preflightFacts(programAudioPeak: Float?, assetAvailability: (AssetID) -> AssetAvailability = { _ in .unknown }) -> StreamPreflightFacts {
@@ -1236,8 +1272,13 @@ final class StreamController: ObservableObject {
             activeProfile.frameRate > capabilities.hardwareMaxFrameRate {
             facts.profileErrors.append("Program canvas exceeds this Mac's estimated hardware limits.")
         }
-        let plan = destinations.encodingPlan(program: settings.outputProfile)
-        facts.encoderCount = plan.encoderSessions
+        let plan = outputEncodingPlan(program: settings.outputProfile)
+        // Count active/finalizing encoder owners even when their destinations
+        // no longer appear in the saved plan. Recording reservations remain
+        // separate so the checklist applies the combined studio limit once.
+        facts.encoderCount = max(plan.encoderSessions, activePublishingEncoderCount)
+        facts.recordingEncoderReservations = recordingEncoderReservations.recordingCount
+        facts.sharedH264AAC = destinations.sharesFixedH264AAC
         facts.testedEncoderBudget = destinations.measuredSessionLimit > 0 ? destinations.measuredSessionLimit : nil
         facts.requiredUplinkMbps = plan.requiredUplinkMbps
         facts.measuredUplinkMbps = destinations.measuredUplinkMbps > 0 ? destinations.measuredUplinkMbps : nil
@@ -1285,14 +1326,14 @@ final class StreamController: ObservableObject {
     /// mid-program, and the recording writer's input is locked to the size of
     /// its first frame).
     private var outputsOwnProfile: Bool {
-        streamState.isActive || recordingDemand > 0 || !recordingEncoderReservations.recordings.isEmpty || externalDisplayDemand > 0 || virtualCameraDemand > 0
+        streamState.isActive || destinationOutputs.encoderSessionCount > 0 || recordingDemand > 0 || !recordingEncoderReservations.recordings.isEmpty || externalDisplayDemand > 0 || virtualCameraDemand > 0
     }
 
     /// Public read for the W04 settings session: while this is true,
     /// connection and canvas/fps edits stage for the next session.
     var outputSessionActive: Bool { outputsOwnProfile }
     var reservedRecordingEncoderCount: Int { recordingEncoderReservations.recordingCount }
-    var activePublishingEncoderCount: Int { destinationOutputs.states.values.filter { $0.isActive }.count }
+    var activePublishingEncoderCount: Int { destinationOutputs.encoderSessionCount }
 
     /// Applies a just-saved settings snapshot from the shared settings
     /// session (W04, issue #67). Updates the controller's working copy so no
