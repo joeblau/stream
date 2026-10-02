@@ -57,8 +57,11 @@ final class AssetLibraryStore: ObservableObject {
     nonisolated(unsafe) private var activationObserver: NSObjectProtocol?
     nonisolated(unsafe) private var workspaceObservers: [NSObjectProtocol] = []
 
-    init() {
-        var document = Self.loadDocument() ?? AssetLibraryDocument()
+    private let directory: URL
+
+    init(directory: URL = DesktopStorage.projectDirectory) {
+        self.directory = directory
+        var document = Self.loadDocument(url: directory.appendingPathComponent(Self.fileName)) ?? AssetLibraryDocument()
         document.pruneUsage()
         assets = document.assets
         usage = document.usage
@@ -191,7 +194,7 @@ final class AssetLibraryStore: ObservableObject {
 
         switch mode {
         case .copy:
-            guard let containerURL = Self.containerURL() else { return nil }
+            guard let containerURL = containerURL() else { return nil }
             let relativePath = "\(Self.copiesFolderName)/\(id.rawValue.uuidString)/\(fileName)"
             let destination = containerURL.appendingPathComponent(relativePath)
             do {
@@ -252,7 +255,7 @@ final class AssetLibraryStore: ObservableObject {
             guard let bookmark = AssetBookmarkCodec.makeBookmark(for: url) else { return false }
             asset.bookmarkData = bookmark
         case .projectCopy:
-            guard let containerURL = Self.containerURL(),
+            guard let containerURL = containerURL(),
                   let relativePath = asset.relativePath else { return false }
             let destination = containerURL.appendingPathComponent(relativePath)
             do {
@@ -323,7 +326,7 @@ final class AssetLibraryStore: ObservableObject {
 
         switch targetMode {
         case .copy:
-            guard let containerURL = Self.containerURL() else { return false }
+            guard let containerURL = containerURL() else { return false }
             // Replace always owns a FRESH copy path (the old copy may be
             // shared after a dedup adopt — never mutate shared storage).
             let relativePath = "\(Self.copiesFolderName)/\(id.rawValue.uuidString)/\(url.lastPathComponent)"
@@ -375,7 +378,7 @@ final class AssetLibraryStore: ObservableObject {
         guard let asset = asset(withID: id) else { return }
         if asset.storage == .projectCopy, let relativePath = asset.relativePath,
            !assets.contains(where: { $0.id != id && $0.relativePath == relativePath }),
-           let containerURL = Self.containerURL() {
+           let containerURL = containerURL() {
             try? FileManager.default.removeItem(
                 at: containerURL.appendingPathComponent(relativePath).deletingLastPathComponent())
         }
@@ -399,7 +402,7 @@ final class AssetLibraryStore: ObservableObject {
         switch asset.storage {
         case .projectCopy:
             guard let relativePath = asset.relativePath,
-                  let containerURL = Self.containerURL() else { return nil }
+                  let containerURL = containerURL() else { return nil }
             let url = containerURL.appendingPathComponent(relativePath)
             return ResolvedAssetAccess(url: url, needsSecurityScope: false)
         case .linked:
@@ -427,7 +430,7 @@ final class AssetLibraryStore: ObservableObject {
         guard !snapshot.isEmpty else { return }
         probeGeneration += 1
         let generation = probeGeneration
-        let containerURL = Self.containerURL()
+        let containerURL = containerURL()
         Task.detached(priority: .utility) { [weak self] in
             var results: [AssetID: (AssetAvailability, Data?)] = [:]
             for asset in snapshot {
@@ -567,19 +570,12 @@ final class AssetLibraryStore: ObservableObject {
 
     // MARK: - Persistence (the SceneStore/SoundboardStore pattern)
 
-    private static func containerURL() -> URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: AppGroup.identifier)
-    }
-
-    private static func fileURL() -> URL? {
-        containerURL()?.appendingPathComponent(fileName)
-    }
+    private func containerURL() -> URL? { directory }
 
     /// Loads the document, quarantining an unreadable/newer file aside (never
     /// crash-loop, never overwrite data that couldn't be read — the S12 rule).
-    private static func loadDocument() -> AssetLibraryDocument? {
-        guard let url = fileURL(), let data = try? Data(contentsOf: url) else { return nil }
+    private static func loadDocument(url: URL) -> AssetLibraryDocument? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
         guard let document = try? JSONDecoder().decode(AssetLibraryDocument.self, from: data)
         else {
             let formatter = DateFormatter()
@@ -609,9 +605,9 @@ final class AssetLibraryStore: ObservableObject {
 
     private func writeDocument() {
         let document = AssetLibraryDocument(assets: assets, usage: usage)
-        guard let url = Self.fileURL(),
-              let data = try? JSONEncoder().encode(document) else { return }
-        try? data.write(to: url, options: .atomic)
+        let url = directory.appendingPathComponent(Self.fileName)
+        guard let data = try? JSONEncoder().encode(document) else { return }
+        try? ProjectDocumentHistory.write(data, to: url)
     }
 }
 

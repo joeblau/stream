@@ -172,6 +172,7 @@ final class StreamController: ObservableObject {
     private let programConverter = PreviewImageConverter()
 
     private var settings: StreamSettings = .default
+    private let settingsStore = DesktopSettingsStore()
     /// The W06 permission center (issue #69), shared with the app root. C10:
     /// status transitions drive capture recovery (a re-granted permission
     /// retries the sources its denial blocked; a camera revocation marks the
@@ -204,7 +205,7 @@ final class StreamController: ObservableObject {
         // The persisted profile is the canvas authority from launch, so the
         // preview opens at the configured geometry before any source frame
         // ever arrives.
-        let persisted = SettingsStore().load()
+        let persisted = settingsStore.load()
         self.settings = persisted
         self.activeProfile = persisted.outputProfile
 
@@ -546,7 +547,7 @@ final class StreamController: ObservableObject {
 
     func startPreview() {
         guard previewState == .idle else { return }
-        settings = SettingsStore().load()
+        settings = settingsStore.load()
         applyOutputProfile(settings.outputProfile)
         previewState = .active
         // PREVIEW monitor: the staged composition from the preview engine.
@@ -605,9 +606,19 @@ final class StreamController: ObservableObject {
         Task { await previewEngine.run(scene: staged, canvasSize: canvasSize, frameRate: fps) }
     }
 
+    func prepareForProjectChange() async {
+        guard !outputSessionActive else { return }
+        stopPreview()
+        await engine.stop()
+        await previewEngine.stop()
+        await audioEngine.stop()
+        capturePool.stopAll()
+        audio.stop()
+    }
+
     func goLive() {
         guard streamState.canStart else { return }
-        settings = SettingsStore().load()
+        settings = settingsStore.load()
         guard settings.isPublishable else {
             errorMessage = "Complete the connection settings before going live."
             return

@@ -143,8 +143,11 @@ final class AnnotationStore: ObservableObject {
     /// for the app's lifetime; this is belt-and-braces).
     nonisolated(unsafe) private var terminationObserver: NSObjectProtocol?
 
-    init() {
-        document = Self.loadDocument() ?? AnnotationDocument()
+    private let storageURL: URL
+
+    init(directory: URL = DesktopStorage.projectDirectory) {
+        storageURL = directory.appendingPathComponent(Self.fileName)
+        document = Self.loadDocument(url: storageURL) ?? AnnotationDocument()
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: nil
         ) { [weak self] _ in
@@ -295,16 +298,10 @@ final class AnnotationStore: ObservableObject {
 
     // MARK: - Persistence (the SoundboardStore pattern)
 
-    private static func fileURL() -> URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: AppGroup.identifier)?
-            .appendingPathComponent(fileName)
-    }
-
     /// Loads the document, quarantining an unreadable/newer file aside (never
     /// crash-loop, never overwrite data that couldn't be read — the S12 rule).
-    private static func loadDocument() -> AnnotationDocument? {
-        guard let url = fileURL(), let data = try? Data(contentsOf: url) else { return nil }
+    private static func loadDocument(url: URL) -> AnnotationDocument? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
         guard let document = try? JSONDecoder().decode(AnnotationDocument.self, from: data) else {
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyyMMdd-HHmmss"
@@ -332,9 +329,9 @@ final class AnnotationStore: ObservableObject {
     }
 
     private func writeDocument() {
-        guard let url = Self.fileURL(),
-              let data = try? JSONEncoder().encode(document) else { return }
-        try? data.write(to: url, options: .atomic)
+        let url = storageURL
+        guard let data = try? JSONEncoder().encode(document) else { return }
+        try? ProjectDocumentHistory.write(data, to: url)
     }
 }
 

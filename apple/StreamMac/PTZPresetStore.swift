@@ -34,7 +34,7 @@ final class PTZPresetStore: ObservableObject {
     /// for the app's lifetime; this is belt-and-braces).
     nonisolated(unsafe) private var terminationObserver: NSObjectProtocol?
 
-    init(documentStore: PTZDocumentStore? = PTZDocumentStore.default()) {
+    init(documentStore: PTZDocumentStore? = PTZDocumentStore(fileURL: DesktopStorage.projectDirectory.appendingPathComponent("stream.ptz.v1.json"))) {
         self.documentStore = documentStore
         let document = documentStore?.load() ?? PTZDocument()
         targets = document.targets

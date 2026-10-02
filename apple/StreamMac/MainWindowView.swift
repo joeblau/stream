@@ -31,6 +31,7 @@ import UniformTypeIdentifiers
 /// per-state Go Live button); window close while an output is active is
 /// confirmed in-window via `WindowCloseGuard`.
 struct MainWindowView: View {
+    @EnvironmentObject private var workspace: StudioWorkspace
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var controller: StreamController
     @EnvironmentObject private var session: SettingsSession
@@ -94,6 +95,20 @@ struct MainWindowView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            if workspace.showProjects { ProjectBrowserView() }
+            studioPanels
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button { workspace.showProjects.toggle() } label: {
+                    Label(workspace.currentProject.name + " · " + workspace.currentProfile.name, systemImage: "folder")
+                }.help("Open shows and production profiles")
+            }
+        }
+    }
+
+    private var studioPanels: some View {
         HSplitView {
             if showScenesPanel {
                 SceneBrowserView()
