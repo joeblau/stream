@@ -10,6 +10,6 @@ readonly RECOVERY_PRODUCTS="$RECOVERY_BUILD_PATH/Build/Products/Debug"
 xcrun swiftc -swift-version 6 -parse-as-library \
     -F "$RECOVERY_PRODUCTS" -framework StreamCore \
     -Xlinker -rpath -Xlinker "${RECOVERY_PRODUCTS:A}" \
-    StreamMac/SessionRecoveryCoordinator.swift StreamMac/SessionRecordingJournalReader.swift \
+    StreamMac/SessionRecoveryCoordinator.swift StreamMac/SessionRecordingJournalReader.swift StreamMac/RecoveryEventReviewCoordinator.swift \
     scripts/session_recovery_harness.swift -o "$RECOVERY_BUILD_PATH/session-recovery-harness"
 "$RECOVERY_BUILD_PATH/session-recovery-harness"

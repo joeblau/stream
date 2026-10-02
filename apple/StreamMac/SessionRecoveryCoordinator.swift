@@ -49,6 +49,7 @@ actor SessionRecoveryDiskStore {
     @Published private(set) var pending: SessionRecoverySnapshot?
     @Published private(set) var error: String?
     @Published var showReview = false
+    let remoteReview = RecoveryEventReviewCoordinator()
     let sessionID = UUID()
     var restoreLocalContext: (@MainActor (SessionRecoverySnapshot) async -> Void)?
     var contextLabel: ((UUID, UUID) -> String?)?
@@ -68,8 +69,12 @@ actor SessionRecoveryDiskStore {
             preserveNeeded = prior == nil && pending != nil
             showReview = pending != nil
         } catch { self.error = "Recovery metadata could not be read. Its original bytes are preserved; review project backups and recordings manually." }
+        remoteReview.load(pending, context: nil)
     }
-    func beginContext(projectID: UUID, profileID: UUID) { context = (projectID, profileID) }
+    func beginContext(projectID: UUID, profileID: UUID, generation: UUID = UUID()) {
+        context = (projectID, profileID)
+        remoteReview.load(pending, context: .init(projectID: projectID, profileID: profileID, generation: generation))
+    }
     func reportError(_ message: String) { error = String(message.prefix(500)) }
     func checkpoint(_ snapshot: SessionRecoverySnapshot) {
         if let context, (snapshot.projectID != context.0 || snapshot.profileID != context.1) { return }
@@ -112,7 +117,10 @@ actor SessionRecoveryDiskStore {
     }
     func dismiss() async {
         await flush()
-        do { try await store.dismissPending(id: pending?.id ?? UUID()); pending = nil; showReview = false; preserveNeeded = false }
+        do {
+            try await store.dismissPending(id: pending?.id ?? UUID()); pending = nil; showReview = false; preserveNeeded = false
+            remoteReview.load(nil, context: nil)
+        }
         catch { self.error = "The recovery review could not be dismissed." }
     }
 }

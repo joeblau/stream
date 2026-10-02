@@ -47,7 +47,25 @@ public struct SessionRecoveryRemoteEvent: Codable, Equatable, Sendable {
     public var outputID: UUID
     public var eventID: String?
     public var state: State
-    public init(outputID: UUID, eventID: String? = nil, state: State = .unknown) { self.outputID = outputID; self.eventID = eventID; self.state = state }
+    /// Optional additions keep old v1 journals readable. They describe the
+    /// session that actually started, never the destination's current edits.
+    public var provider: ManagedProvider?
+    public var channelID: String?
+    public var publisherSessionID: UUID?
+    public var capturedAt: Date?
+    public init(outputID: UUID, eventID: String? = nil, state: State = .unknown,
+                provider: ManagedProvider? = nil, channelID: String? = nil,
+                publisherSessionID: UUID? = nil, capturedAt: Date? = nil) {
+        self.outputID = outputID; self.eventID = eventID; self.state = state
+        self.provider = provider; self.channelID = channelID
+        self.publisherSessionID = publisherSessionID; self.capturedAt = capturedAt
+    }
+    public var reviewIdentity: RecoveryEventIdentity? {
+        guard let provider, let channelID, let eventID, let publisherSessionID, let capturedAt else { return nil }
+        let identity = RecoveryEventIdentity(outputID: outputID, publisherSessionID: publisherSessionID,
+            provider: provider, channelID: channelID, eventID: eventID, capturedAt: capturedAt)
+        return identity.isValid ? identity : nil
+    }
 }
 public struct SessionRecoverySnapshot: Codable, Equatable, Sendable, Identifiable {
     public var version = 1
@@ -80,8 +98,10 @@ public struct SessionRecoverySnapshot: Codable, Equatable, Sendable, Identifiabl
               Set(remoteEvents.map(\.outputID)).count == remoteEvents.count else { return "Recovery journal contains duplicate stable IDs." }
         guard stagedLayers.allSatisfy(\.isValid), recordings.allSatisfy(\.isValid), media.allSatisfy({ ($0.seconds.map { $0.isFinite && $0 >= 0 } ?? true) && ($0.page.map { $0 >= 0 } ?? true) }) else { return "Recovery journal contains invalid timing, geometry or local file references." }
         guard remoteEvents.allSatisfy({ item in
+            guard item.channelID.map(RecoveryEventIdentity.validID) ?? true,
+                  item.capturedAt.map({ $0.timeIntervalSince1970.isFinite }) ?? true else { return false }
             guard let id = item.eventID else { return item.state == .unknown }
-            return !id.isEmpty && id.utf8.count <= 200 && id.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || "_-".unicodeScalars.contains($0) }
+            return RecoveryEventIdentity.validID(id)
         }) else { return "Remote event identifiers must be verified provider IDs, never URLs or credentials." }
         return nil
     }

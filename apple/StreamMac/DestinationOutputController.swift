@@ -13,6 +13,13 @@ final class DestinationOutputController: ObservableObject {
     let fanout = DestinationMediaFanout()
     var stateDidChange: (() -> Void)?
     private(set) var acknowledgedStarts: [UUID: Date] = [:]
+    /// Retain the most recent actual start for each output, including stopped
+    /// sessions whose remote event may still be live. Never read edited drafts
+    /// or infer a remote end from a local stop/failure.
+    private var recoveryStarts: [UUID: SessionRecoveryRemoteEvent] = [:]
+    var recoveryRemoteEvents: [SessionRecoveryRemoteEvent] {
+        recoveryStarts.values.sorted { $0.outputID.uuidString < $1.outputID.uuidString }
+    }
     /// Rehearsal disables publisher creation at the output boundary as well as
     /// the command/UI entry points, so no public transport can be started.
     var isPublishingAllowed = true
@@ -141,6 +148,18 @@ final class DestinationOutputController: ObservableObject {
         }
         runtimes[id] = Runtime(generation: generation, destination: destination, publisher: publisher, video: mailbox,
                                startTask: startTask, eventTask: eventTask, canvas: destination.canvas ?? .program, encoderGroup: encoderGroup, encoded: encoded)
+        let binding = destination.providerBinding.flatMap {
+            RecoveryEventIdentity.validID($0.channelID) && ($0.eventID.map(RecoveryEventIdentity.validID) ?? true) ? $0 : nil
+        }
+        recoveryStarts[id] = .init(outputID: id, eventID: binding?.eventID, provider: binding?.provider,
+            channelID: binding?.channelID, publisherSessionID: generation, capturedAt: Date())
+        while recoveryStarts.count > 10 {
+            // Active sessions always retain their identity. Only stopped prior
+            // outputs are evicted from this bounded recent-session inventory.
+            guard let oldest = recoveryStarts.values.filter({ runtimes[$0.outputID] == nil })
+                .min(by: { ($0.capturedAt ?? .distantPast) < ($1.capturedAt ?? .distantPast) }) else { break }
+            recoveryStarts[oldest.outputID] = nil
+        }
         fanout.add(id: id, publisher: publisher, video: mailbox, canvas: destination.canvas ?? .program, group: encoderGroup)
         changed()
     }
