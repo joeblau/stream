@@ -179,6 +179,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamMac
+        ENABLE_HARDENED_RUNTIME: YES
         GENERATE_INFOPLIST_FILE: YES
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         # The project base carries iOS-only settings; they do not apply here.
@@ -192,6 +193,21 @@ targets:
         # (the sandbox entitlements alone are not enough).
         INFOPLIST_KEY_NSCameraUsageDescription: Stream uses your cameras (including iPhone via Continuity Camera) as live sources in your broadcast scenes.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: Stream uses the microphone (including connected Bluetooth mics) to capture audio for your broadcast.
+    info:
+      path: StreamMac/Info.plist
+      properties:
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Stream Show
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes: [com.joeblau.stream.show]
+            LSTypeIsPackage: true
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.joeblau.stream.show
+            UTTypeDescription: Stream Show Package
+            UTTypeConformsTo: [com.apple.package, public.directory]
+            UTTypeTagSpecification:
+              public.filename-extension: [streamshow]
     entitlements:
       path: StreamMac/StreamMac.entitlements
       properties:
@@ -206,6 +222,7 @@ targets:
         com.apple.security.temporary-exception.audio-unit-host: true
         com.apple.security.device.camera: true
         com.apple.security.device.microphone: true
+        com.apple.security.device.audio-input: true
         com.apple.security.network.client: true
         # A02 (issue #97) / P03 (issue #80): media file playout + the asset
         # library — the file picker grants access to user-picked files,

@@ -10,6 +10,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  macos:
+    name: StreamMac build and tests (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Show native toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+          uname -m
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build desktop studio
+        run: |
+          xcodebuild build -project Stream.xcodeproj -scheme StreamMac \
+            -destination 'platform=macOS' -derivedDataPath build/desktop \
+            CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
+      - name: Test shared desktop logic
+        run: |
+          xcodebuild test -project Stream.xcodeproj -scheme StreamCoreTests \
+            -destination 'platform=macOS' -derivedDataPath build/tests \
+            -resultBundlePath build/desktop-tests.xcresult \
+            CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
+      - name: Validate sandbox declaration
+        run: python3 scripts/validate_desktop_distribution.py build/desktop/Build/Products/Debug/StreamMac.app
+      - name: Retain test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.runner }}
+          path: apple/build/desktop-tests.xcresult
+
   test:
     name: StreamCore tests (iOS Simulator)
     runs-on: macos-26

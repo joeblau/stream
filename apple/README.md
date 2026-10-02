@@ -1,5 +1,8 @@
 # Stream
 
+For the desktop studio, build the **StreamMac** scheme. See the
+[macOS workflow, projects, transfer, and distribution guide](docs/MACOS_STUDIO.md).
+
 **Stream** is an iOS 27+ app that captures the screen and publishes it to RTMP,
 RTMPS, SRT, or WHIP endpoints. It uses ScreenCaptureKit for system-managed content
 selection and sample delivery; ReplayKit and a broadcast upload extension are not
