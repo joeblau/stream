@@ -75,6 +75,8 @@ jobs:
           export STREAM_GUEST_RTC_INCLUDE="$STREAM_INTERVIEW_RETURN_BUILD_PATH/Build/Products/Debug/include/libdatachannel"
           export STREAM_INTERVIEW_TURN_SERVER="$PWD/apple/build/native-runtime-turn/build/bin/turnserver"
           apple/scripts/run_native_interview_return_audio_harness.zsh 2>&1 | tee apple/build/native-runtime-results/return-audio.log
+      - name: Exercise bounded guest return video adaptation policy
+        run: apple/scripts/run_native_guest_return_video_budget.zsh
       - name: Retain actual media and bounded qualification evidence
         if: always()
         uses: actions/upload-artifact@v4

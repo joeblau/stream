@@ -134,12 +134,27 @@ qualified dependencies; all generated/build files remain under
 zsh apple/scripts/run_native_interview_return_audio_harness.zsh
 ```
 
+The bounded video target policy and its hysteresis fixture can be exercised
+without a relay or browser:
+
+```sh
+zsh apple/scripts/run_native_guest_return_video_budget.zsh
+```
+
 ## Remaining acceptance
 
 Issue #127 stays open. This implementation has one native admitted guest, not a
 qualified multi-guest product. Selectable Program/clean/secondary video return,
-bounded adaptive video bandwidth, addressed private talkback and audio/video
-return synchronization are not implemented. Browser AEC is requested by device
+outgoing video encoding/routing, addressed private talkback and audio/video
+return synchronization are not implemented. A bounded video target policy now
+defines three profiles (320x180@15/250 kbps, 640x360@24/650 kbps and
+1280x720@30/1.5 Mbps), rejects out-of-range/stale observations, steps down
+after three congested windows and steps up after eight stable windows over at
+least three seconds. Its fixture validates those transitions and the profile
+ceiling. It consumes caller-supplied estimates and queue/drop observations; it
+does not measure network capacity, select a return source, encode video or send
+video. Thus bounded adaptive video bandwidth is not yet integrated into the
+guest connection. Browser AEC is requested by device
 check, but physical acoustic AEC/headphones behavior is unqualified. Mobile,
 restricted networks, deployed TURN broker, other codec/OS/architecture variants
 and signed app installation need their actual qualification. The local Worker
