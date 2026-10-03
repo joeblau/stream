@@ -56,7 +56,11 @@ private struct Ready: Codable {
                 if child { try await recordUntilKilled() } else { try await recover() }
                 exit(0)
             } catch {
-                print("FAIL: \(error.localizedDescription); all owned artifacts preserved at \(GuestFixtureStorage.artifactRoot.path)")
+                let native = error as NSError
+                print("FAIL: \(native.localizedDescription); domain=\(native.domain), code=\(native.code); all owned artifacts preserved at \(GuestFixtureStorage.artifactRoot.path)")
+                if let underlying = native.userInfo[NSUnderlyingErrorKey] as? NSError {
+                    print("Underlying error: domain=\(underlying.domain), code=\(underlying.code)")
+                }
                 exit(1)
             }
         }
@@ -78,8 +82,11 @@ private struct Ready: Codable {
         let workspace = StudioWorkspace(root: GuestFixtureStorage.machineDirectory)
         print("Stage: child shipping Workspace constructed")
         let runtime = workspace.runtime
+        print("Stage: child creating owned 2-second WAV")
         let mediaURL = try createOwnedMedia()
+        print("Stage: child owned WAV created; creating security-scoped bookmark")
         let bookmark = try mediaURL.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        print("Stage: child scoped bookmark created; restoring actual paused AVPlayer")
         let media = runtime.sceneStore.addSource(SourceDefinition(name: "Owned paused media",
             payload: .media(MediaSourcePayload(bookmarkData: bookmark, fileName: mediaURL.lastPathComponent, autoplay: true))))
         runtime.controller.capturePool.restorePausedMediaPosition(media.id, seconds: 1.25)
