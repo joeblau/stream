@@ -46,7 +46,7 @@ jobs:
           xcodebuild -version
           sw_vers
           uname -m
-          brew install xcodegen cmake ffmpeg opus openssl@3 libevent pkgconf
+          brew install xcodegen cmake ffmpeg opus openssl@3 libevent libmicrohttpd pkgconf
           npm ci --prefix workers/interviews
       - name: Build owned pinned TURN server
         run: |
