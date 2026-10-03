@@ -298,7 +298,9 @@ actor AudioMixEngine {
     /// the outgoing mix). Non-capture channels (mic, guests) are untouched —
     /// they are not scene-bound.
     func applyProgramCaptureGains(_ gains: [AudioChannelID: (volume: Float, isMuted: Bool)]) {
-        let captureChannels = registry.channelIDs().filter {
+        // A binding may precede its first PCM, or survive a ring reset/prune.
+        // Revoke those declarations too before a late callback registers them.
+        let captureChannels = Set(registry.channelIDs()).union(pendingGains.keys).filter {
             if case .capture = $0 { return true }
             return false
         }
@@ -672,6 +674,11 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
     private var channels: [AudioChannelID: ChannelIngest] = [:]
     private var anchor: CMTime = .invalid
+    /// Capture callbacks can arrive before explicit channel registration.
+    /// Retain declared local gains through ring resets so first-buffer
+    /// registration honors the controller's current routing and mute state.
+    /// Guest gains remain owned by the full receive-lease admission below.
+    private var localGains: [AudioChannelID: Float] = [:]
     /// A04: soloed channel IDs. Registry-level (not per-channel-instance) so
     /// solo survives channel teardown/re-creation — `reset`, pruning, and
     /// auto-registration all re-apply it to the next ingest instance.
@@ -880,7 +887,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         // auto-registered the channel (insert-less) just before this call,
         // and the explicit registration (VoicePolish on the mic) must win.
         channels[id] = ChannelIngest(insert: insert,
-                                     initialGain: gain?.effectiveGain ?? Self.defaultGain(for: id),
+                                     initialGain: gain?.effectiveGain ?? localGains[id] ?? Self.defaultGain(for: id),
                                      soloed: soloedIDs.contains(id),
                                      delayFrames: delayFramesByLabel[id.label] ?? 0,
                                      preEffectsEnabled: preEffectsIDs.contains(id))
@@ -889,7 +896,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     func ensureChannel(_ id: AudioChannelID, gain: AudioMixEngine.ChannelGain?) {
         os_unfair_lock_lock(&lock)
         if !isGuest(id), channels[id] == nil {
-            channels[id] = ChannelIngest(insert: nil, initialGain: gain?.effectiveGain ?? Self.defaultGain(for: id),
+            channels[id] = ChannelIngest(insert: nil, initialGain: gain?.effectiveGain ?? localGains[id] ?? Self.defaultGain(for: id),
                 soloed: soloedIDs.contains(id), delayFrames: delayFramesByLabel[id.label] ?? 0,
                 preEffectsEnabled: preEffectsIDs.contains(id))
         }
@@ -950,6 +957,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func setGain(_ id: AudioChannelID, effectiveGain: Float, rampFrames: Int) {
         os_unfair_lock_lock(&lock)
+        if !isGuest(id) { localGains[id] = effectiveGain }
         if guest?.channelID == id { guest?.gain = effectiveGain }
         let channel = channels[id]
         os_unfair_lock_unlock(&lock)
@@ -994,7 +1002,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         let anchor = self.anchor
         let channel = channels[id] ?? {
             let created = ChannelIngest(insert: nil,
-                                        initialGain: Self.defaultGain(for: id),
+                                        initialGain: localGains[id] ?? Self.defaultGain(for: id),
                                         soloed: soloedIDs.contains(id),
                                         delayFrames: delayFramesByLabel[id.label] ?? 0,
                                      preEffectsEnabled: preEffectsIDs.contains(id))

@@ -80,6 +80,8 @@ system picker and Screen Recording permission; denied access can be repaired in
 System Settings. The Sources inspector adds cameras, screen selections, media,
 PDFs, Syphon feeds, and web overlays. Capture resources are shared by their
 stable identities and unavailable sources show inline health.
+See [native source failover qualification](SOURCE_FAILOVER_NATIVE.md) for measured
+freeze/blank/offline/standby behavior and the remaining physical lifecycle gates.
 
 Preview edits are staged. Take publishes the staged scene to Program; Revert
 discards unpublished edits. Explicit Direct Live Editing publishes each edit.
