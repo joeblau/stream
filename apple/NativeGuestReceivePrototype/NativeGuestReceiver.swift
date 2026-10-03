@@ -49,6 +49,7 @@ final class NativeGuestReceiver: @unchecked Sendable {
     private var keyframePending = [false, false], lastKeyframe = [-Double.infinity, -Double.infinity]
     private var audioResetPending = false
     private let mappingGeneration = UUID()
+    private var privateRateStart = 0.0, privateMessages = 0, privateAcknowledgments = 0
     private var signals: [(String, String, String)] = [], signalBytes = 0, signalWorking = false
     private let signalQueue = DispatchQueue(label: "stream.guest.signaling")
     private let queues = (0..<3).map { DispatchQueue(label: "stream.guest.decode.\($0)", qos: .userInitiated) }
@@ -134,6 +135,13 @@ final class NativeGuestReceiver: @unchecked Sendable {
             SGReceiverSendReturnOpus(handle, lease.generation, $0.bindMemory(to: UInt8.self).baseAddress,
                                      $0.count, rtp, ntp) != 0
         }
+    }
+    func sendPrivateControl(_ envelope: GuestPrivateControlEnvelope) -> Bool {
+        guard let text = envelope.wire(negotiation: lease.negotiation) else { return false }
+        transportLock.lock(); defer { transportLock.unlock() }
+        lock.lock(); let permitted = active && !controlClosed; lock.unlock()
+        guard permitted, SGReceiverHostReady(handle) != 0 else { return false }
+        return SGReceiverSendControl(handle, text) != 0
     }
     func approveScreen(_ approved: Bool) -> Bool {
         approveScreen(approved) { [self] message in
@@ -244,10 +252,32 @@ final class NativeGuestReceiver: @unchecked Sendable {
         if type == "control" {
             guard let data = value.data(using: .utf8), data.count <= 1024,
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  object["type"] as? String == "screen-state", object["negotiation"] as? String == lease.negotiation.uuidString.lowercased(),
-                  object["sharing"] is Bool, object.count == 3 else { drops += 1; lock.unlock(); return }
+                  object["negotiation"] as? String == lease.negotiation.uuidString.lowercased() else { drops += 1; lock.unlock(); return }
+            if object["type"] as? String == "screen-state" {
+                guard object["sharing"] is Bool, object.count == 3 else { drops += 1; lock.unlock(); return }
+            } else {
+                guard let envelope = GuestPrivateControlEnvelope.parse(value, negotiation: lease.negotiation) else { drops += 1; lock.unlock(); return }
+                let now = hostSeconds()
+                if now - privateRateStart >= 1 { privateRateStart = now; privateMessages = 0; privateAcknowledgments = 0 }
+                let queued = signals.filter { $0.0 == "private-control" }.count
+                guard queued < 8, envelope.isMessage ? privateMessages < 8 : privateAcknowledgments < 32 else { drops += 1; lock.unlock(); return }
+                if envelope.isMessage { privateMessages += 1 } else { privateAcknowledgments += 1 }
+                let size = value.utf8.count + 32
+                guard active, signals.count < 32, signalBytes + size <= 196_608 else { drops += 1; lock.unlock(); return }
+                signals.append(("private-control", value, "")); signalBytes += "private-control".utf8.count + value.utf8.count
+                let start = !signalWorking; signalWorking = true; lock.unlock()
+                if start { signalQueue.async { [weak self] in self?.drainSignals() } }
+                return
+            }
         }
         let size = type.utf8.count + value.utf8.count + mid.utf8.count
+        // Private chat can occupy at most eight slots and yields them to
+        // signaling/control. It cannot shrink the existing media budget.
+        while signals.count >= 32 || signalBytes + size > 196_608 {
+            guard let index = signals.firstIndex(where: { $0.0 == "private-control" }) else { break }
+            let removed = signals.remove(at: index)
+            signalBytes -= removed.0.utf8.count + removed.1.utf8.count + removed.2.utf8.count
+        }
         guard active, size <= 65_600, signals.count < 32, signalBytes + size <= 196_608 else { drops += 1; lock.unlock(); return }
         signals.append((type, value, mid)); signalBytes += size
         let start = !signalWorking; signalWorking = true; lock.unlock()

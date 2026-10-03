@@ -9,11 +9,12 @@ enum NativeInterviewCommand: Equatable, Sendable {
     /// command cannot edit the connection that replaces it on reconnect.
     case setMuted(NativeInterviewPeerLease, Bool), setSolo(NativeInterviewPeerLease, Bool)
     case rename(NativeInterviewPeerLease, String)
+    case sendPrivateMessage(NativeInterviewPeerLease, String)
     case lock(Bool), disconnect, rejoin, end
 
     var capturesConnection: Bool {
         switch self {
-        case .setMuted, .setSolo, .rename: return true
+        case .setMuted, .setSolo, .rename, .sendPrivateMessage: return true
         default: return false
         }
     }
@@ -22,7 +23,7 @@ enum NativeInterviewCommand: Equatable, Sendable {
         switch self {
         case .admit(let id), .backstage(let id), .onair(let id), .remove(let id), .restartMedia(let id),
              .monitor(let id, _), .approveScreen(let id, _): return id
-        case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _): return context.receive.peerID
+        case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _), .sendPrivateMessage(let context, _): return context.receive.peerID
         default: return nil
         }
     }
@@ -38,6 +39,7 @@ enum NativeInterviewCommand: Equatable, Sendable {
         case .setMuted(_, let muted): return muted ? "Mute Guest" : "Unmute Guest"
         case .setSolo(_, let soloed): return soloed ? "Solo Guest in Monitor" : "Clear Guest Monitor Solo"
         case .rename: return "Rename Guest Locally"
+        case .sendPrivateMessage: return "Send Private Guest Message"
         case .lock(let locked): return locked ? "Lock Guest Room" : "Unlock Guest Room"
         case .disconnect: return "Disconnect Guest Room"
         case .rejoin: return "Rejoin Guest Room"
@@ -70,6 +72,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
     typealias ServiceFactory = @MainActor (NativeInterviewConfiguration, @escaping CredentialProvider) -> any NativeInterviewService
     typealias HostFactory = @MainActor (@escaping NativeInterviewReceiverFactory.SinkFactory) -> NativeInterviewHostBinding
     @Published private(set) var state = NativeInterviewControlState()
+    @Published private(set) var privateMessages: [NativeInterviewPrivateMessage] = []
     private let controller: StreamController
     private let serviceFactory: ServiceFactory
     private let hostFactory: HostFactory
@@ -135,7 +138,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
             nextGeneration: { [weak controller] in controller?.issueGuestReceiveGeneration() },
             slotForGuest: { [weak self] peer in self?.savedSlot(for: peer) })
         session = next
-        observation = next.$snapshot.sink { [weak self] _ in self?.scheduleReconciliation(epoch: current) }
+        observation = next.$snapshot.combineLatest(next.$privateMessages).sink { [weak self] _ in self?.scheduleReconciliation(epoch: current) }
         state = .init(busy: true)
         do {
             try await next.create(); try requireCurrent(current)
@@ -202,6 +205,10 @@ struct NativeInterviewControlState: Equatable, Sendable {
             return nil
         case .monitor(let id, false), .approveScreen(let id, false):
             return registered?.receive.peerID == id ? nil : .unavailable("This guest has no local media connection.")
+        case .sendPrivateMessage(let context, let text):
+            guard currentReadyLease == context else { return .invalidTarget("The guest connection changed.") }
+            guard NativeInterviewPrivateEnvelope.validText(text) else { return .invalidValue("A private message requires 1–512 UTF-8 bytes of plain text.") }
+            return session.canSendPrivateMessage(context: context) ? nil : .unavailable("Private messages require the current open media control channel and fewer than eight pending receipts.")
         case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _):
             guard currentReadyLease == context,
                   controller.registeredGuestAudioChannel(slot: context.receive.slot) != nil else {
@@ -228,6 +235,9 @@ struct NativeInterviewControlState: Equatable, Sendable {
         }
     }
 
+    func privateMessageConnectionOpen(context: NativeInterviewPeerLease) -> Bool {
+        currentReadyLease == context && session?.privateMessageConnectionOpen(context: context) == true
+    }
     func displayName(for guest: UUID) -> String {
         let slot = assignedSlot(for: guest)
         return controller.sceneStore.guestSlots.first(where: { $0.id == slot })?.resolvedName
@@ -302,6 +312,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
         case .setMuted, .setSolo:
             // Mixer mutations belong to StudioCommandDispatcher.
             return false
+        case .sendPrivateMessage(let context, let text): result = session.sendPrivateMessage(text, context: context)
         case .rename(let context, let name):
             guard var slot = controller.sceneStore.guestSlots.first(where: { $0.id == context.receive.slot }) else { return false }
             slot.localName = name; controller.sceneStore.replaceGuestSlot(slot); result = true
@@ -375,6 +386,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
                 routes[context.receive.peerID] = .init(slot: context.receive.slot, programAllowed: program, monitorAllowed: monitor)
             }
         }
+        privateMessages = session.privateMessages
         state.snapshot = snapshot; state.routes = routes; state.busy = !occupiedOperations.isEmpty
         state.failure = snapshot.failure
         if [.ended, .expired, .closed].contains(snapshot.phase) {
@@ -403,7 +415,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
         operation?.cancel(); operation = nil; operationID = nil
         credentialSource?.retire(); credentialSource = nil
         revokeAll(); binding?.shutdown(); binding = nil; session?.shutdown(); session = nil
-        configuration = nil; sharedInvite = nil
+        configuration = nil; sharedInvite = nil; privateMessages.removeAll()
     }
     private func publishBusy() { state.busy = !occupiedOperations.isEmpty }
     private func requireCurrent(_ current: UUID) throws {

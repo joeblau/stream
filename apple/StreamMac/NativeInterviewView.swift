@@ -95,6 +95,8 @@ struct NativeInterviewView: View {
                         serviceName: member.name,
                         localName: sceneStore.guestSlots.first(where: { $0.id == context.receive.slot })?.localName ?? "")
                         .id(context.receive.negotiation)
+                    NativeGuestPrivateMessages(manager: manager, dispatcher: dispatcher, context: context)
+                        .id(context.receive.negotiation)
                 }
                 Text(member.returnAudio == .ready ? "Public show audio return is active; your own audio is excluded." :
                     member.returnAudio == .preparing ? "Preparing public show audio return. Start local preview to supply the mix." :
@@ -202,6 +204,45 @@ private struct NativeGuestLocalControls: View {
         Button(title) { dispatcher.execute(.interview(action)) }
             .disabled(!dispatcher.canExecute(.interview(action)))
             .help(dispatcher.availabilityError(for: .interview(action))?.description ?? title)
+    }
+}
+
+/// Private conversation contents never enter the shared command snapshot.
+private struct NativeGuestPrivateMessages: View {
+    @ObservedObject var manager: NativeInterviewManager
+    @ObservedObject var dispatcher: StudioCommandDispatcher
+    let context: NativeInterviewPeerLease
+    @State private var draft = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Private messages").font(.headline)
+            if !manager.privateMessages.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(manager.privateMessages) { message in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(message.fromGuest ? "Guest" : "You").font(.caption).foregroundStyle(.secondary)
+                                Text(message.text).textSelection(.enabled)
+                                if !message.fromGuest { Text(receipt(message.delivery)).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxHeight: 150)
+            }
+            TextField("Message this guest privately", text: $draft, axis: .vertical)
+                .lineLimit(1...3).textFieldStyle(.roundedBorder)
+            Button("Send Private Message") {
+                let command = StudioCommand.interview(.sendPrivateMessage(context, draft))
+                if dispatcher.execute(command).error == nil { draft = "" }
+            }.disabled(!dispatcher.canExecute(.interview(.sendPrivateMessage(context, draft))))
+            Text("Text stays in this connection and is cleared on reconnect or room end. Received means the guest browser accepted it. Delivery without a receipt remains unknown; nothing is resent automatically.")
+                .font(.caption).foregroundStyle(.secondary)
+        }.onChange(of: manager.privateMessageConnectionOpen(context: context)) { _, open in
+            if !open { draft = "" }
+        }
+    }
+    private func receipt(_ state: NativeInterviewPrivateDelivery) -> String {
+        switch state { case .pending: return "Waiting for guest receipt"; case .received: return "Guest received"; case .unknown: return "Delivery unknown" }
     }
 }
 

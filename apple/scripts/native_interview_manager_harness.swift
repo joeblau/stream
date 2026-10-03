@@ -141,6 +141,8 @@ private actor ManagerGuest {
     let callbacks: NativeInterviewReceiverEvents
     let mapping = UUID()
     private(set) var started = false, retired = false
+    private var privateControlOpen = true
+    private(set) var privateSent: [NativeInterviewPrivateEnvelope] = []
     init(context: NativeInterviewPeerLease, sink: NativeGuestMediaSink,
          events: @escaping @Sendable (NativeInterviewMediaEvent) -> Bool) throws {
         self.context = context; self.sink = sink; self.events = events
@@ -156,10 +158,16 @@ private actor ManagerGuest {
         guard !retired, let intent = callbacks.beginApproval(approved) else { return false }
         return callbacks.finishApproval(approved, intent: intent)
     }
+    var supportsPrivateMessages: Bool { !retired && privateControlOpen }
+    func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool {
+        guard supportsPrivateMessages, privateSent.count < 128 else { return false }
+        privateSent.append(envelope); return true
+    }
+    func privateReceived(_ envelope: NativeInterviewPrivateEnvelope) { _ = events(.privateControl(envelope)) }
     func screenSharing(_ sharing: Bool) throws {
         callbacks.receive("control", try json(["sharing": sharing]), "")
     }
-    func controlClosed() { callbacks.receive("control-closed", "", "") }
+    func controlClosed() { privateControlOpen = false; callbacks.receive("control-closed", "", "") }
     func retire() { guard !retired else { return }; retired = true; callbacks.close() }
     @discardableResult func paint(_ role: GuestReceiveRole, color: UInt32) throws -> CMTime {
         var pixel: CVPixelBuffer?
@@ -478,6 +486,38 @@ private extension AudioMixEngine {
         try require(studio.manager.displayName(for: id) == alias && studio.manager.state.snapshot.members.first?.name == reported,
                     "Fresh actual Worker roster erased local alias")
         trace("full-context embedded mute/monitor solo reuse persisted Mixer; local alias remains separate from actual service name")
+
+        let privateCommand = NativeInterviewCommand.sendPrivateMessage(host.context, "Owned private dispatcher text ✓")
+        try studio.command(privateCommand)
+        try await wait("Private send did not remain pending without a receipt") {
+            studio.manager.privateMessages.last?.delivery == .pending
+        }
+        guard case .message(let privateID, let privateText) = host.privateSent.last,
+              privateText == "Owned private dispatcher text ✓" else { throw ManagerFixtureError.failed("Dispatcher did not reach the captured media host") }
+        host.privateReceived(.acknowledgment(id: UUID()))
+        try await Task.sleep(for: .milliseconds(20))
+        try require(studio.manager.privateMessages.last?.delivery == .pending, "Unsolicited ACK manufactured receipt")
+        host.privateReceived(.acknowledgment(id: privateID))
+        try await wait("Current private receipt missing") { studio.manager.privateMessages.last?.delivery == .received }
+        let incomingID = UUID()
+        host.privateReceived(.message(id: incomingID, text: "Owned private guest text"))
+        host.privateReceived(.message(id: incomingID, text: "Owned private guest text"))
+        try await wait("Private inbound text missing") { studio.manager.privateMessages.contains { $0.id == incomingID } }
+        try require(studio.manager.privateMessages.filter { $0.id == incomingID }.count == 1,
+                    "Duplicate private delivery duplicated UI history")
+        try require(host.privateSent.contains(.acknowledgment(id: incomingID)), "Only actual accepted inbound text may be ACKed")
+        for text in ["", " ", String(repeating: "✓", count: 171), "forbidden\u{1}"] {
+            try require(!studio.dispatcher.canExecute(.interview(.sendPrivateMessage(host.context, text))), "Malformed private command accepted")
+        }
+        let messagesBeforeFlood = studio.manager.privateMessages.count
+        for _ in 0..<100 { host.privateReceived(.message(id: UUID(), text: "Owned bounded private flood")) }
+        for _ in 0..<32 {
+            try require(host.events(.returnAudio(.unavailable)), "Private queue occupancy stole reserved media event capacity")
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        try require(studio.manager.privateMessages.count <= messagesBeforeFlood + 8 && !host.retired,
+                    "Private event overflow evicted or retired media instead of dropping private traffic")
+        trace("actual shared dispatcher/private session: real host boundary, pending versus ACK, duplicate suppression, plain-text bound and independent droppable private mailbox")
         let acknowledgedRevision = studio.manager.state.snapshot.members.first!.membershipRevision
         receiptSocket.hold(true, suppress: true); let beforeRepeat = receiptSocket.heldCount
         try studio.command(.onair(id))
@@ -569,6 +609,8 @@ private extension AudioMixEngine {
         try require(studio.controller.guestVideoFrames.pixels(slot: lease.slot, role: .screen, at: secondScreen, program: false) == nil,
                     "Actual adapter control closure did not revoke screen synchronously")
         try await wait("Control closure metadata missing") { studio.manager.state.snapshot.members.first?.screenApproved == false }
+        try await wait("Closed media control retained private history") { studio.manager.privateMessages.isEmpty }
+        try require(!studio.dispatcher.canExecute(.interview(privateCommand)), "Closed data channel left private send enabled")
         try require(studio.dispatcher.execute(.interview(.approveScreen(id, true))).error != nil,
                     "Approval restored a closed control channel")
         try host.screenSharing(true)
@@ -619,7 +661,7 @@ private extension AudioMixEngine {
                     "Rejoin did not keep stable identity and replace authority privately")
         let beforeStaleMixer = studio.settings.activeSettings.mixer
         let beforeStaleSlots = studio.scenes.guestSlots
-        for stale in [oldMute, oldSolo, oldRename] {
+        for stale in [oldMute, oldSolo, oldRename, privateCommand] {
             try require(!studio.dispatcher.canExecute(.interview(stale)) && studio.dispatcher.execute(.interview(stale)).error != nil,
                         "Retained full-context command edited the rejoined guest")
         }

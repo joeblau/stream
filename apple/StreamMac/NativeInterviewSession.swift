@@ -5,6 +5,13 @@ import Foundation
 /// never registers a source, opens an audio gate or starts a publisher.
 @MainActor final class NativeInterviewSession: ObservableObject {
     @Published private(set) var snapshot = NativeInterviewSnapshot()
+    /// Separate from shared control snapshots and recording archives.
+    @Published private(set) var privateMessages: [NativeInterviewPrivateMessage] = []
+    private var pendingPrivateMessages: [UUID: ContinuousClock.Instant] = [:]
+    private var privateMessageExpiry: Task<Void, Never>?
+    private var privateSendStart: ContinuousClock.Instant?
+    private var privateSendCount = 0
+    private let privateMessageTimeout: Duration
     private let service: any NativeInterviewService
     private let factory: (any NativeInterviewMediaHostFactory)?
     private let clock: @Sendable () -> Date
@@ -42,7 +49,7 @@ import Foundation
         var incomingBytes = 0
         var candidates: [NativeInterviewICECandidate] = [], outbound: [NativeInterviewICECandidate] = []
         var candidateBytes = 0, outboundBytes = 0
-        var offered = false, answered = false
+        var offered = false, answered = false, controlOpen = true
         var media: NativeInterviewMediaMIDs?
         init(context: NativeInterviewPeerLease, mailbox: NativeInterviewMediaMailbox) {
             self.context = context; self.mailbox = mailbox
@@ -58,11 +65,11 @@ import Foundation
          clock: @escaping @Sendable () -> Date = { Date() },
          mediaPreparationTimeout: Duration = .seconds(15), negotiationTimeout: Duration = .seconds(20),
          nextGeneration: (@MainActor () -> UInt64?)? = nil,
-         slotForGuest: (@MainActor (UUID) -> UUID?)? = nil) {
+         slotForGuest: (@MainActor (UUID) -> UUID?)? = nil, privateMessageTimeout: Duration = .seconds(10)) {
         self.service = service; self.factory = factory; self.clock = clock
         self.mediaPreparationTimeout = mediaPreparationTimeout; self.negotiationTimeout = negotiationTimeout
         self.nextGeneration = nextGeneration
-        self.slotForGuest = slotForGuest
+        self.slotForGuest = slotForGuest; self.privateMessageTimeout = privateMessageTimeout
     }
 
     func create() async throws {
@@ -204,6 +211,55 @@ import Foundation
         guard snapshot.phase == .connected, let peer = peers[guest], peer.host != nil,
               snapshot.members.first(where: { $0.id == guest })?.media == .ready else { return nil }
         return peer.context
+    }
+    func privateMessageConnectionOpen(context: NativeInterviewPeerLease) -> Bool {
+        guard readyPeerLease(for: context.receive.peerID) == context,
+              let peer = peers[context.receive.peerID], peer.controlOpen,
+              peer.host?.supportsPrivateMessages == true else { return false }
+        return true
+    }
+    func canSendPrivateMessage(context: NativeInterviewPeerLease) -> Bool {
+        privateMessageConnectionOpen(context: context) && pendingPrivateMessages.count < 8
+    }
+    @discardableResult func sendPrivateMessage(_ text: String, context: NativeInterviewPeerLease) -> Bool {
+        guard NativeInterviewPrivateEnvelope.validText(text), canSendPrivateMessage(context: context),
+              let host = peers[context.receive.peerID]?.host else { return false }
+        let now = ContinuousClock.now
+        if privateSendStart.map({ $0.duration(to: now) >= .seconds(1) }) ?? true { privateSendStart = now; privateSendCount = 0 }
+        guard privateSendCount < 8 else { return false }; privateSendCount += 1
+        let id = UUID()
+        guard host.sendPrivateControl(.message(id: id, text: text)) else { return false }
+        appendPrivateMessage(.init(id: id, fromGuest: false, text: text, delivery: .pending))
+        pendingPrivateMessages[id] = now.advanced(by: min(.seconds(10), max(.milliseconds(100), privateMessageTimeout)))
+        if privateMessageExpiry == nil {
+            privateMessageExpiry = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard !Task.isCancelled, let self else { return }
+                    let expired = self.pendingPrivateMessages.filter { $0.value <= ContinuousClock.now }.map(\.key)
+                    for id in expired {
+                        self.pendingPrivateMessages[id] = nil
+                        if let index = self.privateMessages.firstIndex(where: { $0.id == id && !$0.fromGuest }) {
+                            self.privateMessages[index].delivery = .unknown
+                        }
+                    }
+                    if self.pendingPrivateMessages.isEmpty { self.privateMessageExpiry = nil; return }
+                }
+            }
+        }
+        return true
+    }
+    private func appendPrivateMessage(_ message: NativeInterviewPrivateMessage) {
+        if privateMessages.count >= 64 {
+            guard let index = privateMessages.firstIndex(where: { pendingPrivateMessages[$0.id] == nil }) else { return }
+            privateMessages.remove(at: index)
+        }
+        privateMessages.append(message)
+    }
+    private func clearPrivateMessages() {
+        privateMessageExpiry?.cancel(); privateMessageExpiry = nil
+        pendingPrivateMessages.removeAll(); privateMessages.removeAll()
+        privateSendStart = nil; privateSendCount = 0
     }
     func currentPeerLease(for guest: UUID) -> NativeInterviewPeerLease? {
         guard snapshot.phase == .connected, !revoked.contains(guest) else { return nil }
@@ -442,9 +498,30 @@ import Foundation
             guard peer.offered, peer.answered else { failPeer(id, .malformed); return }
             peer.deadline?.cancel(); peer.deadline = nil
             updateMember(id) { $0.media = .ready }
+            if peer.host?.supportsPrivateMessages == true { _ = peer.host?.sendPrivateControl(.availability(true)) }
         case .returnAudio(let value): updateMember(id) { $0.returnAudio = value }
         case .screenSharing(let value): updateMember(id) { $0.screenSharing = value && $0.screenApproved }
-        case .controlClosed: updateMember(id) { $0.screenApproved = false; $0.screenSharing = false; $0.returnAudio = .unavailable }
+        case .privateControl(let envelope):
+            guard readyPeerLease(for: id) == context, peer.controlOpen else { return }
+            switch envelope {
+            case .availability: return // Browser cannot alter host capability.
+            case .message(let messageID, let text):
+                guard NativeInterviewPrivateEnvelope.validText(text) else { return }
+                guard !privateMessages.contains(where: { $0.id == messageID && !$0.fromGuest }) else { return }
+                if !privateMessages.contains(where: { $0.id == messageID && $0.fromGuest }) {
+                    appendPrivateMessage(.init(id: messageID, fromGuest: true, text: text, delivery: .received))
+                }
+                _ = peer.host?.sendPrivateControl(.acknowledgment(id: messageID))
+            case .acknowledgment(let messageID):
+                // Timeout remains unknown; a stale/unsolicited receipt grants
+                // no history or authority and never causes a resend.
+                guard let deadline = pendingPrivateMessages.removeValue(forKey: messageID),
+                      let index = privateMessages.firstIndex(where: { $0.id == messageID && !$0.fromGuest }) else { return }
+                privateMessages[index].delivery = deadline > ContinuousClock.now ? .received : .unknown
+            }
+        case .controlClosed:
+            peer.controlOpen = false; clearPrivateMessages()
+            updateMember(id) { $0.screenApproved = false; $0.screenSharing = false; $0.returnAudio = .unavailable }
         case .failed(let failure): failPeer(id, failure)
         }
     }
@@ -550,6 +627,7 @@ import Foundation
         // The actual relay read remains retained until its task returns.
     }
     private func dropPeer(_ id: UUID) {
+        clearPrivateMessages()
         peers.removeValue(forKey: id)?.retire()
         updateMember(id) { $0.media = .unavailable; $0.returnAudio = .unavailable; $0.screenApproved = false; $0.screenSharing = false }
     }
@@ -580,6 +658,17 @@ private final class NativeInterviewMediaMailbox: @unchecked Sendable {
     func append(_ event: NativeInterviewMediaEvent) -> Bool {
         lock.lock()
         guard !closed else { lock.unlock(); return false }
+        if case .privateControl = event {
+            let privateCount = events.reduce(0) { count, value in
+                if case .privateControl = value { return count + 1 }; return count
+            }
+            // Private traffic is droppable and cannot overflow or retire media.
+            guard privateCount < 8, events.count < 32, bytes + event.byteCount <= 196_608 else { lock.unlock(); return true }
+        }
+        while events.count >= 32 || bytes + event.byteCount > 196_608 {
+            guard let index = events.firstIndex(where: { if case .privateControl = $0 { return true }; return false }) else { break }
+            bytes -= events.remove(at: index).byteCount
+        }
         let accepted = events.count < 32 && bytes + event.byteCount <= 196_608
         if accepted { events.append(event); bytes += event.byteCount } else { overflow = true }
         let start = !working; working = true; lock.unlock()

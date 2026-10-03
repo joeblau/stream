@@ -87,6 +87,11 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
             gate.lock()
             controlClosed = true; approvalIntent = UUID(); approved = false; sink.enableScreen(false)
             gate.unlock(); event = .controlClosed
+        case "private-control":
+            guard let native, permittedReceiver() === native,
+                  let envelope = NativeInterviewPrivateEnvelope.parse(value, negotiation: sink.lease.negotiation) else { return }
+            gate.lock(); let permitted = active && !controlClosed; gate.unlock()
+            guard permitted else { return }; event = .privateControl(envelope)
         case "control":
             // The receiver already validated the exact negotiation and bounds.
             guard let data = value.data(using: .utf8),
@@ -244,6 +249,11 @@ private final class NativeGuestReturnSender: @unchecked Sendable {
         guard receiver.candidate(candidate.value, mid: candidate.mid) else {
             throw NativeInterviewError.transport
         }
+    }
+    var supportsPrivateMessages: Bool { !isRetired && callbacks.permitsReturn(receiver) }
+    func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool {
+        guard supportsPrivateMessages else { return false }
+        return receiver.sendPrivateControl(envelope)
     }
     func approveScreen(_ approved: Bool) -> Bool {
         guard !isRetired, let intent = callbacks.beginApproval(approved) else { return false }

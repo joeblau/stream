@@ -143,18 +143,31 @@ struct NativeInterviewMediaMIDs: Sendable, Equatable {
     }
 }
 
+typealias NativeInterviewPrivateEnvelope = GuestPrivateControlEnvelope
+enum NativeInterviewPrivateDelivery: String, Sendable { case pending, received, unknown }
+struct NativeInterviewPrivateMessage: Sendable, Equatable, Identifiable, CustomStringConvertible, CustomDebugStringConvertible {
+    let id: UUID
+    let fromGuest: Bool
+    let text: String
+    var delivery: NativeInterviewPrivateDelivery
+    var description: String { "<private interview message>" }
+    var debugDescription: String { description }
+}
+
 enum NativeInterviewMediaEvent: Sendable {
     case offer(sdp: String, media: NativeInterviewMediaMIDs)
     case candidate(value: String, mid: String)
     case ready
     case returnAudio(NativeInterviewReturnAudioState)
     case screenSharing(Bool)
+    case privateControl(NativeInterviewPrivateEnvelope)
     case controlClosed
     case failed(NativeInterviewError)
     var byteCount: Int {
         switch self {
         case .offer(let sdp, _): sdp.utf8.count + 256
         case .candidate(let value, let mid): value.utf8.count + mid.utf8.count + 128
+        case .privateControl(let value): value.byteCount
         default: 128
         }
     }
@@ -165,8 +178,15 @@ enum NativeInterviewMediaEvent: Sendable {
     func acceptAnswer(_ sdp: String) throws
     func acceptCandidate(_ value: String, mid: String) throws
     func approveScreen(_ approved: Bool) -> Bool
+    var supportsPrivateMessages: Bool { get }
+    func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool
     /// Closes the full-lease sink synchronously before native callback teardown.
     func retire()
+}
+
+extension NativeInterviewMediaHost {
+    var supportsPrivateMessages: Bool { false }
+    func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool { false }
 }
 
 @MainActor protocol NativeInterviewMediaHostFactory {

@@ -10,13 +10,72 @@ let candidateQueue = [], signalChain = Promise.resolve(), left = false, name = '
 let relayTimer, deviceEpoch = 0, activeNegotiation, cachedRelay;
 let control, mediaSenders = {}, screenApproved = false, shareEpoch = 0, pendingDisplay = false;
 const MEDIA_CONTROL = 'stream-interview-control-v1';
+const privateMessages = [], privatePending = new Map();
+let privateSupported=false;
+let privateTimer, privateRateStart=0, privateIncoming=0, privateOutgoing=0, privateAcknowledgments=0;
+const privateID=value=>typeof value==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+const privateText=value=>typeof value==='string' && value.trim().length>0 && new TextEncoder().encode(value).length<=512 && !/[\x00-\x08\x0b-\x1f\x7f]/.test(value);
+function updatePrivateControls() {
+  const open=admitted && privateSupported && control?.readyState==='open';
+  $('message').disabled=!open;$('sendmessage').disabled=!open || privatePending.size>=8 || !privateText($('message').value);
+}
+function clearPrivateMessages() {
+  clearInterval(privateTimer);privateTimer=undefined;privatePending.clear();privateMessages.length=0;
+  privateSupported=false;privateRateStart=0;privateIncoming=privateOutgoing=privateAcknowledgments=0;
+  $('messages').replaceChildren();$('message').value='';
+  $('message-status').textContent='Connect to the admitted host to send messages.';updatePrivateControls();
+}
+function privateRate() {
+  const now=performance.now();if(now-privateRateStart>=1000){privateRateStart=now;privateIncoming=privateOutgoing=privateAcknowledgments=0;}
+}
+function privateSend(value) {
+  if(!admitted || control?.readyState!=='open' || control.bufferedAmount>8192)return false;
+  const text=JSON.stringify({...value,negotiation:activeNegotiation});if(new TextEncoder().encode(text).length>1024)return false;
+  try{control.send(text);return true;}catch{return false;}
+}
+function appendPrivateMessage(id,text,fromHost,delivery) {
+  if(privateMessages.length>=64){const index=privateMessages.findIndex(value=>!privatePending.has(value.id));if(index<0)return false;privateMessages.splice(index,1);$('messages').children[index].remove();}
+  const paragraph=document.createElement('p'),body=document.createElement('span'),receipt=document.createElement('small');
+  body.textContent=(fromHost?'Host: ':'You: ')+text;receipt.textContent=delivery;paragraph.append(body,receipt);$('messages').append(paragraph);
+  privateMessages.push({id,fromHost,receipt});return true;
+}
+function receivePrivate(value) {
+  if(!value || value.negotiation!==activeNegotiation)return false;
+  if(value.type==='private-message-capability' && Object.keys(value).length===3 && typeof value.enabled==='boolean') {
+    privateSupported=value.enabled;$('message-status').textContent=privateSupported?'Private messages are available for this host connection.':'This host does not provide private messages.';updatePrivateControls();return true;
+  }
+  if(!privateSupported || !privateID(value.id))return false;
+  privateRate();
+  if(value.type==='private-message' && Object.keys(value).length===4 && privateText(value.text)) {
+    if(privateIncoming>=8)return true;privateIncoming++;
+    const previous=privateMessages.find(message=>message.id===value.id);
+    if(previous && !previous.fromHost)return true;
+    if(!previous && !appendPrivateMessage(value.id,value.text,true,'Received'))return true;
+    privateSend({type:'private-message-ack',id:value.id});return true;
+  }
+  if(value.type==='private-message-ack' && Object.keys(value).length===3) {
+    if(privateAcknowledgments>=32)return true;privateAcknowledgments++;
+    const pending=privatePending.get(value.id);if(pending){privatePending.delete(value.id);pending.receipt.textContent='Host received';updatePrivateControls();}return true;
+  }
+  return false;
+}
+$('message').oninput=updatePrivateControls;
+$('sendmessage').onclick=()=>{
+  privateRate();const text=$('message').value;
+  if(!privateSupported || !privateText(text) || privatePending.size>=8 || privateOutgoing>=8)return;
+  const id=crypto.randomUUID();if(!privateSend({type:'private-message',id,text})){$('message-status').textContent='Message was not sent. Check the host connection.';return;}
+  privateOutgoing++;appendPrivateMessage(id,text,false,'Waiting for host receipt');
+  privatePending.set(id,{receipt:privateMessages.at(-1).receipt,expires:performance.now()+10000});$('message').value='';
+  $('message-status').textContent='Private message sent once; waiting for a host receipt.';updatePrivateControls();
+  privateTimer??=setInterval(()=>{const now=performance.now();for(const[id,pending]of privatePending){if(now>=pending.expires){pending.receipt.textContent='Delivery unknown';privatePending.delete(id);}}updatePrivateControls();if(!privatePending.size){clearInterval(privateTimer);privateTimer=undefined;}},100);
+};
 let joinEpoch = 0, admitted = false, cameraEnabled = true, microphoneEnabled = true;
 const valid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(room ?? '') && /^[0-9a-f]{64}$/.test(secret);
 if (!valid) { status('This invite is incomplete. Ask the host for a fresh link.'); $('prepare').disabled = true; }
 function controls(enabled) { for (const id of ['mute','hide','tone','join']) $(id).disabled = !enabled; }
 function resetPeer() {
   clearTimeout(relayTimer); relayTimer = undefined;
-  stopShare();control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();
+  stopShare();control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();clearPrivateMessages();
   admitted = false; host = hostGeneration = activeNegotiation = undefined; candidateQueue = [];
   pc?.close(); pc = undefined; $('return').srcObject = null;
   $('program').textContent='Program and recording status unavailable while disconnected.';
@@ -127,7 +186,7 @@ async function acceptSignal(data, epoch) {
     const identities=payload.media, mids=['audio','camera','screen'].map(kind=>identities?.[kind]);
     if(mids.some(mid=>typeof mid!=='string' || !/^[0-9A-Za-z_-]{1,16}$/.test(mid)) || new Set(mids).size!==3)throw new Error('The host must offer separate camera and screen sources.');
     const negotiation = payload.negotiation;
-    activeNegotiation = negotiation; clearTimeout(relayTimer); stopShare();
+    activeNegotiation = negotiation; clearTimeout(relayTimer); stopShare();clearPrivateMessages();
     control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();
     pc?.close(); $('return').srcObject = null;
     const next = new RTCPeerConnection({iceServers:await iceServers()});
@@ -137,11 +196,12 @@ async function acceptSignal(data, epoch) {
       const channel=event.channel;
       if(!current() || channel.label!==MEDIA_CONTROL || control){channel.close();return;}
       control=channel;
-      channel.onopen=()=>{if(current())updateShareControls();};
-      channel.onclose=()=>{if(current() && control===channel){screenApproved=false;stopShare();updateShareControls();}};
+      channel.onopen=()=>{if(current()){updateShareControls();updatePrivateControls();}};
+      channel.onclose=()=>{if(current() && control===channel){screenApproved=false;stopShare();updateShareControls();clearPrivateMessages();}};
       channel.onmessage=event=>{
         if(!current() || control!==channel || typeof event.data!=='string' || new TextEncoder().encode(event.data).length>1024)return;
         let value;try{value=JSON.parse(event.data);}catch{return;}
+        if(receivePrivate(value))return;
         if(value?.type!=='screen-approval' || value.negotiation!==negotiation || typeof value.approved!=='boolean')return;
         screenApproved=value.approved;if(!screenApproved)stopShare();updateShareControls();
       };
