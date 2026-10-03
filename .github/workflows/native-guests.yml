@@ -31,6 +31,7 @@ on:
       - 'workers/interviews/public/guest.*'
       - 'workers/interviews/package*.json'
       - 'workers/interviews/test/browser/native-host-*'
+      - 'workers/interviews/test/browser/chrome-fixture.mjs'
       - '.github/workflows/native-guests.yml'
   workflow_dispatch:
 
@@ -98,6 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           STREAM_GUEST_PROGRAM_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_guest_program_iso_harness.zsh 2>&1 | tee apple/build/native-guest-results/program-iso.log
+          STREAM_GUEST_PROGRAM_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_guest_program_iso_harness.zsh --hold-startup-800ms 2>&1 | tee apple/build/native-guest-results/program-iso-held-startup.log
       - name: Qualify the shipping browser against the native host
         env:
           CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
