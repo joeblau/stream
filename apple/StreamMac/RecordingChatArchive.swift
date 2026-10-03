@@ -152,6 +152,11 @@ final class RecordingChatArchive: @unchecked Sendable {
         }
         // A short holdback merges host-clock receipts with encoder-delayed
         // frames in order. A pause freezes receipts at the shared media end.
+        if final, clock.sealed, clock.origin.isNumeric, clock.end.isNumeric {
+            // A rotation can trim the last accepted image's nominal duration.
+            // The final hide/cue/summary follows the real sealed movie window.
+            videoEnd = min(videoEnd, max(0, (clock.end - clock.origin).seconds))
+        }
         let paused = clock.paused || clock.waitingForResume
         let watermark = paused && Date().timeIntervalSince(lastFrameTime) > 0.2 ? videoEnd : max(0, videoEnd - 0.2)
         flush(upTo: final ? videoEnd : watermark, final: final)

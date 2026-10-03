@@ -21,6 +21,7 @@ final class VideoHarnessSpace: @unchecked Sendable {
 
 @main struct IsolatedVideoHarness {
     @MainActor static func main() async throws {
+        setbuf(stdout, nil)
         let folder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true).standardizedFileURL
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let measured = try await Task.detached { try RecordingVideoStorageProbe.measure(folder) }.value
@@ -43,6 +44,7 @@ final class VideoHarnessSpace: @unchecked Sendable {
         try await scenario(folder: folder, budget: budget, codec: .h264, quality: .standard)
         try await scenario(folder: folder, budget: budget, codec: .hevc, quality: .high)
         try await lifecycle(folder: folder, budget: budget)
+        try await audioLeadingRotation(folder: folder, budget: budget)
         print("PASS: strict holders, source processing, common timing/durations, camera disconnect/recovery, unavailable guest, associated audio and independent four-encoder workload")
     }
     @MainActor static func lifecycle(folder: URL, budget: IsolatedVideoBudget) async throws {
@@ -123,6 +125,96 @@ final class VideoHarnessSpace: @unchecked Sendable {
         precondition(decoded[0].0 < 60 && decoded[0].2 > 70)
         print("PASS: common pause interval and segment identity, independent low-storage partial preservation, ISO library manifests/active guard and decoded video-only export")
     }
+    @MainActor static func audioLeadingRotation(folder: URL, budget: IsolatedVideoBudget) async throws {
+        let directory = folder.appendingPathComponent("audio-leading-rotation")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let providers = SourceFrameProviders(), holder = LatestScreenFrame()
+        let payload = ScreenSourcePayload(targetIdentifier: "owned-leading-screen"), key = CaptureSourceKey.screen(payload)
+        holder.store(try pixel(bright: false))
+        providers.updateKeyed(screenHolders: [key: holder], cameraHolders: [:])
+        let source = RecordingVideoSourceFactory.make(source: .init(name: "Owned Screen", payload: .screen(payload)), key: key, frames: providers)
+        let oldURL = directory.appendingPathComponent("program-old.mp4"), nextURL = directory.appendingPathComponent("program-next.mp4")
+        let oldTimeline = RecordingTimeline(), nextTimeline = RecordingTimeline()
+        let programRouter = ProgramRecordingRouter(), audioRouter = IsolatedRecordingRouter(), videoRouter = IsolatedVideoRouter()
+        var config = ProgramRecordingSession.Configuration(); config.frameRate = 60
+        let old = ProgramRecordingSession(outputURL: oldURL, configuration: config, timeline: oldTimeline)
+        let next = ProgramRecordingSession(outputURL: nextURL, configuration: config, timeline: nextTimeline)
+        let audioSelections: [IsolatedRecordingSelection] = [
+            .init(targetID: "bus.program", name: "PCM", format: .wav),
+            .init(targetID: "bus.monitor", name: "AAC", format: .m4a)]
+        let oldAudio = IsolatedRecordingGroup(programURL: oldURL, selections: audioSelections, sessionID: "leading", segmentIndex: 1, context: .init(), timeline: oldTimeline, event: { _ in })
+        let nextAudio = IsolatedRecordingGroup(programURL: nextURL, selections: audioSelections, sessionID: "leading", segmentIndex: 2, context: .init(), timeline: nextTimeline, event: { _ in })
+        let selection = IsolatedVideoSelection(targetID: "screen", name: "Screen", resolution: .hd720, frameRate: 15, audioTargetID: "bus.program")
+        let probe = VideoHarnessProbe()
+        let oldVideo = IsolatedVideoGroup(programURL: oldURL, selections: [selection], sources: ["screen": source], sessionID: "leading", segmentIndex: 1, context: .init(), budget: budget, timeline: oldTimeline, event: probe.status)
+        let nextVideo = IsolatedVideoGroup(programURL: nextURL, selections: [selection], sources: ["screen": source], sessionID: "leading", segmentIndex: 2, context: .init(), budget: budget, timeline: nextTimeline, event: probe.status)
+        programRouter.install(old); audioRouter.install(oldAudio); videoRouter.install(oldVideo)
+        func audio(_ seconds: Double) throws {
+            let sample = try ProgramRecordingFixtures.audio(at: seconds)
+            programRouter.appendAudio(sample)
+            for selected in audioSelections { audioRouter.append(sample, targetID: selected.targetID) }
+            videoRouter.appendAudio(sample, videoTargetID: "screen")
+        }
+        let clock = ContinuousClock(), start = clock.now
+        for index in 0..<100 {
+            try await clock.sleep(until: start.advanced(by: .seconds(Double(index)/100)))
+            try audio(Double(index)/100)
+            if index % 5 == 0 {
+                for frame in 0..<3 { programRouter.appendVideo(try ProgramRecordingFixtures.video(at: Double(index)/100 + Double(frame)/60)) }
+            }
+        }
+        // Original PCM is delivered before a delayed next image stamped1.003.
+        // Program accepts its lead; active ISO files must hold their commits.
+        for index in 100..<106 { try audio(Double(index)/100) }
+        let deadline = clock.now.advanced(by: .seconds(3))
+        while (!oldTimeline.snapshot().end.isNumeric || (oldTimeline.snapshot().end-oldTimeline.snapshot().origin).seconds < 1.0599) && clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        precondition((oldTimeline.snapshot().end-oldTimeline.snapshot().origin).seconds >= 1.0599,
+                     "Fixture did not establish actual accepted audio-leading media")
+        programRouter.rotate(to: next, finishing: old)
+        audioRouter.retire(oldAudio, installing: nextAudio); videoRouter.retire(oldVideo, installing: nextVideo)
+        let previous = Task { await withCheckedContinuation { continuation in
+            old.finish(waitingForSourceBoundary: true) { continuation.resume(returning: $0) }
+        } }
+        let continuingPCM = Task {
+            for index in 106..<212 {
+                let seconds = Double(index)/100
+                try await clock.sleep(until: start.advanced(by: .seconds(seconds)))
+                try audio(seconds)
+            }
+        }
+        for frame in 0..<60 {
+            let seconds = 1.003 + Double(frame)/60
+            try await clock.sleep(until: start.advanced(by: .seconds(seconds)))
+            programRouter.appendVideo(try ProgramRecordingFixtures.video(at: seconds))
+        }
+        programRouter.stop(next); audioRouter.retire(nextAudio, installing: nil); videoRouter.retire(nextVideo, installing: nil)
+        let finishingNext = Task { await finish(next) }
+        try await continuingPCM.value
+        let oldResult = await previous.value, nextResult = await finishingNext.value
+        await withCheckedContinuation { continuation in oldAudio.finish { continuation.resume() } }
+        await withCheckedContinuation { continuation in oldVideo.finish { continuation.resume() } }
+        await withCheckedContinuation { continuation in nextAudio.finish { continuation.resume() } }
+        await withCheckedContinuation { continuation in nextVideo.finish { continuation.resume() } }
+        programRouter.finished(old); programRouter.finished(next)
+        audioRouter.finished(oldAudio); audioRouter.finished(nextAudio); videoRouter.finished(oldVideo); videoRouter.finished(nextVideo)
+        precondition(oldResult.completed && nextResult.completed, oldResult.error ?? nextResult.error ?? "Leading rotation failed")
+        for (url, duration, audioGroup, videoGroup) in [(oldURL, 1.003, oldAudio, oldVideo), (nextURL, 1.0, nextAudio, nextVideo)] {
+            try await ProgramRecordingFixtures.inspect(url, expectedDuration: duration, checkSync: false)
+            for name in audioGroup.files {
+                let file = url.deletingLastPathComponent().appendingPathComponent(name)
+                let decoded = try AVAudioFile(forReading: file)
+                precondition(abs(Double(decoded.length)/48_000-duration) < 1.0/48_000,
+                             "Already-committed leading PCM exceeded its final shared cut: \(name), \(decoded.length) frames")
+                let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: file.appendingPathExtension("isolated.json"))) as! [String: Any]
+                precondition(!(metadata["gaps"] as! [[String: Any]]).contains { $0["reason"] as? String == "missing-tail" })
+            }
+            for name in videoGroup.files { try await ProgramRecordingFixtures.inspect(url.deletingLastPathComponent().appendingPathComponent(name), expectedDuration: duration, checkSync: false) }
+        }
+        print("PASS: accepted60ms audio lead plus delayed first-next image1.003s partitions real PCM history; WAV/M4A and associated ISO video honor the shared cut and decode without fabricated tails")
+    }
+
     static func feed(_ program: ProgramRecordingSession, isolated: IsolatedVideoRecorder, duration: Double,
                      offset: Double, probe: VideoHarnessProbe) async throws {
         let clock = ContinuousClock(), start = clock.now
@@ -219,8 +311,17 @@ final class VideoHarnessSpace: @unchecked Sendable {
             let audio = try ProgramRecordingFixtures.audio(at: seconds, timestampBase: base)
             program.appendAudio(audio); network.appendAudio(audio); raw.appendAudio(audio)
         }
-        await engine.stop(); raw.deactivate(); processed.deactivate()
-        let programResult = await finish(program), networkResult = await finish(network)
+        await engine.stop()
+        let finishingProgram = Task { await finish(program) }, finishingNetwork = Task { await finish(network) }
+        // The independent PCM source continues after video is sealed, as the
+        // shipping recorder's retained audio tap does. Keep original PTS/data.
+        for index in 700..<710 {
+            let seconds = Double(index) / 100
+            try await clock.sleep(until: start.advanced(by: .seconds(seconds)))
+            let audio = try ProgramRecordingFixtures.audio(at: seconds, timestampBase: base)
+            program.appendAudio(audio); network.appendAudio(audio); raw.appendAudio(audio)
+        }
+        let programResult = await finishingProgram.value, networkResult = await finishingNetwork.value
         await finish(raw); await finish(processed); await finish(guest)
         precondition(programResult.completed && networkResult.completed, "Program/other consumer failed")
         precondition(probe.snapshot("camera").status == "complete", probe.snapshot("camera").error ?? "Raw camera failed")
