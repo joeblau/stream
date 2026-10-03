@@ -66,7 +66,7 @@ enum ProgramRecordingFixtures {
         let videoRange = try await videos[0].load(.timeRange)
         let audioRange = try await audios[0].load(.timeRange)
         precondition(abs(videoRange.start.seconds - audioRange.start.seconds) < 0.04, "Track start mismatch")
-        precondition(abs(videoRange.duration.seconds - audioRange.duration.seconds) < 0.08, "Track end mismatch")
+        precondition(abs(videoRange.duration.seconds - audioRange.duration.seconds) < 0.08, "Track end mismatch: video \(videoRange.start.seconds)+\(videoRange.duration.seconds), audio \(audioRange.start.seconds)+\(audioRange.duration.seconds)")
         let reader = try AVAssetReader(asset: asset)
         let videoOutput = AVAssetReaderTrackOutput(track: videos[0], outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         let audioOutput = AVAssetReaderTrackOutput(track: audios[0], outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
