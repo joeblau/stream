@@ -1,0 +1,61 @@
+name: Native recording recovery
+
+on:
+  pull_request:
+    paths:
+      - 'apple/StreamMac/**'
+      - 'apple/StreamCore/**'
+      - 'apple/project.yml'
+      - 'apple/Vendor/**'
+      - 'apple/scripts/abrupt_session_recovery_harness.swift'
+      - 'apple/scripts/run_abrupt_session_recovery_harness.zsh'
+      - 'apple/scripts/program_recording_fixtures.swift'
+      - 'apple/scripts/guest_fixture_boundaries.rb'
+      - 'apple/scripts/repair_desktop_transport_archives.py'
+      - '.github/workflows/native-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  recovery:
+    name: Abrupt recording recovery (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Show environment and install fixture tools
+        run: |
+          xcodebuild -version
+          sw_vers
+          uname -m
+          brew install xcodegen cmake
+      - name: Kill only the owned active recorder and recover actual files
+        run: |
+          mkdir -p build/native-recovery-results
+          set -euo pipefail
+          ABRUPT_RECOVERY_BUILD_PATH="$PWD/build/native-recovery" zsh scripts/run_abrupt_session_recovery_harness.zsh 2>&1 | tee build/native-recovery-results/abrupt-recovery.log
+      - name: Retain original interrupted media and recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-recovery-${{ matrix.runner }}
+          path: |
+            apple/build/native-recovery-results
+            apple/build/abrupt-session-recovery-validation/artifacts-*
+          if-no-files-found: warn
+          retention-days: 14
