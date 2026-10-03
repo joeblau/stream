@@ -170,6 +170,12 @@ extension StudioCommandDispatcher {
             add(prefix + ".screen.revoke", "Revoke \(guest.name)'s Screen", "Guests", .interview(.approveScreen(guest.id, false)))
             add(prefix + ".media.reconnect", "Reconnect \(guest.name)'s Media", "Guests", .interview(.restartMedia(guest.id)))
             add(prefix + ".remove", "Remove \(guest.name)", "Guests", .interview(.remove(guest.id)))
+            if let context = currentGuestCommandContext(for: guest.id) {
+                add(prefix + ".mute", "Mute \(guest.name)", "Guests", .interview(.setMuted(context, true)))
+                add(prefix + ".unmute", "Unmute \(guest.name)", "Guests", .interview(.setMuted(context, false)))
+                add(prefix + ".solo", "Solo \(guest.name) in Monitor", "Guests", .interview(.setSolo(context, true)))
+                add(prefix + ".unsolo", "Clear \(guest.name)'s Monitor Solo", "Guests", .interview(.setSolo(context, false)))
+            }
         }
         return result
     }

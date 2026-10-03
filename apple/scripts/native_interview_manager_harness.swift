@@ -200,20 +200,23 @@ private final class ManagerPCMProbe: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }; precondition(packets.count < 2_000)
         packets.append(.init(pts: sample.presentationTimeStamp.seconds, samples: values))
     }
-    func amplitude(from start: Double, to end: Double) -> Double {
+    func amplitude(_ frequency: Double = 2_000, from start: Double, to end: Double) -> Double {
         lock.lock(); let values = packets; lock.unlock()
         var real = 0.0, imaginary = 0.0, count = 0
         for packet in values {
             for index in 0..<(packet.samples.count / 2) {
                 let time = packet.pts + Double(index) / 48_000
                 guard time >= start && time < end else { continue }
-                let phase = (time - start) * 2 * .pi * 2_000
+                let phase = (time - start) * 2 * .pi * frequency
                 real += Double(packet.samples[index * 2]) * cos(phase)
                 imaginary += Double(packet.samples[index * 2]) * sin(phase); count += 1
             }
         }
         precondition(count > 8_000, "Actual mixer tap must cover a bounded measured window")
         return 2 * hypot(real, imaginary) / Double(count)
+    }
+    var deliveredEndPTS: Double {
+        lock.fixtureLocked { packets.last.map { $0.pts + Double($0.samples.count / 2) / 48_000 } ?? -.infinity }
     }
 }
 private final class ManagerActorHold: @unchecked Sendable {
@@ -256,13 +259,26 @@ private extension AudioMixEngine {
         manager.shutdown(); controller.retireGuestMedia(); await mixer.stop()
         scenes.flushPendingWrites(); defaults.removePersistentDomain(forName: suite)
     }
-    func measure(_ title: String, program expectedProgram: Double, monitor expectedMonitor: Double) async throws {
+    func measure(_ title: String, program expectedProgram: Double, monitor expectedMonitor: Double,
+                 localProgram: Double? = nil, localMonitor: Double? = nil) async throws {
         let start = CMClockGetTime(CMClockGetHostTimeClock()).seconds + 0.12, end = start + 0.25
         try await Task.sleep(for: .milliseconds(450))
+        let deadline = ContinuousClock.now + .seconds(2)
+        while (program.deliveredEndPTS < end || monitor.deliveredEndPTS < end) && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        try require(program.deliveredEndPTS >= end && monitor.deliveredEndPTS >= end,
+                    "Actual prior-phase PCM taps must cover the measured window before another control transition")
         for (name, probe, expected) in [("Program", program, expectedProgram), ("Monitor", monitor, expectedMonitor)] {
             let actual = probe.amplitude(from: start, to: end)
             try require(abs(actual - expected) < 0.012, "\(title) \(name) actual \(actual), expected \(expected)")
             trace("\(title) \(name) amplitude=\(actual)")
+        }
+        for (name, probe, expected) in [("Program", program, localProgram), ("Monitor", monitor, localMonitor)] {
+            guard let expected else { continue }
+            let actual = probe.amplitude(1_000, from: start, to: end)
+            try require(abs(actual - expected) < 0.012, "\(title) \(name) unrelated source actual \(actual), expected \(expected)")
+            trace("\(title) \(name) unrelated amplitude=\(actual)")
         }
     }
 }
@@ -305,7 +321,8 @@ private extension AudioMixEngine {
         try await wait("Actual ready lease missing") { studio.manager.currentReadyLease?.receive.peerID == id }
         return studio.factory!.hosts.last!
     }
-    static func producer(_ host: ManagerHost) -> Task<Void, Error> {
+    static func producer(_ host: ManagerHost, localMixer: AudioMixEngine? = nil,
+                         localChannel: AudioChannelID? = nil) -> Task<Void, Error> {
         let sink = host.sink, lease = host.context.receive, mapping = host.mapping
         return Task.detached(priority: .userInitiated) {
             let clock = ContinuousClock(), started = clock.now
@@ -314,7 +331,9 @@ private extension AudioMixEngine {
             var index = 0
             while !Task.isCancelled {
                 try await clock.sleep(until: started.advanced(by: .milliseconds(index * 10)))
-                index = max(index, Int((CMClockGetTime(CMClockGetHostTimeClock()).seconds - source) * 100))
+                let reached = max(index, Int((CMClockGetTime(CMClockGetHostTimeClock()).seconds - source) * 100))
+                precondition(reached - index <= 70, "Fixture source stall exceeded the shipping bounded ring")
+                while index <= reached && !Task.isCancelled {
                 let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480)!; pcm.frameLength = 480
                 for frame in 0..<480 {
                     let value = Float(sin((Double(index) / 100 + Double(frame) / 48_000) * 2 * .pi * 2_000)) * 0.25
@@ -322,7 +341,12 @@ private extension AudioMixEngine {
                 }
                 _ = sink.receive(.init(lease: lease, pcm: pcm, pts: CMTime(seconds: base + Double(index) / 100, preferredTimescale: 48_000),
                     duration: CMTime(value: 480, timescale: 48_000), mappingGeneration: mapping, clockQuality: .senderReportAligned))
+                if let localMixer, let localChannel {
+                    localMixer.enqueue(localChannel, try ProgramRecordingFixtures.audio(at: Double(index) / 100,
+                        timestampBase: base, constantTone: true, amplitude: 0.2))
+                }
                 index += 1; precondition(index < 2_000, "Owned PCM producer lifetime is bounded")
+                }
             }
         }
     }
@@ -393,8 +417,18 @@ private extension AudioMixEngine {
 
         await studio.mixer.addTap(bus: .program, token: UUID(), capacity: 64, sink: studio.program.receive)
         await studio.mixer.addTap(bus: .monitor, token: UUID(), capacity: 64, sink: studio.monitor.receive)
-        await studio.mixer.run(); let pcm = producer(host)
+        let local = AudioChannelID.application(bundleID: "fixture.interview-panel-independent-1000")
+        await studio.mixer.run()
+        await studio.mixer.setChannelGain(local, volume: 1, isMuted: false)
+        await studio.mixer.addChannel(local)
+        let pcm = producer(host, localMixer: studio.mixer, localChannel: local)
         try await studio.measure("admitted backstage", program: 0, monitor: 0)
+        try studio.command(.setSolo(host.context, true))
+        try await studio.measure("monitor solo grants no admission", program: 0, monitor: 0,
+                                localProgram: 0.2, localMonitor: 0.2)
+        try require(studio.manager.state.routes[id]?.programAllowed == false
+            && studio.manager.state.routes[id]?.monitorAllowed == false, "Solo granted a local media route")
+        try studio.command(.setSolo(host.context, false))
         try studio.command(.monitor(id, true)); try await studio.measure("private monitor", program: 0, monitor: 0.25)
         let receiptSocket = await studio.service!.socket!
         receiptSocket.hold(true)
@@ -405,6 +439,45 @@ private extension AudioMixEngine {
         receiptSocket.hold(false); try receiptSocket.wake()
         try await wait("Actual stage ACK did not grant local intent") { studio.manager.state.routes[id]?.programAllowed == true }
         try await studio.measure("acknowledged onair", program: 0.25, monitor: 0.25)
+        let channel = AudioMixEngine.guestChannelID(for: lease)
+        let oldMute = NativeInterviewCommand.setMuted(host.context, true)
+        let oldSolo = NativeInterviewCommand.setSolo(host.context, true)
+        let alias = "Local \(UUID().uuidString)"
+        let oldRename = NativeInterviewCommand.rename(host.context, "Stale operator name")
+        try studio.command(oldMute)
+        try await studio.measure("embedded mute preserves unrelated producer", program: 0, monitor: 0,
+                                localProgram: 0.2, localMonitor: 0.2)
+        try studio.command(oldSolo)
+        try await studio.measure("solo does not unmute guest", program: 0, monitor: 0,
+                                localProgram: 0.2, localMonitor: 0)
+        let restoredMixer = DesktopSettingsStore(directory: directory).load().mixer
+        try require(restoredMixer.channelMutes[channel.label] == true && restoredMixer.soloedChannels.contains(channel.label),
+                    "Embedded mute/solo did not persist through the actual settings store")
+        try studio.command(.setMuted(host.context, false))
+        try await studio.measure("monitor solo excludes unrelated tone only", program: 0.25, monitor: 0.25,
+                                localProgram: 0.2, localMonitor: 0)
+        try studio.command(.setSolo(host.context, false))
+        try await studio.measure("clear solo restores private monitor mix", program: 0.25, monitor: 0.25,
+                                localProgram: 0.2, localMonitor: 0.2)
+        try studio.command(.rename(host.context, alias))
+        let reported = studio.manager.state.snapshot.members.first!.name
+        try require(studio.manager.displayName(for: id) == alias && studio.manager.state.snapshot.members.first?.name == reported,
+                    "Local rename changed service identity or failed to label the current slot")
+        studio.scenes.flushPendingWrites()
+        let aliasReload = SceneStore(directory: directory)
+        try require(aliasReload.guestSlots.first(where: { $0.id == lease.slot })?.resolvedName == alias,
+                    "Local name did not survive actual project reload")
+        var portableIDs: [String: String] = [:]
+        let portableData = try PortableShow.redact(JSONEncoder().encode(studio.scenes.document), remappingIDs: true, idMap: &portableIDs)
+        let portable = try JSONDecoder().decode(SceneDocument.self, from: portableData)
+        try require(portable.guestSlots.contains(where: { $0.localName == alias }), "Portable import rewrote literal UUID-shaped local name")
+        try require(studio.dispatcher.execute(.interview(.rename(host.context, "Invalid\nname"))).error != nil
+            && studio.manager.displayName(for: id) == alias, "Malformed name changed the saved alias")
+        try receiptSocket.wake()
+        try await Task.sleep(for: .milliseconds(40))
+        try require(studio.manager.displayName(for: id) == alias && studio.manager.state.snapshot.members.first?.name == reported,
+                    "Fresh actual Worker roster erased local alias")
+        trace("full-context embedded mute/monitor solo reuse persisted Mixer; local alias remains separate from actual service name")
         let acknowledgedRevision = studio.manager.state.snapshot.members.first!.membershipRevision
         receiptSocket.hold(true, suppress: true); let beforeRepeat = receiptSocket.heldCount
         try studio.command(.onair(id))
@@ -524,6 +597,13 @@ private extension AudioMixEngine {
               case .interview(.onair(let commandGuest)) = action.command, commandGuest == id else {
             throw ManagerFixtureError.failed("Palette/adapter stable command did not resolve")
         }
+        for (suffix, expected) in [("mute", oldMute), ("solo", oldSolo)] {
+            try require(actions.first(where: { $0.id == "interview.guest.\(id.uuidString.lowercased()).\(suffix)" })?.command == .interview(expected),
+                        "Palette/adapter command did not retain the exact current guest connection")
+        }
+        let oldAdapterMute = studio.dispatcher.controllerTargets().first {
+            $0.id == "interview.guest.\(id.uuidString.lowercased()).mute"
+        }!
         let firstGeneration = lease.generation
         pcm.cancel(); _ = try? await pcm.value
         try studio.command(.disconnect)
@@ -537,6 +617,21 @@ private extension AudioMixEngine {
         try require(rejoined.context.receive.slot == lease.slot && rejoined.context.receive.generation > firstGeneration
             && rejoined.context.hostGeneration != host.context.hostGeneration && !studio.manager.state.routes[id]!.programAllowed,
                     "Rejoin did not keep stable identity and replace authority privately")
+        let beforeStaleMixer = studio.settings.activeSettings.mixer
+        let beforeStaleSlots = studio.scenes.guestSlots
+        for stale in [oldMute, oldSolo, oldRename] {
+            try require(!studio.dispatcher.canExecute(.interview(stale)) && studio.dispatcher.execute(.interview(stale)).error != nil,
+                        "Retained full-context command edited the rejoined guest")
+        }
+        try require(oldAdapterMute.execute(nil) != nil, "Retained adapter callback silently retargeted replacement lease")
+        try require(studio.settings.activeSettings.mixer == beforeStaleMixer && studio.scenes.guestSlots == beforeStaleSlots,
+                    "Rejected stale commands mutated persisted project state")
+        try require(studio.manager.displayName(for: id) == alias, "Rejoin roster erased saved local name")
+        try studio.command(.rename(rejoined.context, ""))
+        try require(studio.manager.displayName(for: id) == reported
+            && studio.scenes.guestSlots.first(where: { $0.id == lease.slot })?.localName == nil,
+                    "Use Guest Name did not remove the alias")
+        trace("retained mute/solo/rename refused after actual host rejoin; replacement state unchanged and alias reset uses current lease")
         let secondGeneration = rejoined.context.receive.generation
         try studio.command(.end)
         do { _ = try await studio.capturedCredentialProvider!(); throw ManagerFixtureError.failed("End retained future operator credential reads") }
