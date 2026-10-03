@@ -273,13 +273,18 @@ final class NativeGuestReceiver: @unchecked Sendable {
             lock.unlock(); if request { requestKeyframe(role) }; return
         }
         if index == 1 && !screenApproved { drops += 1; lock.unlock(); return }
+        // WebRTC's audio RTCP reports default to 5s, randomized up to 7.5s.
+        // Extrapolate that role for at most 8s (500ms transport allowance).
+        // Video keeps its 3s horizon; queue expiry and mapped arrival limits
+        // remain independent of report cadence. Both clocks keep one origin.
+        let reportHorizon: Double = index == 2 ? 8 : 3
         guard let data, count > 0, count <= (index == 2 ? 1275 : 2_097_152),
-              let report = reports[role], now - report.received <= 3, let ntpOrigin, let hostOrigin else {
+              let report = reports[role], now - report.received <= reportHorizon, let ntpOrigin, let hostOrigin else {
             unsynchronized += 1; lock.unlock(); return
         }
         let offset = Double(Int32(bitPattern: rtp &- report.rtp)) / (index == 2 ? 48_000 : 90_000)
         let pts = hostOrigin + report.ntp - ntpOrigin + offset
-        guard offset >= -0.5, offset <= 3, abs(pts - now) <= 3 else { unsynchronized += 1; lock.unlock(); return }
+        guard offset >= -0.5, offset <= reportHorizon, abs(pts - now) <= 3 else { unsynchronized += 1; lock.unlock(); return }
         guard lastPTS[index].map({ pts > $0 }) ?? true else { drops += 1; lock.unlock(); return }
         lastPTS[index] = pts
         let payload = Data(bytes: data, count: count)

@@ -24,8 +24,13 @@ final class GuestVideoFrameStore: @unchecked Sendable {
     private var closed = false
     private var roles: [GuestReceiveRole: RoleFrames] = [:]
     private var stats = Statistics()
-    private let maximumFrames = 6
-    private let maximumBytes = 24 * 1_024 * 1_024
+    // The receiver maps video 120ms ahead for playout. ISO can query another
+    // 90ms behind Program's host clock while its fixed-rate worker catches up.
+    // Six 30fps frames cover only 167ms and evict those still-due ISO pixels.
+    // Retain bounded history for both readers; a high-rate/large-frame peer
+    // still drops at either cap and never makes lookup destructive.
+    private let maximumFrames = 16
+    private let maximumBytes = 32 * 1_024 * 1_024
 
     /// The caller owns admission. Replacing a peer clears every retained frame
     /// before the new generation can publish, even when its stable slot matches.

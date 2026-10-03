@@ -163,6 +163,9 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
     }
     static func main() async throws {
         let folder = URL(fileURLWithPath: CommandLine.arguments[1])
+        if CommandLine.arguments.contains("--sparse-audio-reports") {
+            try await sparseAudioReports(folder); return
+        }
         if CommandLine.arguments.contains("--validation-held-idr") {
             try await heldIDRDependentFrame(folder); return
         }
@@ -323,6 +326,73 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         try await queuedReferenceLoss(folder, overflow: false)
         try await queuedReferenceLoss(folder, overflow: true)
         try await heldIDRDependentFrame(folder)
+    }
+    @MainActor static func sparseAudioReports(_ folder: URL) async throws {
+        let receipts = GuestReceipts(), bridge = GuestSignalBridge()
+        let lease = GuestReceiveLease(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 29)
+        let receiver = try NativeGuestReceiver(admitted: lease, cameraMID: "camera-mid", screenMID: "screen-mid", audioMID: "audio-mid",
+            video: { receipts.receive($0) }, audio: { receipts.receive($0) }, signal: { bridge.outgoing($0, $1, $2) })
+        bridge.receiver = receiver
+        let peer = SGPeerFixtureCreate(guestFixtureSignal, Unmanaged.passUnretained(bridge).toOpaque())!
+        bridge.peer = peer
+        defer { receiver.stop(); SGPeerFixtureDestroy(peer) }
+        precondition(SGPeerFixtureStart(peer) != 0)
+        await wait("sparse-audio-peer-connected", receiver, receipts) { SGPeerFixtureReady(peer) != 0 }
+        let sourceNTP = 4_000_000_000.0, base: UInt32 = 600_000
+        await startupReports([(2, base, sourceNTP)], peer: peer, receiver: receiver, receipts: receipts)
+        let opus = [UInt8](try Data(contentsOf: folder.appendingPathComponent("opus-030.bin")))
+        send(packet(role: 2, sequence: 1, timestamp: base, payload: opus, marker: true), role: 2, peer: peer)
+        await wait("sparse-audio-real-codec-calibration", receiver, receipts) { receipts.snapshot().1.count == 1 }
+        let first = receipts.snapshot().1[0]
+        precondition(first.frames == 960 && first.rms > 0.025)
+        // Retain the first REAL sender mapping, and schedule measured RTP on
+        // its20ms source grid after cold codec initialization. No restamping.
+        let origin = first.pts - 0.12
+        let hostNow = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        let startFrame = Int(ceil((hostNow - origin + 0.06) * 50))
+        let sourceClock = ContinuousClock(), began = sourceClock.now
+        var sequence: UInt16 = 2, sent = 0
+        writeLine("Guest sparse audio: calibrated real Opus; source-grid start=\(startFrame) packets,8s bounded horizon")
+        for index in 0..<375 {
+            let offset = Double(startFrame + index) / 50
+            let remaining = origin + offset - CMClockGetTime(CMClockGetHostTimeClock()).seconds
+            if remaining > 0 { try await sourceClock.sleep(until: sourceClock.now + .nanoseconds(Int64(remaining * 1_000_000_000))) }
+            send(packet(role: 2, sequence: sequence, timestamp: base &+ UInt32(startFrame + index) * 960,
+                        payload: opus, marker: true), role: 2, peer: peer)
+            sequence &+= 1; sent += 1
+        }
+        await wait("sparse-audio-all375-real-packets-before7.5s", receiver, receipts) { receipts.snapshot().1.count == 376 }
+        let actual = receipts.snapshot().1
+        precondition(actual.allSatisfy { $0.frames == 960 && $0.rms > 0.025 })
+        for index in 2..<actual.count {
+            precondition(abs(actual[index].pts - actual[index - 1].pts - 0.02) < 0.5 / 48_000)
+        }
+        precondition(receiver.counters.errors == 0 && receiver.counters.dropped == 0 && receiver.counters.unsynchronized == 0)
+        let age = receiver.diagnosticSnapshot()[2].senderReportAge!
+        precondition(age > 7.4 && age < 8)
+        writeLine("Guest sparse audio: all\(sent) real20ms packets/\(sent * 960) samples decoded continuously without refresh; reportAge=\(age)s elapsed=\(began.duration(to: sourceClock.now))")
+        // An old mapping must still fail closed. Keep actual RTP and host
+        // clocks consistent; only the report deliberately becomes stale.
+        let staleDeadline = ContinuousClock.now + .seconds(1)
+        while receiver.diagnosticSnapshot()[2].senderReportAge! <= 8.1 && ContinuousClock.now < staleDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        precondition(receiver.diagnosticSnapshot()[2].senderReportAge! > 8.1, "Bounded stale-report observation")
+        let staleBefore = receipts.snapshot().1.count, unsyncBefore = receiver.counters.unsynchronized
+        let staleFrame = Int(ceil((CMClockGetTime(CMClockGetHostTimeClock()).seconds - origin) * 50))
+        send(packet(role: 2, sequence: sequence, timestamp: base &+ UInt32(staleFrame) * 960,
+                    payload: opus, marker: true), role: 2, peer: peer); sequence &+= 1
+        await wait("sparse-audio-stale8s-map-denied", receiver, receipts) { receiver.counters.unsynchronized == unsyncBefore + 1 }
+        precondition(receipts.snapshot().1.count == staleBefore)
+        let refreshed = Double(staleFrame) / 50
+        sr(2, rtp: base &+ UInt32(staleFrame) * 960, seconds: sourceNTP + refreshed, peer: peer)
+        await wait("sparse-audio-fresh-report-received", receiver, receipts) { receiver.diagnosticSnapshot()[2].senderReportAge! < 0.1 }
+        send(packet(role: 2, sequence: sequence, timestamp: base &+ UInt32(staleFrame + 1) * 960,
+                    payload: opus, marker: true), role: 2, peer: peer)
+        await wait("sparse-audio-original-clock-recovered", receiver, receipts) { receipts.snapshot().1.count == staleBefore + 1 }
+        precondition(abs(receipts.snapshot().1.last!.pts - (first.pts + Double(staleFrame + 1) / 50)) < 0.5 / 48_000)
+        precondition(receiver.counters.errors == 0 && receiver.counters.dropped == 0)
+        writeLine("Guest sparse audio: >8s stale mapping denied, fresh owned SR resumes original shared host clock PASS")
     }
     @MainActor static func longCall(_ folder: URL) async throws {
         let receipts = GuestReceipts(), bridge = GuestSignalBridge()
