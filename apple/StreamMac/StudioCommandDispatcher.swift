@@ -1058,6 +1058,11 @@ final class StudioCommandDispatcher: ObservableObject {
         self.session = session
         self.recorder = recorder
         self.previewProgram = previewProgram
+        // Admission reads the live applied document before a guest can route.
+        // Keep the session weak so runtime retirement cannot retain its graph.
+        controller.guestMixerSettings = { [weak session] in
+            session?.activeSettings.mixer ?? MixerSettings()
+        }
         let soundboardStore = SoundboardStore()
         self.soundboardStore = soundboardStore
         self.soundboard = SoundboardController(store: soundboardStore,
@@ -3680,6 +3685,7 @@ final class StudioCommandDispatcher: ObservableObject {
             redoLabel: undoStack.redoLabel,
             annotations: annotations.uiState(stagedSceneID: staged?.id))
         registerAppAudioMixerChannels()
+        registerGuestMixerChannels()
         pushMixerStateToEngine()
     }
 
@@ -3696,6 +3702,21 @@ final class StudioCommandDispatcher: ObservableObject {
             else { continue }
             let id = AudioChannelID.application(bundleID: payload.channelBundleID)
             channelIDsByLabel[id.label] = id
+        }
+    }
+
+    /// A persisted source alone cannot admit audio. Only the controller's
+    /// explicitly registered slot gets a mixer channel, shared by its camera
+    /// and screen sources. A newly registered label must receive the current
+    /// document even when no fader changed since the previous refresh.
+    private func registerGuestMixerChannels() {
+        for source in sceneStore.sources {
+            guard case .guest(let payload) = source.payload,
+                  let slot = payload.slotID,
+                  let id = controller.registeredGuestAudioChannel(slot: slot),
+                  channelIDsByLabel[id.label] != id else { continue }
+            channelIDsByLabel[id.label] = id
+            lastPushedMixer = nil
         }
     }
 
