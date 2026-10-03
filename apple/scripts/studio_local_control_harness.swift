@@ -10,6 +10,17 @@ import Security
     static var machineDirectory: URL { projectDirectory }
 }
 struct HarnessID: Hashable { var rawValue = UUID() }
+/// Real interview snapshot values at the controlled studio boundary. The wire
+/// fixture starts no service/media factory and makes no guest routing claim.
+struct HarnessGuestRoute {
+    var slot: UUID
+    var programAllowed = false
+    var monitorAllowed = false
+}
+struct HarnessInterviewState {
+    var snapshot = NativeInterviewSnapshot()
+    var routes: [UUID: HarnessGuestRoute] = [:]
+}
 struct HarnessState {
     var stream: StreamSessionState = .idle
     var recording: RecordingSessionState = .idle
@@ -19,6 +30,7 @@ struct HarnessState {
     var hasPendingStagedEdits = false
     var layerVisibility: [HarnessID: Bool] = [:]
     var directLiveEditing = false
+    var interview = HarnessInterviewState()
 }
 enum StudioCommand { case action(String), pdfGoToPage(UUID, page: Int), addRecordingMarker(String) }
 enum StudioCommandError: Error {
