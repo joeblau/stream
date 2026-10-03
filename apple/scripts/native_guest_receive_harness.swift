@@ -108,9 +108,35 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
             }
         }
     }
-    @MainActor static func wait(_ predicate: () -> Bool) async {
-        for _ in 0..<1000 { if predicate() { return }; try? await Task.sleep(for: .milliseconds(10)) }
-        preconditionFailure("Bounded peer/decode deadline")
+    private static func progress(_ receiver: NativeGuestReceiver, _ receipts: GuestReceipts) -> String {
+        // Snapshot Swift state before taking any transport lock. Never hold a
+        // receipt/decoder lock across the SDK, whose callbacks enter Swift.
+        let snapshots = receiver.diagnosticSnapshot(), counts = receiver.counters
+        let (video, audio) = receipts.snapshot()
+        let roles = snapshots.map { snapshot in
+            let transport = receiver.transportStats(snapshot.role)
+            let statuses = snapshot.statuses.map { "\($0.stage):\($0.status):\($0.detail)" }.joined(separator: ",")
+            return "role=\(snapshot.role.rawValue) received=\(snapshot.received) decoded=\(snapshot.decoded) expired=\(snapshot.expired) queued=\(snapshot.queued)/\(snapshot.bytes) working=\(snapshot.working) srAge=\(snapshot.senderReportAge.map { String(format: "%.3f", $0) } ?? "none") transportFrames=\(transport.frames) rejected=\(transport.rejected) pending=\(transport.pending_packets)/\(transport.pending_bytes) codec=[\(statuses)]"
+        }.joined(separator: " | ")
+        return "video=\(video.count) audio=\(audio.count)/\(audio.reduce(0) { $0 + $1.frames }) errors=\(counts.errors) drops=\(counts.dropped) unsynchronized=\(counts.unsynchronized) \(roles)"
+    }
+    @MainActor private static func wait(_ phase: String, _ receiver: NativeGuestReceiver, _ receipts: GuestReceipts, _ predicate: () -> Bool) async {
+        let began = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        print("Guest phase start \(phase): \(progress(receiver, receipts))")
+        // Preserve the original 1000 ten-millisecond waits. The elapsed clock
+        // exposes scheduler starvation instead of increasing any deadline.
+        for iteration in 0..<1000 {
+            if predicate() {
+                print("Guest phase complete \(phase) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
+                return
+            }
+            if iteration > 0 && iteration % 100 == 0 {
+                print("Guest phase waiting \(phase) iteration=\(iteration) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        print("Guest phase deadline \(phase) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
+        preconditionFailure("Bounded peer/decode deadline: \(phase)")
     }
     static func main() async throws {
         let folder = URL(fileURLWithPath: CommandLine.arguments[1]), receipts = GuestReceipts(), bridge = GuestSignalBridge()
@@ -122,7 +148,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         bridge.peer = peer
         defer { receiver.stop(); SGPeerFixtureDestroy(peer) }
         precondition(SGPeerFixtureStart(peer) != 0)
-        await wait { SGPeerFixtureReady(peer) != 0 }
+        await wait("initial-peer-connected", receiver, receipts) { SGPeerFixtureReady(peer) != 0 }
         precondition(!bridge.hasFailed())
         print("Guest receive: actual public SDK peer DTLS/SRTP connected")
         let camera = frames(try Data(contentsOf: folder.appendingPathComponent("camera.h264")))
@@ -136,6 +162,8 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         sr(1, rtp: screenBase, seconds: 4_000_000_000.3, peer: peer)
         try await Task.sleep(for: .milliseconds(20))
         var cameraSequence: UInt16 = 65_534, screenSequence: UInt16 = 2, audioSequence: UInt16 = 65_534
+        let feedBegan = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        print("Guest initial paced feed start: \(progress(receiver, receipts))")
         for tick in 0..<70 {
             let opus = try Data(contentsOf: folder.appendingPathComponent(String(format: "opus-%03d.bin", tick)))
             send(packet(role: 2, sequence: audioSequence, timestamp: audioBase &+ UInt32(tick * 960), payload: [UInt8](opus), marker: true), role: 2, peer: peer); audioSequence &+= 1
@@ -145,8 +173,11 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
                 video(screen[index], role: 1, timestamp: screenBase &+ UInt32(index * 9000), sequence: &screenSequence, peer: peer)
             }
             try await Task.sleep(for: .milliseconds(20))
+            if tick % 10 == 9 {
+                print("Guest paced feed tick=\(tick + 1) sourceElapsed=\(Double(tick + 1) * 0.02)s hostElapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - feedBegan)s: \(progress(receiver, receipts))")
+            }
         }
-        await wait { let (v, a) = receipts.snapshot(); return v.count == 28 && a.reduce(0) { $0 + $1.frames } >= 67_080 || receiver.counters.errors > 0 }
+        await wait("initial-h264-opus-decode", receiver, receipts) { let (v, a) = receipts.snapshot(); return v.count == 28 && a.reduce(0) { $0 + $1.frames } >= 67_080 || receiver.counters.errors > 0 }
         await receiver.finishAudio()
         let (v, a) = receipts.snapshot()
         print("Guest decode counts video=\(v.count) audio=\(a.count) errors=\(receiver.counters.errors) dropped=\(receiver.counters.dropped) unsynchronized=\(receiver.counters.unsynchronized)")
@@ -184,21 +215,21 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         badPadding[badPadding.count - 1] = 255
         precondition(receiver.validationPacket(badPadding, role: .camera))
         cameraSequence &+= 1
-        await wait { receiver.transportStats(.audio).rejected == 2 && receiver.transportStats(.camera).rejected == 2 }
+        await wait("malformed-reorder-rejected", receiver, receipts) { receiver.transportStats(.audio).rejected == 2 && receiver.transportStats(.camera).rejected == 2 }
         let countsAfter = receipts.snapshot(); precondition(countsBefore.0.count == countsAfter.0.count && countsBefore.1.count == countsAfter.1.count)
         // An unfinished FU expires without the pinned SDK retaining any of it.
         send(packet(role: 0, sequence: cameraSequence, timestamp: cameraBase &+ 126_000, payload: [0x7c, 0x85, 1, 2], marker: false), role: 0, peer: peer); cameraSequence &+= 1
-        await wait { receiver.transportStats(.camera).pending_packets == 1 }
+        await wait("unfinished-fu-pending", receiver, receipts) { receiver.transportStats(.camera).pending_packets == 1 }
         try await Task.sleep(for: .milliseconds(350))
         precondition(receiver.transportStats(.camera).pending_packets == 0 && receiver.transportStats(.camera).pending_bytes == 0)
         // FU-A continuation may not change the NAL's type/NRI.
         send(packet(role: 0, sequence: cameraSequence, timestamp: cameraBase &+ 135_000, payload: [0x7c, 0x85, 1, 2], marker: false), role: 0, peer: peer); cameraSequence &+= 1
         send(packet(role: 0, sequence: cameraSequence, timestamp: cameraBase &+ 135_000, payload: [0x5c, 0x45, 1, 2], marker: true), role: 0, peer: peer); cameraSequence &+= 1
-        await wait { receiver.transportStats(.camera).rejected == 3 }
+        await wait("fu-identity-rejected", receiver, receipts) { receiver.transportStats(.camera).rejected == 3 }
         // Loss recovery emits a complete real IDR after the malformed AU.
         sr(0, rtp: cameraBase &+ 135_000, seconds: 4_000_000_001.5, peer: peer)
         video(camera[0], role: 0, timestamp: cameraBase &+ 135_000, sequence: &cameraSequence, peer: peer)
-        await wait { receipts.snapshot().0.count == countsBefore.0.count + 1 }
+        await wait("actual-idr-recovery", receiver, receipts) { receipts.snapshot().0.count == countsBefore.0.count + 1 }
         let hugeFU = [UInt8](repeating: 1, count: 4000)
         for index in 0..<512 {
             let payload = [UInt8(0x7c), UInt8(index == 0 ? 0x85 : 0x05)] + hugeFU
@@ -230,7 +261,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         bridge.receiver = receiver
         let peer = SGPeerFixtureCreate(guestFixtureSignal, Unmanaged.passUnretained(bridge).toOpaque())!; bridge.peer = peer
         defer { receiver.stop(); SGPeerFixtureDestroy(peer) }
-        precondition(SGPeerFixtureStart(peer) != 0); await wait { SGPeerFixtureReady(peer) != 0 }
+        precondition(SGPeerFixtureStart(peer) != 0); await wait("long-call-peer-connected", receiver, receipts) { SGPeerFixtureReady(peer) != 0 }
         let camera = frames(try Data(contentsOf: folder.appendingPathComponent("camera.h264")))[0]
         let screen = frames(try Data(contentsOf: folder.appendingPathComponent("screen.h264")))[0]
         let opus = [UInt8](try Data(contentsOf: folder.appendingPathComponent("opus-000.bin")))
@@ -250,7 +281,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
                 video(screen, role: 1, timestamp: videoTime, sequence: &screenSequence, peer: peer)
             }
         }
-        await wait { receipts.snapshot().0.count == 15 && receipts.snapshot().1.count == 14 }
+        await wait("long-call-late-screen-decode", receiver, receipts) { receipts.snapshot().0.count == 15 && receipts.snapshot().1.count == 14 }
         let (video, audio) = receipts.snapshot()
         precondition(receiver.counters.errors == 0 && receiver.counters.unsynchronized == 0)
         let cameras = video.filter { $0.role == .camera }, screens = video.filter { $0.role == .screen }
@@ -270,7 +301,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
                 send(packet(role: 2, sequence: audioSequence, timestamp: base &+ UInt32(index) * frames, payload: [UInt8](data), marker: true), role: 2, peer: peer); audioSequence &+= 1
                 try await Task.sleep(for: .milliseconds(item.duration))
             }
-            await wait { receipts.snapshot().1.count == baseline + item.packets || receiver.counters.errors > 0 }
+            await wait("opus-case-\(item.label)", receiver, receipts) { receipts.snapshot().1.count == baseline + item.packets || receiver.counters.errors > 0 }
             precondition(receiver.counters.errors == 0)
             let actual = Array(receipts.snapshot().1.dropFirst(baseline))
             precondition(actual.reduce(0) { $0 + $1.frames } == item.frames && actual.allSatisfy { $0.frames == Int(frames) })
@@ -294,12 +325,12 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         bridge.receiver = receiver
         let peer = SGPeerFixtureCreate(guestFixtureSignal, Unmanaged.passUnretained(bridge).toOpaque())!; bridge.peer = peer
         defer { receiver.stop(); SGPeerFixtureDestroy(peer) }
-        precondition(SGPeerFixtureStart(peer) != 0); await wait { SGPeerFixtureReady(peer) != 0 }
+        precondition(SGPeerFixtureStart(peer) != 0); await wait("revoke-peer-connected", receiver, receipts) { SGPeerFixtureReady(peer) != 0 }
         let frame = frames(try Data(contentsOf: folder.appendingPathComponent("screen.h264")))[0]
         sr(1, rtp: 0, seconds: 4_000_000_000, peer: peer)
         var screenSequence: UInt16 = 1, cameraSequence: UInt16 = 1
         video(frame, role: 1, timestamp: 0, sequence: &screenSequence, peer: peer)
-        await wait { barrier.snapshot().0 }
+        await wait("revoke-screen-callback-entered", receiver, receipts) { barrier.snapshot().0 }
         let revoke = Task.detached { let sent = receiver.approveScreen(false); barrier.markReturned(); return sent }
         try await Task.sleep(for: .milliseconds(60))
         precondition(!barrier.snapshot().1, "Revoke returned while a prior screen callback still owned the gate")
@@ -311,7 +342,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         video(frames(try Data(contentsOf: folder.appendingPathComponent("camera.h264")))[0], role: 0, timestamp: 0, sequence: &cameraSequence, peer: peer)
         sr(2, rtp: 0, seconds: 4_000_000_000, peer: peer)
         send(packet(role: 2, sequence: 1, timestamp: 0, payload: [UInt8](try Data(contentsOf: folder.appendingPathComponent("opus-000.bin"))), marker: true), role: 2, peer: peer)
-        await wait { receipts.snapshot().0.contains { $0.role == .camera } && !receipts.snapshot().1.isEmpty }
+        await wait("revoke-camera-audio-health", receiver, receipts) { receipts.snapshot().0.contains { $0.role == .camera } && !receipts.snapshot().1.isEmpty }
         try await Task.sleep(for: .milliseconds(80))
         precondition(receipts.snapshot().0.filter { $0.role == .screen }.count == count)
         print("Guest receive: actual blocked decoded callback fences synchronous screen revoke; later screen rejected, camera/audio continue PASS")
