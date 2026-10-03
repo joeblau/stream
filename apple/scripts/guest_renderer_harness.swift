@@ -67,9 +67,32 @@ enum GuestRendererHarness {
         let updated = color(render(at: next, program: true))
         precondition(updated.0 < 5 && updated.2 > 240, "Nested guests must not reuse a static cached image")
         precondition(color(render(at: next, program: true, values: [:])).2 < 5, "Unknown bound source must not use inline guest pixels")
+        let definition = SourceDefinition(name: "Registered Guest", payload: .guest(payload))
+        let iso = RecordingVideoSourceFactory.makeGuest(source: definition, lease: lease, frames: store)!.makeRenderer()
+        let size = CGSize(width: 320, height: 180), duration = CMTime(value: 1, timescale: 30)
+        let future = iso(size, now, duration, 0, .raw)!
+        precondition(!future.sourceAvailable && future.sample != nil)
+        let raw = iso(size, next, duration, 1, .raw)!
+        let processed = iso(size, next, duration, 2, .processed)!
+        precondition(raw.sourceAvailable && processed.sourceAvailable)
+        let rawPixels = CMSampleBufferGetImageBuffer(raw.sample!)!
+        CVPixelBufferLockBaseAddress(rawPixels, .readOnly)
+        let rawBytes = CVPixelBufferGetBaseAddress(rawPixels)!.assumingMemoryBound(to: UInt8.self)
+        precondition(rawBytes[90 * CVPixelBufferGetBytesPerRow(rawPixels) + 160 * 4] > 240)
+        CVPixelBufferUnlockBaseAddress(rawPixels, .readOnly)
+        store.allowProgram(false, lease: lease)
+        precondition(!iso(size, next, duration, 3, .raw)!.sourceAvailable, "Backstage media must not enter guest ISO")
+        store.allowProgram(true, lease: lease)
+        let successor = GuestReceiveLease(slot: lease.slot, peerID: UUID(), negotiation: UUID(), generation: 2)
+        precondition(store.register(successor))
+        store.allowProgram(true, lease: successor)
+        precondition(store.receive(.init(lease: successor, role: .camera, pixels: pixels(red: 0, green: 255, blue: 0),
+                                        pts: next, duration: .invalid, mappingGeneration: UUID(), clockQuality: .senderReportAligned), arrival: now))
+        precondition(!iso(size, next, duration, 4, .raw)!.sourceAvailable, "An ISO must not adopt a replacement peer")
+        precondition(color(render(at: next, program: true)).1 > 240)
         store.retire()
         precondition(color(render(at: next, program: false)).2 < 5)
         print("Guest renderer: old document defaults, stable slot/role persistence, exact registered source, future-frame withholding, backstage/Program gate, dynamic nested pixels and runtime retirement PASS")
-        print("Qualification: actual software Core Image raster from generated CoreVideo receipts; codec transport and combined Program/ISO AV decode remain separate")
+        print("Qualification: actual Core Image raster and raw/processed generation-pinned ISO source workers from generated CoreVideo receipts; codec transport and combined Program/ISO AV decode remain separate")
     }
 }

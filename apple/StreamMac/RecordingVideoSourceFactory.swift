@@ -12,6 +12,48 @@ enum RecordingVideoSourceFactory {
             }
         }
     }
+    /// An ISO subscription pins the admitted peer generation. Rejoining the
+    /// same persistent slot cannot silently replace media in an existing file.
+    static func makeGuest(source: SourceDefinition, lease: GuestReceiveLease,
+                          frames: GuestVideoFrameStore) -> IsolatedVideoSource? {
+        guard case .guest(let payload) = source.payload, payload.slotID == lease.slot else { return nil }
+        return IsolatedVideoSource {
+            let renderer = GuestRenderer(source: source, payload: payload, lease: lease, frames: frames)
+            return { size, pts, duration, sequence, processing in
+                renderer.render(size: size, pts: pts, duration: duration, sequence: sequence, processing: processing)
+            }
+        }
+    }
+
+    private final class GuestRenderer: @unchecked Sendable {
+        let source: SourceDefinition
+        let payload: GuestSourcePayload
+        let lease: GuestReceiveLease
+        let frames: GuestVideoFrameStore
+        var renderer: SceneRenderer?
+        init(source: SourceDefinition, payload: GuestSourcePayload, lease: GuestReceiveLease,
+             frames: GuestVideoFrameStore) {
+            self.source = source; self.payload = payload; self.lease = lease; self.frames = frames
+        }
+        func render(size: CGSize, pts: CMTime, duration: CMTime, sequence: Int64,
+                    processing: IsolatedVideoProcessing) -> IsolatedVideoRenderedFrame? {
+            let pixels = frames.pixels(slot: lease.slot, role: payload.role == .camera ? .camera : .screen,
+                                       at: pts, program: true, requiring: lease)
+            let snapshot = Snapshot(camera: nil, pixels: pixels)
+            let lookup = SourceFrameLookup(camera: { _ in nil }, screen: { _ in snapshot.pixels },
+                                           guest: { _, _ in snapshot.pixels })
+            let placement: LayerPayload = processing == .raw ? .screen(ScreenSourcePayload()) : source.payload
+            let layer = LayerNode(name: source.name, sourceID: source.id, payload: placement, transform: .fullscreen,
+                                  effectOverrides: processing == .raw ? .identity : nil)
+            let scene = Scene(name: source.name, layers: [layer], background: .solid(colorHex: "#000000"))
+            if renderer == nil { renderer = SceneRenderer() }
+            let frame = renderer?.render(scene: scene, overlayContext: .empty, canvasSize: size,
+                                         frames: lookup, sourcePayloads: [source.id: placement], scenes: [:],
+                                         presentationTime: pts, frameDuration: duration, sequence: sequence)
+            return IsolatedVideoRenderedFrame(sample: frame?.sampleBuffer, sourceAvailable: pixels != nil)
+        }
+    }
+
     private final class Snapshot: @unchecked Sendable {
         let camera: LatestCameraFrame.Frame?
         let pixels: CVPixelBuffer?

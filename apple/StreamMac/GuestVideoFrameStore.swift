@@ -99,9 +99,11 @@ final class GuestVideoFrameStore: @unchecked Sendable {
 
     /// Non-destructive across canvases. Camera pixels expire; an enabled static
     /// screen retains its last due frame until an explicit track/session end.
-    func pixels(slot: UUID, role: GuestReceiveRole, at time: CMTime, program: Bool) -> CVPixelBuffer? {
+    func pixels(slot: UUID, role: GuestReceiveRole, at time: CMTime, program: Bool,
+                requiring current: GuestReceiveLease? = nil) -> CVPixelBuffer? {
         lock.lock(); defer { lock.unlock() }
-        guard !closed, lease?.slot == slot, (!program || programAllowed), time.isNumeric,
+        guard !closed, lease?.slot == slot, current == nil || current == lease,
+              (!program || programAllowed), time.isNumeric,
               var state = roles[role], state.enabled,
               let index = state.frames.lastIndex(where: { $0.pts <= time }) else { return nil }
         let frame = state.frames[index]
