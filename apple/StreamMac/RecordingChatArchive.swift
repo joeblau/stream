@@ -97,7 +97,7 @@ final class RecordingChatArchive: @unchecked Sendable {
             pump(final: true)
             if !failed {
                 for paint in active.keys.sorted(by: Self.paintOrder) {
-                    add(.init(type: "hide", seconds: videoEnd, slotID: paint.slotID, messageID: paint.messageID))
+                    add(.init(type: "hide", seconds: videoEnd, slotID: paint.slotID, messageID: paint.messageID, pageIndex: paint.pageIndex, pageCount: paint.pageCount))
                 }
                 active.removeAll(); flush(upTo: videoEnd, final: true)
                 summary.status = completed ? "complete" : "partial"
@@ -138,12 +138,14 @@ final class RecordingChatArchive: @unchecked Sendable {
                 lastFrameTime = Date(); videoEnd = max(videoEnd, frame.endSeconds)
                 let next = Dictionary(bindings.map { ($0.paint, $0.message) }, uniquingKeysWith: { first, _ in first })
                 for paint in active.keys.filter({ next[$0] == nil }).sorted(by: Self.paintOrder) {
-                    add(.init(type: "hide", seconds: frame.seconds, slotID: paint.slotID, messageID: paint.messageID))
+                    add(.init(type: "hide", seconds: frame.seconds, slotID: paint.slotID, messageID: paint.messageID, pageIndex: paint.pageIndex, pageCount: paint.pageCount))
                 }
                 for paint in next.keys.filter({ active[$0] == nil }).sorted(by: Self.paintOrder) {
                     var message = next[paint]!
                     if !preferences.includeAuthors { message.author = nil }
-                    add(.init(type: "show", seconds: frame.seconds, message: message, slotID: paint.slotID, messageID: paint.messageID))
+                    add(.init(type: "show", seconds: frame.seconds, message: message, slotID: paint.slotID, messageID: paint.messageID,
+                        bodyUTF16Start: paint.bodyUTF16Start, bodyUTF16Length: paint.bodyUTF16Length,
+                        pageIndex: paint.pageIndex, pageCount: paint.pageCount))
                 }
                 active = next
             }

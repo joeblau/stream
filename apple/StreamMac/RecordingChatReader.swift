@@ -86,11 +86,11 @@ enum RecordingChatReader {
         func write(_ text: String) throws { try file.write(contentsOf: Data(text.utf8)) }
         var first = true, cueNumber = 0
         var active: [String: RecordingChatRecord] = [:]
-        func key(_ value: RecordingChatRecord) -> String { (value.slotID ?? "") + ":" + (value.messageID ?? value.message?.id ?? "") }
+        func key(_ value: RecordingChatRecord) -> String { (value.slotID ?? "") + ":" + (value.messageID ?? value.message?.id ?? "") + ":" + (value.pageIndex.map(String.init) ?? "") }
         func cue(_ value: RecordingChatRecord, until end: Double) throws {
             guard let message = value.message, end > value.seconds else { return }
             cueNumber += 1
-            let body = [message.author, message.text].compactMap { $0 }.joined(separator: "\n")
+            let body = [message.author, value.paintedBody].compactMap { $0 }.joined(separator: "\n")
                 .replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\r", with: "")
                 .split(separator: "\n", omittingEmptySubsequences: true).joined(separator: "\n")
@@ -100,7 +100,7 @@ enum RecordingChatReader {
         let inspection = try scan(source, header: { header in
             switch format {
             case .json: try write("{\"header\":"); try file.write(contentsOf: encoder.encode(header)); try write(",\"events\":[\n")
-            case .csv: try write("seconds,type,slot_id,message_id,platform,author,text,provider_timestamp,receipt_timestamp,while_paused,title\n")
+            case .csv: try write("seconds,type,slot_id,message_id,platform,author,text,provider_timestamp,receipt_timestamp,while_paused,title,page_index,page_count,painted_text\n")
             case .vtt: try write("WEBVTT\n\n")
             case .srt: break
             }
@@ -111,9 +111,12 @@ enum RecordingChatReader {
                 try file.write(contentsOf: encoder.encode(value))
             case .csv:
                 let m = value.message
-                let cells = [String(format: "%.6f", value.seconds), value.type, value.slotID ?? "", value.messageID ?? m?.id ?? "",
+                var cells: [String] = [String(format: "%.6f", value.seconds), value.type, value.slotID ?? "", value.messageID ?? m?.id ?? "",
                     m?.platform ?? "", m?.author ?? "", m?.text ?? "", m.map { ISO8601DateFormatter().string(from: $0.providerTimestamp) } ?? "",
                     m.map { String($0.timestampIsReceiptTime) } ?? "", value.whilePaused.map(String.init) ?? "", value.title ?? ""]
+                cells.append(value.pageIndex.map(String.init) ?? "")
+                cells.append(value.pageCount.map(String.init) ?? "")
+                cells.append(value.type == "show" ? value.paintedBody ?? "" : "")
                 try write(cells.map(csvCell).joined(separator: ",") + "\n")
             case .vtt, .srt:
                 let id = key(value)

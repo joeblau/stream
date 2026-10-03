@@ -188,15 +188,24 @@ struct MainWindowView: View {
                     controller.outputSessionActive || dispatcher.state.recording.isActive
                 },
                 stopAllOutputs: {
+                    controller.ending.cancelPending()
                     dispatcher.execute(.stopStream)
                     dispatcher.execute(.stopRecording)
                     controller.stopExternalDisplayOutput()
                     controller.stopVirtualCameraOutput()
+                    controller.stopSecondaryRecording()
+                    for _ in 0..<150 {
+                        if !recorder.state.isActive && !controller.outputSessionActive { break }
+                        try? await Task.sleep(for: .milliseconds(100))
+                    }
                 },
                 stopPreview: { dispatcher.execute(.stopPreview) })
         }
         .toolbar { panelToggles }
         .onAppear {
+            if !controller.ending.isBound {
+                controller.bindEnding(accounts: workspace.runtime.providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
+            }
             shortcuts.actions = { commandActions }
             shortcuts.onExecute = { action in
                 if let command = action.command { dispatcher.execute(command) }
@@ -217,6 +226,7 @@ struct MainWindowView: View {
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
         .onDisappear {
+            controller.ending.shutdown()
             controller.stopVirtualCameraOutput()
             workspace.runtime.providerAccounts.shutdown()
             controller.stopExternalDisplayOutput()
@@ -411,6 +421,8 @@ struct MainWindowView: View {
 
     // MARK: - Canvas panel
 
+    @State private var showSecondaryCanvasPanel = false
+
     private var canvasPanel: some View {
         VStack(spacing: 0) {
             // C01 (issue #76): the thumbnail camera switcher — live tiles for
@@ -428,6 +440,11 @@ struct MainWindowView: View {
             AnnotationToolbarView()
             Divider()
             transitionControls
+            DisclosureGroup("Secondary Canvas", isExpanded: $showSecondaryCanvasPanel) {
+                if showSecondaryCanvasPanel {
+                    ScrollView { SecondaryCanvasPanelView().padding(8) }.frame(maxHeight: 420)
+                }
+            }.padding(8)
             if showDiagnostics {
                 Divider()
                 diagnosticsStrip

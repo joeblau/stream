@@ -14,12 +14,17 @@ import StreamCore
     var networkPackets = 0
     var noisyVideo = false
     var activePublishingEncoderCount: Int { 1 }
+    private var reservations = StudioEncoderReservations()
+    func reserveRecordingEncoders(_ id: UUID, count: Int, canvas: OutputCanvas) -> String? {
+        reservations.reserve(id, encoders: count, publishing: activePublishingEncoderCount)
+    }
+    func releaseRecordingEncoders(_ id: UUID) { reservations.release(id) }
     func recordingVideoSources() -> [RecordingVideoSource] { [] }
     func addRecordingVideoSource(targetID: String) -> (RecordingVideoSubscription, IsolatedVideoSource)? { nil }
     func removeRecordingVideoSource(_ subscription: RecordingVideoSubscription) {}
     private var videos: [FrameSubscription: @Sendable (Frame) -> Void] = [:]
     private var audios: [AudioTapSubscription: @Sendable (CMSampleBuffer) -> Void] = [:]
-    func addFrameSink(sink: @escaping @Sendable (Frame) -> Void) -> FrameSubscription {
+    func addFrameSink(canvas: OutputCanvas = .program, sink: @escaping @Sendable (Frame) -> Void) -> FrameSubscription {
         let token = FrameSubscription(); videos[token] = sink; return token
     }
     func addProgramAudioTap(sink: @escaping @Sendable (CMSampleBuffer) -> Void) -> AudioTapSubscription {
@@ -32,8 +37,8 @@ import StreamCore
     }
     func removeFrameSink(_ token: FrameSubscription) { videos.removeValue(forKey: token) }
     func removeAudioTap(_ token: AudioTapSubscription) { audios.removeValue(forKey: token) }
-    func noteRecordingStarted() { demands += 1 }
-    func noteRecordingStopped() { demands -= 1 }
+    func noteRecordingStarted(canvas: OutputCanvas = .program) { demands += 1 }
+    func noteRecordingStopped(canvas: OutputCanvas = .program) { demands -= 1 }
     func feed(seconds: Double, offset: Double = 0) async throws {
         let clock = ContinuousClock(); let start = clock.now
         for index in 0..<Int(seconds * 100) {

@@ -26,7 +26,7 @@ import Foundation
         queue.receive(first); queue.receive(message(try event("1")))
         precondition(queue.messages.count == 1)
         queue.receive(message(try event("1", connection: "another/channel")))
-        precondition(queue.messages.count == 2)
+        precondition(queue.messages.count == 1)
         let second = message(try event("2", text: "Next"))
         queue.receive(second); queue.favorite(first.id); queue.enqueue(first.id); queue.enqueue(second.id)
         queue.retainReadingPosition(first.id)
@@ -49,6 +49,6 @@ import Foundation
         precondition(queue.message(a.id) != nil && queue.message(b.id) != nil)
         precondition(queue.readingID == first.id && queue.message(first.id) != nil)
         precondition(queue.filtered(search: "", connectionID: "another/channel").allSatisfy { $0.connectionID == "another/channel" })
-        print("PASS: documented Restream public events, provider identity/scope deduplication, private/unknown/oversize rejection, Unicode, bounded queue/favorites, selection under message churn and reconnect replay, independent featured state")
+        print("PASS: documented Restream public events, provider identity deduplication across adapters, private/unknown/oversize rejection, Unicode, bounded queue/favorites, selection under message churn and reconnect replay, independent featured state")
     }
 }

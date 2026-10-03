@@ -58,6 +58,33 @@ actor ProviderHTTPFixture {
     func count(host: String) -> Int { requests.filter { $0.url?.host == host }.count }
     func allRequests() -> [URLRequest] { requests }
 }
+actor ProviderEndingHTTPFixture {
+    var calls: [URLRequest] = []
+    var completed: Set<String> = []
+    var heldRead = false
+    var entered = false
+    var gate: CheckedContinuation<Void, Never>?
+    func hold() { heldRead = true }
+    func release() { heldRead = false; gate?.resume(); gate = nil }
+    func send(_ call: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        calls.append(call)
+        let id = URLComponents(url: call.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "id" }!.value!
+        let row: [String: Any]
+        if call.httpMethod == "POST" {
+            completed.insert(id)
+            row = ["id": id, "snippet": ["channelId": "UC1"], "status": ["lifeCycleStatus": "complete"]]
+        } else {
+            if heldRead { entered = true; await withCheckedContinuation { gate = $0 } }
+            row = ["id": id, "snippet": ["channelId": "UC1"], "status": ["lifeCycleStatus": completed.contains(id) ? "complete" : "live"]]
+        }
+        let object: [String: Any]
+        if call.httpMethod == "POST" { object = row } else { object = ["items": [row]] }
+        let data = try JSONSerialization.data(withJSONObject: object)
+        return (data, HTTPURLResponse(url: call.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+    var count: Int { calls.count }
+    var posts: Int { calls.filter { $0.httpMethod == "POST" }.count }
+}
 /// Local HTTP is used only to exercise URLSession redirect/size behavior. The
 /// production vault itself accepts only its documented HTTPS API hosts.
 final class ProviderHTTPServerFixture: @unchecked Sendable {
@@ -113,7 +140,51 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         try await httpBoundary()
         try await vaultLifecycle()
         try await nativeSession()
+        try await nativeEnding()
         print("Provider accounts: loopback/state/cancel, refresh coalescing/rotation/late response, safe GET retry, native OAuth/discovery/event receipt/shutdown PASS")
+    }
+    @MainActor static func nativeEnding() async throws {
+        let http = ProviderEndingHTTPFixture()
+        let vault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await http.send($0) })
+        let generation = try await vault.configure(.youtube, clientID: "fixture")
+        try await vault.accept(.init(access: "fixture-access", expiresAt: Date().addingTimeInterval(3_600), scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: generation)
+        let session = ProviderAccountSession(restream: FixtureRestream(), vault: vault)
+        let binding = ProviderDestinationBinding(provider: .youtube, channelID: "UC1", eventID: "ending-event")
+        let ended = await session.endRemote(binding)
+        precondition(ended.confirmsEnd && session.snapshot(.youtube).events.contains { $0.id == "ending-event" && $0.state == .ended })
+        let count = await http.count
+        let unsupported = await session.endRemote(.init(provider: .twitch, channelID: "42"))
+        precondition(unsupported.disposition == .unsupported)
+        check(await http.count == count, "Unsupported provider ending reached an API")
+        let reviewed = await session.endRemote(binding, reviewOnly: true)
+        precondition(reviewed.confirmsEnd && reviewed.disposition == .observed)
+        check(await http.posts == 1, "Review retried a remote mutation")
+        session.shutdown()
+        let readHTTP = ProviderEndingHTTPFixture()
+        let readVault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await readHTTP.send($0) })
+        let readGeneration = try await readVault.configure(.youtube, clientID: "fixture")
+        try await readVault.accept(.init(access: "read-only", expiresAt: Date().addingTimeInterval(3_600), scopes: ["https://www.googleapis.com/auth/youtube.readonly"]), provider: .youtube, generation: readGeneration)
+        let readSession = ProviderAccountSession(restream: FixtureRestream(), vault: readVault)
+        let readReceipt = await readSession.endRemote(binding, reviewOnly: true)
+        precondition(readReceipt.disposition == .observed && readReceipt.event?.state == .live)
+        let deniedEnd = await readSession.endRemote(binding)
+        precondition(deniedEnd.disposition == .blocked && deniedEnd.failure?.kind == .permission)
+        check(await readHTTP.posts == 0, "Read-only authorization sent a completion")
+        readSession.shutdown()
+        let lateHTTP = ProviderEndingHTTPFixture(); await lateHTTP.hold()
+        let lateVault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await lateHTTP.send($0) })
+        let lateGeneration = try await lateVault.configure(.youtube, clientID: "fixture")
+        try await lateVault.accept(.init(access: "old-account", expiresAt: Date().addingTimeInterval(3_600), scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: lateGeneration)
+        let lateSession = ProviderAccountSession(restream: FixtureRestream(), vault: lateVault)
+        let oldEnd = Task { await lateSession.endRemote(binding) }
+        await settle { await lateHTTP.entered }
+        lateSession.forget(.youtube)
+        await settle { await !lateVault.hasToken(.youtube) }
+        await lateHTTP.release()
+        let oldResult = await oldEnd.value
+        precondition(!oldResult.confirmsEnd && lateSession.snapshot(.youtube).events.isEmpty)
+        check(await lateHTTP.posts == 0, "Old-account read was followed by a mutation after logout")
+        lateSession.shutdown()
     }
     static func check(_ value: Bool, _ message: String = "Provider lifecycle assertion") { precondition(value, message) }
     static func settle(_ predicate: @Sendable () async -> Bool) async {

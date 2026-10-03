@@ -21,6 +21,7 @@ struct VirtualCameraOutputView: View {
             Picker("Feed", selection: $output.feed) {
                 Text("Composed Program").tag(ExternalDisplayFeed.program)
                 Text("Destination canvas").tag(ExternalDisplayFeed.selectedCanvas)
+                Text("Secondary layout").tag(ExternalDisplayFeed.secondaryCanvas)
             }.disabled(output.isActive)
             if output.feed == .selectedCanvas {
                 Picker("Canvas", selection: $output.selectedDestinationID) {
@@ -33,7 +34,9 @@ struct VirtualCameraOutputView: View {
                 else {
                     let selected = controller.destinations.saved.first { $0.id == output.selectedDestinationID }
                     output.start(programAvailable: true,
-                        selectedProfile: selected?.effectiveProfile(program: controller.activeProfile))
+                        selectedProfile: output.feed == .secondaryCanvas
+                            ? (controller.secondaryCanvasAvailable ? controller.activeSecondaryProfile : nil)
+                            : controller.profileForOutputDestination(selected))
                 }
             }.disabled(!output.isActive && !output.deviceAvailable)
             if let error = output.error { Text(error).font(.caption).foregroundStyle(.orange) }

@@ -11,7 +11,13 @@ protocol ProviderCredentialStore: Sendable {
 extension KeychainStore: ProviderCredentialStore {}
 
 actor ProviderTokenVault {
+    #if STREAM_NATIVE_VALIDATION
+    static let shared = ProviderTokenVault(keychain: NativeValidationProviderCredentials(), transport: { _ in
+        throw ProviderFailure(.unavailable)
+    })
+    #else
     static let shared = ProviderTokenVault()
+    #endif
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
     private let keychain: any ProviderCredentialStore
     private let transport: Transport
@@ -42,6 +48,9 @@ actor ProviderTokenVault {
     func accept(_ token: ProviderOAuthToken, provider: ManagedProvider, generation expected: UUID) throws {
         guard generation(provider) == expected else { throw CancellationError() }
         try save(token, provider: provider)
+        // Accepting new OAuth authorization may change the user behind an
+        // unchanged client ID. Late requests from the old user must be ignored.
+        generations[provider] = UUID(); refreshes[provider]?.cancel(); refreshes[provider] = nil
     }
     func disconnect(_ provider: ManagedProvider) {
         generations[provider] = UUID(); refreshes[provider]?.cancel(); refreshes[provider] = nil
@@ -129,3 +138,11 @@ actor ProviderTokenVault {
         return data
     }
 }
+
+#if STREAM_NATIVE_VALIDATION
+private struct NativeValidationProviderCredentials: ProviderCredentialStore {
+    func string(for item: KeychainStore.Item) -> String? { nil }
+    func set(_ value: String, for item: KeychainStore.Item) -> Bool { false }
+    func remove(_ item: KeychainStore.Item) {}
+}
+#endif

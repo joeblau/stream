@@ -109,6 +109,25 @@ actor AudioMixEngine {
     private var anchor: CMTime = .invalid
     private var mixPosition: Int64 = 0
     private var tickTask: Task<Void, Never>?
+    /// Opt-in capture leases only. Existing inputs retain the 5 ms scheduling margin.
+    /// Public capture batches may arrive tens of milliseconds after their original host PTS.
+    /// Holdback delays delivery, never media timestamps, and stays inside the existing bounded ring.
+    private var captureHoldbacks: [UUID: Int64] = [:]
+    struct CaptureTimingSnapshot: Codable, Sendable {
+        var holdbackMilliseconds: Double
+        var leaseCount: Int
+    }
+    @discardableResult func reserveCaptureHoldback(token: UUID, milliseconds: Double) -> Bool {
+        guard milliseconds.isFinite, (5...100).contains(milliseconds) else { return false }
+        guard captureHoldbacks[token] != nil || captureHoldbacks.count < 32 else { return false }
+        captureHoldbacks[token] = Int64((milliseconds * Double(Self.sampleRate) / 1_000).rounded())
+        return true
+    }
+    func releaseCaptureHoldback(_ token: UUID) { captureHoldbacks.removeValue(forKey: token) }
+    func captureTimingSnapshot() -> CaptureTimingSnapshot {
+        CaptureTimingSnapshot(holdbackMilliseconds: Double(captureHoldbackFrames) * 1_000 / Double(Self.sampleRate), leaseCount: captureHoldbacks.count)
+    }
+    private var captureHoldbackFrames: Int64 { max(240, captureHoldbacks.values.max() ?? 240) }
     private var busGains: [AudioBus: Float] = [.program: 1, .monitor: 1, .aux: 1]
     /// A04: per-bus meters (post-gain, pre-clamp), fed in `postBus`.
     private var busLevels: [AudioBus: LevelMeter] = [:]
@@ -152,6 +171,7 @@ actor AudioMixEngine {
         tickTask?.cancel()
         tickTask = nil
         registry.reset()
+        captureHoldbacks.removeAll()
     }
 
     // MARK: - Channels
@@ -391,14 +411,14 @@ actor AudioMixEngine {
         }
     }
 
-    /// Emits every chunk whose sample window is safely in the past. The 5 ms
-    /// safety margin absorbs capture-callback delivery jitter at chunk edges;
+    /// Emits every chunk whose sample window is safely in the past. The default 5 ms
+    /// margin, or a bounded explicit capture lease, absorbs callback delivery jitter;
     /// later arrival is covered by the ring's counted-silence underrun policy.
     private func tick() {
         let now = CMClockGetTime(CMClockGetHostTimeClock())
         let elapsedFrames = Int64(CMTimeGetSeconds(CMTimeSubtract(now, anchor))
                                     * Double(Self.sampleRate))
-        let safety: Int64 = 240
+        let safety = captureHoldbackFrames
         while mixPosition + Int64(Self.chunkFrames) <= elapsedFrames - safety {
             mixChunk(at: mixPosition)
             mixPosition += Int64(Self.chunkFrames)

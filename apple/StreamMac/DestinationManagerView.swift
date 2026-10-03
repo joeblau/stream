@@ -50,6 +50,9 @@ struct DestinationManagerView: View {
                                   onStart: controller.startDestination,
                                   onStop: controller.stopDestination,
                                   onRetry: controller.retryDestination)
+            DisclosureGroup("Stop Local / End Remote / End All") {
+                StudioEndingControls(coordinator: controller.ending)
+            }
             resourceEstimate
             DisclosureGroup("Session Resilience and Source Failover") {
                 DesktopResilienceView(coordinator: controller.resilience)
@@ -93,6 +96,11 @@ struct DestinationManagerView: View {
             Button("Unlink Provider Routing") { session.draft[index].providerBinding = nil }
         }
         Toggle("Enabled for Go Live", isOn: $session.draft[index].isEnabled)
+        Picker("Composed canvas", selection: Binding(get: { session.draft[index].canvas ?? .program },
+            set: { session.draft[index].canvas = $0 })) {
+            Text("Program").tag(OutputCanvas.program)
+            Text("Secondary layout").tag(OutputCanvas.secondary)
+        }
         Picker("Protocol", selection: $session.draft[index].transport) {
             ForEach(StreamProtocol.allCases, id: \.self) { transport in
                 Text(transport.displayName).tag(transport)

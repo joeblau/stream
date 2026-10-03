@@ -29,6 +29,7 @@ struct ProviderAccountSnapshot {
 final class ProviderAccountSession: ObservableObject {
     @Published private(set) var accounts: [ManagedProvider: ProviderAccountSnapshot] = [:]
     @Published private(set) var viewers: [String: Int] = [:]
+    weak var directChat: StudioDirectChatManager?
     private var viewerDates: [String: Date] = [:]
     private let restream: any ProviderRestreamBoundary
     private let vault: ProviderTokenVault
@@ -40,6 +41,12 @@ final class ProviderAccountSession: ObservableObject {
     private var receivers: [ManagedProvider: OAuthLoopbackReceiver] = [:]
     private var hourlyValidation: Task<Void, Never>?
     private var boot: Task<Void, Never>?
+    private var endingEpochs: [ManagedProvider: UUID] = [:]
+    private func endingEpoch(_ provider: ManagedProvider) -> UUID {
+        if let epoch = endingEpochs[provider] { return epoch }
+        let epoch = UUID(); endingEpochs[provider] = epoch; return epoch
+    }
+    private func hasEndingEpoch(_ provider: ManagedProvider, _ epoch: UUID) -> Bool { endingEpoch(provider) == epoch }
     init(restream: any ProviderRestreamBoundary, vault: ProviderTokenVault = .shared,
          transport: @escaping ProviderTokenVault.Transport = ProviderTokenVault.network,
          openBrowser: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
@@ -78,6 +85,7 @@ final class ProviderAccountSession: ObservableObject {
                         guard !Task.isCancelled else { return }
                         accounts[.twitch]?.failure = Self.failure(error)
                         accounts[.twitch]?.hasCredential = present; accounts[.twitch]?.verifiedAt = nil
+                        if !present { directChat?.stop(.twitch) }
                     }
                 }
             }
@@ -107,7 +115,7 @@ final class ProviderAccountSession: ObservableObject {
         if let error {
             let failure = Self.failure(error)
             accounts[provider]?.failure = failure; accounts[provider]?.verifiedAt = nil
-            if failure.kind == .authorization { accounts[provider]?.hasCredential = false }
+            if failure.kind == .authorization { accounts[provider]?.hasCredential = false; directChat?.stop(provider) }
             if failure.kind == .rateLimited {
                 let delay = max(1, failure.retryAfter ?? 60)
                 accounts[provider]?.retryUntil = Date().addingTimeInterval(delay)
@@ -127,10 +135,14 @@ final class ProviderAccountSession: ObservableObject {
         accounts[provider]?.isWorking = false; accounts[provider]?.devicePrompt = nil
     }
     func shutdown() {
+        for provider in ManagedProvider.allCases { endingEpochs[provider] = UUID() }
+        directChat?.shutdown()
         boot?.cancel(); boot = nil; hourlyValidation?.cancel(); hourlyValidation = nil
         for provider in ManagedProvider.allCases { cancel(provider); cooldowns[provider]?.cancel(); cooldowns[provider] = nil }
     }
     func forget(_ provider: ManagedProvider) {
+        endingEpochs[provider] = UUID()
+        directChat?.stop(provider)
         let generation = begin(provider, action: "Forgetting local authorization")
         jobs[provider] = Task { [weak self] in
             guard let self else { return }
@@ -143,8 +155,10 @@ final class ProviderAccountSession: ObservableObject {
             finish(provider, generation)
         }
     }
-    func authorize(_ provider: ManagedProvider, clientID: String) {
+    func authorize(_ provider: ManagedProvider, clientID: String, additionalScopes: [String] = []) {
         guard [.youtube, .twitch].contains(provider) else { return }
+        endingEpochs[provider] = UUID()
+        directChat?.stop(provider)
         let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
         let generation = begin(provider, action: "Waiting for provider authorization")
         accounts[provider]?.clientID = clientID
@@ -167,7 +181,7 @@ final class ProviderAccountSession: ObservableObject {
                     try ProviderFailure.check(data: data, response: response)
                     token = try ProviderOAuthToken.parse(data)
                 } else {
-                    token = try await TwitchDeviceAuthorization(send: transport).authorize(clientID: clientID) { [weak self] prompt in
+                    token = try await TwitchDeviceAuthorization(send: transport).authorize(clientID: clientID, additionalScopes: additionalScopes) { [weak self] prompt in
                         await MainActor.run {
                             guard let self, self.isCurrent(provider, generation) else { return }
                             self.accounts[provider]?.devicePrompt = prompt
@@ -185,6 +199,38 @@ final class ProviderAccountSession: ObservableObject {
                 refresh(provider)
             } catch { finish(provider, generation, error: error) }
         }
+    }
+    /// Chat shares the machine vault; no bearer credential crosses into views
+    /// or a second OAuth session. Readers do not cancel metadata/event jobs.
+    func chatRequest(_ provider: ManagedProvider, _ request: URLRequest) async throws -> Data {
+        guard [.youtube, .twitch].contains(provider), canRequest(provider) else { throw ProviderFailure(.unavailable) }
+        do { return try await vault.send(provider, request: request) }
+        catch {
+            if (error as? ProviderFailure)?.kind == .authorization {
+                accounts[provider]?.hasCredential = false; accounts[provider]?.scopes = []; accounts[provider]?.verifiedAt = nil
+                accounts[provider]?.failure = Self.failure(error)
+            }
+            if let failure = error as? ProviderFailure, failure.kind == .rateLimited {
+                let delay = max(1, failure.retryAfter ?? 60)
+                accounts[provider]?.failure = failure; accounts[provider]?.retryUntil = Date().addingTimeInterval(delay)
+                cooldowns[provider]?.cancel()
+                cooldowns[provider] = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                    self?.accounts[provider]?.retryUntil = nil; self?.cooldowns[provider] = nil
+                }
+            }
+            throw error
+        }
+    }
+    func chatIdentity(_ provider: ManagedProvider) async throws -> DirectChatIdentity {
+        guard [.youtube, .twitch].contains(provider) else { throw ProviderFailure(.unavailable) }
+        guard canRequest(provider) else { throw ProviderFailure(.rateLimited) }
+        let expected = await vault.generation(provider)
+        if provider == .twitch { try await vault.validateTwitch() }
+        let channels = try await api().channels(provider), scopes = await vault.scopes(provider)
+        guard await vault.generation(provider) == expected, !Task.isCancelled else { throw CancellationError() }
+        guard channels.count == 1 else { throw ProviderFailure(.permission) }
+        return .init(channelID: channels[0].id, scopes: scopes)
     }
     func refresh(_ provider: ManagedProvider) {
         guard canRequest(provider), [.youtube, .twitch, .restream].contains(provider) else { return }
@@ -280,6 +326,50 @@ final class ProviderAccountSession: ObservableObject {
         mutateYouTube { try await $0.editYouTubeEvent(id: eventID, title: draft.title, description: draft.description, scheduledAt: draft.scheduledAt) }
     }
     func completeYouTube(eventID: String) { mutateYouTube { try await $0.completeYouTubeEvent(id: eventID) } }
+    /// Independent explicit ending operations do not cancel metadata work or
+    /// another target's completion. OAuth replacement still invalidates them.
+    func endRemote(_ binding: ProviderDestinationBinding, reviewOnly: Bool = false) async -> ProviderCompletionReceipt {
+        guard binding.provider == .youtube, let id = binding.eventID else { return .init(.unsupported) }
+        guard canRequest(.youtube) else { return .init(.blocked, failure: .init(.rateLimited)) }
+        let epoch = endingEpoch(.youtube), credential = await vault.generation(.youtube)
+        let scopes = await vault.scopes(.youtube)
+        let canWrite = scopes.contains("https://www.googleapis.com/auth/youtube") || scopes.contains("https://www.googleapis.com/auth/youtube.force-ssl")
+        guard canWrite || (reviewOnly && scopes.contains("https://www.googleapis.com/auth/youtube.readonly")) else {
+            return .init(.blocked, failure: .init(.permission))
+        }
+        let vault = vault
+        let boundary = ProviderAPI { [weak self] provider, request in
+            guard await self?.hasEndingEpoch(provider, epoch) == true,
+                  await vault.generation(provider) == credential, !Task.isCancelled else { throw CancellationError() }
+            return try await vault.send(provider, request: request)
+        }
+        let result = reviewOnly ? await boundary.reviewYouTubeEnd(id: id, expectedChannelID: binding.channelID)
+            : await boundary.endYouTubeEvent(id: id, expectedChannelID: binding.channelID)
+        guard endingEpoch(.youtube) == epoch, await vault.generation(.youtube) == credential, !Task.isCancelled else {
+            return .init(.unconfirmed, failure: .init(.unavailable))
+        }
+        if let event = result.event {
+            accounts[.youtube]?.events = Self.merge((accounts[.youtube]?.events ?? []).filter { $0.id != event.id } + [event])
+            accounts[.youtube]?.verifiedAt = result.receivedAt
+        } else if let index = accounts[.youtube]?.events.firstIndex(where: { $0.id == id }) {
+            accounts[.youtube]?.events[index].state = .unknown
+        }
+        accounts[.youtube]?.failure = result.failure
+        if let failure = result.failure {
+            accounts[.youtube]?.verifiedAt = nil
+            if failure.kind == .authorization { accounts[.youtube]?.hasCredential = false; directChat?.stop(.youtube) }
+            if failure.kind == .rateLimited {
+                let delay = max(1, failure.retryAfter ?? 60)
+                accounts[.youtube]?.retryUntil = Date().addingTimeInterval(delay)
+                cooldowns[.youtube]?.cancel()
+                cooldowns[.youtube] = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                    self?.accounts[.youtube]?.retryUntil = nil; self?.cooldowns[.youtube] = nil
+                }
+            }
+        }
+        return result
+    }
     func canRequest(_ provider: ManagedProvider) -> Bool { (accounts[provider]?.retryUntil ?? .distantPast) <= Date() }
     private func mutateYouTube(_ operation: @escaping @Sendable (ProviderAPI) async throws -> ProviderEvent) {
         guard canRequest(.youtube) else { return }

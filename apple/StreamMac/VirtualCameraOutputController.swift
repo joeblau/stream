@@ -104,7 +104,7 @@ final class VirtualCameraOutputController: NSObject, ObservableObject, @preconcu
     func start(programAvailable: Bool, selectedProfile: OutputProfile? = nil) {
         guard !isActive else { return }
         guard programAvailable else { error = "Start the studio preview or another production output before starting the virtual camera."; return }
-        guard feed != .selectedCanvas || selectedProfile != nil else { error = "Choose an available destination canvas."; return }
+        guard feed == .program || selectedProfile != nil else { error = "Choose an available destination canvas or Take a secondary layout to Program."; return }
         do {
             let producer = try VirtualCameraProducer(format: format, canvas: feed == .selectedCanvas ? selectedProfile?.canvasSize : nil)
             guard let cancel = subscribe({ producer.append($0) }) else { producer.stop(); error = "The program graph is unavailable."; return }
