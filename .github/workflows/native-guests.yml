@@ -93,6 +93,7 @@ jobs:
           STREAM_FRACTIONAL_ISO_FRAMEWORKS="$PWD/apple/build/guest-audio-validation/core-derived/Build/Products/Debug" apple/scripts/run_fractional_iso_audio_harness.zsh 2>&1 | tee apple/build/native-guest-results/fractional-iso.log
           GUEST_RENDERER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_renderer_harness.zsh 2>&1 | tee apple/build/native-guest-results/controller-renderer.log
           GUEST_PERSISTED_MIXER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_persisted_mixer_harness.zsh 2>&1 | tee apple/build/native-guest-results/persisted-mixer.log
+          GUEST_PERSISTED_MIXER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_persisted_mixer_harness.zsh --hold-producer-20ms 2>&1 | tee apple/build/native-guest-results/persisted-mixer-delayed-source.log
       - name: Qualify actual decoded guest Program and ISO files
         run: |
           set -euo pipefail
