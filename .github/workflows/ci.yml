@@ -61,6 +61,7 @@ jobs:
           SCHEDULING_BUILD_PATH=build/tests zsh scripts/run_provider_scheduling_harness.zsh
           CHAT_BUILD_PATH=build/tests zsh scripts/run_direct_chat_harness.zsh
           ENDING_BUILD_PATH=build/tests zsh scripts/run_studio_ending_harness.zsh
+          OWNED_ENDING_BUILD_PATH=build/tests zsh scripts/run_owned_ending_harness.zsh
       - name: Qualify shared publishing encoders and bounded transport fanout
         run: SHARED_ENCODER_BUILD_PATH=build/desktop zsh scripts/run_shared_encoder_harness.zsh
 
