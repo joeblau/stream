@@ -117,7 +117,8 @@ struct NativeInterviewControlState: Equatable, Sendable {
         }
         binding = hostBinding
         let next = NativeInterviewSession(service: service, factory: hostBinding.factory,
-            nextGeneration: { [weak controller] in controller?.issueGuestReceiveGeneration() })
+            nextGeneration: { [weak controller] in controller?.issueGuestReceiveGeneration() },
+            slotForGuest: { [weak self] peer in self?.savedSlot(for: peer) })
         session = next
         observation = next.$snapshot.sink { [weak self] _ in self?.scheduleReconciliation(epoch: current) }
         state = .init(busy: true)
@@ -187,6 +188,30 @@ struct NativeInterviewControlState: Equatable, Sendable {
         case .monitor(let id, false), .approveScreen(let id, false):
             return registered?.receive.peerID == id ? nil : .unavailable("This guest has no local media connection.")
         }
+    }
+
+    func assignedSlot(for guest: UUID) -> UUID? {
+        session?.currentPeerLease(for: guest)?.receive.slot
+            ?? controller.sceneStore.guestSlots.first(where: { $0.reconnectPeerID == guest })?.id
+    }
+    /// Assignment is deliberate lobby preparation. An active receive lease
+    /// cannot be moved to another slot by changing editable project metadata.
+    @discardableResult func assignSlot(_ slot: UUID, to guest: UUID) -> Bool {
+        guard !closed, let member = state.snapshot.members.first(where: { $0.id == guest }),
+              member.membership == .waiting, session?.currentPeerLease(for: guest) == nil,
+              !state.snapshot.members.contains(where: {
+                  $0.id != guest && session?.currentPeerLease(for: $0.id)?.receive.slot == slot
+              }) else { return false }
+        return controller.sceneStore.assignGuest(guest, to: slot, displayName: member.name)
+    }
+    private func savedSlot(for guest: UUID) -> UUID? {
+        let store = controller.sceneStore
+        let slot = store.guestSlots.first(where: { $0.reconnectPeerID == guest })
+            ?? store.guestSlots.first(where: { $0.reconnectPeerID == nil })
+            ?? store.createGuestSlot(name: "Guest \(store.guestSlots.count + 1)")
+        guard let slot else { return nil }
+        let name = session?.snapshot.members.first(where: { $0.id == guest })?.name ?? slot.displayName
+        return store.assignGuest(guest, to: slot.id, displayName: name) ? slot.id : nil
     }
 
     @discardableResult func execute(_ command: NativeInterviewCommand) -> Bool {
@@ -279,6 +304,12 @@ struct NativeInterviewControlState: Equatable, Sendable {
     private func reconcile(epoch current: UUID) {
         guard !closed, epoch == current, let session else { return }
         let snapshot = session.snapshot
+        for member in snapshot.members {
+            if var slot = controller.sceneStore.guestSlots.first(where: { $0.reconnectPeerID == member.id }),
+               slot.displayName != member.name {
+                slot.displayName = member.name; controller.sceneStore.replaceGuestSlot(slot)
+            }
+        }
         if let registered, session.currentPeerLease(for: registered.receive.peerID) != registered { clearRegistration(registered) }
         var routes: [UUID: NativeInterviewLocalRoute] = [:]
         if let context = registered, let intent, intent.context == context {

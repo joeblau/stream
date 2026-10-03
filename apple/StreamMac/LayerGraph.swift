@@ -539,6 +539,9 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
     var commentHeaderUTF16Length: Int? = nil
     var commentPageIndex = 0
     var commentAvatarKey: String? = nil
+    /// Typed project-slot binding; credentials and remote connection state
+    /// remain outside editable scene content.
+    var guestBinding: GuestTitleBinding? = nil
 
     init(text: String = "",
          fontName: String? = nil,
@@ -595,6 +598,7 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
         commentHeaderUTF16Length = try container.decodeIfPresent(Int.self, forKey: .commentHeaderUTF16Length)
         commentPageIndex = try container.decodeIfPresent(Int.self, forKey: .commentPageIndex) ?? 0
         commentAvatarKey = try container.decodeIfPresent(String.self, forKey: .commentAvatarKey)
+        guestBinding = try container.decodeIfPresent(GuestTitleBinding.self, forKey: .guestBinding)
     }
 
     /// The payload's styling fields as one `TextTitleStyle` value — what a
@@ -634,6 +638,9 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
     /// The style model owns the style ranges; the timer model owns the
     /// timer ranges.
     var validationError: String? {
+        if guestBinding != nil && (timer != nil || ticker != nil || recordingChatMessageID != nil) {
+            return "A guest name/title binding cannot also be a timer, ticker or public comment."
+        }
         if timer != nil && ticker != nil { return "Choose either a timer or a ticker for this layer." }
         return style.validationError ?? timer?.validationError ?? ticker?.validationError
             ?? (ticker != nil ? TickerOverlayConfiguration.textValidationError(text) : nil)
@@ -755,6 +762,54 @@ struct WebSourcePayload: Hashable, Codable, Sendable {
                                               forKey: .configuration)
             ?? BrowserOverlayConfiguration(urlString: url?.absoluteString)
     }
+}
+
+/// Project content only. A saved public peer UUID helps reconnect an existing
+/// invite to its chosen slot; it grants no service or media authority.
+struct GuestSlot: Identifiable, Hashable, Codable, Sendable {
+    var id = UUID()
+    var name: String
+    var displayName = ""
+    var title = ""
+    var reconnectPeerID: UUID?
+    var cameraPlaceholder = GuestOfflinePlaceholder()
+    var screenPlaceholder = GuestOfflinePlaceholder(message: "Screen not shared")
+
+    var resolvedName: String { displayName.isEmpty ? name : displayName }
+    func normalized() -> GuestSlot {
+        var value = self
+        value.name = Self.bounded(name, fallback: "Guest slot")
+        value.displayName = Self.bounded(displayName)
+        value.title = Self.bounded(title)
+        value.cameraPlaceholder = cameraPlaceholder.normalized()
+        value.screenPlaceholder = screenPlaceholder.normalized()
+        return value
+    }
+    private static func bounded(_ value: String, fallback: String = "") -> String {
+        let bounded = String(value.prefix(128))
+        return bounded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : bounded
+    }
+}
+
+struct GuestOfflinePlaceholder: Hashable, Codable, Sendable {
+    var visible = true
+    var colorHex = "#253858"
+    var message = "Guest offline"
+
+    func normalized() -> Self {
+        var value = self
+        value.message = String(message.prefix(128))
+        if colorHex.range(of: "^#[0-9a-fA-F]{6}$", options: .regularExpression) == nil {
+            value.colorHex = "#253858"
+        }
+        return value
+    }
+}
+
+struct GuestTitleBinding: Hashable, Codable, Sendable {
+    enum Field: String, Codable, CaseIterable, Sendable { case name, title }
+    var slotID: UUID
+    var field: Field
 }
 
 enum GuestSourceRole: String, Hashable, Codable, Sendable {
@@ -1806,6 +1861,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
     /// timing — everything but the string), stored once at project level
     /// and applied by writing their value onto a text layer's payload.
     var textStylePresets: [TextStylePreset]
+    var guestSlots: [GuestSlot]
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
@@ -1818,7 +1874,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
          defaultTransition: SceneTransition = .default,
          effectPresets: [SourceEffectPreset] = [],
          stylePresets: [LayerStylePreset] = [],
-         textStylePresets: [TextStylePreset] = []) {
+         textStylePresets: [TextStylePreset] = [],
+         guestSlots: [GuestSlot] = []) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
@@ -1831,6 +1888,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
         self.effectPresets = effectPresets
         self.stylePresets = stylePresets
         self.textStylePresets = textStylePresets
+        self.guestSlots = guestSlots
     }
 
     /// `overlays`/`defaultBackground` were added within v2; decode them with
@@ -1851,6 +1909,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
         effectPresets = try container.decodeIfPresent([SourceEffectPreset].self, forKey: .effectPresets) ?? []
         stylePresets = try container.decodeIfPresent([LayerStylePreset].self, forKey: .stylePresets) ?? []
         textStylePresets = try container.decodeIfPresent([TextStylePreset].self, forKey: .textStylePresets) ?? []
+        guestSlots = try container.decodeIfPresent([GuestSlot].self, forKey: .guestSlots) ?? []
     }
 
     /// The S07 render context the engine composites every scene inside.

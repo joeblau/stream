@@ -178,6 +178,7 @@ final class SceneRenderer {
     /// against. Defaults to the shared `TitleTokenStore`; tests can inject a
     /// fixed map.
     private let tokenProvider: () -> [String: String]
+    private let guestSlotProvider: () -> [UUID: GuestSlot]
 
     /// G01 (issue #81): where the renderer resolves an image layer's payload
     /// to its decoded image (alpha/color space/pixel aspect preserved by the
@@ -255,12 +256,15 @@ final class SceneRenderer {
          segmentation: PersonSegmentationCoordinator = .shared,
          tokenProvider: @escaping () -> [String: String] =
             { TitleTokenStore.shared.snapshot() },
+         guestSlotProvider: @escaping () -> [UUID: GuestSlot] =
+            { GuestSlotRenderStore.shared.snapshot() },
          imageProvider: @escaping (ImageSourcePayload) -> CIImage? =
             { ImageLayerImageStore.shared.image(for: $0) },
          usesSoftwareRendering: Bool = false) {
         self.sourceEffectsProvider = sourceEffectsProvider
         self.segmentation = segmentation
         self.tokenProvider = tokenProvider
+        self.guestSlotProvider = guestSlotProvider
         self.imageProvider = imageProvider
         self.usesSoftwareRendering = usesSoftwareRendering
         var options: [CIContextOption: Any] = [
@@ -702,7 +706,19 @@ final class SceneRenderer {
                 guard case .guest(let registered)? = sourcePayloads[id] else { return nil }
                 payload = registered
             } else { payload = inline }
-            guard let pixels = frames.guest?(payload, currentGuestPresentationTime) else { return nil }
+            guard let pixels = frames.guest?(payload, currentGuestPresentationTime) else {
+                guard let id = payload.slotID, let slot = guestSlotProvider()[id] else { return nil }
+                let placeholder = payload.role == .camera ? slot.cameraPlaceholder : slot.screenPlaceholder
+                guard placeholder.visible else { return nil }
+                var background = layer
+                background.payload = .shape(.init(fillColorHex: placeholder.colorHex))
+                let base = image(for: background, canvas: canvas, frames: frames,
+                    sourcePayloads: sourcePayloads, scenes: scenes, depth: depth, visited: visited)
+                let text = TextSourcePayload(text: placeholder.message, fontSize: 38, alignment: .center, padding: 16)
+                let caption = placeText(text, layer: layer, canvas: canvas)
+                if let caption, let base { return caption.composited(over: base) }
+                return caption ?? base
+            }
             return place(source: CIImage(cvPixelBuffer: pixels), layer: layer, canvas: canvas, isCamera: false)
         case .screen:
             guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
@@ -949,7 +965,12 @@ final class SceneRenderer {
             else { return nil }
             resolvedText = value
         } else {
-            resolvedText = text.recordingChatMessageID == nil ? TitleTemplate.resolve(text.text, with: tokenProvider()) : text.text
+            if text.recordingChatMessageID == nil, let binding = text.guestBinding,
+               let slot = guestSlotProvider()[binding.slotID] {
+                resolvedText = binding.field == .name ? slot.resolvedName : slot.title
+            } else {
+                resolvedText = text.recordingChatMessageID == nil ? TitleTemplate.resolve(text.text, with: tokenProvider()) : text.text
+            }
         }
         guard !resolvedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
@@ -1432,7 +1453,7 @@ final class SceneRenderer {
                 // G02 (issue #110): a timed/fly-in title animates per tick —
                 // it must never bake into the static nested-scene cache.
                 if text.timing?.isActive == true || text.timer != nil || text.ticker != nil
-                    || TitleTemplate.containsToken(text.text) { return false }
+                    || text.guestBinding != nil || TitleTemplate.containsToken(text.text) { return false }
             case .scene(let reference):
                 guard !visited.contains(reference.sceneID),
                       let child = scenes[reference.sceneID] else { continue }

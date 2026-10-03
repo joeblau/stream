@@ -1116,6 +1116,7 @@ final class StreamController: ObservableObject {
     @discardableResult
     func registerGuestMedia(_ lease: GuestReceiveLease, name: String) async -> Bool {
         guard !guestMediaRetired, lease.generation > 0 else { return false }
+        guard sceneStore.guestSlots.contains(where: { $0.id == lease.slot }) || sceneStore.guestSlots.count < 16 else { return false }
         if guestLease == lease { return true }
         // The one-peer runtime uses a monotonic session generation. Canceled
         // requests consume their generation, so a stale completion cannot
@@ -1151,15 +1152,10 @@ final class StreamController: ObservableObject {
         mixerGains[channel] = (Float(max(0, min(mixer.channelVolumes[channel.label] ?? 1, 2))),
                               mixer.channelMutes[channel.label] ?? false)
         let title = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
-        for role in [GuestSourceRole.camera, .screen] {
-            if !sceneStore.sources.contains(where: {
-                guard case .guest(let payload) = $0.payload else { return false }
-                return payload.slotID == lease.slot && payload.role == role
-            }) {
-                sceneStore.addSource(.init(name: "\(title.isEmpty ? "Guest" : title) \(role == .camera ? "Camera" : "Screen")",
-                                          payload: .guest(.init(slotID: lease.slot, role: role))))
-            }
+        if !sceneStore.guestSlots.contains(where: { $0.id == lease.slot }) {
+            sceneStore.replaceGuestSlot(.init(id: lease.slot, name: title.isEmpty ? "Guest" : title))
         }
+        sceneStore.ensureGuestSources(slotID: lease.slot, name: title.isEmpty ? "Guest" : title)
         return true
     }
 
