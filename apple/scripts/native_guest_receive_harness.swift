@@ -140,8 +140,33 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         writeLine("Guest phase deadline \(phase) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
         preconditionFailure("Bounded peer/decode deadline: \(phase)")
     }
+    @MainActor private static func startupReports(_ reports: [(Int32, UInt32, Double)],
+        peer: OpaquePointer, receiver: NativeGuestReceiver, receipts: GuestReceipts) async {
+        // The outgoing peer can report connected before the receiving endpoint
+        // can authenticate its first RTCP packet. Explicit bounded setup retry:
+        // no calibration or measured media is sent until real report receipts.
+        let sender = Task {
+            for attempt in 0..<50 {
+                guard !Task.isCancelled else { return }
+                writeLine("Guest explicit startup SR transmission attempt=\(attempt + 1) roles=\(reports.count), original calibration RTP/NTP unchanged")
+                for (role, rtp, ntp) in reports { sr(role, rtp: rtp, seconds: ntp, peer: peer) }
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+            }
+        }
+        await wait("startup-SR-readiness-before-calibration-media", receiver, receipts) {
+            let snapshots = receiver.diagnosticSnapshot()
+            return reports.allSatisfy { role, _, _ in
+                snapshots[Int(role)].senderReportAge.map { $0 <= 3 } ?? false
+            }
+        }
+        sender.cancel()
+    }
     static func main() async throws {
-        let folder = URL(fileURLWithPath: CommandLine.arguments[1]), receipts = GuestReceipts(), bridge = GuestSignalBridge()
+        let folder = URL(fileURLWithPath: CommandLine.arguments[1])
+        if CommandLine.arguments.contains("--validation-held-idr") {
+            try await heldIDRDependentFrame(folder); return
+        }
+        let receipts = GuestReceipts(), bridge = GuestSignalBridge()
         let lease = GuestReceiveLease(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 7)
         let receiver = try NativeGuestReceiver(admitted: lease, cameraMID: "camera-mid", screenMID: "screen-mid", audioMID: "audio-mid", screenApproved: true,
             video: { receipts.receive($0) }, audio: { receipts.receive($0) }, signal: { bridge.outgoing($0, $1, $2) })
@@ -160,9 +185,10 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         var calibrationCameraSequence: UInt16 = 65_000, calibrationScreenSequence: UInt16 = 65_000
         // Real compressed calibration initializes this same pair of decoders.
         // It is separately counted and never substitutes for measured pixels.
-        sr(0, rtp: cameraCalibration, seconds: 4_000_000_000, peer: peer)
-        sr(2, rtp: audioCalibration, seconds: 4_000_000_000, peer: peer)
-        sr(1, rtp: screenCalibration, seconds: 4_000_000_000.3, peer: peer)
+        await startupReports([(0, cameraCalibration, 4_000_000_000),
+                              (2, audioCalibration, 4_000_000_000),
+                              (1, screenCalibration, 4_000_000_000.3)],
+                             peer: peer, receiver: receiver, receipts: receipts)
         video(camera[0], role: 0, timestamp: cameraCalibration, sequence: &calibrationCameraSequence, peer: peer)
         video(screen[0], role: 1, timestamp: screenCalibration, sequence: &calibrationScreenSequence, peer: peer)
         send(packet(role: 2, sequence: 65_000, timestamp: audioCalibration,
@@ -296,6 +322,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         try await revokeBoundary(folder)
         try await queuedReferenceLoss(folder, overflow: false)
         try await queuedReferenceLoss(folder, overflow: true)
+        try await heldIDRDependentFrame(folder)
     }
     @MainActor static func longCall(_ folder: URL) async throws {
         let receipts = GuestReceipts(), bridge = GuestSignalBridge()
@@ -390,6 +417,61 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(80))
         precondition(receipts.snapshot().0.filter { $0.role == .screen }.count == count)
         writeLine("Guest receive: actual blocked decoded callback fences synchronous screen revoke; later screen rejected, camera/audio continue PASS")
+    }
+    @MainActor static func heldIDRDependentFrame(_ folder: URL) async throws {
+        let receipts = GuestReceipts(), bridge = GuestSignalBridge(), barrier = GuestRevokeBarrier()
+        let receiver = try NativeGuestReceiver(admitted: .init(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 12),
+            cameraMID: "camera-mid", screenMID: "screen-mid", audioMID: "audio-mid", screenApproved: true,
+            video: { if $0.role == .screen { barrier.blockFirstScreen() }; receipts.receive($0) },
+            audio: { receipts.receive($0) }, signal: { bridge.outgoing($0, $1, $2) })
+        bridge.receiver = receiver
+        let peer = SGPeerFixtureCreate(guestFixtureSignal, Unmanaged.passUnretained(bridge).toOpaque())!; bridge.peer = peer
+        defer { barrier.release.signal(); receiver.stop(); SGPeerFixtureDestroy(peer) }
+        precondition(SGPeerFixtureStart(peer) != 0)
+        await wait("held-IDR-peer", receiver, receipts) { SGPeerFixtureReady(peer) != 0 }
+        let camera = frames(try Data(contentsOf: folder.appendingPathComponent("camera.h264")))
+        let screen = frames(try Data(contentsOf: folder.appendingPathComponent("screen.h264")))
+        let opus = [UInt8](try Data(contentsOf: folder.appendingPathComponent("opus-000.bin")))
+        sr(0, rtp: 0, seconds: 4_000_000_000, peer: peer)
+        sr(1, rtp: 0, seconds: 4_000_000_000.3, peer: peer)
+        sr(2, rtp: 0, seconds: 4_000_000_000, peer: peer)
+        var cameraSequence: UInt16 = 1, screenSequence: UInt16 = 1
+        video(screen[0], role: 1, timestamp: 0, sequence: &screenSequence, peer: peer)
+        await wait("held-IDR-screen-actual-callback", receiver, receipts) { barrier.snapshot().0 }
+        video(camera[0], role: 0, timestamp: 0, sequence: &cameraSequence, peer: peer)
+        await wait("held-IDR-camera-actual-pixels-before-reference-commit", receiver, receipts) {
+            let state = receiver.diagnosticSnapshot()[0]
+            return state.awaitingIDR && state.decoded == 0 && state.statuses.contains {
+                $0.stage == "video-output" && $0.status == 0 && $0.detail & 0x8000_0000 != 0
+            }
+        }
+        video(camera[1], role: 0, timestamp: 9_000, sequence: &cameraSequence, peer: peer)
+        await wait("held-IDR-dependent-P-admitted-within-bounds", receiver, receipts) {
+            let state = receiver.diagnosticSnapshot()[0]
+            return state.queued == 1 || receiver.counters.dropped != 0
+        }
+        let queued = receiver.diagnosticSnapshot()[0]
+        precondition(queued.awaitingIDR && queued.queued == 1 && queued.bytes <= 2_097_152
+                     && receiver.counters.dropped == 0,
+                     "A queued P behind an in-flight IDR must wait for the actual decode result, not create a reference gap")
+        send(packet(role: 2, sequence: 1, timestamp: 0, payload: opus, marker: true), role: 2, peer: peer)
+        barrier.release.signal()
+        await wait("held-IDR-actual-IDR-plus-queued-P-and-other-roles", receiver, receipts) {
+            let (v, a) = receipts.snapshot()
+            return v.filter { $0.role == .camera }.count == 2 && v.filter { $0.role == .screen }.count == 1
+                && a.count == 1 && !receiver.diagnosticSnapshot()[0].working
+        }
+        video(camera[2], role: 0, timestamp: 18_000, sequence: &cameraSequence, peer: peer)
+        video(screen[1], role: 1, timestamp: 9_000, sequence: &screenSequence, peer: peer)
+        send(packet(role: 2, sequence: 2, timestamp: 960, payload: opus, marker: true), role: 2, peer: peer)
+        await wait("held-IDR-next-dependent-P-remains-decodable", receiver, receipts) {
+            let (v, a) = receipts.snapshot()
+            return v.filter { $0.role == .camera }.count == 3 && v.filter { $0.role == .screen }.count == 2 && a.count == 2
+        }
+        let final = receiver.diagnosticSnapshot()[0]
+        precondition(!final.awaitingIDR && final.lossEpoch == 0 && final.expired == 0
+                     && receiver.counters.errors == 0 && receiver.counters.dropped == 0)
+        writeLine("Guest receive: actual held in-flight IDR retains bounded queued P; successful pixels establish references before dependent decode, next P/screen/audio remain healthy PASS")
     }
     @MainActor static func queuedReferenceLoss(_ folder: URL, overflow: Bool) async throws {
         let receipts = GuestReceipts(), bridge = GuestSignalBridge(), barrier = GuestRevokeBarrier()

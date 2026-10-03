@@ -189,7 +189,9 @@ final class NativeGuestReceiver: @unchecked Sendable {
         lastPTS[index] = pts
         let payload = Data(bytes: data, count: count)
         receivedUnits[index] += 1
-        if index < 2, needsIDR[index], !GuestH264Decoder.hasIDR(payload) { drops += 1; lock.unlock(); return }
+        // A submitted IDR may still be decoding. Admit its dependent frame
+        // within the same bounded queue, then decide using the actual IDR
+        // result at dequeue. Early rejection would itself break the chain.
         let capacity = index == 2 ? 32 : 3, byteLimit = index == 2 ? 40_800 : 2_097_152
         if pending[index].count >= capacity || bytes[index] + count > byteLimit {
             drops += pending[index].count + 1; pending[index].removeAll(); bytes[index] = 0
