@@ -4,11 +4,33 @@
 #include <chrono>
 #include <cstring>
 #include <mutex>
+#include <map>
+#include <sstream>
 
 namespace {
 using Clock = std::chrono::steady_clock;
 uint16_t u16(const uint8_t *p) { return uint16_t(p[0]) << 8 | p[1]; }
 uint32_t u32(const uint8_t *p) { return uint32_t(u16(p)) << 16 | u16(p + 2); }
+bool qualifiedH264(const rtc::Description::Media::RtpMap &codec) {
+    std::map<std::string, std::string> values;
+    if (codec.fmtps.size() > 4) return false;
+    for (const auto &line : codec.fmtps) {
+        if (line.size() > 4096) return false;
+        std::istringstream stream(line); std::string parameter;
+        while (std::getline(stream, parameter, ';')) {
+            const auto first = parameter.find_first_not_of(" \t"), last = parameter.find_last_not_of(" \t");
+            if (first == std::string::npos) continue;
+            parameter = parameter.substr(first, last - first + 1);
+            const auto equals = parameter.find('=');
+            if (equals == std::string::npos || !equals || equals + 1 == parameter.size() || values.size() >= 16) return false;
+            auto key = parameter.substr(0, equals), value = parameter.substr(equals + 1);
+            if (key.find_first_not_of("abcdefghijklmnopqrstuvwxyz-") != std::string::npos || value.find_first_of("\r\n\t ") != std::string::npos || !values.emplace(key, value).second) return false;
+        }
+    }
+    auto profile = values.find("profile-level-id"), mode = values.find("packetization-mode");
+    return mode != values.end() && mode->second == "1" && profile != values.end() && profile->second.size() == 6 &&
+        profile->second.substr(0, 4) == "42e0" && profile->second.find_first_not_of("0123456789abcdef") == std::string::npos;
+}
 struct State {
     std::recursive_mutex mutex;
     bool active = true;
@@ -159,6 +181,7 @@ public:
             if (message->type == rtc::Message::Control) { control(message, send); continue; }
             ValidatedRTP packet{};
             if (!rtp(message, payloadType, ssrc, packet)) { ++stats.rejected; clear(true); continue; }
+            if (reinterpret_cast<const uint8_t *>(message->data())[0] & 16) ++stats.extension_packets;
             // Track the validated ORIGINAL sequence/SSRC for RR/PLI. The
             // AU-private sequence normalization below is never a transport stat.
             rtc::message_vector observed{packet.packet}; receiving.incoming(observed, send);
@@ -202,6 +225,8 @@ struct SGReceiver {
     std::array<std::string, 3> mids;
     std::array<uint32_t, 3> ssrcs{};
     bool configured = false;
+    bool host = false;
+    std::shared_ptr<rtc::DataChannel> control;
     std::array<std::shared_ptr<rtc::Track>, 3> tracks;
     std::array<std::shared_ptr<Guard>, 3> guards;
 };
@@ -216,7 +241,7 @@ extern "C" SGReceiver *SGReceiverCreate(uint64_t generation, const char *camera,
         result->mids = mids; result->state = std::make_shared<State>();
         auto state = result->state;
         state->generation = generation; state->media = media; state->signal = signal; state->context = context;
-        rtc::Configuration configuration; configuration.bindAddress = "127.0.0.1"; configuration.disableAutoNegotiation = true;
+        rtc::Configuration configuration; configuration.bindAddress = "127.0.0.1"; configuration.disableAutoNegotiation = true; configuration.maxMessageSize = 1024;
         result->peer = std::make_shared<rtc::PeerConnection>(configuration);
         result->peer->onLocalDescription([state](rtc::Description description) {
             std::lock_guard lock(state->mutex); if (!state->active) return;
@@ -261,10 +286,94 @@ extern "C" int SGReceiverOffer(SGReceiver *receiver, const char *sdp) {
             ssrcs[role] = sources[0];
         }
         if (ssrcs[0] == ssrcs[1] || ssrcs[0] == ssrcs[2] || ssrcs[1] == ssrcs[2]) return 0;
-        { std::lock_guard lock(receiver->state->mutex); if (!receiver->state->active || receiver->configured) return 0;
+        { std::lock_guard lock(receiver->state->mutex); if (!receiver->state->active || receiver->configured || receiver->host) return 0;
           receiver->ssrcs = ssrcs; receiver->configured = true; }
         receiver->peer->setRemoteDescription(offer);
         receiver->peer->setLocalDescription(rtc::Description::Type::Answer); return 1;
+    } catch (...) { return 0; }
+}
+extern "C" int SGReceiverStartHost(SGReceiver *receiver) {
+    if (!receiver) return 0;
+    try {
+        std::lock_guard lock(receiver->state->mutex);
+        if (!receiver->state->active || receiver->configured || receiver->host) return 0;
+        receiver->host = true;
+        // Offer only qualified primary H264 mode1 and Opus. No RTX, other video
+        // codec or payload-type assumptions inherited from a browser's offer.
+        for (int role : {SG_AUDIO, SG_CAMERA, SG_SCREEN}) {
+            if (role == SG_AUDIO) {
+                rtc::Description::Audio audio(receiver->mids[role], rtc::Description::Direction::RecvOnly);
+                audio.addOpusCodec(111, "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1");
+                audio.addExtMap(rtc::Description::Entry::ExtMap(1, "urn:ietf:params:rtp-hdrext:sdes:mid"));
+                receiver->tracks[role] = receiver->peer->addTrack(audio);
+            } else {
+                rtc::Description::Video video(receiver->mids[role], rtc::Description::Direction::RecvOnly);
+                video.addH264Codec(96, "profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1");
+                video.addExtMap(rtc::Description::Entry::ExtMap(1, "urn:ietf:params:rtp-hdrext:sdes:mid"));
+                receiver->tracks[role] = receiver->peer->addTrack(video);
+            }
+        }
+        auto state = receiver->state;
+        receiver->control = receiver->peer->createDataChannel("stream-interview-control-v1");
+        receiver->control->onOpen([state] {
+            std::lock_guard lock(state->mutex); if (state->active) state->signal(state->context, "control-open", "", "");
+        });
+        receiver->control->onClosed([state] {
+            std::lock_guard lock(state->mutex); if (state->active) state->signal(state->context, "control-closed", "", "");
+        });
+        receiver->control->onError([state](rtc::string) {
+            std::lock_guard lock(state->mutex); if (state->active) state->signal(state->context, "control-closed", "", "");
+        });
+        receiver->control->onMessage([](rtc::binary) {}, [state](rtc::string message) {
+            std::lock_guard lock(state->mutex);
+            if (state->active && message.size() <= 1024) state->signal(state->context, "control", message.c_str(), "");
+        });
+        receiver->peer->setLocalDescription(rtc::Description::Type::Offer); return 1;
+    } catch (...) { return 0; }
+}
+extern "C" int SGReceiverAnswer(SGReceiver *receiver, const char *sdp) {
+    if (!receiver || !sdp || std::strlen(sdp) > 65536) return 0;
+    try {
+        rtc::Description answer(sdp, "answer");
+        if (answer.mediaCount() != 4 || !answer.hasApplication()) return 0;
+        std::array<uint32_t, 3> ssrcs{};
+        for (int i = 0; i < answer.mediaCount(); ++i) {
+            auto entry = answer.media(i);
+            if (std::holds_alternative<rtc::Description::Application *>(entry)) continue;
+            auto media = std::get<rtc::Description::Media *>(entry);
+            int role = -1; for (int j = 0; j < 3; ++j) if (media->mid() == receiver->mids[j]) role = j;
+            if (role < 0 || ssrcs[role] || media->direction() != rtc::Description::Direction::SendOnly || media->type() != (role == SG_AUDIO ? "audio" : "video")) return 0;
+            const int pt = role == SG_AUDIO ? 111 : 96;
+            const auto codec = media->rtpMap(pt); const auto sources = media->getSSRCs();
+            if (!codec || codec->format != (role == SG_AUDIO ? "opus" : "H264") || codec->clockRate != (role == SG_AUDIO ? 48000 : 90000) || sources.size() != 1 || !sources[0]) return 0;
+            // Every negotiated payload must be the primary codec we offered.
+            if (media->payloadTypes().size() != 1 || media->payloadTypes()[0] != pt) return 0;
+            if (role != SG_AUDIO && !qualifiedH264(*codec)) return 0;
+            ssrcs[role] = sources[0];
+        }
+        if (!ssrcs[0] || !ssrcs[1] || !ssrcs[2] || ssrcs[0] == ssrcs[1] || ssrcs[0] == ssrcs[2] || ssrcs[1] == ssrcs[2]) return 0;
+        {
+            std::lock_guard lock(receiver->state->mutex);
+            if (!receiver->state->active || !receiver->host || receiver->configured) return 0;
+            receiver->configured = true; receiver->ssrcs = ssrcs;
+            for (int role = 0; role < 3; ++role) {
+                auto guard = std::make_shared<Guard>(receiver->state, role, role == SG_AUDIO ? 111 : 96, ssrcs[role]);
+                receiver->guards[role] = guard; receiver->tracks[role]->setMediaHandler(guard);
+            }
+        }
+        receiver->peer->setRemoteDescription(answer); return 1;
+    } catch (...) { return 0; }
+}
+extern "C" int SGReceiverHostReady(SGReceiver *receiver) {
+    if (!receiver) return 0;
+    std::lock_guard lock(receiver->state->mutex);
+    return receiver->state->active && receiver->configured && receiver->control && receiver->control->isOpen() && receiver->peer->state() == rtc::PeerConnection::State::Connected;
+}
+extern "C" int SGReceiverSendControl(SGReceiver *receiver, const char *message) {
+    if (!receiver || !message || std::strlen(message) > 1024) return 0;
+    try { std::lock_guard lock(receiver->state->mutex);
+        if (!receiver->state->active || !receiver->control || !receiver->control->isOpen() || receiver->control->bufferedAmount() > 8192) return 0;
+        receiver->control->send(rtc::string(message)); return 1;
     } catch (...) { return 0; }
 }
 extern "C" int SGReceiverCandidate(SGReceiver *receiver, const char *candidate, const char *mid) {
@@ -292,6 +401,7 @@ extern "C" void SGReceiverStop(SGReceiver *receiver) {
     { std::lock_guard lock(receiver->state->mutex);
       receiver->state->active = false; receiver->state->media = nullptr; receiver->state->signal = nullptr; receiver->state->context = nullptr; }
     receiver->peer->resetCallbacks(); receiver->peer->close();
+    if (receiver->control) { receiver->control->resetCallbacks(); receiver->control->close(); }
 }
 extern "C" void SGReceiverDestroy(SGReceiver *receiver) { SGReceiverStop(receiver); delete receiver; }
 #ifdef STREAM_GUEST_VALIDATION

@@ -44,6 +44,16 @@ private final class GuestReceipts: @unchecked Sendable {
     }
     func snapshot() -> ([Video], [Audio]) { lock.lock(); defer { lock.unlock() }; return (video, audio) }
 }
+private final class GuestRevokeBarrier: @unchecked Sendable {
+    let lock = NSLock(), release = DispatchSemaphore(value: 0)
+    private var entered = false, returned = false
+    func blockFirstScreen() {
+        lock.lock(); let first = !entered; entered = true; lock.unlock()
+        if first { precondition(release.wait(timeout: .now() + 3) == .success) }
+    }
+    func markReturned() { lock.lock(); returned = true; lock.unlock() }
+    func snapshot() -> (Bool, Bool) { lock.lock(); defer { lock.unlock() }; return (entered, returned) }
+}
 @main struct NativeGuestReceiveHarness {
     static func print(_ message: String) { FileHandle.standardOutput.write(Data((message + "\n").utf8)) }
     static func be32(_ n: UInt32) -> [UInt8] { [UInt8(truncatingIfNeeded: n >> 24), UInt8(truncatingIfNeeded: n >> 16), UInt8(truncatingIfNeeded: n >> 8), UInt8(truncatingIfNeeded: n)] }
@@ -105,7 +115,7 @@ private final class GuestReceipts: @unchecked Sendable {
     static func main() async throws {
         let folder = URL(fileURLWithPath: CommandLine.arguments[1]), receipts = GuestReceipts(), bridge = GuestSignalBridge()
         let lease = GuestReceiveLease(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 7)
-        let receiver = try NativeGuestReceiver(admitted: lease, cameraMID: "camera-mid", screenMID: "screen-mid", audioMID: "audio-mid",
+        let receiver = try NativeGuestReceiver(admitted: lease, cameraMID: "camera-mid", screenMID: "screen-mid", audioMID: "audio-mid", screenApproved: true,
             video: { receipts.receive($0) }, audio: { receipts.receive($0) }, signal: { bridge.outgoing($0, $1, $2) })
         bridge.receiver = receiver
         let peer = SGPeerFixtureCreate(guestFixtureSignal, Unmanaged.passUnretained(bridge).toOpaque())!
@@ -210,11 +220,12 @@ private final class GuestReceipts: @unchecked Sendable {
         let after = receipts.snapshot(); precondition(before.0.count == after.0.count && before.1.count == after.1.count)
         print("Guest receive: explicit admission, distinct MIDs, CSRC/extension/padding normalization, sequence/RTP wrap, actual H264/Opus decoded AV timing, stop stale media PASS")
         try await longCall(folder)
+        try await revokeBoundary(folder)
     }
     @MainActor static func longCall(_ folder: URL) async throws {
         let receipts = GuestReceipts(), bridge = GuestSignalBridge()
         let receiver = try NativeGuestReceiver(admitted: .init(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 8),
-            cameraMID: "camera-mid", screenMID: "screen-mid", audioMID: "audio-mid",
+            cameraMID: "camera-mid", screenMID: "screen-mid", audioMID: "audio-mid", screenApproved: true,
             video: { receipts.receive($0) }, audio: { receipts.receive($0) }, signal: { bridge.outgoing($0, $1, $2) })
         bridge.receiver = receiver
         let peer = SGPeerFixtureCreate(guestFixtureSignal, Unmanaged.passUnretained(bridge).toOpaque())!; bridge.peer = peer
@@ -273,5 +284,36 @@ private final class GuestReceipts: @unchecked Sendable {
             for pair in zip(actual, actual.dropFirst()) { precondition(abs(pair.1.pts - pair.0.pts - item.duration / 1000) < 0.00001) }
             print("Guest actual RTP Opus \(item.label) config=\(item.config) packets=\(item.packets) decodedframes=\(item.frames) referencecount/channel/timestamp PASS")
         }
+    }
+    @MainActor static func revokeBoundary(_ folder: URL) async throws {
+        let receipts = GuestReceipts(), bridge = GuestSignalBridge(), barrier = GuestRevokeBarrier()
+        let receiver = try NativeGuestReceiver(admitted: .init(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 9),
+            cameraMID: "camera-mid", screenMID: "screen-mid", audioMID: "audio-mid", screenApproved: true,
+            video: { if $0.role == .screen { barrier.blockFirstScreen() }; receipts.receive($0) },
+            audio: { receipts.receive($0) }, signal: { bridge.outgoing($0, $1, $2) })
+        bridge.receiver = receiver
+        let peer = SGPeerFixtureCreate(guestFixtureSignal, Unmanaged.passUnretained(bridge).toOpaque())!; bridge.peer = peer
+        defer { receiver.stop(); SGPeerFixtureDestroy(peer) }
+        precondition(SGPeerFixtureStart(peer) != 0); await wait { SGPeerFixtureReady(peer) != 0 }
+        let frame = frames(try Data(contentsOf: folder.appendingPathComponent("screen.h264")))[0]
+        sr(1, rtp: 0, seconds: 4_000_000_000, peer: peer)
+        var screenSequence: UInt16 = 1, cameraSequence: UInt16 = 1
+        video(frame, role: 1, timestamp: 0, sequence: &screenSequence, peer: peer)
+        await wait { barrier.snapshot().0 }
+        let revoke = Task.detached { let sent = receiver.approveScreen(false); barrier.markReturned(); return sent }
+        try await Task.sleep(for: .milliseconds(60))
+        precondition(!barrier.snapshot().1, "Revoke returned while a prior screen callback still owned the gate")
+        barrier.release.signal(); let sent = await revoke.value
+        precondition(!sent, "Legacy source-offer fixture has no remote approval channel; local revocation still gates media")
+        let count = receipts.snapshot().0.filter { $0.role == .screen }.count
+        video(frame, role: 1, timestamp: 9000, sequence: &screenSequence, peer: peer)
+        sr(0, rtp: 0, seconds: 4_000_000_000, peer: peer)
+        video(frames(try Data(contentsOf: folder.appendingPathComponent("camera.h264")))[0], role: 0, timestamp: 0, sequence: &cameraSequence, peer: peer)
+        sr(2, rtp: 0, seconds: 4_000_000_000, peer: peer)
+        send(packet(role: 2, sequence: 1, timestamp: 0, payload: [UInt8](try Data(contentsOf: folder.appendingPathComponent("opus-000.bin"))), marker: true), role: 2, peer: peer)
+        await wait { receipts.snapshot().0.contains { $0.role == .camera } && !receipts.snapshot().1.isEmpty }
+        try await Task.sleep(for: .milliseconds(80))
+        precondition(receipts.snapshot().0.filter { $0.role == .screen }.count == count)
+        print("Guest receive: actual blocked decoded callback fences synchronous screen revoke; later screen rejected, camera/audio continue PASS")
     }
 }

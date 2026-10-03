@@ -12,7 +12,7 @@ typedef void (*SGMediaCallback)(void *, uint64_t generation, int role, int event
                               const uint8_t *, size_t, uint32_t rtp, uint64_t ntp);
 typedef void (*SGSignalCallback)(void *, const char *type, const char *value, const char *mid);
 typedef struct {
-    uint64_t frames, rejected, dropped, peak_bytes;
+    uint64_t frames, rejected, dropped, peak_bytes, extension_packets;
     size_t pending_bytes, pending_packets;
 } SGReceiveStats;
 // Prototype transport binds loopback only and uses no STUN/TURN service. Caller
@@ -21,6 +21,10 @@ SGReceiver *SGReceiverCreate(uint64_t admitted_generation, const char *camera_mi
                              const char *screen_mid, const char *audio_mid,
                              SGMediaCallback, SGSignalCallback, void *context);
 int SGReceiverOffer(SGReceiver *, const char *sdp);
+int SGReceiverStartHost(SGReceiver *);
+int SGReceiverAnswer(SGReceiver *, const char *sdp);
+int SGReceiverHostReady(SGReceiver *);
+int SGReceiverSendControl(SGReceiver *, const char *message);
 int SGReceiverCandidate(SGReceiver *, const char *candidate, const char *mid);
 void SGReceiverExpire(SGReceiver *);
 int SGReceiverRequestKeyframe(SGReceiver *, int role);
