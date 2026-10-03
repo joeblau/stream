@@ -41,7 +41,19 @@ assert camera_entitlements.get("com.apple.security.app-sandbox") is True
 assert camera_entitlements.get("com.apple.security.application-groups") == ["$(DEVELOPMENT_TEAM).com.joeblau.Stream.VirtualOutputs"]
 assert "$(DEVELOPMENT_TEAM).com.joeblau.Stream.VirtualOutputs" in entitlements.get("com.apple.security.application-groups", [])
 assert not camera_entitlements.get("com.apple.security.get-task-allow")
+helper = app / "Contents/Helpers/StreamBrowserAudioHelper.app"
+with (helper / "Contents/Info.plist").open("rb") as file:
+    helper_info = plistlib.load(file)
+assert helper_info["CFBundleIdentifier"] == "com.joeblau.StreamBrowserAudioHelper"
+assert (helper / "Contents/MacOS" / helper_info["CFBundleExecutable"]).is_file()
+with (source / "BrowserAudioHelper/BrowserAudioHelper.entitlements").open("rb") as file:
+    helper_entitlements = plistlib.load(file)
+for suffix in ["app-sandbox", "network.client", "network.server"]:
+    assert helper_entitlements.get("com.apple.security." + suffix) is True
+assert helper_entitlements.get("com.apple.security.application-groups") == ["group.com.joeblau.Stream"]
+assert not helper_entitlements.get("com.apple.security.get-task-allow")
 architectures = subprocess.check_output(["lipo", "-archs", str(executable)], text=True).strip()
 print("Desktop bundle and sandbox declarations validated:", architectures)
 print("Embedded CMIO camera, matching team/App Group namespace and sandbox declarations validated.")
+print("Embedded browser helper and sandbox declarations validated; production audio route remains gated.")
 print("Developer ID signature, hardened runtime and notarization require the release workflow.")
