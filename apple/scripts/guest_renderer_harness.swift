@@ -1,9 +1,118 @@
+import AVFoundation
 import CoreMedia
 import CoreVideo
 import Foundation
 
+private final class GuestAdmissionFixtureGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = false
+    let release = DispatchSemaphore(value: 0)
+    func mark() { lock.lock(); active = true; lock.unlock() }
+    func entered() -> Bool { lock.lock(); defer { lock.unlock() }; return active }
+    func hold() { mark(); precondition(release.wait(timeout: .now() + 3) == .success) }
+}
+private extension AudioMixEngine {
+    /// Hold the actual actor executor, rather than substituting a registration
+    /// implementation, to exercise a real pending controller request.
+    func holdGuestFixture(_ gate: GuestAdmissionFixtureGate) { gate.hold() }
+}
+
 @main
 enum GuestRendererHarness {
+    @MainActor static func controllerAdmission() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("stream-guest-admission-\(UUID().uuidString)")
+        try DesktopStorage.prepare(directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scenes = SceneStore(directory: directory)
+        let mixer = AudioMixEngine()
+        let controller = StreamController(sceneStore: scenes, previewProgram: PreviewProgramModel(selected: scenes.selected),
+                                          permissions: PermissionsManager(), audioEngine: mixer)
+        let initialSources = scenes.sources.count
+        let canceledLease = GuestReceiveLease(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 1)
+        let hold = GuestAdmissionFixtureGate(), started = GuestAdmissionFixtureGate()
+        let blocked = Task { await mixer.holdGuestFixture(hold) }
+        for _ in 0..<100 where !hold.entered() { try await Task.sleep(for: .milliseconds(1)) }
+        precondition(hold.entered())
+        let registering = Task { @MainActor in
+            started.mark()
+            return await controller.registerGuestMedia(canceledLease, name: "Pending Guest")
+        }
+        for _ in 0..<100 where !started.entered() { try await Task.sleep(for: .milliseconds(1)) }
+        precondition(started.entered())
+        controller.removeGuestMedia(canceledLease)
+        hold.release.signal()
+        await blocked.value
+        let canceled = await registering.value
+        precondition(!canceled && mixer.registeredGuestChannelID(slot: canceledLease.slot) == nil)
+        precondition(scenes.sources.count == initialSources, "Canceled admission cannot resurrect scene sources")
+        let canceledRetry = await controller.registerGuestMedia(canceledLease, name: "Stale Retry")
+        precondition(!canceledRetry, "A retry needs a fresh session generation")
+        let second = GuestReceiveLease(slot: canceledLease.slot, peerID: UUID(), negotiation: UUID(), generation: 2)
+        let admitted = await controller.registerGuestMedia(second, name: "Registered Guest")
+        precondition(admitted && scenes.sources.count == initialSources + 2)
+        let duplicateHold = GuestAdmissionFixtureGate(), duplicateStarted = GuestAdmissionFixtureGate()
+        let heldAgain = Task { await mixer.holdGuestFixture(duplicateHold) }
+        for _ in 0..<100 where !duplicateHold.entered() { try await Task.sleep(for: .milliseconds(1)) }
+        precondition(duplicateHold.entered())
+        let lease = GuestReceiveLease(slot: second.slot, peerID: UUID(), negotiation: UUID(), generation: 3)
+        let winningRegistration = Task { @MainActor in
+            duplicateStarted.mark()
+            return await controller.registerGuestMedia(lease, name: "Rejoined Guest")
+        }
+        for _ in 0..<100 where !duplicateStarted.entered() { try await Task.sleep(for: .milliseconds(1)) }
+        precondition(duplicateStarted.entered())
+        let duplicate = await controller.registerGuestMedia(lease, name: "Duplicate Pending Guest")
+        precondition(!duplicate)
+        duplicateHold.release.signal()
+        await heldAgain.value
+        let winner = await winningRegistration.value
+        precondition(winner && mixer.registeredGuestChannelID(slot: lease.slot) != nil)
+        precondition(scenes.sources.count == initialSources + 2, "A rejoin retains the two stable source identities")
+        let camera = scenes.sources.first { source in
+            guard case .guest(let payload) = source.payload else { return false }
+            return payload.slotID == lease.slot && payload.role == .camera
+        }!
+        precondition(controller.addRecordingAudioTap(targetID: "channel.guest.\(UUID().uuidString)", processing: .beforeEffects, sink: { _ in }) == nil)
+        let recording = controller.addRecordingVideoSource(targetID: "source.\(camera.id)")!
+        let render = recording.1.makeRenderer()
+        await mixer.run()
+        let now = CMClockGetTime(CMClockGetHostTimeClock()), due = now + CMTime(value: 5_760, timescale: 48_000)
+        let clock = UUID(), format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false)!
+        let invalidPCM = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512)!
+        invalidPCM.frameLength = 512
+        for channel in 0..<2 { for sample in 0..<512 { invalidPCM.floatChannelData![channel][sample] = 0 } }
+        invalidPCM.floatChannelData![0][0] = .nan
+        controller.receiveGuestAudio(.init(lease: lease, pcm: invalidPCM, pts: due,
+                                          duration: CMTime(value: 512, timescale: 48_000),
+                                          mappingGeneration: UUID(), clockQuality: .senderReportAligned))
+        precondition(mixer.guestAdmissionSnapshot().mappingGeneration == nil)
+        controller.receiveGuestVideo(.init(lease: lease, role: .camera, pixels: pixels(red: 255, green: 0, blue: 0),
+                                          pts: due, duration: .invalid, mappingGeneration: clock, clockQuality: .senderReportAligned))
+        let validPCM = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512)!
+        validPCM.frameLength = 512
+        for channel in 0..<2 { for sample in 0..<512 { validPCM.floatChannelData![channel][sample] = 0 } }
+        controller.receiveGuestAudio(.init(lease: lease, pcm: validPCM, pts: due,
+                                          duration: CMTime(value: 512, timescale: 48_000),
+                                          mappingGeneration: UUID(), clockQuality: .senderReportAligned))
+        precondition(mixer.guestAdmissionSnapshot().mappingGeneration == nil, "Audio cannot replace the registered video clock")
+        controller.receiveGuestAudio(.init(lease: lease, pcm: validPCM, pts: due,
+                                          duration: CMTime(value: 512, timescale: 48_000),
+                                          mappingGeneration: clock, clockQuality: .senderReportAligned))
+        precondition(mixer.guestAdmissionSnapshot().mappingGeneration == clock)
+        let size = CGSize(width: 320, height: 180), duration = CMTime(value: 1, timescale: 30)
+        precondition(!render(size, due, duration, 0, .raw)!.sourceAvailable)
+        precondition(controller.setGuestMediaRouting(lease, programAllowed: true, monitorAllowed: false))
+        precondition(render(size, due, duration, 1, .raw)!.sourceAvailable)
+        precondition(controller.setGuestMediaRouting(lease, programAllowed: false, monitorAllowed: true))
+        precondition(!render(size, due, duration, 2, .raw)!.sourceAvailable)
+        controller.removeRecordingVideoSource(recording.0)
+        controller.retireGuestMedia()
+        let afterRetirement = await controller.registerGuestMedia(lease, name: "Retired Guest")
+        precondition(!afterRetirement && mixer.registeredGuestChannelID(slot: lease.slot) == nil)
+        await mixer.stop()
+        print("Guest controller: actual pending admission/remove barrier, no source/channel resurrection, separate stable camera/screen sources, unknown ISO rejection, Program/ISO grant/revoke and permanent retirement PASS")
+    }
+
     static func pixels(red: UInt8, green: UInt8, blue: UInt8) -> CVPixelBuffer {
         var result: CVPixelBuffer?
         precondition(CVPixelBufferCreate(nil, 320, 180, kCVPixelFormatType_32BGRA, nil, &result) == kCVReturnSuccess)
@@ -23,7 +132,7 @@ enum GuestRendererHarness {
         let p = CVPixelBufferGetBaseAddress(pixels)!.assumingMemoryBound(to: UInt8.self)
         return (Int(p[index + 2]), Int(p[index + 1]), Int(p[index]))
     }
-    static func main() throws {
+    @MainActor static func main() async throws {
         let store = GuestVideoFrameStore()
         let lease = GuestReceiveLease(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 1)
         let clock = UUID(), sourceID = SourceDefinitionID()
@@ -72,6 +181,17 @@ enum GuestRendererHarness {
         let size = CGSize(width: 320, height: 180), duration = CMTime(value: 1, timescale: 30)
         let future = iso(size, now, duration, 0, .raw)!
         precondition(!future.sourceAvailable && future.sample != nil)
+        // Program may run ahead of the ISO worker. Reading the newer image
+        // must not consume the older due receipt needed by that worker.
+        _ = render(at: next, program: true)
+        let delayed = iso(size, due + CMTime(value: 1, timescale: 60), duration, 1, .raw)!
+        precondition(delayed.sourceAvailable && delayed.sample != nil)
+        let delayedPixels = CMSampleBufferGetImageBuffer(delayed.sample!)!
+        CVPixelBufferLockBaseAddress(delayedPixels, .readOnly)
+        let delayedBytes = CVPixelBufferGetBaseAddress(delayedPixels)!.assumingMemoryBound(to: UInt8.self)
+        precondition(delayedBytes[90 * CVPixelBufferGetBytesPerRow(delayedPixels) + 160 * 4 + 2] > 240,
+                     "A later Program read must preserve the earlier red ISO frame")
+        CVPixelBufferUnlockBaseAddress(delayedPixels, .readOnly)
         let raw = iso(size, next, duration, 1, .raw)!
         let processed = iso(size, next, duration, 2, .processed)!
         precondition(raw.sourceAvailable && processed.sourceAvailable)
@@ -92,6 +212,7 @@ enum GuestRendererHarness {
         precondition(color(render(at: next, program: true)).1 > 240)
         store.retire()
         precondition(color(render(at: next, program: false)).2 < 5)
+        try await controllerAdmission()
         print("Guest renderer: old document defaults, stable slot/role persistence, exact registered source, future-frame withholding, backstage/Program gate, dynamic nested pixels and runtime retirement PASS")
         print("Qualification: actual Core Image raster and raw/processed generation-pinned ISO source workers from generated CoreVideo receipts; codec transport and combined Program/ISO AV decode remain separate")
     }
