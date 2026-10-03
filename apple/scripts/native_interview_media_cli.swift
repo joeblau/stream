@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreMedia
+import CryptoKit
 import Darwin
 import Foundation
 import StreamCore
@@ -182,6 +183,12 @@ private final class InterviewSinkProbe: @unchecked Sendable {
                     }
                     _ = output.emit(state)
                     if let accepted = probe.snapshot() { _ = output.emit(accepted) }
+                    // Synthetic message hashes only; no conversation text is
+                    // written to process logs or validation artifacts.
+                    _ = output.emit(["type": "private-messages", "values": session.privateMessages.map {
+                        ["id": $0.id.uuidString.lowercased(), "fromGuest": $0.fromGuest, "delivery": $0.delivery.rawValue,
+                         "digest": SHA256.hash(data: Data($0.text.utf8)).map { String(format: "%02x", $0) }.joined()] as [String: Any]
+                    }])
                     try? await Task.sleep(for: .milliseconds(100))
                 }
             }
@@ -212,6 +219,11 @@ private final class InterviewSinkProbe: @unchecked Sendable {
                 case "admit": guard let guest, session.admit(guest) else { throw NativeInterviewError.changed }
                 case "approval": guard let guest, let approved = object["approved"] as? Bool,
                     session.approveScreen(approved, guest: guest) else { throw NativeInterviewError.changed }
+                case "message":
+                    let accepted = guest.flatMap { session.readyPeerLease(for: $0) }.map {
+                        session.sendPrivateMessage(object["text"] as? String ?? "", context: $0)
+                    } ?? false
+                    _ = output.emit(["type": "private-send", "accepted": accepted])
                 case "rejoin": session.disconnectForRejoin(); try await session.connect()
                 case "remove": guard let guest, session.remove(guest) else { throw NativeInterviewError.changed }
                 case "end": session.end()

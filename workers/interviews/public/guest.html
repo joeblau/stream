@@ -13,5 +13,10 @@
 <video id="return" autoplay playsinline controls aria-label="Host return feed"></video>
 <button id="share" disabled>Share screen with host</button><button id="stopshare" disabled>Stop screen sharing</button>
 <p id="share-status" role="status">Screen sharing requires admission and explicit host approval. Your camera and microphone continue while sharing.</p>
+<section aria-label="Private messages"><h2>Private messages</h2>
+<p>Text is private to the current host connection. It is cleared on reconnect or leave and is not included in Program. Received means the other side accepted the text; missing receipts remain unknown.</p>
+<div id="messages" role="log" aria-live="polite"></div>
+<label>Message the host <textarea id="message" maxlength="512" rows="2" disabled></textarea></label>
+<button id="sendmessage" disabled>Send private message</button><p id="message-status" role="status">Connect to the admitted host to send messages.</p></section>
 <p>Native host media, mobile browsers and restricted networks still require qualification. The browser reference host is for testing.</p>
 </main></html>

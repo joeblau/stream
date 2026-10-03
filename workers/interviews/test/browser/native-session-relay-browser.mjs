@@ -1,7 +1,7 @@
 // Actual local Worker control + owned Coturn relay + shipping native session,
 // receiver adapter and leased sink. Generated capture inputs only, no devices.
 import assert from 'node:assert/strict';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,createHash} from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -16,6 +16,7 @@ async function wait(label,predicate,timeout=15_000){const end=Date.now()+timeout
 async function port(){const server=net.createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const value=server.address().port;await new Promise(resolve=>server.close(resolve));return value;}
 const workerRoot=fileURLToPath(new URL('../../',import.meta.url));
 const cli=process.env.NATIVE_INTERVIEW_MEDIA_CLI, turnserver=process.env.STREAM_INTERVIEW_TURN_SERVER;
+const testPrivateMessages=process.argv.slice(2).includes('--private-messages');
 const expectPolicyUnavailable=process.argv.slice(2).includes('--expect-relay-policy-unavailable');
 const tcpOnly=process.argv.slice(2).includes('--policy-tcp-only'),tcpProbe=process.env.STREAM_RELAY_POLICY_TCP_PROBE;
 assert(cli&&path.isAbsolute(cli)&&turnserver&&path.isAbsolute(turnserver),'Set absolute owned native CLI and pinned Coturn executable paths');
@@ -54,8 +55,9 @@ class CDP {
 }
 
 const syntheticMedia = `
+window.__fixturePrivateControls=[];window.__fixtureHoldPrivateACK=false;
 window.__fixturePeers=[];window.__fixtureCamera=[];window.__fixtureScreens=[];window.__fixtureAudio=[];
-const Peer=window.RTCPeerConnection;window.RTCPeerConnection=class extends Peer{constructor(configuration){super({...configuration,iceTransportPolicy:"relay"});window.__fixturePeers.push(this);}};
+const Peer=window.RTCPeerConnection;window.RTCPeerConnection=class extends Peer{constructor(configuration){super({...configuration,iceTransportPolicy:"relay"});window.__fixturePeers.push(this);this.addEventListener('datachannel',event=>{const channel=event.channel;window.__fixturePrivateControls.push(channel);const send=channel.send.bind(channel);channel.send=value=>{let object;try{object=JSON.parse(value);}catch{}if(window.__fixtureHoldPrivateACK && object?.type==='private-message-ack')return;return send(value);};});}};
 const canvasTrack=color=>{const canvas=document.createElement('canvas');canvas.width=320;canvas.height=180;const context=canvas.getContext('2d');let counter=0;
 const paint=()=>{context.fillStyle=color;context.fillRect(0,0,320,180);context.fillStyle='white';context.fillRect((counter++%80)*4,0,4,4);};paint();
 const stream=canvas.captureStream(15),track=stream.getVideoTracks()[0];const timer=setInterval(()=>{if(track.readyState==='ended'){clearInterval(timer);return;}paint();},60);return stream;};
@@ -95,7 +97,7 @@ try {
   worker=child(process.execPath,[path.join(workerRoot,'node_modules/wrangler/bin/wrangler.js'),'dev','--local','--config',config,'--ip','127.0.0.1','--port',String(servicePort),'--inspector-port',String(inspectorPort),'--persist-to',path.join(owned,'state'),'--log-level','none','--show-interactive-dev-session=false']);
   await wait('real local Worker readiness',async()=>{check();try{return(await fetch(`${origin}/guest.html`,{signal:AbortSignal.timeout(1000)})).status===200;}catch{return false;}},20_000);
   assert(turn.exitCode===null,'Owned Coturn must remain running');
-  let pending='',nativeBytes=0,stderrBytes=0,state,invite,accepted,stopped=false,closed=false,linesAfterStop=0;
+  let pending='',nativeBytes=0,stderrBytes=0,state,invite,accepted,messages=[],privateSends=[],stopped=false,closed=false,linesAfterStop=0;
   native=child(cli,[nativeConfig],{stdio:['pipe','pipe','pipe']});
   native.stdin.on('error',()=>{failure=new Error('Native command pipe closed');});
   native.stderr.on('data',chunk=>{stderrBytes+=chunk.length;if(stderrBytes>262_144)failure=new Error('Native diagnostic budget exceeded');});
@@ -110,6 +112,8 @@ try {
         case'private-invite':assert(!invite&&typeof value.url==='string'&&value.url.length<=2048,'Private invite IPC shape');invite=value.url;break;
         case'state':assert(typeof value.phase==='string'&&Array.isArray(value.members)&&value.members.length<=1,'Native state shape');state=value;break;
         case'accepted':assert(Number.isSafeInteger(value.generation)&&value.generation>0&&Array.isArray(value.roles)&&value.roles.length===3,'Native accepted lease shape');accepted=value;break;
+        case'private-messages':assert(Array.isArray(value.values)&&value.values.length<=64,'Private history bound');messages=value.values;break;
+        case'private-send':assert(typeof value.accepted==='boolean','Private send receipt');assert(privateSends.length<32,'Private fixture receipt bound');privateSends.push(value.accepted);break;
         case'stopped':stopped=true;break;
         case'error':throw new Error(`Native safe error: ${/^[a-zA-Z]{1,32}$/.test(value.reason)?value.reason:'unknown'}`);
         default:throw new Error('Unknown native receipt');
@@ -171,6 +175,41 @@ try {
   console.log(`Owned native selected pair metadata: ${JSON.stringify(state.transport)}`);
   assert(pair?.local==='relay'&&pair.sent>0&&pair.received>0&&state.transport.local==='relay'&&state.transport.udp,'Both actual endpoints must select local TURN relay candidates and deliver actual media');
   console.log(`PASS actual local Worker + ${version.product} -> native production adapter/leased sink: both selected LOCAL candidates relay ${pair.protocol}, Chrome remote=${pair.remote}; H264 camera and stereo48k Opus PCM; no early media or screen admission`);
+  if(testPrivateMessages) {
+    await browser.until(g,"!document.getElementById('message').disabled",'actual native messaging capability');
+    const digest=text=>createHash('sha256').update(text).digest('hex');
+    const hostText='Owned host Unicode ✓ <script>literal</script>';
+    command({type:'message',id:guest,text:hostText});
+    await wait('actual private host-to-browser receipt',()=>{check();return messages.some(value=>!value.fromGuest&&value.digest===digest(hostText)&&value.delivery==='received');});
+    assert(await browser.evaluate(g,`document.getElementById('messages').textContent.includes(${JSON.stringify(hostText)}) && document.getElementById('messages').querySelectorAll('script').length===0`),'Browser renders accepted private text as plain text');
+    const guestText='Owned guest Unicode ✓ <b>literal</b>';
+    await browser.evaluate(g,`document.getElementById('message').value=${JSON.stringify(guestText)};document.getElementById('message').dispatchEvent(new Event('input'));document.getElementById('sendmessage').click()`);
+    await wait('actual browser-to-native private text',()=>{check();return messages.some(value=>value.fromGuest&&value.digest===digest(guestText));});
+    await browser.until(g,"document.getElementById('messages').textContent.includes('Host received')",'actual native ACK reaches guest');
+    const oldPrivateCount=messages.length,oldCamera=role('camera').count,oldAudio=role('audio').samples;
+    await browser.evaluate(g,`(()=>{const channel=window.__fixturePrivateControls.at(-1),negotiation=${JSON.stringify(accepted.negotiation)};for(let i=0;i<100;i++){channel.send(JSON.stringify({type:'private-message',id:crypto.randomUUID(),negotiation:i%2?crypto.randomUUID():negotiation,text:i%2?'wrong context':'x'.repeat(513)}));}channel.send(JSON.stringify({type:'private-message',id:crypto.randomUUID(),negotiation,text:'ignored',extra:true}));channel.send(JSON.stringify({type:'private-message-ack',id:crypto.randomUUID(),negotiation}));})()`);
+    await pause(350);check();assert(messages.length===oldPrivateCount,'Malformed/stale/unsolicited private envelopes cannot enter history');
+    assert(role('camera').count>oldCamera&&role('audio').samples>oldAudio&&state.members[0].media==='ready','Private flood cannot reset healthy native media');
+    const duplicateID=randomBytes(16).toString('hex').replace(/^(........)(....)(....)(....)(............)$/,'$1-$2-$3-$4-$5');
+    await browser.evaluate(g,`(()=>{const channel=window.__fixturePrivateControls.at(-1),value=JSON.stringify({type:'private-message',id:${JSON.stringify(duplicateID)},negotiation:${JSON.stringify(accepted.negotiation)},text:'Owned duplicate delivery'});channel.send(value);channel.send(value);})()`);
+    await wait('real duplicate inbound envelopes accepted once',()=>{check();return messages.filter(value=>value.id===duplicateID).length===1;});
+    await pause(150);check();assert(messages.filter(value=>value.id===duplicateID).length===1,'Duplicate native private receipt cannot duplicate history');
+    const browserHistoryBeforeHeld=await browser.evaluate(g,"document.getElementById('messages').children.length");
+    await browser.evaluate(g,'window.__fixtureHoldPrivateACK=true');
+    await pause(1050);const sendsBefore=privateSends.length;
+    for(let i=0;i<9;i++)command({type:'message',id:guest,text:'Owned held receipt '+i});
+    await wait('eight occupied private receipts and ninth refusal',()=>{check();return privateSends.length===sendsBefore+9;});
+    assert.deepEqual(privateSends.slice(sendsBefore),[true,true,true,true,true,true,true,true,false],'Pending receipt occupancy stays bounded');
+    await wait('eight accepted sends appear in actual pending history',()=>{check();return messages.filter(value=>value.delivery==='pending').length===8;});
+    const pendingIDs=messages.filter(value=>value.delivery==='pending').map(value=>value.id);
+    assert(pendingIDs.length===8,'Only actual accepted sends appear pending');
+    await wait('missing actual private ACK remains unknown without replay',()=>{check();return pendingIDs.every(id=>messages.find(value=>value.id===id)?.delivery==='unknown');},12_000);
+    assert(await browser.evaluate(g,"document.getElementById('messages').children.length")===browserHistoryBeforeHeld+8,'Unknown sends are never replayed');
+    await browser.evaluate(g,'window.__fixtureHoldPrivateACK=false');
+    await browser.evaluate(g,`(()=>{const channel=window.__fixturePrivateControls.at(-1);for(const id of ${JSON.stringify(pendingIDs)})channel.send(JSON.stringify({type:'private-message-ack',id,negotiation:${JSON.stringify(accepted.negotiation)}}));})()`);
+    await pause(250);check();assert(pendingIDs.every(id=>messages.find(value=>value.id===id)?.delivery==='unknown'),'Late receipt cannot rewrite timed-out delivery certainty');
+    console.log('PASS private messages over actual relay SDK data channel: both directions, real receipt, literal Unicode/HTML, bounded pending/timeout, no replay, malformed/stale/flood isolation with healthy H264/Opus');
+  }
   command({type:'approval',id:guest,approved:true});await browser.until(g,"!document.getElementById('share').disabled",'native actual approval channel');
   await browser.evaluate(g,"document.getElementById('share').click()");await wait('simultaneous native camera/screen/audio accepted',()=>{check();return role('screen')?.count>=3&&state?.members[0]?.sharing;},20_000);
   const blue=role('screen').rgb;assert(blue[2]>150&&blue[0]<80,'Actual native screen is blue');
@@ -185,8 +224,18 @@ try {
   command({type:'admit',id:guest});await wait('new native relay peer and original stable slot',()=>{check();return accepted?.generation>original.generation&&state?.members[0]?.media==='ready'&&role('camera')?.count>=3&&role('audio')?.samples>=2880;},20_000);
   assert(accepted.slot===original.slot&&accepted.negotiation!==original.negotiation,'Rejoin must retain stable slot and replace full authority');
   assert(role('screen').count===0&&state.members[0].approved===false,'Rejoin cannot inherit screen permission');
+  if(testPrivateMessages) {
+    await wait('native private conversation wiped after actual rejoin',()=>{check();return messages.length===0;});
+    assert(await browser.evaluate(g,"document.getElementById('messages').children.length===0 && document.getElementById('message').value===''")===true,'Browser replacement clears private history and draft');
+    const oldCount=messages.length;
+    await browser.evaluate(g,`window.__fixturePrivateControls.at(-1).send(JSON.stringify({type:'private-message',id:crypto.randomUUID(),negotiation:${JSON.stringify(original.negotiation)},text:'Owned stale conversation'}))`);
+    await pause(200);check();assert(messages.length===oldCount,'Old private negotiation cannot enter replacement');
+    command({type:'message',id:guest,text:'Owned fresh connection'});
+    await wait('fresh replacement receives a new deliberate message',()=>{check();return messages.some(value=>value.delivery==='received');});
+  }
   command({type:'end'});await wait('native observes actual Worker end',()=>{check();return state?.phase==='ended';});
   await browser.until(g,"document.getElementById('preview').srcObject===null&&document.getElementById('prepare').disabled&&window.__fixtureCamera.every(s=>s.getTracks().every(t=>t.readyState==='ended'))",'real ended event stops generated guest capture');
+  if(testPrivateMessages)await wait('room end clears private conversation',()=>{check();return messages.length===0;});
   const endCount=accepted.roles.map(value=>value.count);await pause(250);check();assert(accepted.roles.every((value,index)=>value.count===endCount[index]),'No sink media after room end');
   command({type:'stop'});await wait('native synchronous gates and terminal receipt',()=>{check();return stopped&&closed;},10_000);assert(linesAfterStop===0,'No native receipt after stopped');
   assert(browser.errors.length===0,'Actual guest lifecycle has no browser exception');

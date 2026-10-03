@@ -156,7 +156,7 @@ jobs:
           export NATIVE_INTERVIEW_MEDIA_CLI="$PWD/apple/build/native-interview-media/native-interview-media-cli"
           STREAM_RELAY_POLICY_TCP_PROBE="$PWD/apple/build/native-guest-ci/TransportSourceBuild/$(uname -m)/relay-policy-tcp-harness"
           export STREAM_RELAY_POLICY_TCP_PROBE
-          node workers/interviews/test/browser/native-session-relay-browser.mjs 2>&1 | tee apple/build/native-guest-results/relay-positive.log
+          node workers/interviews/test/browser/native-session-relay-browser.mjs --private-messages 2>&1 | tee apple/build/native-guest-results/relay-positive.log
       - name: Qualify the shipping browser against the native host
         env:
           CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
