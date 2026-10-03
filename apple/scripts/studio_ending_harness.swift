@@ -33,6 +33,10 @@ private actor EndingHTTP {
     func send(_ provider: ManagedProvider, _ call: URLRequest) async throws -> Data {
         precondition(provider == .youtube)
         requests.append(call)
+        if call.url!.path == "/youtube/v3/channels" {
+            let data = Data(#"{"items":[{"id":"owner"}]}"#.utf8)
+            return data
+        }
         let id = URLComponents(url: call.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "id" }!.value!
         if call.httpMethod == "POST" {
             if holdPost { return try await withCheckedThrowingContinuation { gate = $0 } }

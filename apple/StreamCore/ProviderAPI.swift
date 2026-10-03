@@ -383,6 +383,27 @@ public extension ProviderAPI {
 }
 
 public extension ProviderAPI {
+    /// The saved binding is only an expectation. Prove that the currently
+    /// authorized user owns that channel before reading its selected event.
+    private func ownedYouTubeEventForEnding(id: String, expectedChannelID: String) async throws -> ProviderEvent {
+        try Task.checkCancellation()
+        guard ProviderChannel.validID(id), ProviderChannel.validID(expectedChannelID) else { throw ProviderFailure(.invalidRequest) }
+        let fresh = ProviderAPI { provider, original in
+            var request = original
+            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            request.timeoutInterval = 10
+            try Task.checkCancellation()
+            let data = try await send(provider, request)
+            try Task.checkCancellation()
+            return data
+        }
+        let owners = try await fresh.channels(.youtube)
+        guard owners.contains(where: { $0.id == expectedChannelID }) else { throw ProviderFailure(.permission) }
+        let event = try await fresh.youtubeEvent(id: id)
+        guard event.channelID == expectedChannelID else { throw ProviderFailure(.permission) }
+        return event
+    }
     /// Ownership and lifecycle are read immediately before a single explicit
     /// mutation. Never retries, completes another ID, or deletes an upcoming
     /// event as a substitute for ending a live event.
@@ -390,16 +411,15 @@ public extension ProviderAPI {
         var attempted = false
         do {
             try Task.checkCancellation()
-            guard ProviderChannel.validID(id), ProviderChannel.validID(expectedChannelID) else { throw ProviderFailure(.invalidRequest) }
-            let fresh = try await youtubeEvent(id: id)
-            guard fresh.channelID == expectedChannelID else { throw ProviderFailure(.permission) }
+            let fresh = try await ownedYouTubeEventForEnding(id: id, expectedChannelID: expectedChannelID)
             if fresh.state == .ended { return .init(.alreadyEnded, event: fresh) }
             guard fresh.state == .live else { throw ProviderFailure(.invalidRequest) }
             var call = try Self.request(.youtube, path: "/youtube/v3/liveBroadcasts/transition",
                 query: ["id": id, "part": "snippet,status", "broadcastStatus": "complete"])
-            call.httpMethod = "POST"
+            call.httpMethod = "POST"; call.timeoutInterval = 10
             try Task.checkCancellation(); attempted = true
             let data = try await send(.youtube, call)
+            try Task.checkCancellation()
             guard data.count <= 2_097_152, let row = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 throw ProviderFailure(.invalidResponse)
             }
@@ -414,8 +434,7 @@ public extension ProviderAPI {
     func reviewYouTubeEnd(id: String, expectedChannelID: String) async -> ProviderCompletionReceipt {
         do {
             try Task.checkCancellation()
-            let fresh = try await youtubeEvent(id: id)
-            guard fresh.channelID == expectedChannelID else { throw ProviderFailure(.permission) }
+            let fresh = try await ownedYouTubeEventForEnding(id: id, expectedChannelID: expectedChannelID)
             return .init(.observed, event: fresh)
         } catch { return .init(.blocked, failure: error as? ProviderFailure ?? .init(.unavailable)) }
     }

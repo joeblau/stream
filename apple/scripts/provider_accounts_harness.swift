@@ -76,6 +76,10 @@ actor ProviderEndingHTTPFixture {
     func release() { heldRead = false; gate?.resume(); gate = nil }
     func send(_ call: URLRequest) async throws -> (Data, HTTPURLResponse) {
         calls.append(call)
+        if call.url!.path == "/youtube/v3/channels" {
+            let data = Data(#"{"items":[{"id":"UC1"}]}"#.utf8)
+            return (data, HTTPURLResponse(url: call.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
         let id = URLComponents(url: call.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "id" }!.value!
         let row: [String: Any]
         if call.httpMethod == "POST" {
