@@ -31,6 +31,13 @@ actual decoded endpoints, no missing-tail padding and bounded origin rounding.
 A pending pause rejects manual/automatic split until actual writer acknowledgment.
 `REHEARSAL_AUDIO_HOLDBACK_MS` selects one explicit timing run when diagnosing a
 specific route; it does not change production's default audio scheduling.
+`REHEARSAL_RESTART_BURST` optionally exercises up to 64 shipping preview
+start/stop transitions immediately before the storage-loss recording. It uses
+the same owned controller and recording entry point, without altering engine
+clocks or gates. If the storage-loss recording fails to start, the fixture logs
+its actual state, source video/audio frontiers, progress, output reservations
+and error before preserving the original failure. CI retains the rehearsal
+media and writer/isolated journals even when the fixture fails.
 
 The runner creates fixture-only copies for the publisher factory, credential
 storage and microphone-consent boundary. It never requests capture access,
