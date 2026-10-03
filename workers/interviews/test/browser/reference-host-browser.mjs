@@ -198,8 +198,20 @@ try {
   clearTimeout(deadline); browser?.socket.close(); chrome?.kill('SIGTERM');
   for (const peer of connections) peer.socket.terminate(); wss.close(); server.closeAllConnections();
   if (server.listening) await new Promise(resolve => server.close(resolve));
-  if (chrome && chrome.exitCode===null && chrome.signalCode===null) await Promise.race([
-    new Promise(resolve => chrome.once('exit', resolve)), pause(2000).then(() => chrome.kill('SIGKILL'))
-  ]);
-  await fs.rm(profile, {recursive:true, force:true});
+  if (chrome?.pid && chrome.exitCode===null && chrome.signalCode===null) {
+    let terminateDeadline;
+    try {
+      await new Promise((resolve, reject) => {
+        chrome.once('exit', resolve);
+        terminateDeadline = setTimeout(() => {
+          chrome.kill('SIGKILL');
+          // Wait for the exit event after escalation before deleting its profile.
+          terminateDeadline = setTimeout(() => reject(new Error('Chrome did not exit during fixture cleanup')), 2000);
+        }, 2000);
+      });
+    } finally { clearTimeout(terminateDeadline); }
+  }
+  // Chrome helpers can finish profile writes just after the browser exits.
+  // Retry only Node's transient recursive-removal errors, with a bounded delay.
+  await fs.rm(profile, {recursive:true, force:true, maxRetries:10, retryDelay:100});
 }
