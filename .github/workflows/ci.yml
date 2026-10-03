@@ -98,6 +98,8 @@ jobs:
         run: |
           zsh scripts/run_program_recording_harness.zsh
           STREAM_FRACTIONAL_ISO_FRAMEWORKS="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_fractional_iso_audio_harness.zsh
+      - name: Qualify abrupt recording process recovery
+        run: ABRUPT_RECOVERY_BUILD_PATH="$PWD/build/desktop" zsh scripts/run_abrupt_session_recovery_harness.zsh
       - name: Validate sandbox declaration
         run: python3 scripts/validate_desktop_distribution.py build/desktop/Build/Products/Debug/StreamMac.app
       - name: Retain test results
@@ -109,6 +111,7 @@ jobs:
             apple/build/desktop-tests.xcresult
             apple/build/recording-chat-validation/media-*
             apple/build/fractional-iso-audio-validation/media-*
+            apple/build/abrupt-session-recovery-validation/artifacts-*
 
   test:
     name: StreamCore tests (iOS Simulator)
