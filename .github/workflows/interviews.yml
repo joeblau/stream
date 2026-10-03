@@ -56,9 +56,23 @@ jobs:
         id: chrome
         with:
           chrome-version: stable
+      - name: Restore Chrome app bundle layout
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          if [[ "$(uname -s)" != Darwin ]]; then
+            printf 'CHROME_BIN=%s\n' "$CHROME_BIN" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          CHROME_CONTENTS="$(dirname "$(dirname "$CHROME_BIN")")"
+          test -f "$CHROME_CONTENTS/Info.plist"
+          CHROME_APP="$RUNNER_TEMP/stream-chrome/Google Chrome for Testing.app"
+          mkdir -p "$(dirname "$CHROME_APP")"
+          ditto "$CHROME_CONTENTS" "$CHROME_APP/Contents"
+          printf 'CHROME_BIN=%s\n' "$CHROME_APP/Contents/MacOS/Google Chrome for Testing" >> "$GITHUB_ENV"
       - run: node --check public/host.js
       - run: npm run test:client
       - run: npm run test:browser
         env:
-          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
           CHROME_NO_SANDBOX: '1'

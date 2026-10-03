@@ -199,6 +199,7 @@ final class SceneRenderer {
     /// `render`/`renderTransition` before any layer work — the timestamp the
     /// timed/fly-in title visibility samples against.
     private var currentPresentationSeconds = 0.0
+    private var currentGuestPresentationTime: CMTime = .invalid
     /// G02: per-layer timed-visibility anchors — the clock seconds at which
     /// each timed text layer FIRST painted after being absent. A layer absent
     /// from a tick is pruned (`textTimingSeen` is rebuilt per render call),
@@ -314,6 +315,7 @@ final class SceneRenderer {
         // set rebuilds each call so an absent layer's anchor prunes (and its
         // next appearance replays the timing).
         currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
+        currentGuestPresentationTime = presentationTime
         textTimingSeen.removeAll()
         chatMasks.removeAll(keepingCapacity: true)
         placedNestedChat.removeAll(keepingCapacity: true)
@@ -371,6 +373,7 @@ final class SceneRenderer {
         let canvas = CGRect(x: 0, y: 0, width: outWidth, height: outHeight)
         currentFrameIntervalMs = max(1, CMTimeGetSeconds(frameDuration) * 1000)
         currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
+        currentGuestPresentationTime = presentationTime
         textTimingSeen.removeAll()
         chatMasks.removeAll(keepingCapacity: true)
         placedNestedChat.removeAll(keepingCapacity: true)
@@ -693,6 +696,14 @@ final class SceneRenderer {
                        depth: Int,
                        visited: Set<SceneID>) -> CIImage? {
         switch layer.payload {
+        case .guest(let inline):
+            let payload: GuestSourcePayload
+            if let id = layer.sourceID {
+                guard case .guest(let registered)? = sourcePayloads[id] else { return nil }
+                payload = registered
+            } else { payload = inline }
+            guard let pixels = frames.guest?(payload, currentGuestPresentationTime) else { return nil }
+            return place(source: CIImage(cvPixelBuffer: pixels), layer: layer, canvas: canvas, isCamera: false)
         case .screen:
             guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
                   let screen = frames.screen(key) else { return nil }
@@ -770,9 +781,7 @@ final class SceneRenderer {
             return place(source: CIImage(cvPixelBuffer: buffer),
                          layer: layer, canvas: canvas, isCamera: false)
         default:
-            // Payload kinds without a renderer yet (pdf, guest): documented
-            // fallback is the background showing through; later waves add
-            // renderers behind this switch.
+            // Unsupported payloads paint nothing.
             return nil
         }
     }
@@ -1410,7 +1419,7 @@ final class SceneRenderer {
                                  visited: Set<SceneID>) -> Bool {
         for layer in scene.layers where layer.isVisible {
             switch layer.payload {
-            case .camera, .screen, .syphon, .media, .pdf, .web:
+            case .camera, .screen, .syphon, .media, .pdf, .web, .guest:
                 return false
             case .image:
                 // G01 (issue #81): the layer's VALUE (the payload) is static,

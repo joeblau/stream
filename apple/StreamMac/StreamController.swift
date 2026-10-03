@@ -94,6 +94,15 @@ final class StreamController: ObservableObject {
     /// flushing immediately, without claiming to delay system sleep.
     var stopRecordingForLifecycle: (() -> Void)?
     private let resilientFrames: ResilientSourceFrames
+    let guestVideoFrames: GuestVideoFrameStore
+    private var guestLease: GuestReceiveLease?
+    private var pendingGuestLease: GuestReceiveLease?
+    private var lastGuestAdmissionGeneration: UInt64 = 0
+    /// The dispatcher supplies current unsaved live mixer edits. A controller
+    /// without that owner uses its loaded project settings.
+    var guestMixerSettings: (() -> MixerSettings)?
+    private var guestRegistration = UUID()
+    private var guestMediaRetired = false
     private var resilienceTask: Task<Void, Never>?
     private var failureTracker = SourceFailureTracker<CaptureSourceKey>()
     private var resilienceDemand: Set<CaptureSourceKey> = []
@@ -125,7 +134,7 @@ final class StreamController: ObservableObject {
     /// monotonic host clock the video engines anchor on, and fans the program
     /// mix out to the publisher and the recorder through independent bounded
     /// taps. Runs with the W02 pipeline demand.
-    private let audioEngine = AudioMixEngine()
+    private let audioEngine: AudioMixEngine
     /// A07 (issue #119): headphone monitoring — plays the engine's MONITOR
     /// bus (same routing as program, own master gain, A04 solo-in-place) to
     /// the selected output device. Read by the settings UI for the device
@@ -325,12 +334,14 @@ final class StreamController: ObservableObject {
 
     init(sceneStore: SceneStore, previewProgram: PreviewProgramModel,
          permissions: PermissionsManager,
+         audioEngine: AudioMixEngine = AudioMixEngine(),
          publisherFactory: @escaping (StreamCore.StreamProtocol) -> any Publisher = { transport in
              switch transport {
              case .rtmp, .rtmps: return RTMPPublisher()
              case .srt, .whip: return SessionPublisher(protocol: transport)
              }
          }) {
+        self.audioEngine = audioEngine
         self.sceneStore = sceneStore
         self.previewProgram = previewProgram
         self.permissions = permissions
@@ -351,10 +362,17 @@ final class StreamController: ObservableObject {
         // both the staged preview and the outgoing program; S05: the pool
         // keys those captures by source identity).
         let frames = capturePool.frames
+        let guestFrames = GuestVideoFrameStore()
+        self.guestVideoFrames = guestFrames
         let resilientFrames = ResilientSourceFrames(raw: SourceFrameLookup(
             camera: { key in frames.hasCameraSource(for: key) ? frames.cameraFrame(for: key) : frames.freshestCameraFrame() },
             screen: { key in frames.hasScreenSource(for: key) ? frames.screenFrame(for: key) : frames.latestScreenFrame() },
-            media: { key in frames.hasMediaSource(for: key) ? frames.mediaFrame(for: key) : nil }))
+            media: { key in frames.hasMediaSource(for: key) ? frames.mediaFrame(for: key) : nil },
+            guest: { payload, time in
+                guard let slot = payload.slotID else { return nil }
+                return guestFrames.pixels(slot: slot, role: payload.role == .camera ? .camera : .screen,
+                                          at: time, program: true)
+            }))
         self.resilientFrames = resilientFrames
         let privacyGate = ProgramPrivacyGate()
         self.privacyGate = privacyGate
@@ -370,6 +388,16 @@ final class StreamController: ObservableObject {
         self.previewEngine = CompositionEngine(
             screenProvider: { frames.latestScreenFrame() },
             cameraProvider: { frames.freshestCameraFrame() },
+            frameLookup: SourceFrameLookup(
+                camera: { key in frames.hasCameraSource(for: key) ? frames.cameraFrame(for: key) : frames.freshestCameraFrame() },
+                screen: { key in frames.hasScreenSource(for: key) ? frames.screenFrame(for: key) : frames.latestScreenFrame() },
+                media: { key in frames.hasMediaSource(for: key) ? frames.mediaFrame(for: key) : nil },
+                pdf: { key, size in frames.mediaFrame(for: key, canvasSize: size) },
+                guest: { payload, time in
+                    guard let slot = payload.slotID else { return nil }
+                    return guestFrames.pixels(slot: slot, role: payload.role == .camera ? .camera : .screen,
+                                              at: time, program: false)
+                }),
             // G11 (issue #117): preview shows annotations as SwiftUI chrome in
             // CanvasInteractionView — painting them into the image too would
             // double-draw them.
@@ -682,6 +710,11 @@ final class StreamController: ObservableObject {
             switch source.payload { case .camera, .screen, .guest: return ("source.\(source.id)", source); default: return nil }
         }
         return catalog.map { id, source in
+            if case .guest(let payload) = source.payload {
+                let available = guestLease?.slot == payload.slotID && payload.slotID != nil
+                return .init(id: id, name: source.name, isAvailable: available,
+                             unsupportedReason: available ? nil : "Register this guest slot before recording.")
+            }
             guard let key = Self.videoCaptureKey(source.payload) else {
                 return .init(id: id, name: source.name, isAvailable: false, unsupportedReason: "Guest video capture is not implemented.")
             }
@@ -704,7 +737,13 @@ final class StreamController: ObservableObject {
         default:
             source = sceneStore.sources.first { "source.\($0.id)" == targetID }
         }
-        guard let source, let key = Self.videoCaptureKey(source.payload) else { return nil }
+        guard let source else { return nil }
+        if case .guest(let payload) = source.payload {
+            guard let lease = guestLease, payload.slotID == lease.slot,
+                  let worker = RecordingVideoSourceFactory.makeGuest(source: source, lease: lease, frames: guestVideoFrames) else { return nil }
+            return (RecordingVideoSubscription(), worker)
+        }
+        guard let key = Self.videoCaptureKey(source.payload) else { return nil }
         let token = RecordingVideoSubscription()
         isolatedVideoCaptureSubscriptions[token] = key; reconcileSourceDemand()
         return (token, RecordingVideoSourceFactory.make(source: source,
@@ -781,6 +820,9 @@ final class StreamController: ObservableObject {
             case .screen(let payload): return (nil, .capture(.screen(payload)), .screen(payload))
             case .appAudio(let payload): return (nil, .application(bundleID: payload.channelBundleID), .appAudio(payload))
             case .media: return (nil, .media(source.id), .media(source.id))
+            case .guest(let payload):
+                guard let slot = payload.slotID, let channel = audioEngine.registeredGuestChannelID(slot: slot) else { return nil }
+                return (nil, channel, nil)
             default: return nil
             }
         }
@@ -791,7 +833,8 @@ final class StreamController: ObservableObject {
         }
         if label.hasPrefix("media."), let uuid = UUID(uuidString: String(label.dropFirst(6))) { return (nil, .media(SourceDefinitionID(uuid)), nil) }
         if label.hasPrefix("app.") { return (nil, .application(bundleID: String(label.dropFirst(4))), nil) }
-        if label.hasPrefix("guest.") { return (nil, .guest(id: String(label.dropFirst(6))), nil) }
+        if label.hasPrefix("guest."), let slot = UUID(uuidString: String(label.dropFirst(6))),
+           let channel = audioEngine.registeredGuestChannelID(slot: slot) { return (nil, channel, nil) }
         return nil
     }
 
@@ -1042,6 +1085,115 @@ final class StreamController: ObservableObject {
         managedStartAuthorityObserver = accounts.$managedReadRevision.dropFirst().sink { [weak coordinator] _ in
             coordinator?.cancelAll()
         }
+    }
+
+    /// Called only after session admission. Receipts cannot create slots or
+    /// channels. Registration survives a pipeline restart but not retirement.
+    @discardableResult
+    func registerGuestMedia(_ lease: GuestReceiveLease, name: String) async -> Bool {
+        guard !guestMediaRetired, lease.generation > 0 else { return false }
+        if guestLease == lease { return true }
+        // The one-peer runtime uses a monotonic session generation. Canceled
+        // requests consume their generation, so a stale completion cannot
+        // remove a later retry sharing the exact same lease.
+        guard lease.generation > lastGuestAdmissionGeneration else { return false }
+        if let pending = pendingGuestLease {
+            guard pending.slot == lease.slot, lease.generation > pending.generation else { return false }
+        }
+        if let current = guestLease {
+            guard current.slot == lease.slot, lease.generation > current.generation else { return false }
+            guestVideoFrames.remove(current)
+            _ = audioEngine.removeGuest(current)
+            guestLease = nil
+        }
+        lastGuestAdmissionGeneration = lease.generation
+        let ticket = UUID(); guestRegistration = ticket; pendingGuestLease = lease
+        let channel = AudioMixEngine.guestChannelID(for: lease)
+        let mixer = guestMixerSnapshot(channel: channel)
+        // Gain, mute, solo and aux are seeded in the registration transaction.
+        // A restored mute starts at zero, and an older rejected lease cannot
+        // change the newer channel's mixer state through generic-ID awaits.
+        guard await audioEngine.registerGuest(lease, initialMixer: mixer) else {
+            if guestRegistration == ticket { pendingGuestLease = nil }
+            return false
+        }
+        guard !guestMediaRetired, guestRegistration == ticket,
+              guestMixerValues(mixer, channel: channel) == guestMixerValues(guestMixerSnapshot(channel: channel), channel: channel),
+              guestVideoFrames.register(lease) else {
+            if guestRegistration == ticket { pendingGuestLease = nil }
+            _ = audioEngine.removeGuest(lease); return false
+        }
+        pendingGuestLease = nil; guestLease = lease
+        mixerGains[channel] = (Float(max(0, min(mixer.channelVolumes[channel.label] ?? 1, 2))),
+                              mixer.channelMutes[channel.label] ?? false)
+        let title = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
+        for role in [GuestSourceRole.camera, .screen] {
+            if !sceneStore.sources.contains(where: {
+                guard case .guest(let payload) = $0.payload else { return false }
+                return payload.slotID == lease.slot && payload.role == role
+            }) {
+                sceneStore.addSource(.init(name: "\(title.isEmpty ? "Guest" : title) \(role == .camera ? "Camera" : "Screen")",
+                                          payload: .guest(.init(slotID: lease.slot, role: role))))
+            }
+        }
+        return true
+    }
+
+    private func guestMixerSnapshot(channel: AudioChannelID) -> MixerSettings {
+        var mixer = guestMixerSettings?() ?? settings.mixer
+        if guestMixerSettings == nil, let liveGain = mixerGains[channel] {
+            mixer.channelVolumes[channel.label] = Double(liveGain.volume)
+            mixer.channelMutes[channel.label] = liveGain.isMuted ? true : nil
+        }
+        return mixer
+    }
+    private func guestMixerValues(_ mixer: MixerSettings, channel: AudioChannelID) -> [Double] {
+        [max(0, min(2, mixer.channelVolumes[channel.label] ?? 1)),
+         mixer.channelMutes[channel.label] == true ? 1 : 0,
+         mixer.soloedChannels.contains(channel.label) ? 1 : 0,
+         max(0, min(1, mixer.channelAuxSends[channel.label] ?? 0))]
+    }
+
+    /// Both callback paths validate the common clock generation without
+    /// introducing a main-actor task for every decoded frame.
+    nonisolated func receiveGuestVideo(_ frame: GuestVideoFrame) {
+        _ = guestVideoFrames.receive(frame)
+    }
+    nonisolated func registeredGuestAudioChannel(slot: UUID) -> AudioChannelID? {
+        audioEngine.registeredGuestChannelID(slot: slot)
+    }
+    nonisolated func receiveGuestAudio(_ frame: GuestAudioFrame) {
+        guard audioEngine.validateGuestFrame(frame),
+              guestVideoFrames.acceptClock(lease: frame.lease, mapping: frame.mappingGeneration) else { return }
+        _ = audioEngine.enqueueGuest(frame)
+    }
+
+    @discardableResult
+    func setGuestMediaRouting(_ lease: GuestReceiveLease, programAllowed: Bool, monitorAllowed: Bool) -> Bool {
+        guard !guestMediaRetired, guestLease == lease else { return false }
+        if !programAllowed { guestVideoFrames.allowProgram(false, lease: lease) }
+        guard audioEngine.setGuestRouting(lease, programAllowed: programAllowed, monitorAllowed: monitorAllowed),
+              !guestMediaRetired, guestLease == lease else { return false }
+        guestVideoFrames.allowProgram(programAllowed, lease: lease)
+        return true
+    }
+
+    /// The native session owner grants capture separately and forwards an
+    /// acknowledged share-end/revoke here. A frame never grants itself access.
+    func setGuestScreenEnabled(_ enabled: Bool, lease: GuestReceiveLease) {
+        guard !guestMediaRetired, guestLease == lease else { return }
+        if enabled { guestVideoFrames.enable(.screen, lease: lease) }
+        else { guestVideoFrames.disable(.screen, lease: lease) }
+    }
+    func removeGuestMedia(_ lease: GuestReceiveLease) {
+        guard guestLease == lease || pendingGuestLease == lease else { return }
+        guestRegistration = UUID(); pendingGuestLease = nil
+        if guestLease == lease { guestLease = nil }
+        guestVideoFrames.remove(lease); _ = audioEngine.removeGuest(lease)
+    }
+    func retireGuestMedia() {
+        guestMediaRetired = true; guestRegistration = UUID(); pendingGuestLease = nil; guestLease = nil
+        guestVideoFrames.retire(); audioEngine.retireGuestAdmissions()
     }
 
     func shutdownManagedStart() {
