@@ -111,7 +111,10 @@ jobs:
           mkdir -p apple/build/native-guest-results
           set -euo pipefail
           apple/scripts/run_native_interview_control_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-service.log
-          INTERVIEW_MANAGER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_interview_manager_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-manager.log
+          # The manager fixture resolves and repairs its own SwiftPM artifact
+          # tree. Sharing the shipping app DerivedData exposes both the
+          # original XCFramework and repaired product module maps to Clang.
+          apple/scripts/run_native_interview_manager_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-manager.log
           STREAM_INTERVIEW_RECEIVER_FRAMEWORKS="$PWD/apple/build/native-guest-ci/Build/Products/Debug" apple/scripts/run_native_interview_receiver_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-receiver.log
       - name: Decode real SDK media and qualify registration boundaries
         run: |
