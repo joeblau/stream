@@ -1209,9 +1209,19 @@ final class StudioCommandDispatcher: ObservableObject {
             if action.id.hasPrefix("output.stream.") { feedback = state.stream.isActive ? 1 : 0 }
             if action.id.hasPrefix("output.record.") { feedback = state.recording.isActive ? 1 : 0 }
             if action.id.hasPrefix("output.preview.") { feedback = state.preview == .active ? 1 : 0 }
+            if case .interview(.setMuted(let context, _)) = action.command {
+                feedback = state.mixer.channelMutes[AudioMixEngine.guestChannelID(for: context.receive).label] == true ? 1 : 0
+            }
+            if case .interview(.setSolo(let context, _)) = action.command {
+                feedback = state.mixer.soloedChannels.contains(AudioMixEngine.guestChannelID(for: context.receive).label) ? 1 : 0
+            }
             result.append(.init(id: action.id, title: action.title, kind: .command, normalizedValue: feedback,
                                 unavailableReason: action.unavailableReason, execute: { [weak self] _ in
-                guard let self, let current = self.catalogueActions().first(where: { $0.id == action.id }) else { return "The stable command target no longer exists." }
+                guard let self else { return "The studio is no longer available." }
+                if case .interview(let guest) = action.command, guest.capturesConnection {
+                    return self.execute(.interview(guest)).error?.description
+                }
+                guard let current = self.catalogueActions().first(where: { $0.id == action.id }) else { return "The stable command target no longer exists." }
                 guard let command = current.command else { return current.unavailableReason ?? "This action is unavailable." }
                 return self.execute(command).error?.description
             }))
@@ -1371,6 +1381,10 @@ final class StudioCommandDispatcher: ObservableObject {
             return StudioCommandResult(outcome: .rejected(error), state: state)
         }
         if case .interview(let action) = command {
+            if let mixer = interviewManager?.mixerCommand(for: action) {
+                perform(mixer); refreshState()
+                return .init(outcome: .success, state: state)
+            }
             guard interviewManager?.execute(action) == true else {
                 let error = StudioCommandError.unavailable("The guest connection changed or its action queue is occupied. Review Guests before retrying.")
                 refreshState(); postRejection(command: command, error: error)
@@ -1404,6 +1418,12 @@ final class StudioCommandDispatcher: ObservableObject {
     /// controls, automation can pre-flight.
     func canExecute(_ command: StudioCommand) -> Bool {
         validate(command) == nil
+    }
+
+    func currentGuestCommandContext(for guest: UUID) -> NativeInterviewPeerLease? {
+        guard let context = interviewManager?.currentReadyLease,
+              context.receive.peerID == guest else { return nil }
+        return context
     }
 
     /// Authoritative rejection reason used by palettes and external controllers.

@@ -75,7 +75,7 @@ SWIFT
 application_root += content + "\n.defaultAppStorage(GuestFixtureDefaults.value)\n    }\n}\n"
 root_path = File.join(folder, 'fixtures/InterviewShippingApplicationRoot.swift')
 File.write(root_path, application_root)
-target['sources'] += [root_path, File.join(root, 'scripts/native_interview_manager_harness.swift')]
+target['sources'] += [root_path, File.join(root, 'scripts/native_interview_manager_harness.swift'), File.join(root, 'scripts/program_recording_fixtures.swift')]
 spec['targets']['NativeInterviewManagerHarness'] = target
 spec['schemes']['NativeInterviewManagerHarness'] = {'build' => {'targets' => {'NativeInterviewManagerHarness' => 'all'}}}
 File.write(File.join(folder, 'project.json'), JSON.pretty_generate(spec))

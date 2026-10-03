@@ -770,16 +770,19 @@ struct GuestSlot: Identifiable, Hashable, Codable, Sendable {
     var id = UUID()
     var name: String
     var displayName = ""
+    /// Operator-owned local alias, separate from service-reported metadata.
+    var localName: String? = nil
     var title = ""
     var reconnectPeerID: UUID?
     var cameraPlaceholder = GuestOfflinePlaceholder()
     var screenPlaceholder = GuestOfflinePlaceholder(message: "Screen not shared")
 
-    var resolvedName: String { displayName.isEmpty ? name : displayName }
+    var resolvedName: String { localName ?? (displayName.isEmpty ? name : displayName) }
     func normalized() -> GuestSlot {
         var value = self
         value.name = Self.bounded(name, fallback: "Guest slot")
         value.displayName = Self.bounded(displayName)
+        value.localName = localName.map { Self.bounded($0) }.flatMap { $0.isEmpty ? nil : $0 }
         value.title = Self.bounded(title)
         value.cameraPlaceholder = cameraPlaceholder.normalized()
         value.screenPlaceholder = screenPlaceholder.normalized()

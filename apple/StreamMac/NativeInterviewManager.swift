@@ -5,12 +5,24 @@ import StreamCore
 enum NativeInterviewCommand: Equatable, Sendable {
     case admit(UUID), backstage(UUID), onair(UUID), remove(UUID), restartMedia(UUID)
     case monitor(UUID, Bool), approveScreen(UUID, Bool)
+    /// Local edits capture the entire admitted connection, so a retained
+    /// command cannot edit the connection that replaces it on reconnect.
+    case setMuted(NativeInterviewPeerLease, Bool), setSolo(NativeInterviewPeerLease, Bool)
+    case rename(NativeInterviewPeerLease, String)
     case lock(Bool), disconnect, rejoin, end
+
+    var capturesConnection: Bool {
+        switch self {
+        case .setMuted, .setSolo, .rename: return true
+        default: return false
+        }
+    }
 
     var guestID: UUID? {
         switch self {
         case .admit(let id), .backstage(let id), .onair(let id), .remove(let id), .restartMedia(let id),
              .monitor(let id, _), .approveScreen(let id, _): return id
+        case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _): return context.receive.peerID
         default: return nil
         }
     }
@@ -23,6 +35,9 @@ enum NativeInterviewCommand: Equatable, Sendable {
         case .restartMedia: return "Reconnect Guest Media"
         case .monitor(_, let enabled): return enabled ? "Allow Guest in Monitor" : "Remove Guest from Monitor"
         case .approveScreen(_, let approved): return approved ? "Approve Guest Screen" : "Revoke Guest Screen"
+        case .setMuted(_, let muted): return muted ? "Mute Guest" : "Unmute Guest"
+        case .setSolo(_, let soloed): return soloed ? "Solo Guest in Monitor" : "Clear Guest Monitor Solo"
+        case .rename: return "Rename Guest Locally"
         case .lock(let locked): return locked ? "Lock Guest Room" : "Unlock Guest Room"
         case .disconnect: return "Disconnect Guest Room"
         case .rejoin: return "Rejoin Guest Room"
@@ -187,7 +202,36 @@ struct NativeInterviewControlState: Equatable, Sendable {
             return nil
         case .monitor(let id, false), .approveScreen(let id, false):
             return registered?.receive.peerID == id ? nil : .unavailable("This guest has no local media connection.")
+        case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _):
+            guard currentReadyLease == context,
+                  controller.registeredGuestAudioChannel(slot: context.receive.slot) != nil else {
+                return .invalidTarget("The guest connection changed. Use the current guest controls.")
+            }
+            if case .rename(_, let name) = command,
+               name.count > 128 || name.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) {
+                return .invalidValue("A local guest name must be at most 128 characters without control characters.")
+            }
+            return nil
         }
+    }
+
+    /// Resolve a guarded local edit to the existing shared mixer document.
+    /// Only StudioCommandDispatcher executes these mutations.
+    func mixerCommand(for command: NativeInterviewCommand) -> StudioCommand? {
+        guard availabilityError(for: command) == nil else { return nil }
+        switch command {
+        case .setMuted(let context, let muted):
+            return controller.registeredGuestAudioChannel(slot: context.receive.slot).map { .setChannelMuted($0, muted) }
+        case .setSolo(let context, let soloed):
+            return controller.registeredGuestAudioChannel(slot: context.receive.slot).map { .setChannelSolo($0, soloed) }
+        default: return nil
+        }
+    }
+
+    func displayName(for guest: UUID) -> String {
+        let slot = assignedSlot(for: guest)
+        return controller.sceneStore.guestSlots.first(where: { $0.id == slot })?.resolvedName
+            ?? state.snapshot.members.first(where: { $0.id == guest })?.name ?? "Guest"
     }
 
     func assignedSlot(for guest: UUID) -> UUID? {
@@ -255,6 +299,12 @@ struct NativeInterviewControlState: Equatable, Sendable {
         case .restartMedia(let id):
             revokeAll(id); result = session.restartMedia(id)
         case .lock(let locked): result = session.setLocked(locked)
+        case .setMuted, .setSolo:
+            // Mixer mutations belong to StudioCommandDispatcher.
+            return false
+        case .rename(let context, let name):
+            guard var slot = controller.sceneStore.guestSlots.first(where: { $0.id == context.receive.slot }) else { return false }
+            slot.localName = name; controller.sceneStore.replaceGuestSlot(slot); result = true
         case .disconnect:
             revokeAll(); session.disconnectForRejoin(); result = true
         case .rejoin:

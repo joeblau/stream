@@ -16,6 +16,9 @@ struct GuestSlotsView: View {
                     DisclosureGroup(slot.name) {
                         TextField("Slot label", text: binding(slot.id, \.name))
                         TextField("Display name (guest metadata updates it)", text: binding(slot.id, \.displayName))
+                        TextField("Local name override", text: .init(
+                            get: { store.guestSlots.first(where: { $0.id == slot.id })?.localName ?? "" },
+                            set: { value in update(slot.id) { $0.localName = value } }))
                         TextField("Title", text: binding(slot.id, \.title))
                         placeholder(slot.id, role: .camera)
                         placeholder(slot.id, role: .screen)
