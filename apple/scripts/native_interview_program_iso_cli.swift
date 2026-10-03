@@ -230,7 +230,16 @@ final class InterviewRecordingProbe: @unchecked Sendable {
         guard dispatcher.execute(.interview(command)).error == nil else { throw NativeInterviewError.changed }
     }
     func startSegment() throws {
-        guard program == nil, let context = manager.currentReadyLease else { throw NativeInterviewError.changed }
+        guard program == nil, let context = manager.currentReadyLease,
+              var slot = scenes.guestSlots.first(where: { $0.id == context.receive.slot }) else {
+            throw NativeInterviewError.changed
+        }
+        // Black is this fixture's explicit offline-card choice. Production
+        // slots now default to visible cards, which also contain no guest media.
+        slot.cameraPlaceholder.visible = false; slot.screenPlaceholder.visible = false
+        scenes.replaceGuestSlot(slot)
+        precondition(scenes.guestSlots.first(where: { $0.id == context.receive.slot })?.cameraPlaceholder.visible == false
+            && scenes.guestSlots.first(where: { $0.id == context.receive.slot })?.screenPlaceholder.visible == false)
         let sources = scenes.sources.filter {
             guard case .guest(let payload) = $0.payload else { return false }; return payload.slotID == context.receive.slot
         }
