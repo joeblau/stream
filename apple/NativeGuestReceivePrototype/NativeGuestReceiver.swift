@@ -7,9 +7,33 @@ import VideoToolbox
 private enum GuestDecodeError: Error { case unsupported, malformed, codec(OSStatus), audioFrames(expected: UInt32, actual: UInt32, code: Int?) }
 private func hostSeconds() -> Double { CMClockGetTime(CMClockGetHostTimeClock()).seconds }
 
-/// One admitted peer prototype. Its callbacks are isolated media receipts; this
+/// A single flattened ICE URL. Credentials have no portable encoding or useful
+/// description, and the receiver retains no Swift copy after SDK creation.
+struct NativeGuestRelayServer: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    let url: String
+    let username: String?
+    let credential: String?
+    var description: String { "<private guest relay server>" }
+    var debugDescription: String { description }
+}
+enum NativeGuestTransport: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    case loopbackValidation
+    case relay([NativeGuestRelayServer])
+    var description: String { "<private guest transport configuration>" }
+    var debugDescription: String { description }
+}
+
+/// One admitted peer. Its callbacks are isolated media receipts; this
 /// class never registers an audio source, stages a scene or publishes output.
 final class NativeGuestReceiver: @unchecked Sendable {
+    struct CodecStatus: Sendable {
+        let stage: String, status: OSStatus, detail: UInt32
+    }
+    struct DecodeDiagnostics: Sendable {
+        let role: GuestReceiveRole, received: Int, decoded: Int, expired: Int, queued: Int, bytes: Int, working: Bool
+        let senderReportAge: Double?, statuses: [CodecStatus]
+        let awaitingIDR: Bool, lossEpoch: UInt64
+    }
     private struct Input { let data: Data, pts: Double, arrival: Double }
     private struct SenderReport { let rtp: UInt32, ntp: Double, received: Double }
     private let lock = NSLock(), transportLock = NSLock(), outputGate = NSRecursiveLock()
@@ -19,8 +43,9 @@ final class NativeGuestReceiver: @unchecked Sendable {
     private var reports: [Int32: SenderReport] = [:]
     private var lastPTS: [Double?] = [nil, nil, nil]
     private var pending: [[Input]] = [[], [], []], bytes = [0, 0, 0], working = [false, false, false]
-    private var needsIDR = [true, true]
+    private var needsIDR = [true, true], lossEpoch: [UInt64] = [0, 0]
     private var screenApproved: Bool
+    private var approvalIntent = UUID(), controlClosed = false
     private var keyframePending = [false, false], lastKeyframe = [-Double.infinity, -Double.infinity]
     private var audioResetPending = false
     private let mappingGeneration = UUID()
@@ -31,23 +56,60 @@ final class NativeGuestReceiver: @unchecked Sendable {
     private var audio: GuestOpusDecoder?
     private var expiry: Task<Void, Never>?
     private var decodeErrors = 0, drops = 0, unsynchronized = 0
+    private var receivedUnits = [0, 0, 0], decodedUnits = [0, 0, 0], expiredUnits = [0, 0, 0]
+    private var codecStatuses: [[String: CodecStatus]] = [[:], [:], [:]]
     private let videoOutput: @Sendable (GuestVideoFrame) -> Void
     private let audioOutput: @Sendable (GuestAudioFrame) -> Void
     private let signalOutput: @Sendable (String, String, String) -> Void
     init(admitted lease: GuestReceiveLease, cameraMID: String, screenMID: String, audioMID: String, screenApproved: Bool = false,
          video: @escaping @Sendable (GuestVideoFrame) -> Void,
          audio: @escaping @Sendable (GuestAudioFrame) -> Void,
-         signal: @escaping @Sendable (String, String, String) -> Void) throws {
+         signal: @escaping @Sendable (String, String, String) -> Void,
+         transport: NativeGuestTransport = .loopbackValidation) throws {
         guard lease.generation > 0 else { throw GuestDecodeError.malformed }
         self.lease = lease; self.screenApproved = screenApproved; videoOutput = video; audioOutput = audio; signalOutput = signal
-        handle = SGReceiverCreate(lease.generation, cameraMID, screenMID, audioMID, { context, generation, role, event, data, size, rtp, ntp in
+        let mediaCallback: SGMediaCallback = { context, generation, role, event, data, size, rtp, ntp in
             guard let context else { return }
             Unmanaged<NativeGuestReceiver>.fromOpaque(context).takeUnretainedValue().receive(generation: generation, role: role, event: event, data: data, count: size, rtp: rtp, ntp: ntp)
-        }, { context, type, value, mid in
+        }
+        let signalCallback: SGSignalCallback = { context, type, value, mid in
             guard let context, let type, let value, let mid else { return }
             let owner = Unmanaged<NativeGuestReceiver>.fromOpaque(context).takeUnretainedValue()
             owner.signal(String(cString: type), String(cString: value), String(cString: mid))
-        }, Unmanaged.passUnretained(self).toOpaque())
+        }
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        switch transport {
+        case .loopbackValidation:
+            handle = SGReceiverCreate(lease.generation, cameraMID, screenMID, audioMID, mediaCallback, signalCallback, context)
+        case .relay(let servers):
+            guard !servers.isEmpty, servers.count <= 64 else { throw GuestDecodeError.malformed }
+            var allocations: [(UnsafeMutablePointer<CChar>, Int)] = []
+            func temporary(_ string: String?, limit: Int) throws -> UnsafePointer<CChar>? {
+                guard let string else { return nil }
+                guard !string.isEmpty, string.utf8.count <= limit,
+                      !string.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else { throw GuestDecodeError.malformed }
+                let bytes = Array(string.utf8), buffer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count + 1)
+                for (index, byte) in bytes.enumerated() { buffer[index] = CChar(bitPattern: byte) }
+                buffer[bytes.count] = 0; allocations.append((buffer, bytes.count + 1)); return UnsafePointer(buffer)
+            }
+            defer {
+                for (buffer, count) in allocations {
+                    // The application owns these short-lived buffers only.
+                    // The peer owns the SDK copies until synchronous stop.
+                    SGReceiverWipeBuffer(buffer, count); buffer.deallocate()
+                }
+            }
+            var entries: [SGIceServer] = []
+            for server in servers {
+                entries.append(try .init(url: temporary(server.url, limit: 512),
+                                        username: temporary(server.username, limit: 256),
+                                        credential: temporary(server.credential, limit: 2_048)))
+            }
+            handle = entries.withUnsafeBufferPointer {
+                SGReceiverCreateConfigured(lease.generation, cameraMID, screenMID, audioMID,
+                    $0.baseAddress, $0.count, mediaCallback, signalCallback, context)
+            }
+        }
         guard handle != nil else { throw GuestDecodeError.unsupported }
         expiry = Task { [weak self] in
             while !Task.isCancelled {
@@ -63,20 +125,60 @@ final class NativeGuestReceiver: @unchecked Sendable {
     func answer(_ sdp: String) -> Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverAnswer(handle, sdp) != 0 }
     var hostReady: Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverHostReady(handle) != 0 }
     func approveScreen(_ approved: Bool) -> Bool {
+        approveScreen(approved) { [self] message in
+            transportLock.lock(); defer { transportLock.unlock() }
+            return SGReceiverSendControl(handle, message) != 0
+        }
+    }
+    private func approveScreen(_ approved: Bool, send: (String) -> Bool) -> Bool {
         // Synchronous revocation must finish any already-entered callback before
         // returning. Callers must not hold their receipt sink lock here.
         outputGate.lock(); lock.lock()
-        if !approved { screenApproved = false; pending[1].removeAll(); bytes[1] = 0; needsIDR[1] = true }
-        let current = active; lock.unlock(); outputGate.unlock()
+        approvalIntent = UUID(); let intent = approvalIntent
+        if !approved { screenApproved = false; pending[1].removeAll(); bytes[1] = 0; requireIDRLocked(1) }
+        let current = active && (!approved || !controlClosed); lock.unlock(); outputGate.unlock()
         guard current else { return false }
         let data = try? JSONSerialization.data(withJSONObject: ["type": "screen-approval", "negotiation": lease.negotiation.uuidString.lowercased(), "approved": approved])
         guard let data, let message = String(data: data, encoding: .utf8) else { return false }
-        transportLock.lock(); let sent = SGReceiverSendControl(handle, message) != 0; transportLock.unlock()
-        outputGate.lock(); lock.lock(); screenApproved = active && sent && approved
-        if !screenApproved { pending[1].removeAll(); bytes[1] = 0 }; needsIDR[1] = true; lock.unlock(); outputGate.unlock()
+        let sent = send(message)
+        outputGate.lock(); lock.lock()
+        guard active, !controlClosed, approvalIntent == intent else {
+            lock.unlock(); outputGate.unlock(); return false
+        }
+        screenApproved = sent && approved
+        if !screenApproved { pending[1].removeAll(); bytes[1] = 0 }; requireIDRLocked(1); lock.unlock(); outputGate.unlock()
         if sent && approved { requestKeyframe(1) }; return sent
     }
+#if STREAM_GUEST_VALIDATION
+    // Inject only the control-send boundary into the production authority path.
+    // Fixture close delivery uses the same actual SDK signal handler.
+    func validationApproveScreen(_ approved: Bool, send: (String) -> Bool) -> Bool { approveScreen(approved, send: send) }
+    func validationControlClosed() { signal("control-closed", "", "") }
+    var validationScreenApproved: Bool { lock.lock(); defer { lock.unlock() }; return screenApproved }
+#endif
     func transportStats(_ role: GuestReceiveRole) -> SGReceiveStats { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverStats(handle, role.rawValue) }
+    struct ICEPair: Sendable {
+        enum Kind: Int32, Sendable {
+            case unknown, host, serverReflexive, peerReflexive, relay
+            var label: String {
+                switch self {
+                case .unknown: "unknown"
+                case .host: "host"
+                case .serverReflexive: "srflx"
+                case .peerReflexive: "prflx"
+                case .relay: "relay"
+                }
+            }
+        }
+        let local: Kind, remote: Kind, udp: Bool
+    }
+    var selectedICEPair: ICEPair? {
+        transportLock.lock(); defer { transportLock.unlock() }
+        let value = SGReceiverSelectedIcePair(handle)
+        guard value.selected != 0 else { return nil }
+        return ICEPair(local: ICEPair.Kind(rawValue: value.local_type) ?? .unknown,
+                       remote: ICEPair.Kind(rawValue: value.remote_type) ?? .unknown, udp: value.udp != 0)
+    }
     #if STREAM_GUEST_VALIDATION
     func validationPacket(_ data: Data, role: GuestReceiveRole) -> Bool {
         transportLock.lock(); defer { transportLock.unlock() }
@@ -85,6 +187,31 @@ final class NativeGuestReceiver: @unchecked Sendable {
     #endif
     var counters: (errors: Int, dropped: Int, unsynchronized: Int) {
         lock.lock(); defer { lock.unlock() }; return (decodeErrors, drops, unsynchronized)
+    }
+    func diagnosticSnapshot() -> [DecodeDiagnostics] {
+        lock.lock(); defer { lock.unlock() }
+        let now = hostSeconds()
+        return (0..<3).map { index -> DecodeDiagnostics in
+            let role = GuestReceiveRole(rawValue: Int32(index))!
+            let age: Double? = reports[Int32(index)].map { now - $0.received }
+            let statuses = codecStatuses[index].values.sorted { $0.stage < $1.stage }
+            let awaiting = index < 2 ? needsIDR[index] : false
+            let epoch: UInt64 = index < 2 ? lossEpoch[index] : 0
+            return DecodeDiagnostics(role: role, received: receivedUnits[index], decoded: decodedUnits[index],
+                expired: expiredUnits[index], queued: pending[index].count, bytes: bytes[index], working: working[index],
+                senderReportAge: age, statuses: statuses, awaitingIDR: awaiting, lossEpoch: epoch)
+        }
+    }
+    private func requireIDRLocked(_ index: Int) {
+        needsIDR[index] = true; lossEpoch[index] &+= 1
+    }
+    private func codecStatus(role: Int32, stage: String, status: OSStatus, detail: UInt32) {
+        lock.lock(); defer { lock.unlock() }
+        // Stages are fixed application constants, never remote strings.
+        codecStatuses[Int(role)][stage] = .init(stage: stage, status: status, detail: detail)
+        if stage == "video-output", status != noErr {
+            decodeErrors += 1; requireIDRLocked(Int(role))
+        }
     }
     private func expire() { transportLock.lock(); defer { transportLock.unlock() }; SGReceiverExpire(handle) }
     private func keyframe(_ role: Int32) { transportLock.lock(); defer { transportLock.unlock() }; _ = SGReceiverRequestKeyframe(handle, role) }
@@ -99,7 +226,10 @@ final class NativeGuestReceiver: @unchecked Sendable {
     }
     private func signal(_ type: String, _ value: String, _ mid: String) {
         lock.lock()
-        if type == "control-closed" { screenApproved = false; pending[1].removeAll(); bytes[1] = 0; needsIDR[1] = true }
+        if type == "control-closed" {
+            approvalIntent = UUID(); controlClosed = true
+            screenApproved = false; pending[1].removeAll(); bytes[1] = 0; requireIDRLocked(1)
+        }
         if type == "control" {
             guard let data = value.data(using: .utf8), data.count <= 1024,
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -153,12 +283,14 @@ final class NativeGuestReceiver: @unchecked Sendable {
         guard lastPTS[index].map({ pts > $0 }) ?? true else { drops += 1; lock.unlock(); return }
         lastPTS[index] = pts
         let payload = Data(bytes: data, count: count)
-        if index < 2, needsIDR[index], !GuestH264Decoder.hasIDR(payload) { drops += 1; lock.unlock(); return }
-        if index < 2 { needsIDR[index] = false }
+        receivedUnits[index] += 1
+        // A submitted IDR may still be decoding. Admit its dependent frame
+        // within the same bounded queue, then decide using the actual IDR
+        // result at dequeue. Early rejection would itself break the chain.
         let capacity = index == 2 ? 32 : 3, byteLimit = index == 2 ? 40_800 : 2_097_152
         if pending[index].count >= capacity || bytes[index] + count > byteLimit {
             drops += pending[index].count + 1; pending[index].removeAll(); bytes[index] = 0
-            if index < 2 { needsIDR[index] = true }
+            if index < 2 { requireIDRLocked(index) }
             else { audioResetPending = true }
             lock.unlock(); if index < 2 { requestKeyframe(role) }; return
         }
@@ -176,37 +308,51 @@ final class NativeGuestReceiver: @unchecked Sendable {
             guard active, !pending[index].isEmpty else { working[index] = false; lock.unlock(); return }
             let input = pending[index].removeFirst(); bytes[index] -= input.data.count
             if hostSeconds() - input.arrival > 0.12 {
-                drops += 1; if index < 2 { needsIDR[index] = true } else { audioResetPending = true }; lock.unlock()
+                drops += 1; expiredUnits[index] += 1; if index < 2 { requireIDRLocked(index) } else { audioResetPending = true }; lock.unlock()
                 if index < 2 { requestKeyframe(role) }; continue
             }
+            // A preceding queued AU may have expired since admission. Do
+            // not submit a dependent P frame on a now-missing reference.
+            if index < 2, needsIDR[index], !GuestH264Decoder.hasIDR(input.data) {
+                drops += 1; lock.unlock(); requestKeyframe(role); continue
+            }
+            let submittedEpoch = index < 2 ? lossEpoch[index] : 0
             lock.unlock()
             do {
                 if index == 2 {
                     if audio?.accepts(input.pts) == false { audio = nil }
-                    if audio == nil { audio = try GuestOpusDecoder() }
+                    if audio == nil { audio = try GuestOpusDecoder { [weak self] stage, status, detail in
+                        self?.codecStatus(role: role, stage: stage, status: status, detail: detail)
+                    } }
                     emitAudio(try audio!.decode(input.data, pts: input.pts))
                 } else {
                     if videos[index] == nil {
-                        videos[index] = GuestH264Decoder { [weak self] pixels, pts in
+                        videos[index] = GuestH264Decoder(output: { [weak self] pixels, pts, idr, submittedEpoch in
                             guard let self else { return }
-                            self.outputGate.lock(); self.lock.lock(); let current = self.active && (index != 1 || self.screenApproved); self.lock.unlock()
+                            self.outputGate.lock(); self.lock.lock()
+                            self.decodedUnits[index] += 1
+                            let current = self.active && (index != 1 || self.screenApproved)
+                            if current && idr && self.lossEpoch[index] == submittedEpoch { self.needsIDR[index] = false }
+                            self.lock.unlock()
                             if current { self.videoOutput(.init(lease: self.lease, role: GuestReceiveRole(rawValue: role)!, pixels: pixels, pts: pts,
                                 duration: .invalid, mappingGeneration: self.mappingGeneration, clockQuality: .senderReportAligned)) }
                             self.outputGate.unlock()
-                        }
+                        }, diagnostic: { [weak self] stage, status, detail in
+                            self?.codecStatus(role: role, stage: stage, status: status, detail: detail)
+                        })
                     }
-                    try videos[index]!.decode(input.data, pts: CMTime(seconds: input.pts, preferredTimescale: 1_000_000_000))
+                    try videos[index]!.decode(input.data, pts: CMTime(seconds: input.pts, preferredTimescale: 1_000_000_000), lossEpoch: submittedEpoch)
                 }
             } catch {
                 FileHandle.standardError.write(Data("Guest decoder role \(role): \(error)\n".utf8))
-                lock.lock(); decodeErrors += 1; if index < 2 { needsIDR[index] = true } else { audioResetPending = true }; lock.unlock()
+                lock.lock(); decodeErrors += 1; if index < 2 { requireIDRLocked(index) } else { audioResetPending = true }; lock.unlock()
                 if index < 2 { requestKeyframe(role) }
             }
         }
     }
     private func emitAudio(_ chunks: [GuestOpusDecoder.Chunk]) {
         for chunk in chunks {
-            outputGate.lock(); lock.lock(); let current = active; lock.unlock()
+            outputGate.lock(); lock.lock(); decodedUnits[2] += 1; let current = active; lock.unlock()
             if current { audioOutput(.init(lease: lease, pcm: chunk.pcm, pts: CMTime(seconds: chunk.pts, preferredTimescale: 1_000_000_000),
                 duration: CMTime(value: Int64(chunk.pcm.frameLength), timescale: 48_000), mappingGeneration: mappingGeneration,
                 clockQuality: .senderReportAligned)) }
@@ -223,7 +369,8 @@ final class NativeGuestReceiver: @unchecked Sendable {
         }
     }
     func stop() {
-        outputGate.lock(); lock.lock(); active = false; pending = [[], [], []]; signals.removeAll(); bytes = [0, 0, 0]; reports.removeAll(); lock.unlock(); outputGate.unlock()
+        outputGate.lock(); lock.lock(); active = false; approvalIntent = UUID(); controlClosed = true; screenApproved = false
+        pending = [[], [], []]; signals.removeAll(); bytes = [0, 0, 0]; reports.removeAll(); lock.unlock(); outputGate.unlock()
         expiry?.cancel(); expiry = nil
         transportLock.lock(); if let handle { SGReceiverDestroy(handle); self.handle = nil }; transportLock.unlock()
         for index in 0..<2 { queues[index].async { [weak self] in self?.videos[index]?.close(); self?.videos[index] = nil } }
@@ -234,8 +381,16 @@ final class NativeGuestReceiver: @unchecked Sendable {
 
 private final class GuestH264Decoder {
     private var sps: Data?, pps: Data?, format: CMVideoFormatDescription?, session: VTDecompressionSession?
-    private let output: (CVPixelBuffer, CMTime) -> Void
-    init(output: @escaping (CVPixelBuffer, CMTime) -> Void) { self.output = output }
+    private final class DecodeContext {
+        let idr: Bool, lossEpoch: UInt64
+        init(idr: Bool, lossEpoch: UInt64) { self.idr = idr; self.lossEpoch = lossEpoch }
+    }
+    private let output: (CVPixelBuffer, CMTime, Bool, UInt64) -> Void
+    private let diagnostic: @Sendable (String, OSStatus, UInt32) -> Void
+    init(output: @escaping (CVPixelBuffer, CMTime, Bool, UInt64) -> Void,
+         diagnostic: @escaping @Sendable (String, OSStatus, UInt32) -> Void) {
+        self.output = output; self.diagnostic = diagnostic
+    }
     static func nals(_ data: Data) -> [Data] {
         let bytes = [UInt8](data); var starts: [(Int, Int)] = [], i = 0
         while i + 3 <= bytes.count {
@@ -250,7 +405,7 @@ private final class GuestH264Decoder {
         }
     }
     static func hasIDR(_ data: Data) -> Bool { nals(data).contains { $0.first.map { $0 & 31 == 5 } == true } }
-    func decode(_ data: Data, pts: CMTime) throws {
+    func decode(_ data: Data, pts: CMTime, lossEpoch: UInt64) throws {
         let units = Self.nals(data)
         for unit in units {
             guard let first = unit.first, first & 128 == 0, unit.count <= 2_097_152 else { throw GuestDecodeError.malformed }
@@ -264,16 +419,22 @@ private final class GuestH264Decoder {
                 var sizes = [a.count, b.count]
                 return CMVideoFormatDescriptionCreateFromH264ParameterSets(allocator: nil, parameterSetCount: 2, parameterSetPointers: &pointers, parameterSetSizes: &sizes, nalUnitHeaderLength: 4, formatDescriptionOut: &format)
             } }
+            diagnostic("video-format", status, 0)
             guard status == noErr, let format else { throw GuestDecodeError.codec(status) }
             let dimensions = CMVideoFormatDescriptionGetDimensions(format)
             guard (1...1920).contains(dimensions.width), (1...1080).contains(dimensions.height) else { throw GuestDecodeError.unsupported }
-            var callback = VTDecompressionOutputCallbackRecord(decompressionOutputCallback: { refcon, _, status, _, pixels, pts, _ in
-                guard status == noErr, let pixels, let refcon else { return }
-                Unmanaged<GuestH264Decoder>.fromOpaque(refcon).takeUnretainedValue().output(pixels, pts)
+            var callback = VTDecompressionOutputCallbackRecord(decompressionOutputCallback: { refcon, frameRefcon, status, flags, pixels, pts, _ in
+                guard let refcon else { return }
+                let owner = Unmanaged<GuestH264Decoder>.fromOpaque(refcon).takeUnretainedValue()
+                owner.diagnostic("video-output", status, flags.rawValue | (pixels == nil ? 0 : 0x8000_0000))
+                guard status == noErr, let pixels, let frameRefcon else { return }
+                let input = Unmanaged<DecodeContext>.fromOpaque(frameRefcon).takeUnretainedValue()
+                owner.output(pixels, pts, input.idr, input.lossEpoch)
             }, decompressionOutputRefCon: Unmanaged.passUnretained(self).toOpaque())
             let created = VTDecompressionSessionCreate(allocator: nil, formatDescription: format,
                 decoderSpecification: nil, imageBufferAttributes: [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA] as CFDictionary,
                 outputCallback: &callback, decompressionSessionOut: &session)
+            diagnostic("video-create", created, 0)
             guard created == noErr, session != nil else { throw GuestDecodeError.codec(created) }
         }
         var avcc = Data()
@@ -289,9 +450,17 @@ private final class GuestH264Decoder {
         var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: pts, decodeTimeStamp: .invalid), size = avcc.count
         let ready = CMSampleBufferCreateReady(allocator: nil, dataBuffer: block, formatDescription: format, sampleCount: 1, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample)
         guard ready == noErr, let sample, let session else { throw GuestDecodeError.codec(ready) }
-        let decoded = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: [], frameRefcon: nil, infoFlagsOut: nil)
-        guard decoded == noErr else { throw GuestDecodeError.codec(decoded) }
-        VTDecompressionSessionWaitForAsynchronousFrames(session)
+        let input = DecodeContext(idr: units.contains { $0.first.map { $0 & 31 == 5 } == true }, lossEpoch: lossEpoch)
+        // One serial submit per role. Extend this sole callback context through
+        // actual asynchronous completion, including errors/dropped output.
+        try withExtendedLifetime(input) {
+            var flags = VTDecodeInfoFlags()
+            let decoded = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: [],
+                frameRefcon: Unmanaged.passUnretained(input).toOpaque(), infoFlagsOut: &flags)
+            diagnostic("video-submit", decoded, flags.rawValue)
+            VTDecompressionSessionWaitForAsynchronousFrames(session)
+            guard decoded == noErr else { throw GuestDecodeError.codec(decoded) }
+        }
     }
     func close() { if let session { VTDecompressionSessionWaitForAsynchronousFrames(session); VTDecompressionSessionInvalidate(session) }; session = nil; format = nil }
     deinit { close() }
@@ -300,8 +469,10 @@ private final class GuestOpusDecoder {
     struct Chunk { let pcm: AVAudioPCMBuffer, pts: Double }
     private let codec: AudioCodec, pcmFormat: AVAudioFormat
     private var nextPTS: Double?, ended = false
+    private let diagnostic: @Sendable (String, OSStatus, UInt32) -> Void
     func accepts(_ pts: Double) -> Bool { nextPTS.map { abs(pts - $0) <= 1.0 / 48_000 } ?? true }
-    init() throws {
+    init(diagnostic: @escaping @Sendable (String, OSStatus, UInt32) -> Void) throws {
+        self.diagnostic = diagnostic
         // Public AudioCodec exposes decoder trimming before initialization.
         // AVAudioConverter's default decoder omits120 leading CELT samples on
         // the qualified current OS; configuring this property after initialize
@@ -311,14 +482,17 @@ private final class GuestOpusDecoder {
         guard let component = AudioComponentFindNext(nil, &description) else { throw GuestDecodeError.unsupported }
         var instance: AudioComponentInstance?
         let created = AudioComponentInstanceNew(component, &instance)
+        diagnostic("opus-create", created, 0)
         guard created == noErr, let instance else { throw GuestDecodeError.codec(created) }
         var initialized = false
         defer { if !initialized { AudioComponentInstanceDispose(instance) } }
         var propertySize: UInt32 = 0, writable: DarwinBoolean = false
         let info = AudioCodecGetPropertyInfo(instance, kAudioCodecPropertyPrimeInfo, &propertySize, &writable)
+        diagnostic("opus-prime-info", info, propertySize | (writable.boolValue ? 0x8000_0000 : 0))
         guard info == noErr, writable.boolValue, propertySize == MemoryLayout<AudioCodecPrimeInfo>.size else { throw GuestDecodeError.unsupported }
         var prime = AudioCodecPrimeInfo(leadingFrames: 0, trailingFrames: 0)
         let configured = AudioCodecSetProperty(instance, kAudioCodecPropertyPrimeInfo, propertySize, &prime)
+        diagnostic("opus-prime-set", configured, 0)
         guard configured == noErr else { throw GuestDecodeError.codec(configured) }
         var input = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatOpus, mFormatFlags: 0,
             mBytesPerPacket: 0, mFramesPerPacket: 0, mBytesPerFrame: 0, mChannelsPerFrame: 2, mBitsPerChannel: 0, mReserved: 0)
@@ -327,6 +501,7 @@ private final class GuestOpusDecoder {
             mBytesPerFrame: 8, mChannelsPerFrame: 2, mBitsPerChannel: 32, mReserved: 0)
         guard let pcm = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false) else { throw GuestDecodeError.unsupported }
         let ready = AudioCodecInitialize(instance, &input, &output, nil, 0)
+        diagnostic("opus-initialize", ready, 0)
         guard ready == noErr else { throw GuestDecodeError.codec(ready) }
         initialized = true; codec = instance; pcmFormat = pcm
     }
@@ -348,9 +523,11 @@ private final class GuestOpusDecoder {
         var bytes = UInt32(data.count), packets: UInt32 = 1
         var packet = AudioStreamPacketDescription(mStartOffset: 0, mVariableFramesInPacket: frames, mDataByteSize: bytes)
         let appended = data.withUnsafeBytes { AudioCodecAppendInputData(codec, $0.baseAddress!, &bytes, &packets, &packet) }
+        diagnostic("opus-append", appended, packets)
         guard appended == noErr, packets == 1, bytes == data.count else { throw GuestDecodeError.codec(appended) }
         var samples = [Float](repeating: 0, count: 5760 * 2), outputBytes: UInt32 = 5760 * 8, outputFrames: UInt32 = 5760, status: UInt32 = 0
         let decoded = AudioCodecProduceOutputPackets(codec, &samples, &outputBytes, &outputFrames, nil, &status)
+        diagnostic("opus-output", decoded, outputFrames)
         guard decoded == noErr, outputFrames == frames, outputBytes == frames * 8,
               status == kAudioCodecProduceOutputPacketSuccess || status == kAudioCodecProduceOutputPacketSuccessHasMore else {
             throw GuestDecodeError.audioFrames(expected: frames, actual: outputFrames, code: Int(decoded))

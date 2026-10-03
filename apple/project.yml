@@ -179,6 +179,10 @@ targets:
       - StreamBroadcast/LatestCameraFrame.swift
       # Restream chat, shared with the iOS app (macOS-adapted).
       - Stream/RestreamChat.swift
+      # Application-owned public libdatachannel receiver. The session factory
+      # requires explicit admission plus ephemeral service relay credentials.
+      - NativeGuestReceivePrototype/NativeGuestReceiver.swift
+      - NativeGuestReceivePrototype/GuestReceive.cpp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamMac
@@ -188,6 +192,16 @@ targets:
         PROVISIONING_PROFILE_SPECIFIER: $(STREAM_MAC_PROVISIONING_PROFILE)
         GENERATE_INFOPLIST_FILE: YES
         MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_OBJC_BRIDGING_HEADER: StreamMac/StreamMac-Bridging-Header.h
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        HEADER_SEARCH_PATHS:
+          - $(inherited)
+          - $(BUILT_PRODUCTS_DIR)/include/libdatachannel
+          - $(STREAM_GUEST_RTC_INCLUDE)
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lc++
+          - -lz
         # The project base carries iOS-only settings; they do not apply here.
         TARGETED_DEVICE_FAMILY: ""
         # C05 (issue #105): opt in to the explicit Continuity Camera device

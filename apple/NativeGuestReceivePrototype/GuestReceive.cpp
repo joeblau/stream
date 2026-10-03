@@ -1,11 +1,16 @@
 #include "GuestReceive.h"
 #include <rtc/rtc.hpp>
+#include <rtc/version.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
 #include <mutex>
 #include <map>
 #include <sstream>
+
+static_assert(RTC_VERSION_MAJOR == 0 && RTC_VERSION_MINOR == 24 && RTC_VERSION_PATCH == 0,
+              "Guest receive requires the qualified public libdatachannel 0.24.0 ABI");
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -230,8 +235,10 @@ struct SGReceiver {
     std::array<std::shared_ptr<rtc::Track>, 3> tracks;
     std::array<std::shared_ptr<Guard>, 3> guards;
 };
-extern "C" SGReceiver *SGReceiverCreate(uint64_t generation, const char *camera, const char *screen, const char *audio,
-                                        SGMediaCallback media, SGSignalCallback signal, void *context) {
+namespace {
+SGReceiver *createReceiver(uint64_t generation, const char *camera, const char *screen, const char *audio,
+                           SGMediaCallback media, SGSignalCallback signal, void *context,
+                           const rtc::Configuration &configuration) {
     if (!generation || !camera || !screen || !audio || !media || !signal || !context) return nullptr;
     std::array<std::string, 3> mids{camera, screen, audio};
     for (auto &mid : mids) if (mid.empty() || mid.size() > 64 || mid.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos) return nullptr;
@@ -241,7 +248,6 @@ extern "C" SGReceiver *SGReceiverCreate(uint64_t generation, const char *camera,
         result->mids = mids; result->state = std::make_shared<State>();
         auto state = result->state;
         state->generation = generation; state->media = media; state->signal = signal; state->context = context;
-        rtc::Configuration configuration; configuration.bindAddress = "127.0.0.1"; configuration.disableAutoNegotiation = true; configuration.maxMessageSize = 1024;
         result->peer = std::make_shared<rtc::PeerConnection>(configuration);
         result->peer->onLocalDescription([state](rtc::Description description) {
             std::lock_guard lock(state->mutex); if (!state->active) return;
@@ -268,6 +274,83 @@ extern "C" SGReceiver *SGReceiverCreate(uint64_t generation, const char *camera,
         });
         return owner.release();
     } catch (...) { return nullptr; }
+}
+bool boundedText(const char *value, size_t maximum, bool required) {
+    if (!value) return !required;
+    const auto count = strnlen(value, maximum + 1);
+    if (count > maximum || (required && !count)) return false;
+    for (size_t i = 0; i < count; ++i) if (uint8_t(value[i]) < 32 || uint8_t(value[i]) == 127) return false;
+    return true;
+}
+struct TemporaryRelayConfiguration {
+    rtc::Configuration value;
+    ~TemporaryRelayConfiguration() {
+        // Best effort for application-owned copies. SDK copies are retained
+        // solely by this peer and released on its synchronous destruction.
+        for (auto &server : value.iceServers) {
+            for (auto *text : {&server.username, &server.password}) {
+                volatile char *bytes = text->data();
+                for (size_t i = 0; i < text->size(); ++i) bytes[i] = 0;
+                text->clear();
+            }
+        }
+    }
+};
+}
+extern "C" SGReceiver *SGReceiverCreate(uint64_t generation, const char *camera, const char *screen, const char *audio,
+                                        SGMediaCallback media, SGSignalCallback signal, void *context) {
+    rtc::Configuration configuration; configuration.bindAddress = "127.0.0.1";
+    configuration.disableAutoNegotiation = true; configuration.maxMessageSize = 1024;
+    return createReceiver(generation, camera, screen, audio, media, signal, context, configuration);
+}
+extern "C" SGReceiver *SGReceiverCreateConfigured(uint64_t generation, const char *camera, const char *screen, const char *audio,
+                                                  const SGIceServer *servers, size_t count,
+                                                  SGMediaCallback media, SGSignalCallback signal, void *context) {
+    if (!servers || !count || count > 64) return nullptr;
+    try {
+        TemporaryRelayConfiguration configuration;
+        configuration.value.disableAutoNegotiation = true; configuration.value.maxMessageSize = 1024;
+        configuration.value.iceTransportPolicy = rtc::TransportPolicy::Relay;
+        bool hasRelay = false;
+        for (size_t i = 0; i < count; ++i) {
+            const auto &entry = servers[i];
+            if (!boundedText(entry.url, 512, true)) return nullptr;
+            const std::string url(entry.url);
+            const auto separator = url.find(':');
+            const auto scheme = url.substr(0, separator);
+            if (separator == std::string::npos || (scheme != "stun" && scheme != "stuns" && scheme != "turn" && scheme != "turns")) return nullptr;
+            const auto query = url.find('?');
+            if (query != std::string::npos && url.substr(query) != "?transport=udp" && url.substr(query) != "?transport=tcp") return nullptr;
+            auto authority = url.substr(separator + 1, (query == std::string::npos ? url.size() : query) - separator - 1);
+            const auto portSeparator = authority.find(':');
+            auto host = authority.substr(0, portSeparator);
+            if (host.empty() || host.size() > 253 || host.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") != std::string::npos) return nullptr;
+            if (portSeparator != std::string::npos) {
+                const auto port = authority.substr(portSeparator + 1);
+                if (port.empty() || port.size() > 5 || port.find_first_not_of("0123456789") != std::string::npos) return nullptr;
+                const auto number = std::stoul(port);
+                if (!number || number > 65535 || number == 53) return nullptr;
+            }
+            rtc::IceServer server(url);
+            const bool relay = scheme == "turn" || scheme == "turns";
+            if (relay) {
+                if (server.type != rtc::IceServer::Type::Turn || !boundedText(entry.username, 256, true) || !boundedText(entry.credential, 2048, true)) return nullptr;
+                // The pinned public libjuice transport supports UDP TURN only.
+                // Validate every descriptor, but do not claim an unusable
+                // TCP/TLS relay as the configuration's required capability.
+                if (server.relayType != rtc::IceServer::RelayType::TurnUdp) continue;
+                server.username = entry.username; server.password = entry.credential; hasRelay = true;
+            } else if (server.type != rtc::IceServer::Type::Stun || entry.username || entry.credential) return nullptr;
+            configuration.value.iceServers.push_back(std::move(server));
+        }
+        if (!hasRelay) return nullptr;
+        return createReceiver(generation, camera, screen, audio, media, signal, context, configuration.value);
+    } catch (...) { return nullptr; }
+}
+extern "C" void SGReceiverWipeBuffer(void *buffer, size_t bytes) {
+    if (!buffer || bytes > 4096) return;
+    volatile uint8_t *owned = static_cast<uint8_t *>(buffer);
+    for (size_t i = 0; i < bytes; ++i) owned[i] = 0;
 }
 extern "C" int SGReceiverOffer(SGReceiver *receiver, const char *sdp) {
     if (!receiver || !sdp || std::strlen(sdp) > 65536) return 0;
@@ -395,6 +478,26 @@ extern "C" SGReceiveStats SGReceiverStats(SGReceiver *receiver, int role) {
     if (!receiver || role < 0 || role > 2) return {};
     std::lock_guard lock(receiver->state->mutex);
     return receiver->guards[role] ? receiver->guards[role]->snapshot() : SGReceiveStats{};
+}
+extern "C" SGIcePair SGReceiverSelectedIcePair(SGReceiver *receiver) {
+    if (!receiver) return {};
+    try {
+        std::lock_guard lock(receiver->state->mutex);
+        if (!receiver->state->active) return {};
+        rtc::Candidate local, remote;
+        if (!receiver->peer->getSelectedCandidatePair(&local, &remote)) return {};
+        const auto type = [](rtc::Candidate::Type value) {
+            switch (value) {
+                case rtc::Candidate::Type::Host: return 1;
+                case rtc::Candidate::Type::ServerReflexive: return 2;
+                case rtc::Candidate::Type::PeerReflexive: return 3;
+                case rtc::Candidate::Type::Relayed: return 4;
+                default: return 0;
+            }
+        };
+        return {1, type(local.type()), type(remote.type()),
+                local.transportType() == rtc::Candidate::TransportType::Udp ? 1 : 0};
+    } catch (...) { return {}; }
 }
 extern "C" void SGReceiverStop(SGReceiver *receiver) {
     if (!receiver) return;
