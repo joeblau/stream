@@ -229,7 +229,10 @@ private final class QuietWirePeer: @unchecked Sendable {
 private final class BoundedProcessText: @unchecked Sendable {
     private let lock = NSLock()
     private var bytes = Data()
+    private var endOfFileCallbacks = 0
     func append(_ data: Data) { lock.lock(); defer { lock.unlock() }; precondition(bytes.count + data.count <= 131_072, "External adapter exceeded fixture output bound"); bytes.append(data) }
+    func ended() { lock.withLock { endOfFileCallbacks += 1 } }
+    var eofCount: Int { lock.withLock { endOfFileCallbacks } }
     var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: bytes, as: UTF8.self) }
     var snapshots: [[String: Any]] { text.split(separator: "\n").compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] } }
 }
@@ -243,8 +246,16 @@ private final class BoundedProcessText: @unchecked Sendable {
         process.arguments = ["python3", "-u", script.path]
         process.standardInput = input; process.standardOutput = stdout; process.standardError = stderr
         let output = output, errors = errors
-        stdout.fileHandleForReading.readabilityHandler = { handle in output.append(handle.availableData) }
-        stderr.fileHandleForReading.readabilityHandler = { handle in errors.append(handle.availableData) }
+        stdout.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil; output.ended() }
+            else { output.append(data) }
+        }
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil; errors.ended() }
+            else { errors.append(data) }
+        }
         try process.run()
         var credential = try JSONSerialization.data(withJSONObject: ["version": 1, "clientID": clientID.uuidString,
             "token": token, "host": "127.0.0.1", "port": Int(port)])
@@ -255,6 +266,11 @@ private final class BoundedProcessText: @unchecked Sendable {
     func stop() {
         if process.isRunning { process.terminate() }
         stdout.fileHandleForReading.readabilityHandler = nil; stderr.fileHandleForReading.readabilityHandler = nil
+    }
+    var pipesFinished: Bool { output.eofCount > 0 && errors.eofCount > 0 }
+    var pipesRetired: Bool {
+        output.eofCount == 1 && errors.eofCount == 1 &&
+        stdout.fileHandleForReading.readabilityHandler == nil && stderr.fileHandleForReading.readabilityHandler == nil
     }
 }
 
@@ -472,6 +488,7 @@ private final class BoundedProcessText: @unchecked Sendable {
         let sample = try ExternalSampleProcess(script: sampleRoot.appendingPathComponent("studio_status_adapter.py"), clientID: samplePair.id, token: samplePair.token, port: port)
         defer { sample.stop() }
         await waitUntil { !sample.process.isRunning }
+        await waitUntil { sample.pipesFinished }
         precondition(sample.output.snapshots.isEmpty && sample.errors.text.contains("adapterDisabled"), "Actual external sample bypassed its disabled registration")
         try manager.setEnabled(sampleManifest.id, true)
         progress("Local control fixture: actual external Python enabled state and disable")
@@ -484,6 +501,7 @@ private final class BoundedProcessText: @unchecked Sendable {
         await waitUntil { connected.output.snapshots.contains { $0["recording"] as? String == "paused" } }
         try manager.setEnabled(sampleManifest.id, false)
         await waitUntil { !connected.process.isRunning }
+        await waitUntil { connected.pipesFinished }
         precondition(connected.errors.text.contains("Studio disconnected") && dispatcher.emitted.count == commandCount,
             "External sample did not stop cleanly or emitted/replayed a production command")
         precondition(!connected.output.text.contains(samplePair.token) && !connected.errors.text.contains(samplePair.token))
@@ -495,8 +513,15 @@ private final class BoundedProcessText: @unchecked Sendable {
         precondition(server.authenticatedClientIDs.contains(samplePair.id) && dispatcher.emitted.count == commandCount)
         try manager.remove(sampleManifest.id)
         await waitUntil { !restarted.process.isRunning }
+        await waitUntil { restarted.pipesFinished }
         precondition(store.token(for: samplePair.id) == nil && !restarted.output.text.contains(samplePair.token) && !restarted.errors.text.contains(samplePair.token))
         dispatcher.state = originalState
+        // Exercise the actual six Python pipes, not a second handler model.
+        // EOF handlers left installed can spin and starve later native replies.
+        try await Task.sleep(for: .milliseconds(100))
+        precondition([sample, connected, restarted].allSatisfy(\.pipesRetired),
+            "Completed external processes retained EOF handlers or repeated empty callbacks")
+        progress("PASS: all six actual Python pipes retire at first EOF; no empty callback spin after exit")
         progress("PASS: actual bundled external Python process against native server; disabled admission, live authoritative state, disable, explicit restart, revoke and no command/secret replay")
 
         progress("Local control fixture: future registry preserves bytes and restores current grants")
