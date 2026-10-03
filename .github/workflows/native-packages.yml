@@ -1,0 +1,88 @@
+name: Native show packages
+
+on:
+  pull_request:
+    paths:
+      - 'apple/StreamMac/**'
+      - 'apple/StreamCore/**'
+      - 'apple/StreamCoreTests/PortableShowTests.swift'
+      - 'apple/VirtualOutputShared/**'
+      - 'apple/project.yml'
+      - 'apple/Vendor/**'
+      - 'apple/scripts/*portable_show_native*'
+      - 'apple/scripts/*package_read*'
+      - 'apple/scripts/guest_fixture_boundaries.rb'
+      - 'apple/scripts/desktop_transport_fixture.rb'
+      - 'apple/scripts/repair_desktop_transport_archives.py'
+      - 'apple/scripts/patches/**'
+      - 'apple/docs/PORTABLE_SHOW_NATIVE_ENTRY.md'
+      - 'apple/docs/PACKAGE_READ_OWNERSHIP.md'
+      - '.github/workflows/native-packages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packages:
+    name: Sandbox transfer and read ownership (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Show toolchain and install fixture tools
+        id: tools
+        run: |
+          xcodebuild -version
+          sw_vers
+          uname -m
+          brew install xcodegen cmake
+          mkdir -p apple/build/native-package-results
+      - name: Qualify signed native sandbox package delivery
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          PORTABLE_NATIVE_BUILD_PATH="$PWD/apple/build/native-package-ci" \
+            zsh apple/scripts/run_portable_show_native_harness.zsh 2>&1 | tee apple/build/native-package-results/sandbox.log
+      - name: Qualify actual read and import ownership
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          PACKAGE_READ_BUILD_PATH="$PWD/apple/build/native-package-ci" \
+            zsh apple/scripts/run_package_read_harness.zsh 2>&1 | tee apple/build/native-package-results/read-ownership.log
+      - name: Qualify portable Core paths and manifest boundaries
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        working-directory: apple
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild test -project Stream.xcodeproj -scheme StreamCoreTests \
+            -destination 'platform=macOS' -derivedDataPath build/native-package-core \
+            -only-testing:StreamCoreTests/PortableShowTests \
+            -resultBundlePath build/native-package-core.xcresult \
+            CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation \
+            2>&1 | tee build/native-package-results/core.log
+      - name: Retain native receipts, package bytes and Core results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-packages-${{ matrix.runner }}
+          path: |
+            apple/build/native-package-results
+            apple/build/native-package-core.xcresult
+            apple/build/portable-show-native-validation/artifacts-*
+            apple/build/portable-show-native-validation/actual-entitlements.plist
+            apple/build/portable-show-native-validation/sandbox.entitlements
+            apple/build/package-read-validation/artifacts-*
+          if-no-files-found: warn
+          retention-days: 14

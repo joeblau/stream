@@ -10,6 +10,14 @@ final class RecordingTerminationDelegate: NSObject, NSApplicationDelegate {
     private var finalizing = false
     private var terminationPending = false
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        StudioPackageOpenReceiver.shared.install()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        StudioPackageOpenReceiver.shared.shutdown()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard Self.recorder?.state.isActive == true || Self.finishSession != nil else { return .terminateNow }
         guard !terminationPending else { return .terminateLater }
