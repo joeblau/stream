@@ -164,8 +164,26 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(20))
         var cameraSequence: UInt16 = 65_534, screenSequence: UInt16 = 2, audioSequence: UInt16 = 65_534
         let feedBegan = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        writeLine("Guest initial paced feed start: \(progress(receiver, receipts))")
+        let sourceClock = ContinuousClock(), sourceStart = sourceClock.now
+        let delayedScheduler = CommandLine.arguments.contains("--validation-delayed-scheduler")
+        writeLine("Guest initial paced feed start scheduler=\(delayedScheduler ? "controlled-80ms" : "absolute-source-clock"): \(progress(receiver, receipts))")
         for tick in 0..<70 {
+            let sourceElapsed = Double(tick) * 0.02
+            let deadline = sourceStart.advanced(by: .seconds(sourceElapsed))
+            if delayedScheduler {
+                // Simulate a coarse/late scheduler, then catch up on the
+                // ORIGINAL source grid. This changes neither RTP nor NTP.
+                if sourceClock.now < deadline { try await Task.sleep(for: .milliseconds(80)) }
+            } else { try await sourceClock.sleep(until: deadline) }
+            if tick % 10 == 0 {
+                // Reports describe the same source frontier as the packets.
+                // Repeating the original NTP or rebasing to wall arrival would
+                // change the common mapping and hide the actual cue contract.
+                let videoFrontier = UInt32(tick * 1_800)
+                sr(0, rtp: cameraBase &+ videoFrontier, seconds: 4_000_000_000 + sourceElapsed, peer: peer)
+                sr(2, rtp: audioBase &+ UInt32(tick * 960), seconds: 4_000_000_000 + sourceElapsed, peer: peer)
+                sr(1, rtp: screenBase &+ videoFrontier, seconds: 4_000_000_000.3 + sourceElapsed, peer: peer)
+            }
             let opus = try Data(contentsOf: folder.appendingPathComponent(String(format: "opus-%03d.bin", tick)))
             send(packet(role: 2, sequence: audioSequence, timestamp: audioBase &+ UInt32(tick * 960), payload: [UInt8](opus), marker: true), role: 2, peer: peer); audioSequence &+= 1
             if tick % 5 == 0 {
@@ -173,7 +191,6 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
                 video(camera[index], role: 0, timestamp: cameraBase &+ UInt32(index * 9000), sequence: &cameraSequence, peer: peer)
                 video(screen[index], role: 1, timestamp: screenBase &+ UInt32(index * 9000), sequence: &screenSequence, peer: peer)
             }
-            try await Task.sleep(for: .milliseconds(20))
             if tick % 10 == 9 {
                 writeLine("Guest paced feed tick=\(tick + 1) sourceElapsed=\(Double(tick + 1) * 0.02)s hostElapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - feedBegan)s: \(progress(receiver, receipts))")
             }
