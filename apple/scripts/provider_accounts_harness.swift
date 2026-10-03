@@ -14,6 +14,11 @@ final class MemoryProviderCredentials: ProviderCredentialStore, @unchecked Senda
 }
 actor ProviderHTTPFixture {
     var requests: [URLRequest] = []
+    var holdThumbnail = false
+    var thumbnailEntered = false
+    var thumbnailGate: CheckedContinuation<Void, Never>?
+    func holdNextThumbnail() { holdThumbnail = true; thumbnailEntered = false }
+    func releaseThumbnail() { holdThumbnail = false; thumbnailGate?.resume(); thumbnailGate = nil }
     var holdRefresh = false
     var refreshGate: CheckedContinuation<Void, Never>?
     var refreshEntered = false
@@ -35,6 +40,9 @@ actor ProviderHTTPFixture {
             body = #"{"client_id":"client","user_id":"42","scopes":["channel:read:stream_key","channel:manage:broadcast"],"expires_in":3600}"#
         } else if path == "/oauth2/device" {
             body = #"{"device_code":"device","user_code":"ABCD","verification_uri":"https://www.twitch.tv/activate","expires_in":60,"interval":1}"#
+        } else if path == "/upload/youtube/v3/thumbnails/set" {
+            if holdThumbnail { thumbnailEntered = true; await withCheckedContinuation { thumbnailGate = $0 } }
+            body = #"{"kind":"youtube#thumbnailSetResponse","items":[{"default":{"url":"https://i.ytimg.com/vi/event1/default.jpg","width":120,"height":90}}]}"#
         } else if path == "/youtube/v3/channels" {
             body = #"{"items":[{"id":"UC1","snippet":{"title":"Actual fixture channel"}}]}"#
         } else if path == "/youtube/v3/liveBroadcasts", request.httpMethod == "POST" {
@@ -299,6 +307,26 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         session.refresh(.youtube)
         await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
         precondition(session.snapshot(.youtube).events.contains { $0.id == "acknowledged-id" && $0.state == .unknown }, "An eventual-consistency refresh erased the acknowledged event ID")
+        let image = Data([137,80,78,71,13,10,26,10,0])
+        session.uploadYouTubeThumbnail(eventID: "event1", channelID: "UC1", image: image, mimeType: "image/png")
+        await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
+        precondition(session.lastThumbnailReceipt?.eventID == "event1" && session.snapshot(.youtube).failure == nil)
+        let uploads = await http.allRequests().filter { $0.url?.path == "/upload/youtube/v3/thumbnails/set" }
+        precondition(uploads.count == 1 && uploads[0].httpBody == image && uploads[0].value(forHTTPHeaderField: "Authorization") != nil)
+        await http.holdNextThumbnail()
+        session.uploadYouTubeThumbnail(eventID: "event1", channelID: "UC1", image: image, mimeType: "image/png")
+        await settle { await http.thumbnailEntered }
+        session.cancel(.youtube)
+        await http.releaseThumbnail()
+        try await Task.sleep(for: .milliseconds(30))
+        precondition(session.lastThumbnailReceipt == nil && !session.snapshot(.youtube).isWorking, "Late upload result revived a cancelled session")
+        check(await http.allRequests().filter { $0.url?.path == "/upload/youtube/v3/thumbnails/set" }.count == 2, "Cancelled media upload was replayed")
+        var denied = try ProviderAPI.request(.youtube, path: "/upload/youtube/v3/videos")
+        denied.httpMethod = "POST"; denied.httpBody = image; denied.setValue("image/png", forHTTPHeaderField: "Content-Type")
+        let before = await http.allRequests().count
+        do { _ = try await vault.send(.youtube, request: denied); preconditionFailure("Unrelated media upload accepted") }
+        catch let failure as ProviderFailure { precondition(failure.kind == .invalidRequest) }
+        check(await http.allRequests().count == before)
         session.authorize(.twitch, clientID: "client")
         await settle { await MainActor.run { session.snapshot(.twitch).channels.first?.id == "42" && !session.snapshot(.twitch).isWorking } }
         precondition(session.snapshot(.twitch).scopes.contains("channel:read:stream_key"))
@@ -308,10 +336,20 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
         precondition(session.snapshot(.youtube).failure?.kind == .rateLimited && !session.canRequest(.youtube))
         precondition(session.snapshot(.twitch).verifiedAt != nil && session.snapshot(.twitch).failure == nil)
+        let beforeChatCooldown = await http.count(host: "www.googleapis.com")
+        do {
+            _ = try await session.chatRequest(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages"))
+            preconditionFailure("A chat GET ignored the account cooldown")
+        } catch let failure as ProviderFailure {
+            precondition(failure.kind == .rateLimited && (failure.retryAfter ?? 0) > 0)
+        }
+        let afterChatCooldown = await http.count(host: "www.googleapis.com")
+        precondition(afterChatCooldown == beforeChatCooldown)
         let calls = await http.count(host: "www.googleapis.com")
         session.refresh(.youtube)
         check(await http.count(host: "www.googleapis.com") == calls, "Cooldown must suppress repeated API reads")
         session.shutdown()
+        precondition(session.lastThumbnailReceipt == nil)
         precondition(!session.snapshot(.youtube).isWorking && !session.snapshot(.twitch).isWorking)
         check(await vault.hasToken(.youtube), "Workspace shutdown must preserve reusable machine credentials")
         // The actual native session must discard a late OAuth token after a
