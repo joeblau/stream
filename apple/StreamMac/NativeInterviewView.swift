@@ -18,6 +18,7 @@ struct NativeInterviewView: View {
                 Text("Guests").font(.headline)
                 Text("One guest connection. Incoming camera, screen and audio; studio return audio is not connected yet.")
                     .font(.caption).foregroundStyle(.secondary)
+                GuestSlotsView(store: sceneStore)
                 if [.idle, .ended, .expired, .failed, .closed].contains(manager.state.snapshot.phase) {
                     creationForm
                 }
@@ -81,6 +82,12 @@ struct NativeInterviewView: View {
             Text("\(member.membership.rawValue.capitalized) · \(NativeInterviewViewValues.media(member.media))")
                 .font(.caption).foregroundStyle(.secondary)
             if member.membership == .waiting {
+                Picker("Saved Guest Slot", selection: Binding<UUID?>(
+                    get: { manager.assignedSlot(for: member.id) },
+                    set: { slot in if let slot { _ = manager.assignSlot(slot, to: member.id) } })) {
+                    Text("Automatic unused slot").tag(Optional<UUID>.none)
+                    ForEach(sceneStore.guestSlots) { slot in Text(slot.name).tag(Optional(slot.id)) }
+                }
                 commandButton("Admit Backstage", .admit(member.id))
             } else {
                 HStack {

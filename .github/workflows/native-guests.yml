@@ -21,6 +21,8 @@ on:
       - 'apple/StreamMac/RecordingPreferences.swift'
       - 'apple/StreamMac/SceneRenderer.swift'
       - 'apple/StreamMac/LayerGraph.swift'
+      - 'apple/StreamMac/SceneModel.swift'
+      - 'apple/StreamMac/TextLayerSectionView.swift'
       - 'apple/StreamMac/CompositionEngine.swift'
       - 'apple/StreamMac/StudioCommandDispatcher.swift'
       - 'apple/StreamMac/StudioCommandPalette.swift'
@@ -109,7 +111,10 @@ jobs:
           mkdir -p apple/build/native-guest-results
           set -euo pipefail
           apple/scripts/run_native_interview_control_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-service.log
-          INTERVIEW_MANAGER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_interview_manager_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-manager.log
+          # The manager fixture resolves and repairs its own SwiftPM artifact
+          # tree. Sharing the shipping app DerivedData exposes both the
+          # original XCFramework and repaired product module maps to Clang.
+          apple/scripts/run_native_interview_manager_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-manager.log
           STREAM_INTERVIEW_RECEIVER_FRAMEWORKS="$PWD/apple/build/native-guest-ci/Build/Products/Debug" apple/scripts/run_native_interview_receiver_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-receiver.log
       - name: Decode real SDK media and qualify registration boundaries
         run: |
@@ -122,6 +127,7 @@ jobs:
           apple/scripts/run_guest_audio_harness.zsh --hold-before-revoke 2>&1 | tee apple/build/native-guest-results/audio-delayed-tick.log
           STREAM_FRACTIONAL_ISO_FRAMEWORKS="$PWD/apple/build/guest-audio-validation/core-derived/Build/Products/Debug" apple/scripts/run_fractional_iso_audio_harness.zsh 2>&1 | tee apple/build/native-guest-results/fractional-iso.log
           GUEST_RENDERER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_renderer_harness.zsh 2>&1 | tee apple/build/native-guest-results/controller-renderer.log
+          GUEST_SLOTS_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_slots_harness.zsh 2>&1 | tee apple/build/native-guest-results/guest-slots.log
           GUEST_PERSISTED_MIXER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_persisted_mixer_harness.zsh 2>&1 | tee apple/build/native-guest-results/persisted-mixer.log
           GUEST_PERSISTED_MIXER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_persisted_mixer_harness.zsh --hold-producer-20ms 2>&1 | tee apple/build/native-guest-results/persisted-mixer-delayed-source.log
       - name: Qualify actual decoded guest Program and ISO files
@@ -164,6 +170,7 @@ jobs:
           name: native-guests-${{ matrix.runner }}
           path: |
             apple/build/native-guest-results
+            apple/build/guest-slots-validation/artifacts-*
             apple/build/native-guest-program-iso-validation/media-*
             apple/build/guest-audio-validation/media-*
             apple/build/fractional-iso-audio-validation/media-*

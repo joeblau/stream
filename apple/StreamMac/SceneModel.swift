@@ -204,6 +204,9 @@ final class SceneStore: ObservableObject {
     @Published private(set) var sources: [SourceDefinition] {
         didSet { scheduleSceneAutosave() }
     }
+    @Published private(set) var guestSlots: [GuestSlot] {
+        didSet { scheduleSceneAutosave() }
+    }
     /// S07: project-wide overlays (back-to-front), stored once at document
     /// level and composited above every scene's layers. Mutated only through
     /// the dispatcher's project-level overlay commands.
@@ -277,6 +280,18 @@ final class SceneStore: ObservableObject {
         projectID = document.projectID
         projectName = document.projectName
         sources = document.sources
+        var savedSlots: [GuestSlot] = []
+        for slot in document.guestSlots where savedSlots.count < 16 && !savedSlots.contains(where: { $0.id == slot.id }) {
+            savedSlots.append(slot.normalized())
+        }
+        // Existing admitted guest sources already carry stable slot UUIDs.
+        for source in document.sources where savedSlots.count < 16 {
+            if case .guest(let payload) = source.payload, let id = payload.slotID,
+               !savedSlots.contains(where: { $0.id == id }) {
+                savedSlots.append(GuestSlot(id: id, name: source.name).normalized())
+            }
+        }
+        guestSlots = savedSlots
         overlays = document.overlays
         defaultBackground = document.defaultBackground
         defaultTransition = document.defaultTransition
@@ -299,6 +314,7 @@ final class SceneStore: ObservableObject {
         // resolve a bound layer's inherited effects against (per-frame read
         // path, same hand-off pattern as SourcePayloadStore).
         SourceEffectsStore.shared.publish(document.sources)
+        GuestSlotRenderStore.shared.publish(guestSlots)
         writeSceneDocument()
         writeBrowserDocument()
         // Flush any pending debounced autosave on quit. willTerminate is
@@ -328,7 +344,14 @@ final class SceneStore: ObservableObject {
                       defaultTransition: defaultTransition,
                       effectPresets: effectPresets,
                       stylePresets: stylePresets,
-                      textStylePresets: textStylePresets)
+                      textStylePresets: textStylePresets,
+                      guestSlots: guestSlots)
+    }
+
+    func writeGuestSlots(_ values: [GuestSlot]) {
+        var bounded: [GuestSlot] = []
+        for value in values where bounded.count < 16 && !bounded.contains(where: { $0.id == value.id }) { bounded.append(value.normalized()) }
+        guestSlots = bounded
     }
 
     func setProjectIdentity(_ id: UUID, name: String) {
@@ -987,6 +1010,7 @@ final class SceneStore: ObservableObject {
         // resolve a bound layer's inherited effects against (per-frame read
         // path; project-level edits apply to staged AND program next tick).
         SourceEffectsStore.shared.publish(sources)
+        GuestSlotRenderStore.shared.publish(guestSlots)
         sceneAutosaveTask?.cancel()
         sceneAutosaveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.autosaveDelay * 1_000_000_000))

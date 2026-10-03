@@ -10,6 +10,17 @@ import Security
     static var machineDirectory: URL { projectDirectory }
 }
 struct HarnessID: Hashable { var rawValue = UUID() }
+/// Real interview snapshot values at the controlled studio boundary. The wire
+/// fixture starts no service/media factory and makes no guest routing claim.
+struct HarnessGuestRoute {
+    var slot: UUID
+    var programAllowed = false
+    var monitorAllowed = false
+}
+struct HarnessInterviewState {
+    var snapshot = NativeInterviewSnapshot()
+    var routes: [UUID: HarnessGuestRoute] = [:]
+}
 struct HarnessState {
     var stream: StreamSessionState = .idle
     var recording: RecordingSessionState = .idle
@@ -19,6 +30,14 @@ struct HarnessState {
     var hasPendingStagedEdits = false
     var layerVisibility: [HarnessID: Bool] = [:]
     var directLiveEditing = false
+    var interview: HarnessInterviewState = {
+        let memberID = UUID(uuidString: "8C0C448D-9FB1-4D4D-A7B0-8AEF1AF10E2D")!
+        let roomID = UUID(uuidString: "A0D41B44-E995-4C4A-9D4D-2F43C2D7AA65")!
+        let slotID = UUID(uuidString: "3D31F54C-9820-45E8-B88D-1DA15B6C5537")!
+        return .init(snapshot: .init(phase: .connected, room: roomID, members: [
+            .init(id: memberID, name: "Fixture Guest", membership: .backstage, media: .ready)
+        ]), routes: [memberID: .init(slot: slotID, monitorAllowed: true)])
+    }()
 }
 enum StudioCommand { case action(String), pdfGoToPage(UUID, page: Int), addRecordingMarker(String) }
 enum StudioCommandError: Error {
@@ -365,6 +384,12 @@ private final class BoundedProcessText: @unchecked Sendable {
         let authenticated = try await client.request(handshake)
         let sessionID = authenticated.sessionID!
         precondition(authenticated.snapshot?.projectID == directory.lastPathComponent)
+        let interview = authenticated.snapshot?.interview
+        precondition(interview?.phase == "connected" && interview?.room == UUID(uuidString: "A0D41B44-E995-4C4A-9D4D-2F43C2D7AA65") && interview?.locked == false)
+        precondition(interview?.members == [.init(id: UUID(uuidString: "8C0C448D-9FB1-4D4D-A7B0-8AEF1AF10E2D")!, name: "Fixture Guest",
+            membership: "backstage", media: "ready", slot: UUID(uuidString: "3D31F54C-9820-45E8-B88D-1DA15B6C5537")!,
+            programAllowed: false, monitorAllowed: true, screenApproved: false, screenSharing: false)],
+            "Interview snapshot JSON lost member routing or approval fields")
         let capabilityRequest = StudioControlRequest(type: .capabilities, id: UUID(), sessionID: sessionID)
         let discovery = try await client.request(capabilityRequest)
         precondition(discovery.commands?.contains { $0.id == stable && $0.title == "Intro" } == true)

@@ -10,6 +10,7 @@ import Foundation
     private let clock: @Sendable () -> Date
     private let mediaPreparationTimeout: Duration, negotiationTimeout: Duration
     private let nextGeneration: (@MainActor () -> UInt64?)?
+    private let slotForGuest: (@MainActor (UUID) -> UUID?)?
     private var room: NativeInterviewCreatedRoom?
     private var socket: (any NativeInterviewSocketTransport)?
     private var epoch = UUID(), hostGeneration: UUID?
@@ -56,10 +57,12 @@ import Foundation
     init(service: any NativeInterviewService, factory: (any NativeInterviewMediaHostFactory)? = nil,
          clock: @escaping @Sendable () -> Date = { Date() },
          mediaPreparationTimeout: Duration = .seconds(15), negotiationTimeout: Duration = .seconds(20),
-         nextGeneration: (@MainActor () -> UInt64?)? = nil) {
+         nextGeneration: (@MainActor () -> UInt64?)? = nil,
+         slotForGuest: (@MainActor (UUID) -> UUID?)? = nil) {
         self.service = service; self.factory = factory; self.clock = clock
         self.mediaPreparationTimeout = mediaPreparationTimeout; self.negotiationTimeout = negotiationTimeout
         self.nextGeneration = nextGeneration
+        self.slotForGuest = slotForGuest
     }
 
     func create() async throws {
@@ -368,7 +371,14 @@ import Foundation
             issuedGeneration = allocated
         } else { issuedGeneration = localGeneration + 1 }
         localGeneration = issuedGeneration
-        let slot = slots[id] ?? UUID(); slots[id] = slot
+        let slot: UUID
+        if let slotForGuest {
+            guard let chosen = slotForGuest(id) else {
+                updateMember(id) { $0.media = .failed }; snapshot.failure = .capacity; return false
+            }
+            slot = chosen
+        } else { slot = slots[id] ?? UUID() }
+        slots[id] = slot
         let context = NativeInterviewPeerLease(room: room.id, hostGeneration: hostGeneration, guestGeneration: generation,
             receive: .init(slot: slot, peerID: id, negotiation: UUID(), generation: localGeneration))
         let current = epoch
