@@ -108,6 +108,7 @@ jobs:
           path: |
             apple/build/desktop-tests.xcresult
             apple/build/recording-chat-validation/media-*
+            apple/build/fractional-iso-audio-validation/media-*
 
   test:
     name: StreamCore tests (iOS Simulator)
