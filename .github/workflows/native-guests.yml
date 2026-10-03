@@ -86,6 +86,7 @@ jobs:
           mkdir -p apple/build/native-guest-results
           set -euo pipefail
           apple/scripts/run_native_guest_receive_harness.zsh 2>&1 | tee apple/build/native-guest-results/receiver.log
+          apple/build/native-guest-receive/guest-harness apple/build/native-guest-receive/fixtures --validation-delayed-scheduler 2>&1 | tee apple/build/native-guest-results/receiver-delayed-scheduler.log
           apple/scripts/run_guest_frame_store_harness.zsh 2>&1 | tee apple/build/native-guest-results/store.log
           apple/scripts/run_guest_audio_harness.zsh 2>&1 | tee apple/build/native-guest-results/audio.log
           STREAM_FRACTIONAL_ISO_FRAMEWORKS="$PWD/apple/build/guest-audio-validation/core-derived/Build/Products/Debug" apple/scripts/run_fractional_iso_audio_harness.zsh 2>&1 | tee apple/build/native-guest-results/fractional-iso.log
