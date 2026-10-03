@@ -10,6 +10,13 @@ private func hostSeconds() -> Double { CMClockGetTime(CMClockGetHostTimeClock())
 /// One admitted peer prototype. Its callbacks are isolated media receipts; this
 /// class never registers an audio source, stages a scene or publishes output.
 final class NativeGuestReceiver: @unchecked Sendable {
+    struct CodecStatus: Sendable {
+        let stage: String, status: OSStatus, detail: UInt32
+    }
+    struct DecodeDiagnostics: Sendable {
+        let role: GuestReceiveRole, received: Int, decoded: Int, expired: Int, queued: Int, bytes: Int, working: Bool
+        let senderReportAge: Double?, statuses: [CodecStatus]
+    }
     private struct Input { let data: Data, pts: Double, arrival: Double }
     private struct SenderReport { let rtp: UInt32, ntp: Double, received: Double }
     private let lock = NSLock(), transportLock = NSLock(), outputGate = NSRecursiveLock()
@@ -31,6 +38,8 @@ final class NativeGuestReceiver: @unchecked Sendable {
     private var audio: GuestOpusDecoder?
     private var expiry: Task<Void, Never>?
     private var decodeErrors = 0, drops = 0, unsynchronized = 0
+    private var receivedUnits = [0, 0, 0], decodedUnits = [0, 0, 0], expiredUnits = [0, 0, 0]
+    private var codecStatuses: [[String: CodecStatus]] = [[:], [:], [:]]
     private let videoOutput: @Sendable (GuestVideoFrame) -> Void
     private let audioOutput: @Sendable (GuestAudioFrame) -> Void
     private let signalOutput: @Sendable (String, String, String) -> Void
@@ -85,6 +94,25 @@ final class NativeGuestReceiver: @unchecked Sendable {
     #endif
     var counters: (errors: Int, dropped: Int, unsynchronized: Int) {
         lock.lock(); defer { lock.unlock() }; return (decodeErrors, drops, unsynchronized)
+    }
+    func diagnosticSnapshot() -> [DecodeDiagnostics] {
+        lock.lock(); defer { lock.unlock() }
+        let now = hostSeconds()
+        return (0..<3).map { index in
+            .init(role: GuestReceiveRole(rawValue: Int32(index))!, received: receivedUnits[index],
+                  decoded: decodedUnits[index], expired: expiredUnits[index], queued: pending[index].count,
+                  bytes: bytes[index], working: working[index],
+                  senderReportAge: reports[Int32(index)].map { now - $0.received },
+                  statuses: codecStatuses[index].values.sorted { $0.stage < $1.stage })
+        }
+    }
+    private func codecStatus(role: Int32, stage: String, status: OSStatus, detail: UInt32) {
+        lock.lock(); defer { lock.unlock() }
+        // Stages are fixed application constants, never remote strings.
+        codecStatuses[Int(role)][stage] = .init(stage: stage, status: status, detail: detail)
+        if stage == "video-output", status != noErr {
+            decodeErrors += 1; needsIDR[Int(role)] = true
+        }
     }
     private func expire() { transportLock.lock(); defer { transportLock.unlock() }; SGReceiverExpire(handle) }
     private func keyframe(_ role: Int32) { transportLock.lock(); defer { transportLock.unlock() }; _ = SGReceiverRequestKeyframe(handle, role) }
@@ -153,6 +181,7 @@ final class NativeGuestReceiver: @unchecked Sendable {
         guard lastPTS[index].map({ pts > $0 }) ?? true else { drops += 1; lock.unlock(); return }
         lastPTS[index] = pts
         let payload = Data(bytes: data, count: count)
+        receivedUnits[index] += 1
         if index < 2, needsIDR[index], !GuestH264Decoder.hasIDR(payload) { drops += 1; lock.unlock(); return }
         if index < 2 { needsIDR[index] = false }
         let capacity = index == 2 ? 32 : 3, byteLimit = index == 2 ? 40_800 : 2_097_152
@@ -176,24 +205,28 @@ final class NativeGuestReceiver: @unchecked Sendable {
             guard active, !pending[index].isEmpty else { working[index] = false; lock.unlock(); return }
             let input = pending[index].removeFirst(); bytes[index] -= input.data.count
             if hostSeconds() - input.arrival > 0.12 {
-                drops += 1; if index < 2 { needsIDR[index] = true } else { audioResetPending = true }; lock.unlock()
+                drops += 1; expiredUnits[index] += 1; if index < 2 { needsIDR[index] = true } else { audioResetPending = true }; lock.unlock()
                 if index < 2 { requestKeyframe(role) }; continue
             }
             lock.unlock()
             do {
                 if index == 2 {
                     if audio?.accepts(input.pts) == false { audio = nil }
-                    if audio == nil { audio = try GuestOpusDecoder() }
+                    if audio == nil { audio = try GuestOpusDecoder { [weak self] stage, status, detail in
+                        self?.codecStatus(role: role, stage: stage, status: status, detail: detail)
+                    } }
                     emitAudio(try audio!.decode(input.data, pts: input.pts))
                 } else {
                     if videos[index] == nil {
-                        videos[index] = GuestH264Decoder { [weak self] pixels, pts in
+                        videos[index] = GuestH264Decoder(output: { [weak self] pixels, pts in
                             guard let self else { return }
-                            self.outputGate.lock(); self.lock.lock(); let current = self.active && (index != 1 || self.screenApproved); self.lock.unlock()
+                            self.outputGate.lock(); self.lock.lock(); self.decodedUnits[index] += 1; let current = self.active && (index != 1 || self.screenApproved); self.lock.unlock()
                             if current { self.videoOutput(.init(lease: self.lease, role: GuestReceiveRole(rawValue: role)!, pixels: pixels, pts: pts,
                                 duration: .invalid, mappingGeneration: self.mappingGeneration, clockQuality: .senderReportAligned)) }
                             self.outputGate.unlock()
-                        }
+                        }, diagnostic: { [weak self] stage, status, detail in
+                            self?.codecStatus(role: role, stage: stage, status: status, detail: detail)
+                        })
                     }
                     try videos[index]!.decode(input.data, pts: CMTime(seconds: input.pts, preferredTimescale: 1_000_000_000))
                 }
@@ -206,7 +239,7 @@ final class NativeGuestReceiver: @unchecked Sendable {
     }
     private func emitAudio(_ chunks: [GuestOpusDecoder.Chunk]) {
         for chunk in chunks {
-            outputGate.lock(); lock.lock(); let current = active; lock.unlock()
+            outputGate.lock(); lock.lock(); decodedUnits[2] += 1; let current = active; lock.unlock()
             if current { audioOutput(.init(lease: lease, pcm: chunk.pcm, pts: CMTime(seconds: chunk.pts, preferredTimescale: 1_000_000_000),
                 duration: CMTime(value: Int64(chunk.pcm.frameLength), timescale: 48_000), mappingGeneration: mappingGeneration,
                 clockQuality: .senderReportAligned)) }
@@ -235,7 +268,11 @@ final class NativeGuestReceiver: @unchecked Sendable {
 private final class GuestH264Decoder {
     private var sps: Data?, pps: Data?, format: CMVideoFormatDescription?, session: VTDecompressionSession?
     private let output: (CVPixelBuffer, CMTime) -> Void
-    init(output: @escaping (CVPixelBuffer, CMTime) -> Void) { self.output = output }
+    private let diagnostic: @Sendable (String, OSStatus, UInt32) -> Void
+    init(output: @escaping (CVPixelBuffer, CMTime) -> Void,
+         diagnostic: @escaping @Sendable (String, OSStatus, UInt32) -> Void) {
+        self.output = output; self.diagnostic = diagnostic
+    }
     static func nals(_ data: Data) -> [Data] {
         let bytes = [UInt8](data); var starts: [(Int, Int)] = [], i = 0
         while i + 3 <= bytes.count {
@@ -264,16 +301,21 @@ private final class GuestH264Decoder {
                 var sizes = [a.count, b.count]
                 return CMVideoFormatDescriptionCreateFromH264ParameterSets(allocator: nil, parameterSetCount: 2, parameterSetPointers: &pointers, parameterSetSizes: &sizes, nalUnitHeaderLength: 4, formatDescriptionOut: &format)
             } }
+            diagnostic("video-format", status, 0)
             guard status == noErr, let format else { throw GuestDecodeError.codec(status) }
             let dimensions = CMVideoFormatDescriptionGetDimensions(format)
             guard (1...1920).contains(dimensions.width), (1...1080).contains(dimensions.height) else { throw GuestDecodeError.unsupported }
-            var callback = VTDecompressionOutputCallbackRecord(decompressionOutputCallback: { refcon, _, status, _, pixels, pts, _ in
-                guard status == noErr, let pixels, let refcon else { return }
-                Unmanaged<GuestH264Decoder>.fromOpaque(refcon).takeUnretainedValue().output(pixels, pts)
+            var callback = VTDecompressionOutputCallbackRecord(decompressionOutputCallback: { refcon, _, status, flags, pixels, pts, _ in
+                guard let refcon else { return }
+                let owner = Unmanaged<GuestH264Decoder>.fromOpaque(refcon).takeUnretainedValue()
+                owner.diagnostic("video-output", status, flags.rawValue | (pixels == nil ? 0 : 0x8000_0000))
+                guard status == noErr, let pixels else { return }
+                owner.output(pixels, pts)
             }, decompressionOutputRefCon: Unmanaged.passUnretained(self).toOpaque())
             let created = VTDecompressionSessionCreate(allocator: nil, formatDescription: format,
                 decoderSpecification: nil, imageBufferAttributes: [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA] as CFDictionary,
                 outputCallback: &callback, decompressionSessionOut: &session)
+            diagnostic("video-create", created, 0)
             guard created == noErr, session != nil else { throw GuestDecodeError.codec(created) }
         }
         var avcc = Data()
@@ -289,7 +331,9 @@ private final class GuestH264Decoder {
         var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: pts, decodeTimeStamp: .invalid), size = avcc.count
         let ready = CMSampleBufferCreateReady(allocator: nil, dataBuffer: block, formatDescription: format, sampleCount: 1, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample)
         guard ready == noErr, let sample, let session else { throw GuestDecodeError.codec(ready) }
-        let decoded = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: [], frameRefcon: nil, infoFlagsOut: nil)
+        var flags = VTDecodeInfoFlags()
+        let decoded = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: [], frameRefcon: nil, infoFlagsOut: &flags)
+        diagnostic("video-submit", decoded, flags.rawValue)
         guard decoded == noErr else { throw GuestDecodeError.codec(decoded) }
         VTDecompressionSessionWaitForAsynchronousFrames(session)
     }
@@ -300,8 +344,10 @@ private final class GuestOpusDecoder {
     struct Chunk { let pcm: AVAudioPCMBuffer, pts: Double }
     private let codec: AudioCodec, pcmFormat: AVAudioFormat
     private var nextPTS: Double?, ended = false
+    private let diagnostic: @Sendable (String, OSStatus, UInt32) -> Void
     func accepts(_ pts: Double) -> Bool { nextPTS.map { abs(pts - $0) <= 1.0 / 48_000 } ?? true }
-    init() throws {
+    init(diagnostic: @escaping @Sendable (String, OSStatus, UInt32) -> Void) throws {
+        self.diagnostic = diagnostic
         // Public AudioCodec exposes decoder trimming before initialization.
         // AVAudioConverter's default decoder omits120 leading CELT samples on
         // the qualified current OS; configuring this property after initialize
@@ -311,14 +357,17 @@ private final class GuestOpusDecoder {
         guard let component = AudioComponentFindNext(nil, &description) else { throw GuestDecodeError.unsupported }
         var instance: AudioComponentInstance?
         let created = AudioComponentInstanceNew(component, &instance)
+        diagnostic("opus-create", created, 0)
         guard created == noErr, let instance else { throw GuestDecodeError.codec(created) }
         var initialized = false
         defer { if !initialized { AudioComponentInstanceDispose(instance) } }
         var propertySize: UInt32 = 0, writable: DarwinBoolean = false
         let info = AudioCodecGetPropertyInfo(instance, kAudioCodecPropertyPrimeInfo, &propertySize, &writable)
+        diagnostic("opus-prime-info", info, propertySize | (writable.boolValue ? 0x8000_0000 : 0))
         guard info == noErr, writable.boolValue, propertySize == MemoryLayout<AudioCodecPrimeInfo>.size else { throw GuestDecodeError.unsupported }
         var prime = AudioCodecPrimeInfo(leadingFrames: 0, trailingFrames: 0)
         let configured = AudioCodecSetProperty(instance, kAudioCodecPropertyPrimeInfo, propertySize, &prime)
+        diagnostic("opus-prime-set", configured, 0)
         guard configured == noErr else { throw GuestDecodeError.codec(configured) }
         var input = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatOpus, mFormatFlags: 0,
             mBytesPerPacket: 0, mFramesPerPacket: 0, mBytesPerFrame: 0, mChannelsPerFrame: 2, mBitsPerChannel: 0, mReserved: 0)
@@ -327,6 +376,7 @@ private final class GuestOpusDecoder {
             mBytesPerFrame: 8, mChannelsPerFrame: 2, mBitsPerChannel: 32, mReserved: 0)
         guard let pcm = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false) else { throw GuestDecodeError.unsupported }
         let ready = AudioCodecInitialize(instance, &input, &output, nil, 0)
+        diagnostic("opus-initialize", ready, 0)
         guard ready == noErr else { throw GuestDecodeError.codec(ready) }
         initialized = true; codec = instance; pcmFormat = pcm
     }
@@ -348,9 +398,11 @@ private final class GuestOpusDecoder {
         var bytes = UInt32(data.count), packets: UInt32 = 1
         var packet = AudioStreamPacketDescription(mStartOffset: 0, mVariableFramesInPacket: frames, mDataByteSize: bytes)
         let appended = data.withUnsafeBytes { AudioCodecAppendInputData(codec, $0.baseAddress!, &bytes, &packets, &packet) }
+        diagnostic("opus-append", appended, packets)
         guard appended == noErr, packets == 1, bytes == data.count else { throw GuestDecodeError.codec(appended) }
         var samples = [Float](repeating: 0, count: 5760 * 2), outputBytes: UInt32 = 5760 * 8, outputFrames: UInt32 = 5760, status: UInt32 = 0
         let decoded = AudioCodecProduceOutputPackets(codec, &samples, &outputBytes, &outputFrames, nil, &status)
+        diagnostic("opus-output", decoded, outputFrames)
         guard decoded == noErr, outputFrames == frames, outputBytes == frames * 8,
               status == kAudioCodecProduceOutputPacketSuccess || status == kAudioCodecProduceOutputPacketSuccessHasMore else {
             throw GuestDecodeError.audioFrames(expected: frames, actual: outputFrames, code: Int(decoded))

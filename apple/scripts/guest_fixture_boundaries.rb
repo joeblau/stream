@@ -2,6 +2,12 @@
 # mixer, renderer, recording and persistence code remains unchanged.
 module StreamGuestFixtureBoundaries
   def self.apply(core, desktop, root, folder)
+    # Shared app aliases (including RestreamChat) have their own credential
+    # paths outside StreamCore. Enable their existing no-network/no-Keychain
+    # validation guards for every generated desktop target using this helper.
+    desktop['settings'] ||= {}
+    desktop['settings']['base'] ||= {}
+    desktop['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = '$(inherited) STREAM_NATIVE_VALIDATION'
     fixture_root = File.join(File.expand_path(folder), 'fixtures')
     require 'fileutils'
     FileUtils.mkdir_p(fixture_root)
