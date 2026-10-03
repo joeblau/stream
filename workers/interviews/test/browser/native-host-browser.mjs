@@ -8,7 +8,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {WebSocket, WebSocketServer} from 'ws';
-import {chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
+import {chromeFixtureExecutable, chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const publicPath = fileURLToPath(new URL('../../public/', import.meta.url));
@@ -252,7 +252,7 @@ const check = () => { assert(!serverFailure, serverFailure?.message); native?.ch
 try {
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const executable = process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  const executable = await chromeFixtureExecutable(process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', profile);
   startup.phase('launch');
   chrome = spawn(executable,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--no-first-run',
     '--disable-background-networking','--disable-component-update','--disable-extensions','--autoplay-policy=no-user-gesture-required',

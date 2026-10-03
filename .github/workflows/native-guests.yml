@@ -111,13 +111,14 @@ jobs:
           mkdir -p apple/build/native-guest-results
           set -euo pipefail
           apple/scripts/run_native_interview_control_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-service.log
-          INTERVIEW_MANAGER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_interview_manager_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-manager.log
+          STREAM_GUEST_RTC_INCLUDE="$PWD/apple/build/native-guest-ci/Build/Products/Debug/include/libdatachannel" INTERVIEW_MANAGER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_interview_manager_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-manager.log
           STREAM_INTERVIEW_RECEIVER_FRAMEWORKS="$PWD/apple/build/native-guest-ci/Build/Products/Debug" apple/scripts/run_native_interview_receiver_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-receiver.log
       - name: Decode real SDK media and qualify registration boundaries
         run: |
           mkdir -p apple/build/native-guest-results
           set -euo pipefail
           apple/scripts/run_native_guest_receive_harness.zsh 2>&1 | tee apple/build/native-guest-results/receiver.log
+          apple/scripts/run_native_guest_receive_harness.zsh --sparse-audio-reports 2>&1 | tee apple/build/native-guest-results/receiver-sparse-audio-reports.log
           apple/build/native-guest-receive/guest-harness apple/build/native-guest-receive/fixtures --validation-delayed-scheduler 2>&1 | tee apple/build/native-guest-results/receiver-delayed-scheduler.log
           apple/scripts/run_guest_frame_store_harness.zsh 2>&1 | tee apple/build/native-guest-results/store.log
           apple/scripts/run_guest_audio_harness.zsh 2>&1 | tee apple/build/native-guest-results/audio.log

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
-import {chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
+import {chromeFixtureExecutable, chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
 
 const publicPath = fileURLToPath(new URL('../../public/', import.meta.url));
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -150,7 +150,7 @@ async function run() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   startup.phase('launch');
-  chrome = spawn(await chromePath(), ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
+  chrome = spawn(await chromeFixtureExecutable(await chromePath(), profile), ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
     '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-component-update',
     '--disable-sync', '--disable-extensions', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
     '--autoplay-policy=no-user-gesture-required',

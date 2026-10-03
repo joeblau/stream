@@ -1,3 +1,25 @@
+import fs from 'node:fs/promises';
+import {constants} from 'node:fs';
+import path from 'node:path';
+
+// setup-chrome can flatten the outer macOS .app directory. Chromium's
+// parent/child bundle identity then disagrees and Mach rendezvous fails.
+// Restore the signed bundle bytes in this fixture's disposable directory;
+// never mutate the action cache or change sandbox/code-signing policy.
+export async function chromeFixtureExecutable(executable, ownedRoot) {
+  if (process.platform !== 'darwin') return executable;
+  const resolved = await fs.realpath(executable);
+  const bundle = path.dirname(path.dirname(path.dirname(resolved)));
+  if (path.basename(bundle).endsWith('.app')) return executable;
+  if (path.basename(path.dirname(resolved)) !== 'MacOS' ||
+      path.basename(path.dirname(path.dirname(resolved))) !== 'Contents') return executable;
+  await fs.access(path.join(bundle, 'Contents', 'Info.plist'));
+  const restored = path.join(ownedRoot, 'chrome-bundle', 'Google Chrome for Testing.app');
+  await fs.cp(bundle, restored, {recursive:true, preserveTimestamps:true,
+    verbatimSymlinks:true, mode:constants.COPYFILE_FICLONE});
+  return path.join(restored, 'Contents', 'MacOS', path.basename(resolved));
+}
+
 // Owned-profile test processes only. Chromium's OSCrypt GetKeychain selects
 // MockKeychain for this public switch, avoiding login-Keychain permission waits:
 // https://chromium.googlesource.com/chromium/src/+/refs/tags/143.0.7497.1/components/os_crypt/sync/os_crypt_mac.mm
