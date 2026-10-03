@@ -134,10 +134,24 @@ assert actual==expected,'Actual fixture app has unexpected/missing entitlements'
 print('Verified ad hoc signature and exact sandbox/user-selected/bookmark entitlements; no get-task-allow, device, network, App Group or Keychain claims',flush=True)
 PY
 env DYLD_FRAMEWORK_PATH="$PORTABLE_PRODUCTS" python3 - "$PORTABLE_PRODUCTS/PortableShowNativeDriver" "$PORTABLE_APP" "${PORTABLE_NATIVE_DIR:A}" <<'PY'
-import pathlib,subprocess,sys,uuid
+import pathlib,plistlib,shutil,subprocess,sys,uuid
 root=pathlib.Path(sys.argv[3])/('artifacts-'+str(uuid.uuid4()));root.mkdir()
-try:raise SystemExit(subprocess.run([sys.argv[1],sys.argv[2],str(root)],timeout=100).returncode)
+with (pathlib.Path(sys.argv[2])/'Contents/Info.plist').open('rb') as file:
+ identifier=plistlib.load(file)['CFBundleIdentifier']
+assert identifier.startswith('com.joeblau.Stream.fixture.portable.'),'Refusing non-fixture receipt collection'
+uuid.UUID(identifier.removeprefix('com.joeblau.Stream.fixture.portable.'))
+container=pathlib.Path.home()/'Library/Containers'/identifier/'Data/Library/Application Support/StreamPortableFixture'
+result=1
+try:result=subprocess.run([sys.argv[1],sys.argv[2],str(root)],timeout=100).returncode
 except subprocess.TimeoutExpired:
  print('FAIL: portable native driver exceeded100s; own app container/artifacts retained',flush=True)
- raise SystemExit(1)
+finally:
+ # Only bounded metadata from this unique generated app is retained. The
+ # persisted runtime and bookmark bytes remain in its owned app container.
+ receipts=root/'native-receipts';receipts.mkdir()
+ for name in ['report.json','open-receipt.json','termination-trace.json','window-close-trace.json','lifecycle-trace.json']:
+  source=container/name
+  if not source.is_symlink() and source.is_file() and source.stat().st_size<=1024*1024:shutil.copyfile(source,receipts/name)
+ print('Owned native qualification artifacts:',root,flush=True)
+raise SystemExit(result)
 PY

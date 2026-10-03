@@ -54,6 +54,8 @@ substitute event handler and holds no additional package security-scope lease.
 File identity assertions use the owned vnode identity to accommodate Foundation
 spelling `/tmp` as `/private/tmp`; all production IO retains the original URL.
 Artifacts and the unique fixture app container remain available after the run.
+The runner copies bounded native receipts into its owned artifact directory;
+runtime persistence and app-scope bookmark bytes remain in the unique container.
 The child lifetime is bounded to 110 seconds, the parent to 100 seconds; native
 receipts, file readiness and normal Quit have separate bounded waits.
 
@@ -75,3 +77,13 @@ and `/tmp/stream-portable-native-shipping-complete.log` (the latter adds actual
 repeated non-package and multi-package delivery checks).
 The acceptance criteria in #155 remain subject to the explicit native picker
 and physical interaction limits above.
+
+The dedicated `Native show packages` workflow runs the signed sandbox fixture,
+actual read/import ownership fixture and four portable Core tests on Apple
+Silicon and Intel runners. Logs, synthetic package bytes, bounded native receipts,
+exact entitlement declarations and Core test results are retained for 14 days.
+A missing WindowServer or failed native delivery fails qualification; a canceled
+chooser is reported as **UNQUALIFIED** and cannot establish picker acceptance.
+The combined local branch passed the signed sandbox fixture after merging the
+current native guest baseline and main; its final log is
+`/tmp/stream-portable-native-final-artifacts.log` (Xcode 26.6, macOS 27.0.1, ARM).
