@@ -8,18 +8,35 @@ let local, shared, socket, pc, audio, analyser, meterSource, meterFrame, generat
 let signalQueue = {pending:0};
 let candidateQueue = [], signalChain = Promise.resolve(), left = false, name = 'Guest';
 let relayTimer, deviceEpoch = 0, activeNegotiation, cachedRelay;
+let control, mediaSenders = {}, screenApproved = false, shareEpoch = 0, pendingDisplay = false;
+const MEDIA_CONTROL = 'stream-interview-control-v1';
 let joinEpoch = 0, admitted = false, cameraEnabled = true, microphoneEnabled = true;
 const valid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(room ?? '') && /^[0-9a-f]{64}$/.test(secret);
 if (!valid) { status('This invite is incomplete. Ask the host for a fresh link.'); $('prepare').disabled = true; }
 function controls(enabled) { for (const id of ['mute','hide','tone','join']) $(id).disabled = !enabled; }
 function resetPeer() {
   clearTimeout(relayTimer); relayTimer = undefined;
+  stopShare();control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();
   admitted = false; host = hostGeneration = activeNegotiation = undefined; candidateQueue = [];
   pc?.close(); pc = undefined; $('return').srcObject = null;
   $('program').textContent='Program and recording status unavailable while disconnected.';
-  stopShare(); $('share').disabled = true;
 }
-function stopShare() { shared?.getTracks().forEach(track => track.stop()); shared = undefined; $('stopshare').disabled = true; }
+function updateShareControls() {
+  $('share').disabled=!admitted || !screenApproved || control?.readyState!=='open' || !!shared || pendingDisplay;
+  $('stopshare').disabled=!shared;
+  $('share-status').textContent=shared?'Screen sharing active; camera and microphone remain connected':screenApproved?pendingDisplay?'Finish or cancel the open screen chooser before trying again.':'The host approved screen sharing. Choose a screen when ready.':'Screen sharing requires admission and explicit host approval.';
+}
+function screenState(sharing) {
+  if(control?.readyState!=='open')return false;
+  try{if(control.bufferedAmount>8192)throw new Error('Control backlog');control.send(JSON.stringify({type:'screen-state',negotiation:activeNegotiation,sharing}));return true;}
+  catch{screenApproved=false;control.close();return false;}
+}
+function stopShare() {
+  ++shareEpoch;const previous=shared;shared=undefined;
+  previous?.getTracks().forEach(track=>track.stop());
+  mediaSenders.screen?.replaceTrack(null).catch(()=>{});
+  if(previous)screenState(false);updateShareControls();
+}
 function send(value) { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); }
 function signal(kind, payload) { send({type:'signal', to:host, targetGeneration:hostGeneration, kind, payload:JSON.stringify(payload)}); }
 async function enumerate() {
@@ -54,7 +71,7 @@ async function prepare() {
     const old = local;
     for (const track of fresh.getTracks()) {
       track.enabled = track.kind === 'audio' ? microphoneEnabled : cameraEnabled;
-      const sender = pc?.getSenders().find(s=>s.track?.kind === track.kind && !shared?.getTracks().includes(s.track));
+      const sender = mediaSenders[track.kind==='audio'?'audio':'camera'];
       if (sender) await sender.replaceTrack(track);
     }
     local = fresh; watchTracks(local); $('preview').srcObject = local;
@@ -71,7 +88,7 @@ async function switchDevice(kind, id) {
     if (epoch!==deviceEpoch || !local || left) { fresh.getTracks().forEach(t=>t.stop()); return; }
     const track = fresh.getTracks()[0]; track.enabled = kind==='audio' ? microphoneEnabled : cameraEnabled;
     const old = local.getTracks().find(t=>t.kind===kind);
-    const sender = pc?.getSenders().find(s=>s.track === old); if (sender) await sender.replaceTrack(track);
+    const sender = mediaSenders[kind==='audio'?'audio':'camera']; if (sender) await sender.replaceTrack(track);
     local.removeTrack(old); local.addTrack(track); old.stop(); watchTracks(fresh); $('preview').srcObject = local;
     if (kind==='audio') await startMeter(); await enumerate();
   } catch { fresh?.getTracks().forEach(t=>t.stop()); status('Device change failed. Your previous device and invite remain active.'); }
@@ -91,11 +108,27 @@ async function acceptSignal(data, epoch) {
   if (data.kind === 'reset') { resetPeer(); status('Host restarted the media connection. Waiting for admission.'); return; }
   if (data.kind === 'offer') {
     if (!payload || !/^[0-9a-f-]{36}$/.test(payload.negotiation ?? '') || payload.description?.type!=='offer') return;
+    const identities=payload.media, mids=['audio','camera','screen'].map(kind=>identities?.[kind]);
+    if(mids.some(mid=>typeof mid!=='string' || !/^[0-9A-Za-z_-]{1,16}$/.test(mid)) || new Set(mids).size!==3)throw new Error('The host must offer separate camera and screen sources.');
     const negotiation = payload.negotiation;
     activeNegotiation = negotiation; clearTimeout(relayTimer); stopShare();
+    control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();
     pc?.close(); const next = new RTCPeerConnection({iceServers:await iceServers()});
     if (epoch!==joinEpoch || !admitted || activeNegotiation!==negotiation || hostGeneration!==data.generation || host!==data.from) { next.close(); return; } pc = next;
-    local.getTracks().forEach(track=>next.addTrack(track,local));
+    const current=()=>epoch===joinEpoch && admitted && pc===next && activeNegotiation===negotiation && hostGeneration===data.generation && host===data.from;
+    next.ondatachannel=event=>{
+      const channel=event.channel;
+      if(!current() || channel.label!==MEDIA_CONTROL || control){channel.close();return;}
+      control=channel;
+      channel.onopen=()=>{if(current())updateShareControls();};
+      channel.onclose=()=>{if(current() && control===channel){screenApproved=false;stopShare();updateShareControls();}};
+      channel.onmessage=event=>{
+        if(!current() || control!==channel || typeof event.data!=='string' || new TextEncoder().encode(event.data).length>1024)return;
+        let value;try{value=JSON.parse(event.data);}catch{return;}
+        if(value?.type!=='screen-approval' || value.negotiation!==negotiation || typeof value.approved!=='boolean')return;
+        screenApproved=value.approved;if(!screenApproved)stopShare();updateShareControls();
+      };
+    };
     const refreshRelay = async () => {
       try { const servers = await iceServers(); if(pc===next) { next.setConfiguration({iceServers:servers}); relayTimer=setTimeout(refreshRelay,480000); } }
       catch { if(pc===next) { status('Relay credential refresh failed. Reconnect before relay access expires.'); relayTimer=setTimeout(refreshRelay,60000); } }
@@ -105,12 +138,26 @@ async function acceptSignal(data, epoch) {
     next.ontrack = event => { if(pc===next) $('return').srcObject = event.streams[0] ?? new MediaStream([event.track]); };
     next.onconnectionstatechange = () => { if(pc===next) status(`Host media: ${next.connectionState}.`); };
     await next.setRemoteDescription(payload.description);
+    if(!current())return;
+    for(const [kind,trackKind]of [['audio','audio'],['camera','video'],['screen','video']]) {
+      const transceiver=next.getTransceivers().find(value=>value.mid===identities[kind]);
+      if(!transceiver || transceiver.receiver.track.kind!==trackKind){next.close();throw new Error('Host media identities do not match the offered tracks.');}
+      mediaSenders[kind]=transceiver.sender;transceiver.direction=kind==='screen'?'sendonly':'sendrecv';
+      if(kind!=='screen') {
+        const track=local?.getTracks().find(value=>value.kind===trackKind);
+        if(!track){next.close();throw new Error('Check camera and microphone before joining.');}
+        transceiver.sender.setStreams(local);await transceiver.sender.replaceTrack(track);
+        if(!current())return;
+      }
+    }
     for(const candidate of candidateQueue.filter(value=>value.negotiation===negotiation)) {
       try { await next.addIceCandidate(candidate.candidate); } catch { status('A relay candidate was rejected; checking remaining paths.'); }
+      if(!current())return;
     }
     candidateQueue = [];
-    await next.setLocalDescription(await next.createAnswer()); signal('answer',{negotiation,description:next.localDescription});
-    $('share').disabled=false;
+    const answer=await next.createAnswer();if(!current())return;
+    await next.setLocalDescription(answer);if(!current())return;
+    signal('answer',{negotiation,description:next.localDescription});updateShareControls();
   } else if (data.kind === 'candidate') {
     if (!payload || !/^[0-9a-f-]{36}$/.test(payload.negotiation ?? '') || !payload.candidate) return;
     if(pc?.remoteDescription && payload.negotiation===activeNegotiation) {
@@ -154,16 +201,23 @@ $('mute').onclick=()=>{microphoneEnabled=!microphoneEnabled;local?.getAudioTrack
 $('hide').onclick=()=>{cameraEnabled=!cameraEnabled;local?.getVideoTracks().forEach(t=>t.enabled=cameraEnabled);$('hide').textContent=cameraEnabled?'Turn camera off':'Turn camera on';};
 $('tone').onclick=async()=>{if(!audio)return;await audio.resume();const tone=audio.createOscillator(),gain=audio.createGain();tone.frequency.value=440;gain.gain.value=.03;tone.connect(gain).connect(audio.destination);tone.start();tone.stop(audio.currentTime+.3);};
 $('share').onclick=async()=>{
-  if(!pc || !admitted)return;
+  if(!pc || !admitted || !screenApproved || control?.readyState!=='open' || !mediaSenders.screen || shared || pendingDisplay)return;
+  const expected=pc,negotiation=activeNegotiation,sender=mediaSenders.screen,epoch=++shareEpoch;
+  const current=()=>pc===expected && admitted && screenApproved && activeNegotiation===negotiation && mediaSenders.screen===sender && epoch===shareEpoch;
+  pendingDisplay=true;updateShareControls();
+  let captured;
   try{
-    const captured=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
-    if(!pc || !admitted){captured.getTracks().forEach(t=>t.stop());return;}
-    stopShare();shared=captured;shared.getVideoTracks()[0].onended=async()=>{const sender=pc?.getSenders().find(s=>s.track?.kind==='video');if(sender&&local)await sender.replaceTrack(local.getVideoTracks()[0]);stopShare();status('Screen sharing stopped. Your camera remains active.');};
-    // Screen replacement is explicit and never silently substitutes for camera.
-    const sender=pc.getSenders().find(s=>s.track?.kind==='video');await sender.replaceTrack(shared.getVideoTracks()[0]);
-    $('stopshare').disabled=false;status('Screen is shared with the admitted host.');
-  }catch{status('Screen sharing was cancelled or unavailable.');}
+    captured=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+    if(!current()){captured.getTracks().forEach(t=>t.stop());return;}
+    const track=captured.getVideoTracks()[0];if(!track)throw new Error('No screen track');
+    shared=captured;track.onended=()=>{if(shared===captured){stopShare();status('Screen sharing stopped. Camera and microphone remain connected.');}};
+    await sender.replaceTrack(track);
+    if(!current()){captured.getTracks().forEach(t=>t.stop());if(shared===captured)stopShare();return;}
+    if(!screenState(true)){stopShare();status('Screen controls are unavailable. Camera and microphone remain connected.');return;}
+    status('Screen shared as a separate source with the approved host.');
+  }catch{const stillCurrent=current();captured?.getTracks().forEach(t=>t.stop());if(captured && shared===captured)stopShare();if(stillCurrent)status('Screen sharing was cancelled or unavailable. Camera and microphone remain connected.');}
+  finally{pendingDisplay=false;updateShareControls();}
 };
-$('stopshare').onclick=async()=>{const sender=pc?.getSenders().find(s=>s.track?.kind==='video');if(sender&&local)await sender.replaceTrack(local.getVideoTracks()[0]);stopShare();};
+$('stopshare').onclick=()=>{stopShare();status('Screen sharing stopped. Camera and microphone remain connected.');};
 navigator.mediaDevices?.addEventListener('devicechange',()=>enumerate().catch(()=>status('Devices changed. Check camera and microphone again.')));
 window.addEventListener('pagehide',()=>{secret='';leave();});
