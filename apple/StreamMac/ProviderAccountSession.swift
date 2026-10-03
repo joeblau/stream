@@ -3,6 +3,15 @@ import Combine
 import Foundation
 import StreamCore
 
+/// MainActor account intent can change before the vault receives its next
+/// actor message. This synchronous lease fences that actor-entry gap too.
+private final class ProviderEndingIntentLease: @unchecked Sendable {
+    private let lock = NSLock()
+    private var valid = true
+    func invalidate() { lock.withLock { valid = false } }
+    func isCurrent() -> Bool { lock.withLock { valid } }
+}
+
 @MainActor protocol ProviderRestreamBoundary: AnyObject, Sendable {
     var hasProviderAuthorization: Bool { get }
     func signOut()
@@ -51,12 +60,20 @@ final class ProviderAccountSession: ObservableObject {
     private var hourlyValidation: Task<Void, Never>?
     private var boot: Task<Void, Never>?
     private var endingEpochs: [ManagedProvider: UUID] = [:]
+    private var endingIntentLeases: [ManagedProvider: ProviderEndingIntentLease] = [:]
     private var managedReadGenerations: [ManagedProvider: (session: UUID, credential: UUID, token: UUID)] = [:]
     private func endingEpoch(_ provider: ManagedProvider) -> UUID {
         if let epoch = endingEpochs[provider] { return epoch }
         let epoch = UUID(); endingEpochs[provider] = epoch; return epoch
     }
-    private func hasEndingEpoch(_ provider: ManagedProvider, _ epoch: UUID) -> Bool { endingEpoch(provider) == epoch }
+    private func invalidateEndingEpoch(_ provider: ManagedProvider) {
+        endingIntentLeases.removeValue(forKey: provider)?.invalidate()
+        endingEpochs[provider] = UUID()
+    }
+    private func endingIntentLease(_ provider: ManagedProvider) -> ProviderEndingIntentLease {
+        if let lease = endingIntentLeases[provider] { return lease }
+        let lease = ProviderEndingIntentLease(); endingIntentLeases[provider] = lease; return lease
+    }
     init(restream: any ProviderRestreamBoundary, vault: ProviderTokenVault = .shared,
          transport: @escaping ProviderTokenVault.Transport = ProviderTokenVault.network,
          openBrowser: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }, pendingDirectory: URL? = nil) {
@@ -159,7 +176,7 @@ final class ProviderAccountSession: ObservableObject {
         closed = true
         managedReadRevision = UUID()
         lastThumbnailReceipt = nil
-        for provider in ManagedProvider.allCases { endingEpochs[provider] = UUID() }
+        for provider in ManagedProvider.allCases { invalidateEndingEpoch(provider) }
         directChat?.shutdown()
         boot?.cancel(); boot = nil; hourlyValidation?.cancel(); hourlyValidation = nil
         for provider in ManagedProvider.allCases { cancel(provider); cooldowns[provider]?.cancel(); cooldowns[provider] = nil }
@@ -167,7 +184,7 @@ final class ProviderAccountSession: ObservableObject {
     func forget(_ provider: ManagedProvider) {
         guard !closed else { return }
         if provider == .youtube { lastThumbnailReceipt = nil }
-        endingEpochs[provider] = UUID()
+        invalidateEndingEpoch(provider)
         if provider == .youtube { managedReadRevision = UUID() }
         directChat?.stop(provider)
         let generation = begin(provider, action: "Forgetting local authorization")
@@ -186,7 +203,7 @@ final class ProviderAccountSession: ObservableObject {
         guard !closed else { return }
         guard [.youtube, .twitch].contains(provider) else { return }
         if provider == .youtube { lastThumbnailReceipt = nil }
-        endingEpochs[provider] = UUID()
+        invalidateEndingEpoch(provider)
         if provider == .youtube { managedReadRevision = UUID() }
         directChat?.stop(provider)
         let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -534,22 +551,42 @@ final class ProviderAccountSession: ObservableObject {
     /// another target's completion. OAuth replacement still invalidates them.
     func endRemote(_ binding: ProviderDestinationBinding, reviewOnly: Bool = false) async -> ProviderCompletionReceipt {
         guard binding.provider == .youtube, let id = binding.eventID else { return .init(.unsupported) }
+        guard !closed, !Task.isCancelled else { return .init(.blocked, failure: .init(.authorization)) }
         guard canRequest(.youtube) else { return .init(.blocked, failure: .init(.rateLimited)) }
-        let epoch = endingEpoch(.youtube), credential = await vault.generation(.youtube)
+        let epoch = endingEpoch(.youtube), lease = endingIntentLease(.youtube)
+        let credential = await vault.generation(.youtube)
         let scopes = await vault.scopes(.youtube)
+        let finalCredential = await vault.generation(.youtube)
+        guard !closed, endingEpoch(.youtube) == epoch, lease.isCurrent(), credential == finalCredential, !Task.isCancelled else {
+            return .init(.blocked, failure: .init(.authorization))
+        }
         let canWrite = scopes.contains("https://www.googleapis.com/auth/youtube") || scopes.contains("https://www.googleapis.com/auth/youtube.force-ssl")
         guard canWrite || (reviewOnly && scopes.contains("https://www.googleapis.com/auth/youtube.readonly")) else {
             return .init(.blocked, failure: .init(.permission))
         }
         let vault = vault
-        let boundary = ProviderAPI { [weak self] provider, request in
-            guard await self?.hasEndingEpoch(provider, epoch) == true,
-                  await vault.generation(provider) == credential, !Task.isCancelled else { throw CancellationError() }
-            return try await vault.send(provider, request: request)
+        let boundary = ProviderAPI { provider, original in
+            guard provider == .youtube, lease.isCurrent(), !Task.isCancelled,
+                  let url = original.url, url.scheme == "https", url.host == "www.googleapis.com",
+                  url.user == nil, url.password == nil, url.port == nil, url.fragment == nil,
+                  original.httpBody == nil, original.httpBodyStream == nil else { throw ProviderFailure(.authorization) }
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let isGet = original.httpMethod == "GET" &&
+                ((url.path == "/youtube/v3/channels" && query.filter { $0.name == "mine" }.map(\.value) == ["true"]) ||
+                 (url.path == "/youtube/v3/liveBroadcasts" && query.filter { $0.name == "id" }.map(\.value) == [id]))
+            let isEnd = !reviewOnly && original.httpMethod == "POST" && url.path == "/youtube/v3/liveBroadcasts/transition" &&
+                query.filter { $0.name == "id" }.map(\.value) == [id] &&
+                query.filter { $0.name == "broadcastStatus" }.map(\.value) == ["complete"]
+            guard isGet || isEnd else { throw ProviderFailure(.invalidRequest) }
+            var requiredScopes: Set<String> = ["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.force-ssl"]
+            if isGet { requiredScopes.insert("https://www.googleapis.com/auth/youtube.readonly") }
+            return try await vault.send(provider, request: original, expectedGeneration: credential,
+                                        retryAuthorizedGET: false, authorizationIsCurrent: lease.isCurrent, requiredAnyScope: requiredScopes)
         }
         let result = reviewOnly ? await boundary.reviewYouTubeEnd(id: id, expectedChannelID: binding.channelID)
             : await boundary.endYouTubeEvent(id: id, expectedChannelID: binding.channelID)
-        guard endingEpoch(.youtube) == epoch, await vault.generation(.youtube) == credential, !Task.isCancelled else {
+        let receiptCredential = await vault.generation(.youtube)
+        guard !closed, endingEpoch(.youtube) == epoch, lease.isCurrent(), receiptCredential == credential, !Task.isCancelled else {
             return .init(.unconfirmed, failure: .init(.unavailable))
         }
         if let event = result.event {
