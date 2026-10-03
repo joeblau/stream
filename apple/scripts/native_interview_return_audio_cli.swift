@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreMedia
+import CryptoKit
 import Darwin
 import Foundation
 import StreamCore
@@ -221,6 +222,10 @@ private final class ReturnProgramProbe: @unchecked Sendable {
                             state["transport"] = ["local": pair.local.label, "remote": pair.remote.label, "udp": pair.udp]
                         }
                     }
+                    state["privateMessages"] = current.manager.privateMessages.map {
+                        ["fromGuest": $0.fromGuest, "delivery": $0.delivery.rawValue,
+                         "digest": SHA256.hash(data: Data($0.text.utf8)).map { String(format: "%02x", $0) }.joined()] as [String: Any]
+                    }
                     _ = output.emit(state)
                     try? await Task.sleep(for: .milliseconds(100))
                 }
@@ -231,6 +236,7 @@ private final class ReturnProgramProbe: @unchecked Sendable {
                 let data = handle.availableData
                 if data.isEmpty { handle.readabilityHandler = nil; input.close() } else { input.receive(data) }
             }
+            var retainedPrivateContext: NativeInterviewPeerLease?
             commandLoop: for await line in input.stream {
                 guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                       let command = object["type"] as? String else { throw NativeInterviewError.malformed }
@@ -243,6 +249,17 @@ private final class ReturnProgramProbe: @unchecked Sendable {
                     guard current.manager.state.snapshot.phase == .connected else { throw NativeInterviewError.timeout }
                     _ = output.emit(["type": "private-invite", "url": try await current.manager.inviteForSharing().absoluteString])
                 case "admit": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.admit(guest))
+                case "message":
+                    guard let context = current.manager.currentReadyLease, context.receive.peerID == guest,
+                          let text = object["text"] as? String else { throw NativeInterviewError.changed }
+                    if retainedPrivateContext == nil { retainedPrivateContext = context }
+                    try current.command(.sendPrivateMessage(context, text))
+                case "stale-message":
+                    guard let context = retainedPrivateContext,
+                          current.dispatcher.execute(.interview(.sendPrivateMessage(context, "Owned stale private command"))).error != nil else {
+                        throw NativeInterviewError.changed
+                    }
+                    _ = output.emit(["type": "ack", "command": "stale-message-rejected"])
                 case "onair": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.onair(guest))
                 case "backstage": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.backstage(guest))
                 case "mute": await current.volume(1, muted: true); _ = output.emit(["type": "ack", "command": "mute"])
