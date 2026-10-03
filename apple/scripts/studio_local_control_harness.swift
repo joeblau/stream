@@ -81,41 +81,138 @@ struct HarnessLayer { var id: HarnessID; var isVisible: Bool }
         tokens.removeValue(forKey: id); return errSecSuccess
     }
 }
+private struct WireDeadlineFailure: Error {}
+
+/// The Network callback and deadline may race after cancellation. Exactly one
+/// owns the continuation; neither a late callback nor a canceled timer leaks it.
+private final class WireOperation<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var timer: Task<Void, Never>?
+    init(_ continuation: CheckedContinuation<Value, Error>) { self.continuation = continuation }
+    func watch(_ timer: Task<Void, Never>) {
+        let completed = lock.withLock {
+            guard continuation != nil else { return true }
+            self.timer = timer; return false
+        }
+        if completed { timer.cancel() }
+    }
+    func resolve(_ result: Result<Value, Error>) {
+        let pending = lock.withLock { () -> (CheckedContinuation<Value, Error>, Task<Void, Never>?)? in
+            guard let continuation else { return nil }
+            let timer = self.timer
+            self.continuation = nil; self.timer = nil
+            return (continuation, timer)
+        }
+        guard let (continuation, timer) = pending else { return }
+        timer?.cancel(); continuation.resume(with: result)
+    }
+}
+
 @MainActor final class WireClient {
     let connection: NWConnection
     private var buffer = StudioControlFrameBuffer()
     private var frames: [StudioControlResponse] = []
-    init(port: UInt16) {
+    private(set) var receivedFrameCount = 0
+    private let timeout: Duration
+    init(port: UInt16, timeout: Duration = .seconds(5)) {
+        self.timeout = timeout
         connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
         connection.start(queue: .global())
     }
-    func write(_ data: Data) async throws {
+    private func arm<Value>(_ operation: WireOperation<Value>, deadline: ContinuousClock.Instant) {
+        let connection = connection
+        operation.watch(Task { @MainActor in
+            do { try await ContinuousClock().sleep(until: deadline) } catch { return }
+            operation.resolve(.failure(WireDeadlineFailure()))
+            connection.cancel()
+        })
+    }
+    func write(_ data: Data, deadline: ContinuousClock.Instant? = nil) async throws {
+        let deadline = deadline ?? .now.advanced(by: timeout)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let operation = WireOperation(continuation)
+            arm(operation, deadline: deadline)
             connection.send(content: data, completion: .contentProcessed { error in
-                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                if let error { operation.resolve(.failure(error)) } else { operation.resolve(.success(())) }
             })
         }
+        guard ContinuousClock.now < deadline else { connection.cancel(); throw WireDeadlineFailure() }
     }
     func request(_ request: StudioControlRequest) async throws -> StudioControlResponse {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
         var data = try JSONEncoder().encode(request); data.append(10)
-        try await write(data)
+        try await write(data, deadline: deadline)
         while true {
-            let response = try await read()
+            let response = try await read(deadline: deadline)
             if response.id == request.id { return response }
         }
     }
-    func read() async throws -> StudioControlResponse {
+    func read(deadline: ContinuousClock.Instant? = nil) async throws -> StudioControlResponse {
+        let deadline = deadline ?? .now.advanced(by: timeout)
+        guard ContinuousClock.now < deadline else { connection.cancel(); throw WireDeadlineFailure() }
         while frames.isEmpty {
             let data: Data = try await withCheckedThrowingContinuation { continuation in
+                let operation = WireOperation(continuation)
+                arm(operation, deadline: deadline)
                 connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, complete, error in
-                    if let error { continuation.resume(throwing: error) }
-                    else if let data, !data.isEmpty { continuation.resume(returning: data) }
-                    else { continuation.resume(throwing: StudioControlProtocolError(code: "closed", message: complete ? "Closed" : "Empty")) }
+                    if let error { operation.resolve(.failure(error)) }
+                    else if let data, !data.isEmpty { operation.resolve(.success(data)) }
+                    else { operation.resolve(.failure(StudioControlProtocolError(code: "closed", message: complete ? "Closed" : "Empty"))) }
                 }
             }
-            frames += try buffer.append(data).map { try JSONDecoder().decode(StudioControlResponse.self, from: $0) }
+            guard ContinuousClock.now < deadline else { connection.cancel(); throw WireDeadlineFailure() }
+            let decoded = try buffer.append(data).map { try JSONDecoder().decode(StudioControlResponse.self, from: $0) }
+            receivedFrameCount += decoded.count; frames += decoded
         }
         return frames.removeFirst()
+    }
+}
+
+/// Actual loopback peers either stay silent or send unrelated responses.
+/// Cancellation exercises the real receive callback/deadline race.
+private final class QuietWirePeer: @unchecked Sendable {
+    private let listener: NWListener
+    private let lock = NSLock()
+    private var connections: [NWConnection] = []
+    private var noiseTasks: [Task<Void, Never>] = []
+    private var ready = false
+    var port: UInt16? { lock.withLock { ready ? listener.port?.rawValue : nil } }
+    init(noise: Bool = false) throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: parameters)
+        listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            if case .ready = state { self.lock.withLock { self.ready = true } }
+        }
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let self else { connection.cancel(); return }
+            self.lock.withLock { self.connections.append(connection) }
+            connection.start(queue: .global())
+            if noise {
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, _, _ in
+                    guard let self, data?.isEmpty == false else { return }
+                    let frame = Data("{\"version\":1,\"type\":\"event\",\"id\":\"\(UUID().uuidString)\"}\n".utf8)
+                    let task = Task.detached {
+                        for _ in 0..<500 {
+                            guard !Task.isCancelled else { return }
+                            connection.send(content: frame, completion: .contentProcessed { _ in })
+                            do { try await Task.sleep(for: .milliseconds(2)) } catch { return }
+                        }
+                    }
+                    self.lock.withLock { self.noiseTasks.append(task) }
+                }
+            }
+        }
+        listener.start(queue: .global())
+    }
+    func stop() {
+        listener.cancel()
+        let tasks = lock.withLock { let old = noiseTasks; noiseTasks.removeAll(); return old }
+        for task in tasks { task.cancel() }
+        let connections = lock.withLock { let old = self.connections; self.connections.removeAll(); return old }
+        for connection in connections { connection.cancel() }
     }
 }
 private final class BoundedProcessText: @unchecked Sendable {
@@ -151,6 +248,11 @@ private final class BoundedProcessText: @unchecked Sendable {
 }
 
 @main struct StudioLocalControlHarness {
+    @MainActor static func progress(_ message: String) {
+        // Direct bounded writes stay visible if a later fixture hangs/crashes;
+        // process stdout buffering must not hide the last completed boundary.
+        try? FileHandle.standardOutput.write(contentsOf: Data((message + "\n").utf8))
+    }
     @MainActor static func waitUntil(_ test: () -> Bool) async {
         for _ in 0..<2000 {
             if test() { return }; try? await Task.sleep(for: .milliseconds(1))
@@ -158,6 +260,35 @@ private final class BoundedProcessText: @unchecked Sendable {
         preconditionFailure("Local IPC harness timed out")
     }
     @MainActor static func main() async throws {
+        progress("Local control fixture: nonresponsive native peer deadline")
+        let quiet = try QuietWirePeer()
+        defer { quiet.stop() }
+        await waitUntil { quiet.port != nil }
+        for _ in 0..<3 {
+            let client = WireClient(port: quiet.port!, timeout: .milliseconds(100))
+            defer { client.connection.cancel() }
+            let started = ContinuousClock.now
+            do {
+                _ = try await client.request(.init(type: .capabilities, id: UUID()))
+                preconditionFailure("Nonresponsive peer fabricated a response")
+            } catch is WireDeadlineFailure {
+                precondition(ContinuousClock.now - started < .seconds(2), "Native fixture deadline was unbounded")
+            }
+        }
+        let noisy = try QuietWirePeer(noise: true)
+        defer { noisy.stop() }
+        await waitUntil { noisy.port != nil }
+        let noisyClient = WireClient(port: noisy.port!, timeout: .milliseconds(300))
+        defer { noisyClient.connection.cancel() }
+        do {
+            _ = try await noisyClient.request(.init(type: .capabilities, id: UUID()))
+            preconditionFailure("Unrelated event responses fabricated a matching receipt")
+        } catch is WireDeadlineFailure {
+            precondition(noisyClient.receivedFrameCount > 1, "Busy peer did not exercise repeated receives")
+        }
+        noisy.stop()
+        progress("PASS: silent and busy unmatched native peers expire at the request deadline; cancellation resolves once and MainActor timers remain responsive")
+        progress("Local control fixture: authenticated native socket and adapter permissions")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("stream-local-api-tests-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -323,6 +454,7 @@ private final class BoundedProcessText: @unchecked Sendable {
         precondition(manager.document.adapters.isEmpty && store.token(for: adapterPair.id) == nil)
         adapterClient.connection.cancel(); adapterReconnect.connection.cancel()
         let sampleRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).deletingLastPathComponent().appendingPathComponent("integrations/sample-adapter")
+        progress("Local control fixture: actual external Python disabled admission")
         let sampleManifest = try JSONDecoder().decode(StudioAdapterManifest.self, from: Data(contentsOf: sampleRoot.appendingPathComponent("manifest.json")))
         store.pair(name: "Actual External Status Sample"); let samplePair = store.pairing!
         try manager.register(sampleManifest, clientID: samplePair.id)
@@ -331,6 +463,7 @@ private final class BoundedProcessText: @unchecked Sendable {
         await waitUntil { !sample.process.isRunning }
         precondition(sample.output.snapshots.isEmpty && sample.errors.text.contains("adapterDisabled"), "Actual external sample bypassed its disabled registration")
         try manager.setEnabled(sampleManifest.id, true)
+        progress("Local control fixture: actual external Python enabled state and disable")
         let connected = try ExternalSampleProcess(script: sampleRoot.appendingPathComponent("studio_status_adapter.py"), clientID: samplePair.id, token: samplePair.token, port: port)
         defer { connected.stop() }
         await waitUntil { !connected.output.snapshots.isEmpty }
@@ -344,6 +477,7 @@ private final class BoundedProcessText: @unchecked Sendable {
             "External sample did not stop cleanly or emitted/replayed a production command")
         precondition(!connected.output.text.contains(samplePair.token) && !connected.errors.text.contains(samplePair.token))
         try manager.setEnabled(sampleManifest.id, true)
+        progress("Local control fixture: actual external Python explicit restart and revoke")
         let restarted = try ExternalSampleProcess(script: sampleRoot.appendingPathComponent("studio_status_adapter.py"), clientID: samplePair.id, token: samplePair.token, port: port)
         defer { restarted.stop() }
         await waitUntil { restarted.output.snapshots.contains { $0["recording"] as? String == "paused" } }
