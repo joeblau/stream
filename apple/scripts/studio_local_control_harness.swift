@@ -114,6 +114,7 @@ private final class WireOperation<Value: Sendable>: @unchecked Sendable {
     private var buffer = StudioControlFrameBuffer()
     private var frames: [StudioControlResponse] = []
     private(set) var receivedFrameCount = 0
+    private var operationPhase = "idle"
     private let timeout: Duration
     init(port: UInt16, timeout: Duration = .seconds(5)) {
         self.timeout = timeout
@@ -129,6 +130,7 @@ private final class WireOperation<Value: Sendable>: @unchecked Sendable {
         })
     }
     func write(_ data: Data, deadline: ContinuousClock.Instant? = nil) async throws {
+        operationPhase = "write"
         let deadline = deadline ?? .now.advanced(by: timeout)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let operation = WireOperation(continuation)
@@ -142,13 +144,22 @@ private final class WireOperation<Value: Sendable>: @unchecked Sendable {
     func request(_ request: StudioControlRequest) async throws -> StudioControlResponse {
         let deadline = ContinuousClock.now.advanced(by: timeout)
         var data = try JSONEncoder().encode(request); data.append(10)
-        try await write(data, deadline: deadline)
-        while true {
-            let response = try await read(deadline: deadline)
-            if response.id == request.id { return response }
+        do {
+            try await write(data, deadline: deadline)
+            while true {
+                let response = try await read(deadline: deadline)
+                if response.id == request.id { return response }
+            }
+        } catch is WireDeadlineFailure {
+            // Never log requests, tokens or response bodies. A bounded phase
+            // report distinguishes connect/write/response failures on CI.
+            let report = "Local wire deadline: type=\(request.type.rawValue) phase=\(operationPhase) receivedFrames=\(receivedFrameCount) queuedFrames=\(frames.count) connection=\(connection.state)\n"
+            try? FileHandle.standardOutput.write(contentsOf: Data(report.utf8))
+            throw WireDeadlineFailure()
         }
     }
     func read(deadline: ContinuousClock.Instant? = nil) async throws -> StudioControlResponse {
+        operationPhase = "read"
         let deadline = deadline ?? .now.advanced(by: timeout)
         guard ContinuousClock.now < deadline else { connection.cancel(); throw WireDeadlineFailure() }
         while frames.isEmpty {
@@ -486,8 +497,9 @@ private final class BoundedProcessText: @unchecked Sendable {
         await waitUntil { !restarted.process.isRunning }
         precondition(store.token(for: samplePair.id) == nil && !restarted.output.text.contains(samplePair.token) && !restarted.errors.text.contains(samplePair.token))
         dispatcher.state = originalState
-        print("PASS: actual bundled external Python process against native server; disabled admission, live authoritative state, disable, explicit restart, revoke and no command/secret replay")
+        progress("PASS: actual bundled external Python process against native server; disabled admission, live authoritative state, disable, explicit restart, revoke and no command/secret replay")
 
+        progress("Local control fixture: future registry preserves bytes and restores current grants")
         let futureDirectory = directory.appendingPathComponent("future")
         try FileManager.default.createDirectory(at: futureDirectory, withIntermediateDirectories: true)
         let futureData = Data("{\"version\":99,\"adapters\":[]}".utf8)
@@ -504,10 +516,13 @@ private final class BoundedProcessText: @unchecked Sendable {
         precondition(dispatcher.macros.update(ShowMacroDocument(macros: [macro])) == nil)
         let macroCommandID = "macro.\(macro.id.uuidString).run"
         dispatcher.actions.append(.init(id: macroCommandID, title: "Run Remote", command: .action(macroCommandID)))
+        progress("Local control fixture: authenticate ordinary macro owner · native peers=\(server.connectedClients)")
         let owner = WireClient(port: port)
         let ownerAuth = try await owner.request(.init(type: .authenticate, id: UUID(), clientID: pairing.id, token: pairing.token))
+        progress("Local control fixture: ordinary owner authenticated; request delayed macro")
         let started = try await owner.request(.init(type: .command, id: UUID(), sessionID: ownerAuth.sessionID, commandID: macroCommandID))
         precondition(started.result?.succeeded == true && dispatcher.macros.isRunning)
+        progress("Local control fixture: delayed macro acknowledged; revoke owner and await cancellation")
         server.revoke(pairing.id)
         await waitUntil { !dispatcher.macros.isRunning && server.connectedClients == 0 }
         precondition(store.token(for: pairing.id) == nil && dispatcher.macros.progress.phase == .cancelled)
