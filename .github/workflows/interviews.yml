@@ -61,6 +61,10 @@ jobs:
           CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
+          if [[ "$(uname -s)" != Darwin ]]; then
+            printf 'CHROME_BIN=%s\n' "$CHROME_BIN" >> "$GITHUB_ENV"
+            exit 0
+          fi
           CHROME_CONTENTS="$(dirname "$(dirname "$CHROME_BIN")")"
           test -f "$CHROME_CONTENTS/Info.plist"
           CHROME_APP="$RUNNER_TEMP/stream-chrome/Google Chrome for Testing.app"
