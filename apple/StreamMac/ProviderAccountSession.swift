@@ -33,6 +33,8 @@ final class ProviderAccountSession: ObservableObject {
     @Published private(set) var youtubeStreams: [YouTubeLiveStream] = []
     @Published private(set) var bindingReview: YouTubeBindingReview?
     @Published private(set) var lastSchedulingReceipt: ProviderSchedulingReceipt?
+    /// Public receipt invalidation only; contains no credential information.
+    @Published private(set) var managedReadRevision = UUID()
     let pending: ProviderPendingCatalog
     private var pendingScheduling: (generation: UUID, action: String, id: String, mutating: Bool)?
     private var closed = false
@@ -49,6 +51,7 @@ final class ProviderAccountSession: ObservableObject {
     private var hourlyValidation: Task<Void, Never>?
     private var boot: Task<Void, Never>?
     private var endingEpochs: [ManagedProvider: UUID] = [:]
+    private var managedReadGenerations: [ManagedProvider: (session: UUID, credential: UUID, token: UUID)] = [:]
     private func endingEpoch(_ provider: ManagedProvider) -> UUID {
         if let epoch = endingEpochs[provider] { return epoch }
         let epoch = UUID(); endingEpochs[provider] = epoch; return epoch
@@ -154,6 +157,7 @@ final class ProviderAccountSession: ObservableObject {
     }
     func shutdown() {
         closed = true
+        managedReadRevision = UUID()
         lastThumbnailReceipt = nil
         for provider in ManagedProvider.allCases { endingEpochs[provider] = UUID() }
         directChat?.shutdown()
@@ -164,6 +168,7 @@ final class ProviderAccountSession: ObservableObject {
         guard !closed else { return }
         if provider == .youtube { lastThumbnailReceipt = nil }
         endingEpochs[provider] = UUID()
+        if provider == .youtube { managedReadRevision = UUID() }
         directChat?.stop(provider)
         let generation = begin(provider, action: "Forgetting local authorization")
         jobs[provider] = Task { [weak self] in
@@ -182,6 +187,7 @@ final class ProviderAccountSession: ObservableObject {
         guard [.youtube, .twitch].contains(provider) else { return }
         if provider == .youtube { lastThumbnailReceipt = nil }
         endingEpochs[provider] = UUID()
+        if provider == .youtube { managedReadRevision = UUID() }
         directChat?.stop(provider)
         let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
         let generation = begin(provider, action: "Waiting for provider authorization")
@@ -215,6 +221,7 @@ final class ProviderAccountSession: ObservableObject {
                 }
                 guard isCurrent(provider, generation) else { return }
                 try await vault.accept(token, provider: provider, generation: credentialGeneration)
+                if provider == .youtube, isCurrent(provider, generation), !closed { managedReadRevision = UUID() }
                 if provider == .twitch { try await vault.validateTwitch() }
                 let scopes = await vault.scopes(provider)
                 guard isCurrent(provider, generation) else { return }
@@ -302,6 +309,66 @@ final class ProviderAccountSession: ObservableObject {
             guard let binding = destinations.first(where: { $0.id == id })?.providerBinding else { return .init(outputID: id) }
             return .init(outputID: id, eventID: binding.eventID, state: event(binding)?.state == .ended ? .ended : .unknown)
         }
+    }
+    /// An opaque process-local generation incorporates both account replacement
+    /// and this workspace's retirement/authorization intent. Never journal it.
+    /// Actual vault scopes, not cached UI metadata, authorize the GET boundary.
+    func recoveryAuthorizationGeneration(_ provider: ManagedProvider = .youtube) async -> UUID? {
+        guard !closed, provider == .youtube, !Task.isCancelled else { return nil }
+        let epoch = endingEpoch(provider), credential = await vault.generation(provider)
+        let present = await vault.hasToken(provider), scopes = await vault.scopes(provider)
+        let finalCredential = await vault.generation(provider)
+        guard present, scopes.contains(where: {
+            ["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.force-ssl",
+             "https://www.googleapis.com/auth/youtube.readonly"].contains($0)
+        }), !closed, endingEpoch(provider) == epoch, finalCredential == credential,
+              !Task.isCancelled else { return nil }
+        if let current = managedReadGenerations[provider], current.session == epoch, current.credential == credential { return current.token }
+        let token = UUID()
+        managedReadGenerations[provider] = (epoch, credential, token)
+        return token
+    }
+    /// Shared by explicit recovery and managed-start reviews. This boundary
+    /// accepts only three YouTube read resources; token/mutation endpoints are
+    /// unavailable. Callers keep any raw API fields ephemeral and normalize
+    /// public metadata before publishing it to views or portable documents.
+    func managedReadRequest(_ original: URLRequest, provider: ManagedProvider = .youtube,
+                            expectedGeneration: UUID) async throws -> Data {
+        guard !closed, provider == .youtube else { throw ProviderFailure(.unavailable) }
+        guard canRequest(provider) else { throw ProviderFailure(.rateLimited) }
+        guard original.httpMethod == "GET", original.httpBody == nil, original.httpBodyStream == nil,
+              let url = original.url, url.scheme == "https", url.host == "www.googleapis.com",
+              url.user == nil, url.password == nil, url.fragment == nil, url.port == nil,
+              ["/youtube/v3/channels", "/youtube/v3/liveBroadcasts", "/youtube/v3/liveStreams"].contains(url.path) else {
+            throw ProviderFailure(.invalidRequest)
+        }
+        let current = await recoveryAuthorizationGeneration(provider)
+        guard current == expectedGeneration, !closed,
+              let generation = managedReadGenerations[provider], generation.token == expectedGeneration,
+              generation.session == endingEpoch(provider) else { throw ProviderFailure(.authorization) }
+        try Task.checkCancellation()
+        var request = original
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.timeoutInterval = 30
+        let data = try await vault.send(provider, request: request, expectedGeneration: generation.credential, retryAuthorizedGET: false)
+        let final = await recoveryAuthorizationGeneration(provider)
+        guard final == expectedGeneration, !closed, generation.session == endingEpoch(provider) else { throw ProviderFailure(.authorization) }
+        try Task.checkCancellation()
+        return data
+    }
+    func verifyRecoveryEvent(_ identity: RecoveryEventIdentity) async throws -> RecoveryEventVerification {
+        guard identity.provider == .youtube else { throw ProviderFailure(.unavailable) }
+        guard let generation = await recoveryAuthorizationGeneration(.youtube) else { throw ProviderFailure(.authorization) }
+        let reader = RecoveryEventReader { [weak self] provider, request in
+            guard let self else { throw ProviderFailure(.unavailable) }
+            return try await self.managedReadRequest(request, provider: provider, expectedGeneration: generation)
+        }
+        let receipt = try await reader.verify(identity)
+        let final = await recoveryAuthorizationGeneration(.youtube)
+        guard final == generation, !closed,
+              managedReadGenerations[.youtube]?.session == endingEpoch(.youtube), !Task.isCancelled else { throw ProviderFailure(.authorization) }
+        return receipt
     }
     func viewerCount(_ binding: ProviderDestinationBinding) -> Int? {
         let key = Self.viewerKey(binding)

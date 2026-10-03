@@ -27,13 +27,18 @@ final class RecoveryEventReviewCoordinator: ObservableObject {
     private var deadlines: [UUID: Task<Void, Never>] = [:]
     private var jobOutputIDs: [UUID: UUID] = [:]
     private var expiredJobs: Set<UUID> = []
+    private var accountObservation: AnyCancellable?
     private let now: @Sendable () -> Date
     private let timeout: Duration
     init(now: @escaping @Sendable () -> Date = { Date() }, timeout: Duration = .seconds(30)) {
         self.now = now; self.timeout = timeout
     }
     func bind(authorization: @escaping Authorization, verify: @escaping Verify) {
+        accountObservation = nil
         invalidate(); authorize = authorization; read = verify
+    }
+    func observeAuthorizationChanges(_ changes: AnyPublisher<Void, Never>) {
+        accountObservation = changes.sink { [weak self] _ in self?.invalidate() }
     }
     func load(_ snapshot: SessionRecoverySnapshot?, context: Context?) {
         invalidate(); self.context = context
@@ -53,7 +58,7 @@ final class RecoveryEventReviewCoordinator: ObservableObject {
         // canceled requests. Late replies are ignored by the captured fence.
         resetReviews()
     }
-    func shutdown() { closed = true; invalidate(); authorize = nil; read = nil }
+    func shutdown() { closed = true; invalidate(); authorize = nil; read = nil; accountObservation = nil }
     private var contextMatches: Bool {
         guard let context, let snapshot else { return false }
         return context.projectID == snapshot.projectID && context.profileID == snapshot.profileID

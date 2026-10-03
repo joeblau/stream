@@ -73,28 +73,30 @@ private struct RecoveryEventReviewList: View {
     @ObservedObject var coordinator: RecoveryEventReviewCoordinator
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(coordinator.events, id: \.outputID) { event in
-                    let review = coordinator.review(event.outputID)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text("\(event.provider?.name ?? "Unmanaged output") · \(event.eventID ?? event.outputID.uuidString)")
-                                .font(.caption).lineLimit(1)
-                            Spacer()
-                            Button(coordinator.verifying.contains(event.outputID) ? "Verifying…" : "Verify Remote State") {
-                                coordinator.verify(event.outputID)
-                            }.disabled(!coordinator.canVerify(event.outputID))
-                        }
-                        Text(review.state == .reconnectable ? "Live · reconnect review candidate" : review.state.rawValue.capitalized)
-                            .font(.caption).bold()
-                        Text(review.reason.message).font(.caption).foregroundStyle(.secondary)
-                        if let checkedAt = review.checkedAt {
-                            Text("Checked \(checkedAt.formatted(date: .abbreviated, time: .standard)); receipt expires after 60 seconds.")
-                                .font(.caption2).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(coordinator.events, id: \.outputID) { event in
+                        let review = coordinator.review(event.outputID)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text("\(event.provider?.name ?? "Unmanaged output") · \(event.eventID ?? event.outputID.uuidString)")
+                                    .font(.caption).lineLimit(1)
+                                Spacer()
+                                Button(coordinator.verifying.contains(event.outputID) ? "Verifying…" : "Verify Remote State") {
+                                    coordinator.verify(event.outputID)
+                                }.disabled(!coordinator.canVerify(event.outputID))
+                            }
+                            Text(review.state == .reconnectable ? "Live · reconnect review candidate" : review.state.rawValue.capitalized)
+                                .font(.caption).bold()
+                            Text(review.reason.message).font(.caption).foregroundStyle(.secondary)
+                            if let checkedAt = review.checkedAt {
+                                Text("Checked \(checkedAt.formatted(date: .abbreviated, time: .standard)); receipt expires after 60 seconds.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
-            }
+            }.frame(maxHeight: 220)
         }
     }
 }
