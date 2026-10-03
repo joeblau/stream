@@ -131,6 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           STREAM_GUEST_PROGRAM_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_guest_program_iso_harness.zsh 2>&1 | tee apple/build/native-guest-results/program-iso.log
+          STREAM_GUEST_PROGRAM_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_guest_program_iso_harness.zsh --hold-startup-800ms 2>&1 | tee apple/build/native-guest-results/program-iso-held-startup.log
       - name: Qualify actual local relay policy and service media
         env:
           CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
@@ -138,8 +139,9 @@ jobs:
           set -euo pipefail
           export STREAM_INTERVIEW_TURN_BUILD_DIR="$PWD/apple/build/native-interview-turn"
           STREAM_TURN_OPENSSL_ROOT="$(brew --prefix openssl@3)"
+          export STREAM_TURN_OPENSSL_ROOT
           STREAM_TURN_LIBEVENT_ROOT="$(brew --prefix libevent)"
-          export STREAM_TURN_OPENSSL_ROOT STREAM_TURN_LIBEVENT_ROOT
+          export STREAM_TURN_LIBEVENT_ROOT
           apple/scripts/build_owned_interview_turn.zsh 2>&1 | tee apple/build/native-guest-results/turn-build.log
           export STREAM_INTERVIEW_TURN_SERVER="$STREAM_INTERVIEW_TURN_BUILD_DIR/build/bin/turnserver"
           export STREAM_INTERVIEW_RECEIVER_FRAMEWORKS="$PWD/apple/build/native-guest-ci/Build/Products/Debug"

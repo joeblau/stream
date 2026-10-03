@@ -51,4 +51,4 @@ xcodebuild -project "$GUEST_PROGRAM_DIR/NativeGuestProgramISOValidation.xcodepro
   -derivedDataPath "$GUEST_PROGRAM_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 env DYLD_FRAMEWORK_PATH="${GUEST_PROGRAM_BUILD_PATH:A}/Build/Products/Debug" \
   "${GUEST_PROGRAM_BUILD_PATH:A}/Build/Products/Debug/NativeGuestProgramISOHarness" \
-  "$GUEST_PROGRAM_DIR/fixtures" "$GUEST_PROGRAM_DIR/media-$(uuidgen)"
+  "$GUEST_PROGRAM_DIR/fixtures" "$GUEST_PROGRAM_DIR/media-$(uuidgen)" "$@"
