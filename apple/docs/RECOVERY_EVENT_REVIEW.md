@@ -61,7 +61,10 @@ POST/body/token-resource requests never cross the boundary, 401 never retries,
 and account replacement/forget/retirement invalidates late receipts. It uses an
 in-memory credential store and HTTP fixtures, not production Keychain secrets.
 
-These checks qualify the implemented software boundaries. A physical abrupt
-process/OS interruption, damaged media repair, accessibility and a real authorized
-provider's restart workflow still require separate acceptance evidence. Finalized
-copies of already-readable generated recordings are not abrupt-kill repair proof.
+These checks qualify the implemented software boundaries. The separate
+[abrupt recording fixture](ABRUPT_RECORDING_RECOVERY.md) launches and SIGKILLs
+only an owned recorder process, then runs shipping startup review and actual
+fragment decoding/finalized-copy export while preserving the originals. Its
+default H.264/MP4 scope differs from OS/power interruption, physical-volume
+damage, general accessibility and an authorized provider's external restart
+workflow, which retain their separate qualification limits.
