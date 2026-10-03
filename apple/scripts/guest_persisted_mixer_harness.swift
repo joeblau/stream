@@ -38,6 +38,10 @@ private final class PersistedGuestProbe: @unchecked Sendable {
         precondition(count > 8_000, "Actual tap must cover a measured PCM window")
         return 2 * hypot(real, imaginary) / Double(count)
     }
+    func deliveredEndPTS() -> Double {
+        lock.lock(); defer { lock.unlock() }
+        return packets.map { $0.pts + Double($0.samples.count / 2) / 48_000 }.max() ?? -.infinity
+    }
 }
 
 @MainActor private final class PersistedGuestStudio {
@@ -94,6 +98,12 @@ private final class PersistedGuestProbe: @unchecked Sendable {
         let start = CMClockGetTime(CMClockGetHostTimeClock()).seconds + 0.12
         let end = start + 0.25
         try await Task.sleep(for: .milliseconds(450))
+        let receiptDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while [program, monitor, aux].contains(where: { $0.deliveredEndPTS() < end }) && ContinuousClock.now < receiptDeadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        precondition([program, monitor, aux].allSatisfy { $0.deliveredEndPTS() >= end },
+                     "Actual tap receipts must cover the original measured window before the next control transition")
         for (name, probe, frequency, expected) in [
             ("Program guest", program, 2_000.0, guestProgram),
             ("Monitor guest", monitor, 2_000.0, guestMonitor),
@@ -123,24 +133,31 @@ private final class PersistedGuestProbe: @unchecked Sendable {
             var index = 0
             while !Task.isCancelled {
                 try await clock.sleep(until: started.advanced(by: .milliseconds(index * 10)))
-                // A scheduling stall drops stale source intervals instead of
-                // sending a burst or inventing a different source clock.
-                index = max(index, Int((CMClockGetTime(CMClockGetHostTimeClock()).seconds - sourceStart) * 100))
-                let offset = Double(index) / 100
-                let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480)!
-                pcm.frameLength = 480
-                for frame in 0..<480 {
-                    let value = Float(sin((offset + Double(frame) / 48_000) * 2 * .pi * 2_000)) * 0.25
-                    pcm.floatChannelData![0][frame] = value; pcm.floatChannelData![1][frame] = value
+                if CommandLine.arguments.contains("--hold-producer-20ms") {
+                    try await Task.sleep(for: .milliseconds(20))
                 }
-                controller.receiveGuestAudio(.init(lease: lease, pcm: pcm,
-                    pts: CMTime(seconds: base + offset, preferredTimescale: 48_000),
-                    duration: CMTime(value: 480, timescale: 48_000),
-                    mappingGeneration: mapping, clockQuality: .senderReportAligned))
-                mixer.enqueue(local, try ProgramRecordingFixtures.audio(at: offset, timestampBase: base,
-                                                                        constantTone: true, amplitude: 0.2))
-                index += 1
-                precondition(index < 1_500, "Fixture producer has a bounded lifetime")
+                // A coalesced wake must not delete complete source PCM intervals.
+                // Generate every original 480-frame interval through this wake;
+                // the real inlet keeps its bounded queue and original host PTS.
+                let reached = max(index, Int((CMClockGetTime(CMClockGetHostTimeClock()).seconds - sourceStart) * 100))
+                precondition(reached - index <= 70, "Fixture source stall exceeded the shipping 700ms queue budget")
+                while index <= reached && !Task.isCancelled {
+                    let offset = Double(index) / 100
+                    let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480)!
+                    pcm.frameLength = 480
+                    for frame in 0..<480 {
+                        let value = Float(sin((offset + Double(frame) / 48_000) * 2 * .pi * 2_000)) * 0.25
+                        pcm.floatChannelData![0][frame] = value; pcm.floatChannelData![1][frame] = value
+                    }
+                    controller.receiveGuestAudio(.init(lease: lease, pcm: pcm,
+                        pts: CMTime(seconds: base + offset, preferredTimescale: 48_000),
+                        duration: CMTime(value: 480, timescale: 48_000),
+                        mappingGeneration: mapping, clockQuality: .senderReportAligned))
+                    mixer.enqueue(local, try ProgramRecordingFixtures.audio(at: offset, timestampBase: base,
+                                                                            constantTone: true, amplitude: 0.2))
+                    index += 1
+                    precondition(index < 1_500, "Fixture producer has a bounded lifetime")
+                }
             }
         }
     }
