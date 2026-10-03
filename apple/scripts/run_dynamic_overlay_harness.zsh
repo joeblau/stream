@@ -23,6 +23,8 @@ h['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.
 h['sources'] << File.join(root,'scripts/dynamic_overlay_harness.swift')
 spec['targets']['DynamicOverlayHarness']=h
 spec['schemes']['DynamicOverlayHarness']={'build'=>{'targets'=>{'DynamicOverlayHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(h, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$OVERLAY_DIR/project.json" --project "$OVERLAY_DIR"

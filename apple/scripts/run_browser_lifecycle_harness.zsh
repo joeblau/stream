@@ -28,6 +28,8 @@ h['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.
 h['sources'] << File.join(root,'scripts/browser_lifecycle_harness.swift')
 spec['targets']['BrowserLifecycleHarness']=h
 spec['schemes']['BrowserLifecycleHarness']={'build'=>{'targets'=>{'BrowserLifecycleHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(h, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$BROWSER_DIR/project.json" --project "$BROWSER_DIR"

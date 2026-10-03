@@ -30,6 +30,8 @@ target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMa
 target['sources'] << File.join(root,'scripts/studio_privacy_harness.swift')
 spec['targets']['StudioPrivacyHarness']=target
 spec['schemes']['StudioPrivacyHarness']={'build'=>{'targets'=>{'StudioPrivacyHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(target, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$PRIVACY_DIR/project.json" --project "$PRIVACY_DIR"

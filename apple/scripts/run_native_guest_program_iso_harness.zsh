@@ -29,7 +29,7 @@ target['type']='tool'
 target.delete('info')
 require File.join(root, 'scripts/guest_fixture_boundaries')
 StreamGuestFixtureBoundaries.apply(spec['targets']['StreamCore'], target, root, folder)
-target['sources'] << {'path'=>File.join(root,'NativeGuestReceivePrototype'),'excludes'=>['README.md']}
+StreamDesktopTransportFixture.include_receiver(target, root)
 target['sources'] << File.join(root,'scripts/guest_receive_peer_fixture.cpp')
 target['sources'] << File.join(root,'scripts/native_guest_program_iso_harness.swift')
 settings=target['settings']['base']

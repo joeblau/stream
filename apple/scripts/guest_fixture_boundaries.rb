@@ -63,5 +63,7 @@ enum GuestFixtureStorage {
 SWIFT
     desktop['sources'][0] = {'path' => File.join(root, 'StreamMac'), 'excludes' => excluded}
     desktop['sources'].concat(generated + [support])
+    require File.join(root, 'scripts/desktop_transport_fixture')
+    StreamDesktopTransportFixture.apply(desktop, root)
   end
 end

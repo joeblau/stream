@@ -23,6 +23,8 @@ h['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.
 h['sources'] << File.join(root,'scripts/color_transform_harness.swift')
 spec['targets']['ColorTransformHarness']=h
 spec['schemes']['ColorTransformHarness']={'build'=>{'targets'=>{'ColorTransformHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(h, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$COLOR_DIR/project.json" --project "$COLOR_DIR"

@@ -31,6 +31,8 @@ target['sources'] << File.join(root,'scripts/shared_encoder_harness.swift')
 target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 spec['targets']['SharedEncoderHarness']=target
 spec['schemes']['SharedEncoderHarness']={'build'=>{'targets'=>{'SharedEncoderHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(target, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$SHARED_ENCODER_DIR/project.json" --project "$SHARED_ENCODER_DIR"

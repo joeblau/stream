@@ -31,6 +31,8 @@ target['sources'] << File.join(root,'scripts/studio_dual_canvas_harness.swift')
 target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 spec['targets']['StudioDualCanvasHarness']=target
 spec['schemes']['StudioDualCanvasHarness']={'build'=>{'targets'=>{'StudioDualCanvasHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(target, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$DUAL_CANVAS_DIR/project.json" --project "$DUAL_CANVAS_DIR"

@@ -27,6 +27,8 @@ target['sources'] << File.join(root,'scripts/isolated_video_harness.swift')
 target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 spec['targets']['IsolatedVideoHarness']=target
 spec['schemes']['IsolatedVideoHarness']={'build'=>{'targets'=>{'IsolatedVideoHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(target, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$ISO_VIDEO_DIR/project.json" --project "$ISO_VIDEO_DIR"

@@ -54,6 +54,8 @@ target['sources'] += ['MacAudioInput.swift','PreviewProgramModel.swift'].map{|na
 target['sources'] << File.join(root,'scripts/local_shortcut_harness.swift')
 spec['targets']['LocalShortcutHarness']=target
 spec['schemes']={'LocalShortcutHarness'=>{'build'=>{'targets'=>{'LocalShortcutHarness'=>'all'}}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(target, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$LOCAL_SHORTCUT_DIR/project.json" --project "$LOCAL_SHORTCUT_DIR"
