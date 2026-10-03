@@ -83,3 +83,9 @@ macOS 14 runtime, physical camera/microphone/screen capture, deployed service or
 TURN provisioning, Internet/mobile/restricted networks, larger guest capacity,
 return media/mix-minus/AEC, or signed installation. Production entitlements,
 helpers and vendor sources are unchanged.
+
+The controlled scene explicitly disables both offline cards on the actual current
+controller-issued guest slot through `SceneStore.replaceGuestSlot`. This keeps
+its original black-pixel privacy assertions meaningful after saved slots gained
+visible offline cards by default. Source identities, admission and routing stay
+on the shipping paths; the fixture changes ordinary persisted scene metadata.
