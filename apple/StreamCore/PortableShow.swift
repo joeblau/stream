@@ -38,7 +38,7 @@ public enum PortableShow {
     /// remains editable content; connection credentials and machine grants do not.
     public static func redact(_ data: Data, remappingIDs: Bool = false, idMap: inout [String: String]) throws -> Data {
         guard data.count <= 16 * 1024 * 1024 else { throw Failure.invalid("A show document exceeds 16 MiB.") }
-        let literalContentKeys: Set<String> = ["text", "name", "title", "description", "displayname", "html", "css", "javascript", "fontname", "fontfamily"]
+        let literalContentKeys: Set<String> = ["text", "name", "title", "description", "displayname", "localname", "html", "css", "javascript", "fontname", "fontfamily"]
         func visit(_ value: Any, key: String? = nil) -> Any {
             if let dictionary = value as? [String: Any] {
                 var result: [String: Any] = [:]
@@ -80,7 +80,15 @@ public enum PortableShow {
         guard !path.isEmpty, path.utf8.count <= 1024, !path.contains("\\"),
               components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { throw Failure.invalid("Unsafe package path.") }
         let url = root.appendingPathComponent(path).standardizedFileURL
-        guard url.path.hasPrefix(root.standardizedFileURL.path + "/") else { throw Failure.invalid("Package path escapes its folder.") }
+        // Foundation can standardize an existing /private/tmp directory to
+        // /tmp while retaining /private/tmp in its appended child URL. Normalize
+        // the root only for comparison, then construct the child using that
+        // same spelling and the validated relative components. Independently
+        // normalizing a missing child can choose a different alias. Retain the
+        // original root/returned URL and reject child symlinks below before IO.
+        let comparisonRoot = root.standardizedFileURL
+        let comparisonChild = comparisonRoot.appendingPathComponent(path).path
+        guard comparisonChild.hasPrefix(comparisonRoot.path + "/") else { throw Failure.invalid("Package path escapes its folder.") }
         var current = root
         for component in components {
             current.appendPathComponent(String(component))

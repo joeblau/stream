@@ -78,6 +78,7 @@ enum StudioCommand: Equatable, Sendable {
     case startRehearsal
     case stopRehearsal
     case addRecordingMarker(String)
+    case interview(NativeInterviewCommand)
 
     // Scenes (S01 layer graph).
     case selectScene(SceneID)
@@ -613,6 +614,7 @@ enum StudioCommand: Equatable, Sendable {
         case .startRehearsal: return "Begin Local Rehearsal"
         case .stopRehearsal: return "End Local Rehearsal"
         case .addRecordingMarker: return "Add Recording Marker"
+        case .interview(let command): return command.displayName
         case .selectScene, .selectSceneAt: return "Select Scene"
         case .addScene, .insertScene: return "Add Scene"
         case .renameScene: return "Rename Scene"
@@ -937,6 +939,7 @@ struct StudioState: Equatable, Sendable {
     /// Annotate menu, the toolbar, and the canvas chrome read this (the
     /// dispatcher's own published state) instead of the nested store.
     var annotations: AnnotationUIState = .empty
+    var interview = NativeInterviewControlState()
 }
 
 // MARK: - Dispatcher
@@ -969,6 +972,9 @@ final class StudioCommandDispatcher: ObservableObject {
     private let previewProgram: PreviewProgramModel
     private weak var chatCoordinator: StudioChatCoordinator?
     private var chatObservation: AnyCancellable?
+    private weak var interviewManager: NativeInterviewManager?
+    private var interviewObservation: AnyCancellable?
+    private var interviewRefresh: Task<Void, Never>?
     /// S12 (issue #75): the scene-edit undo stack. One entry per executed
     /// undoable command, recorded in `execute` around `perform`.
     private let undoStack = UndoStack<SceneUndoSnapshot>()
@@ -1058,6 +1064,11 @@ final class StudioCommandDispatcher: ObservableObject {
         self.session = session
         self.recorder = recorder
         self.previewProgram = previewProgram
+        // Admission reads the live applied document before a guest can route.
+        // Keep the session weak so runtime retirement cannot retain its graph.
+        controller.guestMixerSettings = { [weak session] in
+            session?.activeSettings.mixer ?? MixerSettings()
+        }
         let soundboardStore = SoundboardStore()
         self.soundboardStore = soundboardStore
         self.soundboard = SoundboardController(store: soundboardStore,
@@ -1178,6 +1189,16 @@ final class StudioCommandDispatcher: ObservableObject {
         chatObservation = coordinator.objectWillChange.sink { [weak self] _ in Task { @MainActor [weak self] in self?.refreshState() } }
         refreshState()
     }
+    func bindInterviewManager(_ manager: NativeInterviewManager) {
+        interviewManager = manager
+        interviewObservation = manager.$state.sink { [weak self] _ in
+            guard let self, self.interviewRefresh == nil else { return }
+            self.interviewRefresh = Task { [weak self] in
+                guard let self else { return }; self.interviewRefresh = nil; self.refreshState()
+            }
+        }
+        refreshState()
+    }
     /// Stable numeric controller targets are deliberately a small typed set.
     /// Capture-layer gain retains its scene/layer ownership on the inspector.
     func controllerTargets() -> [StudioControllerTarget] {
@@ -1188,9 +1209,19 @@ final class StudioCommandDispatcher: ObservableObject {
             if action.id.hasPrefix("output.stream.") { feedback = state.stream.isActive ? 1 : 0 }
             if action.id.hasPrefix("output.record.") { feedback = state.recording.isActive ? 1 : 0 }
             if action.id.hasPrefix("output.preview.") { feedback = state.preview == .active ? 1 : 0 }
+            if case .interview(.setMuted(let context, _)) = action.command {
+                feedback = state.mixer.channelMutes[AudioMixEngine.guestChannelID(for: context.receive).label] == true ? 1 : 0
+            }
+            if case .interview(.setSolo(let context, _)) = action.command {
+                feedback = state.mixer.soloedChannels.contains(AudioMixEngine.guestChannelID(for: context.receive).label) ? 1 : 0
+            }
             result.append(.init(id: action.id, title: action.title, kind: .command, normalizedValue: feedback,
                                 unavailableReason: action.unavailableReason, execute: { [weak self] _ in
-                guard let self, let current = self.catalogueActions().first(where: { $0.id == action.id }) else { return "The stable command target no longer exists." }
+                guard let self else { return "The studio is no longer available." }
+                if case .interview(let guest) = action.command, guest.capturesConnection {
+                    return self.execute(.interview(guest)).error?.description
+                }
+                guard let current = self.catalogueActions().first(where: { $0.id == action.id }) else { return "The stable command target no longer exists." }
                 guard let command = current.command else { return current.unavailableReason ?? "This action is unavailable." }
                 return self.execute(command).error?.description
             }))
@@ -1349,6 +1380,18 @@ final class StudioCommandDispatcher: ObservableObject {
             postRejection(command: command, error: error)
             return StudioCommandResult(outcome: .rejected(error), state: state)
         }
+        if case .interview(let action) = command {
+            if let mixer = interviewManager?.mixerCommand(for: action) {
+                perform(mixer); refreshState()
+                return .init(outcome: .success, state: state)
+            }
+            guard interviewManager?.execute(action) == true else {
+                let error = StudioCommandError.unavailable("The guest connection changed or its action queue is occupied. Review Guests before retrying.")
+                refreshState(); postRejection(command: command, error: error)
+                return .init(outcome: .rejected(error), state: state)
+            }
+            refreshState(); return .init(outcome: .success, state: state)
+        }
         if !executingMacroStep {
             switch command {
             case .stopStream, .stopRecording: macros.cancel()
@@ -1377,6 +1420,12 @@ final class StudioCommandDispatcher: ObservableObject {
         validate(command) == nil
     }
 
+    func currentGuestCommandContext(for guest: UUID) -> NativeInterviewPeerLease? {
+        guard let context = interviewManager?.currentReadyLease,
+              context.receive.peerID == guest else { return nil }
+        return context
+    }
+
     /// Authoritative rejection reason used by palettes and external controllers.
     func availabilityError(for command: StudioCommand) -> StudioCommandError? {
         validate(command)
@@ -1397,6 +1446,9 @@ final class StudioCommandDispatcher: ObservableObject {
         // browser organization, and the lock toggle stay available.
         if let error = sceneContentLockError(for: command) { return error }
         switch command {
+        case .interview(let action):
+            return interviewManager?.availabilityError(for: action) ?? (interviewManager == nil
+                ? .unavailable("Create an interview room in Guests first.") : nil)
         case .startStream:
             guard !controller.isRehearsing else { return .unavailable("End local rehearsal before public Go Live.") }
             guard controller.streamState.canStart else {
@@ -2325,6 +2377,7 @@ final class StudioCommandDispatcher: ObservableObject {
 
     private func perform(_ command: StudioCommand) {
         switch command {
+        case .interview: break // execute preserves the manager's synchronous acceptance/rejection.
         case .startStream:
             controller.goLive()
             if recorder.preferences.autoRecordOnGoLive, !recorder.state.isActive {
@@ -3678,8 +3731,10 @@ final class StudioCommandDispatcher: ObservableObject {
             canRedo: undoStack.canRedo,
             undoLabel: undoStack.undoLabel,
             redoLabel: undoStack.redoLabel,
-            annotations: annotations.uiState(stagedSceneID: staged?.id))
+            annotations: annotations.uiState(stagedSceneID: staged?.id),
+            interview: interviewManager?.state ?? .init())
         registerAppAudioMixerChannels()
+        registerGuestMixerChannels()
         pushMixerStateToEngine()
     }
 
@@ -3696,6 +3751,21 @@ final class StudioCommandDispatcher: ObservableObject {
             else { continue }
             let id = AudioChannelID.application(bundleID: payload.channelBundleID)
             channelIDsByLabel[id.label] = id
+        }
+    }
+
+    /// A persisted source alone cannot admit audio. Only the controller's
+    /// explicitly registered slot gets a mixer channel, shared by its camera
+    /// and screen sources. A newly registered label must receive the current
+    /// document even when no fader changed since the previous refresh.
+    private func registerGuestMixerChannels() {
+        for source in sceneStore.sources {
+            guard case .guest(let payload) = source.payload,
+                  let slot = payload.slotID,
+                  let id = controller.registeredGuestAudioChannel(slot: slot),
+                  channelIDsByLabel[id.label] != id else { continue }
+            channelIDsByLabel[id.label] = id
+            lastPushedMixer = nil
         }
     }
 
@@ -3843,6 +3913,7 @@ private extension StudioCommand {
              .setLayerImage, .setOverlayImage:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
+             .interview,
              .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile, .addRecordingMarker,
              .startRehearsal, .stopRehearsal,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,

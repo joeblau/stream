@@ -1,0 +1,185 @@
+name: Native guest media
+
+on:
+  pull_request:
+    paths:
+      - 'apple/NativeGuestReceivePrototype/**'
+      - 'apple/StreamMac/Guest*'
+      - 'apple/StreamMac/NativeGuestMediaSink.swift'
+      - 'apple/StreamMac/NativeInterview*'
+      - 'apple/StreamMac/StreamMac-Bridging-Header.h'
+      - 'apple/StreamMac/AudioMixEngine.swift'
+      - 'apple/StreamMac/CaptureSourcePool.swift'
+      - 'apple/StreamMac/ResilientSourceFrames.swift'
+      - 'apple/StreamMac/SettingsSession.swift'
+      - 'apple/StreamMac/DesktopStorage.swift'
+      - 'apple/StreamMac/StreamController.swift'
+      - 'apple/StreamMac/RecordingVideoSourceFactory.swift'
+      - 'apple/StreamMac/Isolated*'
+      - 'apple/StreamMac/ProgramRecordingSession.swift'
+      - 'apple/StreamMac/RecordingController.swift'
+      - 'apple/StreamMac/RecordingPreferences.swift'
+      - 'apple/StreamMac/SceneRenderer.swift'
+      - 'apple/StreamMac/LayerGraph.swift'
+      - 'apple/StreamMac/SceneModel.swift'
+      - 'apple/StreamMac/TextLayerSectionView.swift'
+      - 'apple/StreamMac/CompositionEngine.swift'
+      - 'apple/StreamMac/StudioCommandDispatcher.swift'
+      - 'apple/StreamMac/StudioCommandPalette.swift'
+      - 'apple/StreamMac/StudioControlProtocol.swift'
+      - 'apple/StreamMac/StudioLocalControlServer.swift'
+      - 'apple/StreamMac/StudioWorkspace.swift'
+      - 'apple/StreamCore/Audio*'
+      - 'apple/StreamCore/KeychainStore.swift'
+      - 'apple/project.yml'
+      - 'apple/Vendor/**'
+      - 'apple/scripts/repair_desktop_transport_archives.py'
+      - 'apple/scripts/patches/**'
+      - 'apple/scripts/*guest*'
+      - 'apple/scripts/*native_interview*'
+      - 'apple/scripts/build_owned_interview_turn.zsh'
+      - 'apple/scripts/relay_policy_tcp_harness.cpp'
+      - 'apple/scripts/desktop_transport_fixture.rb'
+      - 'apple/scripts/*fractional_iso_audio*'
+      - 'workers/interviews/public/guest.*'
+      - 'workers/interviews/src/**'
+      - 'workers/interviews/package*.json'
+      - 'workers/interviews/test/browser/native-host-*'
+      - 'workers/interviews/test/browser/chrome-fixture.mjs'
+      - 'workers/interviews/test/browser/native-session-*'
+      - '.github/workflows/native-guests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-guests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Guest codecs and Program/ISO (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: npm
+          cache-dependency-path: workers/interviews/package-lock.json
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: Show environment and install fixture tools
+        run: |
+          xcodebuild -version
+          sw_vers
+          uname -m
+          brew install xcodegen cmake ffmpeg opus openssl@3 libevent libmicrohttpd pkgconf
+          npm install --global npm@12.2.0
+      - name: Resolve and verify this build's pinned transport
+        working-directory: apple
+        run: |
+          xcodegen generate
+          xcodebuild -resolvePackageDependencies -project Stream.xcodeproj -scheme StreamMac -derivedDataPath build/native-guest-ci -skipPackagePluginValidation
+          GUEST_ARTIFACT="$PWD/build/native-guest-ci/SourcePackages/artifacts/haishinkit.swift/libdatachannel/libdatachannel.xcframework/macos-arm64_x86_64"
+          python3 scripts/repair_desktop_transport_archives.py build/native-guest-ci
+          GUEST_UNPATCHED="$PWD/build/native-guest-unpatched"
+          mkdir -p "$GUEST_UNPATCHED"
+          cp -R "$GUEST_ARTIFACT/Headers" "$GUEST_UNPATCHED/Headers"
+          cp "$GUEST_ARTIFACT/libdatachannel.a" "$GUEST_UNPATCHED/libdatachannel.a"
+          printf 'STREAM_GUEST_UNPATCHED_RTC_INCLUDE=%s\n' "$GUEST_UNPATCHED/Headers/libdatachannel" >> "$GITHUB_ENV"
+          printf 'STREAM_GUEST_UNPATCHED_RTC_LIBRARY=%s\n' "$GUEST_UNPATCHED/libdatachannel.a" >> "$GITHUB_ENV"
+          python3 scripts/repair_desktop_transport_archives.py build/native-guest-ci --require-relay-policy
+          test -f "$GUEST_ARTIFACT/Headers/libdatachannel/rtc/version.h"
+          test -f "$GUEST_ARTIFACT/libdatachannel.a"
+          printf 'STREAM_GUEST_RTC_INCLUDE=%s\n' "$GUEST_ARTIFACT/Headers/libdatachannel" >> "$GITHUB_ENV"
+          printf 'STREAM_GUEST_RTC_LIBRARY=%s\n' "$GUEST_ARTIFACT/libdatachannel.a" >> "$GITHUB_ENV"
+      - name: Install pinned interview service dependencies
+        run: npm ci --prefix workers/interviews
+      - name: Qualify native interview service and runtime routing
+        run: |
+          mkdir -p apple/build/native-guest-results
+          set -euo pipefail
+          apple/scripts/run_native_interview_control_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-service.log
+          # The manager fixture resolves and repairs its own SwiftPM artifact
+          # tree. Sharing the shipping app DerivedData exposes both the
+          # original XCFramework and repaired product module maps to Clang.
+          apple/scripts/run_native_interview_manager_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-manager.log
+          STREAM_INTERVIEW_RECEIVER_FRAMEWORKS="$PWD/apple/build/native-guest-ci/Build/Products/Debug" apple/scripts/run_native_interview_receiver_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-receiver.log
+      - name: Decode real SDK media and qualify registration boundaries
+        run: |
+          mkdir -p apple/build/native-guest-results
+          set -euo pipefail
+          apple/scripts/run_native_guest_receive_harness.zsh 2>&1 | tee apple/build/native-guest-results/receiver.log
+          apple/scripts/run_native_guest_receive_harness.zsh --sparse-audio-reports 2>&1 | tee apple/build/native-guest-results/receiver-sparse-audio-reports.log
+          apple/build/native-guest-receive/guest-harness apple/build/native-guest-receive/fixtures --validation-delayed-scheduler 2>&1 | tee apple/build/native-guest-results/receiver-delayed-scheduler.log
+          apple/scripts/run_guest_frame_store_harness.zsh 2>&1 | tee apple/build/native-guest-results/store.log
+          apple/scripts/run_guest_audio_harness.zsh 2>&1 | tee apple/build/native-guest-results/audio.log
+          apple/scripts/run_guest_audio_harness.zsh --hold-before-revoke 2>&1 | tee apple/build/native-guest-results/audio-delayed-tick.log
+          STREAM_FRACTIONAL_ISO_FRAMEWORKS="$PWD/apple/build/guest-audio-validation/core-derived/Build/Products/Debug" apple/scripts/run_fractional_iso_audio_harness.zsh 2>&1 | tee apple/build/native-guest-results/fractional-iso.log
+          GUEST_RENDERER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_renderer_harness.zsh 2>&1 | tee apple/build/native-guest-results/controller-renderer.log
+          GUEST_SLOTS_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_slots_harness.zsh 2>&1 | tee apple/build/native-guest-results/guest-slots.log
+          GUEST_PERSISTED_MIXER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_persisted_mixer_harness.zsh 2>&1 | tee apple/build/native-guest-results/persisted-mixer.log
+          GUEST_PERSISTED_MIXER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_persisted_mixer_harness.zsh --hold-producer-20ms 2>&1 | tee apple/build/native-guest-results/persisted-mixer-delayed-source.log
+      - name: Qualify actual decoded guest Program and ISO files
+        run: |
+          set -euo pipefail
+          STREAM_GUEST_PROGRAM_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_guest_program_iso_harness.zsh 2>&1 | tee apple/build/native-guest-results/program-iso.log
+          STREAM_GUEST_PROGRAM_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_guest_program_iso_harness.zsh --hold-startup-800ms 2>&1 | tee apple/build/native-guest-results/program-iso-held-startup.log
+      - name: Qualify actual local relay policy and service media
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          export STREAM_INTERVIEW_TURN_BUILD_DIR="$PWD/apple/build/native-interview-turn"
+          STREAM_TURN_OPENSSL_ROOT="$(brew --prefix openssl@3)"
+          export STREAM_TURN_OPENSSL_ROOT
+          STREAM_TURN_LIBEVENT_ROOT="$(brew --prefix libevent)"
+          export STREAM_TURN_LIBEVENT_ROOT
+          apple/scripts/build_owned_interview_turn.zsh 2>&1 | tee apple/build/native-guest-results/turn-build.log
+          export STREAM_INTERVIEW_TURN_SERVER="$STREAM_INTERVIEW_TURN_BUILD_DIR/build/bin/turnserver"
+          export STREAM_INTERVIEW_RECEIVER_FRAMEWORKS="$PWD/apple/build/native-guest-ci/Build/Products/Debug"
+          export DYLD_FRAMEWORK_PATH="$STREAM_INTERVIEW_RECEIVER_FRAMEWORKS"
+          STREAM_INTERVIEW_MEDIA_BUILD_DIR="$PWD/apple/build/native-interview-negative" STREAM_GUEST_RTC_INCLUDE="$STREAM_GUEST_UNPATCHED_RTC_INCLUDE" STREAM_GUEST_RTC_LIBRARY="$STREAM_GUEST_UNPATCHED_RTC_LIBRARY" apple/scripts/build_native_interview_media_cli.zsh
+          NATIVE_INTERVIEW_MEDIA_CLI="$PWD/apple/build/native-interview-negative/native-interview-media-cli" node workers/interviews/test/browser/native-session-relay-browser.mjs --expect-relay-policy-unavailable 2>&1 | tee apple/build/native-guest-results/relay-negative.log
+          apple/scripts/build_native_interview_media_cli.zsh
+          export NATIVE_INTERVIEW_MEDIA_CLI="$PWD/apple/build/native-interview-media/native-interview-media-cli"
+          STREAM_RELAY_POLICY_TCP_PROBE="$PWD/apple/build/native-guest-ci/TransportSourceBuild/$(uname -m)/relay-policy-tcp-harness"
+          export STREAM_RELAY_POLICY_TCP_PROBE
+          node workers/interviews/test/browser/native-session-relay-browser.mjs 2>&1 | tee apple/build/native-guest-results/relay-positive.log
+      - name: Qualify the shipping browser against the native host
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          apple/scripts/build_native_guest_host_cli.zsh
+          NATIVE_GUEST_HOST="$PWD/apple/build/native-guest-receive/guest-host-cli" node workers/interviews/test/browser/native-host-browser.mjs 2>&1 | tee apple/build/native-guest-results/chrome-native.log
+      - name: Retain qualification logs and decoded media
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-guests-${{ matrix.runner }}
+          path: |
+            apple/build/native-guest-results
+            apple/build/guest-slots-validation/artifacts-*
+            apple/build/native-guest-program-iso-validation/media-*
+            apple/build/guest-audio-validation/media-*
+            apple/build/fractional-iso-audio-validation/media-*
+            apple/build/native-interview-validation/run-*/worker.log
+            apple/build/native-interview-manager-validation/run-*/worker.log
+            apple/build/native-interview-turn/build-provenance.json
+            apple/build/native-interview-turn/licenses
+            apple/build/native-guest-ci/TransportSourceBuild/*/sources.json
+            apple/build/native-guest-ci/SourcePackages/artifacts/haishinkit.swift/libdatachannel/libdatachannel.xcframework/macos-arm64_x86_64/*.stream-relay-policy-*.json
+          if-no-files-found: warn
+          retention-days: 14

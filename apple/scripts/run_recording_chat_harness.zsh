@@ -31,6 +31,8 @@ target['sources'] << File.join(root,'scripts/recording_chat_harness.swift')
 target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 spec['targets']['RecordingChatHarness']=target
 spec['schemes']['RecordingChatHarness']={'build'=>{'targets'=>{'RecordingChatHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(target, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$CHAT_DIR/project.json" --project "$CHAT_DIR"

@@ -30,6 +30,8 @@ target['sources'] << File.join(root,'scripts/comment_presentation_harness.swift'
 target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 spec['targets']['CommentPresentationHarness']=target
 spec['schemes']['CommentPresentationHarness']={'build'=>{'targets'=>{'CommentPresentationHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(target, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$COMMENT_DIR/project.json" --project "$COMMENT_DIR"

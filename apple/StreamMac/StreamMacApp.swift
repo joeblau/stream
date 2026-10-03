@@ -57,6 +57,7 @@ struct StreamMacApp: App {
                 // The smallest supported production layout (1024×640): all
                 // panels stay usable, and any of them can collapse from there.
                 .frame(minWidth: 1024, minHeight: 640)
+                .onAppear { StudioPackageOpenReceiver.shared.bind(workspace) }
                 // Retire the entire injected subtree with its original runtime.
                 .id(ObjectIdentifier(workspace.runtime))
         }

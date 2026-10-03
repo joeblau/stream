@@ -28,7 +28,8 @@ final class ResilientSourceFrames: @unchecked Sendable {
     var lookup: SourceFrameLookup {
         SourceFrameLookup(camera: { [self] key in
             frame(key).map { LatestCameraFrame.Frame(buffer: $0.buffer, position: $0.position) }
-        }, screen: { [self] key in frame(key)?.buffer }, media: { [self] key in frame(key)?.buffer })
+        }, screen: { [self] key in frame(key)?.buffer }, media: { [self] key in frame(key)?.buffer },
+            guest: raw.guest)
     }
     private func rawFrame(_ key: CaptureSourceKey) -> Frame? {
         switch key {

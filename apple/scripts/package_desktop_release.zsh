@@ -13,7 +13,7 @@ xcodegen generate
 readonly RELEASE_ARCH="$(uname -m)"
 xcodebuild -resolvePackageDependencies -project Stream.xcodeproj -scheme StreamMac \
   -derivedDataPath "$RELEASE_DIR/derived"
-python3 scripts/repair_desktop_transport_archives.py "$RELEASE_DIR/derived"
+python3 scripts/repair_desktop_transport_archives.py "$RELEASE_DIR/derived" --require-relay-policy
 xcodebuild archive -project Stream.xcodeproj -scheme StreamMac \
   -destination 'generic/platform=macOS' -archivePath "$RELEASE_DIR/StreamMac.xcarchive" \
   -derivedDataPath "$RELEASE_DIR/derived" ARCHS="$RELEASE_ARCH" ONLY_ACTIVE_ARCH=YES \

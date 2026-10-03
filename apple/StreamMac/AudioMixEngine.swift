@@ -18,7 +18,7 @@ enum AudioChannelID: Hashable, Sendable {
     case media(SourceDefinitionID)
     /// A06: per-application audio capture, keyed by bundle ID.
     case application(bundleID: String)
-    /// A guest/remote contribution (EP06), keyed by guest session ID.
+    /// A guest/remote contribution, keyed by its registered stable slot UUID.
     case guest(id: String)
 
     /// A short stable label for statistics keys and logs.
@@ -132,6 +132,7 @@ actor AudioMixEngine {
     /// A04: per-bus meters (post-gain, pre-clamp), fed in `postBus`.
     private var busLevels: [AudioBus: LevelMeter] = [:]
     private var taps: [UUID: AudioTapMailbox] = [:]
+    private var guestReturns: [UUID: GuestReturnMailbox] = [:]
     private var cancelledTokens: Set<UUID> = []
     /// Gain assignments that arrived before their channel existed; applied at
     /// channel creation (scene gains are pushed before a new capture's first
@@ -153,6 +154,7 @@ actor AudioMixEngine {
     private var auxScratch = [Float](repeating: 0, count: chunkFrames * 2)
     private var preISOScratch = [Float](repeating: 0, count: chunkFrames * 2)
     private var isoScratch = [Float](repeating: 0, count: chunkFrames * 2)
+    private var contributionScratch = [Float](repeating: 0, count: chunkFrames * 2)
     private var formatDescription: CMAudioFormatDescription?
 
     // MARK: - Lifecycle (driven by the W02 pipeline-demand model)
@@ -172,6 +174,96 @@ actor AudioMixEngine {
         tickTask = nil
         registry.reset()
         captureHoldbacks.removeAll()
+    }
+
+    // MARK: - Explicit guest admission
+
+    /// Registration is authority supplied by the runtime, never inferred from
+    /// a PCM callback, channel label, fader, or isolated recording selection.
+    /// One native guest slot is bounded and qualified; replacement closes all
+    /// gates and discards the previous negotiation's samples.
+    @discardableResult func registerGuest(_ lease: GuestReceiveLease, initialMixer: MixerSettings? = nil) -> Bool {
+        let id = Self.guestChannelID(for: lease)
+        let result = registry.registerGuest(lease, gain: pendingGains[id], initialMixer: initialMixer)
+        if result.created, let initialMixer {
+            pendingGains[id] = ChannelGain(volume: Float(max(0, min(2, initialMixer.channelVolumes[id.label] ?? 1))),
+                                           isMuted: initialMixer.channelMutes[id.label] ?? false)
+        }
+        return result.accepted
+    }
+
+    static func guestChannelID(for lease: GuestReceiveLease) -> AudioChannelID {
+        .guest(id: lease.slot.uuidString)
+    }
+
+    nonisolated func registeredGuestChannelID(slot: UUID) -> AudioChannelID? {
+        registry.registeredGuestChannelID(slot: slot)
+    }
+
+    /// Return listening is separate from admitting the guest into Program or
+    /// Monitor. Only this exact current full lease can receive a public mix.
+    @discardableResult nonisolated func setGuestReturnAllowed(_ lease: GuestReceiveLease, allowed: Bool) -> Bool {
+        registry.setGuestReturnAllowed(lease, allowed: allowed)
+    }
+    nonisolated func guestReturnFrameIsCurrent(_ frame: GuestReturnAudioFrame) -> Bool {
+        registry.guestReturnRevision(frame.lease) == frame.routingRevision
+    }
+    @discardableResult func addGuestReturnTap(_ lease: GuestReceiveLease, token: UUID, capacity: Int = 8,
+                sink: @escaping @Sendable (GuestReturnAudioFrame) -> Void) -> Bool {
+        guard cancelledTokens.remove(token) == nil, taps[token] == nil,
+              registry.guestLease(for: Self.guestChannelID(for: lease)) == lease,
+              guestReturns[token] != nil || guestReturns.count < 4 else { return false }
+        guestReturns[token]?.close()
+        let registry = self.registry
+        guestReturns[token] = GuestReturnMailbox(lease: lease, token: token, capacity: capacity,
+            current: { registry.guestReturnRevision($0.lease) == $0.routingRevision }, sink: sink)
+        return true
+    }
+
+    /// Admission and faders are independent. Backstage may be heard privately
+    /// on monitor, but Program, aux, and BOTH isolated processing taps require
+    /// the explicit Program gate. This does not create a recipient mix-minus.
+    @discardableResult nonisolated func setGuestRouting(_ lease: GuestReceiveLease,
+                                            programAllowed: Bool, monitorAllowed: Bool) -> Bool {
+        registry.setGuestRouting(lease, programAllowed: programAllowed, monitorAllowed: monitorAllowed)
+    }
+
+    /// Revokes ingress synchronously, even when the mix actor is busy. Captured
+    /// callbacks cannot repopulate a removed or replaced admission.
+    @discardableResult nonisolated func removeGuest(_ lease: GuestReceiveLease) -> Bool {
+        registry.removeGuest(lease)
+    }
+
+    /// Permanent runtime retirement, preceding receiver/coordinator teardown.
+    /// Ordinary zero-demand stop only clears rings, retaining explicit leases.
+    nonisolated func retireGuestAdmissions() { registry.retireGuestAdmissions() }
+
+    /// The caller first checks the shared audio/video sender-clock mapping.
+    /// This inlet additionally pins that generation, validates bounded decoded
+    /// PCM, and writes at ORIGINAL host PTS. No first-arrival rebase is applied.
+    @discardableResult nonisolated func enqueueGuest(_ frame: GuestAudioFrame) -> Bool {
+        registry.enqueueGuest(frame)
+    }
+
+    /// Nonmutating validation before the shared video/audio mapping is pinned.
+    /// Intake rechecks under the same lock, including after a concurrent revoke.
+    nonisolated func validateGuestFrame(_ frame: GuestAudioFrame) -> Bool {
+        registry.validateGuestFrame(frame)
+    }
+
+    struct GuestAdmissionSnapshot: Sendable {
+        var lease: GuestReceiveLease?
+        var mappingGeneration: UUID?
+        var programAllowed: Bool
+        var monitorAllowed: Bool
+        var retired: Bool
+        var acceptedPackets: UInt64
+        var rejectedPackets: UInt64
+        var lastPTS: CMTime
+        var lastEndPTS: CMTime
+    }
+    nonisolated func guestAdmissionSnapshot() -> GuestAdmissionSnapshot {
+        registry.guestAdmissionSnapshot()
     }
 
     // MARK: - Channels
@@ -228,7 +320,9 @@ actor AudioMixEngine {
     /// the outgoing mix). Non-capture channels (mic, guests) are untouched —
     /// they are not scene-bound.
     func applyProgramCaptureGains(_ gains: [AudioChannelID: (volume: Float, isMuted: Bool)]) {
-        let captureChannels = registry.channelIDs().filter {
+        // A binding may precede its first PCM, or survive a ring reset/prune.
+        // Revoke those declarations too before a late callback registers them.
+        let captureChannels = Set(registry.channelIDs()).union(pendingGains.keys).filter {
             if case .capture = $0 { return true }
             return false
         }
@@ -336,13 +430,23 @@ actor AudioMixEngine {
                         processing: IsolatedAudioProcessing = .afterEffects, sink: @escaping AudioSink) {
         if cancelledTokens.remove(token) != nil { return }
         registry.ensureChannel(channel, gain: pendingGains[channel])
+        let deliveryFilter: (@Sendable (CMSampleBuffer) -> CMSampleBuffer?)?
+        if case .guest = channel {
+            guard let lease = registry.guestLease(for: channel) else { return }
+            let registry = self.registry
+            deliveryFilter = { sample in
+                guard let allowed = registry.isolatedGuestPermission(lease) else { return nil }
+                return allowed ? sample : AudioTapMailbox.silence(like: sample)
+            }
+        } else { deliveryFilter = nil }
         if processing == .beforeEffects { registry.setPreEffectsEnabled(channel, enabled: true) }
         taps[token] = AudioTapMailbox(description: "iso.\(channel.label)",
                                       bus: nil, isolatedChannel: channel, processing: processing,
-                                      capacity: capacity, token: token, sink: sink)
+                                      capacity: capacity, token: token, deliveryFilter: deliveryFilter, sink: sink)
     }
 
     func removeTap(_ token: UUID) {
+        if let removed = guestReturns.removeValue(forKey: token) { removed.close(); return }
         if let removed = taps.removeValue(forKey: token) {
             if let channel = removed.isolatedChannel, removed.processing == .beforeEffects,
                !taps.values.contains(where: { $0.isolatedChannel == channel && $0.processing == .beforeEffects }) {
@@ -354,6 +458,7 @@ actor AudioMixEngine {
     /// Master gain for one bus (program/monitor/aux). Applied post-sum,
     /// pre-clamp. A07 rides on this for monitor level.
     func setBusGain(_ bus: AudioBus, gain: Float) {
+        if bus == .program, gain <= 0 { registry.invalidateGuestReturnFrames() }
         busGains[bus] = max(0, gain)
     }
 
@@ -388,6 +493,9 @@ actor AudioMixEngine {
             if drops > 0 {
                 stats.tapDrops["\(tap.description).\(token.uuidString.prefix(8))"] = drops
             }
+        }
+        for (token, tap) in guestReturns {
+            stats.tapDrops["guest-return.\(token.uuidString.prefix(8))"] = tap.dropCount()
         }
         return stats
     }
@@ -437,6 +545,11 @@ actor AudioMixEngine {
         let wantMonitor = taps.values.contains { $0.isolatedChannel == nil && $0.bus == .monitor }
         let wantAux = taps.values.contains { $0.isolatedChannel == nil && $0.bus == .aux }
         let wantAnyBus = wantProgram || wantMonitor || wantAux
+        let returnWindows = guestReturns.values.compactMap { tap -> (GuestReturnMailbox, UInt64)? in
+            guard let revision = registry.guestReturnRevision(tap.lease) else { return nil }
+            tap.clearScratch()
+            return (tap, revision)
+        }
 
         // A10 (issue #122): advance the duck envelope ONCE per chunk from the
         // PRE-FADER sidechain meters (the mic reads as speech regardless of
@@ -484,12 +597,18 @@ actor AudioMixEngine {
 
         for id in channelIDs {
             let wantsISO = taps.values.contains { $0.isolatedChannel == id }
-            guard wantAnyBus || wantsISO else { continue }
-            for index in isoScratch.indices { isoScratch[index] = 0; preISOScratch[index] = 0 }
+            guard wantAnyBus || wantsISO || !returnWindows.isEmpty else { continue }
+            for index in isoScratch.indices {
+                isoScratch[index] = 0; preISOScratch[index] = 0; contributionScratch[index] = 0
+            }
             let gaps = registry.mixChannel(id, at: position, frameCount: frames,
                                 program: &programScratch, aux: &auxScratch,
                                 isolated: &isoScratch, preEffects: &preISOScratch, monitor: &monitorScratch,
-                                accumulateMonitor: soloActive)
+                                contribution: &contributionScratch,
+                                soloActive: soloActive)
+            for (tap, _) in returnWindows where id != Self.guestChannelID(for: tap.lease) {
+                tap.accumulate(contributionScratch)
+            }
             if wantsISO {
                 let pts = chunkPTS(at: position)
                 for processing in IsolatedAudioProcessing.allCases {
@@ -505,9 +624,16 @@ actor AudioMixEngine {
         }
 
         postBus(.program, from: programScratch, at: position, wanted: wantProgram)
-        postBus(.monitor, from: soloActive ? monitorScratch : programScratch,
+        postBus(.monitor, from: monitorScratch,
                 at: position, wanted: wantMonitor)
         postBus(.aux, from: auxScratch, at: position, wanted: wantAux)
+        for (tap, revision) in returnWindows {
+            var samples = tap.scratch
+            AudioMixerCore.applyBusGainAndClamp(&samples, gain: busGains[.program] ?? 1)
+            if let sample = makeSampleBuffer(samples, frames: frames, pts: chunkPTS(at: position)) {
+                tap.post(.init(lease: tap.lease, routingRevision: revision, sample: sample))
+            }
+        }
     }
 
     private func postBus(_ bus: AudioBus, from samples: [Float],
@@ -593,6 +719,11 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
     private var channels: [AudioChannelID: ChannelIngest] = [:]
     private var anchor: CMTime = .invalid
+    /// Capture callbacks can arrive before explicit channel registration.
+    /// Retain declared local gains through ring resets so first-buffer
+    /// registration honors the controller's current routing and mute state.
+    /// Guest gains remain owned by the full receive-lease admission below.
+    private var localGains: [AudioChannelID: Float] = [:]
     /// A04: soloed channel IDs. Registry-level (not per-channel-instance) so
     /// solo survives channel teardown/re-creation — `reset`, pruning, and
     /// auto-registration all re-apply it to the next ingest instance.
@@ -604,6 +735,199 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     private var delayFramesByLabel: [String: Int] = [:]
     private var preEffectsIDs: Set<AudioChannelID> = []
 
+    private struct GuestAdmission {
+        let lease: GuestReceiveLease
+        var mapping: UUID?
+        var programAllowed = false
+        var monitorAllowed = false
+        var returnAllowed = false
+        var returnRevision: UInt64 = 1
+        var gain: Float
+        var auxSend: Float
+        var lastPTS = CMTime.invalid
+        var lastEndPTS = CMTime.invalid
+        var channelID: AudioChannelID { AudioMixEngine.guestChannelID(for: lease) }
+    }
+    private var guest: GuestAdmission?
+    private var guestRetired = false
+    private var highestGuestGeneration: UInt64 = 0
+    private var guestAcceptedPackets: UInt64 = 0
+    private var guestRejectedPackets: UInt64 = 0
+
+    func registerGuest(_ lease: GuestReceiveLease, gain: AudioMixEngine.ChannelGain?, initialMixer: MixerSettings?) -> (accepted: Bool, created: Bool) {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard !guestRetired, lease.generation > 0 else { return (false, false) }
+        if let current = guest {
+            guard current.lease.slot == lease.slot else { return (false, false) }
+            if current.lease == lease { return (true, false) }
+        }
+        // Runtime generations are monotonically increasing, including after
+        // removal. A delayed explicit registration cannot resurrect an old lease.
+        guard lease.generation > highestGuestGeneration else { return (false, false) }
+        if let current = guest { channels[current.channelID] = nil }
+        highestGuestGeneration = lease.generation
+        let id = AudioMixEngine.guestChannelID(for: lease)
+        let channelGain: Float
+        let auxSend: Float
+        if let initialMixer {
+            let volume = Float(max(0, min(2, initialMixer.channelVolumes[id.label] ?? 1)))
+            channelGain = initialMixer.channelMutes[id.label] == true ? 0 : volume
+            auxSend = Float(max(0, min(1, initialMixer.channelAuxSends[id.label] ?? 0)))
+            if initialMixer.soloedChannels.contains(id.label) { soloedIDs.insert(id) }
+            else { soloedIDs.remove(id) }
+        } else { channelGain = gain?.effectiveGain ?? 1; auxSend = 0 }
+        let admission = GuestAdmission(lease: lease, gain: channelGain, auxSend: auxSend)
+        guest = admission
+        channels[admission.channelID] = makeGuestChannel(admission)
+        return (true, true)
+    }
+
+    private func makeGuestChannel(_ guest: GuestAdmission) -> ChannelIngest {
+        ChannelIngest(insert: nil, initialGain: guest.gain, initialAuxSend: guest.auxSend,
+                      soloed: soloedIDs.contains(guest.channelID),
+                      delayFrames: delayFramesByLabel[guest.channelID.label] ?? 0,
+                      preEffectsEnabled: preEffectsIDs.contains(guest.channelID))
+    }
+
+    func setGuestReturnAllowed(_ lease: GuestReceiveLease, allowed: Bool) -> Bool {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        guard guest?.lease == lease, !guestRetired,
+              guest!.returnRevision < UInt64.max else { return false }
+        if guest!.returnAllowed != allowed {
+            guest!.returnRevision += 1; guest!.returnAllowed = allowed
+        }
+        return true
+    }
+    func guestReturnRevision(_ lease: GuestReceiveLease) -> UInt64? {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        guard guest?.lease == lease, !guestRetired, guest!.returnAllowed else { return nil }
+        return guest!.returnRevision
+    }
+    func invalidateGuestReturnFrames() {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        if guest != nil {
+            if guest!.returnRevision < UInt64.max { guest!.returnRevision += 1 }
+            else { guest!.returnAllowed = false }
+        }
+    }
+
+    func registeredGuestChannelID(slot: UUID) -> AudioChannelID? {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard let guest, guest.lease.slot == slot else { return nil }
+        return guest.channelID
+    }
+
+    func guestLease(for id: AudioChannelID) -> GuestReceiveLease? {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return guest?.channelID == id ? guest?.lease : nil
+    }
+
+    func isolatedGuestPermission(_ lease: GuestReceiveLease) -> Bool? {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard let guest, guest.lease == lease else { return nil }
+        return guest.programAllowed
+    }
+
+    func setGuestRouting(_ lease: GuestReceiveLease, programAllowed: Bool, monitorAllowed: Bool) -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard guest?.lease == lease else { return false }
+        guest?.programAllowed = programAllowed
+        guest?.monitorAllowed = monitorAllowed
+        return true
+    }
+
+    func removeGuest(_ lease: GuestReceiveLease) -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard let current = guest, current.lease == lease else { return false }
+        channels[current.channelID] = nil
+        guest = nil
+        return true
+    }
+
+    func retireGuestAdmissions() {
+        os_unfair_lock_lock(&lock)
+        if let guest { channels[guest.channelID] = nil }
+        guest = nil
+        guestRetired = true
+        os_unfair_lock_unlock(&lock)
+    }
+
+    func guestAdmissionSnapshot() -> AudioMixEngine.GuestAdmissionSnapshot {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return AudioMixEngine.GuestAdmissionSnapshot(lease: guest?.lease, mappingGeneration: guest?.mapping,
+            programAllowed: guest?.programAllowed ?? false, monitorAllowed: guest?.monitorAllowed ?? false,
+            retired: guestRetired, acceptedPackets: guestAcceptedPackets, rejectedPackets: guestRejectedPackets,
+            lastPTS: guest?.lastPTS ?? .invalid, lastEndPTS: guest?.lastEndPTS ?? .invalid)
+    }
+
+    func validateGuestFrame(_ frame: GuestAudioFrame) -> Bool {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return validatedGuestSamples(frame) != nil
+    }
+
+    /// Caller holds the registry lock. This validates without pinning mapping,
+    /// moving a frontier, registering, or otherwise mutating admission state.
+    private func validatedGuestSamples(_ frame: GuestAudioFrame) -> [Float]? {
+        guard let current = guest, current.lease == frame.lease,
+              frame.pts.isNumeric, frame.pts.seconds.isFinite,
+              frame.duration.isNumeric, frame.duration.seconds.isFinite,
+              anchor.isNumeric,
+              abs((frame.pts - CMClockGetTime(CMClockGetHostTimeClock())).seconds) <= 0.5,
+              current.mapping == nil || current.mapping == frame.mappingGeneration,
+              !current.lastPTS.isNumeric || frame.pts > current.lastPTS,
+              !current.lastEndPTS.isNumeric || (frame.pts - current.lastEndPTS).seconds >= -0.5 / 48_000,
+              frame.pcm.format.commonFormat == .pcmFormatFloat32,
+              frame.pcm.format.sampleRate == 48_000, frame.pcm.format.channelCount == 2,
+              frame.pcm.frameLength > 0, frame.pcm.frameLength <= 5_760,
+              abs(frame.duration.seconds - Double(frame.pcm.frameLength) / 48_000) <= 1 / 48_000,
+              let samples = Self.guestSamples(frame.pcm), samples.allSatisfy({ $0.isFinite })
+        else { return nil }
+        return samples
+    }
+
+    func enqueueGuest(_ frame: GuestAudioFrame) -> Bool {
+        // Decode buffers are owned by the receiver; copy only one bounded
+        // packet while the registry pins its exact lease against replacement.
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard var current = guest, let samples = validatedGuestSamples(frame)
+        else { guestRejectedPackets &+= 1; return false }
+        current.mapping = frame.mappingGeneration
+        current.lastPTS = frame.pts
+        current.lastEndPTS = frame.pts + CMTime(value: Int64(frame.pcm.frameLength), timescale: 48_000)
+        let channel = channels[current.channelID] ?? makeGuestChannel(current)
+        channels[current.channelID] = channel
+        // Keep registry -> channel lock order through the original-PTS write.
+        channel.enqueueGuest(samples, pts: frame.pts, anchor: anchor)
+        guest = current
+        guestAcceptedPackets &+= 1
+        return true
+    }
+
+    private static func guestSamples(_ pcm: AVAudioPCMBuffer) -> [Float]? {
+        if pcm.format.isInterleaved { return CanonicalAudioConverter.interleavedFloats(pcm) }
+        guard let planes = pcm.floatChannelData else { return nil }
+        var samples = [Float](repeating: 0, count: Int(pcm.frameLength) * 2)
+        for frame in 0..<Int(pcm.frameLength) {
+            samples[frame * 2] = planes[0][frame]
+            samples[frame * 2 + 1] = planes[1][frame]
+        }
+        return samples
+    }
+
+    private func isGuest(_ id: AudioChannelID) -> Bool {
+        if case .guest = id { return true }
+        return false
+    }
+
     func setAnchor(_ anchor: CMTime) {
         os_unfair_lock_lock(&lock)
         self.anchor = anchor
@@ -613,6 +937,14 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     func reset() {
         os_unfair_lock_lock(&lock)
         channels.removeAll()
+        if var current = guest {
+            if current.returnRevision < UInt64.max { current.returnRevision += 1 }
+            else { current.returnAllowed = false }
+            current.lastPTS = .invalid
+            current.lastEndPTS = .invalid
+            guest = current
+            channels[current.channelID] = makeGuestChannel(current)
+        }
         os_unfair_lock_unlock(&lock)
     }
 
@@ -621,11 +953,12 @@ private final class AudioChannelRegistry: @unchecked Sendable {
                     gain: AudioMixEngine.ChannelGain?) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
+        guard !isGuest(id) else { return }
         // Replace, not just insert-if-absent: an early buffer may have
         // auto-registered the channel (insert-less) just before this call,
         // and the explicit registration (VoicePolish on the mic) must win.
         channels[id] = ChannelIngest(insert: insert,
-                                     initialGain: gain?.effectiveGain ?? Self.defaultGain(for: id),
+                                     initialGain: gain?.effectiveGain ?? localGains[id] ?? Self.defaultGain(for: id),
                                      soloed: soloedIDs.contains(id),
                                      delayFrames: delayFramesByLabel[id.label] ?? 0,
                                      preEffectsEnabled: preEffectsIDs.contains(id))
@@ -633,8 +966,8 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func ensureChannel(_ id: AudioChannelID, gain: AudioMixEngine.ChannelGain?) {
         os_unfair_lock_lock(&lock)
-        if channels[id] == nil {
-            channels[id] = ChannelIngest(insert: nil, initialGain: gain?.effectiveGain ?? Self.defaultGain(for: id),
+        if !isGuest(id), channels[id] == nil {
+            channels[id] = ChannelIngest(insert: nil, initialGain: gain?.effectiveGain ?? localGains[id] ?? Self.defaultGain(for: id),
                 soloed: soloedIDs.contains(id), delayFrames: delayFramesByLabel[id.label] ?? 0,
                 preEffectsEnabled: preEffectsIDs.contains(id))
         }
@@ -665,7 +998,11 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     func anySoloed() -> Bool {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
-        return !soloedIDs.isEmpty
+        return soloedIDs.contains { id in
+            // Persisted local solo retains silence even while its source is
+            // absent. An unregistered/backstage guest cannot silence monitor.
+            return !isGuest(id) || (guest?.channelID == id && guest?.monitorAllowed == true)
+        }
     }
 
     /// A04: the per-channel PRE-FADER meter readings for the mixer UI.
@@ -679,17 +1016,20 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     func removeChannel(_ id: AudioChannelID) {
         os_unfair_lock_lock(&lock)
         channels[id] = nil
+        if guest?.channelID == id { guest = nil }
         os_unfair_lock_unlock(&lock)
     }
 
     func prune(keeping ids: Set<AudioChannelID>) {
         os_unfair_lock_lock(&lock)
-        channels = channels.filter { ids.contains($0.key) }
+        channels = channels.filter { ids.contains($0.key) || guest?.channelID == $0.key }
         os_unfair_lock_unlock(&lock)
     }
 
     func setGain(_ id: AudioChannelID, effectiveGain: Float, rampFrames: Int) {
         os_unfair_lock_lock(&lock)
+        if !isGuest(id) { localGains[id] = effectiveGain }
+        if guest?.channelID == id { guest?.gain = effectiveGain }
         let channel = channels[id]
         os_unfair_lock_unlock(&lock)
         channel?.setGain(effectiveGain, rampFrames: rampFrames)
@@ -697,6 +1037,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func setAuxSend(_ id: AudioChannelID, gain: Float, rampFrames: Int) {
         os_unfair_lock_lock(&lock)
+        if guest?.channelID == id { guest?.auxSend = gain }
         let channel = channels[id]
         os_unfair_lock_unlock(&lock)
         channel?.setAuxSend(gain, rampFrames: rampFrames)
@@ -728,10 +1069,11 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func enqueue(_ id: AudioChannelID, _ sampleBuffer: CMSampleBuffer) {
         os_unfair_lock_lock(&lock)
+        guard !isGuest(id) else { os_unfair_lock_unlock(&lock); return }
         let anchor = self.anchor
         let channel = channels[id] ?? {
             let created = ChannelIngest(insert: nil,
-                                        initialGain: Self.defaultGain(for: id),
+                                        initialGain: localGains[id] ?? Self.defaultGain(for: id),
                                         soloed: soloedIDs.contains(id),
                                         delayFrames: delayFramesByLabel[id.label] ?? 0,
                                      preEffectsEnabled: preEffectsIDs.contains(id))
@@ -751,13 +1093,18 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     func mixChannel(_ id: AudioChannelID, at position: Int64, frameCount: Int,
                     program: inout [Float], aux: inout [Float],
                     isolated: inout [Float], preEffects: inout [Float], monitor: inout [Float],
-                    accumulateMonitor: Bool) -> (pre: Int, post: Int) {
+                    contribution: inout [Float],
+                    soloActive: Bool) -> (pre: Int, post: Int) {
         os_unfair_lock_lock(&lock)
-        let channel = channels[id]
-        os_unfair_lock_unlock(&lock)
-        return channel?.mix(at: position, frameCount: frameCount,
+        defer { os_unfair_lock_unlock(&lock) }
+        let isRegisteredGuest = isGuest(id)
+        let programAllowed = !isRegisteredGuest || (guest?.channelID == id && guest?.programAllowed == true)
+        let monitorAllowed = !isRegisteredGuest || (guest?.channelID == id && guest?.monitorAllowed == true)
+        return channels[id]?.mix(at: position, frameCount: frameCount,
                      program: &program, aux: &aux, isolated: &isolated, preEffects: &preEffects,
-                     monitor: &monitor, accumulateMonitor: accumulateMonitor) ?? (pre: frameCount, post: frameCount)
+                     monitor: &monitor, programAllowed: programAllowed,
+                     contribution: &contribution,
+                     monitorAllowed: monitorAllowed, soloActive: soloActive) ?? (pre: frameCount, post: frameCount)
     }
 
     func statistics() -> AudioEngineStatistics {
@@ -810,10 +1157,11 @@ private final class ChannelIngest: @unchecked Sendable {
     /// ramp is active).
     private var duckedChunk = [Float](repeating: 0, count: AudioMixEngine.chunkFrames * 2)
 
-    init(insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?, initialGain: Float,
+    init(insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?, initialGain: Float, initialAuxSend: Float = 0,
          soloed: Bool = false, delayFrames: Int = 0, preEffectsEnabled: Bool = false) {
         self.insert = insert
         self.gain = ChannelGainRamp(gain: initialGain)
+        self.auxSend = ChannelGainRamp(gain: initialAuxSend)
         self.soloed = soloed
         self.delayFrames = max(0, delayFrames)
         if preEffectsEnabled {
@@ -894,6 +1242,14 @@ private final class ChannelIngest: @unchecked Sendable {
         ring.write(samples, at: position)
     }
 
+    func enqueueGuest(_ samples: [Float], pts: CMTime, anchor: CMTime) {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        let position = Int64(((pts - anchor).seconds * Double(AudioMixEngine.sampleRate)).rounded())
+        ring.write(samples, at: position)
+        preRing?.write(samples, at: position)
+    }
+
     /// Mix-loop read: fills the channel scratch at the absolute window
     /// (shifted back by the A10 delay), exposes the pre-fader chunk as
     /// `isolated`, and accumulates program/aux with per-frame ramped gains
@@ -907,7 +1263,7 @@ private final class ChannelIngest: @unchecked Sendable {
     func mix(at position: Int64, frameCount: Int,
              program: inout [Float], aux: inout [Float],
              isolated: inout [Float], preEffects: inout [Float], monitor: inout [Float],
-             accumulateMonitor: Bool) -> (pre: Int, post: Int) {
+             programAllowed: Bool, contribution: inout [Float], monitorAllowed: Bool, soloActive: Bool) -> (pre: Int, post: Int) {
         os_unfair_lock_lock(&lock)
         let postBefore = ring.underrunFrames
         let preBefore = preRing?.underrunFrames ?? 0
@@ -928,18 +1284,28 @@ private final class ChannelIngest: @unchecked Sendable {
         } else {
             source = chunk
         }
-        if accumulateMonitor && soloed {
-            AudioMixerCore.accumulateWithMonitor(source: source, frameCount: frameCount,
-                                                 gain: &gain, auxGain: &auxSend,
-                                                 program: &program, aux: &aux,
-                                                 monitor: &monitor)
-        } else {
-            AudioMixerCore.accumulate(source: source, frameCount: frameCount,
-                                      gain: &gain, auxGain: &auxSend,
-                                      program: &program, aux: &aux)
+        // Advance one shared fader/send trajectory, even when a hard routing
+        // gate is closed. A mute ramp cannot authorize a backstage source.
+        let hearMonitor = monitorAllowed && (!soloActive || soloed)
+        for frame in 0..<frameCount {
+            let channelGain = gain.advance()
+            let sendGain = auxSend.advance()
+            for side in 0..<2 {
+                let index = frame * 2 + side
+                let value = source[index]
+                contribution[index] = programAllowed ? value * channelGain : 0
+                if programAllowed {
+                    program[index] += contribution[index]
+                    aux[index] += value * sendGain
+                } else {
+                    isolated[index] = 0
+                    preEffects[index] = 0
+                }
+                if hearMonitor { monitor[index] += value * channelGain }
+            }
         }
         os_unfair_lock_unlock(&lock)
-        return (pre: preGaps, post: postGaps)
+        return programAllowed ? (pre: preGaps, post: postGaps) : (pre: frameCount, post: frameCount)
     }
 
     /// A04: the channel's current pre-fader meter reading.
@@ -960,6 +1326,51 @@ private final class ChannelIngest: @unchecked Sendable {
     }
 }
 
+/// One full-lease recipient's bounded PCM delivery queue. Its sum scratch is
+/// used only by the mixer actor; the queue retains immutable owned chunks.
+private final class GuestReturnMailbox: @unchecked Sendable {
+    let lease: GuestReceiveLease
+    var scratch = [Float](repeating: 0, count: AudioMixEngine.chunkFrames * 2)
+    private let lock = NSLock()
+    private let queue: DispatchQueue
+    private let capacity: Int
+    private let current: @Sendable (GuestReturnAudioFrame) -> Bool
+    private let sink: @Sendable (GuestReturnAudioFrame) -> Void
+    private var pending: [GuestReturnAudioFrame] = []
+    private var draining = false, closed = false
+    private var drops: Int64 = 0
+    init(lease: GuestReceiveLease, token: UUID, capacity: Int,
+         current: @escaping @Sendable (GuestReturnAudioFrame) -> Bool,
+         sink: @escaping @Sendable (GuestReturnAudioFrame) -> Void) {
+        self.lease = lease; self.capacity = max(1, min(8, capacity))
+        self.current = current; self.sink = sink
+        queue = DispatchQueue(label: "stream.audio.guest-return.\(token.uuidString)", qos: .userInitiated)
+    }
+    func clearScratch() { for index in scratch.indices { scratch[index] = 0 } }
+    func accumulate(_ samples: [Float]) {
+        for index in scratch.indices { scratch[index] += samples[index] }
+    }
+    func dropCount() -> Int64 { lock.lock(); defer { lock.unlock() }; return drops }
+    func close() { lock.lock(); closed = true; pending.removeAll(); lock.unlock() }
+    func post(_ frame: GuestReturnAudioFrame) {
+        lock.lock()
+        guard !closed else { lock.unlock(); return }
+        if pending.count >= capacity { pending.removeFirst(); drops += 1 }
+        pending.append(frame)
+        let schedule = !draining
+        if schedule { draining = true }; lock.unlock()
+        if schedule { queue.async { self.drain() } }
+    }
+    private func drain() {
+        while true {
+            lock.lock()
+            guard !closed, !pending.isEmpty else { draining = false; lock.unlock(); return }
+            let frame = pending.removeFirst(); lock.unlock()
+            if current(frame) { sink(frame) }
+        }
+    }
+}
+
 /// One tap's bounded, drop-oldest chunk queue — the audio twin of the video
 /// engine's `FrameMailbox`. `post` never blocks; at capacity the oldest chunk
 /// is shed and counted. Delivery runs on the tap's private serial queue, so a
@@ -973,6 +1384,7 @@ private final class AudioTapMailbox: @unchecked Sendable {
     let isolatedChannel: AudioChannelID?
     let processing: IsolatedAudioProcessing
     private let sink: AudioMixEngine.AudioSink
+    private let deliveryFilter: (@Sendable (CMSampleBuffer) -> CMSampleBuffer?)?
     private let queue: DispatchQueue
     private var lock = os_unfair_lock_s()
     private var capacity: Int
@@ -983,6 +1395,7 @@ private final class AudioTapMailbox: @unchecked Sendable {
 
     init(description: String, bus: AudioBus?, isolatedChannel: AudioChannelID?,
          processing: IsolatedAudioProcessing = .afterEffects, capacity: Int, token: UUID,
+         deliveryFilter: (@Sendable (CMSampleBuffer) -> CMSampleBuffer?)? = nil,
          sink: @escaping AudioMixEngine.AudioSink) {
         self.description = description
         self.bus = bus
@@ -990,6 +1403,7 @@ private final class AudioTapMailbox: @unchecked Sendable {
         self.processing = processing
         self.capacity = max(1, capacity)
         self.sink = sink
+        self.deliveryFilter = deliveryFilter
         self.queue = DispatchQueue(label: "com.joeblau.StreamMac.audio.tap.\(token.uuidString)",
                                    qos: .userInitiated)
     }
@@ -1025,7 +1439,30 @@ private final class AudioTapMailbox: @unchecked Sendable {
             }
             let sample = pending.removeFirst()
             os_unfair_lock_unlock(&lock)
-            sink(sample)
+            if let deliveryFilter {
+                if let filtered = deliveryFilter(sample) { sink(filtered) }
+            } else { sink(sample) }
         }
+    }
+
+    /// A permission change discards queued source samples without rewriting
+    /// their timestamps. The isolated consumer receives counted silence for
+    /// the same canonical sample window; a retired lease delivers nothing.
+    static func silence(like sample: CMSampleBuffer) -> CMSampleBuffer? {
+        guard let format = sample.formatDescription else { return nil }
+        let frames = sample.numSamples
+        var block: CMBlockBuffer?
+        let bytes = frames * 2 * MemoryLayout<Float>.size
+        guard CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil,
+            blockLength: bytes, blockAllocator: nil, customBlockSource: nil, offsetToData: 0,
+            dataLength: bytes, flags: 0, blockBufferOut: &block) == noErr, let block,
+            CMBlockBufferFillDataBytes(with: 0, blockBuffer: block, offsetIntoDestination: 0,
+                                     dataLength: bytes) == noErr else { return nil }
+        var output: CMSampleBuffer?
+        guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block,
+            formatDescription: format, sampleCount: frames, presentationTimeStamp: sample.presentationTimeStamp,
+            packetDescriptions: nil, sampleBufferOut: &output) == noErr, let output else { return nil }
+        IsolatedAudioGap.attach(frames, to: output)
+        return output
     }
 }

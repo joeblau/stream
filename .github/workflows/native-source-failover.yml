@@ -1,0 +1,73 @@
+name: Native source failover
+
+on:
+  pull_request:
+    paths:
+      - 'apple/StreamMac/AudioMixEngine.swift'
+      - 'apple/StreamMac/StreamController.swift'
+      - 'apple/StreamMac/CaptureSourcePool.swift'
+      - 'apple/StreamMac/ResilientSourceFrames.swift'
+      - 'apple/StreamMac/StudioWorkspace.swift'
+      - 'apple/StreamMac/SceneRenderer.swift'
+      - 'apple/StreamMac/CompositionEngine.swift'
+      - 'apple/StreamMac/Recording*.swift'
+      - 'apple/StreamMac/ProgramRecordingSession.swift'
+      - 'apple/scripts/*guest_audio*'
+      - 'apple/StreamCore/**'
+      - 'apple/project.yml'
+      - 'apple/Vendor/**'
+      - 'apple/scripts/source_failover_native_harness.swift'
+      - 'apple/scripts/run_source_failover_native_harness.zsh'
+      - 'apple/scripts/program_recording_fixtures.swift'
+      - 'apple/scripts/guest_fixture_boundaries.rb'
+      - 'apple/scripts/repair_desktop_transport_archives.py'
+      - '.github/workflows/native-source-failover.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-source-failover-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  recovery:
+    name: Source pixels and late PCM routing (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Show environment and install fixture tools
+        run: |
+          xcodebuild -version
+          sw_vers
+          uname -m
+          brew install xcodegen cmake
+      - name: Qualify real source health, renderer, recorder and local PCM routing
+        run: |
+          mkdir -p build/native-source-failover-results
+          set -euo pipefail
+          FAILOVER_NATIVE_BUILD_PATH="$PWD/build/native-source-failover" zsh scripts/run_source_failover_native_harness.zsh 2>&1 | tee build/native-source-failover-results/source-failover.log
+          STREAM_GUEST_AUDIO_FRAMEWORKS="$PWD/build/native-source-failover/Build/Products/Debug" zsh scripts/run_guest_audio_harness.zsh 2>&1 | tee build/native-source-failover-results/guest-audio.log
+          STREAM_GUEST_AUDIO_FRAMEWORKS="$PWD/build/native-source-failover/Build/Products/Debug" zsh scripts/run_guest_audio_harness.zsh --hold-before-revoke 2>&1 | tee build/native-source-failover-results/guest-audio-held.log
+      - name: Retain original source recordings and routing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-source-failover-${{ matrix.runner }}
+          path: |
+            apple/build/native-source-failover-results
+            apple/build/source-failover-native-validation/artifacts-*
+            apple/build/guest-audio-validation/media-*
+          if-no-files-found: warn
+          retention-days: 14

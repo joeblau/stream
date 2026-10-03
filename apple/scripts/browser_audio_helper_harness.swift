@@ -241,7 +241,7 @@ final class AudioTrace: @unchecked Sendable {
         // A uniquely named return tone is played through the REAL monitor path in this process.
         // Its frequency makes loopback attribution measurable independently of startup gain.
         let returnMixer = AudioMixEngine(), returnOutput = MonitorOutput(), returnTrace = AudioTrace()
-        let returnChannel = AudioChannelID.guest(id: "monitor-return-1000-fixture")
+        let returnChannel = AudioChannelID.media(SourceDefinitionID())
         await returnMixer.setChannelGain(returnChannel, volume: 1, isMuted: false)
         await returnMixer.addTap(bus: .monitor, token: UUID()) { sample in returnTrace.append(sample); returnOutput.play(sample) }
         await returnMixer.run()

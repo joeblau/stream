@@ -1,0 +1,91 @@
+name: Native interview runtime
+
+on:
+  pull_request:
+    paths:
+      - 'apple/StreamMac/**'
+      - 'apple/StreamCore/**'
+      - 'apple/NativeGuestReceivePrototype/**'
+      - 'apple/scripts/**'
+      - 'apple/project.yml'
+      - 'workers/interviews/**'
+      - '.github/workflows/native-interview-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-interview-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    name: Native manager recordings and return (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: npm
+          cache-dependency-path: workers/interviews/package-lock.json
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: Install owned fixture tools
+        run: |
+          xcodebuild -version
+          sw_vers
+          uname -m
+          brew install xcodegen cmake ffmpeg opus openssl@3 libevent libmicrohttpd pkgconf
+          npm ci --prefix workers/interviews
+      - name: Build owned pinned TURN server
+        run: |
+          set -euo pipefail
+          mkdir -p apple/build/native-runtime-results
+          export STREAM_INTERVIEW_TURN_BUILD_DIR="$PWD/apple/build/native-runtime-turn"
+          STREAM_TURN_OPENSSL_ROOT="$(brew --prefix openssl@3)"
+          STREAM_TURN_LIBEVENT_ROOT="$(brew --prefix libevent)"
+          export STREAM_TURN_OPENSSL_ROOT STREAM_TURN_LIBEVENT_ROOT
+          apple/scripts/build_owned_interview_turn.zsh 2>&1 | tee apple/build/native-runtime-results/turn.log
+      - name: Qualify actual native manager Program and ISO recordings
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          export STREAM_INTERVIEW_PROGRAM_BUILD_PATH="$PWD/apple/build/native-runtime-derived"
+          export STREAM_GUEST_RTC_INCLUDE="$STREAM_INTERVIEW_PROGRAM_BUILD_PATH/Build/Products/Debug/include/libdatachannel"
+          export STREAM_INTERVIEW_TURN_SERVER="$PWD/apple/build/native-runtime-turn/build/bin/turnserver"
+          apple/scripts/run_native_interview_program_iso_harness.zsh 2>&1 | tee apple/build/native-runtime-results/program-iso.log
+      - name: Qualify actual native stereo mix-minus return
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          export STREAM_INTERVIEW_RETURN_BUILD_PATH="$PWD/apple/build/native-runtime-derived"
+          export STREAM_GUEST_RTC_INCLUDE="$STREAM_INTERVIEW_RETURN_BUILD_PATH/Build/Products/Debug/include/libdatachannel"
+          export STREAM_INTERVIEW_TURN_SERVER="$PWD/apple/build/native-runtime-turn/build/bin/turnserver"
+          apple/scripts/run_native_interview_return_audio_harness.zsh 2>&1 | tee apple/build/native-runtime-results/return-audio.log
+      - name: Retain actual media and bounded qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-runtime-${{ matrix.runner }}
+          path: |
+            apple/build/native-runtime-results
+            apple/build/native-interview-program-iso-validation/media-*
+            apple/build/native-interview-program-iso-validation/run-*/worker.log
+            apple/build/native-interview-return-audio-validation/run-*/worker.log
+            apple/build/native-runtime-turn/build-provenance.json
+            apple/build/native-runtime-turn/licenses
+            apple/build/native-runtime-derived/TransportSourceBuild/*/sources.json
+          if-no-files-found: warn

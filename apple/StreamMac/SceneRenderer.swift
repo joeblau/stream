@@ -178,6 +178,7 @@ final class SceneRenderer {
     /// against. Defaults to the shared `TitleTokenStore`; tests can inject a
     /// fixed map.
     private let tokenProvider: () -> [String: String]
+    private let guestSlotProvider: () -> [UUID: GuestSlot]
 
     /// G01 (issue #81): where the renderer resolves an image layer's payload
     /// to its decoded image (alpha/color space/pixel aspect preserved by the
@@ -199,6 +200,7 @@ final class SceneRenderer {
     /// `render`/`renderTransition` before any layer work — the timestamp the
     /// timed/fly-in title visibility samples against.
     private var currentPresentationSeconds = 0.0
+    private var currentGuestPresentationTime: CMTime = .invalid
     /// G02: per-layer timed-visibility anchors — the clock seconds at which
     /// each timed text layer FIRST painted after being absent. A layer absent
     /// from a tick is pruned (`textTimingSeen` is rebuilt per render call),
@@ -254,12 +256,15 @@ final class SceneRenderer {
          segmentation: PersonSegmentationCoordinator = .shared,
          tokenProvider: @escaping () -> [String: String] =
             { TitleTokenStore.shared.snapshot() },
+         guestSlotProvider: @escaping () -> [UUID: GuestSlot] =
+            { GuestSlotRenderStore.shared.snapshot() },
          imageProvider: @escaping (ImageSourcePayload) -> CIImage? =
             { ImageLayerImageStore.shared.image(for: $0) },
          usesSoftwareRendering: Bool = false) {
         self.sourceEffectsProvider = sourceEffectsProvider
         self.segmentation = segmentation
         self.tokenProvider = tokenProvider
+        self.guestSlotProvider = guestSlotProvider
         self.imageProvider = imageProvider
         self.usesSoftwareRendering = usesSoftwareRendering
         var options: [CIContextOption: Any] = [
@@ -314,6 +319,7 @@ final class SceneRenderer {
         // set rebuilds each call so an absent layer's anchor prunes (and its
         // next appearance replays the timing).
         currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
+        currentGuestPresentationTime = presentationTime
         textTimingSeen.removeAll()
         chatMasks.removeAll(keepingCapacity: true)
         placedNestedChat.removeAll(keepingCapacity: true)
@@ -371,6 +377,7 @@ final class SceneRenderer {
         let canvas = CGRect(x: 0, y: 0, width: outWidth, height: outHeight)
         currentFrameIntervalMs = max(1, CMTimeGetSeconds(frameDuration) * 1000)
         currentPresentationSeconds = CMTimeGetSeconds(presentationTime)
+        currentGuestPresentationTime = presentationTime
         textTimingSeen.removeAll()
         chatMasks.removeAll(keepingCapacity: true)
         placedNestedChat.removeAll(keepingCapacity: true)
@@ -693,6 +700,26 @@ final class SceneRenderer {
                        depth: Int,
                        visited: Set<SceneID>) -> CIImage? {
         switch layer.payload {
+        case .guest(let inline):
+            let payload: GuestSourcePayload
+            if let id = layer.sourceID {
+                guard case .guest(let registered)? = sourcePayloads[id] else { return nil }
+                payload = registered
+            } else { payload = inline }
+            guard let pixels = frames.guest?(payload, currentGuestPresentationTime) else {
+                guard let id = payload.slotID, let slot = guestSlotProvider()[id] else { return nil }
+                let placeholder = payload.role == .camera ? slot.cameraPlaceholder : slot.screenPlaceholder
+                guard placeholder.visible else { return nil }
+                var background = layer
+                background.payload = .shape(.init(fillColorHex: placeholder.colorHex))
+                let base = image(for: background, canvas: canvas, frames: frames,
+                    sourcePayloads: sourcePayloads, scenes: scenes, depth: depth, visited: visited)
+                let text = TextSourcePayload(text: placeholder.message, fontSize: 38, alignment: .center, padding: 16)
+                let caption = placeText(text, layer: layer, canvas: canvas)
+                if let caption, let base { return caption.composited(over: base) }
+                return caption ?? base
+            }
+            return place(source: CIImage(cvPixelBuffer: pixels), layer: layer, canvas: canvas, isCamera: false)
         case .screen:
             guard let key = captureKey(for: layer, sourcePayloads: sourcePayloads),
                   let screen = frames.screen(key) else { return nil }
@@ -770,9 +797,7 @@ final class SceneRenderer {
             return place(source: CIImage(cvPixelBuffer: buffer),
                          layer: layer, canvas: canvas, isCamera: false)
         default:
-            // Payload kinds without a renderer yet (pdf, guest): documented
-            // fallback is the background showing through; later waves add
-            // renderers behind this switch.
+            // Unsupported payloads paint nothing.
             return nil
         }
     }
@@ -940,7 +965,12 @@ final class SceneRenderer {
             else { return nil }
             resolvedText = value
         } else {
-            resolvedText = text.recordingChatMessageID == nil ? TitleTemplate.resolve(text.text, with: tokenProvider()) : text.text
+            if text.recordingChatMessageID == nil, let binding = text.guestBinding,
+               let slot = guestSlotProvider()[binding.slotID] {
+                resolvedText = binding.field == .name ? slot.resolvedName : slot.title
+            } else {
+                resolvedText = text.recordingChatMessageID == nil ? TitleTemplate.resolve(text.text, with: tokenProvider()) : text.text
+            }
         }
         guard !resolvedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
@@ -1410,7 +1440,7 @@ final class SceneRenderer {
                                  visited: Set<SceneID>) -> Bool {
         for layer in scene.layers where layer.isVisible {
             switch layer.payload {
-            case .camera, .screen, .syphon, .media, .pdf, .web:
+            case .camera, .screen, .syphon, .media, .pdf, .web, .guest:
                 return false
             case .image:
                 // G01 (issue #81): the layer's VALUE (the payload) is static,
@@ -1423,7 +1453,7 @@ final class SceneRenderer {
                 // G02 (issue #110): a timed/fly-in title animates per tick —
                 // it must never bake into the static nested-scene cache.
                 if text.timing?.isActive == true || text.timer != nil || text.ticker != nil
-                    || TitleTemplate.containsToken(text.text) { return false }
+                    || text.guestBinding != nil || TitleTemplate.containsToken(text.text) { return false }
             case .scene(let reference):
                 guard !visited.contains(reference.sceneID),
                       let child = scenes[reference.sceneID] else { continue }
