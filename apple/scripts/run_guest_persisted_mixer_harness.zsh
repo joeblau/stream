@@ -38,4 +38,4 @@ python3 scripts/repair_desktop_transport_archives.py "${GUEST_PERSISTED_MIXER_BU
 xcodebuild -project "${GUEST_MIXER_DIR}/GuestPersistedMixerValidation.xcodeproj" -scheme GuestPersistedMixerHarness \
   -destination 'platform=macOS' -derivedDataPath "${GUEST_PERSISTED_MIXER_BUILD_PATH}" CODE_SIGNING_ALLOWED=NO build
 GUEST_MIXER_PRODUCTS="${GUEST_PERSISTED_MIXER_BUILD_PATH:A}/Build/Products/Debug"
-env DYLD_FRAMEWORK_PATH="${GUEST_MIXER_PRODUCTS}" "${GUEST_MIXER_PRODUCTS}/GuestPersistedMixerHarness"
+env DYLD_FRAMEWORK_PATH="${GUEST_MIXER_PRODUCTS}" "${GUEST_MIXER_PRODUCTS}/GuestPersistedMixerHarness" "$@"

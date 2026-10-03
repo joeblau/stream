@@ -17,4 +17,4 @@ xcrun swiftc -swift-version 6 -target "$(uname -m)-apple-macosx14.0" -DSTREAM_GU
   "${APPLE_DIR}/StreamMac/GuestMediaReceipts.swift" "${APPLE_DIR}/NativeGuestReceivePrototype/NativeGuestReceiver.swift" \
   "${SCRIPT_DIR}/native_guest_receive_harness.swift" "${BUILD_DIR}/GuestReceive.o" "${BUILD_DIR}/PeerFixture.o" \
   "${STREAM_GUEST_RTC_LIBRARY}" -Xlinker -lc++ -framework Security -framework CoreFoundation -lz -o "${BUILD_DIR}/guest-harness"
-"${BUILD_DIR}/guest-harness" "${BUILD_DIR}/fixtures"
+"${BUILD_DIR}/guest-harness" "${BUILD_DIR}/fixtures" "$@"
