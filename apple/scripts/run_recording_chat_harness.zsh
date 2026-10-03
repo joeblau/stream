@@ -3,6 +3,7 @@ set -euo pipefail
 cd "${0:A:h:h}"
 readonly CHAT_DIR="build/recording-chat-validation"
 readonly CHAT_BUILD_PATH="${CHAT_BUILD_PATH:-$CHAT_DIR/derived}"
+readonly CHAT_MEDIA_DIR="$CHAT_DIR/media-$(uuidgen)"
 mkdir -p "$CHAT_DIR"
 ruby -ryaml -rjson - "$CHAT_DIR" <<'RUBY'
 root=Dir.pwd
@@ -40,4 +41,4 @@ xcodebuild -project "$CHAT_DIR/RecordingChatValidation.xcodeproj" \
   -scheme RecordingChatHarness -destination 'platform=macOS' \
   -derivedDataPath "$CHAT_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 env DYLD_FRAMEWORK_PATH="${CHAT_BUILD_PATH:A}/Build/Products/Debug" \
-  "${CHAT_BUILD_PATH:A}/Build/Products/Debug/RecordingChatHarness"
+  "${CHAT_BUILD_PATH:A}/Build/Products/Debug/RecordingChatHarness" --artifacts-dir "${CHAT_MEDIA_DIR:A}" "$@"
