@@ -128,6 +128,7 @@ jobs:
         run: |
           set -euo pipefail
           STREAM_GUEST_PROGRAM_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_guest_program_iso_harness.zsh 2>&1 | tee apple/build/native-guest-results/program-iso.log
+          STREAM_GUEST_PROGRAM_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_guest_program_iso_harness.zsh --hold-startup-800ms 2>&1 | tee apple/build/native-guest-results/program-iso-held-startup.log
       - name: Qualify actual local relay policy and service media
         env:
           CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
