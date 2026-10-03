@@ -27,8 +27,8 @@ from project files and exports. Global control still checks current targets and
 availability, and never replays missed commands on reconnect.
 
 The catalog covers scene selection, Take/Revert, layer and camera/PIP visibility,
-audio mute/monitor/bus controls, media/playlist/sound transport and output
-start/stop. Comments and guest slots are visibly unavailable until their actual
+audio mute/monitor/bus controls, media/playlist/sound transport, queued comments
+and output start/stop. Guest slots remain visibly unavailable until their actual
 controllers exist; the editor cannot bind those notices.
 
 Settings > Application offers interface text size, native increased contrast,
@@ -47,8 +47,27 @@ when it still belongs to the studio.
 
 Run `apple/scripts/run_studio_shortcuts_harness.zsh` for deterministic target,
 persistence, conflict, text-entry/modal/auto-repeat, opt-in, disconnect/reconnect,
-project isolation and future-version preservation checks. Build `StreamMac` to
-validate the native menu, window, accessibility and hot-key integrations.
+project isolation and future-version preservation checks.
+
+Run `apple/scripts/run_local_shortcut_harness.zsh` on a logged-in Mac for owned
+AppKit window and first-responder qualification. It installs the shipping local
+event monitor and sends app-local `NSEvent` fixtures through `NSApplication`.
+The shipping catalog/dispatcher performs real scene selection, Take,
+rename/reorder/delete and locked-layer rejection/recovery. Native text fields,
+multiline editors and buttons retain typing/Return. An actual attached sheet
+suppresses parent commands while explicit binding capture remains available.
+The shipping SwiftUI palette receives text, Down and Return through its actual
+search editor, executes the selected command once, dismisses and restores the
+original field focus. Repeats cannot collapse palette presentation. Other owned
+windows and monitor removal are checked too.
+
+The runner uses temporary documents/preferences and generated tool-only
+credential/microphone boundaries. It never registers global hotkeys, starts
+capture/publishing, controls another application or injects `CGEvent` input.
+Missing WindowServer access is explicitly unqualified (exit 77); a stalled
+fixture fails within 45 seconds. These fixtures establish local event dispatch,
+not physical keyboard input, device reconnect, global foreground-app control or
+accessibility traversal. Build `StreamMac` separately for the complete app.
 
 Manual acceptance still needs VoiceOver/Accessibility Inspector and Full
 Keyboard Access on a running studio: traverse panels and layer actions, adjust
