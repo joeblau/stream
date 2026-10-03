@@ -41,6 +41,6 @@ struct NativeGuestReturnVideoBudgetHarness {
                                 bufferedBytes: 0, droppedFrames: 0, sentFrames: 30), "nonmonotonic sample is rejected")
         require(!budget.observe(monotonicMilliseconds: 22_000, estimatedAvailableBitsPerSecond: 100_000_001,
                                 bufferedBytes: 0, droppedFrames: 0, sentFrames: 30), "out-of-range estimate is rejected")
-        print("PASS guest return video budget transitions=3 max=1280x720@30/1500000 stable-up=8/3500ms down=3 dwell=2000ms invalidSamples=2")
+        print("PASS guest return video budget transitions=3 max=1280x720@30/1500000 stable-up=8/3500ms down=3 dwell=2000ms invalidSamples=3")
     }
 }
