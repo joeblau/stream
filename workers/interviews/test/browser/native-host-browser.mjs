@@ -8,12 +8,14 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {WebSocket, WebSocketServer} from 'ws';
+import {chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const publicPath = fileURLToPath(new URL('../../public/', import.meta.url));
 const room = crypto.randomUUID(), hostID = crypto.randomUUID(), guestID = crypto.randomUUID();
 const capability = 'b'.repeat(64), hostGeneration = crypto.randomUUID();
 const media = {audio:'audio-mid', camera:'camera-mid', screen:'screen-mid'};
+const startup = new ChromeFixtureDiagnostics();
 const cli = process.env.NATIVE_GUEST_HOST;
 assert(cli && path.isAbsolute(cli), 'Set NATIVE_GUEST_HOST to the absolute native host CLI binary path');
 await fs.access(cli, fs.constants.X_OK);
@@ -147,12 +149,16 @@ class CDP {
       if (pending) { this.pending.delete(value.id); clearTimeout(pending.timer);
         value.error ? pending.reject(new Error(value.error.message)) : pending.resolve(value.result); }
       if (value.method === 'Runtime.exceptionThrown') this.errors.push(value.params.exceptionDetails.text);
+      startup.event(value.method);
     });
     socket.on('close', () => { for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Chrome closed')); } this.pending.clear(); });
   }
   send(method, params = {}, sessionId) {
     return new Promise((resolve, reject) => {
-      const id = ++this.id, timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Chrome timeout: ${method}`)); }, 10_000);
+      const id = ++this.id, timer = setTimeout(() => {
+        this.pending.delete(id); startup.timeout(method,this.pending.size);
+        reject(new Error(`Chrome timeout: ${method}`));
+      }, 10_000);
       this.pending.set(id, {resolve,reject,timer}); this.socket.send(JSON.stringify({id,method,params,sessionId}));
     });
   }
@@ -183,6 +189,7 @@ Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{value:async()=>{
 let peer, native, chrome, browserSocket, browser, serverFailure;
 const hosts = [], profile = await fs.mkdtemp(path.join(os.tmpdir(), 'stream-native-host-chrome-'));
 const server = http.createServer(async (request, response) => {
+  startup.request();
   try {
     if (request.method === 'POST' && request.url === `/v1/rooms/${room}/turn`) {
       assert.equal(request.headers.authorization, `Bearer ${capability}`);
@@ -191,7 +198,7 @@ const server = http.createServer(async (request, response) => {
     const name = new URL(request.url, 'http://localhost').pathname;
     assert(/^\/guest\.(html|js|css)$/.test(name));
     response.setHeader('Content-Type', name.endsWith('.js') ? 'application/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
-    response.setHeader('Referrer-Policy', 'no-referrer'); response.end(await fs.readFile(path.join(publicPath, name.slice(1))));
+    response.setHeader('Referrer-Policy', 'no-referrer'); response.end(await fs.readFile(path.join(publicPath, name.slice(1)))); startup.response();
   } catch { response.writeHead(404); response.end(); }
 });
 const wss = new WebSocketServer({noServer:true,handleProtocols:protocols => protocols.has('stream-interview-v1') ? 'stream-interview-v1' : false});
@@ -246,23 +253,36 @@ try {
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const executable = process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  startup.phase('launch');
   chrome = spawn(executable,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--no-first-run',
     '--disable-background-networking','--disable-component-update','--disable-extensions','--autoplay-policy=no-user-gesture-required',
-    ...(process.env.CHROME_NO_SANDBOX === '1' ? ['--no-sandbox'] : []),'about:blank'],{stdio:'ignore'});
+    ...chromeFixtureCredentialArguments(),
+    ...(process.env.CHROME_NO_SANDBOX === '1' ? ['--no-sandbox'] : []),'about:blank'],{stdio:['ignore','ignore','pipe']});
+  startup.observe(chrome);
   let launchFailure; chrome.on('error', () => { launchFailure = true; });
   const port = await wait('isolated Chrome launch', async () => {
     assert(!launchFailure, 'Chrome launch failed');
     try { return (await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).trim().split('\n'); } catch { return undefined; }
   });
+  startup.phase('debug-endpoint');
   browserSocket = new WebSocket(`ws://127.0.0.1:${port[0]}${port[1]}`,{handshakeTimeout:10_000});
   await new Promise((resolve,reject) => { browserSocket.once('open',resolve); browserSocket.once('error',reject); });
+  startup.phase('debug-connected');
   browser = new CDP(browserSocket); const version = await browser.send('Browser.getVersion');
+  startup.version(version.product);
+  startup.phase('browser-version');
   const target = await browser.send('Target.createTarget',{url:'about:blank'});
+  startup.phase('target-created');
   const {sessionId:g} = await browser.send('Target.attachToTarget',{targetId:target.targetId,flatten:true});
+  startup.phase('target-attached');
   await browser.send('Page.enable',{},g); await browser.send('Runtime.enable',{},g);
+  startup.phase('page-runtime-enabled');
   await browser.send('Page.addScriptToEvaluateOnNewDocument',{source:syntheticMedia},g);
+  startup.phase('navigate');
   await browser.send('Page.navigate',{url:`${origin}/guest.html?room=${room}#${capability}`},g);
+  startup.phase('navigation-accepted');
   await browser.until(g,"typeof document.getElementById('prepare').onclick==='function'",'actual guest page');
+  startup.phase('guest-ready');
   assert.equal(await browser.evaluate(g,'location.hash'),'');
   await browser.evaluate(g,"document.getElementById('prepare').click()");
   await browser.until(g,"!document.getElementById('join').disabled",'synthetic camera/tone prepared');
