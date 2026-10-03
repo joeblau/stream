@@ -93,7 +93,9 @@ jobs:
         run: COMMENT_BUILD_PATH=build/desktop zsh scripts/run_comment_presentation_harness.zsh
 
       - name: Qualify generated program recordings
-        run: zsh scripts/run_program_recording_harness.zsh
+        run: |
+          zsh scripts/run_program_recording_harness.zsh
+          STREAM_FRACTIONAL_ISO_FRAMEWORKS="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_fractional_iso_audio_harness.zsh
       - name: Validate sandbox declaration
         run: python3 scripts/validate_desktop_distribution.py build/desktop/Build/Products/Debug/StreamMac.app
       - name: Retain test results
