@@ -38,7 +38,7 @@ public enum PortableShow {
     /// remains editable content; connection credentials and machine grants do not.
     public static func redact(_ data: Data, remappingIDs: Bool = false, idMap: inout [String: String]) throws -> Data {
         guard data.count <= 16 * 1024 * 1024 else { throw Failure.invalid("A show document exceeds 16 MiB.") }
-        let literalContentKeys: Set<String> = ["text", "name", "title", "description", "displayname", "html", "css", "javascript", "fontname", "fontfamily"]
+        let literalContentKeys: Set<String> = ["text", "name", "title", "description", "displayname", "localname", "html", "css", "javascript", "fontname", "fontfamily"]
         func visit(_ value: Any, key: String? = nil) -> Any {
             if let dictionary = value as? [String: Any] {
                 var result: [String: Any] = [:]

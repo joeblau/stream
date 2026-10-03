@@ -78,7 +78,7 @@ struct NativeInterviewView: View {
     private func guest(_ member: NativeInterviewMember) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
-            Text(member.name).font(.headline)
+            Text(manager.displayName(for: member.id)).font(.headline)
             Text("\(member.membership.rawValue.capitalized) · \(NativeInterviewViewValues.media(member.media))")
                 .font(.caption).foregroundStyle(.secondary)
             if member.membership == .waiting {
@@ -90,6 +90,12 @@ struct NativeInterviewView: View {
                 }
                 commandButton("Admit Backstage", .admit(member.id))
             } else {
+                if let context = dispatcher.currentGuestCommandContext(for: member.id) {
+                    NativeGuestLocalControls(dispatcher: dispatcher, context: context,
+                        serviceName: member.name,
+                        localName: sceneStore.guestSlots.first(where: { $0.id == context.receive.slot })?.localName ?? "")
+                        .id(context.receive.negotiation)
+                }
                 HStack {
                     commandButton("On Air", .onair(member.id))
                     commandButton("Backstage", .backstage(member.id))
@@ -150,6 +156,48 @@ struct NativeInterviewView: View {
                 formMessage = "Private expiring guest invite copied. Share it only with the intended guest."
             } catch { formMessage = NativeInterviewViewValues.message((error as? NativeInterviewError) ?? .transport) }
         }
+    }
+}
+
+/// The rendered controls retain their exact connection, rather than looking
+/// up a replacement while processing an old button or text-field callback.
+private struct NativeGuestLocalControls: View {
+    @ObservedObject var dispatcher: StudioCommandDispatcher
+    let context: NativeInterviewPeerLease
+    let serviceName: String
+    @State private var name: String
+
+    init(dispatcher: StudioCommandDispatcher, context: NativeInterviewPeerLease,
+         serviceName: String, localName: String) {
+        self.dispatcher = dispatcher; self.context = context; self.serviceName = serviceName
+        _name = State(initialValue: localName)
+    }
+    private var channel: AudioChannelID { AudioMixEngine.guestChannelID(for: context.receive) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                let muted = dispatcher.state.mixer.channelMutes[channel.label] == true
+                let soloed = dispatcher.state.mixer.soloedChannels.contains(channel.label)
+                button(muted ? "Unmute" : "Mute", .setMuted(context, !muted))
+                button(soloed ? "Clear Monitor Solo" : "Solo in Monitor", .setSolo(context, !soloed))
+            }
+            Text("Mute uses the saved mixer channel. Solo affects private Monitor after the guest is allowed there; it grants no Monitor or Program permission.")
+                .font(.caption).foregroundStyle(.secondary)
+            TextField("Local display name", text: $name).textFieldStyle(.roundedBorder)
+            HStack {
+                button("Save Local Name", .rename(context, name))
+                Button("Use Guest Name") {
+                    if dispatcher.execute(.interview(.rename(context, ""))).error == nil { name = "" }
+                }.disabled(!dispatcher.canExecute(.interview(.rename(context, ""))))
+            }
+            Text("Guest-reported name: \(serviceName). The local name labels this project and its overlays; it is not sent to the guest service.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    private func button(_ title: String, _ action: NativeInterviewCommand) -> some View {
+        Button(title) { dispatcher.execute(.interview(action)) }
+            .disabled(!dispatcher.canExecute(.interview(action)))
+            .help(dispatcher.availabilityError(for: .interview(action))?.description ?? title)
     }
 }
 

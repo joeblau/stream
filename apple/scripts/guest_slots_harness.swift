@@ -179,6 +179,18 @@ private func require(_ value: Bool, _ reason: String) throws {
         let after = fingerprint(render(nested, at: due, program: true, scenes: [names.id: names]))
         try require(changedTitle != after, "Bound name in a nested scene reused stale cached pixels")
         try require(after == literalMetadata("Grace Hopper", "Admiral"), "Name binding resolved the wrong slot metadata")
+        metadata.localName = "Local Name"
+        store.replaceGuestSlot(metadata)
+        let aliasPixels = fingerprint(render(nested, at: due, program: true, scenes: [names.id: names]))
+        try require(aliasPixels == literalMetadata("Local Name", "Admiral"), "Local alias did not update the actual bound nested raster")
+        metadata.displayName = "Fresh Service Name"
+        store.replaceGuestSlot(metadata)
+        try require(fingerprint(render(nested, at: due, program: true, scenes: [names.id: names])) == aliasPixels,
+                    "Fresh service metadata erased local alias pixels")
+        metadata.localName = nil; metadata.displayName = "Grace Hopper"
+        store.replaceGuestSlot(metadata)
+        try require(fingerprint(render(nested, at: due, program: true, scenes: [names.id: names])) == after,
+                    "Clearing the alias did not restore service-name pixels")
         controller.removeGuestMedia(lease)
         let lost = render(solo, at: due, program: true)
         try require(color(lost) == cardRGB, "Source loss did not restore configured card")
