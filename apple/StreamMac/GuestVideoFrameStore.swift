@@ -104,15 +104,9 @@ final class GuestVideoFrameStore: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !closed, lease?.slot == slot, current == nil || current == lease,
               (!program || programAllowed), time.isNumeric,
-              var state = roles[role], state.enabled,
+              let state = roles[role], state.enabled,
               let index = state.frames.lastIndex(where: { $0.pts <= time }) else { return nil }
         let frame = state.frames[index]
-        if index > 0 {
-            for removed in state.frames.prefix(index) {
-                state.bytes -= CVPixelBufferGetBytesPerRow(removed.pixels) * CVPixelBufferGetHeight(removed.pixels)
-            }
-            state.frames.removeFirst(index); roles[role] = state
-        }
         guard role == .screen || (time - frame.pts).seconds <= 0.25 else { return nil }
         return frame.pixels
     }
