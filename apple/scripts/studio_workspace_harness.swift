@@ -1,14 +1,41 @@
 import Foundation
 import StreamCore
 
+// Generated runner boundaries use this suite and machine folder rather than
+// importing or changing an operator's credentials, preferences or recordings.
+enum WorkspaceFixtureDefaults {
+    static let name = "stream.workspace-validation.\(UUID())"
+    static var value: UserDefaults { UserDefaults(suiteName: name)! }
+}
+enum WorkspaceFixtureStorage {
+    static let root = FileManager.default.temporaryDirectory.appendingPathComponent("stream-workspace-\(UUID())")
+    static let machineDirectory = root.appendingPathComponent("Machine", isDirectory: true)
+    static let recordingsDirectory = machineDirectory.appendingPathComponent("Recordings", isDirectory: true)
+}
+
 private func require(_ value: @autoclosure () throws -> Bool, _ message: String) throws {
     if try !value() { throw NSError(domain: "WorkspaceHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
 }
 
 @main @MainActor struct WorkspaceHarness {
-    static func main() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("stream-workspace-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+    static func main() async {
+        setbuf(stdout, nil)
+        do { try await run() }
+        catch { print("FAIL: \(error.localizedDescription)"); exit(1) }
+    }
+    static func run() async throws {
+        let root = WorkspaceFixtureStorage.root
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            WorkspaceFixtureDefaults.value.removePersistentDomain(forName: WorkspaceFixtureDefaults.name)
+        }
+        // Provision only our own catalog/profile before startup so the app's
+        // first-launch legacy copy never reads the operator's App Group files.
+        let seededCatalog = StudioProjectCatalog()
+        let seededDirectory = root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(
+            project: seededCatalog.selectedProjectID, profile: seededCatalog.selectedProfileID))
+        try FileManager.default.createDirectory(at: seededDirectory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(seededCatalog).write(to: root.appendingPathComponent("projects.v1.json"))
         let workspace = StudioWorkspace(root: root)
         for starter in StudioStarter.allCases {
             let scene = starter.scene(camera: nil, screen: nil, profile: .default)
@@ -44,6 +71,74 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         workspace.addProfile(named: "Duplicate Profile", duplicate: true)
         await workspace.applyPending()
         try require(workspace.runtime.sceneStore.scenes[0].name == "Old Store Late Write", "Profile duplicate lost scenes")
+
+        // The actual switch retires its runtime before preparing the destination.
+        // A regular file at our new profile path must fail that preparation and
+        // leave the selected context operational through a fresh runtime.
+        let retainedSelection = workspace.selection
+        let retainedDirectory = workspace.directory(for: retainedSelection)
+        let retired = workspace.runtime
+        let retiredAccountsRevision = retired.providerAccounts.managedReadRevision
+        let retiredBinding = retired.recoveryBinding
+        workspace.addProfile(named: "Blocked Preparation", duplicate: false)
+        let blockedSelection = try workspace.pending.unwrap("Failed-switch profile was not staged")
+        let blockedDirectory = workspace.directory(for: blockedSelection)
+        try require(blockedDirectory != retainedDirectory, "Fixture must not replace the selected directory")
+        try FileManager.default.removeItem(at: blockedDirectory)
+        let marker = Data("owned-workspace-preparation-blocker".utf8)
+        try marker.write(to: blockedDirectory)
+        defer { if (try? Data(contentsOf: blockedDirectory)) == marker { try? FileManager.default.removeItem(at: blockedDirectory) } }
+        await workspace.applyPending()
+        try require(retired.providerAccounts.managedReadRevision != retiredAccountsRevision,
+            "Failure fixture did not exercise actual retirement of the old account session")
+        try require(workspace.selection == retainedSelection && workspace.pending == blockedSelection
+            && DesktopStorage.projectDirectory == retainedDirectory, "Failed preparation lost the selected profile/captured storage path")
+        try require(workspace.runtime !== retired && workspace.runtime.controller !== retired.controller
+            && workspace.runtime.providerAccounts !== retired.providerAccounts, "Failed preparation reused the retired runtime")
+        try require(!workspace.isSwitching && workspace.canSwitch && workspace.error?.isEmpty == false,
+            "Failed preparation stranded the switching guard or omitted its error")
+        try require(try Data(contentsOf: blockedDirectory) == marker, "Failed preparation removed the blocking file")
+        let reopened = workspace.runtime
+        try require(!reopened.controller.outputSessionActive && !reopened.controller.isPreviewing
+            && !reopened.recorder.state.isActive && !reopened.controller.secondaryRecorder.state.isActive
+            && reopened.controller.destinationOutputs.states.isEmpty, "Failed preparation started output/capture")
+        try require(reopened.recoveryBinding != nil && reopened.recoveryBinding !== retiredBinding
+            && StudioAutomationEndpoint.shared.isBound
+            && StudioAutomationEndpoint.shared.currentProfile?.id == retainedSelection.profile.uuidString,
+            "Failed preparation did not bind the fresh runtime/recovery context")
+        let reopenedScene = reopened.sceneStore.scenes[0]
+        let rename = reopened.dispatcher.execute(.renameScene(reopenedScene.id, to: "After Failed Switch"))
+        try require(rename.error == nil && rename.state.scenes.contains { $0.id == reopenedScene.id && $0.name == "After Failed Switch" },
+            "Reopened runtime dispatcher was not usable")
+        reopened.flush()
+        let reopenedDocument = try JSONDecoder().decode(SceneDocument.self,
+            from: Data(contentsOf: retainedDirectory.appendingPathComponent("stream.scenes.v2.json")))
+        try require(reopenedDocument.scenes.contains { $0.id == reopenedScene.id && $0.name == "After Failed Switch" },
+            "Reopened runtime did not write to its retained selected directory")
+        reopened.chat.receive(try JSONSerialization.data(withJSONObject: ["action": "event", "timestamp": 1_800_000_001,
+            "payload": ["connectionIdentifier": "fixture/reopened", "eventTypeId": 5,
+                "eventPayload": ["liveChatMessageId": "reopened", "text": "Reopened public fixture", "author": ["displayName": "Producer"]]]]))
+        try require(reopened.chat.queue.messages.count == 1, "Reopened chat session was not usable")
+        reopened.recoveryBinding?.checkpoint()
+        await workspace.recovery.flush()
+        let retainedSnapshot = try JSONDecoder().decode(SessionRecoverySnapshot.self,
+            from: Data(contentsOf: root.appendingPathComponent("SessionRecovery/current.v1.json")))
+        try require(retainedSnapshot.projectID == retainedSelection.project && retainedSnapshot.profileID == retainedSelection.profile
+            && retainedSnapshot.stagedSceneID == reopened.previewProgram.stagedScene?.id.rawValue,
+            "Reopened recovery binding failed to checkpoint the retained context")
+        // Remove only our known regular file; real prepare/switch can now retry.
+        try FileManager.default.removeItem(at: blockedDirectory)
+        await workspace.applyPending()
+        try require(workspace.selection == blockedSelection && workspace.pending == nil && !workspace.isSwitching
+            && workspace.runtime !== reopened && DesktopStorage.projectDirectory == blockedDirectory && workspace.error == nil,
+            "Recovered switch did not retry successfully after the owned blocker was removed")
+        try require(!workspace.runtime.controller.outputSessionActive && !workspace.runtime.recorder.state.isActive,
+            "Retry started an output")
+        workspace.stage(project: retainedSelection.project, profile: retainedSelection.profile)
+        await workspace.applyPending()
+        try require(workspace.selection == retainedSelection && workspace.runtime.sceneStore.scenes[0].name == "After Failed Switch",
+            "A later successful switch lost the recovered profile's persisted edit")
+        print("PASS: actual failed profile-directory preparation retires old account session, retains selection/path, rebuilds usable dispatcher/chat/recovery runtime, clears switch guard and retries after owned file cleanup with no outputs")
 
         let runtime = workspace.runtime
         runtime.previewProgram.setDirectLiveEditing(false)
@@ -123,11 +218,14 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         let preserved = try FileManager.default.contentsOfDirectory(at: selectedDirectory, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.contains("corrupt") }
         try require(preserved.contains { (try? Data(contentsOf: $0)) == Data("truncated-scene-document".utf8) }, "Corrupt original was not preserved")
+        restarted.error = "Fixture previous restore error"
         await restarted.restore(recovery)
         try require(restarted.sceneRecovery == nil, "Successful restore kept recovery pending")
+        try require(restarted.error == nil, "Successful restore kept the previous error banner")
         try require(restarted.runtime.sceneStore.scenes.map(\.name) == recovery.document.scenes.map(\.name), "Accepted backup did not restore scenes")
         await RecordingTerminationDelegate.finishSession?()
         print("PASS: shared chat staging/Take, recovery binding and attached library, project/profile switching, captured store paths, duplication, package preview, consistent ID remapping and packaged LUT bytes")
+        print("Qualification: shipping Workspace switching/recovery logic; temporary machine/project/preferences and generated credential/microphone/legacy-migration boundaries; no operator credentials, real capture or provider calls")
     }
 }
 
