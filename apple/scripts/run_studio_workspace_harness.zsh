@@ -119,6 +119,8 @@ h['sources'] << File.join(folder,'fixtures/WorkspaceApplicationRoot.swift')
 h['sources'] << File.join(root,'scripts/studio_workspace_harness.swift')
 spec['targets']['StudioWorkspaceHarness']=h
 spec['schemes']['StudioWorkspaceHarness']={'build'=>{'targets'=>{'StudioWorkspaceHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(h, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$WORKSPACE_DIR/project.json" --project "$WORKSPACE_DIR"

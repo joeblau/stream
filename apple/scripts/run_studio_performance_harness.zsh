@@ -24,6 +24,8 @@ h['sources'] << File.join(root,'scripts/studio_performance_harness.swift')
 h['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 spec['targets']['StudioPerformanceHarness']=h
 spec['schemes']['StudioPerformanceHarness']={'build'=>{'targets'=>{'StudioPerformanceHarness'=>'all'}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(h, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$WORKSPACE_DIR/project.json" --project "$WORKSPACE_DIR"

@@ -154,8 +154,23 @@ extension StudioCommandDispatcher {
         add("comments.next", "Select Next Queued Comment", "Comments", .selectNextComment)
         add("comments.show", "Show Selected Comment in Preview", "Comments", .showSelectedComment)
         add("comments.hide", "Hide Comment in Preview", "Comments", .hideComment)
-        result.append(StudioPaletteAction(id: "unavailable.guests", title: "Control Guest Slot", category: "Guests", command: nil,
-                                          unavailableReason: "Guest sessions are not implemented in this studio."))
+        add("interview.lock", "Lock Guest Room", "Guests", .interview(.lock(true)))
+        add("interview.unlock", "Unlock Guest Room", "Guests", .interview(.lock(false)))
+        add("interview.disconnect", "Disconnect Guest Room", "Guests", .interview(.disconnect))
+        add("interview.rejoin", "Rejoin Guest Room", "Guests", .interview(.rejoin))
+        add("interview.end", "End Guest Room", "Guests", .interview(.end))
+        for guest in state.interview.snapshot.members {
+            let prefix = "interview.guest.\(guest.id.uuidString.lowercased())"
+            add(prefix + ".admit", "Admit \(guest.name) Backstage", "Guests", .interview(.admit(guest.id)))
+            add(prefix + ".onair", "Allow \(guest.name) in Program", "Guests", .interview(.onair(guest.id)))
+            add(prefix + ".backstage", "Send \(guest.name) Backstage", "Guests", .interview(.backstage(guest.id)))
+            add(prefix + ".monitor.on", "Allow \(guest.name) in Monitor", "Guests", .interview(.monitor(guest.id, true)))
+            add(prefix + ".monitor.off", "Remove \(guest.name) from Monitor", "Guests", .interview(.monitor(guest.id, false)))
+            add(prefix + ".screen.approve", "Approve \(guest.name)'s Screen", "Guests", .interview(.approveScreen(guest.id, true)))
+            add(prefix + ".screen.revoke", "Revoke \(guest.name)'s Screen", "Guests", .interview(.approveScreen(guest.id, false)))
+            add(prefix + ".media.reconnect", "Reconnect \(guest.name)'s Media", "Guests", .interview(.restartMedia(guest.id)))
+            add(prefix + ".remove", "Remove \(guest.name)", "Guests", .interview(.remove(guest.id)))
+        }
         return result
     }
 }

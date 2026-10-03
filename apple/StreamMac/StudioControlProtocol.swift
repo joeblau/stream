@@ -50,6 +50,24 @@ struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var overlayVisibility: [String: Bool]? = nil
     var directLiveEditing: Bool? = nil
     var chat: StudioControlChatState? = nil
+    var interview: StudioControlInterviewState? = nil
+}
+struct StudioControlInterviewState: Codable, Equatable, Sendable {
+    struct Member: Codable, Equatable, Sendable {
+        var id: UUID
+        var name: String
+        var membership: String
+        var media: String
+        var slot: UUID?
+        var programAllowed: Bool
+        var monitorAllowed: Bool
+        var screenApproved: Bool
+        var screenSharing: Bool
+    }
+    var phase: String
+    var room: UUID?
+    var locked: Bool
+    var members: [Member]
 }
 struct StudioControlChatState: Codable, Equatable, Sendable {
     var queuedCount: Int

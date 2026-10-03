@@ -44,6 +44,8 @@ target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMa
 target['sources'] += [File.join(folder,'fixtures/MacAudioInput.swift'),File.join(root,'scripts/managed_start_controller_harness.swift')]
 spec['targets']['ManagedStartControllerHarness']=target
 spec['schemes']={'ManagedStartControllerHarness'=>{'build'=>{'targets'=>{'ManagedStartControllerHarness'=>'all'}}}}
+require File.join(root, 'scripts/desktop_transport_fixture')
+StreamDesktopTransportFixture.apply(target, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$MANAGED_CONTROLLER_DIR/project.json" --project "$MANAGED_CONTROLLER_DIR"

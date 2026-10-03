@@ -1,0 +1,189 @@
+diff --git a/src/impl/icetransport.cpp b/src/impl/icetransport.cpp
+index 7701d25..7b93bc7 100644
+--- a/src/impl/icetransport.cpp
++++ b/src/impl/icetransport.cpp
+@@ -36,6 +36,10 @@ namespace rtc::impl {
+ 
+ #if !USE_NICE // libjuice
+ 
++// Compiled implementation marker for the application-owned pinned-source
++// relay policy. Existing rtc/juice ABI remains unchanged.
++extern "C" int stream_rtc_relay_policy_20261002_v1() { return 1; }
++
+ const int MAX_TURN_SERVERS_COUNT = 2;
+ 
+ void IceTransport::Init() {
+@@ -129,6 +133,8 @@ IceTransport::IceTransport(const Configuration &config, candidate_callback candi
+ 	mAgent = decltype(mAgent)(juice_create(&jconfig), juice_destroy);
+ 	if (!mAgent)
+ 		throw std::runtime_error("Failed to create the ICE agent");
++	if (juice_set_relay_only(mAgent.get(), config.iceTransportPolicy == TransportPolicy::Relay) != JUICE_ERR_SUCCESS)
++		throw std::runtime_error("Failed to configure the ICE relay policy");
+ 
+ 	// ICE-TCP
+ 	juice_set_ice_tcp_mode(mAgent.get(), config.enableIceTcp ? JUICE_ICE_TCP_MODE_ACTIVE
+diff --git a/deps/libjuice/include/juice/juice.h b/deps/libjuice/include/juice/juice.h
+index e43db6c..369a5bd 100644
+--- a/deps/libjuice/include/juice/juice.h
++++ b/deps/libjuice/include/juice/juice.h
+@@ -138,6 +138,9 @@ JUICE_EXPORT int juice_set_local_ice_attributes(juice_agent_t *agent, const char
+ JUICE_EXPORT const char *juice_state_to_string(juice_state_t state);
+ JUICE_EXPORT int juice_mux_listen(const char *bind_address, int local_port, juice_cb_mux_incoming_t cb, void *user_ptr);
+ JUICE_EXPORT int juice_set_ice_tcp_mode(juice_agent_t *agent, juice_ice_tcp_mode_t ice_tcp_mode);
++// Application-owned pinned-source extension. Configure before gathering or
++// adding remote candidates; a running agent cannot reopen direct paths.
++JUICE_EXPORT int juice_set_relay_only(juice_agent_t *agent, bool enabled);
+ 
+ // ICE server
+ 
+diff --git a/deps/libjuice/src/agent.c b/deps/libjuice/src/agent.c
+index 00bbecb..5488440 100644
+--- a/deps/libjuice/src/agent.c
++++ b/deps/libjuice/src/agent.c
+@@ -238,7 +238,7 @@ int agent_gather_candidates(juice_agent_t *agent) {
+ 	}
+ 
+ 	addr_record_t records[ICE_MAX_CANDIDATES_COUNT - 1];
+-	int records_count = conn_get_addrs(agent, records, ICE_MAX_CANDIDATES_COUNT - 1);
++	int records_count = agent->relay_only ? 0 : conn_get_addrs(agent, records, ICE_MAX_CANDIDATES_COUNT - 1);
+ 	if (records_count < 0) {
+ 		JLOG_ERROR("Failed to gather local host candidates");
+ 		records_count = 0;
+@@ -442,7 +442,7 @@ int agent_resolve_servers(juice_agent_t *agent) {
+ 
+ 	// STUN server resolution
+ 	// The entry is added after so the TURN server address will be matched in priority
+-	if (agent->config.stun_server_host) {
++	if (!agent->relay_only && agent->config.stun_server_host) {
+ 		if (!agent->config.stun_server_port)
+ 			agent->config.stun_server_port = 3478; // default STUN port
+ 
+@@ -670,6 +670,8 @@ int agent_send(juice_agent_t *agent, const char *data, size_t size, int ds) {
+ 		JLOG_ERROR("Send while ICE is not connected");
+ 		return -1;
+ 	}
++	if (agent->relay_only && !selected_entry->relay_entry)
++		return -1;
+ 
+ 	if (selected_entry->relay_entry) {
+ 		// The datagram should be sent through the relay, use a channel to minimize overhead
+@@ -764,6 +766,10 @@ int agent_get_selected_candidate_pair(juice_agent_t *agent, ice_candidate_t *loc
+ 		conn_unlock(agent);
+ 		return -1;
+ 	}
++	if (agent->relay_only && (!pair->local || pair->local->type != ICE_CANDIDATE_TYPE_RELAYED)) {
++		conn_unlock(agent);
++		return -1;
++	}
+ 
+ 	if (local)
+ 		*local = pair->local ? *pair->local : agent->local.candidates[0];
+@@ -842,6 +848,8 @@ int agent_input(juice_agent_t *agent, char *buf, size_t len, const addr_record_t
+ 
+ 	case AGENT_STUN_ENTRY_TYPE_CHECK:
+ 		JLOG_DEBUG("Received application datagram");
++		if (agent->relay_only && (!relayed || !entry->relay_entry))
++			return -1;
+ 		if (agent->config.cb_recv)
+ 			agent->config.cb_recv(agent, buf, len, agent->config.user_ptr);
+ 		return 0;
+@@ -1065,6 +1073,10 @@ int agent_bookkeeping(juice_agent_t *agent, timestamp_t *next_timestamp) {
+ 	ice_candidate_pair_t *selected_pair = NULL;
+ 	for (int i = 0; i < agent->candidate_pairs_count; ++i) {
+ 		ice_candidate_pair_t *pair = agent->ordered_pairs[i];
++		if (agent->relay_only && (!pair->local || pair->local->type != ICE_CANDIDATE_TYPE_RELAYED)) {
++			pair->state = ICE_CANDIDATE_PAIR_STATE_FROZEN;
++			continue;
++		}
+ 		if (pair->nominated) {
+ 			// RFC 8445 8.1.1. Nominating Pairs:
+ 			// If more than one candidate pair is nominated by the controlling agent, and if the
+@@ -1344,6 +1356,10 @@ int agent_verify_credentials(juice_agent_t *agent, const agent_stun_entry_t *ent
+ 
+ int agent_dispatch_stun(juice_agent_t *agent, void *buf, size_t size, stun_message_t *msg,
+                         const addr_record_t *src, const addr_record_t *relayed) {
++	// TURN allocation/permission/refresh and server indications still arrive
++	// directly. Only authenticated peer Binding checks require TURN ingress.
++	if (agent->relay_only && !relayed && msg->msg_method == STUN_METHOD_BINDING && msg->has_integrity)
++		return -1;
+ 	if (msg->msg_method == STUN_METHOD_BINDING && msg->has_integrity) {
+ 		JLOG_VERBOSE("STUN message is from the remote peer");
+ 		// Verify the message now
+@@ -2299,6 +2315,8 @@ int agent_add_local_relayed_candidate(juice_agent_t *agent, const addr_record_t
+ 
+ int agent_add_local_reflexive_candidate(juice_agent_t *agent, ice_candidate_type_t type,
+                                         const addr_record_t *record) {
++	if (agent->relay_only)
++		return 0;
+ 	if (type != ICE_CANDIDATE_TYPE_SERVER_REFLEXIVE && type != ICE_CANDIDATE_TYPE_PEER_REFLEXIVE) {
+ 		JLOG_ERROR("Invalid type for local reflexive candidate");
+ 		return -1;
+@@ -2392,6 +2410,9 @@ int agent_add_local_tcp_active_candidate(juice_agent_t *agent, addr_record_t *re
+ 
+ int agent_add_candidate_pair(juice_agent_t *agent, ice_candidate_t *local, // local may be NULL
+                              ice_candidate_t *remote) {
++	if (agent->relay_only && (!local || local->type != ICE_CANDIDATE_TYPE_RELAYED ||
++	                          remote->transport != ICE_CANDIDATE_TRANSPORT_UDP))
++		return 0;
+ 	ice_candidate_pair_t pair;
+ 	bool is_controlling = agent->mode == AGENT_MODE_CONTROLLING;
+ 	if (ice_create_candidate_pair(local, remote, is_controlling, &pair)) {
+@@ -2486,7 +2507,7 @@ int agent_add_candidate_pair(juice_agent_t *agent, ice_candidate_t *local, // lo
+ int agent_add_candidate_pairs_for_remote(juice_agent_t *agent, ice_candidate_t *remote) {
+ 	// Here is the trick: local non-relayed candidates are undifferentiated for sending.
+ 	// Therefore, we don't need to match remote candidates with local ones.
+-	if (agent_add_candidate_pair(agent, NULL, remote))
++	if (!agent->relay_only && agent_add_candidate_pair(agent, NULL, remote))
+ 		return -1;
+ 
+ 	// However, we need still to differenciate local relayed candidates
+@@ -2754,6 +2775,13 @@ int agent_set_ice_tcp_mode(juice_agent_t *agent, juice_ice_tcp_mode_t ice_tcp_mo
+ 	return JUICE_ERR_SUCCESS;
+ }
+ 
++int agent_set_relay_only(juice_agent_t *agent, bool enabled) {
++	if (agent->conn_impl || agent->candidate_pairs_count || agent->remote.candidates_count)
++		return JUICE_ERR_FAILED;
++	agent->relay_only = enabled;
++	return JUICE_ERR_SUCCESS;
++}
++
+ void agent_translate_host_candidate_entry(juice_agent_t *agent, agent_stun_entry_t *entry) {
+ 	if (!entry->pair || entry->pair->remote->type != ICE_CANDIDATE_TYPE_HOST)
+ 		return;
+diff --git a/deps/libjuice/src/agent.h b/deps/libjuice/src/agent.h
+index 5429d89..63826d4 100644
+--- a/deps/libjuice/src/agent.h
++++ b/deps/libjuice/src/agent.h
+@@ -129,6 +129,7 @@ struct juice_agent {
+ 	juice_state_t state;
+ 	agent_mode_t mode;
+ 	juice_ice_tcp_mode_t ice_tcp_mode;
++	bool relay_only;
+ 
+ 	ice_description_t local;
+ 	ice_description_t remote;
+@@ -242,5 +243,6 @@ agent_find_entry_from_record(juice_agent_t *agent, const addr_record_t *record,
+                              const addr_record_t *relayed); // relayed may be NULL
+ void agent_translate_host_candidate_entry(juice_agent_t *agent, agent_stun_entry_t *entry);
+ int agent_set_ice_tcp_mode(juice_agent_t *agent, juice_ice_tcp_mode_t ice_tcp_mode);
++int agent_set_relay_only(juice_agent_t *agent, bool enabled);
+ 
+ #endif
+diff --git a/deps/libjuice/src/juice.c b/deps/libjuice/src/juice.c
+index 074823c..4713253 100644
+--- a/deps/libjuice/src/juice.c
++++ b/deps/libjuice/src/juice.c
+@@ -40,6 +40,12 @@ JUICE_EXPORT int juice_gather_candidates(juice_agent_t *agent) {
+ 	return JUICE_ERR_SUCCESS;
+ }
+ 
++JUICE_EXPORT int juice_set_relay_only(juice_agent_t *agent, bool enabled) {
++	if (!agent)
++		return JUICE_ERR_INVALID;
++	return agent_set_relay_only(agent, enabled);
++}
++
+ JUICE_EXPORT int juice_get_local_description(juice_agent_t *agent, char *buffer, size_t size) {
+ 	if (!agent || (!buffer && size))
+ 		return JUICE_ERR_INVALID;

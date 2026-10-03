@@ -7,7 +7,23 @@ import VideoToolbox
 private enum GuestDecodeError: Error { case unsupported, malformed, codec(OSStatus), audioFrames(expected: UInt32, actual: UInt32, code: Int?) }
 private func hostSeconds() -> Double { CMClockGetTime(CMClockGetHostTimeClock()).seconds }
 
-/// One admitted peer prototype. Its callbacks are isolated media receipts; this
+/// A single flattened ICE URL. Credentials have no portable encoding or useful
+/// description, and the receiver retains no Swift copy after SDK creation.
+struct NativeGuestRelayServer: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    let url: String
+    let username: String?
+    let credential: String?
+    var description: String { "<private guest relay server>" }
+    var debugDescription: String { description }
+}
+enum NativeGuestTransport: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    case loopbackValidation
+    case relay([NativeGuestRelayServer])
+    var description: String { "<private guest transport configuration>" }
+    var debugDescription: String { description }
+}
+
+/// One admitted peer. Its callbacks are isolated media receipts; this
 /// class never registers an audio source, stages a scene or publishes output.
 final class NativeGuestReceiver: @unchecked Sendable {
     struct CodecStatus: Sendable {
@@ -29,6 +45,7 @@ final class NativeGuestReceiver: @unchecked Sendable {
     private var pending: [[Input]] = [[], [], []], bytes = [0, 0, 0], working = [false, false, false]
     private var needsIDR = [true, true], lossEpoch: [UInt64] = [0, 0]
     private var screenApproved: Bool
+    private var approvalIntent = UUID(), controlClosed = false
     private var keyframePending = [false, false], lastKeyframe = [-Double.infinity, -Double.infinity]
     private var audioResetPending = false
     private let mappingGeneration = UUID()
@@ -47,17 +64,52 @@ final class NativeGuestReceiver: @unchecked Sendable {
     init(admitted lease: GuestReceiveLease, cameraMID: String, screenMID: String, audioMID: String, screenApproved: Bool = false,
          video: @escaping @Sendable (GuestVideoFrame) -> Void,
          audio: @escaping @Sendable (GuestAudioFrame) -> Void,
-         signal: @escaping @Sendable (String, String, String) -> Void) throws {
+         signal: @escaping @Sendable (String, String, String) -> Void,
+         transport: NativeGuestTransport = .loopbackValidation) throws {
         guard lease.generation > 0 else { throw GuestDecodeError.malformed }
         self.lease = lease; self.screenApproved = screenApproved; videoOutput = video; audioOutput = audio; signalOutput = signal
-        handle = SGReceiverCreate(lease.generation, cameraMID, screenMID, audioMID, { context, generation, role, event, data, size, rtp, ntp in
+        let mediaCallback: SGMediaCallback = { context, generation, role, event, data, size, rtp, ntp in
             guard let context else { return }
             Unmanaged<NativeGuestReceiver>.fromOpaque(context).takeUnretainedValue().receive(generation: generation, role: role, event: event, data: data, count: size, rtp: rtp, ntp: ntp)
-        }, { context, type, value, mid in
+        }
+        let signalCallback: SGSignalCallback = { context, type, value, mid in
             guard let context, let type, let value, let mid else { return }
             let owner = Unmanaged<NativeGuestReceiver>.fromOpaque(context).takeUnretainedValue()
             owner.signal(String(cString: type), String(cString: value), String(cString: mid))
-        }, Unmanaged.passUnretained(self).toOpaque())
+        }
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        switch transport {
+        case .loopbackValidation:
+            handle = SGReceiverCreate(lease.generation, cameraMID, screenMID, audioMID, mediaCallback, signalCallback, context)
+        case .relay(let servers):
+            guard !servers.isEmpty, servers.count <= 64 else { throw GuestDecodeError.malformed }
+            var allocations: [(UnsafeMutablePointer<CChar>, Int)] = []
+            func temporary(_ string: String?, limit: Int) throws -> UnsafePointer<CChar>? {
+                guard let string else { return nil }
+                guard !string.isEmpty, string.utf8.count <= limit,
+                      !string.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else { throw GuestDecodeError.malformed }
+                let bytes = Array(string.utf8), buffer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count + 1)
+                for (index, byte) in bytes.enumerated() { buffer[index] = CChar(bitPattern: byte) }
+                buffer[bytes.count] = 0; allocations.append((buffer, bytes.count + 1)); return UnsafePointer(buffer)
+            }
+            defer {
+                for (buffer, count) in allocations {
+                    // The application owns these short-lived buffers only.
+                    // The peer owns the SDK copies until synchronous stop.
+                    SGReceiverWipeBuffer(buffer, count); buffer.deallocate()
+                }
+            }
+            var entries: [SGIceServer] = []
+            for server in servers {
+                entries.append(try .init(url: temporary(server.url, limit: 512),
+                                        username: temporary(server.username, limit: 256),
+                                        credential: temporary(server.credential, limit: 2_048)))
+            }
+            handle = entries.withUnsafeBufferPointer {
+                SGReceiverCreateConfigured(lease.generation, cameraMID, screenMID, audioMID,
+                    $0.baseAddress, $0.count, mediaCallback, signalCallback, context)
+            }
+        }
         guard handle != nil else { throw GuestDecodeError.unsupported }
         expiry = Task { [weak self] in
             while !Task.isCancelled {
@@ -73,20 +125,60 @@ final class NativeGuestReceiver: @unchecked Sendable {
     func answer(_ sdp: String) -> Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverAnswer(handle, sdp) != 0 }
     var hostReady: Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverHostReady(handle) != 0 }
     func approveScreen(_ approved: Bool) -> Bool {
+        approveScreen(approved) { [self] message in
+            transportLock.lock(); defer { transportLock.unlock() }
+            return SGReceiverSendControl(handle, message) != 0
+        }
+    }
+    private func approveScreen(_ approved: Bool, send: (String) -> Bool) -> Bool {
         // Synchronous revocation must finish any already-entered callback before
         // returning. Callers must not hold their receipt sink lock here.
         outputGate.lock(); lock.lock()
+        approvalIntent = UUID(); let intent = approvalIntent
         if !approved { screenApproved = false; pending[1].removeAll(); bytes[1] = 0; requireIDRLocked(1) }
-        let current = active; lock.unlock(); outputGate.unlock()
+        let current = active && (!approved || !controlClosed); lock.unlock(); outputGate.unlock()
         guard current else { return false }
         let data = try? JSONSerialization.data(withJSONObject: ["type": "screen-approval", "negotiation": lease.negotiation.uuidString.lowercased(), "approved": approved])
         guard let data, let message = String(data: data, encoding: .utf8) else { return false }
-        transportLock.lock(); let sent = SGReceiverSendControl(handle, message) != 0; transportLock.unlock()
-        outputGate.lock(); lock.lock(); screenApproved = active && sent && approved
+        let sent = send(message)
+        outputGate.lock(); lock.lock()
+        guard active, !controlClosed, approvalIntent == intent else {
+            lock.unlock(); outputGate.unlock(); return false
+        }
+        screenApproved = sent && approved
         if !screenApproved { pending[1].removeAll(); bytes[1] = 0 }; requireIDRLocked(1); lock.unlock(); outputGate.unlock()
         if sent && approved { requestKeyframe(1) }; return sent
     }
+#if STREAM_GUEST_VALIDATION
+    // Inject only the control-send boundary into the production authority path.
+    // Fixture close delivery uses the same actual SDK signal handler.
+    func validationApproveScreen(_ approved: Bool, send: (String) -> Bool) -> Bool { approveScreen(approved, send: send) }
+    func validationControlClosed() { signal("control-closed", "", "") }
+    var validationScreenApproved: Bool { lock.lock(); defer { lock.unlock() }; return screenApproved }
+#endif
     func transportStats(_ role: GuestReceiveRole) -> SGReceiveStats { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverStats(handle, role.rawValue) }
+    struct ICEPair: Sendable {
+        enum Kind: Int32, Sendable {
+            case unknown, host, serverReflexive, peerReflexive, relay
+            var label: String {
+                switch self {
+                case .unknown: "unknown"
+                case .host: "host"
+                case .serverReflexive: "srflx"
+                case .peerReflexive: "prflx"
+                case .relay: "relay"
+                }
+            }
+        }
+        let local: Kind, remote: Kind, udp: Bool
+    }
+    var selectedICEPair: ICEPair? {
+        transportLock.lock(); defer { transportLock.unlock() }
+        let value = SGReceiverSelectedIcePair(handle)
+        guard value.selected != 0 else { return nil }
+        return ICEPair(local: ICEPair.Kind(rawValue: value.local_type) ?? .unknown,
+                       remote: ICEPair.Kind(rawValue: value.remote_type) ?? .unknown, udp: value.udp != 0)
+    }
     #if STREAM_GUEST_VALIDATION
     func validationPacket(_ data: Data, role: GuestReceiveRole) -> Bool {
         transportLock.lock(); defer { transportLock.unlock() }
@@ -134,7 +226,10 @@ final class NativeGuestReceiver: @unchecked Sendable {
     }
     private func signal(_ type: String, _ value: String, _ mid: String) {
         lock.lock()
-        if type == "control-closed" { screenApproved = false; pending[1].removeAll(); bytes[1] = 0; requireIDRLocked(1) }
+        if type == "control-closed" {
+            approvalIntent = UUID(); controlClosed = true
+            screenApproved = false; pending[1].removeAll(); bytes[1] = 0; requireIDRLocked(1)
+        }
         if type == "control" {
             guard let data = value.data(using: .utf8), data.count <= 1024,
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -274,7 +369,8 @@ final class NativeGuestReceiver: @unchecked Sendable {
         }
     }
     func stop() {
-        outputGate.lock(); lock.lock(); active = false; pending = [[], [], []]; signals.removeAll(); bytes = [0, 0, 0]; reports.removeAll(); lock.unlock(); outputGate.unlock()
+        outputGate.lock(); lock.lock(); active = false; approvalIntent = UUID(); controlClosed = true; screenApproved = false
+        pending = [[], [], []]; signals.removeAll(); bytes = [0, 0, 0]; reports.removeAll(); lock.unlock(); outputGate.unlock()
         expiry?.cancel(); expiry = nil
         transportLock.lock(); if let handle { SGReceiverDestroy(handle); self.handle = nil }; transportLock.unlock()
         for index in 0..<2 { queues[index].async { [weak self] in self?.videos[index]?.close(); self?.videos[index] = nil } }

@@ -98,6 +98,7 @@ final class StreamController: ObservableObject {
     private var guestLease: GuestReceiveLease?
     private var pendingGuestLease: GuestReceiveLease?
     private var lastGuestAdmissionGeneration: UInt64 = 0
+    private var lastIssuedGuestGeneration: UInt64 = 0
     /// The dispatcher supplies current unsaved live mixer edits. A controller
     /// without that owner uses its loaded project settings.
     var guestMixerSettings: (() -> MixerSettings)?
@@ -1085,6 +1086,29 @@ final class StreamController: ObservableObject {
         managedStartAuthorityObserver = accounts.$managedReadRevision.dropFirst().sink { [weak coordinator] _ in
             coordinator?.cancelAll()
         }
+    }
+
+    /// A runtime owns this counter across room creation, ending and rejoin.
+    /// Allocated generations stay consumed even when preparation is canceled.
+    func issueGuestReceiveGeneration() -> UInt64? {
+        guard !guestMediaRetired else { return nil }
+        let previous = max(lastIssuedGuestGeneration, lastGuestAdmissionGeneration)
+        guard previous < UInt64.max else { return nil }
+        lastIssuedGuestGeneration = previous + 1
+        return lastIssuedGuestGeneration
+    }
+
+    /// Creates an inlet only after the complete persisted-mixer admission
+    /// transaction succeeds. Cancellation/replacement can never return a sink
+    /// for an older lease or undo a newer registered peer.
+    func makeGuestMediaSink(_ lease: GuestReceiveLease, name: String) async -> NativeGuestMediaSink? {
+        guard !Task.isCancelled, guestLease != lease, pendingGuestLease != lease,
+              await registerGuestMedia(lease, name: name) else { return nil }
+        guard !Task.isCancelled, !guestMediaRetired, guestLease == lease else {
+            removeGuestMedia(lease)
+            return nil
+        }
+        return NativeGuestMediaSink(registered: lease, video: guestVideoFrames, audio: audioEngine)
     }
 
     /// Called only after session admission. Receipts cannot create slots or

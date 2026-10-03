@@ -38,7 +38,7 @@ jobs:
         run: |
           xcodebuild -resolvePackageDependencies -project Stream.xcodeproj -scheme StreamMac \
             -derivedDataPath build/desktop -skipPackagePluginValidation
-          python3 scripts/repair_desktop_transport_archives.py build/desktop
+          python3 scripts/repair_desktop_transport_archives.py build/desktop --require-relay-policy
       - name: Build desktop studio
         run: |
           xcodebuild build -project Stream.xcodeproj -scheme StreamMac \

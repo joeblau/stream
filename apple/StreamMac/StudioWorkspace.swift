@@ -19,6 +19,7 @@ final class StudioRuntime {
     let providerAccounts: ProviderAccountSession
     var recoveryBinding: SessionRecoveryRuntimeBinding?
     let adapters: StudioAdapterManager
+    let interviews: NativeInterviewManager
 
     init() {
         localControl = StudioLocalControlServer()
@@ -46,6 +47,8 @@ final class StudioRuntime {
         controller.bindManagedStart(accounts: providerAccounts)
         chat.bindAccounts(providerAccounts)
         controller.bindEnding(accounts: providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
+        interviews = NativeInterviewManager(controller: controller)
+        dispatcher.bindInterviewManager(interviews)
         adapters = StudioAdapterManager()
         adapters.bind(to: localControl)
         StudioAutomationEndpoint.shared.bind(dispatcher: dispatcher, permissions: permissions,
@@ -139,6 +142,7 @@ final class StudioWorkspace: ObservableObject {
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
         runtime.controller.shutdownManagedStart()
+        runtime.interviews.shutdown()
         runtime.controller.retireGuestMedia()
         runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
@@ -277,6 +281,7 @@ final class StudioWorkspace: ObservableObject {
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
         runtime.controller.shutdownManagedStart()
+        runtime.interviews.shutdown()
         runtime.controller.retireGuestMedia()
         runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
@@ -342,6 +347,7 @@ final class StudioWorkspace: ObservableObject {
             guard self.selection == target, let binding = self.runtime.recoveryBinding else {
                 self.recovery.reportError("The saved project/profile could not be opened."); return
             }
+            self.runtime.interviews.endForRecovery()
             do { try binding.restoreLocal(snapshot) }
             catch { self.recovery.reportError("Local recovery could not be applied. Review project backups and relink missing media.") }
         }
@@ -349,6 +355,7 @@ final class StudioWorkspace: ObservableObject {
             guard let self else { return }
             self.recovery.remoteReview.shutdown()
             self.runtime.controller.shutdownManagedStart()
+            self.runtime.interviews.shutdown()
             self.runtime.controller.retireGuestMedia()
             self.runtime.controllers.shutdown(); self.runtime.controller.ending.shutdown(); self.runtime.providerAccounts.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
             self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop()
