@@ -25,10 +25,17 @@ The application has explicit runtime-owned video and audio admission boundaries:
 - Camera and screen identities stay separate. Screen admission starts disabled;
   stopping a screen clears its pixels. A camera expires after 250 ms without a
   due frame; an enabled static screen retains its last due frame.
-- Each video role retains at most six BGRA buffers and 24 MiB. Pixel area is
+- Each video role retains at most 16 BGRA buffers and 32 MiB. Pixel area is
   bounded to 1280×720, with dimensions up to 1920 for portrait geometry. Overflow
   drops oldest frames and counts loss. These are memory bounds, not measured
   guest capacity.
+- History includes the receiver's 120ms future playout and the ISO worker's
+  historical query. An actual 30fps Chrome stream exposed that six retained
+  buffers (about 167ms) could evict a still-due frame when ISO queried 90ms
+  behind the host clock. The larger bounded history preserves that query
+  without consuming Program pixels or showing future frames. The generated
+  CoreVideo regression exercises the exact before/after timing and both byte
+  caps; actual browser-to-Program/ISO recording is a separate proof.
 - Renderer lookup uses the original mapped host PTS at each composition tick.
   It does not consume frames needed by an earlier Preview or ISO tick. Program
   needs a separate routing grant; Preview can show the backstage source. Nested
