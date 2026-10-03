@@ -157,15 +157,28 @@ private func require(_ value: Bool, _ reason: String) throws {
         let title = solo.layers.first { if case .text(let text) = $0.payload { return text.guestBinding?.field == .title }; return false }!
         let names = Scene(name: "Names", layers: [caption, title]), nested = Scene(name: "Nested Names", layers: [
             LayerNode(name: "Name Scene", payload: .scene(.init(sceneID: names.id)), transform: .fullscreen)])
+        func literalMetadata(_ name: String, _ title: String) -> UInt64 {
+            var literal = names
+            for index in literal.layers.indices {
+                if case .text(var text) = literal.layers[index].payload, let binding = text.guestBinding {
+                    text.guestBinding = nil; text.text = binding.field == .name ? name : title
+                    literal.layers[index].payload = .text(text)
+                }
+            }
+            return fingerprint(render(nested, at: due, program: true, scenes: [literal.id: literal]))
+        }
         let before = fingerprint(render(nested, at: due, program: true, scenes: [names.id: names]))
+        try require(before == literalMetadata("Ada", "Engineer"), "Typed metadata pixels do not equal the independent literal caption raster")
         var metadata = store.guestSlots[0]; metadata.title = "Admiral"
         store.replaceGuestSlot(metadata)
         let changedTitle = fingerprint(render(nested, at: due, program: true, scenes: [names.id: names]))
         try require(before != changedTitle, "Bound title in a nested scene reused stale cached pixels")
+        try require(changedTitle == literalMetadata("Ada", "Admiral"), "Title binding resolved the wrong metadata field")
         metadata.displayName = "Grace Hopper"
         store.replaceGuestSlot(metadata)
         let after = fingerprint(render(nested, at: due, program: true, scenes: [names.id: names]))
         try require(changedTitle != after, "Bound name in a nested scene reused stale cached pixels")
+        try require(after == literalMetadata("Grace Hopper", "Admiral"), "Name binding resolved the wrong slot metadata")
         controller.removeGuestMedia(lease)
         let lost = render(solo, at: due, program: true)
         try require(color(lost) == cardRGB, "Source loss did not restore configured card")

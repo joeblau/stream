@@ -764,6 +764,54 @@ struct WebSourcePayload: Hashable, Codable, Sendable {
     }
 }
 
+/// Project content only. A saved public peer UUID helps reconnect an existing
+/// invite to its chosen slot; it grants no service or media authority.
+struct GuestSlot: Identifiable, Hashable, Codable, Sendable {
+    var id = UUID()
+    var name: String
+    var displayName = ""
+    var title = ""
+    var reconnectPeerID: UUID?
+    var cameraPlaceholder = GuestOfflinePlaceholder()
+    var screenPlaceholder = GuestOfflinePlaceholder(message: "Screen not shared")
+
+    var resolvedName: String { displayName.isEmpty ? name : displayName }
+    func normalized() -> GuestSlot {
+        var value = self
+        value.name = Self.bounded(name, fallback: "Guest slot")
+        value.displayName = Self.bounded(displayName)
+        value.title = Self.bounded(title)
+        value.cameraPlaceholder = cameraPlaceholder.normalized()
+        value.screenPlaceholder = screenPlaceholder.normalized()
+        return value
+    }
+    private static func bounded(_ value: String, fallback: String = "") -> String {
+        let bounded = String(value.prefix(128))
+        return bounded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : bounded
+    }
+}
+
+struct GuestOfflinePlaceholder: Hashable, Codable, Sendable {
+    var visible = true
+    var colorHex = "#253858"
+    var message = "Guest offline"
+
+    func normalized() -> Self {
+        var value = self
+        value.message = String(message.prefix(128))
+        if colorHex.range(of: "^#[0-9a-fA-F]{6}$", options: .regularExpression) == nil {
+            value.colorHex = "#253858"
+        }
+        return value
+    }
+}
+
+struct GuestTitleBinding: Hashable, Codable, Sendable {
+    enum Field: String, Codable, CaseIterable, Sendable { case name, title }
+    var slotID: UUID
+    var field: Field
+}
+
 enum GuestSourceRole: String, Hashable, Codable, Sendable {
     case camera, screen
 }
