@@ -43,6 +43,7 @@ final class StudioRuntime {
         recorder.bindChat(chat)
         controller.bindSecondaryRecordingChat(chat)
         providerAccounts = ProviderAccountSession(restream: chat.restream, pendingDirectory: DesktopStorage.projectDirectory)
+        controller.bindManagedStart(accounts: providerAccounts)
         chat.bindAccounts(providerAccounts)
         controller.bindEnding(accounts: providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
         adapters = StudioAdapterManager()
@@ -137,6 +138,7 @@ final class StudioWorkspace: ObservableObject {
         recovery.remoteReview.invalidate()
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
+        runtime.controller.shutdownManagedStart()
         runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.rundown.stop()
@@ -273,6 +275,7 @@ final class StudioWorkspace: ObservableObject {
         recovery.remoteReview.invalidate()
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
+        runtime.controller.shutdownManagedStart()
         runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.macros.cancel()
@@ -343,6 +346,7 @@ final class StudioWorkspace: ObservableObject {
         RecordingTerminationDelegate.finishSession = { [weak self] in
             guard let self else { return }
             self.recovery.remoteReview.shutdown()
+            self.runtime.controller.shutdownManagedStart()
             self.runtime.controllers.shutdown(); self.runtime.controller.ending.shutdown(); self.runtime.providerAccounts.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
             self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop()
             self.runtime.controller.stopStream(); self.runtime.controller.stopSecondaryRecording(); self.runtime.controller.stopExternalDisplayOutput(); self.runtime.controller.stopVirtualCameraOutput()

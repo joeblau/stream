@@ -25,7 +25,7 @@ struct StreamMacApp: App {
         // separate `SwiftUI.Settings` scene.
         Window("Stream Studio", id: "studio") {
             MainWindowView(firstRunCompleted: $hasCompletedFirstRun)
-                .id(workspace.currentProfile.id)
+                .id(ObjectIdentifier(workspace.runtime))
                 .environmentObject(workspace)
                 .environment(\.sessionRecovery, workspace.recovery)
                 .environment(\.providerAccounts, workspace.runtime.providerAccounts)
