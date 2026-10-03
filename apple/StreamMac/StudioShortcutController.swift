@@ -119,7 +119,8 @@ final class StudioShortcutController: ObservableObject {
         registerGlobals()
     }
     private func handle(_ event: NSEvent) -> NSEvent? {
-        guard let window = event.window, window === studioWindow || window.sheetParent === studioWindow else { return event }
+        guard let studioWindow, let window = event.window,
+              window === studioWindow || window.sheetParent === studioWindow else { return event }
         let chord = Self.chord(event)
         if let target = recordingCommandID {
             if event.keyCode == 53 { cancelRecording(); return nil }
@@ -130,14 +131,16 @@ final class StudioShortcutController: ObservableObject {
         }
         // Palette stays discoverable while a text field has focus, just like
         // a native menu action. It never triggers a production command.
-        if chord.keyCode == 35 && chord.modifiers == 9 && window.attachedSheet == nil {
+        if chord.keyCode == 35 && chord.modifiers == 9 && window === studioWindow
+            && studioWindow.attachedSheet == nil && NSApp.modalWindow == nil {
+            guard !event.isARepeat else { return nil }
             palettePresented.toggle(); return nil
         }
         let responder = window.firstResponder
         let editing = (responder as? NSTextView)?.isEditable == true || responder is NSTextField
             || (chord.keyCode == 36 && responder is NSControl)
         guard let binding = document.binding(for: chord, textEntry: editing,
-                                              modalPresented: window.attachedSheet != nil || palettePresented || editorPresented,
+                                              modalPresented: studioWindow.attachedSheet != nil || NSApp.modalWindow != nil || palettePresented || editorPresented,
                                               repeated: event.isARepeat, global: false) else { return event }
         execute(id: binding.commandID)
         return nil
