@@ -169,6 +169,25 @@ describe('actual Worker and SQLite Durable Object interview signaling', () => {
     expect((guest.roster.peers as Message[]).find(peer => peer.id === guest.id)?.state).toBe('waiting');
   });
 
+  it('a new host generation fences the previous admission before explicit readmission', async () => {
+    const room = await create(), oldHost = await connect(room, room.host), guest = await connect(room, room.guest);
+    await admit(oldHost, guest); oldHost.send({ type: 'stage', id: guest.id });
+    oldHost.send({ type: 'status', program: true, recording: true }); await oldHost.barrier(); await guest.barrier();
+    expect((guest.roster.peers as Message[]).find(peer => peer.id === guest.id)?.state).toBe('onair');
+    const cursor = guest.messages.length, host = await connect(room, room.host);
+    expect(host.generation).not.toBe(oldHost.generation);
+    await guest.next('host-disconnected', cursor); await guest.barrier();
+    expect(guest.roster).toMatchObject({ program: false, recording: false });
+    expect((guest.roster.peers as Message[]).find(peer => peer.id === guest.id)?.state).toBe('waiting');
+    await noSignal(guest, host, signal(host, 'OLD_ADMISSION'));
+    await noSignal(host, guest, signal(guest, 'NO_IMPLICIT_ADMISSION'));
+    await admit(host, guest);
+    host.send({ type: 'status', program: true, recording: true }); await host.barrier(); await guest.barrier();
+    await waitUntil(() => oldHost.closeCode !== undefined, 'Superseded host did not close');
+    expect(guest.roster).toMatchObject({ program: true, recording: true });
+    expect((guest.roster.peers as Message[]).find(peer => peer.id === guest.id)?.state).toBe('backstage');
+  });
+
   it('reconstructs the real object after hibernation with roles, generations, admission and status intact', async () => {
     const room = await create(), host = await connect(room, room.host), guest = await connect(room, room.guest);
     await admit(host, guest); host.send({ type: 'status', program: true, recording: false }); await host.barrier();

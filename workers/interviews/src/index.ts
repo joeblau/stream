@@ -187,6 +187,15 @@ export class InterviewRoom extends DurableObject<Env> {
     const peer: Peer = { id: invite.id, role: invite.role, hash: invite.hash, name: invite.role === 'host' ? 'Host' : 'Guest', state: 'waiting', generation: crypto.randomUUID(), window: Date.now(), count: 0, ackCount: 0, deliveries: [], nextDelivery: 0 };
     this.ctx.storage.sql.exec('INSERT OR REPLACE INTO sessions(id,generation) VALUES(?,?)', peer.id, peer.generation);
     this.ctx.acceptWebSocket(server); server.serializeAttachment(peer);
+    if (peer.role === 'host') {
+      // A replacement host owns a new media session. Fence the previous
+      // admission before publishing its roster, even if the old close is late.
+      room.program = false; room.recording = false; this.save(room);
+      for (const guest of this.peers().filter(item => item.peer.role === 'guest')) {
+        guest.peer.state = 'waiting'; guest.socket.serializeAttachment(guest.peer);
+        this.emit(guest.socket, { type: 'host-disconnected' });
+      }
+    }
     this.emit(server, { type: 'welcome', id: peer.id, role: peer.role, generation: peer.generation, expires: room.expires });
     this.roster();
     return new Response(null, { status: 101, webSocket: client, headers: { 'Sec-WebSocket-Protocol': protocol } });
