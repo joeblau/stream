@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import CoreVideo
 import Foundation
+import StreamCore
 
 private final class GuestAdmissionFixtureGate: @unchecked Sendable {
     private let lock = NSLock()
@@ -106,6 +107,31 @@ enum GuestRendererHarness {
         precondition(controller.setGuestMediaRouting(lease, programAllowed: false, monitorAllowed: true))
         precondition(!render(size, due, duration, 2, .raw)!.sourceAvailable)
         controller.removeRecordingVideoSource(recording.0)
+        // A real live settings edit while the audio actor is held must not
+        // publish an admission carrying the older mute snapshot.
+        let settingsSession = SettingsSession(controller: controller)
+        controller.guestMixerSettings = { [weak settingsSession] in settingsSession?.activeSettings.mixer ?? MixerSettings() }
+        let settingsHold = GuestAdmissionFixtureGate(), settingsStarted = GuestAdmissionFixtureGate()
+        let heldSettings = Task { await mixer.holdGuestFixture(settingsHold) }
+        for _ in 0..<100 where !settingsHold.entered() { try await Task.sleep(for: .milliseconds(1)) }
+        precondition(settingsHold.entered())
+        let staleSettingsLease = GuestReceiveLease(slot: lease.slot, peerID: UUID(), negotiation: UUID(), generation: 4)
+        let pendingSettings = Task { @MainActor in
+            settingsStarted.mark()
+            return await controller.registerGuestMedia(staleSettingsLease, name: "Pending Settings Guest")
+        }
+        for _ in 0..<100 where !settingsStarted.entered() { try await Task.sleep(for: .milliseconds(1)) }
+        precondition(settingsStarted.entered())
+        var changedMixer = settingsSession.activeSettings.mixer
+        changedMixer.channelMutes[AudioMixEngine.guestChannelID(for: staleSettingsLease).label] = true
+        settingsSession.persistMixer(changedMixer)
+        settingsHold.release.signal()
+        await heldSettings.value
+        let staleSettingsAccepted = await pendingSettings.value
+        precondition(!staleSettingsAccepted && mixer.registeredGuestChannelID(slot: lease.slot) == nil)
+        precondition(!controller.setGuestMediaRouting(staleSettingsLease, programAllowed: true, monitorAllowed: true))
+        precondition(scenes.sources.count == initialSources + 2)
+        settingsSession.flushPendingWrites()
         controller.retireGuestMedia()
         let afterRetirement = await controller.registerGuestMedia(lease, name: "Retired Guest")
         precondition(!afterRetirement && mixer.registeredGuestChannelID(slot: lease.slot) == nil)

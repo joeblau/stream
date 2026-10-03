@@ -27,7 +27,8 @@ end
 target=spec['targets'].delete('StreamMac')
 target['type']='tool'
 target.delete('info')
-target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
+require File.join(root, 'scripts/guest_fixture_boundaries')
+StreamGuestFixtureBoundaries.apply(spec['targets']['StreamCore'], target, root, folder)
 target['sources'] << {'path'=>File.join(root,'NativeGuestReceivePrototype'),'excludes'=>['README.md']}
 target['sources'] << File.join(root,'scripts/guest_receive_peer_fixture.cpp')
 target['sources'] << File.join(root,'scripts/native_guest_program_iso_harness.swift')

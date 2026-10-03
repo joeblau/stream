@@ -1109,11 +1109,7 @@ final class StreamController: ObservableObject {
         lastGuestAdmissionGeneration = lease.generation
         let ticket = UUID(); guestRegistration = ticket; pendingGuestLease = lease
         let channel = AudioMixEngine.guestChannelID(for: lease)
-        var mixer = guestMixerSettings?() ?? settings.mixer
-        if guestMixerSettings == nil, let liveGain = mixerGains[channel] {
-            mixer.channelVolumes[channel.label] = Double(liveGain.volume)
-            mixer.channelMutes[channel.label] = liveGain.isMuted ? true : nil
-        }
+        let mixer = guestMixerSnapshot(channel: channel)
         // Gain, mute, solo and aux are seeded in the registration transaction.
         // A restored mute starts at zero, and an older rejected lease cannot
         // change the newer channel's mixer state through generic-ID awaits.
@@ -1121,7 +1117,9 @@ final class StreamController: ObservableObject {
             if guestRegistration == ticket { pendingGuestLease = nil }
             return false
         }
-        guard !guestMediaRetired, guestRegistration == ticket, guestVideoFrames.register(lease) else {
+        guard !guestMediaRetired, guestRegistration == ticket,
+              guestMixerValues(mixer, channel: channel) == guestMixerValues(guestMixerSnapshot(channel: channel), channel: channel),
+              guestVideoFrames.register(lease) else {
             if guestRegistration == ticket { pendingGuestLease = nil }
             _ = audioEngine.removeGuest(lease); return false
         }
@@ -1139,6 +1137,21 @@ final class StreamController: ObservableObject {
             }
         }
         return true
+    }
+
+    private func guestMixerSnapshot(channel: AudioChannelID) -> MixerSettings {
+        var mixer = guestMixerSettings?() ?? settings.mixer
+        if guestMixerSettings == nil, let liveGain = mixerGains[channel] {
+            mixer.channelVolumes[channel.label] = Double(liveGain.volume)
+            mixer.channelMutes[channel.label] = liveGain.isMuted ? true : nil
+        }
+        return mixer
+    }
+    private func guestMixerValues(_ mixer: MixerSettings, channel: AudioChannelID) -> [Double] {
+        [max(0, min(2, mixer.channelVolumes[channel.label] ?? 1)),
+         mixer.channelMutes[channel.label] == true ? 1 : 0,
+         mixer.soloedChannels.contains(channel.label) ? 1 : 0,
+         max(0, min(1, mixer.channelAuxSends[channel.label] ?? 0))]
     }
 
     /// Both callback paths validate the common clock generation without

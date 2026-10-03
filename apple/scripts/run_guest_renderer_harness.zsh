@@ -24,7 +24,8 @@ spec['targets'].each_value do |target|
 end
 target = spec['targets'].delete('StreamMac')
 target['type'] = 'tool'
-target['sources'][0] = { 'path' => File.join(root, 'StreamMac'), 'excludes' => ['StreamMacApp.swift'] }
+require File.join(root, 'scripts/guest_fixture_boundaries')
+StreamGuestFixtureBoundaries.apply(spec['targets']['StreamCore'], target, root, folder)
 target['sources'] << File.join(root, 'scripts/guest_renderer_harness.swift')
 spec['targets']['GuestRendererHarness'] = target
 spec['schemes']['GuestRendererHarness'] = { 'build' => { 'targets' => { 'GuestRendererHarness' => 'all' } } }
