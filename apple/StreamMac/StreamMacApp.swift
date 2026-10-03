@@ -25,7 +25,6 @@ struct StreamMacApp: App {
         // separate `SwiftUI.Settings` scene.
         Window("Stream Studio", id: "studio") {
             MainWindowView(firstRunCompleted: $hasCompletedFirstRun)
-                .id(ObjectIdentifier(workspace.runtime))
                 .environmentObject(workspace)
                 .environment(\.sessionRecovery, workspace.recovery)
                 .environment(\.providerAccounts, workspace.runtime.providerAccounts)
@@ -58,6 +57,8 @@ struct StreamMacApp: App {
                 // The smallest supported production layout (1024×640): all
                 // panels stay usable, and any of them can collapse from there.
                 .frame(minWidth: 1024, minHeight: 640)
+                // Retire the entire injected subtree with its original runtime.
+                .id(ObjectIdentifier(workspace.runtime))
         }
         .defaultSize(width: 1440, height: 900)
         .windowResizability(.contentMinSize)
