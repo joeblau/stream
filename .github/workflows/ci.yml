@@ -88,7 +88,9 @@ jobs:
           REVIEW_ACCOUNTS_BUILD_PATH=build/tests zsh scripts/run_recovery_accounts_harness.zsh
           WORKSPACE_BUILD_PATH=build/desktop zsh scripts/run_studio_workspace_harness.zsh
       - name: Qualify recorded public chat timing
-        run: CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh
+        run: |
+          CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh
+          CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh --late-pause-burst
       - name: Qualify complete comment presentation and recorded pages
         run: COMMENT_BUILD_PATH=build/desktop zsh scripts/run_comment_presentation_harness.zsh
 
@@ -103,7 +105,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.runner }}
-          path: apple/build/desktop-tests.xcresult
+          path: |
+            apple/build/desktop-tests.xcresult
+            apple/build/recording-chat-validation/media-*
+            apple/build/fractional-iso-audio-validation/media-*
 
   test:
     name: StreamCore tests (iOS Simulator)

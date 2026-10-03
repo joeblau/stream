@@ -8,6 +8,7 @@ import StreamCore
 private func check(_ condition: @autoclosure () throws -> Bool, _ reason: String) throws {
     if try !condition() { throw RecordingChatError.invalid(reason) }
 }
+private func chatLog(_ message: String) { FileHandle.standardOutput.write(Data((message + "\n").utf8)) }
 private func event(_ id: String, text: String = "Hello 世界 👋", whisper: Bool = false, type: Int = 5) throws -> Data {
     try JSONSerialization.data(withJSONObject: ["action": "event", "timestamp": 1_800_000_000,
         "token": "secret-token-sentinel", "payload": ["connectionIdentifier": "private-connection-sentinel",
@@ -23,10 +24,44 @@ private final class ChatTestSummary: @unchecked Sendable {
     var warning: String? { lock.lock(); defer { lock.unlock() }; return value?.warning }
 }
 
+/// Holds one actual writer callback so the fixture can create a known backlog
+/// without depending on the host renderer or encoder being slow.
+private final class ChatPauseBacklog: @unchecked Sendable {
+    let enabled: Bool
+    private let lock = NSLock()
+    private let release = DispatchSemaphore(value: 0)
+    private var entered = false
+    private var timedOut = false
+    init(enabled: Bool) { self.enabled = enabled }
+    func accepted(_ frame: RecordingChatFrame) {
+        guard enabled, abs(frame.seconds - 1.4) < 0.000_001 else { return }
+        lock.lock(); entered = true; lock.unlock()
+        let timeout = release.wait(timeout: .now() + 3) == .timedOut
+        lock.lock(); timedOut = timeout; lock.unlock()
+    }
+    var isEntered: Bool { lock.lock(); defer { lock.unlock() }; return entered }
+    var didTimeOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOut }
+    func unblock() { release.signal() }
+}
+
+private final class ChatResumeAcknowledgement: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Bool?
+    func receive(_ ready: Bool) { lock.lock(); value = ready; lock.unlock() }
+    var ready: Bool? { lock.lock(); defer { lock.unlock() }; return value }
+}
+
 @main @MainActor struct RecordingChatHarness {
     static func main() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("stream-chat-\(UUID().uuidString)")
+        let root: URL
+        if let index = CommandLine.arguments.firstIndex(of: "--artifacts-dir") {
+            try check(index + 1 < CommandLine.arguments.count, "Missing chat artifact directory")
+            root = URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true)
+        } else {
+            root = FileManager.default.temporaryDirectory.appendingPathComponent("stream-chat-\(UUID().uuidString)")
+        }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        chatLog("Native chat artifacts: \(root.path)")
         // Keep artifacts for media inspection outside the fixture.
         let workspace = StudioWorkspace(root: root.appendingPathComponent("Workspace"))
         let runtime = workspace.runtime
@@ -48,10 +83,12 @@ private final class ChatTestSummary: @unchecked Sendable {
         let archive = RecordingChatArchive(programURL: programURL, sessionID: sessionID, segmentIndex: 1,
             context: context, timeline: timeline, preferences: prefs)
         feed.install(archive)
+        let backlog = ChatPauseBacklog(enabled: CommandLine.arguments.contains("--late-pause-burst"))
+        defer { backlog.unblock() }
         var config = ProgramRecordingSession.Configuration()
         config.frameRate = 20; config.sessionID = sessionID; config.context = context
         config.chatArchiveFile = archive.url.lastPathComponent
-        config.onVideoAccepted = { frame in feed.frame(frame, into: archive) }
+        config.onVideoAccepted = { frame in feed.frame(frame, into: archive); backlog.accepted(frame) }
         config.onMarkerRecorded = { marker in archive.marker(marker) }
         let writer = ProgramRecordingSession(outputURL: programURL, configuration: config, timeline: timeline,
             spaceProbe: { _ in 8_000_000_000 })
@@ -83,20 +120,53 @@ private final class ChatTestSummary: @unchecked Sendable {
             if tick == 60 { runtime.chat.receive(try event("second")); secondID = runtime.chat.queue.messages.last!.id }
             if tick == 70 { runtime.chat.show(secondID) }
             if tick == 90 { _ = runtime.dispatcher.execute(.take) }
-            if tick == 160 { writer.pause() }
+            if tick == 160 {
+                if backlog.enabled {
+                    let blocked = timeline.snapshot()
+                    try check(backlog.isEntered && blocked.videoPTS.isNumeric
+                        && abs((blocked.videoPTS - blocked.origin).seconds - 1.4) < 0.000_001,
+                        "Controlled writer backlog did not hold the actual 1.40-second frame")
+                    chatLog("Controlled pre-pause backlog: accepted video 1.40 s, three later frames queued")
+                    backlog.unblock()
+                }
+                // Pause deliberately discards queued video. This fixture's
+                // exact 1.6-second boundary must already be accepted, even
+                // when an absolute wall deadline caused a catch-up burst.
+                try await waitForBoundary(timeline, videoSeconds: 1.55, endSeconds: 1.6)
+                writer.pause()
+                try await waitForBoundary(timeline, paused: true)
+                try check(!backlog.didTimeOut, "Controlled writer callback exceeded its bounded hold")
+            }
             if tick == 175 {
                 runtime.chat.receive(try event("paused", text: "During pause 🧑🏽‍🚀"))
                 runtime.chat.hide(); _ = runtime.dispatcher.execute(.take)
             }
-            if tick == 200 { writer.resume() }
+            if tick == 200 {
+                let acknowledgment = ChatResumeAcknowledgement()
+                writer.resume { acknowledgment.receive($0) }
+                let until = ContinuousClock.now + .seconds(3)
+                while acknowledgment.ready == nil && ContinuousClock.now < until {
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                try check(acknowledgment.ready == true, "Native writer did not acknowledge resume before resumed media")
+            }
             if tick == 225 { runtime.chat.receive(try event("long", text: String(repeating: "界👩🏽‍🚀", count: 400))) }
             if tick == 220 { writer.addMarker(title: "Chapter 世界") }
             if tick % 5 == 0 {
                 let selected = (120..<150).contains(tick) ? slate : runtime.previewProgram.programScene!
-                if let frame = renderer.render(scene: selected, overlayContext: .empty,
-                    canvasSize: CGSize(width: 320, height: 180), frames: .init(camera: { _ in nil }, screen: { _ in nil }),
-                    sourcePayloads: [:], scenes: [:], presentationTime: CMTime(seconds: base + seconds, preferredTimescale: 48_000),
-                    frameDuration: CMTime(value: 1, timescale: 20), sequence: Int64(tick)) {
+                let until = ContinuousClock.now + .seconds(3)
+                var rendered: CompositedFrame?
+                repeat {
+                    rendered = renderer.render(scene: selected, overlayContext: .empty,
+                        canvasSize: CGSize(width: 320, height: 180), frames: .init(camera: { _ in nil }, screen: { _ in nil }),
+                        sourcePayloads: [:], scenes: [:], presentationTime: CMTime(seconds: base + seconds, preferredTimescale: 48_000),
+                        frameDuration: CMTime(value: 1, timescale: 20), sequence: Int64(tick))
+                    if rendered == nil {
+                        try check(ContinuousClock.now < until, "Native renderer did not release capacity for the requested source frame")
+                        try await Task.sleep(for: .milliseconds(5))
+                    }
+                } while rendered == nil
+                if let frame = rendered {
                     let paints = RecordingChatPaint.read(frame.sampleBuffer)
                     if tick < 50 { try check(paints.isEmpty, "Staged Show leaked to Program") }
                     if (70..<90).contains(tick) { try check(paints.first?.messageID == firstID, "Identical staged text relabeled Program before Take") }
@@ -106,6 +176,13 @@ private final class ChatTestSummary: @unchecked Sendable {
                 }
             }
             writer.appendAudio(try ProgramRecordingFixtures.audio(at: seconds, timestampBase: base))
+            if backlog.enabled && tick == 140 {
+                let until = ContinuousClock.now + .seconds(3)
+                while !backlog.isEntered && ContinuousClock.now < until {
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                try check(backlog.isEntered, "Native writer did not enter the controlled callback hold")
+            }
             if tick == 0 {
                 for _ in 0..<150 {
                     if timeline.snapshot().origin.isNumeric { break }
@@ -114,11 +191,14 @@ private final class ChatTestSummary: @unchecked Sendable {
                 try check(timeline.snapshot().origin.isNumeric, "Native writer must establish its media timeline before chat receipts")
                 deadline = ContinuousClock.now
             }
-            try await ContinuousClock().sleep(until: deadline + .milliseconds((tick + 1) * 10))
+            if !backlog.enabled || !(140..<160).contains(tick) {
+                try await ContinuousClock().sleep(until: deadline + .milliseconds((tick + 1) * 10))
+            }
         }
         let result = await withCheckedContinuation { continuation in writer.finish { continuation.resume(returning: $0) } }
         feed.install(nil)
         await withCheckedContinuation { continuation in archive.finish(completed: result.completed) { continuation.resume() } }
+        chatLog("Native chat writer: duration \(result.progress.durationSeconds), accepted video \(result.progress.videoSamples), dropped video \(result.progress.droppedVideo), dropped audio \(result.progress.droppedAudio)")
         try check(result.completed && whiteFrames > 10 && blackFrames > 20, "Native program recording/rendering failed")
         try await ProgramRecordingFixtures.inspect(programURL, expectedDuration: 3.2, checkSync: false)
         var records: [RecordingChatRecord] = []
@@ -150,6 +230,21 @@ private final class ChatTestSummary: @unchecked Sendable {
         await model.refresh(access: .init(url: root, scoped: false), activeURLs: [])
         try check(model.entries.first { $0.url.lastPathComponent == programURL.lastPathComponent }?.chatURL?.lastPathComponent == archive.url.lastPathComponent, "Library did not associate the program archive")
         print("PASS: public-only opt-in chat; actual staged Show/Take/Hide identity; decoded feature pixels; privacy/alpha/opaque/stinger/transition suppression; native accepted-frame timing, pause, markers and two segment origins; bounded overload; interrupted-prefix recovery; JSON/CSV/VTT/SRT; author opt-out; profile retention; library association. Artifacts: \(root.path)")
+    }
+
+    static func waitForBoundary(_ timeline: RecordingTimeline, videoSeconds: Double? = nil,
+                                endSeconds: Double? = nil, paused: Bool? = nil) async throws {
+        let until = ContinuousClock.now + .seconds(3)
+        while true {
+            let snapshot = timeline.snapshot()
+            let videoReady = videoSeconds.map { snapshot.origin.isNumeric && snapshot.videoPTS.isNumeric
+                && (snapshot.videoPTS - snapshot.origin).seconds >= $0 - 0.000_001 } ?? true
+            let endReady = endSeconds.map { snapshot.origin.isNumeric && snapshot.end.isNumeric
+                && (snapshot.end - snapshot.origin).seconds >= $0 - 0.000_001 } ?? true
+            if videoReady && endReady && (paused == nil || snapshot.paused == paused) { return }
+            try check(ContinuousClock.now < until, "Native writer did not acknowledge the requested accepted media boundary")
+            try await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     static func alphaContributions(renderer: SceneRenderer, messageID: String) throws {
