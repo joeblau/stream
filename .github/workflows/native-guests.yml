@@ -135,8 +135,10 @@ jobs:
         run: |
           set -euo pipefail
           export STREAM_INTERVIEW_TURN_BUILD_DIR="$PWD/apple/build/native-interview-turn"
-          export STREAM_TURN_OPENSSL_ROOT="$(brew --prefix openssl@3)"
-          export STREAM_TURN_LIBEVENT_ROOT="$(brew --prefix libevent)"
+          STREAM_TURN_OPENSSL_ROOT="$(brew --prefix openssl@3)"
+          export STREAM_TURN_OPENSSL_ROOT
+          STREAM_TURN_LIBEVENT_ROOT="$(brew --prefix libevent)"
+          export STREAM_TURN_LIBEVENT_ROOT
           apple/scripts/build_owned_interview_turn.zsh 2>&1 | tee apple/build/native-guest-results/turn-build.log
           export STREAM_INTERVIEW_TURN_SERVER="$STREAM_INTERVIEW_TURN_BUILD_DIR/build/bin/turnserver"
           export STREAM_INTERVIEW_RECEIVER_FRAMEWORKS="$PWD/apple/build/native-guest-ci/Build/Products/Debug"
@@ -145,7 +147,8 @@ jobs:
           NATIVE_INTERVIEW_MEDIA_CLI="$PWD/apple/build/native-interview-negative/native-interview-media-cli" node workers/interviews/test/browser/native-session-relay-browser.mjs --expect-relay-policy-unavailable 2>&1 | tee apple/build/native-guest-results/relay-negative.log
           apple/scripts/build_native_interview_media_cli.zsh
           export NATIVE_INTERVIEW_MEDIA_CLI="$PWD/apple/build/native-interview-media/native-interview-media-cli"
-          export STREAM_RELAY_POLICY_TCP_PROBE="$PWD/apple/build/native-guest-ci/TransportSourceBuild/$(uname -m)/relay-policy-tcp-harness"
+          STREAM_RELAY_POLICY_TCP_PROBE="$PWD/apple/build/native-guest-ci/TransportSourceBuild/$(uname -m)/relay-policy-tcp-harness"
+          export STREAM_RELAY_POLICY_TCP_PROBE
           node workers/interviews/test/browser/native-session-relay-browser.mjs 2>&1 | tee apple/build/native-guest-results/relay-positive.log
       - name: Qualify the shipping browser against the native host
         env:
