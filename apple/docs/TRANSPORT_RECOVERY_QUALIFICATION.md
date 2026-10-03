@@ -36,6 +36,12 @@ a `close()` continuation warning during this exercised reconnect, although the
 actual reconnect and both stop acknowledgments complete; this test does not
 qualify sustained reconnect resource usage.
 
+The hosted Intel run at `895e25d` reached receiver setup but the installed
+minimal Homebrew `ffmpeg` lacked the SRT protocol, so it did not qualify
+transport recovery. The workflow now installs `ffmpeg-full`, checks actual
+RTMP/SRT protocol availability before compilation, and selects that binary
+explicitly through its formula prefix.
+
 The Native transport recovery workflow runs both modes on Apple Silicon and
 Intel and retains original receiver files and logs. Hosted checks must pass on
 the final commit before they qualify that architecture.

@@ -45,8 +45,12 @@ jobs:
           xcodebuild -version
           sw_vers
           uname -m
-          brew install xcodegen cmake ffmpeg
-          ffmpeg -version
+          brew install xcodegen cmake ffmpeg-full
+          echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
+          "$(brew --prefix ffmpeg-full)/bin/ffmpeg" -version
+          "$(brew --prefix ffmpeg-full)/bin/ffmpeg" -protocols | tee /tmp/stream-receiver-protocols.txt
+          rg -x '  srt' /tmp/stream-receiver-protocols.txt
+          rg -x '  rtmp' /tmp/stream-receiver-protocols.txt
       - name: Qualify real endpoint loss and independent continuous decode
         run: |
           mkdir -p build/native-transport-results

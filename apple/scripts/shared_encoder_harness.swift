@@ -103,7 +103,7 @@ private actor EncodedPublisherProbe: Publisher {
         do { try probe.run(); probe.waitUntilExit(); return probe.terminationStatus == 0 } catch { return false }
     }
     static func localhostTransports(directory: URL, settings: StreamSettings) async throws {
-        guard let path = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].first(where: FileManager.default.isExecutableFile(atPath:)) else {
+        guard let path = ["/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg", "/usr/local/opt/ffmpeg-full/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].first(where: FileManager.default.isExecutableFile(atPath:)) else {
             report("UNQUALIFIED: localhost transport fixtures require ffmpeg with libsrt/RTMP; no transport acceptance claimed")
             return
         }
@@ -168,7 +168,7 @@ private actor EncodedPublisherProbe: Publisher {
         report("PASS: one actual fixed encoder -> RTMPPublisher/RTMPStream and SessionPublisher/SRTStream compressed passthrough -> simultaneous localhost ffmpeg MP4 receivers; H.264/AAC decode/sync/metadata, SRT startup primer and independent acknowledged stops")
     }
     static func localhostRecovery(directory: URL, settings: StreamSettings) async throws {
-        guard let path = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first(where: FileManager.default.isExecutableFile(atPath:)) else {
+        guard let path = ["/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg", "/usr/local/opt/ffmpeg-full/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first(where: FileManager.default.isExecutableFile(atPath:)) else {
             throw NSError(domain: "SharedEncoderHarness", code: 77, userInfo: [NSLocalizedDescriptionKey: "Real RTMP/SRT recovery requires owned ffmpeg receivers"])
         }
         var processes: [Process] = [], handles: [FileHandle] = []
