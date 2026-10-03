@@ -73,8 +73,17 @@ final class StudioWorkspace: ObservableObject {
     @Published var showProjects = false
     @Published var recoveryFile: URL?
     @Published var sceneRecovery: Backup?
-    @Published var importPreview: ShowPackagePreview?
-    @Published var packageBusy = false
+    @Published var importPreview: ShowPackagePreview? {
+        didSet {
+            // The sheet's existing Cancel binding closes preview authority.
+            // A canceled IO worker retains its capacity until it returns.
+            if importPreview == nil {
+                latestPackageRead = nil
+                refreshPackageBusy()
+            }
+        }
+    }
+    @Published private(set) var packageBusy = false
     @Published var showRecordingLibrary = false
     var permissionChoicePending = false
     let recovery: SessionRecoveryCoordinator
@@ -86,6 +95,10 @@ final class StudioWorkspace: ObservableObject {
     private let catalogURL: URL
     private let root: URL
     private var stateObservation: AnyCancellable?
+    private var occupiedPackageReads: Set<UUID> = []
+    private var latestPackageRead: UUID?
+    private var packageWrite: UUID?
+    private let maximumPackageReads = 4
     var selection: Selection { Selection(project: catalog.selectedProjectID, profile: catalog.selectedProfileID) }
     var currentProject: StudioProject { catalog.projects.first { $0.id == catalog.selectedProjectID }! }
     var currentProfile: StudioProfile { currentProject.profiles.first { $0.id == catalog.selectedProfileID }! }
@@ -393,17 +406,38 @@ final class StudioWorkspace: ObservableObject {
     func previewPackage(_ url: URL) {
         guard url.isFileURL, url.pathExtension.lowercased() == "streamshow" else { return }
         showProjects = true
-        packageBusy = true
-        Task {
-            do { importPreview = try await Task.detached { try ShowPackageIO.preview(url) }.value }
-            catch { self.error = String(describing: error); showProjects = true }
-            packageBusy = false
+        guard packageWrite == nil else {
+            error = "Wait for the current package import or export to finish before opening another package."
+            return
+        }
+        guard occupiedPackageReads.count < maximumPackageReads else {
+            error = "Wait for the existing package reads to finish before opening another package."
+            return
+        }
+        let request = UUID()
+        occupiedPackageReads.insert(request)
+        latestPackageRead = request
+        refreshPackageBusy()
+        Task { [weak self] in
+            let result = await Task.detached { Result { try ShowPackageIO.preview(url) } }.value
+            guard let self else { return }
+            self.occupiedPackageReads.remove(request)
+            guard self.latestPackageRead == request else { return }
+            self.latestPackageRead = nil
+            switch result {
+            case .success(let preview): self.importPreview = preview
+            case .failure(let failure):
+                self.importPreview = nil
+                self.error = String(describing: failure)
+                self.showProjects = true
+            }
+            self.refreshPackageBusy()
         }
     }
 
     func importPreviewedPackage() async {
-        guard let preview = importPreview, !packageBusy else { return }
-        packageBusy = true
+        guard let preview = importPreview, !packageBusy, let operation = beginPackageWrite() else { return }
+        defer { finishPackageWrite(operation) }
         let project = StudioProject(name: preview.name)
         let target = Selection(project: project.id, profile: project.profiles[0].id)
         let destination = directory(for: target)
@@ -415,14 +449,16 @@ final class StudioWorkspace: ObservableObject {
             showProjects = true
             saveCatalog()
         } catch { self.error = String(describing: error) }
-        packageBusy = false
     }
 
     func exportPackage(includeMedia: Bool, selectedSceneOnly: Bool) {
+        // The native save panel runs a nested run loop. Own the write before
+        // entering it so a delivered package event cannot replace the preview.
+        guard let operation = beginPackageWrite() else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.streamShow]
         panel.nameFieldStringValue = currentProject.name + ".streamshow"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { finishPackageWrite(operation); return }
         runtime.flush()
         var document = runtime.sceneStore.document
         if selectedSceneOnly {
@@ -458,14 +494,35 @@ final class StudioWorkspace: ObservableObject {
         }
         documents["stream.assets.v1.json"] = try? JSONEncoder().encode(AssetLibraryDocument(assets: assets, usage: [:]))
         let packageDocuments = documents, packageMedia = media, name = currentProject.name
-        packageBusy = true
-        Task {
+        Task { [weak self] in
+            defer { self?.finishPackageWrite(operation) }
             do {
                 try await Task.detached { try ShowPackageIO.export(documents: packageDocuments, media: packageMedia,
                     name: name, includeMedia: includeMedia, to: url) }.value
-            } catch { self.error = String(describing: error) }
-            packageBusy = false
+            } catch { self?.error = String(describing: error) }
         }
+    }
+
+    private func beginPackageWrite() -> UUID? {
+        guard !packageBusy else {
+            error = "Wait for the current package operation to finish."
+            return nil
+        }
+        let operation = UUID()
+        packageWrite = operation
+        refreshPackageBusy()
+        return operation
+    }
+
+    private func finishPackageWrite(_ operation: UUID) {
+        guard packageWrite == operation else { return }
+        packageWrite = nil
+        refreshPackageBusy()
+    }
+
+    private func refreshPackageBusy() {
+        let busy = latestPackageRead != nil || packageWrite != nil
+        if packageBusy != busy { packageBusy = busy }
     }
 
     private static func copyCredentials(from source: URL, to target: URL) throws {

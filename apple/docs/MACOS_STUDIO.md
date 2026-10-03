@@ -54,6 +54,9 @@ a preview; import creates a separate show, remaps IDs, then stages it for Apply.
 Relink missing sources/assets and configure destinations before production.
 Raw legacy media bookmarks without library registrations need importing into
 Assets before transfer. Copied HTML/media can contain the producer's own content.
+Native file delivery and sandbox/restart evidence, including the remaining
+picker and physical gesture limits, are documented in
+[Portable show native entry](PORTABLE_SHOW_NATIVE_ENTRY.md).
 
 ## Desktop and shared boundaries
 
