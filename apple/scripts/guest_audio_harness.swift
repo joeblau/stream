@@ -38,6 +38,11 @@ final class GuestAudioProbe: @unchecked Sendable {
         packets.append(.init(pts: sample.presentationTimeStamp.seconds, samples: values, gaps: IsolatedAudioGap.frames(in: sample)))
     }
     func snapshot() -> [GuestAudioPacket] { lock.lock(); defer { lock.unlock() }; return packets }
+    func deliveredEndPTS() -> Double {
+        lock.lock(); defer { lock.unlock() }
+        guard let last = packets.last else { return -.infinity }
+        return last.pts + Double(last.samples.count / 2) / 48_000
+    }
 }
 final class GuestAudioBlockedProbe: @unchecked Sendable {
     let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
@@ -53,10 +58,25 @@ final class GuestAudioBlockedProbe: @unchecked Sendable {
     }
 }
 
+// A bounded hold of the actual mixer actor reproduces hosted scheduling delay.
+// The independent producer retains its original host PTS and continues writing
+// through the real nonisolated ring inlet; no fixture clock is substituted.
+private final class GuestAudioTickHold: @unchecked Sendable {
+    let entered = DispatchSemaphore(value: 0)
+    func waitEntered() -> Bool { entered.wait(timeout: .now() + 1) == .success }
+}
+private extension AudioMixEngine {
+    func fixtureHoldTick(_ hold: GuestAudioTickHold) {
+        hold.entered.signal()
+        _ = DispatchSemaphore(value: 0).wait(timeout: .now() + .milliseconds(80))
+    }
+}
+
 @main struct GuestAudioHarness {
     static func main() async throws {
         let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if CommandLine.arguments.contains("--routes-only") { try await routesAndFiles(directory); return }
         try await admissionAndClock()
         try await atomicPersistedMixer()
         try await originalSourceClock(directory)
@@ -172,6 +192,15 @@ final class GuestAudioBlockedProbe: @unchecked Sendable {
         let amplitude = power(probe.snapshot(), frequency: frequency, from: start, to: end)
         require(present ? amplitude > 0.15 : amplitude < 0.005, "\(name): measured \(frequency)Hz amplitude \(amplitude), expected present=\(present)")
         emit("TRACE: \(name) \(frequency)Hz amplitude=\(amplitude)")
+    }
+    static func awaitDelivered(_ probes: [GuestAudioProbe], through end: Double, name: String, base: Double) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while probes.contains(where: { $0.deliveredEndPTS() < end }) && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        let frontier = probes.map { $0.deliveredEndPTS() }.min() ?? -.infinity
+        require(frontier >= end, "\(name): actual Program/monitor/aux/pre/post PCM did not reach the prior measured window within two seconds")
+        emit("TRACE: \(name) actual all-tap delivered frontier=\(frontier-base)s, required=\(end-base)s")
     }
 
     static func atomicPersistedMixer() async throws {
@@ -293,37 +322,66 @@ final class GuestAudioBlockedProbe: @unchecked Sendable {
         await engine.setChannelAuxSend(guest, gain: 1)
         let base = now() + 0.08, clock = ContinuousClock(), start = clock.now
         var acknowledgements = ["backstage": now()]
-        for index in 0..<310 {
-            let offset = Double(index) / 100
+        // Source delivery owns its original clock and PTS independently of
+        // control readiness. Awaiting a route's tap frontier never pauses,
+        // retimestamps or changes either original synthetic source.
+        let producer = Task.detached(priority: .userInitiated) {
+            for index in 0..<310 {
+                try Task.checkCancellation()
+                let offset = Double(index) / 100
+                try await clock.sleep(until: start.advanced(by: .seconds(offset)))
+                let packet = frame(admission, pts: base + offset, mapping: mapping, pcm: pcm(offset: offset))
+                require(engine.enqueueGuest(packet), "Timed source packet must be admitted")
+                engine.enqueue(unrelated, try ProgramRecordingFixtures.audio(at: offset, timestampBase: base,
+                                                                             constantTone: true, amplitude: 0.2))
+            }
+        }
+        defer { producer.cancel() }
+        var holdTask: Task<Void, Error>?
+        let hold = GuestAudioTickHold()
+        if CommandLine.arguments.contains("--hold-before-revoke") {
+            holdTask = Task.detached {
+                try await clock.sleep(until: start.advanced(by: .seconds(2.15)))
+                await engine.fixtureHoldTick(hold)
+            }
+        }
+        defer { holdTask?.cancel() }
+        let taps = [program, monitor, aux, before, after]
+        for (offset, priorEnd, label) in [(0.6, 0.45, "private-monitor"), (1.2, 1.05, "program-only"),
+                                         (1.8, 1.65, "monitor-solo"), (2.2, 2.10, "revoked"),
+                                         (2.7, 2.60, "absent-local-solo")] {
             try await clock.sleep(until: start.advanced(by: .seconds(offset)))
-            if index == 60 {
-                require(engine.setGuestRouting(admission, programAllowed: false, monitorAllowed: true))
-                acknowledgements["private-monitor"] = now()
+            if label == "revoked", holdTask != nil {
+                require(await Task.detached { hold.waitEntered() }.value, "Actual tick hold did not enter")
+                emit("TRACE: controlled tick80ms pre-revoke frontier=\(monitor.deliveredEndPTS()-base)s host=\(now()-base)s")
             }
-            if index == 120 {
-                require(engine.setGuestRouting(admission, programAllowed: true, monitorAllowed: false))
-                acknowledgements["program-only"] = now()
-            }
-            if index == 180 {
+            // Immediate authority changes affect any still-unrendered old-PTS
+            // PCM. Host-time ACKs cannot establish delivery under an overloaded
+            // tick. Require the prior measured window on all real tap queues.
+            try await awaitDelivered(taps, through: base + priorEnd, name: label, base: base)
+            switch label {
+            case "private-monitor": require(engine.setGuestRouting(admission, programAllowed: false, monitorAllowed: true))
+            case "program-only": require(engine.setGuestRouting(admission, programAllowed: true, monitorAllowed: false))
+            case "monitor-solo":
                 require(engine.setGuestRouting(admission, programAllowed: true, monitorAllowed: true))
                 await engine.setChannelSolo(guest, soloed: true)
-                acknowledgements["monitor-solo"] = now()
+            case "revoked": require(engine.setGuestRouting(admission, programAllowed: false, monitorAllowed: false))
+            case "absent-local-solo": await engine.setChannelSolo(.application(bundleID: "fixture.absent-solo-source"), soloed: true)
+            default: preconditionFailure("Unknown fixture phase")
             }
-            if index == 220 {
-                require(engine.setGuestRouting(admission, programAllowed: false, monitorAllowed: false))
-                acknowledgements["revoked"] = now()
-            }
-            if index == 270 {
-                await engine.setChannelSolo(.application(bundleID: "fixture.absent-solo-source"), soloed: true)
-                acknowledgements["absent-local-solo"] = now()
-            }
-            let packet = frame(admission, pts: base + offset, mapping: mapping, pcm: pcm(offset: offset))
-            require(engine.enqueueGuest(packet), "Timed source packet must be admitted")
-            // Independent local source remains on its own original timestamps.
-            engine.enqueue(unrelated, try ProgramRecordingFixtures.audio(at: offset, timestampBase: base, constantTone: true, amplitude: 0.2))
+            acknowledgements[label] = now()
         }
-        try await Task.sleep(for: .milliseconds(160))
+        try await producer.value; try await holdTask?.value
+        try await awaitDelivered(taps, through: base + 3.05, name: "final stop", base: base)
         await engine.stop()
+        // Retain actual failure media before any spectral assertion. The
+        // bounded original-PTS journal allows a hosted failure to be audited.
+        for (name, probe) in [("program", program), ("monitor", monitor), ("iso-before", before), ("iso-after", after)] {
+            try saveAndRead(probe.snapshot(), to: directory.appendingPathComponent("\(name).wav"))
+        }
+        let journal: [String: Any] = ["base": base, "acknowledgements": acknowledgements,
+            "monitor": monitor.snapshot().map { ["pts": $0.pts, "frames": $0.samples.count / 2] }]
+        try JSONSerialization.data(withJSONObject: journal).write(to: directory.appendingPathComponent("routing-timeline.json"))
         let phases = [
             (0.15, 0.45, false, false, true, "backstage"), (0.75, 1.05, false, true, true, "private-monitor"),
             (1.35, 1.65, true, false, true, "program-only"), (1.95, 2.10, true, true, false, "monitor-solo"),
@@ -345,9 +403,6 @@ final class GuestAudioBlockedProbe: @unchecked Sendable {
             }
             assertTone(program, frequency: 1_000, present: true, start: measuredStart, end: measuredEnd, name: "\(label) unrelated Program")
             assertTone(monitor, frequency: 1_000, present: localMonitorOn, start: measuredStart, end: measuredEnd, name: "\(label) unrelated monitor")
-        }
-        for (name, probe) in [("program", program), ("monitor", monitor), ("iso-before", before), ("iso-after", after)] {
-            try saveAndRead(probe.snapshot(), to: directory.appendingPathComponent("\(name).wav"))
         }
         let stats = await engine.statsSnapshot()
         require(stats.tapDrops.isEmpty, "Normal taps must keep up; drops=\(stats.tapDrops)")
