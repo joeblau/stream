@@ -2,6 +2,9 @@
 # mixer, renderer, recording and persistence code remains unchanged.
 module StreamGuestFixtureBoundaries
   def self.apply(core, desktop, root, folder)
+    desktop['settings'] ||= {}
+    desktop['settings']['base'] ||= {}
+    desktop['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = '$(inherited) STREAM_NATIVE_VALIDATION'
     fixture_root = File.join(File.expand_path(folder), 'fixtures')
     require 'fileutils'
     FileUtils.mkdir_p(fixture_root)
