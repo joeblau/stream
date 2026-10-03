@@ -350,9 +350,25 @@ private extension AudioMixEngine {
         try await wait("Actual manager welcome missing") { studio.manager.state.snapshot.phase == .connected && !studio.manager.state.busy }
         trace("actual manager room created and host welcome acknowledged")
         let (guest, id) = try await connectGuest(studio)
+        var prepared = studio.scenes.createGuestSlot(name: "Prepared Interview Position")!
+        prepared.title = "Guest speaker"; prepared.cameraPlaceholder.message = "Waiting for speaker"
+        studio.scenes.replaceGuestSlot(prepared)
+        let preparedSourceIDs = studio.scenes.sources.compactMap { source -> SourceDefinitionID? in
+            if case .guest(let payload) = source.payload, payload.slotID == prepared.id { return source.id }
+            return nil
+        }
+        try require(studio.manager.assignSlot(prepared.id, to: id), "Actual waiting guest could not choose a prepared project slot")
         try require(!studio.dispatcher.canExecute(.interview(.onair(id))), "Waiting guest received a Program command")
         let host = try await admit(studio, guest: guest, id: id)
         let lease = host.context.receive
+        try require(lease.slot == prepared.id && studio.scenes.guestSlots.first?.reconnectPeerID == id,
+                    "Actual Worker admission ignored the saved public slot assignment")
+        try require(studio.scenes.sources.filter { if case .guest(let p) = $0.payload { return p.slotID == prepared.id }; return false }.map(\.id) == preparedSourceIDs,
+                    "Actual Worker admission replaced the prepared source IDs")
+        studio.scenes.flushPendingWrites()
+        let savedSlots = SceneStore(directory: directory)
+        try require(savedSlots.guestSlots == studio.scenes.guestSlots
+            && savedSlots.sources.map(\.id) == studio.scenes.sources.map(\.id), "Actual active-room slot document did not reload")
         try require(studio.manager.state.routes[id]?.programAllowed == false, "Admission granted Program")
         let cameraPTS = try host.paint(.camera, color: 0xffe02020)
         try require(studio.controller.guestVideoFrames.pixels(slot: lease.slot, role: .camera, at: cameraPTS, program: false) != nil,

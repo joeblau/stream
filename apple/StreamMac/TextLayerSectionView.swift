@@ -52,12 +52,37 @@ struct TextLayerSectionView: View {
             TextEditor(text: payloadBinding(for: layer).text)
                 .frame(minHeight: 56, maxHeight: 120)
                 .font(.body)
+                .disabled(payload.guestBinding != nil)
+            Picker("Guest Slot Binding", selection: Binding<UUID?>(
+                get: { payload.guestBinding?.slotID },
+                set: { id in
+                    var value = payload
+                    value.guestBinding = id.map { .init(slotID: $0, field: payload.guestBinding?.field ?? .name) }
+                    dispatcher.execute(.setLayerText(layer.id, value, in: nil))
+                })) {
+                Text("Editable text").tag(Optional<UUID>.none)
+                ForEach(sceneStore.guestSlots) { slot in Text(slot.name).tag(Optional(slot.id)) }
+            }
+            if let binding = payload.guestBinding {
+                Picker("Guest Metadata", selection: Binding(
+                    get: { binding.field },
+                    set: { field in
+                        var value = payload; value.guestBinding?.field = field
+                        dispatcher.execute(.setLayerText(layer.id, value, in: nil))
+                    })) {
+                    Text("Name").tag(GuestTitleBinding.Field.name)
+                    Text("Title").tag(GuestTitleBinding.Field.title)
+                }
+                Text("Metadata follows the saved slot across Take and reconnect. Choose Editable text to remove this binding.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Insert {host}") { insertToken("host", into: layer) }
                 Button("Insert {guest}") { insertToken("guest", into: layer) }
             }
             .buttonStyle(.borderless)
             .font(.caption)
+            .disabled(payload.guestBinding != nil)
             if TitleTemplate.containsToken(payload.text) {
                 Text("Tokens resolve to the published host/guest names on output; unset tokens render literally.")
                     .font(.caption)

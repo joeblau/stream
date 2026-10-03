@@ -539,6 +539,9 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
     var commentHeaderUTF16Length: Int? = nil
     var commentPageIndex = 0
     var commentAvatarKey: String? = nil
+    /// Typed project-slot binding; credentials and remote connection state
+    /// remain outside editable scene content.
+    var guestBinding: GuestTitleBinding? = nil
 
     init(text: String = "",
          fontName: String? = nil,
@@ -595,6 +598,7 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
         commentHeaderUTF16Length = try container.decodeIfPresent(Int.self, forKey: .commentHeaderUTF16Length)
         commentPageIndex = try container.decodeIfPresent(Int.self, forKey: .commentPageIndex) ?? 0
         commentAvatarKey = try container.decodeIfPresent(String.self, forKey: .commentAvatarKey)
+        guestBinding = try container.decodeIfPresent(GuestTitleBinding.self, forKey: .guestBinding)
     }
 
     /// The payload's styling fields as one `TextTitleStyle` value — what a
@@ -634,6 +638,9 @@ struct TextSourcePayload: Hashable, Codable, Sendable {
     /// The style model owns the style ranges; the timer model owns the
     /// timer ranges.
     var validationError: String? {
+        if guestBinding != nil && (timer != nil || ticker != nil || recordingChatMessageID != nil) {
+            return "A guest name/title binding cannot also be a timer, ticker or public comment."
+        }
         if timer != nil && ticker != nil { return "Choose either a timer or a ticker for this layer." }
         return style.validationError ?? timer?.validationError ?? ticker?.validationError
             ?? (ticker != nil ? TickerOverlayConfiguration.textValidationError(text) : nil)
@@ -1806,6 +1813,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
     /// timing — everything but the string), stored once at project level
     /// and applied by writing their value onto a text layer's payload.
     var textStylePresets: [TextStylePreset]
+    var guestSlots: [GuestSlot]
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
@@ -1818,7 +1826,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
          defaultTransition: SceneTransition = .default,
          effectPresets: [SourceEffectPreset] = [],
          stylePresets: [LayerStylePreset] = [],
-         textStylePresets: [TextStylePreset] = []) {
+         textStylePresets: [TextStylePreset] = [],
+         guestSlots: [GuestSlot] = []) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
@@ -1831,6 +1840,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
         self.effectPresets = effectPresets
         self.stylePresets = stylePresets
         self.textStylePresets = textStylePresets
+        self.guestSlots = guestSlots
     }
 
     /// `overlays`/`defaultBackground` were added within v2; decode them with
@@ -1851,6 +1861,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
         effectPresets = try container.decodeIfPresent([SourceEffectPreset].self, forKey: .effectPresets) ?? []
         stylePresets = try container.decodeIfPresent([LayerStylePreset].self, forKey: .stylePresets) ?? []
         textStylePresets = try container.decodeIfPresent([TextStylePreset].self, forKey: .textStylePresets) ?? []
+        guestSlots = try container.decodeIfPresent([GuestSlot].self, forKey: .guestSlots) ?? []
     }
 
     /// The S07 render context the engine composites every scene inside.
