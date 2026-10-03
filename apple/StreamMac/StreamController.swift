@@ -98,6 +98,9 @@ final class StreamController: ObservableObject {
     private var guestLease: GuestReceiveLease?
     private var pendingGuestLease: GuestReceiveLease?
     private var lastGuestAdmissionGeneration: UInt64 = 0
+    /// The dispatcher supplies current unsaved live mixer edits. A controller
+    /// without that owner uses its loaded project settings.
+    var guestMixerSettings: (() -> MixerSettings)?
     private var guestRegistration = UUID()
     private var guestMediaRetired = false
     private var resilienceTask: Task<Void, Never>?
@@ -1097,15 +1100,24 @@ final class StreamController: ObservableObject {
         if let pending = pendingGuestLease {
             guard pending.slot == lease.slot, lease.generation > pending.generation else { return false }
         }
-        lastGuestAdmissionGeneration = lease.generation
         if let current = guestLease {
             guard current.slot == lease.slot, lease.generation > current.generation else { return false }
             guestVideoFrames.remove(current)
             _ = audioEngine.removeGuest(current)
             guestLease = nil
         }
+        lastGuestAdmissionGeneration = lease.generation
         let ticket = UUID(); guestRegistration = ticket; pendingGuestLease = lease
-        guard await audioEngine.registerGuest(lease) else {
+        let channel = AudioMixEngine.guestChannelID(for: lease)
+        var mixer = guestMixerSettings?() ?? settings.mixer
+        if guestMixerSettings == nil, let liveGain = mixerGains[channel] {
+            mixer.channelVolumes[channel.label] = Double(liveGain.volume)
+            mixer.channelMutes[channel.label] = liveGain.isMuted ? true : nil
+        }
+        // Gain, mute, solo and aux are seeded in the registration transaction.
+        // A restored mute starts at zero, and an older rejected lease cannot
+        // change the newer channel's mixer state through generic-ID awaits.
+        guard await audioEngine.registerGuest(lease, initialMixer: mixer) else {
             if guestRegistration == ticket { pendingGuestLease = nil }
             return false
         }
@@ -1114,6 +1126,8 @@ final class StreamController: ObservableObject {
             _ = audioEngine.removeGuest(lease); return false
         }
         pendingGuestLease = nil; guestLease = lease
+        mixerGains[channel] = (Float(max(0, min(mixer.channelVolumes[channel.label] ?? 1, 2))),
+                              mixer.channelMutes[channel.label] ?? false)
         let title = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
         for role in [GuestSourceRole.camera, .screen] {
             if !sceneStore.sources.contains(where: {
@@ -1131,6 +1145,9 @@ final class StreamController: ObservableObject {
     /// introducing a main-actor task for every decoded frame.
     nonisolated func receiveGuestVideo(_ frame: GuestVideoFrame) {
         _ = guestVideoFrames.receive(frame)
+    }
+    nonisolated func registeredGuestAudioChannel(slot: UUID) -> AudioChannelID? {
+        audioEngine.registeredGuestChannelID(slot: slot)
     }
     nonisolated func receiveGuestAudio(_ frame: GuestAudioFrame) {
         guard audioEngine.validateGuestFrame(frame),
