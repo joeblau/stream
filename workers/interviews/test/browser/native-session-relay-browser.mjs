@@ -9,7 +9,9 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {WebSocket} from 'ws';
+import {chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const startup=new ChromeFixtureDiagnostics();
 async function wait(label,predicate,timeout=15_000){const end=Date.now()+timeout;while(Date.now()<end){const value=await predicate();if(value)return value;await pause(50);}throw new Error(`Bounded fixture timeout: ${label}`);}
 async function port(){const server=net.createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const value=server.address().port;await new Promise(resolve=>server.close(resolve));return value;}
 const workerRoot=fileURLToPath(new URL('../../',import.meta.url));
@@ -33,12 +35,13 @@ class CDP {
       if (pending) { this.pending.delete(value.id); clearTimeout(pending.timer);
         value.error ? pending.reject(new Error(value.error.message)) : pending.resolve(value.result); }
       if (value.method === 'Runtime.exceptionThrown') this.errors.push(value.params.exceptionDetails.text);
+      startup.event(value.method);
     });
     socket.on('close', () => { for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Chrome closed')); } this.pending.clear(); });
   }
   send(method, params = {}, sessionId) {
     return new Promise((resolve, reject) => {
-      const id = ++this.id, timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Chrome timeout: ${method}`)); }, 10_000);
+      const id = ++this.id, timer = setTimeout(() => { this.pending.delete(id); startup.timeout(method,this.pending.size); reject(new Error(`Chrome timeout: ${method}`)); }, 10_000);
       this.pending.set(id, {resolve,reject,timer}); this.socket.send(JSON.stringify({id,method,params,sessionId}));
     });
   }
@@ -117,17 +120,27 @@ try {
   command({type:'create'});await wait('native actual Worker create and host connect',()=>{check();return invite&&state?.phase==='connected';});
   const executable=process.env.CHROME_BIN??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   const profile=path.join(owned,'chrome');await fs.mkdir(profile,{mode:0o700});
-  chrome=child(executable,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--no-first-run','--disable-background-networking','--disable-component-update','--disable-extensions','--autoplay-policy=no-user-gesture-required',...(process.env.CHROME_NO_SANDBOX==='1'?['--no-sandbox']:[]),'about:blank']);
+  startup.phase('launch');
+  chrome=child(executable,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--no-first-run','--disable-background-networking','--disable-component-update','--disable-extensions','--autoplay-policy=no-user-gesture-required',...chromeFixtureCredentialArguments(),...(process.env.CHROME_NO_SANDBOX==='1'?['--no-sandbox']:[]),'about:blank'],{stdio:['ignore','ignore','pipe']});
+  startup.observe(chrome);
   const debugging=await wait('isolated Chrome launch',async()=>{check();try{return(await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).trim().split('\n');}catch{return undefined;}});
+  startup.phase('debug-endpoint');
   browserSocket=new WebSocket(`ws://127.0.0.1:${debugging[0]}${debugging[1]}`,{handshakeTimeout:10_000});
   await new Promise((resolve,reject)=>{browserSocket.once('open',resolve);browserSocket.once('error',()=>reject(new Error('Chrome debug handshake failed')));});
+  startup.phase('debug-connected');
   browser=new CDP(browserSocket);const version=await browser.send('Browser.getVersion');
-  const target=await browser.send('Target.createTarget',{url:'about:blank'}),{sessionId:g}=await browser.send('Target.attachToTarget',{targetId:target.targetId,flatten:true});
+  startup.version(version.product);startup.phase('browser-version');
+  const target=await browser.send('Target.createTarget',{url:'about:blank'});startup.phase('target-created');
+  const {sessionId:g}=await browser.send('Target.attachToTarget',{targetId:target.targetId,flatten:true});startup.phase('target-attached');
   await browser.send('Page.enable',{},g);await browser.send('Runtime.enable',{},g);
+  startup.phase('page-runtime-enabled');
   const ownedTURNOverride=String.raw`const ownedRelay=${JSON.stringify({ttl:600,iceServers:[{urls:[turnURL],username:turnUsername,credential:turnCredential}]})};const originalFetch=window.fetch.bind(window);window.fetch=(input,init)=>{const url=new URL(typeof input==='string'?input:input.url,location.href);if(url.origin===location.origin&&/^\/v1\/rooms\/[0-9a-f-]+\/turn$/.test(url.pathname))return Promise.resolve(new Response(JSON.stringify(ownedRelay),{headers:{'Content-Type':'application/json'}}));return originalFetch(input,init);};`;
   await browser.send('Page.addScriptToEvaluateOnNewDocument',{source:syntheticMedia+ownedTURNOverride},g);
+  startup.phase('navigate');
   await browser.send('Page.navigate',{url:invite},g);invite=undefined;
+  startup.phase('navigation-accepted');
   await browser.until(g,"typeof document.getElementById('prepare').onclick==='function'",'actual guest page');
+  startup.phase('guest-ready');
   assert(browser.errors.length===0&&await browser.evaluate(g,'Array.isArray(window.__fixtureCamera)'),'Generated capture and local TURN override must initialize without script errors');
   assert(await browser.evaluate(g,"location.hash===''")===true,'Guest strips capability fragment');
   await browser.evaluate(g,"document.getElementById('prepare').click()");await browser.until(g,"!document.getElementById('join').disabled",'generated devices prepared');
