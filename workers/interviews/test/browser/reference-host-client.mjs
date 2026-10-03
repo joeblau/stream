@@ -35,11 +35,23 @@ function fixture() {
       Object.assign(this, {config, transceivers:[], tracks:[], candidates:[], configurationChanges:0});
       context.peers.push(this);
     }
-    addTransceiver(kind, options) { this.transceivers.push([kind, options.direction]); }
+    addTransceiver(kind, options) {
+      const transceiver={kind,direction:options.direction,mid:null,sender:{
+        setStreams() {},replaceTrack:async track=>{transceiver.sender.track=track;this.tracks=this.transceivers.map(value=>value.sender.track).filter(Boolean);}
+      }};this.transceivers.push(transceiver);return transceiver;
+    }
+    createDataChannel(label) {
+      this.channel={label,readyState:'connecting',bufferedAmount:0,sent:[],
+        send(value){this.sent.push(JSON.parse(value));},
+        open(){this.readyState='open';this.onopen?.();},
+        message(value){this.onmessage?.({data:JSON.stringify(value)});},
+        close(){this.readyState='closed';this.onclose?.();}};return this.channel;
+    }
     addTrack(track) { this.tracks.push(track); }
     async createOffer() { return context.offerWait ? await context.offerWait.promise : {type:'offer', sdp:'fixture-sdp'}; }
     async setLocalDescription(description) {
       this.localDescription = description;
+      this.transceivers.forEach((value,index)=>value.mid=String(index));
       this.onicecandidate?.({candidate:{toJSON:() => ({candidate:'local', sdpMid:'0'})}});
     }
     async setRemoteDescription(description) {
@@ -51,7 +63,7 @@ function fixture() {
       if (candidate.candidate === 'reject') throw new Error('Fixture rejected candidate');
     }
     setConfiguration(config) { this.config = config; this.configurationChanges++; }
-    close() { this.closed = true; }
+    close() { this.closed = true;this.channel?.close(); }
   }
   const location = {search:`?room=${context.room}`, hash:'#'+'a'.repeat(64), pathname:'/host.html',
     protocol:'https:', host:'interviews.example.test'};
@@ -108,7 +120,8 @@ test('explicit admission, authoritative state, recv-only media and paced ICE', a
   f.host.admit(id); assert(f.socket.sent.some(data => data.type==='admit'));
   assert.equal(f.host.peers.size, 0, 'A request must not create media before server admission');
   await f.admit(id); f.roster([{id}]); const record = f.host.peers.get(id);
-  assert.deepEqual(record.pc.transceivers, [['audio','recvonly'], ['video','recvonly']]);
+  assert.deepEqual(record.pc.transceivers.map(value=>[value.kind,value.direction]), [['audio','recvonly'], ['video','recvonly'], ['video','recvonly']]);
+  assert.deepEqual(f.socket.sent.find(data=>data.kind==='offer') && JSON.parse(f.socket.sent.find(data=>data.kind==='offer').payload).media,{audio:'0',camera:'1',screen:'2'});
   assert.equal(record.pc.tracks.length, 0); assert.equal(f.fetches.length, 1);
   assert(!f.socket.sent.some(data => data.kind==='candidate'));
   await f.advance(30);
@@ -120,6 +133,33 @@ test('explicit admission, authoritative state, recv-only media and paced ICE', a
   f.socket.message({type:'roster', peers:[{id, role:'guest', name:'Fixture guest', state:'onair'}], locked:true, program:true, recording:true});
   assert.deepEqual(f.host.flags, {locked:true, program:true, recording:true});
   f.host.leave(); assert.equal(f.timers.size, 0);
+});
+
+test('screen approval is explicit, negotiation scoped and resets on media restart', async()=>{
+  const f=fixture(),guest=await f.admit(),record=f.host.peers.get(guest.id);
+  assert.equal(record.screenApproved,false);
+  f.host.approveScreen(guest.id,true);assert.equal(record.screenApproved,false,'Closed control channels cannot grant sharing');
+  record.control.open();assert.deepEqual(record.control.sent.at(-1),{type:'screen-approval',negotiation:record.negotiation,approved:false});
+  record.control.message({type:'screen-state',negotiation:record.negotiation,sharing:true});assert.equal(record.screenSharing,false,'A guest cannot approve itself');
+  f.host.approveScreen(guest.id,true);assert.equal(record.screenApproved,true);
+  record.control.message({type:'screen-state',negotiation:crypto.randomUUID(),sharing:true});assert.equal(record.screenSharing,false);
+  record.control.message({type:'screen-state',negotiation:record.negotiation,sharing:true});assert.equal(record.screenSharing,true);
+  const camera={kind:'video',stop(){this.stopped=true;}},audio={kind:'audio',stop(){this.stopped=true;}},screen={kind:'video',stop(){this.stopped=true;}};
+  for(const [track,mid]of [[camera,'1'],[audio,'0'],[screen,'2']])record.pc.ontrack({track,transceiver:{mid},streams:[]});
+  assert.deepEqual(record.stream.getTracks(),[camera,audio]);assert.deepEqual(record.screenStream.getTracks(),[screen]);
+  f.host.approveScreen(guest.id,false);assert.equal(record.screenSharing,false);assert(!camera.stopped && !audio.stopped);
+  f.host.restartGuest(guest.id);await settle();const next=f.host.peers.get(guest.id);
+  assert.equal(next.screenApproved,false);assert(record.control.readyState==='closed');assert(camera.stopped && audio.stopped && screen.stopped);
+  record.control.message({type:'screen-state',negotiation:record.negotiation,sharing:true});assert.equal(next.screenSharing,false);
+  next.control.open();f.host.approveScreen(guest.id,true);next.control.close();assert.equal(next.screenApproved,false);
+  f.host.leave();assert.equal(f.timers.size,0);
+});
+
+test('screen control backlog closes only the control channel and keeps camera media',async()=>{
+  const f=fixture(),guest=await f.admit(),record=f.host.peers.get(guest.id);record.control.open();
+  record.control.bufferedAmount=8193;f.host.approveScreen(guest.id,true);
+  assert.equal(record.control.readyState,'closed');assert.equal(record.screenApproved,false);assert(!record.pc.closed);
+  f.host.leave();
 });
 
 test('matching generations/negotiations, bounded candidates and candidate failure isolation', async () => {
