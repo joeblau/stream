@@ -35,6 +35,8 @@ on:
       - 'apple/scripts/patches/**'
       - 'apple/scripts/*guest*'
       - 'apple/scripts/*native_interview*'
+      - 'apple/scripts/build_owned_interview_turn.zsh'
+      - 'apple/scripts/relay_policy_tcp_harness.cpp'
       - 'apple/scripts/desktop_transport_fixture.rb'
       - 'apple/scripts/*fractional_iso_audio*'
       - 'workers/interviews/public/guest.*'
@@ -60,7 +62,7 @@ jobs:
       matrix:
         runner: [macos-26, macos-26-intel]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 50
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,15 +81,22 @@ jobs:
           xcodebuild -version
           sw_vers
           uname -m
-          brew install xcodegen cmake ffmpeg opus
+          brew install xcodegen cmake ffmpeg opus openssl@3 libevent pkgconf
           npm install --global npm@12.2.0
       - name: Resolve and verify this build's pinned transport
         working-directory: apple
         run: |
           xcodegen generate
           xcodebuild -resolvePackageDependencies -project Stream.xcodeproj -scheme StreamMac -derivedDataPath build/native-guest-ci -skipPackagePluginValidation
-          python3 scripts/repair_desktop_transport_archives.py build/native-guest-ci --require-relay-policy
           GUEST_ARTIFACT="$PWD/build/native-guest-ci/SourcePackages/artifacts/haishinkit.swift/libdatachannel/libdatachannel.xcframework/macos-arm64_x86_64"
+          python3 scripts/repair_desktop_transport_archives.py build/native-guest-ci
+          GUEST_UNPATCHED="$PWD/build/native-guest-unpatched"
+          mkdir -p "$GUEST_UNPATCHED"
+          cp -R "$GUEST_ARTIFACT/Headers" "$GUEST_UNPATCHED/Headers"
+          cp "$GUEST_ARTIFACT/libdatachannel.a" "$GUEST_UNPATCHED/libdatachannel.a"
+          printf 'STREAM_GUEST_UNPATCHED_RTC_INCLUDE=%s\n' "$GUEST_UNPATCHED/Headers/libdatachannel" >> "$GITHUB_ENV"
+          printf 'STREAM_GUEST_UNPATCHED_RTC_LIBRARY=%s\n' "$GUEST_UNPATCHED/libdatachannel.a" >> "$GITHUB_ENV"
+          python3 scripts/repair_desktop_transport_archives.py build/native-guest-ci --require-relay-policy
           test -f "$GUEST_ARTIFACT/Headers/libdatachannel/rtc/version.h"
           test -f "$GUEST_ARTIFACT/libdatachannel.a"
           printf 'STREAM_GUEST_RTC_INCLUDE=%s\n' "$GUEST_ARTIFACT/Headers/libdatachannel" >> "$GITHUB_ENV"
@@ -114,6 +123,24 @@ jobs:
         run: |
           set -euo pipefail
           STREAM_GUEST_PROGRAM_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_guest_program_iso_harness.zsh 2>&1 | tee apple/build/native-guest-results/program-iso.log
+      - name: Qualify actual local relay policy and service media
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          export STREAM_INTERVIEW_TURN_BUILD_DIR="$PWD/apple/build/native-interview-turn"
+          export STREAM_TURN_OPENSSL_ROOT="$(brew --prefix openssl@3)"
+          export STREAM_TURN_LIBEVENT_ROOT="$(brew --prefix libevent)"
+          apple/scripts/build_owned_interview_turn.zsh 2>&1 | tee apple/build/native-guest-results/turn-build.log
+          export STREAM_INTERVIEW_TURN_SERVER="$STREAM_INTERVIEW_TURN_BUILD_DIR/build/bin/turnserver"
+          export STREAM_INTERVIEW_RECEIVER_FRAMEWORKS="$PWD/apple/build/native-guest-ci/Build/Products/Debug"
+          export DYLD_FRAMEWORK_PATH="$STREAM_INTERVIEW_RECEIVER_FRAMEWORKS"
+          STREAM_INTERVIEW_MEDIA_BUILD_DIR="$PWD/apple/build/native-interview-negative" STREAM_GUEST_RTC_INCLUDE="$STREAM_GUEST_UNPATCHED_RTC_INCLUDE" STREAM_GUEST_RTC_LIBRARY="$STREAM_GUEST_UNPATCHED_RTC_LIBRARY" apple/scripts/build_native_interview_media_cli.zsh
+          NATIVE_INTERVIEW_MEDIA_CLI="$PWD/apple/build/native-interview-negative/native-interview-media-cli" node workers/interviews/test/browser/native-session-relay-browser.mjs --expect-relay-policy-unavailable 2>&1 | tee apple/build/native-guest-results/relay-negative.log
+          apple/scripts/build_native_interview_media_cli.zsh
+          export NATIVE_INTERVIEW_MEDIA_CLI="$PWD/apple/build/native-interview-media/native-interview-media-cli"
+          export STREAM_RELAY_POLICY_TCP_PROBE="$PWD/apple/build/native-guest-ci/TransportSourceBuild/$(uname -m)/relay-policy-tcp-harness"
+          node workers/interviews/test/browser/native-session-relay-browser.mjs 2>&1 | tee apple/build/native-guest-results/relay-positive.log
       - name: Qualify the shipping browser against the native host
         env:
           CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
@@ -133,5 +160,9 @@ jobs:
             apple/build/fractional-iso-audio-validation/media-*
             apple/build/native-interview-validation/run-*/worker.log
             apple/build/native-interview-manager-validation/run-*/worker.log
+            apple/build/native-interview-turn/build-provenance.json
+            apple/build/native-interview-turn/licenses
+            apple/build/native-guest-ci/TransportSourceBuild/*/sources.json
+            apple/build/native-guest-ci/SourcePackages/artifacts/haishinkit.swift/libdatachannel/libdatachannel.xcframework/macos-arm64_x86_64/*.stream-relay-policy-*.json
           if-no-files-found: warn
           retention-days: 14
