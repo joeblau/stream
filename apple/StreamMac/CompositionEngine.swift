@@ -298,7 +298,7 @@ actor CompositionEngine {
         self.delayedFrameLookup = SourceFrameLookup(
             camera: { key in delayLines.cameraFrame(for: key, fresh: rawLookup.camera(key)) },
             screen: { key in delayLines.screenFrame(for: key, fresh: rawLookup.screen(key)) },
-            media: rawLookup.media, pdf: rawLookup.pdf)
+            media: rawLookup.media, pdf: rawLookup.pdf, guest: rawLookup.guest)
     }
 
     // MARK: - Lifecycle (driven by the W02 pipeline-demand model)

@@ -94,6 +94,7 @@ final class StreamController: ObservableObject {
     /// flushing immediately, without claiming to delay system sleep.
     var stopRecordingForLifecycle: (() -> Void)?
     private let resilientFrames: ResilientSourceFrames
+    let guestVideoFrames: GuestVideoFrameStore
     private var resilienceTask: Task<Void, Never>?
     private var failureTracker = SourceFailureTracker<CaptureSourceKey>()
     private var resilienceDemand: Set<CaptureSourceKey> = []
@@ -351,10 +352,17 @@ final class StreamController: ObservableObject {
         // both the staged preview and the outgoing program; S05: the pool
         // keys those captures by source identity).
         let frames = capturePool.frames
+        let guestFrames = GuestVideoFrameStore()
+        self.guestVideoFrames = guestFrames
         let resilientFrames = ResilientSourceFrames(raw: SourceFrameLookup(
             camera: { key in frames.hasCameraSource(for: key) ? frames.cameraFrame(for: key) : frames.freshestCameraFrame() },
             screen: { key in frames.hasScreenSource(for: key) ? frames.screenFrame(for: key) : frames.latestScreenFrame() },
-            media: { key in frames.hasMediaSource(for: key) ? frames.mediaFrame(for: key) : nil }))
+            media: { key in frames.hasMediaSource(for: key) ? frames.mediaFrame(for: key) : nil },
+            guest: { payload, time in
+                guard let slot = payload.slotID else { return nil }
+                return guestFrames.pixels(slot: slot, role: payload.role == .camera ? .camera : .screen,
+                                          at: time, program: true)
+            }))
         self.resilientFrames = resilientFrames
         let privacyGate = ProgramPrivacyGate()
         self.privacyGate = privacyGate
@@ -370,6 +378,16 @@ final class StreamController: ObservableObject {
         self.previewEngine = CompositionEngine(
             screenProvider: { frames.latestScreenFrame() },
             cameraProvider: { frames.freshestCameraFrame() },
+            frameLookup: SourceFrameLookup(
+                camera: { key in frames.hasCameraSource(for: key) ? frames.cameraFrame(for: key) : frames.freshestCameraFrame() },
+                screen: { key in frames.hasScreenSource(for: key) ? frames.screenFrame(for: key) : frames.latestScreenFrame() },
+                media: { key in frames.hasMediaSource(for: key) ? frames.mediaFrame(for: key) : nil },
+                pdf: { key, size in frames.mediaFrame(for: key, canvasSize: size) },
+                guest: { payload, time in
+                    guard let slot = payload.slotID else { return nil }
+                    return guestFrames.pixels(slot: slot, role: payload.role == .camera ? .camera : .screen,
+                                              at: time, program: false)
+                }),
             // G11 (issue #117): preview shows annotations as SwiftUI chrome in
             // CanvasInteractionView — painting them into the image too would
             // double-draw them.
@@ -1043,6 +1061,8 @@ final class StreamController: ObservableObject {
             coordinator?.cancelAll()
         }
     }
+
+    func retireGuestMedia() { guestVideoFrames.retire() }
 
     func shutdownManagedStart() {
         managedStartClosed = true

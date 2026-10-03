@@ -321,6 +321,8 @@ struct SourceFrameLookup: Sendable {
     /// means media layers paint the documented nothing fallback.
     var media: (@Sendable (CaptureSourceKey) -> CVPixelBuffer?)? = nil
     var pdf: (@Sendable (CaptureSourceKey, CGSize) -> CVPixelBuffer?)? = nil
+    /// Explicit runtime guest identity and the compositor's shared host clock.
+    var guest: (@Sendable (GuestSourcePayload, CMTime) -> CVPixelBuffer?)? = nil
 }
 
 /// Holds the newest screen frame for one screen capture. Unlike the pre-W08
