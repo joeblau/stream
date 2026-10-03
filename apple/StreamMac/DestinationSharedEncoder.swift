@@ -52,6 +52,8 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     private var scheduled = false, accepting = true, keyframeRequested = true, failed = false, stopped = false
     private var sinks: [UUID: DestinationEncodedMailbox] = [:]
     private var videoSession: VTCompressionSession?
+    private let prefersHardwareEncoder: Bool
+    private var completesAcceptedVideo = false
     private var pool: CVPixelBufferPool?
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var converter: AVAudioConverter?
@@ -66,8 +68,8 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     private var inFlight = 0
     private var encodedVideoCount = 0, encodedAudioCount = 0, rawVideoDrops = 0
     private let failure: @Sendable () -> Void
-    init(key: DestinationSharedEncoderKey, id: UUID = UUID(), failure: @escaping @Sendable () -> Void) {
-        self.key = key; self.id = id; self.failure = failure
+    init(key: DestinationSharedEncoderKey, id: UUID = UUID(), prefersHardwareEncoder: Bool = true, failure: @escaping @Sendable () -> Void) {
+        self.key = key; self.id = id; self.prefersHardwareEncoder = prefersHardwareEncoder; self.failure = failure
     }
     func add(_ mailbox: DestinationEncodedMailbox, id: UUID) {
         lock.lock(); sinks[id] = mailbox; keyframeRequested = true; lock.unlock()
@@ -94,17 +96,22 @@ final class DestinationSharedEncoder: @unchecked Sendable {
         queue.async { [self] in pump() }
     }
     private func pump() {
-        while true {
-            lock.lock()
-            let v = video.isEmpty ? nil : video.removeFirst(), a = audio.isEmpty ? nil : audio.removeFirst()
-            let active = accepting
-            if v == nil && a == nil || !active { scheduled = false; video.removeAll(); audio.removeAll(); lock.unlock(); return }
-            lock.unlock()
-            do {
-                if let v { try encodeVideo(v) }
-                if let a { try encodeAudio(a) }
-            } catch { fail(); return }
-        }
+        lock.lock()
+        let v = video.isEmpty ? nil : video.removeFirst(), a = audio.isEmpty ? nil : audio.removeFirst()
+        let active = accepting
+        if v == nil && a == nil || !active { scheduled = false; video.removeAll(); audio.removeAll(); lock.unlock(); return }
+        lock.unlock()
+        do {
+            if let v { try encodeVideo(v) }
+            if let a { try encodeAudio(a) }
+        } catch { fail(); return }
+        // Give compression callbacks a bounded opportunity to deliver the IDR
+        // and release admission slots before another input pair is processed.
+        // CompleteFrames emits callbacks, whose bookkeeping uses this queue.
+        lock.lock()
+        scheduled = false
+        if accepting && (!video.isEmpty || !audio.isEmpty) { scheduleLocked() }
+        lock.unlock()
     }
     private func recipients() -> [DestinationEncodedMailbox] {
         lock.lock(); defer { lock.unlock() }; return Array(sinks.values)
@@ -136,7 +143,7 @@ final class DestinationSharedEncoder: @unchecked Sendable {
         var created: VTCompressionSession?
         let status = VTCompressionSessionCreate(allocator: nil, width: Int32(key.width), height: Int32(key.height),
             codecType: kCMVideoCodecType_H264,
-            encoderSpecification: [kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: true] as CFDictionary,
+            encoderSpecification: [kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: prefersHardwareEncoder] as CFDictionary,
             imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: nil, refcon: nil, compressionSessionOut: &created)
         guard status == noErr, let created else { throw CocoaError(.coderInvalidValue) }
         videoSession = created
@@ -145,10 +152,16 @@ final class DestinationSharedEncoder: @unchecked Sendable {
             kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_Main_AutoLevel,
             kVTCompressionPropertyKey_AverageBitRate: key.videoBitrate,
             kVTCompressionPropertyKey_ExpectedFrameRate: key.fps,
-            kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: key.keyframeSeconds,
-            kVTCompressionPropertyKey_MaxFrameDelayCount: 3
+            kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: key.keyframeSeconds
         ]
-        guard VTSessionSetProperties(created, propertyDictionary: properties as CFDictionary) == noErr,
+        // Bulk property assignment can succeed while optional keys are absent
+        // (the public software H.264 encoder does not support this delay key).
+        // Without an explicit drain it can retain every admitted frame and
+        // permanently exhaust our four-frame bound without producing output.
+        let delayStatus = VTSessionSetProperty(created, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 3 as CFNumber)
+        completesAcceptedVideo = delayStatus == kVTPropertyNotSupportedErr
+        guard delayStatus == noErr || completesAcceptedVideo,
+              VTSessionSetProperties(created, propertyDictionary: properties as CFDictionary) == noErr,
               VTCompressionSessionPrepareToEncodeFrames(created) == noErr else { throw CocoaError(.coderInvalidValue) }
         let attributes: [CFString: Any] = [kCVPixelBufferWidthKey: key.width, kCVPixelBufferHeightKey: key.height,
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA, kCVPixelBufferIOSurfacePropertiesKey: [:]]
@@ -198,6 +211,10 @@ final class DestinationSharedEncoder: @unchecked Sendable {
                 }
             })
         if result != noErr { inFlight -= 1; throw CocoaError(.coderInvalidValue) }
+        if completesAcceptedVideo,
+           VTCompressionSessionCompleteFrames(videoSession, untilPresentationTimeStamp: pts) != noErr {
+            throw CocoaError(.coderInvalidValue)
+        }
     }
     private func encodeAudio(_ sample: CMSampleBuffer) throws {
         guard let format = sample.formatDescription, CMFormatDescriptionGetMediaType(format) == kCMMediaType_Audio,

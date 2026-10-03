@@ -58,9 +58,11 @@ final class DestinationOutputController: ObservableObject {
     var usesSecondaryCanvas: Bool { runtimes.values.map(\.canvas).contains(.secondary) }
 
     private let factory: (StreamCore.StreamProtocol) -> any Publisher
+    private let sharedEncoderPrefersHardware: Bool
 
-    init(factory: @escaping (StreamCore.StreamProtocol) -> any Publisher) {
+    init(factory: @escaping (StreamCore.StreamProtocol) -> any Publisher, sharedEncoderPrefersHardware: Bool = true) {
         self.factory = factory
+        self.sharedEncoderPrefersHardware = sharedEncoderPrefersHardware
     }
 
     func additionalEncoderSessions(destination: StreamDestination, settings: StreamSettings) -> Int {
@@ -104,7 +106,7 @@ final class DestinationOutputController: ObservableObject {
             if let existing = encoderGroups[key] { encoderGroup = existing }
             else {
                 let groupID = UUID()
-                let group = DestinationSharedEncoder(key: key, id: groupID) { [weak self] in
+                let group = DestinationSharedEncoder(key: key, id: groupID, prefersHardwareEncoder: sharedEncoderPrefersHardware) { [weak self] in
                     Task { @MainActor in
                         guard let self else { return }
                         for (id, runtime) in self.runtimes where runtime.encoderGroup?.id == groupID {

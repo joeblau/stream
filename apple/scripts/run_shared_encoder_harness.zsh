@@ -43,3 +43,5 @@ xcodebuild -project "$SHARED_ENCODER_DIR/SharedEncoderValidation.xcodeproj" \
 readonly SHARED_ENCODER_PRODUCTS="${SHARED_ENCODER_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="$SHARED_ENCODER_PRODUCTS" \
   "$SHARED_ENCODER_PRODUCTS/SharedEncoderHarness"
+env DYLD_FRAMEWORK_PATH="$SHARED_ENCODER_PRODUCTS" \
+  "$SHARED_ENCODER_PRODUCTS/SharedEncoderHarness" --software

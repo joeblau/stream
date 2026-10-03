@@ -42,6 +42,7 @@ private actor EncodedPublisherProbe: Publisher {
 }
 
 @main @MainActor struct SharedEncoderHarness {
+    private static let prefersHardwareEncoder = !CommandLine.arguments.contains("--software")
     static func report(_ value: String) { FileHandle.standardOutput.write(Data((value + "\n").utf8)) }
     static func check(_ value: Bool, _ message: String) throws {
         if !value { throw NSError(domain: "SharedEncoderHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
@@ -132,7 +133,7 @@ private actor EncodedPublisherProbe: Publisher {
         let outputs = DestinationOutputController(factory: { transport in
             if transport == .rtmp { return RTMPPublisher() }
             return SessionPublisher(protocol: .srt)
-        })
+        }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true
         outputs.sharedSourceFrameRate = 25
         defer { outputs.stopAll() }
@@ -169,7 +170,7 @@ private actor EncodedPublisherProbe: Publisher {
     static func rawFinalization(settings: StreamSettings) async throws {
         let failed = EncodedPublisherProbe(shared: false), retry = EncodedPublisherProbe(shared: false)
         var pending = [failed, retry]
-        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() })
+        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true
         outputs.sharedSourceFrameRate = 25
         let target = StreamDestination(name: "Separate fallback", transport: .whip)
@@ -193,7 +194,7 @@ private actor EncodedPublisherProbe: Publisher {
     static func canvasAndEncoderFailure(settings: StreamSettings) async throws {
         let primary = EncodedPublisherProbe(), secondary = EncodedPublisherProbe(), secondaryCopy = EncodedPublisherProbe()
         var pending = [primary, secondary, secondaryCopy]
-        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() })
+        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true
         outputs.sharedSourceFrameRate = 25
         let a = StreamDestination(name: "Program", transport: .rtmp)
@@ -231,7 +232,7 @@ private actor EncodedPublisherProbe: Publisher {
     }
     static func fixedCadence(directory: URL, settings: StreamSettings) async throws {
         let target = EncodedPublisherProbe()
-        let outputs = DestinationOutputController(factory: { _ in target })
+        let outputs = DestinationOutputController(factory: { _ in target }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 60
         var profile = settings; profile.outputProfile = profile.outputProfile.with(frameRate: 24)
         outputs.start(StreamDestination(name: "60 to24"), settings: profile)
@@ -257,7 +258,7 @@ private actor EncodedPublisherProbe: Publisher {
     static func higherRateFallback(settings: StreamSettings) async throws {
         let a = EncodedPublisherProbe(), b = EncodedPublisherProbe()
         var pending = [a, b]
-        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() })
+        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 24
         var faster = settings; faster.outputProfile = faster.outputProfile.with(frameRate: 60)
         outputs.start(StreamDestination(name: "Higher rate RTMP", transport: .rtmp), settings: faster)
@@ -272,11 +273,12 @@ private actor EncodedPublisherProbe: Publisher {
         report("PASS: fixed profiles requesting more fps than the taken canvas use actual separate raw publishers and receive no sharing budget discount")
     }
     static func main() async throws {
+        report("Encoder qualification: \(prefersHardwareEncoder ? "shipping hardware preference with public software fallback" : "explicit public VideoToolbox software encoder; no hardware throughput claim")")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("stream-shared-encoder-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let first = EncodedPublisherProbe(), second = EncodedPublisherProbe(), separate = EncodedPublisherProbe(), rejoin = EncodedPublisherProbe()
         var pending = [first, second, separate, rejoin]
-        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() })
+        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true
         outputs.sharedSourceFrameRate = 25
         var settings = StreamSettings.default
