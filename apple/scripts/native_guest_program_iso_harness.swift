@@ -30,12 +30,16 @@ private func programGuestSignal(_ context: UnsafeMutableRawPointer?, _ type: Uns
 
 private final class ProgramGuestProbe: @unchecked Sendable {
     struct Picture { let pts: Double; let red, green, blue: Int }
-    struct Sound { let pts: Double; let peak: Float; let cue: Double? }
+    struct Sound { let pts: Double; let peak: Float; let cue: Double?; let cueTime: CMTime? }
+    struct PCM { let pts: CMTime; let bytes: Data }
     private let lock = NSLock()
     private var pictures: [Picture] = [], program: [Sound] = [], isolated: [Sound] = []
     private var videoCount = 0, audioCount = 0, rejectedVideo = 0, rejectedAudio = 0
     private var lastVideo: GuestVideoFrame?, lastAudio: GuestAudioFrame?
     private var decodedFlash: Double?, decodedTone: Double?
+    private var programPCM: [PCM] = [], isolatedPCM: [PCM] = []
+    private var initialProgramSamples: [CMSampleBuffer] = [], firstIsolatedSample: CMSampleBuffer?
+    private var programSourceSamples: [CMSampleBuffer] = [], isolatedSourceSamples: [CMSampleBuffer] = []
     private var isoProgress: IsolatedVideoProgress?
     func receive(_ frame: GuestVideoFrame, accepted: Bool) {
         precondition(!frame.duration.isNumeric, "RTP video has no inferred source duration")
@@ -66,30 +70,62 @@ private final class ProgramGuestProbe: @unchecked Sendable {
         CVPixelBufferUnlockBaseAddress(pixels, .readOnly)
         lock.lock(); if pictures.count == 512 { pictures.removeFirst() }; pictures.append(value); lock.unlock()
     }
-    static func sound(_ sample: CMSampleBuffer) -> Sound {
+    static func pcmValues(_ sample: CMSampleBuffer) -> [Float] {
+        guard let format = sample.formatDescription,
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format) else {
+            preconditionFailure("Decoded canonical LPCM format required")
+        }
+        precondition(asbd.pointee.mSampleRate == 48_000 && asbd.pointee.mChannelsPerFrame == 2
+                     && asbd.pointee.mBytesPerFrame == 8 && asbd.pointee.mBitsPerChannel == 32
+                     && asbd.pointee.mFormatFlags & kAudioFormatFlagIsFloat != 0)
         guard let block = CMSampleBufferGetDataBuffer(sample) else { preconditionFailure("Mixed LPCM block required") }
         let bytes = CMBlockBufferGetDataLength(block)
+        precondition(bytes == CMSampleBufferGetNumSamples(sample) * 8)
         var values = [Float](repeating: 0, count: bytes / MemoryLayout<Float>.size)
         values.withUnsafeMutableBytes { pointer in
             precondition(CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: bytes, destination: pointer.baseAddress!) == noErr)
         }
-        let cue = values.firstIndex(where: { abs($0) > 0.025 }).map {
-            sample.presentationTimeStamp.seconds + Double($0 / 2) / 48_000
+        return values
+    }
+    static func sound(_ sample: CMSampleBuffer) -> Sound {
+        let values = pcmValues(sample)
+        let cueTime = values.firstIndex(where: { abs($0) > 0.025 }).map {
+            sample.presentationTimeStamp + CMTime(value: Int64($0 / 2), timescale: 48_000)
         }
-        return .init(pts: sample.presentationTimeStamp.seconds, peak: values.map { abs($0) }.max() ?? 0, cue: cue)
+        return .init(pts: sample.presentationTimeStamp.seconds, peak: values.map { abs($0) }.max() ?? 0,
+                     cue: cueTime?.seconds, cueTime: cueTime)
     }
     func sound(_ sample: CMSampleBuffer, iso: Bool) {
         let value = Self.sound(sample)
+        let pcm: PCM? = value.peak > 0.025 ? Self.pcmValues(sample).withUnsafeBytes {
+            .init(pts: sample.presentationTimeStamp, bytes: Data($0))
+        } : nil
         lock.lock(); defer { lock.unlock() }
-        if iso { if isolated.count == 512 { isolated.removeFirst() }; isolated.append(value) }
-        else { if program.count == 512 { program.removeFirst() }; program.append(value) }
+        if iso {
+            if firstIsolatedSample == nil { firstIsolatedSample = sample }
+            if isolatedSourceSamples.count < 512 { isolatedSourceSamples.append(sample) }
+            if isolated.count == 512 { isolated.removeFirst() }; isolated.append(value)
+            if let pcm, isolatedPCM.count < 128 { isolatedPCM.append(pcm) }
+        } else {
+            if initialProgramSamples.count < 64 { initialProgramSamples.append(sample) }
+            if programSourceSamples.count < 512 { programSourceSamples.append(sample) }
+            if program.count == 512 { program.removeFirst() }; program.append(value)
+            if let pcm, programPCM.count < 128 { programPCM.append(pcm) }
+        }
     }
     func status(_ progress: IsolatedVideoProgress) { lock.lock(); isoProgress = progress; lock.unlock() }
+    func firstSamples() -> ([CMSampleBuffer], CMSampleBuffer?) {
+        lock.lock(); defer { lock.unlock() }; return (initialProgramSamples, firstIsolatedSample)
+    }
+    func sourceSamples() -> (program: [CMSampleBuffer], isolated: [CMSampleBuffer]) {
+        lock.lock(); defer { lock.unlock() }; return (programSourceSamples, isolatedSourceSamples)
+    }
     func snapshot() -> (pictures: [Picture], program: [Sound], isolated: [Sound], video: Int, audio: Int,
                         rejectedVideo: Int, rejectedAudio: Int, lastVideo: GuestVideoFrame?, lastAudio: GuestAudioFrame?, iso: IsolatedVideoProgress?,
-                        decodedFlash: Double?, decodedTone: Double?) {
+                        decodedFlash: Double?, decodedTone: Double?, programPCM: [PCM], isolatedPCM: [PCM]) {
         lock.lock(); defer { lock.unlock() }
-        return (pictures, program, isolated, videoCount, audioCount, rejectedVideo, rejectedAudio, lastVideo, lastAudio, isoProgress, decodedFlash, decodedTone)
+        return (pictures, program, isolated, videoCount, audioCount, rejectedVideo, rejectedAudio, lastVideo, lastAudio,
+                isoProgress, decodedFlash, decodedTone, programPCM, isolatedPCM)
     }
 }
 
@@ -295,7 +331,16 @@ private final class ProgramGuestProbe: @unchecked Sendable {
         let liveTone = live.program.compactMap(\.cue).first!
         let isoTone = live.isolated.compactMap(\.cue).first!
         log("Guest actual host playout: Program flash-tone delta=\(liveFlash.pts - liveTone)s; Program/ISO PCM cue difference=\(liveTone - isoTone)s; original decoded→mix cue difference=\(liveTone - live.decodedTone!)s")
-        precondition(abs(liveFlash.pts - liveTone) < 0.05 && abs(liveTone - isoTone) < 1.0 / 48_000)
+        precondition(abs(liveFlash.pts - liveTone) < 0.05)
+        precondition(CMTimeCompare(live.program.compactMap(\.cueTime).first!, live.isolated.compactMap(\.cueTime).first!) == 0,
+                     "Actual Program and pre-fader ISO PCM cues must match exactly before independent encoders")
+        precondition(live.programPCM.count >= 50 && live.programPCM.count == live.isolatedPCM.count)
+        for packet in live.programPCM {
+            let matching = live.isolatedPCM.first { CMTimeCompare(packet.pts, $0.pts) == 0 }
+            precondition(matching?.bytes == packet.bytes,
+                         "Every audible source window must retain identical PCM bits and original PTS before independent writers")
+        }
+        log("Guest actual pre-writer PCM: \(live.programPCM.count) audible windows match exact CMTime and Float32 sample bytes")
         precondition(abs(liveTone - live.decodedTone!) < 1.0 / 48_000,
                      "The mixer must retain the decoded original sender-clock sample position")
         precondition(liveFlash.pts >= live.decodedFlash! && liveFlash.pts - live.decodedFlash! < 0.05,
@@ -351,6 +396,64 @@ private final class ProgramGuestProbe: @unchecked Sendable {
         let retiredRegistration = await mixer.registerGuest(lease)
         precondition(!retiredRegistration)
         log("Guest Program/ISO: explicit removal/retirement reject captured decoded receipts and cannot register a retired guest PASS")
+        let initial = probe.firstSamples(), origin = timeline.snapshot().origin
+        let firstProgram = initial.0.compactMap { ProgramRecordingSession.audioRange($0, start: origin) }.first!
+        let firstISO = initial.1!
+        let programMetadata = try JSONSerialization.jsonObject(with: Data(contentsOf: programURL.appendingPathExtension("recording.json"))) as! [String: Any]
+        let isolatedMetadata = try JSONSerialization.jsonObject(with: Data(contentsOf: isoURL.appendingPathExtension("recording.json"))) as! [String: Any]
+        let programOffset = programMetadata["audioStartOffsetSeconds"] as! Double
+        let isolatedOffset = isolatedMetadata["audioStartOffsetSeconds"] as! Double
+        let hostTick = 1.0 / Double(origin.timescale)
+        let metadataRounding = (programOffset.ulp + isolatedOffset.ulp) * 4
+        precondition(abs(programOffset - isolatedOffset) <= hostTick + metadataRounding,
+                     "Both writers must begin on the same real PCM grid within one declared host-clock tick")
+        let gapMetadata = try JSONSerialization.jsonObject(with: Data(contentsOf: isoURL.appendingPathExtension("video-isolated.json"))) as! [String: Any]
+        let leadingGap = (gapMetadata["gaps"] as! [[String: Any]]).first {
+            $0["reason"] as? String == "associated-audio-timeline-gap"
+        }
+        let leadingStart = leadingGap?["startSeconds"] as? Double ?? -1
+        precondition(leadingStart >= 0 && leadingStart < 1.0 / 48_000,
+                     "Leading silence must preserve the real PCM grid's fractional movie-origin residue")
+        precondition(abs(leadingStart - programOffset) <= hostTick + metadataRounding,
+                     "The leading gap must preserve Program's first retained audio offset")
+        let padded = ((leadingGap?["durationSeconds"] as? Double ?? 0) * 48_000).rounded()
+        let gap = firstISO.presentationTimeStamp - origin
+        log("Guest actual writer source grids: origin=\(origin.value)/\(origin.timescale) firstRetainedProgramPTS=\(firstProgram.presentationTimeStamp.value)/\(firstProgram.presentationTimeStamp.timescale) offsetSamples=\((firstProgram.presentationTimeStamp - origin).seconds * 48_000); firstISOInputPTS=\(firstISO.presentationTimeStamp.value)/\(firstISO.presentationTimeStamp.timescale) gapSamples=\(gap.seconds * 48_000) recordedLeadingStartSamples=\(leadingStart * 48_000) recordedLeadingSilenceSamples=\(padded)")
+        // Exercise the shipping range helper with the actual retained mixer
+        // buffers. Host-clock timestamps may round a rational PCM boundary;
+        // adjacent chunks must not lose a whole source frame for that residue.
+        let sourceWindows = probe.sourceSamples(), sourceSamples = sourceWindows.isolated
+        var roundedBoundaries = 0, droppedAtBoundaries = 0
+        for (previous, sample) in zip(sourceSamples, sourceSamples.dropFirst()) {
+            let end = previous.presentationTimeStamp
+                + CMTime(value: Int64(CMSampleBufferGetNumSamples(previous)), timescale: 48_000)
+            let pts = sample.presentationTimeStamp, delta = end - pts
+            guard abs(delta.seconds * 48_000) < 0.01 else { continue }
+            let retained = ProgramRecordingSession.audioRange(sample, start: end)
+            let lost = CMSampleBufferGetNumSamples(sample) - (retained.map(CMSampleBufferGetNumSamples) ?? 0)
+            if delta != .zero {
+                if roundedBoundaries < 3 {
+                    log("Guest actual adjacent PCM boundary: previousPTS=\(previous.presentationTimeStamp.value)/\(previous.presentationTimeStamp.timescale) nextRequestedPTS=\(end.value)/\(end.timescale) sourcePTS=\(pts.value)/\(pts.timescale) delta=\(delta.value)/\(delta.timescale) roundedFlags=\(end.flags.contains(.hasBeenRounded))/\(pts.flags.contains(.hasBeenRounded))/\(delta.flags.contains(.hasBeenRounded)) shippingRangeDropped=\(lost)")
+                }
+                roundedBoundaries += 1
+            }
+            droppedAtBoundaries += lost
+        }
+        log("Guest actual PCM adjacency: \(sourceSamples.count) retained source windows, \(roundedBoundaries) sub-0.01-sample rounded boundaries, \(droppedAtBoundaries) whole source frames removed by shipping audioRange")
+        precondition(droppedAtBoundaries == 0,
+                     "Rounded host-clock adjacency must preserve every original PCM frame")
+        let timing = timeline.snapshot(), cutoff = timing.end + timing.offset
+        for (name, samples) in [("Program", sourceWindows.program), ("ISO", sourceWindows.isolated)] {
+            let retained = samples.compactMap {
+                ProgramRecordingSession.audioRange($0, start: timing.sourceStart, end: cutoff)
+            }
+            let last = retained.last!, end = last.presentationTimeStamp
+                + CMTime(value: Int64(CMSampleBufferGetNumSamples(last)), timescale: 48_000)
+            let count = retained.reduce(0) { $0 + CMSampleBufferGetNumSamples($1) }
+            log("Guest actual \(name) retained source tail: cutoff=\(cutoff.value)/\(cutoff.timescale) frames=\(count) lastPTS=\(last.presentationTimeStamp.value)/\(last.presentationTimeStamp.timescale) lastFrames=\(CMSampleBufferGetNumSamples(last)) end=\(end.value)/\(end.timescale) cutoffResidueSamples=\((end - cutoff).seconds * 48_000) roundedFlags=\(cutoff.flags.contains(.hasBeenRounded))/\(end.flags.contains(.hasBeenRounded))")
+        }
+        precondition(Int64(padded) == CMTimeConvertScale(gap, timescale: 48_000, method: .roundTowardZero).value,
+                     "ISO leading silence must cover whole missing source samples without allocating an extra sample for fractional clock residue")
         try await inspect(programURL, isoURL: isoURL, result: result)
         let stats = store.statistics()
         precondition(stats.retainedFrames == 0 && stats.retainedBytes == 0)
@@ -362,6 +465,8 @@ private final class ProgramGuestProbe: @unchecked Sendable {
         let videoFrames, audioFrames, redFrames: Int
         let endsBlack: Bool
         let finalAudioPeak: Float
+        let audioStart, toneTime: CMTime
+        let audioValues: [Float]
     }
     static func decode(_ url: URL) async throws -> DecodedFile {
         let asset = AVURLAsset(url: url)
@@ -376,6 +481,7 @@ private final class ProgramGuestProbe: @unchecked Sendable {
         reader.add(picture); reader.add(sound); precondition(reader.startReading())
         var flash: Double?, tone: Double?, videoFrames = 0, audioFrames = 0, redFrames = 0
         var endsBlack = false, finalAudioPeak: Float = 0
+        var audioStart: CMTime?, toneTime: CMTime?, audioValues: [Float] = []
         while let sample = picture.copyNextSampleBuffer() {
             videoFrames += 1
             guard let pixels = CMSampleBufferGetImageBuffer(sample) else { preconditionFailure("Decoded image missing") }
@@ -391,16 +497,24 @@ private final class ProgramGuestProbe: @unchecked Sendable {
             CVPixelBufferUnlockBaseAddress(pixels, .readOnly)
         }
         while let sample = sound.copyNextSampleBuffer() {
+            if audioStart == nil { audioStart = sample.presentationTimeStamp }
+            precondition(CMTimeCompare(sample.presentationTimeStamp,
+                audioStart! + CMTime(value: Int64(audioFrames), timescale: 48_000)) == 0,
+                "Decoded audio must occupy one contiguous rational sample grid")
             audioFrames += CMSampleBufferGetNumSamples(sample)
+            let values = ProgramGuestProbe.pcmValues(sample)
+            precondition(audioValues.count + values.count <= 960_000, "Bounded ten-second stereo analysis")
+            audioValues += values
             let decoded = ProgramGuestProbe.sound(sample)
-            if tone == nil { tone = decoded.cue }
+            if tone == nil { tone = decoded.cue; toneTime = decoded.cueTime }
             finalAudioPeak = decoded.peak
         }
         precondition(reader.status == .completed, reader.error?.localizedDescription ?? "AssetReader failed")
         precondition(flash != nil && tone != nil, "Actual compressed flash/tone must survive the complete receive/mix/render/write path")
         return .init(duration: duration, videoEnd: CMTimeRangeGetEnd(videoRange).seconds,
                      audioEnd: CMTimeRangeGetEnd(audioRange).seconds, flash: flash!, tone: tone!, videoFrames: videoFrames,
-                     audioFrames: audioFrames, redFrames: redFrames, endsBlack: endsBlack, finalAudioPeak: finalAudioPeak)
+                     audioFrames: audioFrames, redFrames: redFrames, endsBlack: endsBlack, finalAudioPeak: finalAudioPeak,
+                     audioStart: audioStart!, toneTime: toneTime!, audioValues: audioValues)
     }
     static func inspect(_ programURL: URL, isoURL: URL, result: ProgramRecordingSession.Result) async throws {
         let program = try await decode(programURL), iso = try await decode(isoURL)
@@ -413,7 +527,38 @@ private final class ProgramGuestProbe: @unchecked Sendable {
             precondition(abs(file.videoEnd - file.audioEnd) < 0.04)
         }
         precondition(abs(program.duration - iso.duration) < 0.04)
-        precondition(abs(program.flash - iso.flash) < 0.04 && abs(program.tone - iso.tone) < 1.0 / 48_000)
+        precondition(abs(program.flash - iso.flash) < 0.04)
+        // Actual decoded files demonstrated a threshold-only one-sample
+        // difference: .028855238 versus .02494631 at the same frame, while
+        // both tracks started at 0/48000 and contained 137671 frames. Exact
+        // rational comparison includes that boundary without Double epsilon;
+        // the waveform test below separately rejects a real sample shift.
+        let cueDifference = CMTimeAbsoluteValue(program.toneTime - iso.toneTime)
+        precondition(CMTimeCompare(cueDifference, CMTime(value: 1, timescale: 48_000)) <= 0,
+                     "Independent AAC cue thresholds may differ by at most one exact sample")
+        let cueFrame = max(CMTimeConvertScale(program.toneTime - program.audioStart, timescale: 48_000, method: .default).value,
+                           CMTimeConvertScale(iso.toneTime - iso.audioStart, timescale: 48_000, method: .default).value)
+        let window = (Int(cueFrame) + 1_000)..<(Int(cueFrame) + 10_000)
+        precondition(window.upperBound + 1 < min(program.audioFrames, iso.audioFrames))
+        var errors: [Int: Double] = [:], signal = 0.0
+        for lag in -1...1 {
+            var squaredError = 0.0
+            for frame in window { for channel in 0..<2 {
+                let actual = Double(program.audioValues[frame * 2 + channel])
+                let isolated = Double(iso.audioValues[(frame + lag) * 2 + channel])
+                squaredError += (actual - isolated) * (actual - isolated)
+                if lag == 0 { signal += actual * actual }
+            } }
+            errors[lag] = squaredError
+        }
+        log("Recorded rational audio: origin=\(program.audioStart.value)/\(program.audioStart.timescale) cueDifference=\(cueDifference.value)/\(cueDifference.timescale); normalized waveform error lag−1/0/+1=\(sqrt(errors[-1]! / signal))/\(sqrt(errors[0]! / signal))/\(sqrt(errors[1]! / signal))")
+        precondition(signal > 0 && errors[0]! < errors[-1]! && errors[0]! < errors[1]!,
+                     "Decoded tone vectors must match best at zero shift, rather than conceal a one-sample displacement")
+        precondition(CMTimeCompare(program.audioStart, iso.audioStart) == 0 && program.audioFrames == iso.audioFrames,
+                     "Independent files must retain the same rational audio origin and sample count")
+        precondition(zip(program.audioValues, iso.audioValues).allSatisfy { $0.bitPattern == $1.bitPattern },
+                     "The complete owned synthetic PCM sequence must decode identically through both AAC writers")
+        log("Recorded full decoded PCM: \(program.audioValues.count) Float32 values match exact bits; common origin, sample count, cue and silent tail PASS")
         let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: isoURL.appendingPathExtension("video-isolated.json"))) as! [String: Any]
         precondition(metadata["commonSourceStartSeconds"] as? Double == result.progress.sessionStartSourceSeconds)
         precondition(metadata["programFile"] as? String == programURL.lastPathComponent)
