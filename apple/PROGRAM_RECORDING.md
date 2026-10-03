@@ -20,7 +20,7 @@ first video frame is retained during encoder warmup to preserve the track's
 start time. Overload can create gaps; the studio warns rather than claiming an
 undamaged recording.
 
-Recordings use unique names in the App Group's Recordings folder. The initial
+Recordings use unique names in the selected directory or the default Recordings folder. The initial
 free-space guard requires 1 GB. Once per second the writer checks the backing
 volume's available capacity and write progress. It warns below 1 GB, stops local
 recording below 100 MB, warns after three seconds without accepted media, and
@@ -44,6 +44,51 @@ recorder never deletes an incomplete or failed recording:
 - An interrupted journal can still say `preparing`, `recording`, or `finishing`.
   It records the last successful heartbeat, not evidence that a killed process
   still owns the file. Inspect the retained file before using it.
+
+## Source boundaries and trailing PCM
+
+Pause seals image admission and counts queued images it intentionally discards.
+The writer announces Paused only after real original-timestamp PCM reaches the
+maximum accepted image/audio endpoint. Splitting is disabled while that pause
+drain is pending. Resume chooses the first resumed image's source PTS, trims
+straddling PCM on its actual sample grid, and removes one source interval with
+one shared offset. This preserves the unwritten packet suffix across the pause.
+
+Stop seals video admission, drains its bounded accepted queue and closes that
+video input before waiting for the independent audio tap. The tap and recording
+demand remain owned until actual writer and isolated-file completion. Audio has
+three seconds to reach the resolved source endpoint; absent PCM produces a
+visible partial failure without padding Program audio or changing its clock.
+An already accepted audio-leading endpoint remains visible and is preserved.
+
+Rotation uses the first next image's original PTS as the shared cut. The old
+movie explicitly trims nominal image overlap at that boundary. The routers
+retain at most 32 immutable PCM chunks per selected tap to seed already-arrived
+audio into the new segment, and deliver delayed PCM to the retiring segment.
+They clear that history after the final owned writer completes; late callbacks
+cannot reopen a finished inlet. Existing encoder reservations remain held
+through real AVAssetWriter completion, including the temporary old/new overlap.
+
+Active isolated PCM and source rendering commit only through the last actually
+accepted Program image PTS, so a delayed next-frame cut cannot retract bytes
+already written to WAV/M4A. Paused/sealed intervals publish their resolved tails.
+A bounded 64-interval source history retains the correct common pause offset for
+late callbacks. Each isolated writer retains its own PCM inlet for up to three
+seconds before marking any unavailable tail as an explicit gap. The existing
+source-underrun/gap policy remains distinguishable from actual source PCM.
+Associated ISO movies and the opted-in chat archive use the same sealed end;
+final feature-hide events, archive summaries and subtitle cues cannot extend a
+nominal last-image duration past the trimmed movie.
+
+The native writer harness also checks independently delayed 120 ms PCM at
+pause/stop, stop during a pending pause drain, a sample-accurate 1.003 s rotation,
+an accepted audio-leading endpoint, a genuinely missing tail with the unchanged
+three-second deadline, and a native 0.997 s movie trim with its archive/caption
+end. Track starts, endpoints and flash/tone checks remain 40/80/60 ms. The
+isolated-video harness additionally accepts 60 ms leading PCM before a delayed
+first-next image and inspects both WAV/M4A and actual associated source-video
+outputs at the common cut. These are controlled native source fixtures; physical
+capture loss/unplug and live-provider delivery are separate qualification.
 
 ## Native qualification
 

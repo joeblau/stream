@@ -51,6 +51,26 @@ actor RehearsalPublisherProbe: Publisher {
     func statsSnapshot() async -> LiveStats? { nil }
 }
 
+/// Read-only observations on separate bounded output taps. They retain no media
+/// and do not pace, stamp, or synchronize either independently scheduled engine.
+private final class RehearsalMediaClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var videoEnd: Double?, audioEnd: Double?
+    private var videoCount = 0, audioCount = 0
+    func observe(_ sample: CMSampleBuffer, video: Bool) {
+        let pts = sample.presentationTimeStamp.seconds
+        let duration = sample.duration.isNumeric ? sample.duration.seconds : 0
+        lock.lock(); defer { lock.unlock() }
+        if video { videoEnd = pts + duration; videoCount += 1 }
+        else { audioEnd = pts + duration; audioCount += 1 }
+    }
+    func snapshot() -> String {
+        lock.lock(); defer { lock.unlock() }
+        let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        return "host=\(now) videoSourceEnd=\(videoEnd ?? -1) audioSourceEnd=\(audioEnd ?? -1) videoLag=\(videoEnd.map { now-$0 } ?? -1) audioLag=\(audioEnd.map { now-$0 } ?? -1) sourceDifference=\(videoEnd.flatMap { v in audioEnd.map { v-$0 } } ?? -1) counts=\(videoCount)/\(audioCount)"
+    }
+}
+
 @main @MainActor struct LocalRehearsalHarness {
     static func check(_ value: @autoclosure () -> Bool, _ message: String) throws {
         guard value() else { throw NSError(domain: "LocalRehearsalHarness", code: 1,
@@ -75,6 +95,7 @@ actor RehearsalPublisherProbe: Publisher {
             "Public Go Live escaped the rehearsal guard")
     }
     static func main() async throws {
+        setbuf(stdout, nil)
         let folder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let project = folder.appendingPathComponent("Project")
@@ -205,20 +226,51 @@ actor RehearsalPublisherProbe: Publisher {
         print("PASS: failed starts restore owned state; existing live/recording/reserved preparation is rejected without mutation")
         print("PASS: checklist counts active/finalizing publishers outside the plan, two planned publishers plus four studio-wide reservations, rejects six against four, and releases 4→1→0 while primary recorder is idle")
 
+        let clock = RehearsalMediaClock()
+        let videoObservation = controller.addFrameSink { clock.observe($0.sampleBuffer, video: true) }
+        let audioObservation = controller.addProgramAudioTap { clock.observe($0, video: false) }
+        defer { controller.removeFrameSink(videoObservation); controller.removeAudioTap(audioObservation) }
+        func trace(_ stage: String) {
+            let progress = String(decoding: try! JSONEncoder().encode(recorder.progress), as: UTF8.self)
+            print("TRACE \(stage): state=\(recorder.state), \(clock.snapshot()), progress=\(progress)")
+        }
+        func journal(_ url: URL) throws {
+            let data = try Data(contentsOf: url.appendingPathExtension("recording.json"))
+            let value = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let selected = value.filter { ["progress", "sourceStartSeconds", "videoStartOffsetSeconds", "audioStartOffsetSeconds", "pauses", "status"].contains($0.key) }
+            print("TRACE final \(url.lastPathComponent): \(String(decoding: try JSONSerialization.data(withJSONObject: selected, options: [.sortedKeys]), as: UTF8.self))")
+        }
+        recorder.preferences.isolatedTracks = [
+            .init(targetID: "bus.program", name: "Program PCM", format: .wav),
+            .init(targetID: "bus.monitor", name: "Monitor PCM", format: .m4a)
+        ]
         controller.beginLocalRehearsal(recorder: recorder)
         try blocked(controller, recorder: recorder)
         try await wait("Native compositor/mixer/writer did not record", until: { recorder.state == .recording })
+        if let milliseconds = ProcessInfo.processInfo.environment["REHEARSAL_AUDIO_HOLDBACK_MS"].flatMap(Double.init), milliseconds > 0 {
+            let granted = await controller.fixtureReserveAudioHoldback(UUID(), milliseconds: milliseconds)
+            try check(granted, "Existing opt-in capture holdback lease was rejected")
+            print("TRACE: actual independent-clock audio lease \(milliseconds)ms; timestamps unchanged")
+        }
         try await wait("Native media did not advance", until: { recorder.progress.durationSeconds >= 0.7 })
         let output = recorder.currentOutputURL!
+        trace("before-pause")
         recorder.pause()
+        try check(!recorder.canSplit, "An outstanding real PCM pause drain still allowed manual/automatic rotation")
+        recorder.startNewFile()
+        try check(recorder.currentOutputURL == output, "Split replaced the unresolved pause source boundary")
         try await wait("Writer did not pause", until: { recorder.state == .paused })
         try blocked(controller, recorder: recorder)
+        trace("paused-acknowledged")
         recorder.resume()
         try await wait("Writer did not resume", until: { recorder.state == .recording })
+        trace("resumed-before-rotation")
         recorder.startNewFile()
         try await wait("Rotated writer did not record", until: { recorder.state == .recording && recorder.currentOutputURL != output })
+        trace("rotated-recording-acknowledged")
         let next = recorder.currentOutputURL!
         try await wait("Rotated media did not advance", until: { recorder.progress.durationSeconds >= 0.5 })
+        trace("before-stop-preview")
         // Stop preview independently while the output retains recording demand.
         controller.stopPreview()
         try check(recorder.state.isActive && controller.isRehearsing, "Stopping preview ended rehearsal recording")
@@ -230,12 +282,34 @@ actor RehearsalPublisherProbe: Publisher {
         try check(recorder.state == .idle && !controller.isPreviewing && controller.destinationOutputs.isPublishingAllowed
             && controller.reservedRecordingEncoderCount == 0 && !controller.outputSessionActive && recorder.activeOutputURLs.isEmpty,
             "Completed rehearsal retained ownership or failed to enable fresh operator publishing")
+        trace("finalized")
+        try journal(output); try journal(next)
+        for program in [output, next] {
+            let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: program.appendingPathExtension("recording.json"))) as! [String: Any]
+            let files = manifest["isolatedFiles"] as! [String]
+            let duration = (manifest["progress"] as! [String: Any])["durationSeconds"] as! Double
+            try check(files.count == 2, "Shipping rehearsal did not create both selected PCM/AAC isolated tracks")
+            for name in files {
+                let file = program.deletingLastPathComponent().appendingPathComponent(name)
+                let decoded = try AVAudioFile(forReading: file)
+                let iso = try JSONSerialization.jsonObject(with: Data(contentsOf: file.appendingPathExtension("isolated.json"))) as! [String: Any]
+                let gaps = iso["gaps"] as! [[String: Any]]
+                let missing = (iso["progress"] as! [String: Any])["missingSourceFrames"] as! Int
+                let gapFrames = gaps.reduce(0) { $0 + ($1["missingFrames"] as? Int ?? 0) }
+                try check(abs(Double(decoded.length) / 48_000 - duration) < 0.001,
+                    "Decoded isolated track does not share the Program endpoint: \(name), \(decoded.length) frames, Program \(duration)s")
+                try check(missing == 0 && gapFrames <= 4 && !gaps.contains { $0["reason"] as? String == "missing-tail" },
+                    "Actual isolated PCM tail/pause boundary was replaced by a gap: \(name), \(gaps)")
+                print("TRACE isolated \(name): decoded \(decoded.length) frames, Program \(duration)s, actual source-underrun/gap frames \(missing)/\(gapFrames)")
+            }
+        }
         try await ProgramRecordingFixtures.inspect(output, expectedDuration: nil, checkSync: false)
         try await ProgramRecordingFixtures.inspect(next, expectedDuration: nil, checkSync: false)
         print("PASS: actual shipping compositor/mixer H264/AAC rehearsal survives pause/resume, rotation and preview stop; all files decode and guard releases after writer/segment finalization")
 
         controller.beginLocalRehearsal(recorder: recorder)
         try await wait("Storage-loss fixture did not start actual media", until: { recorder.state == .recording && recorder.progress.durationSeconds >= 0.5 })
+        trace("before-storage-relocation")
         let interrupted = recorder.currentOutputURL!
         let relocated = folder.appendingPathComponent("RemovedRecordingPath")
         try FileManager.default.moveItem(at: interrupted.deletingLastPathComponent(), to: relocated)
@@ -243,6 +317,8 @@ actor RehearsalPublisherProbe: Publisher {
         try check(!recorder.state.isActive && recorder.lastError != nil && recorder.activeOutputURLs.isEmpty
             && controller.reservedRecordingEncoderCount == 0 && controller.destinationOutputs.isPublishingAllowed && !controller.isPreviewing,
             "Asynchronous writer/storage failure left rehearsal/public publishing ownership behind")
+        trace("storage-failure-finalized")
+        try journal(relocated.appendingPathComponent(interrupted.lastPathComponent))
         try await ProgramRecordingFixtures.inspect(relocated.appendingPathComponent(interrupted.lastPathComponent), expectedDuration: nil, checkSync: false)
         print("PASS: actual recording-directory relocation triggers asynchronous storage failure; readable partial tracks survive and rehearsal releases only after writer cleanup (physical unplug remains unqualified)")
         print("Configuration: \(ProcessInfo.processInfo.operatingSystemVersionString); \(ProcessInfo.processInfo.processorCount) CPUs; artifacts \(folder.path)")

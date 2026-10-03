@@ -39,6 +39,7 @@ final class IsolatedAudioRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var pending: [CMSampleBuffer] = []
     private var accepting = true
+    private var sourceCutoffAtInlet: CMTime = .invalid
     private var dropCount = 0
     private var file: AVAudioFile?
     private var timer: DispatchSourceTimer?
@@ -49,6 +50,7 @@ final class IsolatedAudioRecorder: @unchecked Sendable {
     private var firstOffset: Double?
     private var lastHealth = Date.distantPast
     private var failure: String?
+    private var finishDeadline: Date?
     private var finishing = false
     private var finished = false
     private var completion: (@Sendable () -> Void)?
@@ -74,9 +76,9 @@ final class IsolatedAudioRecorder: @unchecked Sendable {
     }
 
     func append(_ sample: CMSampleBuffer) {
-        guard !timeline.snapshot().paused else { return }
         lock.lock(); defer { lock.unlock() }
         guard accepting else { return }
+        if sourceCutoffAtInlet.isNumeric, sample.presentationTimeStamp >= sourceCutoffAtInlet { return }
         if pending.count >= 128 { pending.removeFirst(); dropCount += 1 }
         pending.append(sample)
     }
@@ -86,11 +88,12 @@ final class IsolatedAudioRecorder: @unchecked Sendable {
     func fail(_ message: String) { queue.async { [self] in failOnQueue(message) } }
 
     func finish(completion: @escaping @Sendable () -> Void) {
-        deactivate()
+        let timing = timeline.snapshot()
+        lock.lock(); sourceCutoffAtInlet = timing.end.isNumeric ? timing.end + timing.offset : .invalid; lock.unlock()
         queue.async { [self] in
             if finished { completion(); return }
             self.completion = completion
-            finishing = true
+            finishing = true; finishDeadline = Date().addingTimeInterval(3)
             pump()
         }
     }
@@ -98,19 +101,17 @@ final class IsolatedAudioRecorder: @unchecked Sendable {
     private func pump() {
         guard !finished else { return }
         let timing = timeline.snapshot()
-        if failure == nil, timing.origin.isNumeric, !timing.waitingForResume {
+        if failure == nil, timing.origin.isNumeric {
             for _ in 0..<64 {
                 lock.lock(); let sample = pending.first; lock.unlock()
                 guard let sample else { break }
-                let start = sample.presentationTimeStamp - timing.offset
-                let end = start + CMTime(value: Int64(CMSampleBufferGetNumSamples(sample)), timescale: 48_000)
-                // Do not commit beyond the program writer's accepted window.
-                // Otherwise a stalled program encoder or a pause could leave
-                // an isolated file longer than the actual program file.
-                if start >= timing.origin, (!timing.end.isNumeric || end > timing.end), !finishing { break }
+                guard let slices = timing.audioSlices(sample, final: finishing) else { break }
                 lock.lock(); pending.removeFirst(); lock.unlock()
-                if finishing, timing.end.isNumeric, start >= timing.end { continue }
-                appendOnQueue(sample, timing: timing)
+                for slice in slices {
+                    var sliceTiming = timing; sliceTiming.offset = slice.offset
+                    appendOnQueue(slice.sample, timing: sliceTiming)
+                    if failure != nil { break }
+                }
                 if failure != nil { break }
             }
         }
@@ -124,12 +125,20 @@ final class IsolatedAudioRecorder: @unchecked Sendable {
             publish()
         }
         if finishing {
+            if failure == nil, timing.origin.isNumeric, !timing.videoPTS.isNumeric {
+                failOnQueue("No accepted Program video frontier was established.")
+            }
             lock.lock(); let empty = pending.isEmpty; lock.unlock()
-            if empty || failure != nil || !timing.origin.isNumeric || timing.waitingForResume {
+            let requested = timing.origin.isNumeric && timing.end.isNumeric
+                ? Int64(((timing.end - timing.origin).seconds * 48_000).rounded()) : 0
+            let reached = framesWritten >= requested
+            if failure != nil || !timing.origin.isNumeric || (empty && reached) || Date() >= (finishDeadline ?? .distantFuture) {
+                deactivate()
                 if failure == nil, !timing.origin.isNumeric { failOnQueue("No common program timeline was established.") }
-                if failure == nil, timing.end.isNumeric {
-                    let requested = Int64(((timing.end - timing.origin).seconds * 48_000).rounded())
-                    if requested > framesWritten { writeSilence(frames: requested - framesWritten, reason: "missing-tail") }
+                if failure == nil, requested > framesWritten {
+                    // A disconnected/late source remains an explicit gap after
+                    // its bounded drain deadline, never a successful PCM tail.
+                    writeSilence(frames: requested - framesWritten, reason: "missing-tail")
                 }
                 finalize()
             }
@@ -154,18 +163,31 @@ final class IsolatedAudioRecorder: @unchecked Sendable {
         let pts = sample.presentationTimeStamp
         guard pts.isNumeric else { failOnQueue("Isolated audio has an invalid timestamp."); return }
         let relative = pts - timing.offset - timing.origin
-        let position = Int64((relative.seconds * 48_000).rounded())
-        let count = Int64(CMSampleBufferGetNumSamples(sample))
+        var position = Int64((relative.seconds * 48_000).rounded())
+        var retained = sample
         if position < 0 { return } // Preroll precedes the common session origin.
         if position < framesWritten {
-            lock.lock(); dropCount += 1; lock.unlock()
-            return // Late data cannot reorder a track; report the shed chunk.
+            let overlap = framesWritten - position
+            let count = Int64(CMSampleBufferGetNumSamples(sample))
+            if overlap >= count {
+                lock.lock(); dropCount += 1; lock.unlock()
+                return
+            }
+            // Pause cuts live on the PCM grid; rounding the common movie
+            // origin can overlap one sample. Retain the unwritten suffix,
+            // rather than discarding a whole otherwise valid 512-frame chunk.
+            var suffix: CMSampleBuffer?
+            guard CMSampleBufferCopySampleBufferForRange(allocator: nil, sampleBuffer: sample,
+                sampleRange: CFRange(location: Int(overlap), length: Int(count-overlap)), sampleBufferOut: &suffix) == noErr,
+                let suffix else { failOnQueue("Cannot retain the isolated PCM suffix at its common boundary."); return }
+            retained = suffix; position = framesWritten
         }
+        let count = Int64(CMSampleBufferGetNumSamples(retained))
         do {
             if file == nil { try configure() }
             if firstOffset == nil { firstOffset = relative.seconds }
             if position > framesWritten { writeSilence(frames: position - framesWritten, reason: "timeline-gap") }
-            guard failure == nil, let pcm = CanonicalAudioConverter.makePCMBuffer(from: sample),
+            guard failure == nil, let pcm = CanonicalAudioConverter.makePCMBuffer(from: retained),
                   pcm.format.sampleRate == 48_000, pcm.format.channelCount == 2 else {
                 if failure == nil { failOnQueue("Isolated audio is not canonical 48 kHz stereo PCM.") }
                 return
@@ -297,9 +319,29 @@ final class IsolatedRecordingGroup: @unchecked Sendable {
 final class IsolatedRecordingRouter: @unchecked Sendable {
     private let lock = NSLock()
     private var group: IsolatedRecordingGroup?
-    func install(_ group: IsolatedRecordingGroup?) { lock.lock(); self.group = group; lock.unlock() }
+    private var retiring: [ObjectIdentifier: IsolatedRecordingGroup] = [:]
+    private var audioHistory: [String: [CMSampleBuffer]] = [:]
+    func install(_ group: IsolatedRecordingGroup?) { lock.lock(); self.group = group; audioHistory.removeAll(); lock.unlock() }
+    func retire(_ previous: IsolatedRecordingGroup?, installing next: IsolatedRecordingGroup?) {
+        lock.lock(); if let previous { retiring[ObjectIdentifier(previous)] = previous }; group = next
+        if let next {
+            for (id, samples) in audioHistory { for sample in samples { next.append(sample, targetID: id) } }
+        }
+        lock.unlock()
+    }
+    func finished(_ previous: IsolatedRecordingGroup?) {
+        guard let previous else { return }
+        lock.lock(); retiring[ObjectIdentifier(previous)] = nil
+        if retiring.isEmpty && group == nil { audioHistory.removeAll() }
+        lock.unlock()
+    }
     func append(_ sample: CMSampleBuffer, targetID: String) {
-        lock.lock(); let group = group; lock.unlock()
+        lock.lock()
+        guard group != nil || !retiring.isEmpty else { lock.unlock(); return }
+        audioHistory[targetID, default: []].append(sample)
+        if audioHistory[targetID, default: []].count > 32 { audioHistory[targetID]?.removeFirst() }
+        let group = group; let tails = Array(retiring.values); lock.unlock()
         group?.append(sample, targetID: targetID)
+        for previous in tails { previous.append(sample, targetID: targetID) }
     }
 }

@@ -28,7 +28,8 @@ final class RecordingController: ObservableObject {
     }
 
     var isRecording: Bool { state.isRecording }
-    var canSplit: Bool { state == .recording && finishingSegments == 0 }
+    @Published private var pausePending = false
+    var canSplit: Bool { state == .recording && !pausePending && finishingSegments == 0 }
     var currentOutputURL: URL? { session?.outputURL }
     var activeOutputURLs: Set<URL> {
         guard let session else { return finishingURLs.filter { !$0.lastPathComponent.hasSuffix(".chat.jsonl") } }
@@ -204,7 +205,7 @@ final class RecordingController: ObservableObject {
             lastError = error; state = .failed(error); return
         }
         reservationStream = stream
-        lastError = nil; warning = nil; progress = .init(); isolatedProgress = []; isolatedVideoProgress = []
+        lastError = nil; warning = nil; progress = .init(); isolatedProgress = []; isolatedVideoProgress = []; pausePending = false
         unavailableTrackIDs = []; unavailableVideoAudioIDs = []; videoBudget = nil
         self.stream = stream
         recordingID = UUID(); segmentIndex = 0
@@ -401,6 +402,7 @@ final class RecordingController: ObservableObject {
                 case .recording:
                     if self.state == .preparing { self.state = .recording }
                 case .paused:
+                    self.pausePending = false
                     if self.state == .recording { self.state = .paused }
                 case .progress(let progress):
                     self.progress = progress
@@ -423,7 +425,10 @@ final class RecordingController: ObservableObject {
         session?.addMarker(title: title)
     }
 
-    func pause() { guard state == .recording else { return }; session?.pause() }
+    func pause() {
+        guard state == .recording, !pausePending else { return }
+        pausePending = true; session?.pause()
+    }
     func resume() {
         guard state == .paused else { return }
         state = .preparing
@@ -444,18 +449,22 @@ final class RecordingController: ObservableObject {
         }).union(previousChat.map { [$0.url] } ?? [])
         do {
             let next = try makeSegment(stream: stream)
-            session = next; router.install(next); chatFeed.install(chatArchive)
-            isolatedRouter.install(isolatedGroup); previousIsolated?.deactivate()
-            isolatedVideoRouter.install(isolatedVideoGroup); previousVideo?.deactivate()
+            session = next; router.rotate(to: next, finishing: previous); chatFeed.install(chatArchive)
+            isolatedRouter.retire(previousIsolated, installing: isolatedGroup)
+            isolatedVideoRouter.retire(previousVideo, installing: isolatedVideoGroup)
             finishingSegments += 1
             finishingURLs.formUnion(previousURLs)
-            previous.finish { [weak self, store] result in
+            let router = self.router
+            let isolatedRouter = self.isolatedRouter; let isolatedVideoRouter = self.isolatedVideoRouter
+            previous.finish(waitingForSourceBoundary: true) { [weak self, store, router] result in
+                router.finished(previous)
                 if result.completed { store.markComplete(result.url) }
                 RecordingController.finishAssociated(audio: previousIsolated, video: previousVideo, chat: previousChat, completed: result.completed) {
+                    isolatedRouter.finished(previousIsolated); isolatedVideoRouter.finished(previousVideo)
                     Task { @MainActor in
+                        stream.releaseRecordingEncoders(rotationReservation)
                         guard let self else { return }
                         self.finishingSegments -= 1
-                        stream.releaseRecordingEncoders(rotationReservation)
                         self.finishingURLs.subtract(previousURLs)
                         self.acceptFinished(result, final: false)
                         self.completeStopsIfReady()
@@ -471,6 +480,7 @@ final class RecordingController: ObservableObject {
     /// Normal app termination waits for this completion, including any previous
     /// segment still finishing. Pausing/rotating never touches network outputs.
     func stop(completion: (() -> Void)? = nil) {
+        pausePending = false
         if let completion { stopCompletions.append(completion) }
         countdownTask?.cancel(); countdownTask = nil; countdownRemaining = 0
         videoPreflightTask?.cancel(); videoPreflightTask = nil
@@ -480,23 +490,30 @@ final class RecordingController: ObservableObject {
         }
         guard state != .stopping else { return }
         state = .stopping
-        router.install(nil); chatFeed.install(nil)
-        isolatedRouter.install(nil); isolatedGroup?.deactivate()
-        isolatedVideoRouter.install(nil); isolatedVideoGroup?.deactivate()
-        for subscription in isolatedSubscriptions { stream?.removeAudioTap(subscription) }
+        router.stop(session); chatFeed.install(nil)
+        isolatedRouter.retire(isolatedGroup, installing: nil)
+        isolatedVideoRouter.retire(isolatedVideoGroup, installing: nil)
+        let finalIsolatedSubscriptions = isolatedSubscriptions
         isolatedSubscriptions.removeAll()
         if let frameSubscription { stream?.removeFrameSink(frameSubscription) }
-        if let audioSubscription { stream?.removeAudioTap(audioSubscription) }
+        let finalAudioSubscription = audioSubscription
+        let finalStream = stream
         frameSubscription = nil; audioSubscription = nil
         stream = nil
         let id = sessionID
         let isolated = isolatedGroup
         let video = isolatedVideoGroup
         let chat = chatArchive
-        session.finish { [weak self, store] result in
+        let router = self.router
+        let isolatedRouter = self.isolatedRouter; let isolatedVideoRouter = self.isolatedVideoRouter
+        session.finish { [weak self, store, router] result in
+            router.finished(session)
             if result.completed { store.markComplete(result.url) }
             RecordingController.finishAssociated(audio: isolated, video: video, chat: chat, completed: result.completed) {
+                isolatedRouter.finished(isolated); isolatedVideoRouter.finished(video)
                 Task { @MainActor in
+                    if let finalAudioSubscription { finalStream?.removeAudioTap(finalAudioSubscription) }
+                    for subscription in finalIsolatedSubscriptions { finalStream?.removeAudioTap(subscription) }
                     guard let self, self.sessionID == id else { return }
                     self.session = nil; self.isolatedGroup = nil; self.isolatedVideoGroup = nil; self.chatArchive = nil
                     self.progress = result.progress

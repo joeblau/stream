@@ -103,8 +103,12 @@ final class ProgramRecordingSession: @unchecked Sendable {
     // Protected by lock: no unbounded secondary dispatch queue.
     private var video: [CMSampleBuffer] = []
     private var audio: [CMSampleBuffer] = []
-    private var accepting = true
+    private var acceptingVideo = true
+    private var acceptingAudio = true
+    private var closedAtInlet = false
     private var pausedAtInlet = false
+    private var audioTailOpen = false
+    private var audioCutoffAtInlet: CMTime = .invalid
     private var droppedVideo = 0
     private var firstVideoAccepted = false
     private var droppedAudio = 0
@@ -135,7 +139,15 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private var lastHealthCheck = Date.distantPast
     private var progress = Progress()
     private var paused = false
+    private var pauseDraining = false
+    private var pauseDeadline: Date?
+    private var pauseSourceCutoff: CMTime = .invalid
     private var resumePending = false
+    private var finishSourceCutoff: CMTime = .invalid
+    private var awaitingFinishBoundary = false
+    private var videoInputFinished = false
+    private var epochSourceStart: CMTime = .invalid
+    private var epochVideoPTS: CMTime = .invalid
     private var timestampOffset: CMTime = .zero
     private var pauses: [PauseGap] = []
     private var markers: [RecordingMarker] = []
@@ -171,7 +183,12 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private func enqueue(_ sample: CMSampleBuffer, isVideo: Bool) {
         lock.lock()
         defer { lock.unlock() }
-        guard accepting, !pausedAtInlet else { return }
+        if isVideo {
+            guard acceptingVideo, !pausedAtInlet else { return }
+        } else {
+            guard acceptingAudio, !pausedAtInlet || audioTailOpen else { return }
+            if audioCutoffAtInlet.isNumeric, sample.presentationTimeStamp >= audioCutoffAtInlet { return }
+        }
         guard CMSampleBufferGetPresentationTimeStamp(sample).isNumeric else {
             if isVideo { droppedVideo += 1 } else { droppedAudio += 1 }
             return
@@ -206,15 +223,19 @@ final class ProgramRecordingSession: @unchecked Sendable {
     }
 
     func pause() {
-        timeline.pause()
-        lock.lock(); pausedAtInlet = true
-        droppedVideo += video.count; droppedAudio += audio.count
-        video.removeAll(); audio.removeAll(); lock.unlock()
+        lock.lock()
+        guard !closedAtInlet, !pausedAtInlet else { lock.unlock(); return }
+        pausedAtInlet = true; audioTailOpen = configuration.requiresAudio
+        droppedVideo += video.count
+        video.removeAll(); lock.unlock()
         queue.async { [self] in
-            guard !finishRequested, failure == nil, started else { return }
-            paused = true
-            writeManifest(status: "paused")
-            event(.paused)
+            guard !finishRequested, failure == nil, started, !paused, !pauseDraining else { return }
+            // Resolve after any in-flight append. UI progress may be a second
+            // old, and a captured-before-pause callback may still be running.
+            pauseDraining = true; pauseDeadline = Date().addingTimeInterval(3)
+            pauseSourceCutoff = endTime + timestampOffset
+            setAudioCutoff(pauseSourceCutoff)
+            pump()
         }
     }
 
@@ -225,25 +246,84 @@ final class ProgramRecordingSession: @unchecked Sendable {
             guard paused, !finishRequested, failure == nil else { completion?(false); return }
             paused = false; resumePending = true
             timeline.awaitResume()
-            announcedRecording = false
+            announcedRecording = false; epochVideoPTS = .invalid
             lastVideoWrite = Date(); lastAudioWrite = Date()
-            lock.lock(); pausedAtInlet = false; lock.unlock()
+            lock.lock(); pausedAtInlet = false; audioTailOpen = false; audioCutoffAtInlet = .invalid; lock.unlock()
             completion?(true)
         }
     }
 
-    /// Idempotent. Stop accepting immediately; drain at most three seconds of
-    /// pending encode work before finalization. A failed file is preserved.
-    func finish(completion: @escaping @Sendable (Result) -> Void) {
-        lock.lock(); accepting = false; lock.unlock()
+    /// Stops video admission immediately. Real PCM for its final source window
+    /// can still arrive on the independent audio tap, for at most three seconds.
+    /// Rotation resolves its shared boundary from the first next-video PTS.
+    func finish(waitingForSourceBoundary: Bool = false, completion: @escaping @Sendable (Result) -> Void) {
+        sealVideo()
         queue.async { [self] in
             if let result { completion(result); return }
             completions.append(completion)
             guard !finishRequested else { return }
             finishRequested = true
             finishDeadline = Date().addingTimeInterval(3)
+            awaitingFinishBoundary = waitingForSourceBoundary && !finishSourceCutoff.isNumeric
+            pauseDraining = false; paused = false
+            lock.lock()
+            if !closedAtInlet { acceptingAudio = configuration.requiresAudio; audioTailOpen = configuration.requiresAudio }
+            let finalVideo = video.last
+            lock.unlock()
+            if !awaitingFinishBoundary, !finishSourceCutoff.isNumeric {
+                finishSourceCutoff = resolvedSourceEnd(finalVideo: finalVideo)
+            }
+            if !awaitingFinishBoundary, finishSourceCutoff.isNumeric, endTime.isNumeric {
+                endTime = CMTimeMinimum(endTime, finishSourceCutoff - timestampOffset); timeline.seal(end: endTime)
+            }
+            if !resumePending || finalVideo != nil { setAudioCutoff(finishSourceCutoff) }
+            else { resumePending = false; setAudioCutoff(finishSourceCutoff) }
             pump()
         }
+    }
+
+    func sealVideo() {
+        lock.lock(); acceptingVideo = false; lock.unlock()
+    }
+
+    func resolveFinishBoundary(_ sourceTime: CMTime) {
+        queue.async { [self] in
+            guard sourceTime.isNumeric, !finishing, result == nil else { return }
+            finishSourceCutoff = sourceTime; awaitingFinishBoundary = false
+            if finishRequested {
+                setAudioCutoff(sourceTime)
+                if endTime.isNumeric { endTime = CMTimeMinimum(endTime, sourceTime - timestampOffset); timeline.seal(end: endTime) }
+                pump()
+            }
+        }
+    }
+
+    func cancelPendingFinishBoundary() {
+        queue.async { [self] in
+            guard awaitingFinishBoundary, !finishing, result == nil else { return }
+            lock.lock(); let finalVideo = video.last; lock.unlock()
+            finishSourceCutoff = resolvedSourceEnd(finalVideo: finalVideo)
+            awaitingFinishBoundary = false; setAudioCutoff(finishSourceCutoff)
+            if finishSourceCutoff.isNumeric, endTime.isNumeric {
+                endTime = CMTimeMinimum(endTime, finishSourceCutoff - timestampOffset); timeline.seal(end: endTime)
+            }
+            pump()
+        }
+    }
+
+    private func resolvedSourceEnd(finalVideo: CMSampleBuffer?) -> CMTime {
+        let accepted = endTime.isNumeric ? endTime + timestampOffset : .invalid
+        guard let finalVideo else { return accepted }
+        let queued = Self.sourceEnd(finalVideo)
+        return accepted.isNumeric ? CMTimeMaximum(accepted, queued) : queued
+    }
+
+    private func setAudioCutoff(_ sourceTime: CMTime) {
+        lock.lock(); audioCutoffAtInlet = sourceTime; lock.unlock()
+    }
+
+    private static func sourceEnd(_ sample: CMSampleBuffer) -> CMTime {
+        sample.presentationTimeStamp + (sample.duration.isNumeric ? sample.duration : .zero)
     }
 
     private func pump() {
@@ -262,15 +342,36 @@ final class ProgramRecordingSession: @unchecked Sendable {
             if started, !paused { drain() }
             if Date().timeIntervalSince(lastHealthCheck) >= 1 { checkHealth() }
         }
+        if pauseDraining, failure == nil {
+            if audioReached(pauseSourceCutoff) {
+                pauseDraining = false; paused = true
+                lock.lock(); audioTailOpen = false; lock.unlock()
+                timeline.pause()
+                updateProgress(); writeManifest(status: "paused"); event(.paused)
+            } else if Date() >= (pauseDeadline ?? .distantFuture) {
+                fail("Program audio did not reach the pause boundary before its drain deadline.", videoTrack: false)
+            }
+        }
         if finishRequested {
-            lock.lock(); let empty = video.isEmpty && audio.isEmpty; lock.unlock()
-            if failure != nil || empty || Date() >= (finishDeadline ?? .distantFuture) {
-                if !empty && failure == nil {
-                    fail("The recording encoder did not drain before its finalization deadline.")
+            lock.lock(); let videoEmpty = video.isEmpty; let empty = videoEmpty && audio.isEmpty; lock.unlock()
+            // An ended video input must no longer hold up ideal interleaving
+            // while its independent PCM tap supplies the final source window.
+            if started, videoEmpty, !videoInputFinished {
+                videoInput?.markAsFinished(); videoInputFinished = true
+            }
+            let caughtUp = !awaitingFinishBoundary && audioReached(finishSourceCutoff)
+            if failure != nil || (!started && videoEmpty) || (empty && caughtUp) || Date() >= (finishDeadline ?? .distantFuture) {
+                if failure == nil, started, (!empty || !caughtUp) {
+                    fail(awaitingFinishBoundary ? "The next video source boundary did not arrive before finalization." : "Program audio or video did not drain to the recording boundary before its finalization deadline.")
                 }
                 finalize()
             }
         }
+    }
+
+    private func audioReached(_ sourceCutoff: CMTime) -> Bool {
+        !configuration.requiresAudio || (sourceCutoff.isNumeric && audioEnd.isNumeric
+            && audioEnd + timestampOffset >= sourceCutoff - CMTime(value: 1, timescale: 48_000))
     }
 
     private func configure(video: CMSampleBuffer, audio: CMSampleBuffer?) {
@@ -308,8 +409,12 @@ final class ProgramRecordingSession: @unchecked Sendable {
             self.writer = writer; self.videoInput = input
             guard writer.startWriting() else { fail(writer.error?.localizedDescription ?? "Cannot open recording writer."); return }
             let videoPTS = CMSampleBufferGetPresentationTimeStamp(video)
-            sessionStart = configuration.sourceStartTime ?? audio.map { CMTimeMinimum(videoPTS, CMSampleBufferGetPresentationTimeStamp($0)) } ?? videoPTS
+            // Delayed PCM may precede the first video by a capture holdback.
+            // Begin at the actual Program image, retaining only samples in
+            // that source interval rather than manufacturing an audio preroll.
+            sessionStart = configuration.sourceStartTime ?? videoPTS
             writer.startSession(atSourceTime: sessionStart)
+            epochSourceStart = sessionStart
             timeline.begin(at: sessionStart)
             started = true
         } catch { fail("Cannot open recording: \(error.localizedDescription)") }
@@ -321,14 +426,23 @@ final class ProgramRecordingSession: @unchecked Sendable {
             lock.lock()
             let firstVideo = video.first; let firstAudio = audio.first
             lock.unlock()
-            // Both taps share a clock. Use the earliest resumed timestamp to
-            // remove only the paused interval from both tracks.
             guard let firstVideo, !configuration.requiresAudio || firstAudio != nil else { return }
-            let rawStart = firstAudio.map { CMTimeMinimum(firstVideo.presentationTimeStamp, $0.presentationTimeStamp) } ?? firstVideo.presentationTimeStamp
+            // Delayed old PCM must not establish a second resume origin. Wait
+            // until actual samples reach the first resumed video's source PTS,
+            // then remove one interval from both tracks with one offset.
+            let rawStart = firstVideo.presentationTimeStamp
+            if configuration.requiresAudio {
+                lock.lock()
+                while let first = audio.first, Self.sourceEnd(first) <= rawStart { audio.removeFirst() }
+                let hasResumedAudio = audio.first.map { Self.sourceEnd($0) > rawStart } ?? false
+                lock.unlock()
+                guard hasResumedAudio else { return }
+            }
             let gap = CMTimeMaximum(.zero, rawStart - timestampOffset - endTime)
             pauses.append(PauseGap(sourceStartSeconds: (endTime + timestampOffset).seconds, durationSeconds: gap.seconds))
             timestampOffset = timestampOffset + gap
-            timeline.resume(offset: timestampOffset)
+            epochSourceStart = rawStart
+            timeline.resume(offset: timestampOffset, sourceStart: rawStart)
             resumePending = false
         }
         // Bounded work per tick also gives finish/health commands time to run.
@@ -338,7 +452,9 @@ final class ProgramRecordingSession: @unchecked Sendable {
             }
             lock.lock()
             let nextVideo = videoInput.isReadyForMoreMediaData ? video.first : nil
-            let nextAudio = audioInput?.isReadyForMoreMediaData == true ? audio.first : nil
+            var nextAudio = audioInput?.isReadyForMoreMediaData == true ? audio.first : nil
+            if awaitingFinishBoundary, let pending = nextAudio,
+               !lastVideoPTS.isNumeric || Self.sourceEnd(pending) > lastVideoPTS + timestampOffset { nextAudio = nil }
             let isVideo: Bool
             if let nextVideo, let nextAudio {
                 isVideo = CMSampleBufferGetPresentationTimeStamp(nextVideo) <= CMSampleBufferGetPresentationTimeStamp(nextAudio)
@@ -349,7 +465,13 @@ final class ProgramRecordingSession: @unchecked Sendable {
             }
             lock.unlock()
             guard let sourceSample = sample else { return }
-            guard let sample = retimed(sourceSample) else {
+            var retained = sourceSample
+            if !isVideo {
+                let cutoff = pauseDraining ? pauseSourceCutoff : finishRequested ? finishSourceCutoff : .invalid
+                guard let sliced = Self.audioRange(sourceSample, start: epochSourceStart, end: cutoff) else { continue }
+                retained = sliced
+            }
+            guard let sample = retimed(retained) else {
                 fail("Cannot retime recording media after a pause.", videoTrack: isVideo); return
             }
             let pts = CMSampleBufferGetPresentationTimeStamp(sample)
@@ -368,11 +490,16 @@ final class ProgramRecordingSession: @unchecked Sendable {
             let duration = CMSampleBufferGetDuration(sample)
             let sampleEnd = pts + (duration.isNumeric ? duration : CMTime(value: 1, timescale: Int32(max(1, configuration.frameRate))))
             endTime = endTime.isValid ? CMTimeMaximum(endTime, sampleEnd) : sampleEnd
-            timeline.update(end: endTime)
+            if finishRequested, finishSourceCutoff.isNumeric {
+                endTime = CMTimeMinimum(endTime, finishSourceCutoff - timestampOffset)
+            }
+            if finishRequested, !awaitingFinishBoundary { timeline.seal(end: endTime, videoPTS: isVideo ? pts : nil) }
+            else { timeline.update(end: endTime, videoPTS: isVideo ? pts : nil) }
             if isVideo {
                 configuration.onVideoAccepted?(.init(seconds: (pts - sessionStart).seconds,
                     endSeconds: (sampleEnd - sessionStart).seconds, painted: RecordingChatPaint.read(sourceSample)))
                 videoEnd = sampleEnd
+                if !epochVideoPTS.isNumeric { epochVideoPTS = pts }
                 lastVideoPTS = pts; lastVideoWrite = Date(); progress.videoSamples += 1
                 progress.videoStatus = .writing
                 lock.lock(); firstVideoAccepted = true; lock.unlock()
@@ -383,11 +510,32 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 progress.audioStatus = .writing
                 if !firstAudioPTS.isValid { firstAudioPTS = pts }
             }
-            if !announcedRecording, progress.videoSamples > 0, !configuration.requiresAudio || progress.audioSamples > 0 {
+            if !announcedRecording, epochVideoPTS.isNumeric,
+               !configuration.requiresAudio || (lastAudioPTS.isNumeric && lastAudioPTS >= epochVideoPTS) {
                 announcedRecording = true
                 event(.recording)
             }
         }
+    }
+
+    /// Packed PCM is partitioned at its real sample grid. Copying the retained
+    /// range keeps source data/PTS; there is no silence padding or track rebase.
+    static func audioRange(_ sample: CMSampleBuffer, start: CMTime, end: CMTime = .invalid) -> CMSampleBuffer? {
+        let count = CMSampleBufferGetNumSamples(sample)
+        guard count > 0, let format = sample.formatDescription,
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format), asbd.pointee.mSampleRate > 0 else { return nil }
+        let rate = asbd.pointee.mSampleRate, pts = sample.presentationTimeStamp
+        func index(_ time: CMTime) -> Int {
+            max(0, min(count, Int(ceil((time - pts).seconds * rate - 0.000_001))))
+        }
+        let first = start.isNumeric ? index(start) : 0
+        let last = end.isNumeric ? index(end) : count
+        guard last > first else { return nil }
+        if first == 0 && last == count { return sample }
+        var sliced: CMSampleBuffer?
+        guard CMSampleBufferCopySampleBufferForRange(allocator: nil, sampleBuffer: sample,
+            sampleRange: CFRange(location: first, length: last-first), sampleBufferOut: &sliced) == noErr else { return nil }
+        return sliced
     }
 
     private func retimed(_ sample: CMSampleBuffer) -> CMSampleBuffer? {
@@ -460,7 +608,8 @@ final class ProgramRecordingSession: @unchecked Sendable {
         failure = message
         if videoTrack != false { progress.videoStatus = .failed; progress.videoError = message }
         if configuration.requiresAudio, videoTrack != true { progress.audioStatus = .failed; progress.audioError = message }
-        lock.lock(); accepting = false; video.removeAll(); audio.removeAll(); lock.unlock()
+        lock.lock(); acceptingVideo = false; acceptingAudio = false; closedAtInlet = true
+        video.removeAll(); audio.removeAll(); lock.unlock()
         updateProgress()
         writeManifest(status: "partial")
         event(.failed(message))
@@ -484,12 +633,14 @@ final class ProgramRecordingSession: @unchecked Sendable {
         guard !finishing else { return }
         finishing = true
         timer?.cancel(); timer = nil
+        lock.lock(); acceptingVideo = false; acceptingAudio = false; closedAtInlet = true; lock.unlock()
         updateProgress()
         lock.lock(); video.removeAll(); audio.removeAll(); lock.unlock()
         guard started, let writer, writer.status == .writing else {
             complete(error: failure ?? "No program media was received."); return
         }
-        videoInput?.markAsFinished(); audioInput?.markAsFinished()
+        if !videoInputFinished { videoInput?.markAsFinished(); videoInputFinished = true }
+        audioInput?.markAsFinished()
         if endTime.isNumeric { writer.endSession(atSourceTime: endTime) }
         writeManifest(status: "finishing")
         writer.finishWriting { [self] in
