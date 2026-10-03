@@ -49,8 +49,8 @@ jobs:
           echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
           "$(brew --prefix ffmpeg-full)/bin/ffmpeg" -version
           "$(brew --prefix ffmpeg-full)/bin/ffmpeg" -protocols | tee /tmp/stream-receiver-protocols.txt
-          rg -x '  srt' /tmp/stream-receiver-protocols.txt
-          rg -x '  rtmp' /tmp/stream-receiver-protocols.txt
+          awk '$1 == "srt" { found=1 } END { exit !found }' /tmp/stream-receiver-protocols.txt
+          awk '$1 == "rtmp" { found=1 } END { exit !found }' /tmp/stream-receiver-protocols.txt
       - name: Qualify real endpoint loss and independent continuous decode
         run: |
           mkdir -p build/native-transport-results
