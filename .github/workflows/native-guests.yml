@@ -84,7 +84,7 @@ jobs:
           xcodebuild -version
           sw_vers
           uname -m
-          brew install xcodegen cmake ffmpeg opus openssl@3 libevent pkgconf
+          brew install xcodegen cmake ffmpeg opus openssl@3 libevent libmicrohttpd pkgconf
           npm install --global npm@12.2.0
       - name: Resolve and verify this build's pinned transport
         working-directory: apple
