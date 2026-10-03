@@ -58,7 +58,7 @@ struct StreamPreflightView: View {
                 Button("Begin Local Rehearsal") { dispatcher.execute(.startRehearsal) }
                     .disabled(controller.streamState.isActive || recorder.state.isActive)
             }
-            Text("Private or test broadcasts require provider support. This version does not create provider-private broadcasts; each destination Start and Public Go Live publishes to the configured endpoint.")
+            Text("Managed YouTube destinations require a fresh native review of the exact event, stream, schedule, privacy and auto-start effect before sending video. Manual destinations send to their configured endpoint when started.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(10)

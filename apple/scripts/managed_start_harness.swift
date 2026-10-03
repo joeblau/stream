@@ -4,11 +4,11 @@ import StreamCore
 private func require(_ value: Bool, _ message: String) throws {
     if !value { throw NSError(domain: "ManagedStartFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
 }
-@MainActor private func settle(_ predicate: @escaping () -> Bool) async throws {
-    for _ in 0..<500 {
+@MainActor private func settle(_ predicate: @escaping () -> Bool, file: StaticString = #fileID, line: UInt = #line) async throws {
+    for _ in 0..<1500 {
         if predicate() { return }; try await Task.sleep(for: .milliseconds(2))
     }
-    throw NSError(domain: "ManagedStartFixture", code: 2, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for fixture state"])
+    throw NSError(domain: "ManagedStartFixture", code: 2, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for fixture state at \(file):\(line)"])
 }
 
 /// The actual reader/coordinator run against exact injected wire responses.
@@ -20,6 +20,9 @@ private func require(_ value: Bool, _ message: String) throws {
     var allocations = 0
     var blockAt: Int?
     var held: CheckedContinuation<Void, Never>?
+    var holdStreams = false
+    var gates: [CheckedContinuation<Void, Never>] = []
+    var activeHeld = 0; var maximumHeld = 0
     var failure: ProviderFailure?
     var replacementBindingAt: Int?
     var allowAllocation = true
@@ -31,6 +34,11 @@ private func require(_ value: Bool, _ message: String) throws {
                 requests.append(request)
                 let number = requests.count
                 if blockAt == number { await withCheckedContinuation { held = $0 } }
+                if holdStreams && request.url?.path == "/youtube/v3/liveStreams" {
+                    activeHeld += 1; maximumHeld = max(maximumHeld, activeHeld)
+                    await withCheckedContinuation { gates.append($0) }
+                    activeHeld -= 1
+                }
                 if let failure { throw failure }
                 return try response(request, number: number)
             }, current: { [weak self] in self?.contexts[$0] }, publish: { [weak self] context, credentials in
@@ -49,6 +57,11 @@ private func require(_ value: Bool, _ message: String) throws {
         contexts[destination.id] = value; return value
     }
     func release() { let value = held; held = nil; value?.resume() }
+    func releaseAll() {
+        holdStreams = false
+        let pending = gates; gates.removeAll()
+        for continuation in pending { continuation.resume() }
+    }
     private func response(_ request: URLRequest, number: Int) throws -> Data {
         try require(request.httpMethod == "GET" && request.httpBody == nil, "Unexpected provider mutation")
         try require(request.cachePolicy == .reloadIgnoringLocalAndRemoteCacheData && request.timeoutInterval == 10, "Fresh bounded read configuration")
@@ -112,7 +125,7 @@ private func require(_ value: Bool, _ message: String) throws {
         // Noncooperative request completion cannot revive cancellation,
         // profile closure, a replacement attempt or a deadline.
         for action in 0..<4 {
-            let fixture = Fixture(timeout: action == 3 ? .milliseconds(30) : .seconds(30)), value = fixture.context()
+            let fixture = Fixture(timeout: action == 3 ? .seconds(1) : .seconds(30)), value = fixture.context()
             fixture.blockAt = 3; fixture.coordinator.request(value)
             try await settle { fixture.held != nil }
             switch action {
@@ -162,6 +175,30 @@ private func require(_ value: Bool, _ message: String) throws {
         for _ in 0..<12 { bounded.coordinator.request(bounded.context(provider: .twitch)) }
         try require(bounded.coordinator.entries.count == 10, "Review queue exceeded bound")
         bounded.coordinator.shutdown()
-        print("PASS: production managed YouTube review, early-start/consent, exact binding, one-use allocation, account/settings/profile, cancellation/late credentials, timeout, failures and bounded routes")
+        // Deadlines retire presentation without pretending noncooperative
+        // reads have finished. Saturation survives shutdown/new graph creation.
+        let deadlines = Fixture(timeout: .seconds(1)), heldContext = deadlines.context()
+        deadlines.holdStreams = true
+        for expected in 1...10 {
+            deadlines.coordinator.request(heldContext)
+            try await settle { deadlines.activeHeld == expected }
+            try await settle { deadlines.coordinator.entries.first?.phase == .blocked }
+            try require(deadlines.coordinator.occupiedAttemptCount == expected, "Deadline freed an actually held request")
+        }
+        let heldRequests = deadlines.requests.count
+        deadlines.coordinator.reviewAgain(heldContext.destination.id)
+        try require(deadlines.requests.count == heldRequests && deadlines.maximumHeld == 10, "Deadline/review-again exceeded the actual held-read bound")
+        deadlines.coordinator.shutdown()
+        let nextGraph = Fixture(), nextContext = nextGraph.context()
+        nextGraph.coordinator.request(nextContext)
+        try require(nextGraph.coordinator.entries.first?.phase == .blocked && nextGraph.requests.isEmpty, "Retired graph let a new graph bypass occupied reads")
+        deadlines.releaseAll()
+        try await settle { deadlines.activeHeld == 0 && deadlines.coordinator.occupiedAttemptCount == 0 }
+        try require(deadlines.allocations == 0 && deadlines.coordinator.entries.isEmpty, "Late deadline read revived a retired graph")
+        nextGraph.coordinator.reviewAgain(nextContext.destination.id)
+        try await settle { nextGraph.coordinator.entries.first?.phase == .review }
+        try require(nextGraph.allocations == 0, "Draining held reads implicitly started output")
+        nextGraph.coordinator.shutdown()
+        print("PASS: production managed YouTube review, early-start/consent, exact binding, one-use allocation, account/settings/profile, cancellation/late credentials, timeout, failures and global actual occupied-read bounds across retirement")
     }
 }

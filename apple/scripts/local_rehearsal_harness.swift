@@ -89,7 +89,8 @@ actor RehearsalPublisherProbe: Publisher {
         settings.micVolume = 0; settings.audioInputs = []
         DesktopSettingsStore().saveNonSecret(settings)
         let scenes = SceneStore(), preview = PreviewProgramModel(selected: scenes.selected)
-        let controller = StreamController(sceneStore: scenes, previewProgram: preview, permissions: PermissionsManager())
+        let controller = StreamController(sceneStore: scenes, previewProgram: preview, permissions: PermissionsManager(),
+                                          publisherFactory: { _ in RehearsalPublisherProbe() })
         let suite = "stream.rehearsal-validation.\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite); scenes.flushPendingWrites() }

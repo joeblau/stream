@@ -178,12 +178,13 @@ final class StreamController: ObservableObject {
     private let secondaryProgramConverter = PreviewImageConverter()
     /// The W03 staged/program scene model; the engines follow its snapshots.
     private let previewProgram: PreviewProgramModel
-    let destinationOutputs = DestinationOutputController(factory: { transport in
-        switch transport {
-        case .rtmp, .rtmps: return RTMPPublisher()
-        case .srt, .whip: return SessionPublisher(protocol: transport)
-        }
-    })
+    let destinationOutputs: DestinationOutputController
+    @Published private(set) var managedStart: ManagedYouTubeStartCoordinator?
+    @Published private(set) var managedStartHasEntries = false
+    private weak var managedStartAccounts: ProviderAccountSession?
+    private var managedStartClosed = false
+    private var managedStartEntriesObserver: AnyCancellable?
+    private var managedStartAuthorityObserver: AnyCancellable?
     let ending = StudioEndingCoordinator()
     /// Ordered publisher video path: the engine's publisher sink yields into
     /// this newest-only stream; one consumer awaits `appendVideo` in order.
@@ -323,10 +324,17 @@ final class StreamController: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
 
     init(sceneStore: SceneStore, previewProgram: PreviewProgramModel,
-         permissions: PermissionsManager) {
+         permissions: PermissionsManager,
+         publisherFactory: @escaping (StreamCore.StreamProtocol) -> any Publisher = { transport in
+             switch transport {
+             case .rtmp, .rtmps: return RTMPPublisher()
+             case .srt, .whip: return SessionPublisher(protocol: transport)
+             }
+         }) {
         self.sceneStore = sceneStore
         self.previewProgram = previewProgram
         self.permissions = permissions
+        self.destinationOutputs = DestinationOutputController(factory: publisherFactory)
         // The persisted profile is the canvas authority from launch, so the
         // preview opens at the configured geometry before any source frame
         // ever arrives.
@@ -1010,6 +1018,56 @@ final class StreamController: ObservableObject {
 
     var maximumPublishingEncoders: () -> Int? = { nil }
 
+    /// Runtime-owned provider boundary; no cached key or remote UI state can
+    /// authorize a managed publisher. All output command routes reach the
+    /// same startDestination gate below.
+    func bindManagedStart(accounts: ProviderAccountSession) {
+        guard !managedStartClosed, managedStartAccounts !== accounts else { return }
+        managedStart?.shutdown()
+        managedStartAccounts = accounts
+        let coordinator = ManagedYouTubeStartCoordinator(generation: { [weak accounts] in
+            await accounts?.recoveryAuthorizationGeneration(.youtube)
+        }, read: { [weak accounts] request, generation in
+            guard let accounts else { throw ProviderFailure(.authorization) }
+            return try await accounts.managedReadRequest(request, expectedGeneration: generation)
+        }, current: { [weak self] id in self?.managedStartContext(id) }, publish: { [weak self] context, credentials in
+            self?.publishReviewedManagedDestination(context, credentials: credentials) ?? false
+        })
+        managedStart = coordinator
+        managedStartEntriesObserver = coordinator.$entries.sink { [weak self] entries in
+            self?.managedStartHasEntries = !entries.isEmpty
+        }
+        // Published intent precedes asynchronous vault replacement. Cancel
+        // immediately as well as checking the generation at every read.
+        managedStartAuthorityObserver = accounts.$managedReadRevision.dropFirst().sink { [weak coordinator] _ in
+            coordinator?.cancelAll()
+        }
+    }
+
+    func shutdownManagedStart() {
+        managedStartClosed = true
+        managedStart?.shutdown()
+        managedStartEntriesObserver = nil; managedStartAuthorityObserver = nil
+        managedStartHasEntries = false
+    }
+
+    private func managedStartContext(_ id: UUID) -> ManagedYouTubeStartContext? {
+        guard !managedStartClosed, !resilience.isLocked, !isRehearsing,
+              destinationOutputs.isPublishingAllowed, !(destinationOutputs.states[id]?.isActive ?? false),
+              let accounts = managedStartAccounts,
+              let destination = destinations.saved.first(where: { $0.id == id }),
+              destination.providerBinding != nil, canvasStartError(destinations: [destination]) == nil else { return nil }
+        let base = settingsStore.load()
+        let canvas = destination.canvas == .secondary ? activeSecondaryProfile : base.outputProfile
+        return .init(destination: destination, settings: base, canvasProfile: canvas, authorityRevision: accounts.managedReadRevision)
+    }
+
+    private func publishReviewedManagedDestination(_ context: ManagedYouTubeStartContext,
+                                                  credentials: DestinationCredentials) -> Bool {
+        guard managedStartContext(context.destination.id) == context else { return false }
+        return publishDestination(context.destination, credentials: credentials, base: context.settings)
+    }
+
     func goLive() {
         guard !resilience.isLocked else { errorMessage = "Unlock this Mac before starting public outputs."; return }
         guard !isRehearsing else { errorMessage = "End local rehearsal before public Go Live."; return }
@@ -1041,14 +1099,37 @@ final class StreamController: ObservableObject {
         if let error = canvasStartError(destinations: [destination]) {
             errorMessage = error; destinationOutputs.recordFailure(destination, message: error); return
         }
-        let canvasProfile = destination.canvas == .secondary ? activeSecondaryProfile : base.outputProfile
+        if destination.providerBinding != nil {
+            guard let managedStart, let context = managedStartContext(id) else {
+                let message = "This managed destination needs a current account and native event review before sending video. No saved key was used."
+                errorMessage = message; destinationOutputs.recordFailure(destination, message: message); return
+            }
+            managedStart.request(context)
+            return
+        }
         let credentials = destinations.savedCredentials(for: id)
+        _ = publishDestination(destination, credentials: credentials, base: base)
+    }
+
+    /// The factory boundary is synchronous and common to manual and reviewed
+    /// starts, preserving aggregate/shared encoder and dual-canvas checks.
+    @discardableResult
+    private func publishDestination(_ destination: StreamDestination, credentials: DestinationCredentials,
+                                    base: StreamSettings) -> Bool {
+        let id = destination.id
+        guard !resilience.isLocked, !isRehearsing, destinationOutputs.isPublishingAllowed,
+              !(destinationOutputs.states[id]?.isActive ?? false),
+              destinations.saved.first(where: { $0.id == id }) == destination else { return false }
+        if let error = canvasStartError(destinations: [destination]) {
+            errorMessage = error; destinationOutputs.recordFailure(destination, message: error); return false
+        }
+        let canvasProfile = destination.canvas == .secondary ? activeSecondaryProfile : base.outputProfile
         let errors = DestinationValidator.startErrors(destination, credentials: credentials, program: canvasProfile)
         guard errors.isEmpty else {
             let message = errors.joined(separator: "\n")
             errorMessage = message
             destinationOutputs.recordFailure(destination, message: message)
-            return
+            return false
         }
         let activeDestinations = destinations.saved.filter {
             destinationOutputs.states[$0.id]?.isActive == true && $0.id != id
@@ -1059,7 +1140,7 @@ final class StreamController: ObservableObject {
             shareH264AAC: destinations.sharesFixedH264AAC, sourceFrameRate: activeProfile.frameRate)
         guard plan.issues.isEmpty else {
             destinationOutputs.recordFailure(destination, message: plan.issues.joined(separator: "\n"))
-            return
+            return false
         }
         var canvasBase = base; canvasBase.outputProfile = canvasProfile
         let adapted = DestinationValidator.settings(destination, credentials: credentials, base: canvasBase)
@@ -1067,22 +1148,23 @@ final class StreamController: ObservableObject {
         destinationOutputs.sharedSourceFrameRate = activeProfile.frameRate
         let additional = destinationOutputs.additionalEncoderSessions(destination: destination, settings: adapted)
         if let error = recordingEncoderReservations.publishingError(current: activePublishingEncoderCount, starting: additional) {
-            errorMessage = error; destinationOutputs.recordFailure(destination, message: error); return
+            errorMessage = error; destinationOutputs.recordFailure(destination, message: error); return false
         }
         if let limit = maximumPublishingEncoders(), activePublishingEncoderCount + additional > limit {
             let message = "This destination exceeds the encoder budget reserved by isolated recording. Stop isolated recording or reduce destinations."
-            errorMessage = message; destinationOutputs.recordFailure(destination, message: message); return
+            errorMessage = message; destinationOutputs.recordFailure(destination, message: message); return false
         }
         resilience.acknowledgeManualRestart()
         destinationOutputs.start(destination, settings: adapted)
+        return true
     }
 
-    func stopDestination(_ id: UUID) { destinationOutputs.stop(id) }
+    func stopDestination(_ id: UUID) { managedStart?.cancel(id); destinationOutputs.stop(id) }
     func retryDestination(_ id: UUID) {
         guard !(destinationOutputs.states[id]?.isActive ?? false) else { return }
         startDestination(id)
     }
-    func stopStream() { destinationOutputs.stopAll() }
+    func stopStream() { managedStart?.cancelAll(); destinationOutputs.stopAll() }
 
     private func destinationsDidChange() {
         streamState = destinationOutputs.aggregateState
@@ -1132,6 +1214,7 @@ final class StreamController: ObservableObject {
         // writer preparation can yield. A Preparing recorder is not yet
         // Recording, but public publishers must already be blocked.
         isRehearsing = true
+        managedStart?.cancelAll()
         destinationOutputs.isPublishingAllowed = false
         rehearsalObserver = recorder.$state.sink { [weak self, weak recorder] _ in
             // Published sends before the stored state changes. Inspect the
@@ -1251,10 +1334,17 @@ final class StreamController: ObservableObject {
         facts.programAudioPeak = programAudioPeak
         facts.destinationCount = destinations.enabled.count
         for destination in destinations.enabled {
-            let credentials = destinations.savedCredentials(for: destination.id)
+            let managed = destination.providerBinding != nil
+            let credentials = managed ? DestinationCredentials() : destinations.savedCredentials(for: destination.id)
             var errors = DestinationValidator.errors(destination, credentials: credentials)
-            if credentials.endpoint.isEmpty { errors.append("Missing endpoint URL.") }
-            if destination.transport.requiresKey && credentials.streamKey.isEmpty { errors.append("Missing stream key.") }
+            if destination.providerBinding?.provider == .youtube {
+                facts.unverifiedSources.append("\(destination.name): Start requires a fresh owned event/bound-stream review and explicit sending-video consent.")
+            } else if managed {
+                errors.append("Managed start review is unavailable for this provider. Review its external controls and explicitly use a manual destination.")
+            } else {
+                if credentials.endpoint.isEmpty { errors.append("Missing endpoint URL.") }
+                if destination.transport.requiresKey && credentials.streamKey.isEmpty { errors.append("Missing stream key.") }
+            }
             facts.destinationErrors += errors.map { "\(destination.name): \($0)" }
             let profile = destination.effectiveProfile(program: settings.outputProfile)
             facts.profileErrors += (destination.ingestLimits ?? .conservative(for: destination.transport))

@@ -107,6 +107,11 @@ struct MainWindowView: View {
             if workspace.showProjects { ProjectBrowserView() }
             studioPanels
         }
+        .background(ManagedStartSheetHost(controller: controller, willPresent: {
+            panelBeforeSheet = focusedPanel
+        }, didDismiss: {
+            focusedPanel = panelBeforeSheet; panelBeforeSheet = nil
+        }))
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button { workspace.showProjects.toggle() } label: {
@@ -206,6 +211,7 @@ struct MainWindowView: View {
             if !controller.ending.isBound {
                 controller.bindEnding(accounts: workspace.runtime.providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
             }
+            if controller.managedStart == nil { controller.bindManagedStart(accounts: workspace.runtime.providerAccounts) }
             shortcuts.actions = { commandActions }
             shortcuts.onExecute = { action in
                 if let command = action.command { dispatcher.execute(command) }
@@ -226,6 +232,7 @@ struct MainWindowView: View {
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
         .onDisappear {
+            controller.shutdownManagedStart()
             controller.ending.shutdown()
             controller.stopVirtualCameraOutput()
             workspace.runtime.providerAccounts.shutdown()
@@ -992,6 +999,25 @@ struct MainWindowView: View {
 }
 
 // MARK: - Transition settings (S09, issue #100)
+
+@MainActor private struct ManagedStartSheetHost: View {
+    @ObservedObject var controller: StreamController
+    let willPresent: () -> Void
+    let didDismiss: () -> Void
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .sheet(isPresented: Binding(
+                get: { controller.managedStartHasEntries },
+                set: { if !$0 { controller.managedStart?.cancelAll() } }), onDismiss: {
+                    controller.managedStart?.cancelAll(); didDismiss()
+                }) {
+                    if let coordinator = controller.managedStart { ManagedYouTubeStartReviewView(coordinator: coordinator) }
+                }
+            .onChange(of: controller.managedStartHasEntries) { _, presented in
+                if presented { willPresent() }
+            }
+    }
+}
 
 /// The transition pickers in the Sources inspector: the PROJECT default
 /// transition and the STAGED scene's override ("Inherit Default" = none).

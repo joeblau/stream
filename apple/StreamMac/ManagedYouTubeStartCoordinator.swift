@@ -8,10 +8,12 @@ struct ManagedYouTubeStartContext: Equatable, Sendable {
     let destination: StreamDestination
     let settings: StreamSettings
     let authorityRevision: UUID?
-    var profile: YouTubeStartProfile { .init(destination: destination, program: settings.outputProfile) }
-    init(destination: StreamDestination, settings: StreamSettings, authorityRevision: UUID? = nil) {
+    let canvasProfile: OutputProfile
+    var profile: YouTubeStartProfile { .init(destination: destination, program: canvasProfile) }
+    init(destination: StreamDestination, settings: StreamSettings, canvasProfile: OutputProfile? = nil, authorityRevision: UUID? = nil) {
         self.destination = destination
         self.authorityRevision = authorityRevision
+        self.canvasProfile = canvasProfile ?? settings.outputProfile
         var publicSettings = settings; publicSettings.rtmpURL = ""; publicSettings.streamKey = ""
         self.settings = publicSettings
     }
@@ -47,6 +49,12 @@ final class ManagedYouTubeStartCoordinator: ObservableObject {
     private let publish: (ManagedYouTubeStartContext, DestinationCredentials) -> Bool
     private let now: @Sendable () -> Date
     private let operationTimeout: Duration
+    // A cancelled URLSession/test transport may still be running. Retain its
+    // reservation until the task actually returns, including retired runtime
+    // graphs, so cancellation cannot create unbounded held provider reads.
+    private static var occupiedAttempts: Set<UUID> = []
+    private var ownedAttempts: Set<UUID> = []
+    var occupiedAttemptCount: Int { ownedAttempts.count }
     private var jobs: [UUID: Task<Void, Never>] = [:]
     private var deadlines: [UUID: Task<Void, Never>] = [:]
     private var closed = false
@@ -75,8 +83,11 @@ final class ManagedYouTubeStartCoordinator: ObservableObject {
             entries.append(entry); return true
         }
         entries.append(entry)
-        jobs[id] = Task { [weak self] in
-            guard let self else { return }
+        guard acquireAttempt(token) else {
+            blockForCapacity(id, token: token); return true
+        }
+        jobs[id] = Task { [self] in
+            defer { releaseAttempt(token) }
             do {
                 guard let account = try await generation(), valid(id, token), let binding = context.destination.providerBinding else { throw CancellationError() }
                 let reader = reader(account: account)
@@ -99,8 +110,9 @@ final class ManagedYouTubeStartCoordinator: ObservableObject {
               !review.requiresEarlyStart(at: now()) || consent.startBeforeScheduledTime else { return }
         let token = UUID(); entries[index].attempt = token
         entries[index].phase = .preparing; entries[index].message = nil
-        jobs[id] = Task { [weak self] in
-            guard let self else { return }
+        guard acquireAttempt(token) else { blockForCapacity(id, token: token); return }
+        jobs[id] = Task { [self] in
+            defer { releaseAttempt(token) }
             do {
                 guard valid(id, token), try await generation() == account, valid(id, token) else { throw CancellationError() }
                 let credentials = try await reader(account: account).reviewedIngest(review)
@@ -130,6 +142,19 @@ final class ManagedYouTubeStartCoordinator: ObservableObject {
         closed = true
         for task in jobs.values { task.cancel() }; for task in deadlines.values { task.cancel() }
         jobs.removeAll(); deadlines.removeAll(); entries.removeAll()
+    }
+    private func acquireAttempt(_ token: UUID) -> Bool {
+        guard Self.occupiedAttempts.count < 10 else { return false }
+        Self.occupiedAttempts.insert(token); ownedAttempts.insert(token)
+        return true
+    }
+    private func releaseAttempt(_ token: UUID) {
+        Self.occupiedAttempts.remove(token); ownedAttempts.remove(token)
+    }
+    private func blockForCapacity(_ id: UUID, token: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id && $0.attempt == token }) else { return }
+        entries[index].phase = .blocked; entries[index].review = nil; entries[index].accountGeneration = nil
+        entries[index].message = "Provider reads are still finishing after cancellation or timeout. Nothing was started. Wait, then review again explicitly."
     }
     private func reader(account: UUID) -> YouTubeStartReader {
         let read = read, generation = generation

@@ -350,7 +350,8 @@ final class ProviderAccountSession: ObservableObject {
         var request = original
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        request.timeoutInterval = 30
+        guard original.timeoutInterval.isFinite, original.timeoutInterval > 0 else { throw ProviderFailure(.invalidRequest) }
+        request.timeoutInterval = min(30, max(0.1, original.timeoutInterval))
         let data = try await vault.send(provider, request: request, expectedGeneration: generation.credential, retryAuthorizedGET: false)
         let final = await recoveryAuthorizationGeneration(provider)
         guard final == expectedGeneration, !closed, generation.session == endingEpoch(provider) else { throw ProviderFailure(.authorization) }
