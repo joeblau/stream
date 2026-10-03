@@ -14,6 +14,9 @@ final class MemoryProviderCredentials: ProviderCredentialStore, @unchecked Senda
 }
 actor ProviderHTTPFixture {
     var requests: [URLRequest] = []
+    var eventLatency = "low"
+    var eventThumbnail = "https://i.ytimg.com/vi/event1/high.jpg?sqp=public&rs=public"
+    func metadata(latency: String, thumbnail: String) { eventLatency = latency; eventThumbnail = thumbnail }
     var holdThumbnail = false
     var thumbnailEntered = false
     var thumbnailGate: CheckedContinuation<Void, Never>?
@@ -48,7 +51,12 @@ actor ProviderHTTPFixture {
         } else if path == "/youtube/v3/liveBroadcasts", request.httpMethod == "POST" {
             body = #"{"id":"acknowledged-id","snippet":{"channelId":"UC1","title":"Created"},"status":{"lifeCycleStatus":"created","privacyStatus":"private"}}"#
         } else if path == "/youtube/v3/liveBroadcasts" {
-            body = #"{"items":[{"id":"event1","snippet":{"channelId":"UC1","title":"Scheduled"},"status":{"lifeCycleStatus":"ready"}}]}"#
+            let row: [String: Any] = ["id": "event1", "snippet": ["channelId": "UC1", "title": "Scheduled", "thumbnails": [
+                "high": ["url": eventThumbnail, "width": 1280, "height": 720],
+                "futureSize": ["url": "https://ingest.invalid/live?key=PRIVATE_METADATA_FIXTURE"]]],
+                "status": ["lifeCycleStatus": "ready"], "contentDetails": ["latencyPreference": eventLatency,
+                "ingestionInfo": ["streamName": "PRIVATE_METADATA_FIXTURE"]]]
+            body = String(decoding: try JSONSerialization.data(withJSONObject: ["items": [row]]), as: UTF8.self)
         } else if path == "/helix/users" {
             body = #"{"data":[{"id":"42","display_name":"Operator","login":"operator"}]}"#
         } else { body = #"{"data":[]}"# }
@@ -153,7 +161,7 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         try await vaultLifecycle()
         try await nativeSession()
         try await nativeEnding()
-        print("Provider accounts: loopback/state/cancel, refresh coalescing/rotation/late response, safe GET retry, native OAuth/discovery/event receipt/shutdown PASS")
+        print("Provider accounts: loopback/state/cancel, refresh coalescing/rotation/late response, safe GET retry, native OAuth/discovery/public metadata/portable exclusions/event receipt/shutdown PASS")
     }
     @MainActor static func nativeEnding() async throws {
         let http = ProviderEndingHTTPFixture()
@@ -300,6 +308,29 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         await settle { await MainActor.run { session.snapshot(.youtube).channels.count == 1 && !session.snapshot(.youtube).isWorking } }
         precondition(opened?.host == "accounts.google.com")
         precondition(session.snapshot(.youtube).channels.first?.id == "UC1" && session.snapshot(.youtube).events.first?.id == "event1")
+        let discovered = session.snapshot(.youtube).events.first!
+        precondition(discovered.latencyPreference == .low && discovered.thumbnails?.count == 1)
+        precondition(discovered.thumbnails?.first?.width == 1280 && discovered.thumbnails?.first?.height == 720)
+        let metadataBytes = try JSONEncoder().encode(discovered)
+        let metadataRoundTrip = try JSONDecoder().decode(ProviderEvent.self, from: metadataBytes)
+        precondition(metadataRoundTrip == discovered)
+        precondition(!String(decoding: metadataBytes, as: UTF8.self).contains("PRIVATE_METADATA_FIXTURE"))
+        // Actual pending disk persistence and portable routing retain repair
+        // identities only, even when discovery has public image metadata.
+        let pendingDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("provider-metadata-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: pendingDirectory) }
+        let pending = ProviderPendingCatalog(directory: pendingDirectory)
+        precondition(pending.retain([ProviderPendingRecord(discovered)]))
+        let saved = String(decoding: try Data(contentsOf: pendingDirectory.appendingPathComponent("provider-pending.json")), as: UTF8.self)
+        precondition(!saved.contains("ytimg") && !saved.contains("thumbnails") && !saved.contains("latencyPreference") && !saved.contains("PRIVATE_METADATA_FIXTURE"))
+        let restored = ProviderPendingCatalog(directory: pendingDirectory).document.records.first!.cachedEvent
+        precondition(restored.latencyPreference == nil && restored.thumbnails == nil && restored.state == .unknown)
+        let portable = StreamDestination(name: "Discovered", providerBinding: .init(provider: .youtube, channelID: "UC1", eventID: discovered.id))
+        let portableBytes = try JSONEncoder().encode(portable), portableText = String(decoding: portableBytes, as: UTF8.self)
+        precondition(!portableText.contains("ytimg") && !portableText.contains("thumbnails") && !portableText.contains("PRIVATE_METADATA_FIXTURE"))
+        let portableRoundTrip = try JSONDecoder().decode(StreamDestination.self, from: portableBytes)
+        precondition(portableRoundTrip.providerBinding?.eventID == "event1")
+        check(await http.allRequests().allSatisfy { $0.url?.host != "i.ytimg.com" }, "Discovery downloaded a thumbnail")
         let tokenRequest = await http.allRequests().first { $0.url?.host == "oauth2.googleapis.com" }!
         let fields = URLComponents(string: "https://fixture.invalid/?" + String(decoding: tokenRequest.httpBody!, as: UTF8.self))!.queryItems!
         let verifier = fields.first { $0.name == "code_verifier" }!.value!
@@ -308,9 +339,17 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         session.createYouTube(.init(title: "Created"))
         await settle { await MainActor.run { session.snapshot(.youtube).events.contains { $0.id == "acknowledged-id" } } }
         precondition(session.snapshot(.youtube).events.filter { $0.id == "acknowledged-id" }.count == 1)
+        await http.metadata(latency: "ultraLow", thumbnail: "https://i.ytimg.com/vi/event1/refreshed.jpg")
         session.refresh(.youtube)
         await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
         precondition(session.snapshot(.youtube).events.contains { $0.id == "acknowledged-id" && $0.state == .unknown }, "An eventual-consistency refresh erased the acknowledged event ID")
+        let refreshed = session.snapshot(.youtube).events.first { $0.id == "event1" }!
+        precondition(refreshed.latencyPreference == .ultraLow && refreshed.thumbnails?.first?.url.lastPathComponent == "refreshed.jpg")
+        await http.metadata(latency: "futureLatency", thumbnail: "https://i.ytimg.com/vi/event1/high.jpg?access_token=PRIVATE_METADATA_FIXTURE")
+        session.refresh(.youtube)
+        await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
+        let unsupported = session.snapshot(.youtube).events.first { $0.id == "event1" }!
+        precondition(unsupported.latencyPreference == .unknown && unsupported.thumbnails == [] && unsupported.state == .upcoming && session.snapshot(.youtube).failure == nil)
         let image = Data([137,80,78,71,13,10,26,10,0])
         session.uploadYouTubeThumbnail(eventID: "event1", channelID: "UC1", image: image, mimeType: "image/png")
         await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }

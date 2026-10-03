@@ -139,6 +139,7 @@ final class StudioWorkspace: ObservableObject {
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
         runtime.controller.shutdownManagedStart()
+        runtime.controller.retireGuestMedia()
         runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.rundown.stop()
@@ -276,6 +277,7 @@ final class StudioWorkspace: ObservableObject {
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
         runtime.controller.shutdownManagedStart()
+        runtime.controller.retireGuestMedia()
         runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.macros.cancel()
@@ -347,6 +349,7 @@ final class StudioWorkspace: ObservableObject {
             guard let self else { return }
             self.recovery.remoteReview.shutdown()
             self.runtime.controller.shutdownManagedStart()
+            self.runtime.controller.retireGuestMedia()
             self.runtime.controllers.shutdown(); self.runtime.controller.ending.shutdown(); self.runtime.providerAccounts.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
             self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop()
             self.runtime.controller.stopStream(); self.runtime.controller.stopSecondaryRecording(); self.runtime.controller.stopExternalDisplayOutput(); self.runtime.controller.stopVirtualCameraOutput()

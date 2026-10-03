@@ -12,6 +12,10 @@ final class EventLog: @unchecked Sendable {
         for event in events { if case .failed(let error) = event { return error } }
         return nil
     }
+    var paused: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return events.contains { if case .paused = $0 { return true }; return false }
+    }
     var recorded: Bool {
         lock.lock(); defer { lock.unlock() }
         return events.contains { if case .recording = $0 { return true }; return false }
@@ -32,6 +36,7 @@ private final class PausedWriterGate: @unchecked Sendable {
 
 @main struct ProgramRecordingHarness {
     static func main() async throws {
+        setbuf(stdout, nil)
         let folder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent("synchronized-60fps.mp4")
@@ -71,6 +76,8 @@ private final class PausedWriterGate: @unchecked Sendable {
         let pauseJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: pausedURL.appendingPathExtension("recording.json"))) as! [String: Any]
         precondition((pauseJSON["pauses"] as? [[String: Any]])?.count == 1, "Manifest must retain source-clock pause gap")
         print("PASS: pause omits one second from both tracks; resumed MP4 timestamps remain synchronized and decode")
+
+        try await delayedBoundaries(folder, config: config)
 
         let movURL = folder.appendingPathComponent("hevc-high.mov")
         try? FileManager.default.removeItem(at: movURL)
@@ -193,6 +200,166 @@ private final class PausedWriterGate: @unchecked Sendable {
         precondition(preserved == original, "Open failure must preserve the existing file")
         print("PASS: real AVAssetWriter open failure surfaces errors and does not delete existing media")
         print("Configuration: \(ProcessInfo.processInfo.operatingSystemVersionString); \(ProcessInfo.processInfo.processorCount) CPUs; files: \(folder.path)")
+    }
+
+    static func delayedBoundaries(_ folder: URL, config: ProgramRecordingSession.Configuration) async throws {
+        // Source clocks remain independent. Only audio arrival is delayed;
+        // every sample keeps its original source PTS/data through all cuts.
+        let clock = ContinuousClock()
+        func audio(_ sink: @escaping @Sendable (CMSampleBuffer) -> Void,
+                   start: ContinuousClock.Instant, count: Int) -> Task<Void, Error> {
+            Task {
+                for index in 0..<count {
+                    let time = Double(index) / 100
+                    try await clock.sleep(until: start.advanced(by: .seconds(time + 0.12)))
+                    sink(try ProgramRecordingFixtures.audio(at: time,
+                        eventSeconds: time < 1 ? 0.5 : 2.5))
+                }
+            }
+        }
+        func video(_ sink: @escaping @Sendable (CMSampleBuffer) -> Void,
+                   start: ContinuousClock.Instant, offset: Double) async throws {
+            for index in 0..<60 {
+                let time = offset + Double(index) / 60
+                try await clock.sleep(until: start.advanced(by: .seconds(time)))
+                sink(try ProgramRecordingFixtures.video(at: time,
+                    eventSeconds: time < 1 ? 0.5 : 2.5))
+            }
+        }
+        let pauseURL = folder.appendingPathComponent("delayed-pause-stop.mp4")
+        try? FileManager.default.removeItem(at: pauseURL)
+        let log = EventLog(), paused = ProgramRecordingSession(outputURL: pauseURL, configuration: config, event: log.add)
+        let start = clock.now
+        let source = audio(paused.appendAudio, start: start, count: 300)
+        try await video(paused.appendVideo, start: start, offset: 0)
+        try await waitForMediaEnd(paused, seconds: 1)
+        paused.pause()
+        let deadline = clock.now.advanced(by: .seconds(3))
+        while !log.paused && clock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        precondition(log.paused && log.failure() == nil, "Pause acknowledged before actual delayed PCM reached its sealed source boundary")
+        try await clock.sleep(until: start.advanced(by: .seconds(2)))
+        await resume(paused)
+        try await video(paused.appendVideo, start: start, offset: 2)
+        let result = await finish(paused) // audio is still arriving for its final 120 ms
+        try await source.value
+        print("TRACE delayed pause/stop final: \(result.progress), error \(result.error ?? "none")")
+        precondition(result.completed && result.progress.droppedAudio == 0 && result.progress.droppedVideo == 0, result.error ?? "Delayed pause/stop lost media")
+        precondition(abs((result.progress.audioEndSeconds ?? 0) - (result.progress.videoEndSeconds ?? 0)) < 1.0 / 48_000)
+        try await ProgramRecordingFixtures.inspect(pauseURL, expectedDuration: 2, checkSync: true)
+        print("PASS: independently delayed original-PTS PCM drains at pause and EOF; a shared resume boundary removes the source gap without dropped chunks or padded audio")
+
+        let pendingURL = folder.appendingPathComponent("stop-during-pause-drain.mp4")
+        try? FileManager.default.removeItem(at: pendingURL)
+        let pending = ProgramRecordingSession(outputURL: pendingURL, configuration: config)
+        let pendingStart = clock.now
+        let pendingSource = audio(pending.appendAudio, start: pendingStart, count: 100)
+        try await video(pending.appendVideo, start: pendingStart, offset: 0)
+        try await waitForMediaEnd(pending, seconds: 1)
+        pending.pause()
+        let pendingResult = await finish(pending)
+        try await pendingSource.value
+        precondition(pendingResult.completed && pendingResult.progress.droppedAudio == 0 && pendingResult.progress.droppedVideo == 0,
+                     pendingResult.error ?? "Stop during an outstanding pause drain lost its original PCM tail")
+        try await ProgramRecordingFixtures.inspect(pendingURL, expectedDuration: 1, checkSync: true)
+        print("PASS: stop during unresolved pause drainage seals one boundary, retains its delayed real PCM and finalizes once")
+
+        let router = ProgramRecordingRouter()
+        let firstURL = folder.appendingPathComponent("delayed-rotation-1.mp4"), nextURL = folder.appendingPathComponent("delayed-rotation-2.mp4")
+        try? FileManager.default.removeItem(at: firstURL); try? FileManager.default.removeItem(at: nextURL)
+        let first = ProgramRecordingSession(outputURL: firstURL, configuration: config)
+        let next = ProgramRecordingSession(outputURL: nextURL, configuration: config)
+        router.install(first)
+        let splitStart = clock.now
+        let splitSource = audio(router.appendAudio, start: splitStart, count: 201)
+        try await video(router.appendVideo, start: splitStart, offset: 0)
+        router.rotate(to: next, finishing: first)
+        let previous = Task { await withCheckedContinuation { continuation in
+            first.finish(waitingForSourceBoundary: true) { continuation.resume(returning: $0) }
+        } }
+        // 1.003 splits a real 480-frame PCM packet at sample 144. The old and
+        // new writer receive the same immutable packet and retain disjoint data.
+        try await video(router.appendVideo, start: splitStart, offset: 1.003)
+        router.stop(next)
+        let nextResult = await finish(next)
+        let previousResult = await previous.value
+        try await splitSource.value
+        router.finished(first); router.finished(next)
+        precondition(previousResult.completed && nextResult.completed, previousResult.error ?? nextResult.error ?? "Delayed rotation failed")
+        precondition(abs((previousResult.progress.audioEndSeconds ?? 0) - 1.003) < 1.0 / 48_000,
+                     "Retiring segment did not retain its exact PCM prefix")
+        precondition((nextResult.progress.audioEndSeconds ?? 0) > 0.9999 && nextResult.progress.droppedAudio == 0,
+                     "Next segment lost the original PCM suffix or EOF tail")
+        try await ProgramRecordingFixtures.inspect(firstURL, expectedDuration: 1.003, checkSync: true)
+        try await ProgramRecordingFixtures.inspect(nextURL, expectedDuration: 1, checkSync: false)
+        print("PASS: native router rotation partitions a straddling PCM packet at one shared source cut; both independently finishing files retain delayed tails and decode")
+
+        let leadingURL = folder.appendingPathComponent("accepted-audio-leading.mp4")
+        try? FileManager.default.removeItem(at: leadingURL)
+        let leading = ProgramRecordingSession(outputURL: leadingURL, configuration: config)
+        try await feed(leading, seconds: 1)
+        for index in 0..<5 { leading.appendAudio(try ProgramRecordingFixtures.audio(at: 1 + Double(index)/100)) }
+        try await waitForMediaEnd(leading, seconds: 1.05)
+        let lead = await finish(leading)
+        precondition(lead.completed && abs((lead.progress.audioEndSeconds ?? 0)-1.05) < 1.0/48_000,
+                     "Finalization truncated an already accepted audio-leading frontier")
+        try await ProgramRecordingFixtures.inspect(leadingURL, expectedDuration: 1.05, checkSync: true)
+        print("PASS: audio-leading accepted frontier is retained honestly at EOF; no implicit per-track shift or invented source samples")
+
+        let missingURL = folder.appendingPathComponent("missing-audio-tail.mp4")
+        try? FileManager.default.removeItem(at: missingURL)
+        let missing = ProgramRecordingSession(outputURL: missingURL, configuration: config)
+        try await feed(videoSink: missing.appendVideo, audioSink: { sample in
+            if sample.presentationTimeStamp.seconds < 10_000.5 { missing.appendAudio(sample) }
+        }, seconds: 1)
+        let missingStart = clock.now
+        let partial = await finish(missing)
+        let elapsed = missingStart.duration(to: clock.now)
+        precondition(!partial.completed && partial.recoverable && partial.error?.contains("drain") == true
+            && elapsed >= .seconds(2.9) && elapsed < .seconds(4), "Missing PCM tail must time out honestly and finalize a playable partial")
+        precondition((partial.progress.audioEndSeconds ?? 0) < 0.501 && (partial.progress.videoEndSeconds ?? 0) > 0.999,
+                     "Missing tail was hidden by synthesized silence or altered source timestamps")
+        let repeated = await finish(missing)
+        precondition(repeated.progress.audioSamples == partial.progress.audioSamples && repeated.error == partial.error,
+                     "Repeated stop did not return the same cleaned-up writer result")
+        let asset = AVURLAsset(url: missingURL)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        precondition(audioTracks.count == 1 && videoTracks.count == 1)
+        print("PASS: missing real PCM tail retains the strict three-second deadline, visible partial failure, original unequal frontiers and idempotent writer cleanup")
+
+        let clippedURL = folder.appendingPathComponent("clipped-archive.mp4")
+        for suffix in ["", ".chat.jsonl", ".chat.jsonl.summary.json", ".vtt"] {
+            try? FileManager.default.removeItem(atPath: clippedURL.path + suffix)
+        }
+        let archiveTimeline = RecordingTimeline()
+        let archive = RecordingChatArchive(programURL: clippedURL, sessionID: UUID().uuidString, segmentIndex: 1,
+            context: .init(), timeline: archiveTimeline, preferences: .init(enabled: true))
+        let message = RecordingChatMessage(id: "public-fixture", platform: "Fixture", author: nil, text: "Visible control",
+            providerTimestamp: Date(), timestampIsReceiptTime: true, kind: "Text")
+        let paint = RecordingChatPaint(slotID: "owned-slot", messageID: message.id, fingerprint: RecordingChatPaint.fingerprint(message.text))
+        var archiveConfig = config
+        archiveConfig.onVideoAccepted = { frame in archive.frame(frame, bindings: frame.painted.map { .init(paint: $0, message: message) }) }
+        let clipped = ProgramRecordingSession(outputURL: clippedURL, configuration: archiveConfig, timeline: archiveTimeline)
+        try await feed(videoSink: { sample in
+            if sample.presentationTimeStamp.seconds >= 10_000.8 { RecordingChatPaint.attach([paint], to: sample) }
+            clipped.appendVideo(sample)
+        }, audioSink: clipped.appendAudio, seconds: 1)
+        clipped.resolveFinishBoundary(CMTime(seconds: 10_000.997, preferredTimescale: 48_000))
+        let clippedResult = await finish(clipped)
+        await withCheckedContinuation { continuation in archive.finish(completed: clippedResult.completed) { continuation.resume() } }
+        precondition(clippedResult.completed)
+        try await ProgramRecordingFixtures.inspect(clippedURL, expectedDuration: 0.997, checkSync: true)
+        var records: [RecordingChatRecord] = []
+        _ = try RecordingChatReader.scan(archive.url, record: { records.append($0) })
+        let summary = try JSONSerialization.jsonObject(with: Data(contentsOf: archive.url.appendingPathExtension("summary.json"))) as! [String: Any]
+        precondition(abs((summary["durationSeconds"] as! Double)-0.997) < 1.0/48_000
+            && records.last?.type == "hide" && abs(records.last!.seconds-0.997) < 1.0/48_000,
+                     "Chat hide/summary retained a nominal image tail outside the sealed native movie")
+        let subtitles = URL(fileURLWithPath: clippedURL.path + ".vtt")
+        try RecordingChatReader.export(archive.url, format: .vtt, to: subtitles)
+        let cues = try String(contentsOf: subtitles, encoding: .utf8)
+        precondition(cues.contains("00:00:00.997"), "Exported cue did not honor the actual movie cut")
+        print("PASS: native endSession clips a nominal accepted image tail; archive final hide, summary and exported cue follow the same sealed0.997s boundary")
     }
 
     static func waitForMediaEnd(_ session: ProgramRecordingSession, seconds: Double) async throws {

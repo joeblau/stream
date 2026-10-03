@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 /// Adapters issue real documented requests. Authorization lives in an injected
@@ -150,7 +151,25 @@ public struct ProviderAPI: Sendable {
             privacy: status["privacyStatus"] as? String,
             scheduledAt: (snippet["scheduledStartTime"] as? String).flatMap { Self.date($0) },
             state: state, publicURL: URL(string: "https://www.youtube.com/watch?v=\(id)"),
-            boundStreamID: bound, enableAutoStart: details["enableAutoStart"] as? Bool, enableAutoStop: details["enableAutoStop"] as? Bool)
+            boundStreamID: bound, enableAutoStart: details["enableAutoStart"] as? Bool, enableAutoStop: details["enableAutoStop"] as? Bool,
+            latencyPreference: (details["latencyPreference"] as? String).flatMap(ProviderEvent.LatencyPreference.init(rawValue:)) ?? .unknown,
+            thumbnails: (snippet["thumbnails"] as? [String: Any]).map(Self.youtubeThumbnails))
+    }
+    private static func youtubeThumbnails(_ values: [String: Any]) -> [YouTubeThumbnail] {
+        YouTubeThumbnail.Size.allCases.compactMap { size in
+            guard let row = values[size.rawValue] as? [String: Any], let raw = row["url"] as? String,
+                  raw.utf8.count <= 4_096, raw.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
+                  let url = URL(string: raw) else { return nil }
+            func dimension(_ key: String) throws -> Int? {
+                guard let raw = row[key] else { return nil }
+                guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                      number.doubleValue.isFinite, (1...16_384).contains(number.doubleValue),
+                      number.doubleValue.rounded() == number.doubleValue else { throw ProviderFailure(.invalidResponse) }
+                return number.intValue
+            }
+            do { return try YouTubeThumbnail(size: size, url: url, width: dimension("width"), height: dimension("height")) }
+            catch { return nil } // Optional image metadata cannot authorize or invalidate event lifecycle.
+        }
     }
     private func unique(_ events: [ProviderEvent]) throws -> [ProviderEvent] {
         guard events.count <= 2_000 else { throw ProviderFailure(.invalidResponse) }

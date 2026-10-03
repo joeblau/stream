@@ -23,7 +23,14 @@ exercises the shipping rehearsal entry point; checks countdown/preparation
 cancellation, stale callbacks, pre-existing preview, storage failure, existing
 outputs, held failed publisher finalization, reservation accounting, pause/resume,
 rotation, finalization and a recording directory relocated during writing; and
-decodes the generated H.264/AAC files with AVAssetReader.
+decodes the generated H.264/AAC files with AVAssetReader. By default it runs
+both the existing 5 ms mixer timing and an explicit 60 ms capture-holdback lease
+without changing source PTS or compositor/mixer clocks. The same shipping
+pause/rotation/stop sequence writes selected WAV/M4A bus tracks and verifies
+actual decoded endpoints, no missing-tail padding and bounded origin rounding.
+A pending pause rejects manual/automatic split until actual writer acknowledgment.
+`REHEARSAL_AUDIO_HOLDBACK_MS` selects one explicit timing run when diagnosing a
+specific route; it does not change production's default audio scheduling.
 
 The runner creates fixture-only copies for the publisher factory, credential
 storage and microphone-consent boundary. It never requests capture access,

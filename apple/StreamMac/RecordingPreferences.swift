@@ -85,15 +85,45 @@ struct RecordingStoragePreflight: Sendable {
 final class ProgramRecordingRouter: @unchecked Sendable {
     private let lock = NSLock()
     private var session: ProgramRecordingSession?
+    private var retiring: [ObjectIdentifier: ProgramRecordingSession] = [:]
+    private var pendingBoundary: ProgramRecordingSession?
+    private var audioHistory: [CMSampleBuffer] = []
     func install(_ session: ProgramRecordingSession?) {
-        lock.lock(); self.session = session; lock.unlock()
+        lock.lock(); self.session = session; audioHistory.removeAll(); lock.unlock()
+    }
+    func rotate(to next: ProgramRecordingSession, finishing previous: ProgramRecordingSession) {
+        lock.lock()
+        previous.sealVideo()
+        retiring[ObjectIdentifier(previous)] = previous
+        pendingBoundary = previous; session = next
+        for sample in audioHistory { next.appendAudio(sample) }
+        lock.unlock()
+    }
+    func stop(_ current: ProgramRecordingSession) {
+        lock.lock()
+        current.sealVideo(); session = nil
+        retiring[ObjectIdentifier(current)] = current
+        let pending = pendingBoundary; pendingBoundary = nil
+        lock.unlock()
+        pending?.cancelPendingFinishBoundary()
+    }
+    func finished(_ previous: ProgramRecordingSession) {
+        lock.lock(); retiring[ObjectIdentifier(previous)] = nil
+        if retiring.isEmpty && session == nil { audioHistory.removeAll() }
+        lock.unlock()
     }
     func appendVideo(_ sample: CMSampleBuffer) {
-        lock.lock(); let session = session; lock.unlock()
+        lock.lock(); let session = session; let boundary = pendingBoundary; pendingBoundary = nil; lock.unlock()
+        boundary?.resolveFinishBoundary(sample.presentationTimeStamp)
         session?.appendVideo(sample)
     }
     func appendAudio(_ sample: CMSampleBuffer) {
-        lock.lock(); let session = session; lock.unlock()
+        lock.lock()
+        guard session != nil || !retiring.isEmpty else { lock.unlock(); return }
+        audioHistory.append(sample)
+        if audioHistory.count > 32 { audioHistory.removeFirst() }
+        let session = session; let tails = Array(retiring.values); lock.unlock()
         session?.appendAudio(sample)
+        for previous in tails { previous.appendAudio(sample) }
     }
 }

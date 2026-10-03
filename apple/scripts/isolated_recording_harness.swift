@@ -90,10 +90,10 @@ final class ISOProbe: @unchecked Sendable {
             if index < 150 { engine.enqueue(mic, try ProgramRecordingFixtures.audio(at: seconds, timestampBase: base)) }
             if index % 2 == 0 { writer.appendVideo(try ProgramRecordingFixtures.video(at: seconds, timestampBase: base)) }
         }
-        await engine.stop(); raw.deactivate(); post.deactivate()
         let result = await finish(writer)
         precondition(result.completed, result.error ?? "Program failed")
         await finish(raw); await finish(post)
+        await engine.stop()
         precondition(probe.snapshot("channel.mic.default")?.status == "complete")
         precondition(probe.snapshot("processed-mic")?.status == "complete")
         let before = try read(rawURL), after = try read(postURL)
@@ -155,7 +155,7 @@ final class ISOProbe: @unchecked Sendable {
     static func overloadedTrack(_ folder: URL) async throws {
         let timeline = RecordingTimeline(), probe = ISOProbe()
         timeline.begin(at: CMTime(seconds: 10_000, preferredTimescale: 48_000))
-        timeline.update(end: CMTime(seconds: 10_002, preferredTimescale: 48_000))
+        timeline.update(end: CMTime(seconds: 10_002, preferredTimescale: 48_000), videoPTS: CMTime(seconds: 10_002, preferredTimescale: 48_000))
         let url = folder.appendingPathComponent("bounded.wav")
         let track = IsolatedAudioRecorder(outputURL: url, selection: .init(targetID: "bounded", name: "Bounded"),
             sessionID: "bounded", segmentIndex: 1, programFile: "program.mp4", context: .init(), timeline: timeline, event: probe.receive)

@@ -757,9 +757,28 @@ struct WebSourcePayload: Hashable, Codable, Sendable {
     }
 }
 
+enum GuestSourceRole: String, Hashable, Codable, Sendable {
+    case camera, screen
+}
+
 struct GuestSourcePayload: Hashable, Codable, Sendable {
-    /// Invite/session link identifier for a remote guest feed.
+    /// Legacy display/link identity. It never authorizes incoming media.
     var sessionIdentifier: String? = nil
+    /// Stable project identity; remote capabilities and generations stay runtime-only.
+    var slotID: UUID? = nil
+    var role: GuestSourceRole = .camera
+
+    init(sessionIdentifier: String? = nil, slotID: UUID? = nil, role: GuestSourceRole = .camera) {
+        self.sessionIdentifier = sessionIdentifier; self.slotID = slotID; self.role = role
+    }
+
+    private enum CodingKeys: String, CodingKey { case sessionIdentifier, slotID, role }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessionIdentifier = try values.decodeIfPresent(String.self, forKey: .sessionIdentifier)
+        slotID = try values.decodeIfPresent(UUID.self, forKey: .slotID)
+        role = try values.decodeIfPresent(GuestSourceRole.self, forKey: .role) ?? .camera
+    }
 }
 
 /// C09 (issue #163): a Syphon feed published by a local creative/titling
