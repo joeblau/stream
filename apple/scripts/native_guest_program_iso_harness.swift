@@ -190,12 +190,45 @@ private final class ProgramGuestProbe: @unchecked Sendable {
             }
         }
     }
-    @MainActor static func wait(_ label: String, _ predicate: () -> Bool) async throws {
+    static func progress(_ receiver: NativeGuestReceiver, _ probe: ProgramGuestProbe) -> String {
+        let snapshots = receiver.diagnosticSnapshot(), counts = receiver.counters, receipts = probe.snapshot()
+        let roles = snapshots.map { snapshot in
+            let transport = receiver.transportStats(snapshot.role)
+            let statuses = snapshot.statuses.map { "\($0.stage):\($0.status):\($0.detail)" }.joined(separator: ",")
+            return "role=\(snapshot.role.rawValue) received=\(snapshot.received) decoded=\(snapshot.decoded) expired=\(snapshot.expired) queued=\(snapshot.queued)/\(snapshot.bytes) working=\(snapshot.working) awaitingIDR=\(snapshot.awaitingIDR) lossEpoch=\(snapshot.lossEpoch) srAge=\(snapshot.senderReportAge.map { String(format: "%.3f", $0) } ?? "none") transportFrames=\(transport.frames) rejected=\(transport.rejected) codec=[\(statuses)]"
+        }.joined(separator: " | ")
+        return "video=\(receipts.video) audio=\(receipts.audio) rejected=\(receipts.rejectedVideo)/\(receipts.rejectedAudio) errors=\(counts.errors) drops=\(counts.dropped) unsynchronized=\(counts.unsynchronized) \(roles)"
+    }
+    @MainActor static func wait(_ label: String, _ predicate: () -> Bool, diagnostics: (() -> String)? = nil) async throws {
+        let start = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        if let diagnostics { log("Guest Program/ISO phase start \(label): \(diagnostics())") }
         for _ in 0..<1_000 {
-            if predicate() { return }
+            if predicate() {
+                if let diagnostics { log("Guest Program/ISO phase complete \(label) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - start)s: \(diagnostics())") }
+                return
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
+        if let diagnostics { log("Guest Program/ISO phase deadline \(label) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - start)s: \(diagnostics())") }
         preconditionFailure("Bounded deadline: \(label)")
+    }
+    @MainActor static func startupReports(_ reports: [(Int32, UInt32, Double)], peer: OpaquePointer,
+                                         receiver: NativeGuestReceiver, probe: ProgramGuestProbe) async throws {
+        // Connected can precede authenticated RTCP readiness. Retry these exact
+        // initial reports only during bounded setup, before sending any media.
+        let sender = Task {
+            for attempt in 0..<50 {
+                guard !Task.isCancelled else { return }
+                log("Guest Program/ISO explicit startup SR transmission attempt=\(attempt + 1) roles=\(reports.count)")
+                for (role, rtp, ntp) in reports { report(role, timestamp: rtp, seconds: ntp, peer: peer) }
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+            }
+        }
+        defer { sender.cancel() }
+        try await wait("startup-SR-readiness-before-unregistered-media", {
+            let snapshots = receiver.diagnosticSnapshot()
+            return reports.allSatisfy { role, _, _ in snapshots[Int(role)].senderReportAge.map { $0 <= 3 } ?? false }
+        }, diagnostics: { progress(receiver, probe) })
     }
     static func finish(_ writer: ProgramRecordingSession) async -> ProgramRecordingSession.Result {
         await withCheckedContinuation { continuation in writer.finish { continuation.resume(returning: $0) } }
@@ -205,6 +238,10 @@ private final class ProgramGuestProbe: @unchecked Sendable {
     }
 
     @MainActor static func main() async throws {
+        precondition(CommandLine.arguments.count >= 3)
+        let options = Array(CommandLine.arguments.dropFirst(3))
+        precondition(options.allSatisfy { $0 == "--hold-startup-800ms" }, "Unsupported fixture option")
+        let holdStartup = options.contains("--hold-startup-800ms")
         let fixtures = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         let folder = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -271,9 +308,8 @@ private final class ProgramGuestProbe: @unchecked Sendable {
         let ntp = 4_000_000_000.0
         // Every role starts at the SAME sender instant. Reports are sent
         // immediately so the120ms receiver playout lies ahead of host ticks.
-        report(0, timestamp: cameraBase, seconds: ntp, peer: peer)
-        report(2, timestamp: audioBase, seconds: ntp, peer: peer)
-        report(1, timestamp: 123_000_000, seconds: ntp, peer: peer)
+        try await startupReports([(0, cameraBase, ntp), (2, audioBase, ntp), (1, 123_000_000, ntp)],
+                                 peer: peer, receiver: receiver, probe: probe)
         var videoSequence: UInt16 = 65_534, audioSequence: UInt16 = 65_534
         let clock = ContinuousClock(), began = clock.now
         // Real decoded red pixels and audible tone before registration prove
@@ -281,7 +317,11 @@ private final class ProgramGuestProbe: @unchecked Sendable {
         video(camera[0], role: 0, timestamp: cameraBase, sequence: &videoSequence, peer: peer)
         send(packet(role: 2, sequence: audioSequence, timestamp: audioBase, payload: [UInt8](opus[25]), marker: true), role: 2, peer: peer)
         audioSequence &+= 1
-        try await wait("unregistered decoded media", { probe.snapshot().video >= 1 && probe.snapshot().audio >= 1 })
+        try await wait("unregistered decoded media", { probe.snapshot().video >= 1 && probe.snapshot().audio >= 1 }, diagnostics: { progress(receiver, probe) })
+        if holdStartup {
+            log("Guest Program/ISO controlled setup: hold800ms before admission; real source clock and media checks unchanged")
+            try await Task.sleep(for: .milliseconds(800))
+        }
         precondition(mixer.registeredGuestChannelID(slot: lease.slot) == nil)
         let unregistered = probe.snapshot()
         precondition(unregistered.rejectedVideo == 1 && unregistered.rejectedAudio == 1)
@@ -307,25 +347,38 @@ private final class ProgramGuestProbe: @unchecked Sendable {
         }
         store.allowProgram(true, lease: lease)
         precondition(mixer.setGuestRouting(lease, programAllowed: true, monitorAllowed: false))
-        // A fresh SR advances the same common mapping to this real source
-        // interval; it does not replace the host origin or restamp any receipt.
-        let sourceOffset = 0.3
-        try await clock.sleep(until: began.advanced(by: .seconds(sourceOffset)))
-        report(0, timestamp: cameraBase &+ 27_000, seconds: ntp + sourceOffset, peer: peer)
-        report(2, timestamp: audioBase &+ 14_400, seconds: ntp + sourceOffset, peer: peer)
+        // The first real denied video receipt already carries the common
+        // sender instant's original mapped host PTS. Subtract the receiver's
+        // declared120ms playout to pace this synthetic sender against that
+        // EXISTING anchor, even if initial authenticated SR setup retried.
+        // No receiver mapping, receipt PTS or source sample is rewritten.
+        let senderHostOrigin = unregistered.lastVideo!.pts.seconds - 0.12
+        let schedulingHost = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        let sourceBegan = clock.now.advanced(by: .seconds(senderHostOrigin - schedulingHost))
+        // Actual cold decode and privacy/admission setup can exceed300ms on
+        // hosted CPUs. Choose a future20ms source-grid frontier after setup;
+        // matching90k/48k offsets advance the same RTP/NTP relationship.
+        let sourceTick = max(15, Int(ceil((schedulingHost - senderHostOrigin) * 50)) + 3)
+        let sourceOffset = Double(sourceTick) / 50
+        let videoOffset = UInt32(sourceTick * 1_800), audioOffset = UInt32(sourceTick * 960)
+        log("Guest Program/ISO admission frontier elapsed=\(began.duration(to: clock.now)) sourceOffset=\(sourceOffset)s on20msgrid; original mapped anchor retained")
+        try await clock.sleep(until: sourceBegan.advanced(by: .seconds(sourceOffset)))
+        report(0, timestamp: cameraBase &+ videoOffset, seconds: ntp + sourceOffset, peer: peer)
+        report(2, timestamp: audioBase &+ audioOffset, seconds: ntp + sourceOffset, peer: peer)
         for index in 0..<70 {
-            try await clock.sleep(until: began.advanced(by: .seconds(sourceOffset + Double(index) / 50)))
-            send(packet(role: 2, sequence: audioSequence, timestamp: audioBase &+ UInt32(14_400 + index * 960),
+            try await clock.sleep(until: sourceBegan.advanced(by: .seconds(sourceOffset + Double(index) / 50)))
+            send(packet(role: 2, sequence: audioSequence, timestamp: audioBase &+ audioOffset &+ UInt32(index * 960),
                         payload: [UInt8](opus[index]), marker: true), role: 2, peer: peer)
             audioSequence &+= 1
             if index % 5 == 0 {
-                video(camera[index / 5], role: 0, timestamp: cameraBase &+ UInt32(27_000 + (index / 5) * 9_000),
+                video(camera[index / 5], role: 0, timestamp: cameraBase &+ videoOffset &+ UInt32((index / 5) * 9_000),
                       sequence: &videoSequence, peer: peer)
             }
         }
-        try await wait("all actual decoded packets", { probe.snapshot().video == 15 && probe.snapshot().audio == 71 })
+        log("Guest Program/ISO source feed finished elapsed=\(sourceBegan.duration(to: clock.now)); source duration=1.4s: \(progress(receiver, probe))")
+        try await wait("all actual decoded packets", { probe.snapshot().video == 15 && probe.snapshot().audio == 71 }, diagnostics: { progress(receiver, probe) })
         precondition(receiver.counters.errors == 0 && receiver.counters.dropped == 0 && receiver.counters.unsynchronized == 0)
-        try await clock.sleep(until: began.advanced(by: .seconds(sourceOffset + 1.55)))
+        try await clock.sleep(until: sourceBegan.advanced(by: .seconds(sourceOffset + 1.55)))
         let live = probe.snapshot()
         let liveFlash = live.pictures.first { $0.red > 200 && $0.green > 200 && $0.blue > 200 }!
         let liveTone = live.program.compactMap(\.cue).first!
@@ -354,7 +407,7 @@ private final class ProgramGuestProbe: @unchecked Sendable {
         precondition(mixer.setGuestRouting(lease, programAllowed: false, monitorAllowed: false))
         for index in 0..<15 {
             let seconds = sourceOffset + 1.6 + Double(index) / 50
-            try await clock.sleep(until: began.advanced(by: .seconds(seconds)))
+            try await clock.sleep(until: sourceBegan.advanced(by: .seconds(seconds)))
             send(packet(role: 2, sequence: audioSequence, timestamp: audioBase &+ UInt32((seconds * 48_000).rounded()),
                         payload: [UInt8](opus[25 + index]), marker: true), role: 2, peer: peer)
             audioSequence &+= 1
