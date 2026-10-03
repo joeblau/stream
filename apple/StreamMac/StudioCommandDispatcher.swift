@@ -78,6 +78,7 @@ enum StudioCommand: Equatable, Sendable {
     case startRehearsal
     case stopRehearsal
     case addRecordingMarker(String)
+    case interview(NativeInterviewCommand)
 
     // Scenes (S01 layer graph).
     case selectScene(SceneID)
@@ -613,6 +614,7 @@ enum StudioCommand: Equatable, Sendable {
         case .startRehearsal: return "Begin Local Rehearsal"
         case .stopRehearsal: return "End Local Rehearsal"
         case .addRecordingMarker: return "Add Recording Marker"
+        case .interview(let command): return command.displayName
         case .selectScene, .selectSceneAt: return "Select Scene"
         case .addScene, .insertScene: return "Add Scene"
         case .renameScene: return "Rename Scene"
@@ -937,6 +939,7 @@ struct StudioState: Equatable, Sendable {
     /// Annotate menu, the toolbar, and the canvas chrome read this (the
     /// dispatcher's own published state) instead of the nested store.
     var annotations: AnnotationUIState = .empty
+    var interview = NativeInterviewControlState()
 }
 
 // MARK: - Dispatcher
@@ -969,6 +972,9 @@ final class StudioCommandDispatcher: ObservableObject {
     private let previewProgram: PreviewProgramModel
     private weak var chatCoordinator: StudioChatCoordinator?
     private var chatObservation: AnyCancellable?
+    private weak var interviewManager: NativeInterviewManager?
+    private var interviewObservation: AnyCancellable?
+    private var interviewRefresh: Task<Void, Never>?
     /// S12 (issue #75): the scene-edit undo stack. One entry per executed
     /// undoable command, recorded in `execute` around `perform`.
     private let undoStack = UndoStack<SceneUndoSnapshot>()
@@ -1183,6 +1189,16 @@ final class StudioCommandDispatcher: ObservableObject {
         chatObservation = coordinator.objectWillChange.sink { [weak self] _ in Task { @MainActor [weak self] in self?.refreshState() } }
         refreshState()
     }
+    func bindInterviewManager(_ manager: NativeInterviewManager) {
+        interviewManager = manager
+        interviewObservation = manager.$state.sink { [weak self] _ in
+            guard let self, self.interviewRefresh == nil else { return }
+            self.interviewRefresh = Task { [weak self] in
+                guard let self else { return }; self.interviewRefresh = nil; self.refreshState()
+            }
+        }
+        refreshState()
+    }
     /// Stable numeric controller targets are deliberately a small typed set.
     /// Capture-layer gain retains its scene/layer ownership on the inspector.
     func controllerTargets() -> [StudioControllerTarget] {
@@ -1354,6 +1370,14 @@ final class StudioCommandDispatcher: ObservableObject {
             postRejection(command: command, error: error)
             return StudioCommandResult(outcome: .rejected(error), state: state)
         }
+        if case .interview(let action) = command {
+            guard interviewManager?.execute(action) == true else {
+                let error = StudioCommandError.unavailable("The guest connection changed or its action queue is occupied. Review Guests before retrying.")
+                refreshState(); postRejection(command: command, error: error)
+                return .init(outcome: .rejected(error), state: state)
+            }
+            refreshState(); return .init(outcome: .success, state: state)
+        }
         if !executingMacroStep {
             switch command {
             case .stopStream, .stopRecording: macros.cancel()
@@ -1402,6 +1426,9 @@ final class StudioCommandDispatcher: ObservableObject {
         // browser organization, and the lock toggle stay available.
         if let error = sceneContentLockError(for: command) { return error }
         switch command {
+        case .interview(let action):
+            return interviewManager?.availabilityError(for: action) ?? (interviewManager == nil
+                ? .unavailable("Create an interview room in Guests first.") : nil)
         case .startStream:
             guard !controller.isRehearsing else { return .unavailable("End local rehearsal before public Go Live.") }
             guard controller.streamState.canStart else {
@@ -2330,6 +2357,7 @@ final class StudioCommandDispatcher: ObservableObject {
 
     private func perform(_ command: StudioCommand) {
         switch command {
+        case .interview: break // execute preserves the manager's synchronous acceptance/rejection.
         case .startStream:
             controller.goLive()
             if recorder.preferences.autoRecordOnGoLive, !recorder.state.isActive {
@@ -3683,7 +3711,8 @@ final class StudioCommandDispatcher: ObservableObject {
             canRedo: undoStack.canRedo,
             undoLabel: undoStack.undoLabel,
             redoLabel: undoStack.redoLabel,
-            annotations: annotations.uiState(stagedSceneID: staged?.id))
+            annotations: annotations.uiState(stagedSceneID: staged?.id),
+            interview: interviewManager?.state ?? .init())
         registerAppAudioMixerChannels()
         registerGuestMixerChannels()
         pushMixerStateToEngine()
@@ -3864,6 +3893,7 @@ private extension StudioCommand {
              .setLayerImage, .setOverlayImage:
             return true
         case .startStream, .stopStream, .startPreview, .stopPreview,
+             .interview,
              .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile, .addRecordingMarker,
              .startRehearsal, .stopRehearsal,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,

@@ -149,7 +149,8 @@ import Foundation
         pendingAdmission = id; return true
     }
     @discardableResult func setMembership(_ membership: NativeInterviewMembership, guest id: UUID) -> Bool {
-        guard membership != .waiting, peers[id] != nil else { return false }
+        guard membership != .waiting, snapshot.phase == .connected,
+              admittedGenerations[id] != nil, !revoked.contains(id) else { return false }
         return send(["type": membership == .onair ? "stage" : "backstage", "id": id.uuidString.lowercased()])
     }
     @discardableResult func remove(_ id: UUID) -> Bool {
@@ -180,6 +181,10 @@ import Foundation
         guard snapshot.phase == .connected, let peer = peers[guest], peer.host != nil,
               snapshot.members.first(where: { $0.id == guest })?.media == .ready else { return nil }
         return peer.context
+    }
+    func currentPeerLease(for guest: UUID) -> NativeInterviewPeerLease? {
+        guard snapshot.phase == .connected, !revoked.contains(guest) else { return nil }
+        return peers[guest]?.context
     }
     @discardableResult func restartMedia(_ id: UUID) -> Bool {
         guard snapshot.phase == .connected, let generation = admittedGenerations[id], !revoked.contains(id),
@@ -258,7 +263,8 @@ import Foundation
                 if role == "guest" {
                     var member = snapshot.members.first { $0.id == id } ?? .init(id: id, name: name, membership: state)
                     member = .init(id: id, name: name, membership: state, media: member.media,
-                                   screenApproved: member.screenApproved, screenSharing: member.screenSharing)
+                                   screenApproved: member.screenApproved, screenSharing: member.screenSharing,
+                                   membershipRevision: member.membershipRevision)
                     if state == .waiting {
                         member.media = .unavailable; member.screenApproved = false; member.screenSharing = false
                     }
@@ -280,7 +286,10 @@ import Foundation
                   membership != .waiting else { return }
             if pendingAdmission == id { pendingAdmission = nil }
             admittedGenerations[id] = generation
-            updateMember(id) { $0.membership = membership }
+            updateMember(id) {
+                $0.membership = membership
+                if $0.membershipRevision < UInt64.max { $0.membershipRevision += 1 }
+            }
             if peers[id]?.context.guestGeneration != generation {
                 dropPeer(id); _ = beginPeer(id, generation: generation)
             }
@@ -332,6 +341,7 @@ import Foundation
             for event in events { self.media(event, id: id, context: context) }
         }
         let peer = Peer(context: context, mailbox: mailbox); peers[id] = peer
+        snapshot.failure = nil
         guard let factory else { updateMember(id) { $0.media = .unavailable }; return true }
         updateMember(id) { $0.media = .preparing }
         let attempt = UUID(); occupiedMedia.insert(attempt)

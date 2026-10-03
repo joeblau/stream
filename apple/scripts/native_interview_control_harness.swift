@@ -491,6 +491,26 @@ private extension NSLock {
         let final = await client.occupiedRequestCount
         try require(final == 0, "Completed held reads did not release occupancy")
         await client.shutdown()
+        let retiredHTTP = HeldInterviewHTTP(), source = NativeInterviewCredentialSource(secret)
+        let retiring = NativeInterviewServiceClient(configuration: configuration, credential: { try source.current() }, http: retiredHTTP)
+        let retirementJob = Task { try await retiring.createRoom() }
+        try await wait("Credential lifetime request did not enter actual transport") { retiredHTTP.count == 1 }
+        source.retire()
+        try require(source.isRetired, "Synchronous room retirement retained the credential source")
+        do { _ = try source.current(); throw InterviewFixtureError.failed("Retired source allowed a future credential read") }
+        catch NativeInterviewError.closed {}
+        await retiring.shutdown()
+        let hasProvider = await retiring.hasCredentialProvider, remainsOccupied = await retiring.occupiedRequestCount
+        try require(!hasProvider && remainsOccupied == 1, "Shutdown retained provider or released noncooperative request occupancy")
+        do { _ = try await retiring.createRoom(); throw InterviewFixtureError.failed("Closed client allowed another request") }
+        catch NativeInterviewError.closed {}
+        try require(retiredHTTP.count == 1, "Credential retirement allocated/replayed an HTTP mutation")
+        retiredHTTP.release()
+        do { _ = try await retirementJob.value; throw InterviewFixtureError.failed("Retired held mutation accepted its late response") }
+        catch NativeInterviewError.closed {}
+        let released = await retiring.occupiedRequestCount
+        try require(released == 0, "Retired actual transport did not eventually clean occupancy")
+        progress("PASS: synchronous credential source retirement + closed client drops provider while actual noncooperative request stays occupied until return")
         let failed = FailedInterviewHTTP()
         let failing = NativeInterviewServiceClient(configuration: configuration, credential: { secret }, http: failed)
         do { _ = try await failing.createRoom(); throw InterviewFixtureError.failed("Failed creation appeared successful") }

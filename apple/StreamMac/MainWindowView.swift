@@ -704,8 +704,7 @@ struct MainWindowView: View {
                 // availability badges, and missing-asset repair.
                 AssetLibraryPanelView()
             case .guests:
-                placeholder("Guests", systemImage: "person.2",
-                            message: "Remote guest management lands here in a later workstream.")
+                NativeInterviewView(manager: workspace.runtime.interviews)
             case .destinations:
                 ScrollView {
                     DisclosureGroup("Virtual Camera Output") {

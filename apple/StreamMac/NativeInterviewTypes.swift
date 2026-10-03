@@ -25,6 +25,22 @@ struct NativeInterviewSecret: Sendable, CustomStringConvertible, CustomDebugStri
     var isCapability: Bool { value.count == 64 && value.allSatisfy { "0123456789abcdef".contains($0) } }
 }
 
+/// Revokes future credential reads synchronously, even while a closed client
+/// remains retained by a noncooperative request. Copies already handed to a
+/// transport are subject to that transport's lifetime, not memory zeroization.
+final class NativeInterviewCredentialSource: @unchecked Sendable {
+    private let gate = NSLock()
+    private var secret: NativeInterviewSecret?
+    init(_ secret: NativeInterviewSecret) { self.secret = secret }
+    func current() throws -> NativeInterviewSecret {
+        gate.lock(); defer { gate.unlock() }
+        guard let secret else { throw NativeInterviewError.closed }
+        return secret
+    }
+    func retire() { gate.lock(); secret = nil; gate.unlock() }
+    var isRetired: Bool { gate.lock(); defer { gate.unlock() }; return secret == nil }
+}
+
 struct NativeInterviewInvite: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     let id: UUID
     let expires: Date
@@ -167,6 +183,9 @@ struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     var media: NativeInterviewMediaState = .unavailable
     var screenApproved = false
     var screenSharing = false
+    /// Increments only on an actual admitted/stage/backstage receipt, so a
+    /// previously visible onair roster cannot acknowledge a new local intent.
+    var membershipRevision: UInt64 = 0
 }
 enum NativeInterviewPhase: String, Sendable {
     case idle, creating, connecting, connected, disconnected, ending, ended, expired, failed, closed

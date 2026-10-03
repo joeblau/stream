@@ -26,7 +26,7 @@ protocol NativeInterviewService: Sendable {
 /// reconnect replays room creation, invite creation, admission or room ending.
 actor NativeInterviewServiceClient: NativeInterviewService {
     let configuration: NativeInterviewConfiguration
-    private let credential: @Sendable () async throws -> NativeInterviewSecret
+    private var credential: (@Sendable () async throws -> NativeInterviewSecret)?
     private let http: any NativeInterviewHTTPTransport
     private let clock: @Sendable () -> Date
     private var occupied: Set<UUID> = []
@@ -105,8 +105,9 @@ actor NativeInterviewServiceClient: NativeInterviewService {
         request.setValue("stream-interview-v1, \(host.secret.capabilityProtocol)", forHTTPHeaderField: "Sec-WebSocket-Protocol")
         return NativeInterviewURLSessionSocket(request: request)
     }
-    func shutdown() { closed = true; http.shutdown() }
+    func shutdown() { closed = true; credential = nil; http.shutdown() }
     var occupiedRequestCount: Int { occupied.count }
+    var hasCredentialProvider: Bool { credential != nil }
     private func path(_ room: UUID, _ action: String) -> String { "/v1/rooms/\(room.uuidString.lowercased())/\(action)" }
     private func request(_ path: String, secret: NativeInterviewSecret? = nil, body: Data? = nil,
                          status: Int, mutation: Bool = true) async throws -> Data {
@@ -119,7 +120,10 @@ actor NativeInterviewServiceClient: NativeInterviewService {
         let authorization: NativeInterviewSecret
         do {
             if let secret { authorization = secret }
-            else { authorization = try await credential() }
+            else {
+                guard !closed, let credential else { throw NativeInterviewError.closed }
+                authorization = try await credential()
+            }
         } catch { throw NativeInterviewError.authorization }
         guard !closed else { throw NativeInterviewError.closed }
         try Task.checkCancellation()
