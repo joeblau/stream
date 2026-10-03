@@ -180,15 +180,32 @@ private final class FailoverAudioProbe: @unchecked Sendable {
         let media = AudioChannelID.media(SourceDefinitionID())
         func pulse(_ name: String, id: AudioChannelID, lower: Double, upper: Double) async throws {
             let begin = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-            for _ in 0..<70 {
+            let origin = begin + 0.02
+            var emitted = 0
+            var emittedFrames = 0
+            while emitted < 70 {
                 let host = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-                let sample = try ProgramRecordingFixtures.audio(at: 0, timestampBase: host + 0.02,
+                let sourceOffset = Double(emittedFrames) / 48_000
+                let sourceTime = origin + sourceOffset
+                if sourceTime > host + 0.08 {
+                    try await Task.sleep(for: .milliseconds(5))
+                    continue
+                }
+                // One continuous original PCM grid with bounded 80 ms lookahead.
+                // Scheduling a late producer does not create a new source PTS
+                // or turn its host-delivery gaps into a gain assertion.
+                let sample = try ProgramRecordingFixtures.audio(at: sourceOffset, timestampBase: origin,
                     constantTone: true, amplitude: 0.3)
                 mixer.enqueue(id, sample) // Actual nonisolated original-PTS capture ingestion.
-                try await Task.sleep(for: .milliseconds(10))
+                emittedFrames += sample.numSamples
+                emitted += 1
+                if emitted.isMultiple(of: 8) { await Task.yield() }
             }
-            let end = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-            let (rms, count) = observed.rms(from: begin + 0.12, to: end - 0.04)
+            let end = origin + Double(emittedFrames) / 48_000
+            while CMClockGetTime(CMClockGetHostTimeClock()).seconds < end + 0.04 {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let (rms, count) = observed.rms(from: origin + 0.12, to: end - 0.04)
             print("Gain-before-PCM \(name): \(count) actual scalars, Program RMS \(rms)")
             try check(count > 4_800 && rms >= lower && rms <= upper,
                       "Actual pending source gain lost during \(name): RMS=\(rms)")
