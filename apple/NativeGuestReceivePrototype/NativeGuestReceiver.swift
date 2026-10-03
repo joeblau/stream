@@ -17,8 +17,10 @@ final class NativeGuestReceiver: @unchecked Sendable {
     private var active = true, handle: OpaquePointer?
     private var ntpOrigin: Double?, hostOrigin: Double?, originReceived: Double?
     private var reports: [Int32: SenderReport] = [:]
+    private var lastPTS: [Double?] = [nil, nil, nil]
     private var pending: [[Input]] = [[], [], []], bytes = [0, 0, 0], working = [false, false, false]
     private var needsIDR = [true, true]
+    private var screenApproved: Bool
     private var keyframePending = [false, false], lastKeyframe = [-Double.infinity, -Double.infinity]
     private var audioResetPending = false
     private let mappingGeneration = UUID()
@@ -32,12 +34,12 @@ final class NativeGuestReceiver: @unchecked Sendable {
     private let videoOutput: @Sendable (GuestVideoFrame) -> Void
     private let audioOutput: @Sendable (GuestAudioFrame) -> Void
     private let signalOutput: @Sendable (String, String, String) -> Void
-    init(admitted lease: GuestReceiveLease, cameraMID: String, screenMID: String, audioMID: String,
+    init(admitted lease: GuestReceiveLease, cameraMID: String, screenMID: String, audioMID: String, screenApproved: Bool = false,
          video: @escaping @Sendable (GuestVideoFrame) -> Void,
          audio: @escaping @Sendable (GuestAudioFrame) -> Void,
          signal: @escaping @Sendable (String, String, String) -> Void) throws {
         guard lease.generation > 0 else { throw GuestDecodeError.malformed }
-        self.lease = lease; videoOutput = video; audioOutput = audio; signalOutput = signal
+        self.lease = lease; self.screenApproved = screenApproved; videoOutput = video; audioOutput = audio; signalOutput = signal
         handle = SGReceiverCreate(lease.generation, cameraMID, screenMID, audioMID, { context, generation, role, event, data, size, rtp, ntp in
             guard let context else { return }
             Unmanaged<NativeGuestReceiver>.fromOpaque(context).takeUnretainedValue().receive(generation: generation, role: role, event: event, data: data, count: size, rtp: rtp, ntp: ntp)
@@ -57,6 +59,23 @@ final class NativeGuestReceiver: @unchecked Sendable {
     }
     func offer(_ sdp: String) -> Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverOffer(handle, sdp) != 0 }
     func candidate(_ candidate: String, mid: String) -> Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverCandidate(handle, candidate, mid) != 0 }
+    func startHost() -> Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverStartHost(handle) != 0 }
+    func answer(_ sdp: String) -> Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverAnswer(handle, sdp) != 0 }
+    var hostReady: Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverHostReady(handle) != 0 }
+    func approveScreen(_ approved: Bool) -> Bool {
+        // Synchronous revocation must finish any already-entered callback before
+        // returning. Callers must not hold their receipt sink lock here.
+        outputGate.lock(); lock.lock()
+        if !approved { screenApproved = false; pending[1].removeAll(); bytes[1] = 0; needsIDR[1] = true }
+        let current = active; lock.unlock(); outputGate.unlock()
+        guard current else { return false }
+        let data = try? JSONSerialization.data(withJSONObject: ["type": "screen-approval", "negotiation": lease.negotiation.uuidString.lowercased(), "approved": approved])
+        guard let data, let message = String(data: data, encoding: .utf8) else { return false }
+        transportLock.lock(); let sent = SGReceiverSendControl(handle, message) != 0; transportLock.unlock()
+        outputGate.lock(); lock.lock(); screenApproved = active && sent && approved
+        if !screenApproved { pending[1].removeAll(); bytes[1] = 0 }; needsIDR[1] = true; lock.unlock(); outputGate.unlock()
+        if sent && approved { requestKeyframe(1) }; return sent
+    }
     func transportStats(_ role: GuestReceiveRole) -> SGReceiveStats { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverStats(handle, role.rawValue) }
     #if STREAM_GUEST_VALIDATION
     func validationPacket(_ data: Data, role: GuestReceiveRole) -> Bool {
@@ -80,6 +99,13 @@ final class NativeGuestReceiver: @unchecked Sendable {
     }
     private func signal(_ type: String, _ value: String, _ mid: String) {
         lock.lock()
+        if type == "control-closed" { screenApproved = false; pending[1].removeAll(); bytes[1] = 0; needsIDR[1] = true }
+        if type == "control" {
+            guard let data = value.data(using: .utf8), data.count <= 1024,
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["type"] as? String == "screen-state", object["negotiation"] as? String == lease.negotiation.uuidString.lowercased(),
+                  object["sharing"] is Bool, object.count == 3 else { drops += 1; lock.unlock(); return }
+        }
         let size = type.utf8.count + value.utf8.count + mid.utf8.count
         guard active, size <= 65_600, signals.count < 32, signalBytes + size <= 196_608 else { drops += 1; lock.unlock(); return }
         signals.append((type, value, mid)); signalBytes += size
@@ -105,13 +131,18 @@ final class NativeGuestReceiver: @unchecked Sendable {
             // Keep one origin throughout the call. Compare new reports with
             // the previous report and elapsed host time, not total call age.
             let previous = reports[role]
-            let plausible = previous.map { seconds >= $0.ntp && abs((seconds - $0.ntp) - (now - $0.received)) <= 2 } ??
+            let plausible = previous.map {
+                let sourceElapsed = Double(Int32(bitPattern: rtp &- $0.rtp)) / (index == 2 ? 48_000 : 90_000)
+                return seconds >= $0.ntp && abs((seconds - $0.ntp) - (now - $0.received)) <= 2 && abs(sourceElapsed - (seconds - $0.ntp)) <= 0.2
+            } ??
                 (abs((seconds - ntpOrigin!) - (now - originReceived!)) <= 2)
             if plausible {
                 reports[role] = .init(rtp: rtp, ntp: seconds, received: now)
             }
-            lock.unlock(); return
+            let request = plausible && index < 2 && needsIDR[index] && (index != 1 || screenApproved)
+            lock.unlock(); if request { requestKeyframe(role) }; return
         }
+        if index == 1 && !screenApproved { drops += 1; lock.unlock(); return }
         guard let data, count > 0, count <= (index == 2 ? 1275 : 2_097_152),
               let report = reports[role], now - report.received <= 3, let ntpOrigin, let hostOrigin else {
             unsynchronized += 1; lock.unlock(); return
@@ -119,6 +150,8 @@ final class NativeGuestReceiver: @unchecked Sendable {
         let offset = Double(Int32(bitPattern: rtp &- report.rtp)) / (index == 2 ? 48_000 : 90_000)
         let pts = hostOrigin + report.ntp - ntpOrigin + offset
         guard offset >= -0.5, offset <= 3, abs(pts - now) <= 3 else { unsynchronized += 1; lock.unlock(); return }
+        guard lastPTS[index].map({ pts > $0 }) ?? true else { drops += 1; lock.unlock(); return }
+        lastPTS[index] = pts
         let payload = Data(bytes: data, count: count)
         if index < 2, needsIDR[index], !GuestH264Decoder.hasIDR(payload) { drops += 1; lock.unlock(); return }
         if index < 2 { needsIDR[index] = false }
@@ -156,7 +189,7 @@ final class NativeGuestReceiver: @unchecked Sendable {
                     if videos[index] == nil {
                         videos[index] = GuestH264Decoder { [weak self] pixels, pts in
                             guard let self else { return }
-                            self.outputGate.lock(); self.lock.lock(); let current = self.active; self.lock.unlock()
+                            self.outputGate.lock(); self.lock.lock(); let current = self.active && (index != 1 || self.screenApproved); self.lock.unlock()
                             if current { self.videoOutput(.init(lease: self.lease, role: GuestReceiveRole(rawValue: role)!, pixels: pixels, pts: pts,
                                 duration: .invalid, mappingGeneration: self.mappingGeneration, clockQuality: .senderReportAligned)) }
                             self.outputGate.unlock()

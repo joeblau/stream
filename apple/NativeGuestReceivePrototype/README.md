@@ -4,8 +4,11 @@ This isolated application-owned public-SDK prototype is not connected to the
 shipping interview UI, source registry, global PCM mixer, Program or ISO recorder.
 Constructing it requires an explicit admitted lease. It binds loopback only, has
 no STUN/TURN configuration, and never requests a device or reads a credential.
-The current transport accepts a synthetic source offer with three distinct
-camera/screen/audio MIDs. This is **not** the shipping browser's host-offer protocol.
+The transport supports two mutually exclusive modes: a synthetic source-offer
+fixture, and a native host offer answered by the shipping browser guest. The native
+host offers three distinct camera/screen/audio MIDs plus the reliable approval
+channel. It offers only constrained-baseline H264 mode1 primary media (no RTX) and
+Opus, then validates the exact negotiated codecs, direction and primary SSRCs.
 
 The immutable [media receipts](../StreamMac/GuestMediaReceipts.swift) carry stable
 slot/peer UUIDs, connection generation and negotiation UUID. Video contains an
@@ -64,12 +67,40 @@ The fixture distinguishes malformed datagrams rejected by SRTP before our guard
 from validation-only injections into the actual guard, which are compiled only
 with `STREAM_GUEST_VALIDATION`.
 
-Remaining qualification: actual Chrome host-offer/guest-answer negotiation with
-its application control channel and negotiated H264/Opus formats; consent/approval
-and return media; real Program/ISO decoded flash/tone; network loss/jitter/PLC, AEC
-and congestion behavior; older supported macOS and repaired Intel linking/runtime.
+Controlled native and Chrome fixtures pass on macOS27.0.1 arm64, Xcode26.6/SDK26.5,
+Chrome154.0.8037.95 and pinned SDK0.24.0. They decode actual320x180 camera/screen
+pixels and stereo48k PCM through ICE/DTLS/SRTP, including received MID extensions,
+approval/default deny/reset, screen-only stop, fresh generation replacement and
+no receipts after stopped. The native fixture independently checks real libopus
+counts/cues, mono/SILK/hybrid and2.5–60 ms packets, long-call/late-screen clocks,
+bounded malformed assembly and blocked-callback revocation. These are local
+synthetic media and loopback signaling fixtures, not a deployed service.
+
+Remaining qualification: shipping admission/controller binding and return media;
+real Program/ISO decoded flash/tone; network loss/jitter/PLC, AEC and congestion
+behavior; TURN, physical devices, older supported macOS and repaired Intel
+linking/runtime.
 This prototype supplies no jitter buffer, PLC, AEC or automatic source registration.
-Do not claim browser/native interview or roadmap acceptance from loopback receipts.
+Do not claim shipping interview or roadmap acceptance from loopback receipts.
+
+For the actual Chrome/native fixture, build the bounded JSON-lines host CLI with
+the same public library/include environment and
+`apple/scripts/build_native_guest_host_cli.zsh`. Set `NATIVE_GUEST_HOST` to the
+printed binary path when running the independently owned browser fixture. The CLI
+never acquires a device or writes source/scene state. It caps commands and output
+queues, writes stdout with a one-second nonblocking deadline, and fences captured
+generation/negotiation on every command. An ordinary Leave produces a control-state
+closure receipt; command failures remain explicit errors. Screen approval starts
+false, uses only `stream-interview-control-v1`, and limits messages to1024 bytes and
+outgoing backlog to8192 bytes. Revocation fences prior callbacks before returning;
+caller receipt locks must be released around that gate. Closing the control channel
+revokes screen permission and preserves camera/audio. Sender-report acceptance
+requests bounded IDR recovery when the first keyframe preceded clock readiness.
+Negotiated MID extensions pass the same bounded normalization as the synthetic
+decorated packets; actual received extension counts appear in CLI receipts.
+Unsupported negotiation/codec/property states fail explicitly. The used fat
+archive's upstream Intel slice lacks the required RTC implementation; its public
+C++ symbols and link must be verified after the existing pinned source repair.
 
 Public references: [pinned Track API](https://github.com/paullouisageneau/libdatachannel/blob/v0.24.0/include/rtc/track.hpp),
 [Apple AudioCodec](https://developer.apple.com/documentation/audiotoolbox/audio-codec-services),
