@@ -337,6 +337,8 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         let screen = frames(try Data(contentsOf: folder.appendingPathComponent("screen.h264")))[0]
         let opus = [UInt8](try Data(contentsOf: folder.appendingPathComponent("opus-000.bin")))
         let began = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        await startupReports([(0, 0, 4_000_000_000), (2, 0, 4_000_000_000)],
+                             peer: peer, receiver: receiver, receipts: receipts)
         var cameraSequence: UInt16 = 1, screenSequence: UInt16 = 1, audioSequence: UInt16 = 1
         writeLine("Guest receive: >13s actual host-clock sender-report refresh; first screen report deliberately delayed")
         for second in 0...13 {
@@ -398,7 +400,8 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         defer { receiver.stop(); SGPeerFixtureDestroy(peer) }
         precondition(SGPeerFixtureStart(peer) != 0); await wait("revoke-peer-connected", receiver, receipts) { SGPeerFixtureReady(peer) != 0 }
         let frame = frames(try Data(contentsOf: folder.appendingPathComponent("screen.h264")))[0]
-        sr(1, rtp: 0, seconds: 4_000_000_000, peer: peer)
+        await startupReports([(1, 0, 4_000_000_000)],
+                             peer: peer, receiver: receiver, receipts: receipts)
         var screenSequence: UInt16 = 1, cameraSequence: UInt16 = 1
         video(frame, role: 1, timestamp: 0, sequence: &screenSequence, peer: peer)
         await wait("revoke-screen-callback-entered", receiver, receipts) { barrier.snapshot().0 }
@@ -432,9 +435,8 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         let camera = frames(try Data(contentsOf: folder.appendingPathComponent("camera.h264")))
         let screen = frames(try Data(contentsOf: folder.appendingPathComponent("screen.h264")))
         let opus = [UInt8](try Data(contentsOf: folder.appendingPathComponent("opus-000.bin")))
-        sr(0, rtp: 0, seconds: 4_000_000_000, peer: peer)
-        sr(1, rtp: 0, seconds: 4_000_000_000.3, peer: peer)
-        sr(2, rtp: 0, seconds: 4_000_000_000, peer: peer)
+        await startupReports([(0, 0, 4_000_000_000), (1, 0, 4_000_000_000.3), (2, 0, 4_000_000_000)],
+                             peer: peer, receiver: receiver, receipts: receipts)
         var cameraSequence: UInt16 = 1, screenSequence: UInt16 = 1
         video(screen[0], role: 1, timestamp: 0, sequence: &screenSequence, peer: peer)
         await wait("held-IDR-screen-actual-callback", receiver, receipts) { barrier.snapshot().0 }
@@ -489,9 +491,8 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         let camera = frames(try Data(contentsOf: folder.appendingPathComponent("camera.h264")))
         let screen = frames(try Data(contentsOf: folder.appendingPathComponent("screen.h264")))
         let opus = [UInt8](try Data(contentsOf: folder.appendingPathComponent("opus-000.bin")))
-        sr(0, rtp: 0, seconds: 4_000_000_000, peer: peer)
-        sr(1, rtp: 0, seconds: 4_000_000_000.3, peer: peer)
-        sr(2, rtp: 0, seconds: 4_000_000_000, peer: peer)
+        await startupReports([(0, 0, 4_000_000_000), (1, 0, 4_000_000_000.3), (2, 0, 4_000_000_000)],
+                             peer: peer, receiver: receiver, receipts: receipts)
         var cameraSequence: UInt16 = 1, screenSequence: UInt16 = 1
         if overflow { video(screen[0], role: 1, timestamp: 0, sequence: &screenSequence, peer: peer) }
         else { video(camera[0], role: 0, timestamp: 0, sequence: &cameraSequence, peer: peer) }
