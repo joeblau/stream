@@ -42,7 +42,8 @@ final class StudioRuntime {
         dispatcher.bindChatCoordinator(chat)
         recorder.bindChat(chat)
         controller.bindSecondaryRecordingChat(chat)
-        providerAccounts = ProviderAccountSession(restream: chat.restream)
+        providerAccounts = ProviderAccountSession(restream: chat.restream, pendingDirectory: DesktopStorage.projectDirectory)
+        controller.bindManagedStart(accounts: providerAccounts)
         chat.bindAccounts(providerAccounts)
         controller.bindEnding(accounts: providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
         adapters = StudioAdapterManager()
@@ -107,7 +108,7 @@ final class StudioWorkspace: ObservableObject {
             }
         }
         self.catalog = catalog
-        let directory = root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: catalog.selectedProjectID, profile: catalog.selectedProfileID))
+        let directory = root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: catalog.selectedProjectID, profile: catalog.selectedProfileID), isDirectory: true)
         let firstLaunch = !FileManager.default.fileExists(atPath: directory.path)
         try? DesktopStorage.prepare(directory)
         if firstLaunch { Self.copyLegacyFiles(to: directory) }
@@ -122,7 +123,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func directory(for selection: Selection) -> URL {
-        root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: selection.project, profile: selection.profile))
+        root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: selection.project, profile: selection.profile), isDirectory: true)
     }
 
     func stage(project: UUID, profile: UUID) {
@@ -134,8 +135,10 @@ final class StudioWorkspace: ObservableObject {
         guard let next = pending, next != selection, canSwitch else { return }
         isSwitching = true
         StudioAutomationEndpoint.shared.unbind()
+        recovery.remoteReview.invalidate()
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
+        runtime.controller.shutdownManagedStart()
         runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.rundown.stop()
@@ -154,8 +157,16 @@ final class StudioWorkspace: ObservableObject {
             observeRuntime()
             runtime.sceneStore.setProjectIdentity(currentProject.id, name: currentProject.name)
             pending = nil
+            error = nil
             saveCatalog()
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            // The previous runtime has already retired its account and controller sessions.
+            // Reopen the selected context so a failed filesystem operation remains recoverable.
+            runtime = StudioRuntime()
+            observeRuntime()
+            runtime.sceneStore.setProjectIdentity(currentProject.id, name: currentProject.name)
+            self.error = error.localizedDescription
+        }
         isSwitching = false
     }
 
@@ -261,8 +272,10 @@ final class StudioWorkspace: ObservableObject {
         guard canSwitch else { return }
         isSwitching = true
         StudioAutomationEndpoint.shared.unbind()
+        recovery.remoteReview.invalidate()
         runtime.recoveryBinding?.shutdown()
         runtime.controllers.shutdown()
+        runtime.controller.shutdownManagedStart()
         runtime.controller.ending.shutdown(); runtime.providerAccounts.shutdown(); runtime.chat.shutdown()
         runtime.localControl.shutdown()
         runtime.dispatcher.macros.cancel()
@@ -276,7 +289,15 @@ final class StudioWorkspace: ObservableObject {
             observeRuntime()
             runtime.sceneStore.setProjectIdentity(currentProject.id, name: currentProject.name)
             sceneRecovery = nil
-        } catch { self.error = error.localizedDescription }
+            error = nil
+        } catch {
+            // The previous runtime has already retired its account and controller sessions.
+            // Reopen the selected context so a failed filesystem operation remains recoverable.
+            runtime = StudioRuntime()
+            observeRuntime()
+            runtime.sceneStore.setProjectIdentity(currentProject.id, name: currentProject.name)
+            self.error = error.localizedDescription
+        }
         isSwitching = false
     }
 
@@ -291,9 +312,9 @@ final class StudioWorkspace: ObservableObject {
             previewProgram: runtime.previewProgram, controller: runtime.controller, pdfDecks: runtime.dispatcher.pdfDecks,
             recordingActivity: Publishers.CombineLatest(runtime.recorder.$state, runtime.controller.secondaryRecorder.$state)
                 .map { $0.0.isActive || $0.1.isActive }.eraseToAnyPublisher(),
-            remoteEvents: { [weak accounts = runtime.providerAccounts, weak controller = runtime.controller] ids in
-                guard let accounts, let controller else { return ids.map { SessionRecoveryRemoteEvent(outputID: $0) } }
-                return accounts.recoveryEvents(activeIDs: ids, destinations: controller.destinations.saved)
+            remoteEvents: { [weak controller = runtime.controller] ids in
+                guard let controller else { return ids.map { SessionRecoveryRemoteEvent(outputID: $0) } }
+                return controller.destinationOutputs.recoveryRemoteEvents
             },
             recordings: { [weak recorder = runtime.recorder, weak controller = runtime.controller] in
                 guard let recorder else { throw SessionRecoveryDiskStore.Failure.invalid }
@@ -303,6 +324,7 @@ final class StudioWorkspace: ObservableObject {
                     projectID: projectID, profileID: profileID,
                     activeFiles: Set(recorder.activeOutputURLs.union(controller?.secondaryRecordingActiveOutputURLs ?? []).map(\.lastPathComponent)))
             })
+        recovery.remoteReview.bindAccounts(runtime.providerAccounts)
         recovery.contextLabel = { [weak self] project, profile in
             guard let project = self?.catalog.projects.first(where: { $0.id == project }),
                   let profile = project.profiles.first(where: { $0.id == profile }) else { return nil }
@@ -323,6 +345,8 @@ final class StudioWorkspace: ObservableObject {
         }
         RecordingTerminationDelegate.finishSession = { [weak self] in
             guard let self else { return }
+            self.recovery.remoteReview.shutdown()
+            self.runtime.controller.shutdownManagedStart()
             self.runtime.controllers.shutdown(); self.runtime.controller.ending.shutdown(); self.runtime.providerAccounts.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
             self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop()
             self.runtime.controller.stopStream(); self.runtime.controller.stopSecondaryRecording(); self.runtime.controller.stopExternalDisplayOutput(); self.runtime.controller.stopVirtualCameraOutput()

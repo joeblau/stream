@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 readonly ISO_VIDEO_DIR="build/isolated-video-validation"
+readonly ISO_VIDEO_BUILD_PATH="${ISO_VIDEO_BUILD_PATH:-$ISO_VIDEO_DIR/derived}"
 mkdir -p "$ISO_VIDEO_DIR"
 ruby -ryaml -rjson - "$ISO_VIDEO_DIR" <<'RUBY'
 root=Dir.pwd
@@ -13,6 +14,7 @@ if ENV['STREAM_VENDOR_ROOT']
   spec['packages'].each_value{|p| p['path']=File.join(ENV['STREAM_VENDOR_ROOT'],File.basename(p['path'])) if p['path']}
 end
 spec['targets'].select!{|name,_| ['StreamCore','StreamMac'].include?(name)}
+spec['targets'].each_value{|t| t['dependencies']&.reject!{|d| d['target'] && !spec['targets'].key?(d['target'])}}
 spec['schemes']={}
 spec['targets'].each_value do |target|
   target['sources'].map!{|s| s.is_a?(String) ? File.join(root,s) : s.merge('path'=>File.join(root,s['path']))}
@@ -28,8 +30,11 @@ spec['schemes']['IsolatedVideoHarness']={'build'=>{'targets'=>{'IsolatedVideoHar
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$ISO_VIDEO_DIR/project.json" --project "$ISO_VIDEO_DIR"
+xcodebuild -resolvePackageDependencies -project "$ISO_VIDEO_DIR/IsolatedVideoValidation.xcodeproj" \
+  -scheme IsolatedVideoHarness -derivedDataPath "$ISO_VIDEO_BUILD_PATH"
+python3 scripts/repair_desktop_transport_archives.py "$ISO_VIDEO_BUILD_PATH"
 xcodebuild -project "$ISO_VIDEO_DIR/IsolatedVideoValidation.xcodeproj" \
   -scheme IsolatedVideoHarness -destination 'platform=macOS' \
-  -derivedDataPath "$ISO_VIDEO_DIR/derived" CODE_SIGNING_ALLOWED=NO build
-env DYLD_FRAMEWORK_PATH="$PWD/$ISO_VIDEO_DIR/derived/Build/Products/Debug" \
-  "$ISO_VIDEO_DIR/derived/Build/Products/Debug/IsolatedVideoHarness" "$ISO_VIDEO_DIR/media-$(uuidgen)"
+  -derivedDataPath "$ISO_VIDEO_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+env DYLD_FRAMEWORK_PATH="${ISO_VIDEO_BUILD_PATH:A}/Build/Products/Debug" \
+  "${ISO_VIDEO_BUILD_PATH:A}/Build/Products/Debug/IsolatedVideoHarness" "$ISO_VIDEO_DIR/media-$(uuidgen)"

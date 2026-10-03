@@ -45,7 +45,7 @@ import StreamCore
             guard let accounts else { throw CancellationError() }; return try await accounts.chatRequest(provider, request)
         }, identity: { [weak accounts] provider in
             guard let accounts else { throw CancellationError() }; return try await accounts.chatIdentity(provider)
-        }, emit: { [weak self] action in self?.receive(action) })
+        }, presetDirectory: DesktopStorage.projectDirectory, emit: { [weak self] action in self?.receive(action) })
         directChat = manager; accounts.directChat = manager
     }
     func receive(_ data: Data) {

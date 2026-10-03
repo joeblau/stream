@@ -58,10 +58,23 @@ jobs:
           zsh scripts/run_studio_automation_harness.zsh
           zsh scripts/run_studio_virtual_camera_harness.zsh
           PROVIDERS_BUILD_PATH=build/tests zsh scripts/run_provider_accounts_harness.zsh
+          SCHEDULING_BUILD_PATH=build/tests zsh scripts/run_provider_scheduling_harness.zsh
           CHAT_BUILD_PATH=build/tests zsh scripts/run_direct_chat_harness.zsh
           ENDING_BUILD_PATH=build/tests zsh scripts/run_studio_ending_harness.zsh
+          OWNED_ENDING_BUILD_PATH=build/tests zsh scripts/run_owned_ending_harness.zsh
       - name: Test browser helper protocol and bounded PCM inlet
         run: BROWSER_AUDIO_BUILD_PATH=build/desktop zsh scripts/run_browser_audio_helper_harness.zsh
+      - name: Test managed event review and shipping publisher gates
+        run: |
+          zsh scripts/run_managed_start_harness.zsh
+          MANAGED_CONTROLLER_BUILD_PATH=build/desktop zsh scripts/run_managed_start_controller_harness.zsh
+      - name: Qualify shared publishing encoders and bounded transport fanout
+        run: SHARED_ENCODER_BUILD_PATH=build/desktop zsh scripts/run_shared_encoder_harness.zsh
+
+      - name: Qualify local rehearsal preparation and cleanup
+        run: REHEARSAL_BUILD_PATH=build/desktop zsh scripts/run_local_rehearsal_harness.zsh
+      - name: Qualify local shortcut window and focus handling
+        run: LOCAL_SHORTCUT_BUILD_PATH=build/desktop zsh scripts/run_local_shortcut_harness.zsh
 
       - name: Test private program slate rendering
         run: PRIVACY_BUILD_PATH=build/desktop zsh scripts/run_studio_privacy_harness.zsh
@@ -71,13 +84,20 @@ jobs:
         run: |
           zsh scripts/run_studio_chat_harness.zsh
           RECOVERY_BUILD_PATH=build/tests zsh scripts/run_session_recovery_harness.zsh
+          REVIEW_BUILD_PATH=build/tests zsh scripts/run_recovery_event_review_harness.zsh
+          REVIEW_ACCOUNTS_BUILD_PATH=build/tests zsh scripts/run_recovery_accounts_harness.zsh
+          WORKSPACE_BUILD_PATH=build/desktop zsh scripts/run_studio_workspace_harness.zsh
       - name: Qualify recorded public chat timing
-        run: CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh
+        run: |
+          CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh
+          CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh --late-pause-burst
       - name: Qualify complete comment presentation and recorded pages
         run: COMMENT_BUILD_PATH=build/desktop zsh scripts/run_comment_presentation_harness.zsh
 
       - name: Qualify generated program recordings
-        run: zsh scripts/run_program_recording_harness.zsh
+        run: |
+          zsh scripts/run_program_recording_harness.zsh
+          STREAM_FRACTIONAL_ISO_FRAMEWORKS="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_fractional_iso_audio_harness.zsh
       - name: Validate sandbox declaration
         run: python3 scripts/validate_desktop_distribution.py build/desktop/Build/Products/Debug/StreamMac.app
       - name: Retain test results
@@ -85,7 +105,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.runner }}
-          path: apple/build/desktop-tests.xcresult
+          path: |
+            apple/build/desktop-tests.xcresult
+            apple/build/recording-chat-validation/media-*
+            apple/build/fractional-iso-audio-validation/media-*
 
   test:
     name: StreamCore tests (iOS Simulator)

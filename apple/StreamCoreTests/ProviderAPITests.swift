@@ -106,6 +106,46 @@ private final class ProviderClock: @unchecked Sendable {
         #expect((body["snippet"] as? [String: String])?["categoryId"] == "20")
         #expect((body["snippet"] as? [String: String])?["scheduledEndTime"] == "2030-01-02T00:00:00Z")
     }
+    @Test("Explicit privacy edits preserve snippet fields and content settings; mismatched acknowledgements fail")
+    func privacyEdit() async throws {
+        let old = #"{"items":[{"id":"event","etag":"v1","snippet":{"categoryId":"20","scheduledEndTime":"2030-01-02T00:00:00Z"},"status":{"lifeCycleStatus":"ready","privacyStatus":"private"}}]}"#
+        let reply = #"{"id":"event","snippet":{"title":"New"},"status":{"lifeCycleStatus":"ready","privacyStatus":"unlisted"}}"#
+        let fixture = ProviderFixture([old, reply])
+        let date = ISO8601DateFormatter().date(from: "2030-01-01T01:00:00Z")!
+        let event = try await fixture.api.editYouTubeEvent(id: "event", title: "New", description: "Unicode 🎬", scheduledAt: date, privacy: .unlisted)
+        #expect(event.privacy == "unlisted" && event.state == .upcoming)
+        let request = try #require(await fixture.allRequests().last)
+        let body = try #require(JSONSerialization.jsonObject(with: request.httpBody!) as? [String: Any])
+        #expect(request.value(forHTTPHeaderField: "If-Match") == "v1")
+        #expect(body["contentDetails"] == nil)
+        #expect((body["status"] as? [String: String]) == ["privacyStatus": "unlisted"])
+        #expect((body["snippet"] as? [String: String])?["categoryId"] == "20")
+        let uncertain = ProviderFixture([old, #"{"id":"other","status":{"privacyStatus":"unlisted"}}"#])
+        await #expect(throws: ProviderFailure.self) { try await uncertain.api.editYouTubeEvent(id: "event", title: "New", description: "", scheduledAt: date, privacy: .unlisted) }
+        #expect(await uncertain.allRequests().count == 2)
+    }
+    @Test("Thumbnail upload verifies owner, sends exact bounded media once and requires a receipt")
+    func thumbnailUpload() async throws {
+        let owned = #"{"items":[{"id":"event","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"ready"}}]}"#
+        let image = Data([137,80,78,71,13,10,26,10,0])
+        let fixture = ProviderFixture([owned, #"{"kind":"youtube#thumbnailSetResponse","items":[{"default":{"url":"https://i.ytimg.com/vi/event/default.jpg","width":120,"height":90}}]}"#])
+        #expect(try await fixture.api.uploadYouTubeThumbnail(eventID: "event", expectedChannelID: "owner", image: image, mimeType: "image/png").id == "event")
+        let requests = await fixture.allRequests(), request = try #require(requests.last)
+        #expect(requests.count == 2 && request.httpMethod == "POST")
+        #expect(request.url?.path == "/upload/youtube/v3/thumbnails/set" && request.httpBody == image)
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "image/png")
+        let wrong = ProviderFixture([owned])
+        await #expect(throws: ProviderFailure.self) { try await wrong.api.uploadYouTubeThumbnail(eventID: "event", expectedChannelID: "other", image: image, mimeType: "image/png") }
+        #expect(await wrong.allRequests().count == 1)
+        let malformed = ProviderFixture([owned, #"{"kind":"youtube#thumbnailSetResponse","items":[]}"#])
+        await #expect(throws: ProviderFailure.self) { try await malformed.api.uploadYouTubeThumbnail(eventID: "event", expectedChannelID: "owner", image: image, mimeType: "image/png") }
+        #expect(await malformed.allRequests().count == 2)
+        let invalid = ProviderFixture([])
+        for data in [Data(), Data(repeating: 0, count: 2_097_153)] {
+            await #expect(throws: ProviderFailure.self) { try await invalid.api.uploadYouTubeThumbnail(eventID: "event", expectedChannelID: "owner", image: data, mimeType: "image/png") }
+        }
+        #expect(await invalid.allRequests().isEmpty)
+    }
     @Test("Complete reads live state and explicitly transitions one remote ID")
     func complete() async throws {
         let fixture = ProviderFixture([#"{"items":[{"id":"live","status":{"lifeCycleStatus":"live"}}]}"#, #"{"id":"live","status":{"lifeCycleStatus":"complete"}}"#])
@@ -114,42 +154,55 @@ private final class ProviderClock: @unchecked Sendable {
         #expect(request.httpMethod == "POST")
         #expect(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "broadcastStatus" }?.value == "complete")
     }
-    @Test("Ending verifies fresh owner and completion acknowledgement; uncertain mutations stay unknown")
+    @Test("Ending proves the current authorized owner and exact event before a single completion")
     func endingReceipts() async throws {
+        let owner = #"{"items":[{"id":"owner"}]}"#
         let live = #"{"items":[{"id":"event","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"live"}}]}"#
         let completed = #"{"id":"event","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"complete"}}"#
-        let fixture = ProviderFixture([live, completed])
+        let fixture = ProviderFixture([owner, live, completed])
         let result = await fixture.api.endYouTubeEvent(id: "event", expectedChannelID: "owner")
         #expect(result.disposition == .ended && result.confirmsEnd && result.event?.id == "event")
         let calls = await fixture.allRequests()
-        #expect(calls.count == 2 && calls[0].httpMethod == "GET" && calls[1].httpMethod == "POST")
-        #expect(URLComponents(url: calls[1].url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "id" }?.value == "event")
-        let wrongOwner = ProviderFixture([live])
-        #expect(await wrongOwner.api.endYouTubeEvent(id: "event", expectedChannelID: "another").disposition == .blocked)
-        #expect(await wrongOwner.allRequests().count == 1)
+        #expect(calls.map { $0.url!.path } == ["/youtube/v3/channels", "/youtube/v3/liveBroadcasts", "/youtube/v3/liveBroadcasts/transition"])
+        #expect(calls.map(\.httpMethod) == ["GET", "GET", "POST"])
+        #expect(calls.prefix(2).allSatisfy { $0.cachePolicy == .reloadIgnoringLocalAndRemoteCacheData && $0.value(forHTTPHeaderField: "Cache-Control") == "no-cache" })
+        #expect(URLComponents(url: calls[0].url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "mine" }?.value == "true")
+        #expect(URLComponents(url: calls[2].url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "id" }?.value == "event")
+        // Public event metadata matching the saved owner cannot authorize a
+        // completion on behalf of a different currently authenticated account.
+        let foreignAccount = ProviderFixture([#"{"items":[{"id":"different-owner"}]}"#, live, completed])
+        #expect(await foreignAccount.api.endYouTubeEvent(id: "event", expectedChannelID: "owner").failure?.kind == .permission)
+        #expect(await foreignAccount.allRequests().count == 1)
+        let wrongEventOwner = ProviderFixture([owner, #"{"items":[{"id":"event","snippet":{"channelId":"different-owner"},"status":{"lifeCycleStatus":"live"}}]}"#])
+        #expect(await wrongEventOwner.api.endYouTubeEvent(id: "event", expectedChannelID: "owner").disposition == .blocked)
+        #expect(await wrongEventOwner.allRequests().count == 2)
         for uncertain in [#"{"id":"different","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"complete"}}"#,
                           #"{"id":"event","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"live"}}"#,
                           #"{"id":"event","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"revoked"}}"#] {
-            let response = ProviderFixture([live, uncertain])
+            let response = ProviderFixture([owner, live, uncertain])
             let receipt = await response.api.endYouTubeEvent(id: "event", expectedChannelID: "owner")
             #expect(receipt.disposition == .unconfirmed && !receipt.confirmsEnd && receipt.event == nil)
-            #expect(await response.allRequests().count == 2)
+            #expect(await response.allRequests().count == 3)
         }
-        let lostReply = ProviderFixture([live])
+        let lostReply = ProviderFixture([owner, live])
         #expect(await lostReply.api.endYouTubeEvent(id: "event", expectedChannelID: "owner").disposition == .unconfirmed)
-        #expect(await lostReply.allRequests().count == 2) // single mutation, no retry
+        #expect(await lostReply.allRequests().count == 3) // single mutation, no retry
     }
-    @Test("Already ended and review-only calls never mutate; upcoming is not deleted")
+    @Test("Already ended and owned review-only calls never mutate; upcoming is not deleted")
     func endingReview() async throws {
+        let owner = #"{"items":[{"id":"owner"}]}"#
         let ended = #"{"items":[{"id":"event","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"complete"}}]}"#
-        let fixture = ProviderFixture([ended, ended])
+        let fixture = ProviderFixture([owner, ended, owner, ended])
         #expect(await fixture.api.endYouTubeEvent(id: "event", expectedChannelID: "owner").disposition == .alreadyEnded)
         let review = await fixture.api.reviewYouTubeEnd(id: "event", expectedChannelID: "owner")
         #expect(review.disposition == .observed && review.confirmsEnd)
         #expect(await fixture.allRequests().allSatisfy { $0.httpMethod == "GET" })
-        let upcoming = ProviderFixture([#"{"items":[{"id":"event","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"ready"}}]}"#])
+        let foreign = ProviderFixture([#"{"items":[]}"#, ended])
+        #expect(await foreign.api.reviewYouTubeEnd(id: "event", expectedChannelID: "owner").disposition == .blocked)
+        #expect(await foreign.allRequests().count == 1)
+        let upcoming = ProviderFixture([owner, #"{"items":[{"id":"event","snippet":{"channelId":"owner"},"status":{"lifeCycleStatus":"ready"}}]}"#])
         #expect(await upcoming.api.endYouTubeEvent(id: "event", expectedChannelID: "owner").disposition == .blocked)
-        #expect(await upcoming.allRequests().count == 1)
+        #expect(await upcoming.allRequests().count == 2)
     }
     @Test("Only bound documented ingest credentials leave the adapter, never portable metadata")
     func ingest() async throws {
@@ -201,7 +254,24 @@ private final class ProviderClock: @unchecked Sendable {
         let form = String(decoding: requests[0].httpBody!, as: UTF8.self)
         #expect(form.contains("user%3Aread%3Achat") && form.contains("user%3Awrite%3Achat"))
         #expect(!form.contains("moderator%3Amanage%3Achat_messages"))
+        #expect(!form.contains("moderator%3Amanage%3Abanned_users"))
         await #expect(throws: ProviderFailure.self) { try await flow.authorize(clientID: "public", additionalScopes: ["unknown:scope"]) { _ in } }
         #expect(await fixture.allRequests().count == 2)
+    }
+    @Test("Twitch timeouts and bans request only the explicitly selected optional grant")
+    func banScopeOptIn() async throws {
+        let fixture = ProviderFixture([#"{"device_code":"device","user_code":"ABCD","verification_uri":"https://www.twitch.tv/activate","expires_in":60,"interval":1}"#,
+            #"{"access_token":"access","expires_in":3600,"scope":["moderator:manage:banned_users"]}"#])
+        let clock = ProviderClock()
+        let flow = TwitchDeviceAuthorization(send: { request in
+            let data = try await fixture.send(.twitch, request)
+            return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, sleep: { clock.advance($0) }, now: clock.now)
+        let token = try await flow.authorize(clientID: "public", additionalScopes: ["moderator:manage:banned_users"]) { _ in }
+        #expect(token.scopes == ["moderator:manage:banned_users"])
+        let requests = await fixture.allRequests()
+        let form = String(decoding: requests[0].httpBody!, as: UTF8.self)
+        #expect(form.contains("moderator%3Amanage%3Abanned_users"))
+        #expect(!form.contains("user%3Aread%3Achat") && !form.contains("user%3Awrite%3Achat"))
     }
 }

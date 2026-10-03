@@ -12,6 +12,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 const publicPath = fileURLToPath(new URL('../../public/', import.meta.url));
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const room = crypto.randomUUID(), hostCap = 'a'.repeat(64), guestCap = 'b'.repeat(64);
+const hostID=crypto.randomUUID(),guestID=crypto.randomUUID();
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'stream-reference-chrome-'));
 const connections = [];
 let host, guest, program = false, recording = false, locked = false, ended = false;
@@ -50,7 +51,8 @@ server.on('upgrade', (request, socket, head) => {
   if (!role || ended) {socket.destroy(); return;}
   wss.handleUpgrade(request, socket, head, ws => {
     const previous = role==='host' ? host : guest;
-    const peer = {socket:ws, role, id:previous?.id ?? crypto.randomUUID(), generation:crypto.randomUUID(),
+    // Actual Worker identities belong to the invite, not the current socket.
+    const peer = {socket:ws, role, id:role==='host'?hostID:guestID, generation:crypto.randomUUID(),
       state:'waiting', name:role==='host' ? 'Host' : 'Guest', delivery:0};
     if (role==='host') host = peer; else guest = peer;
     connections.push(peer); previous?.socket.close(4001, 'Replaced');
@@ -112,10 +114,11 @@ class CDP {
       });
     });
   }
-  async target(url) {
+  async target(url, script='') {
     const target = await this.send('Target.createTarget', {url:'about:blank'});
     const attached = await this.send('Target.attachToTarget', {targetId:target.targetId, flatten:true});
     await this.send('Page.enable', {}, attached.sessionId); await this.send('Runtime.enable', {}, attached.sessionId);
+    if(script)await this.send('Page.addScriptToEvaluateOnNewDocument',{source:script},attached.sessionId);
     await this.send('Page.navigate', {url}, attached.sessionId); return attached.sessionId;
   }
   async evaluate(session, expression) {
@@ -153,8 +156,16 @@ async function run() {
   const socket = new WebSocket(`ws://127.0.0.1:${lines[0]}${lines[1]}`, {handshakeTimeout:10000});
   await new Promise((resolve, reject) => {socket.once('open', resolve); socket.once('error', reject);});
   browser = new CDP(socket);
-  const h = await browser.target(`${origin}/host.html?room=${room}#${hostCap}`);
-  const g = await browser.target(`${origin}/guest.html?room=${room}#${guestCap}`);
+  const peerObserver=`window.__fixturePeers=[];const NativePeer=window.RTCPeerConnection;window.RTCPeerConnection=class extends NativePeer{constructor(...args){super(...args);window.__fixturePeers.push(this);}};`;
+  const screenFixture=`window.__fixtureScreens=[];window.__fixtureDisplayCount=0;Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{value:async()=>{
+    window.__fixtureDisplayCount++;if(window.__fixtureDenyDisplay)throw new DOMException('Synthetic refusal','NotAllowedError');const canvas=document.createElement('canvas');canvas.width=640;canvas.height=360;
+    const context=canvas.getContext('2d');const paint=()=>{context.fillStyle='rgb(12,200,60)';context.fillRect(0,0,640,360);context.fillStyle='white';context.fillRect((Date.now()/10)%600,20,20,20);};paint();
+    const stream=canvas.captureStream(15),track=stream.getVideoTracks()[0];window.__fixtureScreens.push(stream);
+    const timer=setInterval(()=>{if(track.readyState==='ended'){clearInterval(timer);return;}paint();},50);
+    if(window.__fixtureDelayDisplay)await new Promise(resolve=>window.__fixtureResolveDisplay=resolve);return stream;
+  }});`;
+  const h = await browser.target(`${origin}/host.html?room=${room}#${hostCap}`,peerObserver);
+  const g = await browser.target(`${origin}/guest.html?room=${room}#${guestCap}`,peerObserver+screenFixture);
   await browser.wait(h, "typeof document.getElementById('connect')?.onclick==='function'", 'host page');
   await browser.wait(g, "typeof document.getElementById('prepare')?.onclick==='function'", 'guest page');
   assert.equal(await browser.evaluate(h, 'location.hash'), ''); assert.equal(await browser.evaluate(g, 'location.hash'), '');
@@ -166,6 +177,59 @@ async function run() {
   await browser.wait(h, "document.querySelector('[data-action=admit]')", 'waiting guest');
   await browser.evaluate(h, "document.querySelector('[data-action=admit]').click()");
   await browser.wait(h, "document.querySelector('#roster video')?.videoWidth>0 && document.querySelector('#roster video')?.srcObject?.getTracks().some(t=>t.kind==='audio'&&t.readyState==='live')", 'real guest video/audio tracks');
+  const health=`(async()=>{const reports=await window.__fixturePeers.at(-1).getStats();const values=[...reports.values()].filter(value=>value.type==='inbound-rtp');const video=document.querySelector('[data-source=camera]'),track=video?.srcObject?.getVideoTracks()[0];return {camera:values.find(value=>value.trackIdentifier===track?.id)?.framesDecoded??0,audio:values.filter(value=>value.kind==='audio').reduce((sum,value)=>sum+(value.packetsReceived??0),0)};})()`;
+  await browser.wait(h,`(${health}).then(value=>value.camera>0&&value.audio>0)`,'actual received camera and audio packets');
+  assert.equal(await browser.evaluate(g,"document.getElementById('share').disabled"),true);
+  await browser.evaluate(g,"document.getElementById('share').onclick()");
+  assert.equal(await browser.evaluate(g,'window.__fixtureDisplayCount'),0,'Unapproved sharing must not request a display');
+  const sourceIDs=await browser.evaluate(h,"[...document.querySelectorAll('#roster [data-source]')].map(value=>value.dataset.sourceId)");
+  assert.equal(new Set(sourceIDs).size,2);assert(sourceIDs[0].endsWith('/camera')&&sourceIDs[1].endsWith('/screen'));
+  await browser.evaluate(h,"document.querySelector('[data-action=approveScreen]').click()");
+  await browser.wait(g,"!document.getElementById('share').disabled",'explicit host screen approval');
+  await browser.evaluate(g,"document.getElementById('share').click()");
+  await browser.wait(h,"document.querySelector('[data-source=screen]')?.videoWidth>0&&document.querySelector('[data-source=screen]').srcObject!==null",'independent decoded screen');
+  const mids=await browser.evaluate(h,"[...document.querySelectorAll('#roster [data-source]')].map(value=>value.dataset.mid)");
+  assert.equal(new Set(mids).size,2);assert(mids.every(Boolean));
+  assert.equal(await browser.evaluate(h,"document.querySelector('[data-source=camera]').srcObject.getVideoTracks()[0].id!==document.querySelector('[data-source=screen]').srcObject.getVideoTracks()[0].id"),true);
+  assert.equal(await browser.evaluate(h,"(()=>{const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d');context.drawImage(document.querySelector('[data-source=screen]'),0,0,1,1);const pixel=context.getImageData(0,0,1,1).data;return pixel[1]>150&&pixel[0]<70&&pixel[2]<100;})()"),true,'Screen pixels must come from the independent synthetic source');
+  const beforeStop=await browser.evaluate(h,health);
+  await browser.evaluate(g,"document.getElementById('stopshare').click()");
+  await browser.wait(h,"document.querySelector('[data-source=screen]').srcObject===null",'screen stopped independently');
+  await browser.wait(g,"window.__fixtureScreens.at(-1).getTracks().every(track=>track.readyState==='ended')&&window.__fixtureGuestTracks.every(track=>track.readyState==='live')",'display stopped without camera/microphone loss');
+  await browser.wait(h,`(${health}).then(value=>value.camera>${beforeStop.camera}&&value.audio>${beforeStop.audio})`,'camera/audio continue after screen stop');
+  await browser.evaluate(g,"document.getElementById('share').click()");
+  await browser.wait(h,"document.querySelector('[data-source=screen]').srcObject!==null",'second independent screen');
+  await browser.evaluate(h,"document.querySelector('[data-action=approveScreen]').click()");
+  await browser.wait(g,"document.getElementById('share').disabled&&window.__fixtureScreens.at(-1).getTracks().every(track=>track.readyState==='ended')",'host removes screen permission');
+  await browser.wait(h,"document.querySelector('[data-source=screen]').srcObject===null",'unapproved screen hidden immediately');
+  // A permission result that returns after grant removal must be stopped,
+  // rather than replacing a camera sender or entering a new connection.
+  await browser.evaluate(h,"document.querySelector('[data-action=approveScreen]').click()");
+  await browser.wait(g,"!document.getElementById('share').disabled",'approval for delayed display request');
+  await browser.evaluate(g,"window.__fixtureDelayDisplay=true;document.getElementById('share').click()");
+  await browser.wait(g,"typeof window.__fixtureResolveDisplay==='function'",'held synthetic display result');
+  await browser.evaluate(h,"document.querySelector('[data-action=approveScreen]').click()");
+  await browser.wait(g,"document.getElementById('share-status').textContent.includes('requires')",'grant removed before display returns');
+  const heldCount=await browser.evaluate(g,'window.__fixtureDisplayCount');
+  await browser.evaluate(h,"document.querySelector('[data-action=approveScreen]').click()");
+  await browser.wait(g,"document.getElementById('share-status').textContent.includes('chooser')",'held display request keeps its admission slot');
+  await browser.evaluate(g,"document.getElementById('share').onclick()");
+  assert.equal(await browser.evaluate(g,'window.__fixtureDisplayCount'),heldCount,'Noncooperative display requests remain bounded to one across approval changes');
+  await browser.evaluate(h,"document.querySelector('[data-action=approveScreen]').click()");
+  await browser.wait(g,"document.getElementById('share-status').textContent.includes('requires')",'second removal before held result');
+  await browser.evaluate(g,"window.__fixtureDelayDisplay=false;window.__fixtureResolveDisplay()");
+  await browser.wait(g,"window.__fixtureScreens.at(-1).getTracks().every(track=>track.readyState==='ended')&&window.__fixtureGuestTracks.every(track=>track.readyState==='live')",'late display result discarded');
+  await browser.evaluate(h,"document.querySelector('[data-action=approveScreen]').click()");
+  await browser.wait(g,"!document.getElementById('share').disabled",'approved permission-denial case');
+  await browser.evaluate(g,"window.__fixtureDenyDisplay=true;document.getElementById('share').click()");
+  await browser.wait(g,"document.getElementById('status').textContent.includes('cancelled')&&window.__fixtureGuestTracks.every(track=>track.readyState==='live')&&!document.getElementById('share').disabled",'display permission denial keeps camera/audio healthy');
+  await browser.evaluate(g,"window.__fixtureDenyDisplay=false;window.__fixtureDelayDisplay=true;window.__fixtureResolveDisplay=undefined;document.getElementById('share').click()");
+  await browser.wait(g,"typeof window.__fixtureResolveDisplay==='function'",'held display across new negotiation');
+  await browser.evaluate(h,"document.querySelector('[data-action=restartGuest]').click()");
+  await browser.wait(g,"document.getElementById('share-status').textContent.includes('requires')",'new negotiation requires new screen grant');
+  await browser.evaluate(g,"window.__fixtureDelayDisplay=false;window.__fixtureResolveDisplay()");
+  await browser.wait(g,"window.__fixtureScreens.at(-1).getTracks().every(track=>track.readyState==='ended')&&window.__fixtureGuestTracks.every(track=>track.readyState==='live')",'late old-negotiation display result stopped');
+  await browser.wait(h,`(${health}).then(value=>value.camera>0&&value.audio>0)`,'new negotiation camera/audio remain received');
   assert.equal(await browser.evaluate(g, "document.getElementById('return').srcObject"), null);
   await browser.evaluate(h, "document.getElementById('enable-return').click()");
   await browser.wait(g, "document.getElementById('return').videoWidth>0", 'real optional host return');
@@ -173,13 +237,27 @@ async function run() {
   await browser.wait(h, "document.querySelector('.peer-status').textContent.includes('Test on-air')", 'authoritative test stage');
   await browser.evaluate(h, "document.getElementById('program').click(); document.getElementById('recording').click()");
   await browser.wait(g, "document.getElementById('program').textContent.includes('Program live')&&document.getElementById('program').textContent.includes('Recording active')", 'authoritative protocol status flags');
+  await browser.wait(h,"!document.querySelector('[data-action=approveScreen]').disabled",'screen control after host return restart');
+  await browser.evaluate(h,"document.querySelector('[data-action=approveScreen]').click()");
+  await browser.wait(g,"!document.getElementById('share').disabled",'new media screen approval');
+  await browser.evaluate(g,"document.getElementById('share').click()");
+  await browser.wait(h,"document.querySelector('[data-source=screen]').srcObject!==null",'active screen before guest reconnect');
   await browser.evaluate(g, "document.getElementById('rejoin').click()");
+  await browser.wait(g,"window.__fixtureScreens.every(stream=>stream.getTracks().every(track=>track.readyState==='ended'))",'guest reconnect stops every screen capture');
   await browser.wait(h, "document.querySelector('[data-action=admit]')&&!document.querySelector('[data-action=admit]').disabled", 'guest rejoin waiting');
   await browser.evaluate(h, "document.querySelector('[data-action=admit]').click()");
   await browser.wait(h, "document.querySelector('#roster video')?.videoWidth>0&&document.querySelector('#roster video')?.srcObject?.getTracks().some(t=>t.readyState==='live')", 'guest media after readmission');
+  assert.equal(await browser.evaluate(g,"document.getElementById('share').disabled"),true,'Guest reconnect must clear screen approval');
+  assert.deepEqual(await browser.evaluate(h,"[...document.querySelectorAll('#roster [data-source]')].map(value=>value.dataset.sourceId)"),sourceIDs,'Source identities remain stable for the invite across rejoin');
+  await browser.wait(h,"!document.querySelector('[data-action=approveScreen]').disabled",'readmitted guest screen control');
+  await browser.evaluate(h,"document.querySelector('[data-action=approveScreen]').click()");
+  await browser.wait(g,"!document.getElementById('share').disabled",'explicit readmitted screen approval');
+  await browser.evaluate(g,"document.getElementById('share').click()");
+  await browser.wait(h,"document.querySelector('[data-source=screen]').srcObject!==null",'active screen before host reconnect');
   // Genuine host loss must release return devices and require a new admission.
   await browser.evaluate(h, "document.getElementById('rejoin').click()");
   await browser.wait(h, "window.__fixtureHostTracks.every(t=>t.readyState==='ended')&&document.getElementById('preview').srcObject===null", 'host devices stopped on reconnect');
+  await browser.wait(g,"window.__fixtureScreens.every(stream=>stream.getTracks().every(track=>track.readyState==='ended'))&&document.getElementById('share').disabled",'host reconnect stops screen and clears approval');
   await browser.wait(h, "!document.querySelector('[data-action=admit]').disabled", 'host rejoin waiting roster');
   await browser.evaluate(h, "document.querySelector('[data-action=admit]').click()");
   await browser.wait(h, "document.querySelector('#roster video')?.videoWidth>0&&document.querySelector('#roster video')?.srcObject?.getTracks().some(t=>t.readyState==='live')", 'guest media after host rejoin');
@@ -190,7 +268,7 @@ async function run() {
   await browser.evaluate(h, "document.getElementById('end').click()");
   await browser.wait(h, "document.getElementById('preview').srcObject===null&&document.getElementById('connect').disabled&&window.__fixtureHostTracks.every(t=>t.readyState==='ended')", 'end stops host tracks and invite');
   assert.deepEqual(browser.errors, []);
-  console.log('PASS actual headless Chrome: fragment wipe, explicit admission, real synthetic WebRTC video/audio tracks, optional host return, authoritative test stage, guest/host reconnect and readmission, revoke/end track and capability cleanup. Loopback fixture; no real TURN or native/physical qualification.');
+  console.log('PASS actual headless Chrome: fragment wipe, admission, concurrent independently decoded camera/screen MIDs and stable source identities, explicit host screen approval/removal, late display result cleanup, camera/audio packets continue after screen stop, optional host return, authoritative test stage, guest/host reconnect clears screen tracks and approvals, revoke/end cleanup. Synthetic canvas replaces the display picker; real loopback WebRTC, no real TURN or native/physical qualification.');
 }
 try {
   await Promise.race([run(), new Promise((_resolve, reject) => {deadline = setTimeout(() => reject(new Error('Browser fixture exceeded 120 seconds')), 120000);})]);

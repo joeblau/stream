@@ -10,7 +10,7 @@ import Testing
         copy.isEnabled = true
         let compatible = DestinationEncodingPlan(destinations: [primary, copy], program: .default)
         #expect(compatible.compatibleGroups.count == 1)
-        #expect(compatible.encoderSessions == 2, "Current backend does not share hardware sessions")
+        #expect(compatible.encoderSessions == 2, "Default adaptive mode reserves one encoder per publisher")
         let baseline = DestinationEncoderKey(destination: primary, program: .default)
         copy.videoBitrate += 1
         #expect(DestinationEncoderKey(destination: copy, program: .default) != baseline)
@@ -21,6 +21,33 @@ import Testing
         copy = primary; copy.followsProgramProfile = false
         copy.outputProfile = .init(canvasWidth: 1920, canvasHeight: 1080, frameRate: 60)
         #expect(DestinationEncoderKey(destination: copy, program: .default) != baseline)
+    }
+
+    @Test("Opt-in fixed H264 AAC sharing counts supported groups only")
+    func fixedSharing() {
+        let a = StreamDestination(name: "A", transport: .rtmp)
+        var b = a.duplicated(); b.transport = .srt
+        let raw = DestinationEncodingPlan(destinations: [a, b], program: .default)
+        #expect(raw.encoderSessions == 2 && !raw.sharedH264AAC)
+        let shared = DestinationEncodingPlan(destinations: [a, b], program: .default, measuredSessionLimit: 1, shareH264AAC: true)
+        #expect(shared.encoderSessions == 1 && shared.issues.isEmpty)
+        b.canvas = .secondary
+        #expect(DestinationEncodingPlan(destinations: [a, b], program: .default, shareH264AAC: true).encoderSessions == 2)
+        b = a; b.transport = .srt; b.audioBitrate += 1
+        #expect(DestinationEncodingPlan(destinations: [a, b], program: .default, shareH264AAC: true).encoderSessions == 2)
+        var whip = a.duplicated(); whip.transport = .whip
+        let secondWhip = whip.duplicated()
+        var hevc = a.duplicated(); hevc.transport = .srt; hevc.videoCodec = .hevc
+        #expect(DestinationEncodingPlan(destinations: [a, whip, secondWhip, hevc, hevc.duplicated()], program: .default, shareH264AAC: true).encoderSessions == 5)
+        for rate in [16_000, 640_000] {
+            var unsupported = a; unsupported.audioBitrate = rate
+            #expect(DestinationEncodingPlan(destinations: [unsupported, unsupported.duplicated()], program: .default, shareH264AAC: true).encoderSessions == 2)
+        }
+        var fractional = a; fractional.keyframeSeconds = 1.5
+        #expect(DestinationEncodingPlan(destinations: [fractional, fractional.duplicated()], program: .default, shareH264AAC: true).encoderSessions == 2)
+        var faster = a; faster.followsProgramProfile = false
+        faster.outputProfile = .init(canvasWidth: 1280, canvasHeight: 720, frameRate: 60)
+        #expect(DestinationEncodingPlan(destinations: [faster, faster.duplicated()], program: .default, shareH264AAC: true, sourceFrameRate: 24).encoderSessions == 2)
     }
 
     @Test("Aggregate estimates enforce ten outputs and measured session/uplink limits")

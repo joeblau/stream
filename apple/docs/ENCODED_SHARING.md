@@ -1,0 +1,45 @@
+# Fixed H.264/AAC publishing groups
+
+Desktop Destinations includes **Share compatible H.264/AAC encoders (fixed profiles)**. It defaults off and can change only while studio outputs and encoder finalization are idle. The profile saves its secret-free preference in `destination-encoding.v1.json`; missing, unreadable or newer documents keep sharing off and preserve existing bytes. Duplicating a local profile copies this preference. Portable import without this optional document keeps the safe default.
+
+Default publishing retains a separate adaptive encoder per destination. Opt-in groups actually encode H.264 Main and 48 kHz stereo AAC-LC once, then deliver the same immutable compressed `CMSampleBuffer` and AAC packet objects to independent RTMP/RTMPS/SRT publisher actors. Recording, WHIP/Opus, HEVC and fixed settings outside the accepted range retain separate encoders. This does not change iOS capture or add recording/network bitstream reuse.
+
+## Identity and resource ownership
+
+A group belongs to one studio output controller and one taken Program or Secondary composition. It matches canvas, width/height, frame rate, H.264 codec/profile, video/audio bitrates, whole-second keyframe interval, canonical post-mix Program audio pipeline and real-time/no-reordering latency policy. Equal geometry across different canvases cannot share pixels. Current supported fixed settings are even dimensions 2–4096, 1–60 fps up to the taken canvas's rendering cadence, positive video bitrate, AAC 32–320 kbps and keyframes 1–10 seconds apart; destination/hardware/ingest validation still applies before start. A custom override outside this fixed backend's range uses separate publishing and receives no budget discount. Higher-than-source frame rates retain the existing separate publisher/repeat path; the sharing path does not claim to generate extra source frames. Lower, non-divisor rates preserve sampling phase (for example, 60 fps input to 24 fps output) while retaining source timestamps.
+
+Changing a destination profile takes effect on its next explicit start and creates or joins the matching group. It never reconfigures another group's encoder. Each group's own VideoToolbox session controls bitrate, fps and keyframes. Individual network adaptive or thermal callbacks cannot lower shared profile settings. A strained route sheds its own media or reconnects; operators can stop it or use separate adaptive encoding after all outputs stop.
+
+The output controller counts real active and finalizing groups, separate publishing reservations, and old failed raw sessions still tearing down during a stable-ID retry. A group's last member releases its reservation only after VideoToolbox completion/invalidation and converter teardown. A transport can remain Stopping while waiting for its own close receipt after that encoder is gone. The studio's four-video-encoder limit also counts Program/Secondary/ISO recording and writer finalization. The destination estimate displays the selected backend mode and current publishing count. Hardware tier and an operator's tested budget remain estimates/qualification boundaries rather than a guarantee that every supported profile runs concurrently.
+
+Sharing saves encoding work, not network traffic: every destination still sends its own payload. Uplink estimates retain all outputs, protocol overhead and spare capacity.
+
+## Bounded transport independence and IDR recovery
+
+Capture callbacks synchronously enqueue into each unique group once, without waiting for any transport. Each group retains at most two raw video buffers (64 MiB each), 64 bounded PCM buffers (4096 frames / 32 KiB each), four in-flight VideoToolbox frames and a six-buffer scaled pixel pool. Audio must remain canonical 48 kHz stereo on its original continuous clock; gaps or accumulated timestamp discontinuity fail the group visibly instead of inventing continuous timing. No unbounded task is spawned for each packet.
+
+VideoToolbox's optional maximum frame delay is set individually. Bulk property assignment can report success even when the software encoder does not support that key. In that case the group's worker explicitly completes each accepted video timestamp; it yields after one video/audio input pair so the emitted callback can deliver the first IDR and release its admission slot. This keeps the software fallback from indefinitely holding all four admitted frames. Source timestamps, queue bounds and per-destination isolation remain the same; software encoding throughput still depends on the selected profile and machine.
+
+Each destination has a separate ordered compressed mailbox: at most 64 queued packets / 4 MiB plus one in-flight packet. Overflow clears queued dependent video and audio, requests an IDR, and resumes only at that IDR. Stop, reconnect and fresh publish reset that target's mailbox. Keyframe requests coalesce in the group with a minimum 250 ms spacing; healthy targets continue with the same profile. The adapters additionally shed dependent media when their observed socket queue reaches 512 KiB. Socket health is sampled by the existing transport supervisor, so that threshold is a congestion trigger, not an exact hard bound on the vendor socket queue.
+
+SRT's TS writer needs both format descriptions before its first PES. The adapter primes the AAC description before accepting video, requests a fresh IDR, then starts audio/video. Initial SRT media can therefore start later than RTMP; all timestamps remain on the same source clock. No dependent frame is sent after a discarded startup IDR. Pause/resume also requires a fresh IDR. A shared encoder failure ends its own member outputs; a failed or slow publisher ends only its own destination. Neither event automatically completes remote provider broadcasts.
+
+## Public API boundary
+
+The pinned HaishinKit revision remains `407adcf411eab17070656f5917a78bace994d9d8`; no vendor or ABI patch is required. Its public `RTMPStream.append(CMSampleBuffer)` directly packetizes H.264 sample buffers without image buffers, and `SRTStream.append(CMSampleBuffer)` forwards those samples to TSWriter. Encoded adapters do not start a redundant capture mixer. Their public audio append methods accept `AVAudioCompressedBuffer` plus `AVAudioTime`, so the frozen app wrapper holds that same AAC packet alongside its compressed `CMSampleBuffer`. The default raw MediaMixer paths remain available.
+
+Encoding uses Apple's [VTCompressionSession API](https://developer.apple.com/documentation/videotoolbox/vtcompressionsession-api-collection) and [AVAudioCompressedBuffer](https://developer.apple.com/documentation/avfaudio/avaudiocompressedbuffer). Group callbacks retain their owner safely until delivery; stopped generations cannot fail or release a later group with identical settings.
+
+## Native evidence
+
+Run from the repository root:
+
+```sh
+SHARED_ENCODER_BUILD_PATH=/tmp/stream-shared-encoder-build zsh apple/scripts/run_shared_encoder_harness.zsh
+```
+
+The fixture compiles shipping controller, encoder, mailboxes and adapters. It runs once with the shipping hardware preference and again with public VideoToolbox software encoding explicitly selected through an internal constructor fixture boundary. Both runs retain the same sample-count, duration and synchronization assertions. It proves compressed object identity, bytes and timestamps across matching targets; writes two actual passthrough MP4s; decodes H.264/AAC with AVAssetReader; checks flash/tone synchronization; checks separate profiles/canvases; saturates a target's queue and verifies IDR recovery while the healthy target advances; exercises independent stop/fail/rejoin and stale acknowledgments; validates encoder/fallback finalization counts, 60-to-24 fps cadence with actual decoded output, higher-than-source fallback, and preference preservation (including an existing unreadable directory at the document path).
+
+When Homebrew FFmpeg is available, the same fixture publishes to simultaneous **localhost-only** RTMP and SRT listeners using the actual adapters, then decodes both resulting MP4s. It waits for each receiver PID's actual listening socket before connecting, without consuming its one accepted input. One observed M3 Max run produced matching 2.0-second / 50-frame passthrough files with about 24 ms flash/tone difference, a 3.999-second / 100-frame RTMP file with about 2 ms difference, and a 3.72-second / 93-frame SRT file with about 27 ms difference after its startup primer. FFmpeg does not reply to RTMP Unpublish.Success; local teardown correctly waits the dependency's three-second request timeout. If FFmpeg is absent, the fixture explicitly reports the transport portion unqualified while retaining native buffer/container checks.
+
+This is small-profile local software evidence. TLS/RTMPS, public provider ingest acceptance, service-specific limits, sustained high-resolution/thermal behavior, every machine's hardware capacity, WHIP/HEVC sharing and recording bitstream reuse are not qualified by it. No external provider mutation or remote publishing occurs in this fixture.

@@ -119,21 +119,39 @@ actor ProviderTokenVault {
         var validated = token; validated.scopes = scopes; validated.expiresAt = Date().addingTimeInterval(seconds)
         try save(validated, provider: .twitch)
     }
-    func send(_ provider: ManagedProvider, request: URLRequest) async throws -> Data {
+    func send(_ provider: ManagedProvider, request: URLRequest, expectedGeneration: UUID? = nil,
+              retryAuthorizedGET: Bool = true,
+              authorizationIsCurrent: @Sendable () -> Bool = { true }, requiredAnyScope: Set<String> = []) async throws -> Data {
         let expected = generation(provider)
+        guard authorizationIsCurrent(), expectedGeneration.map({ $0 == expected }) ?? true else { throw ProviderFailure(.authorization) }
         let allowed = provider == .youtube ? "www.googleapis.com" : (provider == .twitch ? "api.twitch.tv" : "")
-        guard request.url?.scheme == "https", request.url?.host == allowed, request.url?.user == nil, request.url?.password == nil, request.url?.path.hasPrefix(provider == .youtube ? "/youtube/v3/" : "/helix/") == true else { throw ProviderFailure(.invalidRequest) }
+        let path = request.url?.path ?? ""
+        let regularAPI = path.hasPrefix(provider == .youtube ? "/youtube/v3/" : "/helix/")
+        let thumbnailUpload = provider == .youtube && path == "/upload/youtube/v3/thumbnails/set" && request.httpMethod == "POST"
+            && ["image/jpeg", "image/png"].contains(request.value(forHTTPHeaderField: "Content-Type") ?? "")
+            && (1...2_097_152).contains(request.httpBody?.count ?? 0)
+        guard request.url?.scheme == "https", request.url?.host == allowed, request.url?.user == nil, request.url?.password == nil,
+              regularAPI || thumbnailUpload else { throw ProviderFailure(.invalidRequest) }
         var token = try await current(provider), authorized = request
+        guard authorizationIsCurrent(), generation(provider) == expected else { throw ProviderFailure(.authorization) }
+        guard requiredAnyScope.isEmpty || !requiredAnyScope.isDisjoint(with: token.scopes) else { throw ProviderFailure(.permission) }
+        try Task.checkCancellation()
         authorized.setValue("Bearer \(token.access)", forHTTPHeaderField: "Authorization")
         if provider == .twitch { authorized.setValue(clientID(provider), forHTTPHeaderField: "Client-ID") }
+        guard authorizationIsCurrent() else { throw ProviderFailure(.authorization) }
+        try Task.checkCancellation()
         var (data, response) = try await transport(authorized)
         // Read-only retries cannot duplicate an event mutation.
-        if response.statusCode == 401 && (request.httpMethod ?? "GET") == "GET" {
+        if retryAuthorizedGET && response.statusCode == 401 && (request.httpMethod ?? "GET") == "GET" {
             token = try await current(provider, forceRefresh: true)
+            guard authorizationIsCurrent(), generation(provider) == expected else { throw ProviderFailure(.authorization) }
+            guard requiredAnyScope.isEmpty || !requiredAnyScope.isDisjoint(with: token.scopes) else { throw ProviderFailure(.permission) }
+            try Task.checkCancellation()
             authorized.setValue("Bearer \(token.access)", forHTTPHeaderField: "Authorization")
+            guard authorizationIsCurrent() else { throw ProviderFailure(.authorization) }
             (data, response) = try await transport(authorized)
         }
-        guard generation(provider) == expected else { throw CancellationError() }
+        guard authorizationIsCurrent(), generation(provider) == expected else { throw CancellationError() }
         try ProviderFailure.check(data: data, response: response)
         return data
     }

@@ -15,6 +15,10 @@ import StreamCore
         let runtime = StudioRuntime()
         runtime.controllers.shutdown(); runtime.localControl.shutdown()
         runtime.dispatcher.bindChatCoordinator(runtime.chat)
+        // The generated tool replaces Keychain with a no-op boundary. These
+        // valid in-memory fixture credentials let the real budget gate run.
+        runtime.controller.destinations.credentials[budgetDestination.id] = .init(endpoint: "rtmp://127.0.0.1/live", streamKey: "fixture-only")
+        try require(runtime.controller.destinations.apply(), "Seed valid fixture destination")
         defer { runtime.controllers.shutdown(); runtime.localControl.shutdown(); runtime.chat.shutdown(); runtime.flush() }
         runtime.controller.maximumPublishingEncoders = { 0 }
         runtime.controller.goLive()

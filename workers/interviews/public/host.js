@@ -2,6 +2,7 @@
 // written to storage, query strings, logs or third-party services.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CAPABILITY = /^[0-9a-f]{64}$/;
+const CONTROL = 'stream-interview-control-v1';
 const byteLength = value => new TextEncoder().encode(value).length;
 
 export class InterviewReferenceHost {
@@ -86,7 +87,7 @@ export class InterviewReferenceHost {
       const previous=this.peers.get(data.guest);
       if(previous?.generation===data.guestGeneration) return;
       this.#dropPeer(data.guest);
-      const record={id:data.guest,generation:data.guestGeneration,negotiation:undefined,pc:undefined,candidates:[],chain:Promise.resolve(),pendingSignals:0,media:'Preparing media',sentICE:0};
+      const record={id:data.guest,generation:data.guestGeneration,negotiation:undefined,pc:undefined,candidates:[],chain:Promise.resolve(),pendingSignals:0,media:'Preparing media',sentICE:0,screenApproved:false,screenSharing:false};
       this.peers.set(record.id,record);
       this.#offer(record,epoch).catch(()=>{if(this.peers.get(record.id)===record){record.media='Media unavailable. Configure TURN and restart media.';this.changed();}}); return;
     }
@@ -129,20 +130,51 @@ export class InterviewReferenceHost {
     const servers=await this.#relayConfiguration();
     if(epoch!==this.#epoch || this.peers.get(record.id)!==record) return;
     const pc=new this.api.RTCPeerConnection({iceServers:servers});record.pc=pc;record.negotiation=this.api.randomUUID();
-    if(this.#local) this.#local.getTracks().forEach(track=>pc.addTrack(track,this.#local));
-    else {pc.addTransceiver('audio',{direction:'recvonly'});pc.addTransceiver('video',{direction:'recvonly'});}
+    // Three distinct, pre-negotiated MIDs. Screen sharing never replaces the
+    // camera sender and does not need a guest-initiated SDP renegotiation.
+    const audio=pc.addTransceiver('audio',{direction:this.#local?'sendrecv':'recvonly'});
+    const camera=pc.addTransceiver('video',{direction:this.#local?'sendrecv':'recvonly'});
+    const screen=pc.addTransceiver('video',{direction:'recvonly'});
+    if(this.#local) {
+      for(const [transceiver,kind] of [[audio,'audio'],[camera,'video']]) {
+        const track=this.#local.getTracks().find(value=>value.kind===kind);
+        if(track){transceiver.sender.setStreams(this.#local);await transceiver.sender.replaceTrack(track);}
+        if(epoch!==this.#epoch || this.peers.get(record.id)!==record || record.pc!==pc)return;
+      }
+    }
+    const control=pc.createDataChannel(CONTROL);record.control=control;
+    control.onopen=()=>{if(this.peers.get(record.id)===record && record.pc===pc){record.controlReady=true;this.#screenControl(record,false);this.changed();}};
+    control.onclose=()=>{if(this.peers.get(record.id)===record){record.controlReady=false;record.screenApproved=record.screenSharing=false;this.changed();}};
+    control.onmessage=event=>{
+      if(this.peers.get(record.id)!==record || record.pc!==pc || typeof event.data!=='string' || byteLength(event.data)>1024)return;
+      let value;try{value=JSON.parse(event.data);}catch{return;}
+      if(value?.type!=='screen-state' || value.negotiation!==record.negotiation || typeof value.sharing!=='boolean')return;
+      record.screenSharing=record.screenApproved && value.sharing;this.changed();
+    };
     pc.onicecandidate=event=>{
       if(!event.candidate || epoch!==this.#epoch || this.peers.get(record.id)!==record || record.pc!==pc) return;
       if(++record.sentICE>128 || this.#outboundICE.length>=128) {record.media='ICE limit exceeded. Restart media.';this.changed();return;}
       this.#outboundICE.push({record,pc,negotiation:record.negotiation,candidate:event.candidate.toJSON()});if(record.offerSent)this.#drainICE();
     };
-    pc.ontrack=event=>{if(this.peers.get(record.id)===record && record.pc===pc){record.stream=event.streams[0]??record.stream??new this.api.MediaStream();if(!record.stream.getTracks().includes(event.track))record.stream.addTrack(event.track);this.changed();}};
+    pc.ontrack=event=>{
+      if(this.peers.get(record.id)!==record || record.pc!==pc)return;
+      const mid=event.transceiver?.mid;
+      if(mid===record.mediaIDs?.screen && event.track.kind==='video') {
+        record.screenStream=new this.api.MediaStream([event.track]);
+      } else if((mid===record.mediaIDs?.camera && event.track.kind==='video') || (mid===record.mediaIDs?.audio && event.track.kind==='audio')) {
+        record.stream??=new this.api.MediaStream();
+        if(!record.stream.getTracks().includes(event.track))record.stream.addTrack(event.track);
+      } else {event.track.stop();return;}
+      this.changed();
+    };
     pc.onconnectionstatechange=()=>{if(this.peers.get(record.id)===record && record.pc===pc){record.media=`Media ${pc.connectionState}`;this.changed();}};
     const offer=await pc.createOffer();
     if(epoch!==this.#epoch || this.peers.get(record.id)!==record || record.pc!==pc) return;
     await pc.setLocalDescription(offer);
     if(epoch!==this.#epoch || this.peers.get(record.id)!==record || record.pc!==pc) return;
-    if(!this.#signal(record,'offer',{negotiation:record.negotiation,description:pc.localDescription})) throw new Error('Offer unavailable');
+    record.mediaIDs={audio:audio.mid,camera:camera.mid,screen:screen.mid};
+    if(Object.values(record.mediaIDs).some(mid=>typeof mid!=='string') || new Set(Object.values(record.mediaIDs)).size!==3)throw new Error('Media identities unavailable');
+    if(!this.#signal(record,'offer',{negotiation:record.negotiation,description:pc.localDescription,media:record.mediaIDs})) throw new Error('Offer unavailable');
     record.offerSent=true;this.#drainICE();
     record.media='Offer sent; waiting for guest answer';this.changed();
   }
@@ -177,19 +209,30 @@ export class InterviewReferenceHost {
   }
   #dropPeer(id) {
     const record=this.peers.get(id);if(!record)return;
-    record.pc?.close();record.stream?.getTracks().forEach(track=>track.stop());record.candidates=[];this.peers.delete(id);
+    record.control?.close();record.pc?.close();record.stream?.getTracks().forEach(track=>track.stop());record.screenStream?.getTracks().forEach(track=>track.stop());record.screenApproved=record.screenSharing=false;record.candidates=[];this.peers.delete(id);
     this.#outboundICE=this.#outboundICE.filter(item=>item.record!==record);
   }
   admit(id) { const member=this.members.get(id);if(member && (member.state==='waiting' || !this.peers.has(id))) this.#send({type:'admit',id}); }
   stage(id) { if(this.members.get(id)?.state==='backstage') this.#send({type:'stage',id}); }
   backstage(id) { if(this.members.get(id)?.state==='onair') this.#send({type:'backstage',id}); }
   revoke(id) { if(this.members.has(id) && this.#send({type:'revoke',id})) {this.#dropPeer(id);this.changed('Guest revocation requested; media stopped locally.');} }
+  #screenControl(record,approved) {
+    if(record.control?.readyState!=='open')return false;
+    try{if(record.control.bufferedAmount>8192)throw new Error('Control backlog');record.control.send(JSON.stringify({type:'screen-approval',negotiation:record.negotiation,approved}));return true;}
+    catch{record.screenApproved=record.screenSharing=false;record.control.close();this.changed('Screen controls are unavailable. Camera and microphone stay connected.');return false;}
+  }
+  approveScreen(id,approved) {
+    const record=this.peers.get(id);
+    if(!record || !this.connected || this.#ending || !this.#screenControl(record,!!approved))return;
+    record.screenApproved=!!approved;if(!approved)record.screenSharing=false;
+    this.changed(approved?'Screen sharing approved for this guest. The guest chooses when to share.':'Screen sharing permission removed; camera and microphone stay connected.');
+  }
   lock(locked) { this.#send({type:'lock',locked:!!locked}); }
   setStatus(program,recording) { this.#send({type:'status',program:!!program,recording:!!recording}); }
   restartGuest(id) {
     const old=this.peers.get(id);if(!old || !this.connected)return;
     const generation=old.generation;this.#dropPeer(id);
-    const record={id,generation,candidates:[],chain:Promise.resolve(),pendingSignals:0,media:'Restarting media',sentICE:0};this.peers.set(id,record);
+    const record={id,generation,candidates:[],chain:Promise.resolve(),pendingSignals:0,media:'Restarting media',sentICE:0,screenApproved:false,screenSharing:false};this.peers.set(id,record);
     this.#offer(record,this.#epoch).catch(()=>{if(this.peers.get(id)===record){record.media='Restart failed. Check TURN availability.';this.changed();}});
   }
   async enableReturn() {
@@ -238,13 +281,19 @@ if(typeof document!=='undefined') {
     for(const [id,card]of cards)if(!state.members.has(id)){card.remove();cards.delete(id);}
     for(const member of state.members.values()) {
       let card=cards.get(member.id);
-      if(!card){card=document.createElement('article');const title=document.createElement('h3'),status=document.createElement('p'),video=document.createElement('video');status.className='peer-status';status.setAttribute('role','status');video.autoplay=true;video.playsInline=true;video.muted=true;video.controls=true;video.setAttribute('aria-label','Guest media preview');card.append(title,status,video);
+      if(!card){card=document.createElement('article');const title=document.createElement('h3'),status=document.createElement('p'),video=document.createElement('video'),screen=document.createElement('video'),shareStatus=document.createElement('p');status.className='peer-status';status.setAttribute('role','status');video.autoplay=true;video.playsInline=true;video.muted=true;video.controls=true;video.dataset.source='camera';video.dataset.sourceId=`${member.id}/camera`;video.setAttribute('aria-label','Guest camera and microphone');screen.autoplay=true;screen.playsInline=true;screen.muted=true;screen.controls=true;screen.dataset.source='screen';screen.dataset.sourceId=`${member.id}/screen`;screen.setAttribute('aria-label','Guest shared screen');shareStatus.className='screen-status';shareStatus.setAttribute('role','status');card.append(title,status,video,shareStatus,screen);
         for(const [label,action]of [['Admit backstage','admit'],['Mark test on air','stage'],['Return backstage','backstage'],['Restart media','restartGuest'],['Revoke invite','revoke']]){const button=document.createElement('button');button.textContent=label;button.dataset.action=action;button.onclick=()=>host[action](member.id);card.append(button);}
+        const approval=document.createElement('button');approval.textContent='Allow screen sharing';approval.dataset.action='approveScreen';approval.onclick=()=>host.approveScreen(member.id,!host.peers.get(member.id)?.screenApproved);card.append(approval);
         const play=document.createElement('button');play.textContent='Play guest audio';play.dataset.action='play';play.onclick=()=>{video.muted=!video.muted;play.textContent=video.muted?'Play guest audio':'Mute guest audio';if(!video.muted)video.play().catch(()=>host.changed('Use the guest video controls to play audio.'));};card.append(play);cards.set(member.id,card);$('roster').append(card);}
       card.querySelector('h3').textContent=member.name;const peer=state.peers.get(member.id);
       card.querySelector('p').textContent=`${member.state==='onair'?'Test on-air state':member.state} · ${peer?.media??'No media connection'}`;
-      const video=card.querySelector('video');if(video.srcObject!==(peer?.stream??null))video.srcObject=peer?.stream??null;
-      for(const button of card.querySelectorAll('button')){const action=button.dataset.action;button.disabled=!state.connected||state.ending||(action==='admit'&&member.state!=='waiting'&&!!peer)||(action==='stage'&&member.state!=='backstage')||(action==='backstage'&&member.state!=='onair')||(['restartGuest','play'].includes(action)&&!peer);}
+      const video=card.querySelector('[data-source=camera]');if(video.srcObject!==(peer?.stream??null))video.srcObject=peer?.stream??null;
+      const screen=card.querySelector('[data-source=screen]'),screenStream=peer?.screenApproved&&peer?.screenSharing?peer.screenStream??null:null;
+      if(screen.srcObject!==screenStream)screen.srcObject=screenStream;screen.hidden=!screenStream;
+      for(const [element,kind]of [[video,'camera'],[screen,'screen']])element.dataset.mid=peer?.mediaIDs?.[kind]??'';
+      card.querySelector('.screen-status').textContent=peer?.screenSharing?'Guest screen sharing active':peer?.screenApproved?'Screen sharing allowed; waiting for guest':'Screen sharing requires host approval';
+      card.querySelector('[data-action=approveScreen]').textContent=peer?.screenApproved?'Remove screen sharing permission':'Allow screen sharing';
+      for(const button of card.querySelectorAll('button')){const action=button.dataset.action;button.disabled=!state.connected||state.ending||(action==='admit'&&member.state!=='waiting'&&!!peer)||(action==='stage'&&member.state!=='backstage')||(action==='backstage'&&member.state!=='onair')||(['restartGuest','play'].includes(action)&&!peer)||(action==='approveScreen'&&!peer?.controlReady);}
     }
   }
   $('connect').onclick=()=>host.connect();$('rejoin').onclick=()=>host.connect();$('leave').onclick=()=>host.leave();$('end').onclick=()=>host.end();
