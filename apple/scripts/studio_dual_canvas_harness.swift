@@ -34,6 +34,38 @@ private final class CanvasAudioProbe: @unchecked Sendable {
     func snapshot() -> Int { lock.lock(); defer { lock.unlock() }; return count }
 }
 
+/// Synthetic PCM follows each delivered canvas sample clock. This fixture
+/// qualifies canvas/writer routing, not independent live capture-clock drift.
+private final class CanvasRecordingFeed: @unchecked Sendable {
+    private let lock = NSLock()
+    private let frames: CanvasFrames
+    private let writer: ProgramRecordingSession
+    private var origin: Double?
+    private var chunk = 0
+    private var closed = false
+    init(frames: CanvasFrames, writer: ProgramRecordingSession) { self.frames = frames; self.writer = writer }
+    func receive(_ frame: CompositedFrame) {
+        lock.lock(); defer { lock.unlock() }
+        guard !closed else { return }
+        frames.receive(frame)
+        writer.appendVideo(frame.sampleBuffer)
+        let start = frame.presentationTime.seconds
+        if origin == nil { origin = start }
+        let duration = CMSampleBufferGetDuration(frame.sampleBuffer)
+        let end = start + (duration.isNumeric && duration.seconds > 0 ? duration.seconds : 1.0 / 30)
+        // The fixture is bounded to ten seconds; fail rather than manufacture an
+        // unbounded catch-up allocation if the renderer stops making progress.
+        precondition(end - origin! < 10, "Paired fixture render clock stalled")
+        while origin! + Double(chunk) / 100 < end {
+            let sample = try! ProgramRecordingFixtures.audio(at: Double(chunk) / 100,
+                timestampBase: origin!, constantTone: true)
+            writer.appendAudio(sample)
+            chunk += 1
+        }
+    }
+    func close() { lock.lock(); closed = true; lock.unlock() }
+}
+
 private final class CanvasOverride: @unchecked Sendable {
     private let lock = NSLock()
     private var scene: Scene?
@@ -231,30 +263,19 @@ private actor CanvasPublisherProbe: Publisher {
         await engine.addSink(token: cancelled, canvas: .secondary) { _ in preconditionFailure("Cancelled secondary sink revived") }
         let cancelledCount = await engine.subscriberCount
         try check(cancelledCount == 0, "Secondary cancel-before-register leaked a mailbox")
-        await engine.addSink(token: wideToken, capacity: 2) { frame in wideFrames.receive(frame); wideWriter.appendVideo(frame.sampleBuffer) }
-        await engine.addSink(token: tallToken, capacity: 2, canvas: .secondary) { frame in tallFrames.receive(frame); tallWriter.appendVideo(frame.sampleBuffer) }
-        let audio = Task {
-            let origin = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-            var chunk = 0
-            while !Task.isCancelled {
-                let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-                // A PCM source has a continuous sample clock. Catch up after
-                // scheduler jitter instead of creating artificial audio gaps.
-                while origin + Double(chunk) / 100 <= now {
-                    let sample = try ProgramRecordingFixtures.audio(at: Double(chunk) / 100, timestampBase: origin, constantTone: true)
-                    wideWriter.appendAudio(sample); tallWriter.appendAudio(sample); chunk += 1
-                }
-                try await Task.sleep(for: .milliseconds(5))
-            }
-        }
+        let wideFeed = CanvasRecordingFeed(frames: wideFrames, writer: wideWriter)
+        let tallFeed = CanvasRecordingFeed(frames: tallFrames, writer: tallWriter)
+        await engine.addSink(token: wideToken, capacity: 2) { wideFeed.receive($0) }
+        await engine.addSink(token: tallToken, capacity: 2, canvas: .secondary) { tallFeed.receive($0) }
         await engine.run(scene: scene, canvasSize: CGSize(width: 320, height: 180), frameRate: 30)
         try await Task.sleep(for: .milliseconds(1100))
         for _ in 0..<30 {
             if wideFrames.snapshot().count >= 12 && tallFrames.snapshot().count >= 12 { break }
             try await Task.sleep(for: .milliseconds(100))
         }
-        let wideResult = await finish(wideWriter)
+        wideFeed.close()
         await engine.removeSink(wideToken)
+        let wideResult = await finish(wideWriter)
         let remainingSinks = await engine.subscriberCount
         try check(remainingSinks == 1, "Stopping wide recording removed the other canvas's tap")
         let tallCountBefore = tallFrames.snapshot().count
@@ -264,7 +285,7 @@ private actor CanvasPublisherProbe: Publisher {
         }
         try check(tallFrames.snapshot().count >= tallCountBefore + 5, "Stopping wide recording stopped portrait")
         await engine.stop()
-        audio.cancel(); _ = try? await audio.value
+        tallFeed.close()
         let tallResult = await finish(tallWriter)
         try check(wideResult.completed && tallResult.completed, "Paired recording writer failed: \(wideResult.error ?? "") / \(tallResult.error ?? "")")
         let wide = wideFrames.snapshot(), tall = tallFrames.snapshot()

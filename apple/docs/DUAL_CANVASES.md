@@ -115,3 +115,5 @@ The desktop's explicit [fixed H.264/AAC sharing option](ENCODED_SHARING.md)
 reuses compressed samples across matching RTMP/RTMPS/SRT destinations on the
 same canvas. Different canvases always retain separate groups; recording and
 unsupported codec/transport combinations still reserve separate encoders.
+
+The paired-canvas recording fixture generates continuous synthetic PCM from each delivered canvas sample clock and closes that feed before finalization. Its strict decoded track endpoint checks qualify routing and independent writer cleanup; they do not measure independent live capture-clock drift or sustained renderer load. Separate program-recording fixtures retain independently timestamped audio/video, overload and drop-accounting checks.

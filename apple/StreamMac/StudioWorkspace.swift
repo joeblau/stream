@@ -107,7 +107,7 @@ final class StudioWorkspace: ObservableObject {
             }
         }
         self.catalog = catalog
-        let directory = root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: catalog.selectedProjectID, profile: catalog.selectedProfileID))
+        let directory = root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: catalog.selectedProjectID, profile: catalog.selectedProfileID), isDirectory: true)
         let firstLaunch = !FileManager.default.fileExists(atPath: directory.path)
         try? DesktopStorage.prepare(directory)
         if firstLaunch { Self.copyLegacyFiles(to: directory) }
@@ -122,7 +122,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func directory(for selection: Selection) -> URL {
-        root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: selection.project, profile: selection.profile))
+        root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: selection.project, profile: selection.profile), isDirectory: true)
     }
 
     func stage(project: UUID, profile: UUID) {
@@ -155,6 +155,7 @@ final class StudioWorkspace: ObservableObject {
             observeRuntime()
             runtime.sceneStore.setProjectIdentity(currentProject.id, name: currentProject.name)
             pending = nil
+            error = nil
             saveCatalog()
         } catch {
             // The previous runtime has already retired its account and controller sessions.
@@ -285,6 +286,7 @@ final class StudioWorkspace: ObservableObject {
             observeRuntime()
             runtime.sceneStore.setProjectIdentity(currentProject.id, name: currentProject.name)
             sceneRecovery = nil
+            error = nil
         } catch {
             // The previous runtime has already retired its account and controller sessions.
             // Reopen the selected context so a failed filesystem operation remains recoverable.
