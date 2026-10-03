@@ -8,9 +8,11 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
+import {chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
 
 const publicPath = fileURLToPath(new URL('../../public/', import.meta.url));
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const startup = new ChromeFixtureDiagnostics();
 const room = crypto.randomUUID(), hostCap = 'a'.repeat(64), guestCap = 'b'.repeat(64);
 const hostID=crypto.randomUUID(),guestID=crypto.randomUUID();
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'stream-reference-chrome-'));
@@ -19,6 +21,7 @@ let host, guest, program = false, recording = false, locked = false, ended = fal
 let chrome, browser, deadline;
 
 const server = http.createServer(async (request, response) => {
+  startup.request();
   if (request.method==='POST' && request.url===`/v1/rooms/${room}/turn`) {
     response.setHeader('Content-Type', 'application/json');
     // No live TURN provider: real media uses loopback ICE. Relay lifecycle and
@@ -33,7 +36,7 @@ const server = http.createServer(async (request, response) => {
     response.setHeader('Content-Type', name.endsWith('js') ? 'application/javascript' : name.endsWith('css') ? 'text/css' : 'text/html');
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wss:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
-    response.end(await fs.readFile(path.join(publicPath, name.slice(1))));
+    response.end(await fs.readFile(path.join(publicPath, name.slice(1)))); startup.response();
   } catch { response.writeHead(404); response.end(); }
 });
 const wss = new WebSocketServer({noServer:true, handleProtocols:protocols => protocols.has('stream-interview-v1') ? 'stream-interview-v1' : false});
@@ -98,6 +101,7 @@ class CDP {
       if (pending) {clearTimeout(pending.timeout); this.pending.delete(message.id);
         message.error ? pending.reject(new Error(message.error.message)) : pending.resolve(message.result);}
       if (message.method==='Runtime.exceptionThrown') this.errors.push(message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text);
+      startup.event(message.method);
     });
     socket.on('close', () => {
       for (const pending of this.pending.values()) {clearTimeout(pending.timeout); pending.reject(new Error('Chrome connection closed'));}
@@ -107,7 +111,7 @@ class CDP {
   send(method, params={}, sessionId) {
     const id = ++this.id;
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {this.pending.delete(id); reject(new Error(`Chrome timeout: ${method}`));}, 10000);
+      const timeout = setTimeout(() => {this.pending.delete(id); startup.timeout(method,this.pending.size); reject(new Error(`Chrome timeout: ${method}`));}, 10000);
       this.pending.set(id, {resolve, reject, timeout});
       this.socket.send(JSON.stringify({id, method, params, sessionId}), error => {
         if (error) {clearTimeout(timeout); this.pending.delete(id); reject(error);}
@@ -116,10 +120,14 @@ class CDP {
   }
   async target(url, script='') {
     const target = await this.send('Target.createTarget', {url:'about:blank'});
+    startup.phase('target-created');
     const attached = await this.send('Target.attachToTarget', {targetId:target.targetId, flatten:true});
+    startup.phase('target-attached');
     await this.send('Page.enable', {}, attached.sessionId); await this.send('Runtime.enable', {}, attached.sessionId);
+    startup.phase('page-runtime-enabled');
     if(script)await this.send('Page.addScriptToEvaluateOnNewDocument',{source:script},attached.sessionId);
-    await this.send('Page.navigate', {url}, attached.sessionId); return attached.sessionId;
+    startup.phase('navigate');
+    await this.send('Page.navigate', {url}, attached.sessionId); startup.phase('navigation-accepted'); return attached.sessionId;
   }
   async evaluate(session, expression) {
     const result = await this.send('Runtime.evaluate', {expression, returnByValue:true, awaitPromise:true, userGesture:true}, session);
@@ -141,11 +149,14 @@ async function chromePath() {
 async function run() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
+  startup.phase('launch');
   chrome = spawn(await chromePath(), ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
     '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-component-update',
     '--disable-sync', '--disable-extensions', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
     '--autoplay-policy=no-user-gesture-required',
-    ...(process.env.CHROME_NO_SANDBOX==='1' ? ['--no-sandbox'] : []), 'about:blank'], {stdio:'ignore'});
+    ...chromeFixtureCredentialArguments(),
+    ...(process.env.CHROME_NO_SANDBOX==='1' ? ['--no-sandbox'] : []), 'about:blank'], {stdio:['ignore','ignore','pipe']});
+  startup.observe(chrome);
   let launchError; chrome.on('error', error => {launchError = error;});
   let lines;
   for (let attempt=0; attempt<100; attempt++) {
@@ -153,9 +164,12 @@ async function run() {
     try {lines = (await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).trim().split('\n'); break;} catch {await pause(100);}
   }
   if (!lines) throw new Error('Chrome did not open its local debugging endpoint.');
+  startup.phase('debug-endpoint');
   const socket = new WebSocket(`ws://127.0.0.1:${lines[0]}${lines[1]}`, {handshakeTimeout:10000});
   await new Promise((resolve, reject) => {socket.once('open', resolve); socket.once('error', reject);});
+  startup.phase('debug-connected');
   browser = new CDP(socket);
+  startup.version((await browser.send('Browser.getVersion')).product); startup.phase('browser-version');
   const peerObserver=`window.__fixturePeers=[];const NativePeer=window.RTCPeerConnection;window.RTCPeerConnection=class extends NativePeer{constructor(...args){super(...args);window.__fixturePeers.push(this);}};`;
   const screenFixture=`window.__fixtureScreens=[];window.__fixtureDisplayCount=0;Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{value:async()=>{
     window.__fixtureDisplayCount++;if(window.__fixtureDenyDisplay)throw new DOMException('Synthetic refusal','NotAllowedError');const canvas=document.createElement('canvas');canvas.width=640;canvas.height=360;
