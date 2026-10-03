@@ -520,13 +520,36 @@ final class ProgramRecordingSession: @unchecked Sendable {
 
     /// Packed PCM is partitioned at its real sample grid. Copying the retained
     /// range keeps source data/PTS; there is no silence padding or track rebase.
+    static func audioFrameOffset(from start: CMTime, to end: CMTime, rate: CMTimeScale,
+                                 rounding: CMTimeRoundingMethod) -> Int64 {
+        let difference = end - start
+        let nearest = CMTimeConvertScale(difference, timescale: rate, method: .roundHalfAwayFromZero)
+        // Adding a 48 kHz duration to a nanosecond host PTS overflows the
+        // maximum CMTime timescale. Its documented rounding can put a shared
+        // PCM boundary a fraction of a host tick above/below the next packet.
+        // Honor that explicit precision loss, without treating a genuinely
+        // fractional movie origin as a missing/overlapping PCM sample.
+        var uncertainty = CMTime.zero
+        for time in [start, end, difference] where time.flags.contains(.hasBeenRounded) {
+            uncertainty = uncertainty + CMTime(value: 1, timescale: time.timescale)
+        }
+        let halfSample = CMTimeMultiplyByRatio(CMTime(value: 1, timescale: rate), multiplier: 1, divisor: 2)
+        if uncertainty > .zero, uncertainty < halfSample,
+           CMTimeAbsoluteValue(difference - nearest) <= uncertainty { return nearest.value }
+        return CMTimeConvertScale(difference, timescale: rate, method: rounding).value
+    }
+
     static func audioRange(_ sample: CMSampleBuffer, start: CMTime, end: CMTime = .invalid) -> CMSampleBuffer? {
         let count = CMSampleBufferGetNumSamples(sample)
         guard count > 0, let format = sample.formatDescription,
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format), asbd.pointee.mSampleRate > 0 else { return nil }
         let rate = asbd.pointee.mSampleRate, pts = sample.presentationTimeStamp
         func index(_ time: CMTime) -> Int {
-            max(0, min(count, Int(ceil((time - pts).seconds * rate - 0.000_001))))
+            if rate.rounded() == rate, rate <= Double(Int32.max) {
+                return max(0, min(count, Int(audioFrameOffset(from: pts, to: time,
+                    rate: CMTimeScale(rate), rounding: .roundTowardPositiveInfinity))))
+            }
+            return max(0, min(count, Int(ceil((time - pts).seconds * rate))))
         }
         let first = start.isNumeric ? index(start) : 0
         let last = end.isNumeric ? index(end) : count

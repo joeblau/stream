@@ -43,6 +43,7 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private var nextVideoTime: CMTime = .invalid
     private var nextAudioTime: CMTime = .invalid
+    private var establishedAudioGrid = false
     private var firstVideoTime: CMTime = .invalid
     private var blackPixelBuffer: CVPixelBuffer?
     private var sequence: Int64 = 0
@@ -168,9 +169,20 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
                 for slice in slices {
                     guard let retained = ProgramRecordingSession.audioRange(slice.sample, start: nextAudioTime + slice.offset) else { continue }
                     let pts = retained.presentationTimeStamp - slice.offset
-                    if pts >= timing.end { continue }
+                    guard pts < timing.end, let copy = Self.retimed(retained, offset: slice.offset, endingAt: timing.end) else { continue }
+                    if !establishedAudioGrid {
+                        // Begin leading silence on the real source PCM grid,
+                        // just as Program begins with its first retained PCM.
+                        // The fractional movie-origin residue contains no whole
+                        // source sample and must not become a synthetic prefix.
+                        let leadingFrames = ProgramRecordingSession.audioFrameOffset(from: timing.origin, to: pts,
+                            rate: 48_000, rounding: .roundTowardZero)
+                        nextAudioTime = CMTimeConvertScale(pts - CMTime(value: leadingFrames, timescale: 48_000),
+                            timescale: pts.timescale, method: .roundHalfAwayFromZero)
+                        establishedAudioGrid = true
+                    }
                     if pts > nextAudioTime { padAudio(until: pts, origin: timing.origin) }
-                    guard failure == nil, let copy = Self.retimed(retained, offset: slice.offset, endingAt: timing.end) else { continue }
+                    guard failure == nil else { continue }
                     let missing = IsolatedAudioGap.frames(in: sample)
                     if missing > 0 {
                         progress.missingAudioFrames += Int64(missing)
@@ -195,7 +207,12 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
         if Date().timeIntervalSince(lastPublish) >= 1 { publish() }
     }
     private func padAudio(until end: CMTime, origin: CMTime) {
-        let count = Int64(((end - nextAudioTime).seconds * 48_000).rounded())
+        // The movie origin may lie between source PCM samples. Only whole
+        // missing samples can be padded: rounding a >half-sample residue adds
+        // a fabricated frame and shifts the associated AAC waveform relative
+        // to Program. Keep the retained source PTS and its fractional residue.
+        let count = ProgramRecordingSession.audioFrameOffset(from: nextAudioTime, to: end,
+            rate: 48_000, rounding: .roundTowardZero)
         guard count > 0 else { return }
         guard count <= 240_000 else { failOnQueue("Associated audio clock gap exceeds five seconds."); return }
         gap(at: (nextAudioTime - origin).seconds, duration: Double(count) / 48_000, reason: "associated-audio-timeline-gap")
