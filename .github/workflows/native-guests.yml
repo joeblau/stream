@@ -23,17 +23,22 @@ on:
       - 'apple/StreamMac/LayerGraph.swift'
       - 'apple/StreamMac/CompositionEngine.swift'
       - 'apple/StreamMac/StudioCommandDispatcher.swift'
+      - 'apple/StreamMac/StudioCommandPalette.swift'
+      - 'apple/StreamMac/StudioControlProtocol.swift'
+      - 'apple/StreamMac/StudioLocalControlServer.swift'
       - 'apple/StreamMac/StudioWorkspace.swift'
       - 'apple/StreamCore/Audio*'
       - 'apple/StreamCore/KeychainStore.swift'
       - 'apple/project.yml'
       - 'apple/Vendor/**'
       - 'apple/scripts/repair_desktop_transport_archives.py'
+      - 'apple/scripts/patches/**'
       - 'apple/scripts/*guest*'
       - 'apple/scripts/*native_interview*'
       - 'apple/scripts/desktop_transport_fixture.rb'
       - 'apple/scripts/*fractional_iso_audio*'
       - 'workers/interviews/public/guest.*'
+      - 'workers/interviews/src/**'
       - 'workers/interviews/package*.json'
       - 'workers/interviews/test/browser/native-host-*'
       - 'workers/interviews/test/browser/native-session-*'
@@ -81,7 +86,7 @@ jobs:
         run: |
           xcodegen generate
           xcodebuild -resolvePackageDependencies -project Stream.xcodeproj -scheme StreamMac -derivedDataPath build/native-guest-ci -skipPackagePluginValidation
-          python3 scripts/repair_desktop_transport_archives.py build/native-guest-ci
+          python3 scripts/repair_desktop_transport_archives.py build/native-guest-ci --require-relay-policy
           GUEST_ARTIFACT="$PWD/build/native-guest-ci/SourcePackages/artifacts/haishinkit.swift/libdatachannel/libdatachannel.xcframework/macos-arm64_x86_64"
           test -f "$GUEST_ARTIFACT/Headers/libdatachannel/rtc/version.h"
           test -f "$GUEST_ARTIFACT/libdatachannel.a"

@@ -83,7 +83,7 @@ RUBY
 xcodegen generate --spec "$INTERVIEW_DIR/project.json" --project "$INTERVIEW_DIR"
 xcodebuild -resolvePackageDependencies -project "$INTERVIEW_DIR/NativeInterviewManagerValidation.xcodeproj" \
   -scheme NativeInterviewManagerHarness -derivedDataPath "$INTERVIEW_MANAGER_BUILD_PATH"
-python3 scripts/repair_desktop_transport_archives.py "$INTERVIEW_MANAGER_BUILD_PATH"
+python3 scripts/repair_desktop_transport_archives.py "$INTERVIEW_MANAGER_BUILD_PATH" --require-relay-policy
 xcodebuild -project "$INTERVIEW_DIR/NativeInterviewManagerValidation.xcodeproj" -scheme NativeInterviewManagerHarness \
   -destination 'platform=macOS' -derivedDataPath "$INTERVIEW_MANAGER_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 readonly INTERVIEW_MANAGER_PRODUCTS="${INTERVIEW_MANAGER_BUILD_PATH:A}/Build/Products/Debug"
