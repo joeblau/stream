@@ -55,7 +55,8 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
     func snapshot() -> (Bool, Bool) { lock.lock(); defer { lock.unlock() }; return (entered, returned) }
 }
 @main struct NativeGuestReceiveHarness {
-    static func print(_ message: String) { FileHandle.standardOutput.write(Data((message + "\n").utf8)) }
+    // FileHandle writes bypass stdio buffering so a fatal assertion retains diagnostics.
+    static func writeLine(_ message: String) { FileHandle.standardOutput.write(Data((message + "\n").utf8)) }
     static func be32(_ n: UInt32) -> [UInt8] { [UInt8(truncatingIfNeeded: n >> 24), UInt8(truncatingIfNeeded: n >> 16), UInt8(truncatingIfNeeded: n >> 8), UInt8(truncatingIfNeeded: n)] }
     static func packet(role: Int32, sequence: UInt16, timestamp: UInt32, payload: [UInt8], marker: Bool, decorated: Bool = true) -> Data {
         let pt: UInt8 = role == 2 ? 111 : 96
@@ -68,7 +69,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
     }
     static func send(_ data: Data, role: Int32, peer: OpaquePointer) {
         let sent = data.withUnsafeBytes { SGPeerFixtureSend(peer, role, $0.bindMemory(to: UInt8.self).baseAddress!, $0.count) }
-        if sent == 0 { print("Guest fixture rejected send role=\(role) bytes=\(data.count) sequence=\(data.count >= 4 ? Int(data[2]) * 256 + Int(data[3]) : -1)") }
+        if sent == 0 { writeLine("Guest fixture rejected send role=\(role) bytes=\(data.count) sequence=\(data.count >= 4 ? Int(data[2]) * 256 + Int(data[3]) : -1)") }
         precondition(sent != 0, "Actual peer transport rejected a fixture packet")
     }
     static func sr(_ role: Int32, rtp: UInt32, seconds: Double, peer: OpaquePointer) {
@@ -122,20 +123,20 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
     }
     @MainActor private static func wait(_ phase: String, _ receiver: NativeGuestReceiver, _ receipts: GuestReceipts, _ predicate: () -> Bool) async {
         let began = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        print("Guest phase start \(phase): \(progress(receiver, receipts))")
+        writeLine("Guest phase start \(phase): \(progress(receiver, receipts))")
         // Preserve the original 1000 ten-millisecond waits. The elapsed clock
         // exposes scheduler starvation instead of increasing any deadline.
         for iteration in 0..<1000 {
             if predicate() {
-                print("Guest phase complete \(phase) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
+                writeLine("Guest phase complete \(phase) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
                 return
             }
             if iteration > 0 && iteration % 100 == 0 {
-                print("Guest phase waiting \(phase) iteration=\(iteration) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
+                writeLine("Guest phase waiting \(phase) iteration=\(iteration) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
             }
             try? await Task.sleep(for: .milliseconds(10))
         }
-        print("Guest phase deadline \(phase) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
+        writeLine("Guest phase deadline \(phase) elapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - began)s: \(progress(receiver, receipts))")
         preconditionFailure("Bounded peer/decode deadline: \(phase)")
     }
     static func main() async throws {
@@ -150,7 +151,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         precondition(SGPeerFixtureStart(peer) != 0)
         await wait("initial-peer-connected", receiver, receipts) { SGPeerFixtureReady(peer) != 0 }
         precondition(!bridge.hasFailed())
-        print("Guest receive: actual public SDK peer DTLS/SRTP connected")
+        writeLine("Guest receive: actual public SDK peer DTLS/SRTP connected")
         let camera = frames(try Data(contentsOf: folder.appendingPathComponent("camera.h264")))
         let screen = frames(try Data(contentsOf: folder.appendingPathComponent("screen.h264")))
         precondition(camera.count == 14 && screen.count == 14)
@@ -163,7 +164,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(20))
         var cameraSequence: UInt16 = 65_534, screenSequence: UInt16 = 2, audioSequence: UInt16 = 65_534
         let feedBegan = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        print("Guest initial paced feed start: \(progress(receiver, receipts))")
+        writeLine("Guest initial paced feed start: \(progress(receiver, receipts))")
         for tick in 0..<70 {
             let opus = try Data(contentsOf: folder.appendingPathComponent(String(format: "opus-%03d.bin", tick)))
             send(packet(role: 2, sequence: audioSequence, timestamp: audioBase &+ UInt32(tick * 960), payload: [UInt8](opus), marker: true), role: 2, peer: peer); audioSequence &+= 1
@@ -174,14 +175,14 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
             }
             try await Task.sleep(for: .milliseconds(20))
             if tick % 10 == 9 {
-                print("Guest paced feed tick=\(tick + 1) sourceElapsed=\(Double(tick + 1) * 0.02)s hostElapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - feedBegan)s: \(progress(receiver, receipts))")
+                writeLine("Guest paced feed tick=\(tick + 1) sourceElapsed=\(Double(tick + 1) * 0.02)s hostElapsed=\(CMClockGetTime(CMClockGetHostTimeClock()).seconds - feedBegan)s: \(progress(receiver, receipts))")
             }
         }
         await wait("initial-h264-opus-decode", receiver, receipts) { let (v, a) = receipts.snapshot(); return v.count == 28 && a.reduce(0) { $0 + $1.frames } >= 67_080 || receiver.counters.errors > 0 }
         await receiver.finishAudio()
         let (v, a) = receipts.snapshot()
-        print("Guest decode counts video=\(v.count) audio=\(a.count) errors=\(receiver.counters.errors) dropped=\(receiver.counters.dropped) unsynchronized=\(receiver.counters.unsynchronized)")
-        print("Guest PCM samples=\(a.reduce(0) { $0 + $1.frames }); first tone offset=\((a.first { $0.rms > 0.025 }?.pts ?? 0) - (v.first { $0.role == .camera }?.pts ?? 0))s")
+        writeLine("Guest decode counts video=\(v.count) audio=\(a.count) errors=\(receiver.counters.errors) dropped=\(receiver.counters.dropped) unsynchronized=\(receiver.counters.unsynchronized)")
+        writeLine("Guest PCM samples=\(a.reduce(0) { $0 + $1.frames }); first tone offset=\((a.first { $0.rms > 0.025 }?.pts ?? 0) - (v.first { $0.role == .camera }?.pts ?? 0))s")
         precondition(receiver.counters.errors == 0 && v.count == 28)
         let cameras = v.filter { $0.role == .camera }, screens = v.filter { $0.role == .screen }
         precondition(cameras.count == 14 && screens.count == 14 && cameras[0].r > 200 && cameras[0].b < 30 && screens[0].b > 200 && screens[0].r < 30)
@@ -189,13 +190,13 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         precondition(abs(a[0].pts - cameras[0].pts) <= 0.00001)
         let flash = cameras.first { $0.r > 200 && $0.g > 200 && $0.b > 200 }!, tone = a.first { $0.rms > 0.025 }!
         let av = tone.pts - flash.pts, roleOffset = screens[0].pts - cameras[0].pts
-        print("Guest decoded cue AV delta=\(av)s screen camera offset=\(roleOffset)s; 320x180 H264 pixels + 48k stereo Opus PCM")
+        writeLine("Guest decoded cue AV delta=\(av)s screen camera offset=\(roleOffset)s; 320x180 H264 pixels + 48k stereo Opus PCM")
         precondition(abs(av) <= 0.025 && abs(roleOffset - 0.3) <= 0.00001)
         struct Reference: Decodable { let frames: Int, cueFrame: Int }
         let reference = try JSONDecoder().decode(Reference.self, from: Data(contentsOf: folder.appendingPathComponent("opus-reference.json")))
         let actualCue = a.compactMap(\.cuePTS).first! - a[0].pts
         precondition(a.reduce(0) { $0 + $1.frames } == reference.frames && abs(actualCue - Double(reference.cueFrame) / 48_000) < 1.0 / 48_000)
-        print("Guest raw Opus reference sample count/cue matches: \(reference.frames) frames cue=\(reference.cueFrame)/48000 PASS")
+        writeLine("Guest raw Opus reference sample count/cue matches: \(reference.frames) frames cue=\(reference.cueFrame)/48000 PASS")
         for role in [GuestReceiveRole.camera, .screen, .audio] {
             let stats = receiver.transportStats(role)
             precondition(stats.frames == (role == .audio ? 70 : 14) && stats.pending_bytes == 0 && stats.pending_packets == 0 && stats.rejected == 0)
@@ -240,8 +241,8 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         precondition(receiver.validationPacket(packet(role: 0, sequence: 512, timestamp: cameraBase &+ 144_000, payload: [0x7c, 0x05, 1], marker: false, decorated: false), role: .camera))
         let capped = receiver.transportStats(.camera)
         precondition(capped.pending_packets == 0 && capped.pending_bytes == 0 && capped.rejected == 4)
-        print("Guest receive: actual guard512-packet/2MiB AU cap clears stalled assembly PASS")
-        print("Guest receive: actual transported duplicate/reordered timestamps/FU identity/IDR recovery; actual guard injected malformed headers and250ms partial-AU expiry PASS")
+        writeLine("Guest receive: actual guard512-packet/2MiB AU cap clears stalled assembly PASS")
+        writeLine("Guest receive: actual transported duplicate/reordered timestamps/FU identity/IDR recovery; actual guard injected malformed headers and250ms partial-AU expiry PASS")
         receiver.stop()
         let before = receipts.snapshot()
         _ = packet(role: 2, sequence: audioSequence, timestamp: audioBase, payload: [0xf8, 0xff, 0xfe], marker: true).withUnsafeBytes {
@@ -249,7 +250,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         }
         try await Task.sleep(for: .milliseconds(100))
         let after = receipts.snapshot(); precondition(before.0.count == after.0.count && before.1.count == after.1.count)
-        print("Guest receive: explicit admission, distinct MIDs, CSRC/extension/padding normalization, sequence/RTP wrap, actual H264/Opus decoded AV timing, stop stale media PASS")
+        writeLine("Guest receive: explicit admission, distinct MIDs, CSRC/extension/padding normalization, sequence/RTP wrap, actual H264/Opus decoded AV timing, stop stale media PASS")
         try await longCall(folder)
         try await revokeBoundary(folder)
     }
@@ -267,7 +268,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         let opus = [UInt8](try Data(contentsOf: folder.appendingPathComponent("opus-000.bin")))
         let began = CMClockGetTime(CMClockGetHostTimeClock()).seconds
         var cameraSequence: UInt16 = 1, screenSequence: UInt16 = 1, audioSequence: UInt16 = 1
-        print("Guest receive: >13s actual host-clock sender-report refresh; first screen report deliberately delayed")
+        writeLine("Guest receive: >13s actual host-clock sender-report refresh; first screen report deliberately delayed")
         for second in 0...13 {
             if second > 0 { try await Task.sleep(for: .seconds(1)) }
             let elapsed = CMClockGetTime(CMClockGetHostTimeClock()).seconds - began
@@ -287,7 +288,7 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         let cameras = video.filter { $0.role == .camera }, screens = video.filter { $0.role == .screen }
         precondition(cameras.last!.pts - cameras[0].pts > 13 && abs(screens[0].pts - cameras.last!.pts - 0.3) < 0.00001)
         precondition(audio.allSatisfy { $0.frames == 960 })
-        print("Guest receive: common mapping survives13s; late first screen SR and explicit audio reset after source gaps PASS")
+        writeLine("Guest receive: common mapping survives13s; late first screen SR and explicit audio reset after source gaps PASS")
         struct OpusCase: Decodable { let label: String, packets: Int, frames: Int, channels: Int, duration: Double, config: Int, channelRMS: [[Double]] }
         let cases = try JSONDecoder().decode([OpusCase].self, from: Data(contentsOf: folder.appendingPathComponent("opus-cases.json")))
         for item in cases {
@@ -306,14 +307,14 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
             let actual = Array(receipts.snapshot().1.dropFirst(baseline))
             precondition(actual.reduce(0) { $0 + $1.frames } == item.frames && actual.allSatisfy { $0.frames == Int(frames) })
             let loud = actual.max { $0.rms < $1.rms }!
-            print("Guest Opus case \(item.label) actualchannelRMS=\(loud.rms)/\(loud.rightRMS)")
+            writeLine("Guest Opus case \(item.label) actualchannelRMS=\(loud.rms)/\(loud.rightRMS)")
             if item.channels == 1 { precondition(abs(loud.rms - loud.rightRMS) < 0.00001) }
             else { precondition(loud.rms > loud.rightRMS * 2 && loud.rightRMS > 0.005) }
             for (actual, reference) in zip(actual, item.channelRMS) {
                 precondition(abs(actual.rms - reference[0]) < 0.002 && abs(actual.rightRMS - reference[1]) < 0.002)
             }
             for pair in zip(actual, actual.dropFirst()) { precondition(abs(pair.1.pts - pair.0.pts - item.duration / 1000) < 0.00001) }
-            print("Guest actual RTP Opus \(item.label) config=\(item.config) packets=\(item.packets) decodedframes=\(item.frames) referencecount/channel/timestamp PASS")
+            writeLine("Guest actual RTP Opus \(item.label) config=\(item.config) packets=\(item.packets) decodedframes=\(item.frames) referencecount/channel/timestamp PASS")
         }
     }
     @MainActor static func revokeBoundary(_ folder: URL) async throws {
@@ -345,6 +346,6 @@ private final class GuestRevokeBarrier: @unchecked Sendable {
         await wait("revoke-camera-audio-health", receiver, receipts) { receipts.snapshot().0.contains { $0.role == .camera } && !receipts.snapshot().1.isEmpty }
         try await Task.sleep(for: .milliseconds(80))
         precondition(receipts.snapshot().0.filter { $0.role == .screen }.count == count)
-        print("Guest receive: actual blocked decoded callback fences synchronous screen revoke; later screen rejected, camera/audio continue PASS")
+        writeLine("Guest receive: actual blocked decoded callback fences synchronous screen revoke; later screen rejected, camera/audio continue PASS")
     }
 }
