@@ -164,6 +164,6 @@ pair and fails closed before readiness/media if that policy is not satisfied.
 
 | Issue criteria | Evidence from this change | Remaining qualification/work |
 | --- | --- | --- |
-| #125 native host lifecycle | Actual local service, single-peer admission/rejoin/end, bound factory/sink and generation fences | Actual positive native relay-only path, studio return media, mobile/restricted networks and measured larger capacity |
+| #125 native host lifecycle | Actual local service, single-peer admission/rejoin/end, bound factory/sink and generation fences | Combined manager entry with real media, studio return media, mobile/restricted networks and measured larger capacity; separate actual local receiver relay proof is in NATIVE_INTERVIEW_RECEIVER.md |
 | #128 studio controls | Native lobby, Backstage/On Air, private Monitor, screen permission, removal/reconnect/lock, separate source framing and shared commands | Rename/mute/solo end-to-end workflow, remaining scene actions, private talkback/messages, operator/manual UI qualification |
-| #130 guest screen | Independent registered camera/screen sources and host approval/revoke/control-close routing gates | Actual production adapter media and encoded outputs, independent stop with healthy camera/audio, permission-denied and unsupported-browser behavior across the full native workflow |
+| #130 guest screen | Independent registered camera/screen sources and host approval/revoke/control-close routing gates | Combined manager entry and encoded outputs, permission-denied and unsupported-browser behavior across the full native workflow; separate real adapter camera/screen approval and independent stop pass the local relay fixture |
