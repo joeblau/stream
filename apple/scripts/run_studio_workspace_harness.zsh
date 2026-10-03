@@ -64,6 +64,12 @@ Dir.glob('StreamMac/**/*.swift').each do |path|
     directory='defaultDirectory: URL? = nil'
     abort 'Recording directory fixture boundary changed' unless source.include?(directory)
     source.sub!(directory,'defaultDirectory: URL? = WorkspaceFixtureStorage.recordingsDirectory')
+  elsif path=='StreamMac/StreamController.swift'
+    preview='    func startPreview() {'
+    abort 'Preview capture fixture boundary changed' unless source.include?(preview)
+    # Keep actual MainWindow onAppear/dispatcher invocation, but stop before
+    # allocating real camera/screen/microphone or compositor pipeline demand.
+    source.sub!(preview,"    func startPreview() {\n        WorkspaceViewReceipts.previewSuppressed[ObjectIdentifier(self), default: 0] += 1\n        return")
   end
   next if source==original
   name=path.delete_prefix('StreamMac/').tr('/','_')
@@ -79,6 +85,37 @@ h['settings']['base'] ||= {}
 h['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
 h['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>excluded}
 h['sources'] += generated
+# Use the shipping App's actual root identity and environment injection chain,
+# not a reconstructed onAppear/onDisappear implementation.
+app=File.read('StreamMac/StreamMacApp.swift')
+first=app.index('            MainWindowView(firstRunCompleted: $hasCompletedFirstRun)')
+last=first && app.index("\n        }\n        .defaultSize",first)
+abort 'Shipping App window-content boundary changed' unless first && last
+content=app[first...last].strip
+content.sub!('MainWindowView(firstRunCompleted: $hasCompletedFirstRun)', <<'SWIFT'.strip)
+MainWindowView(firstRunCompleted: $hasCompletedFirstRun)
+                .onAppear { WorkspaceViewReceipts.appeared[ObjectIdentifier(observedRuntime), default: 0] += 1 }
+                .onDisappear { WorkspaceViewReceipts.disappeared[ObjectIdentifier(observedRuntime), default: 0] += 1 }
+SWIFT
+applicationRoot=<<'SWIFT'
+import SwiftUI
+import StreamCore
+@MainActor struct WorkspaceApplicationRoot: View {
+    @ObservedObject var workspace: StudioWorkspace
+    @State private var hasCompletedFirstRun = true
+    private var sceneStore: SceneStore { workspace.runtime.sceneStore }
+    private var previewProgram: PreviewProgramModel { workspace.runtime.previewProgram }
+    private var streamController: StreamController { workspace.runtime.controller }
+    private var settingsSession: SettingsSession { workspace.runtime.settings }
+    private var permissions: PermissionsManager { workspace.runtime.permissions }
+    private var recorder: RecordingController { workspace.runtime.recorder }
+    private var dispatcher: StudioCommandDispatcher { workspace.runtime.dispatcher }
+    var body: some View {
+        let observedRuntime = workspace.runtime
+SWIFT
+applicationRoot += content + "\n.defaultAppStorage(WorkspaceFixtureDefaults.value)\n    }\n}\n"
+fixture_write(File.join(folder,'fixtures/WorkspaceApplicationRoot.swift'),applicationRoot)
+h['sources'] << File.join(folder,'fixtures/WorkspaceApplicationRoot.swift')
 h['sources'] << File.join(root,'scripts/studio_workspace_harness.swift')
 spec['targets']['StudioWorkspaceHarness']=h
 spec['schemes']['StudioWorkspaceHarness']={'build'=>{'targets'=>{'StudioWorkspaceHarness'=>'all'}}}

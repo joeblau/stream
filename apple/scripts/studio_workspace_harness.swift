@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import StreamCore
+import SwiftUI
 
 // Generated runner boundaries use this suite and machine folder rather than
 // importing or changing an operator's credentials, preferences or recordings.
@@ -12,16 +14,72 @@ enum WorkspaceFixtureStorage {
     static let machineDirectory = root.appendingPathComponent("Machine", isDirectory: true)
     static let recordingsDirectory = machineDirectory.appendingPathComponent("Recordings", isDirectory: true)
 }
+@MainActor enum WorkspaceViewReceipts {
+    static var appeared: [ObjectIdentifier: Int] = [:]
+    static var disappeared: [ObjectIdentifier: Int] = [:]
+    static var previewSuppressed: [ObjectIdentifier: Int] = [:]
+}
 
 private func require(_ value: @autoclosure () throws -> Bool, _ message: String) throws {
     if try !value() { throw NSError(domain: "WorkspaceHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
 }
 
 @main @MainActor struct WorkspaceHarness {
-    static func main() async {
+    static func main() {
         setbuf(stdout, nil)
-        do { try await run() }
-        catch { print("FAIL: \(error.localizedDescription)"); exit(1) }
+        guard CGSessionCopyCurrentDictionary() != nil else {
+            print("UNQUALIFIED: shipping MainWindow lifecycle needs a logged-in WindowServer session")
+            exit(77)
+        }
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory); app.finishLaunching()
+        Task { @MainActor in
+            do { try await run(); exit(0) }
+            catch { print("FAIL: \(error.localizedDescription)"); exit(1) }
+        }
+        app.run()
+    }
+    static func waitForView(_ workspace: StudioWorkspace, retired: StudioRuntime? = nil, afterDisappearance: Int = 0) async throws {
+        let runtime = workspace.runtime, id = ObjectIdentifier(runtime)
+        var ready = false
+        for _ in 0..<600 {
+            if WorkspaceViewReceipts.appeared[id, default: 0] > 0
+                && WorkspaceViewReceipts.previewSuppressed[ObjectIdentifier(runtime.controller), default: 0] > 0
+                && (retired == nil || WorkspaceViewReceipts.disappeared[ObjectIdentifier(retired!), default: 0] > afterDisappearance) {
+                ready = true; break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try require(ready, "Shipping MainWindow did not appear/retire its actual root within six seconds")
+        try await Task.sleep(for: .milliseconds(100))
+        try require(runtime.providerAccounts.canRequest(.youtube) && runtime.providerAccounts.canRequest(.twitch),
+            "Old MainWindow disappearance permanently closed the current account session")
+        try require(runtime.controller.ending.isBound, "MainWindow did not retain/rebind the current ending coordinator (new appear=\(WorkspaceViewReceipts.appeared[id, default: 0]), old disappear=\(retired.map { WorkspaceViewReceipts.disappeared[ObjectIdentifier($0), default: 0] } ?? 0), old ending=\(retired?.controller.ending.isBound ?? false), current accounts=\(runtime.providerAccounts.canRequest(.youtube)))")
+        try require(!runtime.controller.isPreviewing && !runtime.controller.outputSessionActive && !runtime.recorder.state.isActive,
+            "UI fixture allocated real capture or output")
+        let managed = try runtime.controller.managedStart.unwrap("Current runtime has no managed-start binding")
+        var unsupported = StreamDestination(name: "Lifecycle-only unsupported provider")
+        unsupported.providerBinding = .init(provider: .twitch, channelID: "fixture")
+        _ = managed.request(.init(destination: unsupported, settings: .default))
+        try require(managed.entries.contains { $0.id == unsupported.id && $0.phase == .blocked }
+            && runtime.controller.managedStartHasEntries,
+            "MainWindow permanently retired the bound managed-start coordinator/observer")
+        managed.cancel(unsupported.id)
+        // Local read-only eligibility only: never call Verify or authorize.
+        let output = UUID()
+        var snapshot = SessionRecoverySnapshot(projectID: workspace.selection.project, profileID: workspace.selection.profile)
+        snapshot.remoteEvents = [.init(outputID: output, eventID: "fixture-event", provider: .youtube,
+            channelID: "fixture-channel", publisherSessionID: UUID(), capturedAt: Date())]
+        workspace.recovery.remoteReview.load(snapshot, context: .init(projectID: workspace.selection.project,
+            profileID: workspace.selection.profile, generation: UUID()))
+        try require(workspace.recovery.remoteReview.canVerify(output), "UI disappearance retired the current recovery review gate")
+        workspace.recovery.remoteReview.load(nil, context: nil)
+    }
+    static func applyWithView(_ workspace: StudioWorkspace) async throws {
+        let retired = workspace.runtime
+        let oldDisappearance = WorkspaceViewReceipts.disappeared[ObjectIdentifier(retired), default: 0]
+        await workspace.applyPending()
+        try await waitForView(workspace, retired: retired, afterDisappearance: oldDisappearance)
     }
     static func run() async throws {
         let root = WorkspaceFixtureStorage.root
@@ -37,6 +95,36 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try FileManager.default.createDirectory(at: seededDirectory, withIntermediateDirectories: true)
         try JSONEncoder().encode(seededCatalog).write(to: root.appendingPathComponent("projects.v1.json"))
         let workspace = StudioWorkspace(root: root)
+        WorkspaceFixtureDefaults.value.set(true, forKey: "onboarding.hasCompletedFirstRun")
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1440, height: 900),
+            styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: WorkspaceApplicationRoot(workspace: workspace))
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.contentView = nil; window.close() }
+        try await waitForView(workspace)
+        let initialRuntime = workspace.runtime
+        let firstAppear = WorkspaceViewReceipts.appeared[ObjectIdentifier(initialRuntime), default: 0]
+        let firstDisappear = WorkspaceViewReceipts.disappeared[ObjectIdentifier(initialRuntime), default: 0]
+        window.contentView = nil
+        for _ in 0..<600 {
+            if WorkspaceViewReceipts.disappeared[ObjectIdentifier(initialRuntime), default: 0] > firstDisappear { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try require(WorkspaceViewReceipts.disappeared[ObjectIdentifier(initialRuntime), default: 0] > firstDisappear,
+            "Owned window detachment did not trigger actual MainWindow disappearance")
+        try require(initialRuntime.providerAccounts.canRequest(.youtube), "Window detach closed current accounts")
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        for _ in 0..<600 {
+            if WorkspaceViewReceipts.appeared[ObjectIdentifier(initialRuntime), default: 0] > firstAppear { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try require(workspace.runtime === initialRuntime && WorkspaceViewReceipts.appeared[ObjectIdentifier(initialRuntime), default: 0] > firstAppear,
+            "Window reattachment did not reopen the actual same-runtime MainWindow")
+        try await waitForView(workspace)
+        print("PASS: actual shipping MainWindow owned window detach/reattach retains accounts, rebinds ending and keeps managed-start/recovery gates open; capture explicitly suppressed")
         for starter in StudioStarter.allCases {
             let scene = starter.scene(camera: nil, screen: nil, profile: .default)
             let decoded = try JSONDecoder().decode(Scene.self, from: JSONEncoder().encode(scene))
@@ -59,17 +147,17 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         workspace.runtime.flush()
         workspace.create(named: "Second Show")
         try require(workspace.selection == first, "Creating a show changed active project before Apply")
-        await workspace.applyPending()
+        try await applyWithView(workspace)
         try require(workspace.selection != first, "Apply did not select the new show")
         try require(workspace.runtime.sceneStore.scenes[0].name != "First Show Camera", "Scene data leaked between projects")
         firstStore.rename(scene.id, to: "Old Store Late Write")
         firstStore.flushPendingWrites()
         try require(workspace.runtime.sceneStore.scenes[0].name != "Old Store Late Write", "Old object writes crossed project directory")
         workspace.stage(project: first.project, profile: first.profile)
-        await workspace.applyPending()
+        try await applyWithView(workspace)
         try require(workspace.runtime.sceneStore.scenes[0].name == "Old Store Late Write", "Persisted project did not reload")
         workspace.addProfile(named: "Duplicate Profile", duplicate: true)
-        await workspace.applyPending()
+        try await applyWithView(workspace)
         try require(workspace.runtime.sceneStore.scenes[0].name == "Old Store Late Write", "Profile duplicate lost scenes")
 
         // The actual switch retires its runtime before preparing the destination.
@@ -88,7 +176,7 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         let marker = Data("owned-workspace-preparation-blocker".utf8)
         try marker.write(to: blockedDirectory)
         defer { if (try? Data(contentsOf: blockedDirectory)) == marker { try? FileManager.default.removeItem(at: blockedDirectory) } }
-        await workspace.applyPending()
+        try await applyWithView(workspace)
         try require(retired.providerAccounts.managedReadRevision != retiredAccountsRevision,
             "Failure fixture did not exercise actual retirement of the old account session")
         try require(workspace.selection == retainedSelection && workspace.pending == blockedSelection
@@ -128,14 +216,14 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
             "Reopened recovery binding failed to checkpoint the retained context")
         // Remove only our known regular file; real prepare/switch can now retry.
         try FileManager.default.removeItem(at: blockedDirectory)
-        await workspace.applyPending()
+        try await applyWithView(workspace)
         try require(workspace.selection == blockedSelection && workspace.pending == nil && !workspace.isSwitching
             && workspace.runtime !== reopened && DesktopStorage.projectDirectory == blockedDirectory && workspace.error == nil,
             "Recovered switch did not retry successfully after the owned blocker was removed")
         try require(!workspace.runtime.controller.outputSessionActive && !workspace.runtime.recorder.state.isActive,
             "Retry started an output")
         workspace.stage(project: retainedSelection.project, profile: retainedSelection.profile)
-        await workspace.applyPending()
+        try await applyWithView(workspace)
         try require(workspace.selection == retainedSelection && workspace.runtime.sceneStore.scenes[0].name == "After Failed Switch",
             "A later successful switch lost the recovered profile's persisted edit")
         print("PASS: actual failed profile-directory preparation retires old account session, retains selection/path, rebuilds usable dispatcher/chat/recovery runtime, clears switch guard and retries after owned file cleanup with no outputs")
@@ -213,6 +301,9 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         workspace.runtime.flush()
         try Data("truncated-scene-document".utf8).write(to: currentURL)
         let restarted = StudioWorkspace(root: root)
+        let retiredRestart = restarted.runtime
+        host.rootView = WorkspaceApplicationRoot(workspace: restarted)
+        try await waitForView(restarted)
         let recovery = try restarted.sceneRecovery.unwrap("Corrupt scenes did not offer backup recovery")
         try require(!restarted.runtime.controller.streamState.isActive && !restarted.runtime.recorder.state.isActive, "Recovery started an output")
         let preserved = try FileManager.default.contentsOfDirectory(at: selectedDirectory, includingPropertiesForKeys: nil)
@@ -220,9 +311,11 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try require(preserved.contains { (try? Data(contentsOf: $0)) == Data("truncated-scene-document".utf8) }, "Corrupt original was not preserved")
         restarted.error = "Fixture previous restore error"
         await restarted.restore(recovery)
+        try await waitForView(restarted, retired: retiredRestart)
         try require(restarted.sceneRecovery == nil, "Successful restore kept recovery pending")
         try require(restarted.error == nil, "Successful restore kept the previous error banner")
         try require(restarted.runtime.sceneStore.scenes.map(\.name) == recovery.document.scenes.map(\.name), "Accepted backup did not restore scenes")
+        print("PASS: actual shipping App root identity/environment chain recreates MainWindow across profile apply, same-profile failed preparation fallback and backup restore; old disappear cannot retire new accounts/managed start")
         await RecordingTerminationDelegate.finishSession?()
         print("PASS: shared chat staging/Take, recovery binding and attached library, project/profile switching, captured store paths, duplication, package preview, consistent ID remapping and packaged LUT bytes")
         print("Qualification: shipping Workspace switching/recovery logic; temporary machine/project/preferences and generated credential/microphone/legacy-migration boundaries; no operator credentials, real capture or provider calls")
