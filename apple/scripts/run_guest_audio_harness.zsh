@@ -31,4 +31,4 @@ xcrun swiftc -swift-version 6 -strict-concurrency=complete -parse-as-library \
   "${APPLE_DIR}/StreamMac/ProgramRecordingSession.swift" "${APPLE_DIR}/StreamMac/AudioMixEngine.swift" \
   "${SCRIPT_DIR}/program_recording_fixtures.swift" "${SCRIPT_DIR}/guest_audio_harness.swift" \
   -o "${BUILD_DIR}/GuestAudioHarness"
-env DYLD_FRAMEWORK_PATH="${FRAMEWORKS}" "${BUILD_DIR}/GuestAudioHarness" "${BUILD_DIR}/media-$(uuidgen)"
+env DYLD_FRAMEWORK_PATH="${FRAMEWORKS}" "${BUILD_DIR}/GuestAudioHarness" "${BUILD_DIR}/media-$(uuidgen)" "$@"
