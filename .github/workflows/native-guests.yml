@@ -5,6 +5,9 @@ on:
     paths:
       - 'apple/NativeGuestReceivePrototype/**'
       - 'apple/StreamMac/Guest*'
+      - 'apple/StreamMac/NativeGuestMediaSink.swift'
+      - 'apple/StreamMac/NativeInterview*'
+      - 'apple/StreamMac/StreamMac-Bridging-Header.h'
       - 'apple/StreamMac/AudioMixEngine.swift'
       - 'apple/StreamMac/CaptureSourcePool.swift'
       - 'apple/StreamMac/ResilientSourceFrames.swift'
@@ -27,10 +30,13 @@ on:
       - 'apple/Vendor/**'
       - 'apple/scripts/repair_desktop_transport_archives.py'
       - 'apple/scripts/*guest*'
+      - 'apple/scripts/*native_interview*'
+      - 'apple/scripts/desktop_transport_fixture.rb'
       - 'apple/scripts/*fractional_iso_audio*'
       - 'workers/interviews/public/guest.*'
       - 'workers/interviews/package*.json'
       - 'workers/interviews/test/browser/native-host-*'
+      - 'workers/interviews/test/browser/native-session-*'
       - '.github/workflows/native-guests.yml'
   workflow_dispatch:
 
@@ -81,6 +87,14 @@ jobs:
           test -f "$GUEST_ARTIFACT/libdatachannel.a"
           printf 'STREAM_GUEST_RTC_INCLUDE=%s\n' "$GUEST_ARTIFACT/Headers/libdatachannel" >> "$GITHUB_ENV"
           printf 'STREAM_GUEST_RTC_LIBRARY=%s\n' "$GUEST_ARTIFACT/libdatachannel.a" >> "$GITHUB_ENV"
+      - name: Install pinned interview service dependencies
+        run: npm ci --prefix workers/interviews
+      - name: Qualify native interview service and runtime routing
+        run: |
+          mkdir -p apple/build/native-guest-results
+          set -euo pipefail
+          apple/scripts/run_native_interview_control_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-service.log
+          INTERVIEW_MANAGER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_native_interview_manager_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-manager.log
       - name: Decode real SDK media and qualify registration boundaries
         run: |
           mkdir -p apple/build/native-guest-results
@@ -101,7 +115,6 @@ jobs:
         run: |
           set -euo pipefail
           apple/scripts/build_native_guest_host_cli.zsh
-          npm ci --prefix workers/interviews
           NATIVE_GUEST_HOST="$PWD/apple/build/native-guest-receive/guest-host-cli" node workers/interviews/test/browser/native-host-browser.mjs 2>&1 | tee apple/build/native-guest-results/chrome-native.log
       - name: Retain qualification logs and decoded media
         if: always()
@@ -113,5 +126,7 @@ jobs:
             apple/build/native-guest-program-iso-validation/media-*
             apple/build/guest-audio-validation/media-*
             apple/build/fractional-iso-audio-validation/media-*
+            apple/build/native-interview-validation/run-*/worker.log
+            apple/build/native-interview-manager-validation/run-*/worker.log
           if-no-files-found: warn
           retention-days: 14
