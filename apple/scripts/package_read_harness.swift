@@ -12,47 +12,76 @@ import StreamCore
 // Generated tool-only IO probes hold the completion of an actual shipping
 // preview/import. They neither substitute package data nor cancel the worker.
 enum PackageReadProbe {
+    private struct Waiter {
+        let key: String
+        let completion: CheckedContinuation<Void, Error>
+        let deadline: Task<Void, Never>
+    }
     private final class State: @unchecked Sendable {
-        let condition = NSCondition()
+        let lock = NSLock()
         var held: Set<String> = [], entered: [String: Int] = [:]
-        var delivered: [String: Int] = [:]
+        var delivered: [String: Int] = [:], waiters: [UUID: Waiter] = [:]
     }
     private static let state = State()
     private static func key(_ kind: String, _ url: URL) -> String { kind + ":" + url.lastPathComponent }
     static func hold(_ kind: String, _ url: URL) {
-        state.condition.lock(); state.held.insert(key(kind, url)); state.condition.unlock()
+        state.lock.lock(); state.held.insert(key(kind, url)); state.lock.unlock()
     }
     static func release(_ kind: String, _ url: URL) {
-        state.condition.lock(); state.held.remove(key(kind, url)); state.condition.broadcast(); state.condition.unlock()
+        state.lock.lock()
+        let key = key(kind, url)
+        state.held.remove(key)
+        let released = state.waiters.filter { $0.value.key == key }
+        for id in released.keys { state.waiters.removeValue(forKey: id) }
+        state.lock.unlock()
+        for waiter in released.values { waiter.deadline.cancel(); waiter.completion.resume() }
     }
     static func count(_ kind: String, _ url: URL, delivered: Bool = false) -> Int {
-        state.condition.lock(); defer { state.condition.unlock() }
+        state.lock.lock(); defer { state.lock.unlock() }
         return (delivered ? state.delivered : state.entered)[key(kind, url), default: 0]
     }
-    private static func completedIO(_ kind: String, _ url: URL) {
-        state.condition.lock(); defer { state.condition.unlock() }
-        let key = key(kind, url)
-        state.entered[key, default: 0] += 1
-        let deadline = Date().addingTimeInterval(15)
-        while state.held.contains(key) {
-            precondition(state.condition.wait(until: deadline), "Owned actual IO completion hold exceeded15 seconds")
+    private static func expire(_ id: UUID) {
+        state.lock.lock(); let waiter = state.waiters.removeValue(forKey: id); state.lock.unlock()
+        waiter?.completion.resume(throwing: NSError(domain: "PackageReadHarness", code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "Owned actual IO completion hold exceeded15 seconds"]))
+    }
+    private static func completedIO(_ kind: String, _ url: URL) async throws {
+        // Suspend only the completion of the real IO. Blocking four Swift
+        // cooperative workers here starved the fixture's MainActor on CI.
+        try await withCheckedThrowingContinuation { completion in
+            state.lock.lock()
+            let key = key(kind, url)
+            state.entered[key, default: 0] += 1
+            guard state.held.contains(key) else {
+                state.lock.unlock(); completion.resume(); return
+            }
+            let id = UUID()
+            let deadline = Task.detached {
+                do { try await Task.sleep(for: .seconds(15)); expire(id) }
+                catch { /* Explicit release already resumed this completion. */ }
+            }
+            state.waiters[id] = Waiter(key: key, completion: completion, deadline: deadline)
+            state.lock.unlock()
         }
     }
-    static func preview(_ url: URL) throws -> ShowPackagePreview {
+    static func preview(_ url: URL) async -> Result<ShowPackagePreview, Error> {
         let result = Result { try ShowPackageIO.preview(url) }
-        completedIO("preview", url)
-        return try result.get()
+        do { try await completedIO("preview", url); return result }
+        catch { return .failure(error) }
     }
-    static func importFiles(from source: URL, to destination: URL) throws {
+    static func importFiles(from source: URL, to destination: URL) async throws {
         let result = Result { try ShowPackageIO.importFiles(from: source, to: destination) }
-        completedIO("import", source)
+        try await completedIO("import", source)
         return try result.get()
     }
     static func previewReturned(_ url: URL) {
-        state.condition.lock(); state.delivered[key("preview", url), default: 0] += 1; state.condition.unlock()
+        state.lock.lock(); state.delivered[key("preview", url), default: 0] += 1; state.lock.unlock()
     }
     static func releaseAll() {
-        state.condition.lock(); state.held.removeAll(); state.condition.broadcast(); state.condition.unlock()
+        state.lock.lock()
+        state.held.removeAll(); let released = Array(state.waiters.values); state.waiters.removeAll()
+        state.lock.unlock()
+        for waiter in released { waiter.deadline.cancel(); waiter.completion.resume() }
     }
 }
 

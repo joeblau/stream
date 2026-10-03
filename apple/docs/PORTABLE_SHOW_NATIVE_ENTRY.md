@@ -27,7 +27,9 @@ zsh apple/scripts/run_portable_show_native_harness.zsh
 The runner generates a unique fixture app from the shipping `@main` app, root
 window, delegate and package receiver. Its defaults, credential storage,
 provider transport, capture and permission boundaries are fixture-only. It
-signs the owned app ad hoc and verifies exactly the App Sandbox, user-selected
+signs each nested dylib/framework before the owned app ad hoc and verifies the
+entire bundle with `codesign --verify --deep --strict`. This includes Xcode's
+preview/debug dylibs when present. It verifies exactly the App Sandbox, user-selected
 read/write and app-scope bookmark entitlements. There are no network, device,
 Keychain, App Group or debugging entitlements. It never changes default file
 associations, TCC, system devices or another application's state.
@@ -56,6 +58,10 @@ spelling `/tmp` as `/private/tmp`; all production IO retains the original URL.
 Artifacts and the unique fixture app container remain available after the run.
 The runner copies bounded native receipts into its owned artifact directory;
 runtime persistence and app-scope bookmark bytes remain in the unique container.
+Controlled cancel/drop commands also observe the actual native preview-sheet
+dismissal/presentation before acknowledging the next gesture, so an old sheet's
+binding callback cannot outrun the synthetic wire sequence. All package IO and
+repeated-import assertions remain on the shipping Workspace.
 The child lifetime is bounded to 110 seconds, the parent to 100 seconds; native
 receipts, file readiness and normal Quit have separate bounded waits.
 

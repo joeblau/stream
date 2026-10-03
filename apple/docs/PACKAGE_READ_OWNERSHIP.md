@@ -36,7 +36,11 @@ credentials, device permissions, publishing or recording are exercised.
 
 Only the IO completion boundary is held: each probe calls the real preview or
 import before withholding its result. A second observer records completion of
-the actual Workspace transaction. Tests prove that A finishing after B cannot
+the actual Workspace transaction. Completion holds use checked continuations
+with a fifteen-second deadline, canceled on explicit release; they do not block
+the Swift cooperative executor. The actual whole-runtime fixture also runs with
+`LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`, so a constrained pool must still enter
+all four retained reads and run the MainActor release/control path. Tests prove that A finishing after B cannot
 replace B, an old return cannot clear C's busy state, canceled noncooperative
 workers retain all four occupied slots, and late malformed reads cannot publish
 obsolete errors. An actual import retains its busy/source ownership across
