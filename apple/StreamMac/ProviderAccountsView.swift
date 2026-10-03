@@ -78,6 +78,27 @@ struct ProviderAccountsView: View {
                             Text("Event ID: \(event.id)").font(.caption).textSelection(.enabled)
                             if let date = event.scheduledAt { Text("Scheduled \(date.formatted()) · \(TimeZone.current.identifier)").font(.caption) }
                             if let url = event.publicURL { Link("Open broadcast", destination: url) }
+                            if provider == .youtube {
+                                Text("YouTube latency preference: \((event.latencyPreference ?? .unknown).label)")
+                                    .font(.caption)
+                                Text("Provider setting, not measured delivery latency.").font(.caption2).foregroundStyle(.secondary)
+                                if let thumbnails = event.thumbnails, !thumbnails.isEmpty {
+                                    DisclosureGroup("Public thumbnail links (\(thumbnails.count))") {
+                                        ForEach(thumbnails) { thumbnail in
+                                            HStack {
+                                                Link(thumbnail.size.rawValue.capitalized, destination: thumbnail.url)
+                                                if let width = thumbnail.width, let height = thumbnail.height {
+                                                    Text("\(width) × \(height)").foregroundStyle(.secondary)
+                                                } else { Text("Dimensions unavailable").foregroundStyle(.secondary) }
+                                            }.font(.caption)
+                                        }
+                                        Text("Opens the provider's public image in your browser. Images are not downloaded or saved by Stream.")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                } else {
+                                    Text("Public thumbnails: unavailable").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                     if provider == .youtube { youtubeControls }
