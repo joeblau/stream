@@ -21,6 +21,12 @@ import Foundation
     private var relay: NativeInterviewRelayConfiguration?
     private var peers: [UUID: Peer] = [:], slots: [UUID: UUID] = [:], admittedGenerations: [UUID: UUID] = [:]
     private var pendingAdmission: UUID?, revoked: Set<UUID> = []
+    private struct MembershipCommand {
+        let generation: UUID
+        let membership: NativeInterviewMembership
+        let revision: UInt64
+    }
+    private var membershipCommands: [UUID: [MembershipCommand]] = [:]
     private var localGeneration: UInt64 = 0
     private var occupiedMedia: Set<UUID> = []
     private var occupiedRequests: Set<UUID> = []
@@ -150,14 +156,28 @@ import Foundation
     }
     @discardableResult func setMembership(_ membership: NativeInterviewMembership, guest id: UUID) -> Bool {
         guard membership != .waiting, snapshot.phase == .connected,
-              admittedGenerations[id] != nil, !revoked.contains(id) else { return false }
-        return send(["type": membership == .onair ? "stage" : "backstage", "id": id.uuidString.lowercased()])
+              let generation = admittedGenerations[id], !revoked.contains(id),
+              let revision = nextMembershipReceiptRevision(for: id) else { return false }
+        guard send(["type": membership == .onair ? "stage" : "backstage", "id": id.uuidString.lowercased()]) else { return false }
+        membershipCommands[id, default: []].append(.init(generation: generation, membership: membership, revision: revision))
+        return true
+    }
+    /// The Worker emits one ordered admitted receipt for each stage/backstage
+    /// request. Include requests already in flight so an earlier stage receipt
+    /// cannot acknowledge a later intent after a Backstage reversal.
+    func nextMembershipReceiptRevision(for id: UUID) -> UInt64? {
+        guard snapshot.phase == .connected, admittedGenerations[id] != nil, !revoked.contains(id),
+              let member = snapshot.members.first(where: { $0.id == id }),
+              membershipCommands.values.reduce(0, { $0 + $1.count }) < 32 else { return nil }
+        let previous = membershipCommands[id]?.last?.revision ?? member.membershipRevision
+        return previous < UInt64.max ? previous + 1 : nil
     }
     @discardableResult func remove(_ id: UUID) -> Bool {
         guard snapshot.phase == .connected, snapshot.members.contains(where: { $0.id == id }) else { return false }
         // Authority closes synchronously even if the server acknowledgment is
         // late or absent. An old admitted/SDP response cannot resurrect it.
-        revoked.insert(id); admittedGenerations[id] = nil; if pendingAdmission == id { pendingAdmission = nil }
+        revoked.insert(id); admittedGenerations[id] = nil; membershipCommands[id] = nil
+        if pendingAdmission == id { pendingAdmission = nil }
         dropPeer(id)
         return send(["type": "revoke", "id": id.uuidString.lowercased()])
     }
@@ -274,6 +294,7 @@ import Foundation
             for id in Array(peers.keys) where !members.contains(where: { $0.id == id && $0.membership != .waiting }) { dropPeer(id) }
             for id in Array(admittedGenerations.keys) where !members.contains(where: { $0.id == id && $0.membership != .waiting }) {
                 admittedGenerations[id] = nil
+                membershipCommands[id] = nil
             }
             if let pendingAdmission, !members.contains(where: { $0.id == pendingAdmission }) { self.pendingAdmission = nil }
             snapshot.members = members
@@ -284,11 +305,27 @@ import Foundation
             guard !revoked.contains(id), snapshot.members.contains(where: { $0.id == id }),
                   let state = object["state"] as? String, let membership = NativeInterviewMembership(rawValue: state),
                   membership != .waiting else { return }
-            if pendingAdmission == id { pendingAdmission = nil }
+            let revision: UInt64?
+            if pendingAdmission == id {
+                pendingAdmission = nil
+                let previous = snapshot.members.first(where: { $0.id == id })!.membershipRevision
+                revision = previous < UInt64.max ? previous + 1 : nil
+            } else if let command = membershipCommands[id]?.first, command.generation == generation {
+                guard command.membership == membership else { throw NativeInterviewError.malformed }
+                membershipCommands[id]?.removeFirst()
+                if membershipCommands[id]?.isEmpty == true { membershipCommands[id] = nil }
+                revision = command.revision
+            } else {
+                // Unsolicited membership metadata is not an acknowledgment of
+                // any local command. A changed service generation retires the
+                // old request queue along with its media authority.
+                if admittedGenerations[id] != generation { membershipCommands[id] = nil }
+                revision = nil
+            }
             admittedGenerations[id] = generation
             updateMember(id) {
                 $0.membership = membership
-                if $0.membershipRevision < UInt64.max { $0.membershipRevision += 1 }
+                if let revision { $0.membershipRevision = revision }
             }
             if peers[id]?.context.guestGeneration != generation {
                 dropPeer(id); _ = beginPeer(id, generation: generation)
@@ -495,6 +532,7 @@ import Foundation
         epoch = UUID(); receiveTask?.cancel(); connectionDeadline?.cancel(); endingDeadline?.cancel()
         expiryTask?.cancel(); relayRefreshTask?.cancel(); relayRequest?.cancel()
         socket?.close(); socket = nil; hostGeneration = nil; pendingAdmission = nil; admittedGenerations.removeAll()
+        membershipCommands.removeAll()
         for id in Array(peers.keys) { dropPeer(id) }
         snapshot.members.removeAll(); snapshot.program = false; snapshot.recording = false; snapshot.locked = false
         if wipe { room = nil; relay = nil; slots.removeAll(); revoked.removeAll() }

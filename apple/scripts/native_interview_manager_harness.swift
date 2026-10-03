@@ -22,7 +22,7 @@ private extension NSLock {
 private final class ManagerReceiptSocket: NativeInterviewSocketTransport, @unchecked Sendable {
     let actual: any NativeInterviewSocketTransport
     private let lock = NSLock()
-    private var withheld: [String] = []
+    private var withheld: [String] = [], released: [String] = []
     private var holding = false, suppressing = false, captured = 0
     init(_ actual: any NativeInterviewSocketTransport) { self.actual = actual }
     var closeCode: Int? { actual.closeCode }
@@ -32,9 +32,19 @@ private final class ManagerReceiptSocket: NativeInterviewSocketTransport, @unche
         lock.lock(); holding = enabled; suppressing = suppress; lock.unlock()
     }
     var heldCount: Int { lock.lock(); defer { lock.unlock() }; return captured }
+    func releaseNext() throws {
+        try lock.fixtureLocked {
+            try require(!withheld.isEmpty, "No actual membership receipt to release")
+            released.append(withheld.removeFirst())
+        }
+        try wake()
+    }
     func receive() async throws -> String {
         while true {
-            let released = lock.fixtureLocked { !holding && !withheld.isEmpty ? withheld.removeFirst() : nil }
+            let released: String? = lock.fixtureLocked {
+                if !self.released.isEmpty { return self.released.removeFirst() }
+                return !holding && !withheld.isEmpty ? withheld.removeFirst() : nil
+            }
             if let released { return released }
             let text = try await actual.receive()
             let object = try NativeInterviewWire.object(Data(text.utf8))
@@ -45,7 +55,7 @@ private final class ManagerReceiptSocket: NativeInterviewSocketTransport, @unche
                         "Actual withheld receipt ACK failed")
             lock.fixtureLocked {
                 captured += 1
-                if !discard { precondition(withheld.count < 16); withheld.append(text) }
+                if !discard { precondition(withheld.count < 32); withheld.append(text) }
             }
         }
     }
@@ -143,7 +153,8 @@ private actor ManagerGuest {
     func acceptAnswer(_ sdp: String) throws { _ = events(.ready) }
     func acceptCandidate(_ value: String, mid: String) throws {}
     func approveScreen(_ approved: Bool) -> Bool {
-        guard !retired else { return false }; callbacks.setApproved(approved); return true
+        guard !retired, let intent = callbacks.beginApproval(approved) else { return false }
+        return callbacks.finishApproval(approved, intent: intent)
     }
     func screenSharing(_ sharing: Bool) throws {
         callbacks.receive("control", try json(["sharing": sharing]), "")
@@ -381,11 +392,11 @@ private extension AudioMixEngine {
         let acknowledgedRevision = studio.manager.state.snapshot.members.first!.membershipRevision
         receiptSocket.hold(true, suppress: true); let beforeRepeat = receiptSocket.heldCount
         try studio.command(.onair(id))
-        try await wait("Repeated actual stage not received") { receiptSocket.heldCount > beforeRepeat }
         try require(studio.manager.state.routes[id]?.programAllowed == true
             && studio.manager.state.snapshot.members.first?.membershipRevision == acknowledgedRevision,
             "Repeated no-op/withheld ACK invalidated an already acknowledged intent")
         try await studio.measure("repeated onair no new receipt", program: 0.25, monitor: 0.25)
+        try require(receiptSocket.heldCount == beforeRepeat, "Idempotent On Air sent a redundant stage request")
         receiptSocket.hold(false)
         try studio.command(.backstage(id))
         try require(studio.manager.state.routes[id]?.programAllowed == false && studio.manager.state.routes[id]?.monitorAllowed == true,
@@ -393,20 +404,87 @@ private extension AudioMixEngine {
         try await studio.measure("backstage keeps private monitor", program: 0, monitor: 0.25)
         try studio.command(.monitor(id, false)); try await studio.measure("backstage no monitor intent", program: 0, monitor: 0)
 
+        try await wait("Actual Backstage receipt missing before reversal") {
+            studio.manager.state.snapshot.members.first?.membership == .backstage
+        }
+        let beforeReversal = receiptSocket.heldCount
+        let reversalRevision = studio.manager.state.snapshot.members.first!.membershipRevision
+        receiptSocket.hold(true)
+        try studio.command(.onair(id))
+        try await wait("First actual stage receipt not held") { receiptSocket.heldCount == beforeReversal + 1 }
+        try studio.command(.backstage(id))
+        try await wait("Reversing actual Backstage receipt not held") { receiptSocket.heldCount == beforeReversal + 2 }
+        try studio.command(.onair(id))
+        try await wait("Latest actual stage receipt not held") {
+            receiptSocket.heldCount == beforeReversal + 3 && studio.manager.state.snapshot.members.first?.membership == .onair
+        }
+        try receiptSocket.releaseNext()
+        try await wait("First old stage receipt not delivered") {
+            studio.manager.state.snapshot.members.first!.membershipRevision == reversalRevision + 1
+        }
+        try await studio.measure("old stage ACK cannot satisfy reversed intent", program: 0, monitor: 0)
+        try require(studio.manager.state.routes[id]?.programAllowed == false,
+                    "First old stage receipt granted latest reversed intent")
+        try receiptSocket.releaseNext()
+        try await wait("Reversing Backstage receipt not delivered") {
+            studio.manager.state.snapshot.members.first!.membershipRevision == reversalRevision + 2
+        }
+        try await studio.measure("old Backstage ACK keeps reversed intent closed", program: 0, monitor: 0)
+        try receiptSocket.releaseNext()
+        try await wait("Latest matching stage receipt did not grant reversed intent") {
+            studio.manager.state.routes[id]?.programAllowed == true
+        }
+        try await studio.measure("latest reversed stage ACK", program: 0.25, monitor: 0)
+        receiptSocket.hold(false)
+        try studio.command(.backstage(id))
+        try await studio.measure("reversal final Backstage", program: 0, monitor: 0)
+        trace("actual Worker On Air/Backstage/On Air receipts delivered individually; only latest matching stage ACK grants Program")
+
+        let boundedStart = receiptSocket.heldCount
+        let boundedRevision = studio.manager.state.snapshot.members.first!.membershipRevision
+        receiptSocket.hold(true)
+        for count in 1...32 {
+            try studio.command(.onair(id))
+            try await wait("Bounded actual stage receipt missing") { receiptSocket.heldCount == boundedStart + count }
+            // Stay within the actual Worker's command rate limit while its
+            // real receipts remain deliberately held and already ACKed.
+            try await Task.sleep(for: .milliseconds(35))
+        }
+        try require(studio.dispatcher.execute(.interview(.onair(id))).error != nil,
+                    "An uncertain membership queue admitted a 33rd request")
+        try receiptSocket.releaseNext()
+        try await wait("First bounded stage receipt missing") {
+            studio.manager.state.snapshot.members.first!.membershipRevision == boundedRevision + 1
+        }
+        try await studio.measure("bounded queue retains latest ordinal", program: 0, monitor: 0)
+        receiptSocket.hold(false); try receiptSocket.wake()
+        try await wait("Last bounded stage receipt did not grant its own intent") {
+            studio.manager.state.snapshot.members.first!.membershipRevision == boundedRevision + 32
+                && studio.manager.state.routes[id]?.programAllowed == true
+        }
+        try await studio.measure("bounded final stage ACK", program: 0.25, monitor: 0)
+        try studio.command(.backstage(id)); try await studio.measure("bounded final Backstage", program: 0, monitor: 0)
+        trace("actual Worker holds 32 membership requests; 33rd refused, no ordinal eviction, only final matching receipt opens Program")
+
         try studio.command(.approveScreen(id, true)); try host.screenSharing(true)
         try await wait("Screen sharing metadata missing") { studio.manager.state.snapshot.members.first?.screenSharing == true }
         let screenPTS = try host.paint(.screen, color: 0xff20e020)
         try require(studio.controller.guestVideoFrames.pixels(slot: lease.slot, role: .screen, at: screenPTS, program: false) != nil,
                     "Actual adapter bridge approval did not open the controller screen gate")
-        host.controlClosed()
+        try studio.command(.approveScreen(id, false))
         try require(studio.controller.guestVideoFrames.pixels(slot: lease.slot, role: .screen, at: screenPTS, program: false) == nil,
-                    "Actual adapter control closure did not revoke screen synchronously")
-        try await wait("Control closure metadata missing") { studio.manager.state.snapshot.members.first?.screenApproved == false }
+                    "Screen revoke retained cached private screen")
         try studio.command(.approveScreen(id, true)); try host.screenSharing(true)
         let secondScreen = try host.paint(.screen, color: 0xff20e020)
-        try studio.command(.approveScreen(id, false))
+        host.controlClosed()
         try require(studio.controller.guestVideoFrames.pixels(slot: lease.slot, role: .screen, at: secondScreen, program: false) == nil,
-                    "Screen revoke retained cached private screen")
+                    "Actual adapter control closure did not revoke screen synchronously")
+        try await wait("Control closure metadata missing") { studio.manager.state.snapshot.members.first?.screenApproved == false }
+        try require(studio.dispatcher.execute(.interview(.approveScreen(id, true))).error != nil,
+                    "Approval restored a closed control channel")
+        try host.screenSharing(true)
+        try require(studio.controller.guestVideoFrames.pixels(slot: lease.slot, role: .screen, at: secondScreen, program: false) == nil,
+                    "Late sharing restored a closed control channel")
         _ = try host.paint(.camera, color: 0xffe02020)
         trace("real adapter event bridge: approval opens screen; revoke/control-close synchronously clear screen while camera/audio remain independent")
 

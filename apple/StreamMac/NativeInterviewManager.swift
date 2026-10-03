@@ -196,7 +196,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
         case .admit(let id): result = session.admit(id)
         case .onair(let id):
             guard let context = session.readyPeerLease(for: id), context == registered,
-                  let member = session.snapshot.members.first(where: { $0.id == id }), member.membershipRevision < UInt64.max else { return false }
+                  let member = session.snapshot.members.first(where: { $0.id == id }) else { return false }
             var wanted = intent?.context == context ? intent! : .init(context: context)
             // Repeating an already acknowledged local intent keeps its valid
             // receipt. A service that treats repeated stage as a no-op must not
@@ -205,7 +205,13 @@ struct NativeInterviewControlState: Equatable, Sendable {
             let acknowledged = wanted.program && member.membership == .onair
                 && member.membershipRevision >= wanted.requiredMembershipRevision
             wanted.program = true
-            if !acknowledged { wanted.requiredMembershipRevision = member.membershipRevision + 1 }
+            if acknowledged {
+                // An already acknowledged intent is idempotent. Avoid an
+                // unnecessary request whose no-op response may have no ACK.
+                result = true; break
+            }
+            guard let revision = session.nextMembershipReceiptRevision(for: id) else { return false }
+            wanted.requiredMembershipRevision = revision
             intent = wanted
             result = session.setMembership(.onair, guest: id)
             if !result { intent?.program = false }
