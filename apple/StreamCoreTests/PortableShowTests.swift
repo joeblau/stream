@@ -55,4 +55,46 @@ import Testing
         try Data("{\"changed\":true}".utf8).write(to: root.appendingPathComponent("stream.scenes.v2.json"))
         #expect(throws: (any Error).self) { try PortableShow.validate(at: root) }
     }
+
+    @Test func existingTemporaryAliasesPreserveURLsAndRejectOwnedChildEscapes() throws {
+        #if os(macOS)
+        let name = "stream-package-alias-\(UUID().uuidString)"
+        let root = URL(fileURLWithPath: "/private/tmp", isDirectory: true).appendingPathComponent(name, isDirectory: true)
+        let outside = URL(fileURLWithPath: "/private/tmp", isDirectory: true).appendingPathComponent(name + "-outside", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let bytes = Data("{\"owned\":true}".utf8)
+        try bytes.write(to: root.appendingPathComponent("stream.scenes.v2.json"))
+        try bytes.write(to: outside.appendingPathComponent("outside.json"))
+        for prefix in ["/private/tmp", "/tmp"] {
+            let spelling = URL(fileURLWithPath: prefix, isDirectory: true).appendingPathComponent(name, isDirectory: true)
+            let original = spelling.absoluteString
+            let expected = spelling.appendingPathComponent("stream.scenes.v2.json").standardizedFileURL
+            let returned = try PortableShow.safeURL("stream.scenes.v2.json", under: spelling)
+            #expect(returned.absoluteString == expected.absoluteString)
+            #expect(spelling.absoluteString == original)
+            #expect(try Data(contentsOf: returned) == bytes)
+            let missing = try PortableShow.safeURL("Assets/new-file", under: spelling)
+            #expect(missing.absoluteString == spelling.appendingPathComponent("Assets/new-file").standardizedFileURL.absoluteString)
+            let entry = try PortableShow.fileDescription(path: "stream.scenes.v2.json", root: spelling)
+            try JSONEncoder().encode(PortableShowManifest(name: "Alias Show", includesMedia: false, files: [entry]))
+                .write(to: spelling.appendingPathComponent("manifest.json"))
+            let validated = try PortableShow.validate(at: spelling)
+            #expect(validated.files.count == 1)
+            #expect(validated.files.first?.path == entry.path)
+            #expect(validated.files.first?.bytes == entry.bytes)
+            #expect(validated.files.first?.sha256 == entry.sha256)
+        }
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("Escape"), withDestinationURL: outside)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("InternalLink"),
+            withDestinationURL: root.appendingPathComponent("stream.scenes.v2.json"))
+        for prefix in ["/private/tmp", "/tmp"] {
+            let spelling = URL(fileURLWithPath: prefix, isDirectory: true).appendingPathComponent(name, isDirectory: true)
+            #expect(throws: (any Error).self) { try PortableShow.safeURL("Escape/outside.json", under: spelling) }
+            #expect(throws: (any Error).self) { try PortableShow.safeURL("InternalLink", under: spelling) }
+            #expect(throws: (any Error).self) { try PortableShow.safeURL("../" + outside.lastPathComponent + "/outside.json", under: spelling) }
+        }
+        #endif
+    }
 }
