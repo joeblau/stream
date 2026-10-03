@@ -84,9 +84,13 @@ private struct Ready: Codable {
         let runtime = workspace.runtime
         print("Stage: child creating owned 2-second WAV")
         let mediaURL = try createOwnedMedia()
-        print("Stage: child owned WAV created; creating security-scoped bookmark")
-        let bookmark = try mediaURL.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-        print("Stage: child scoped bookmark created; restoring actual paused AVPlayer")
+        print("Stage: child owned WAV created; qualifying exact internal-media validation boundary (no security grant)")
+        try qualifyOwnedMediaBoundary(mediaURL)
+        let bookmark = try mediaURL.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        let resolvedMedia = try AbruptFixtureOwnedMedia.resolve(bookmark)
+        try require(resolvedMedia.resolvingSymlinksInPath().path == mediaURL.resolvingSymlinksInPath().path,
+                    "Owned ordinary bookmark did not resolve the exact internal WAV")
+        print("Stage: child owned internal-media bookmark created; restoring actual paused AVPlayer; external scope UNQUALIFIED")
         let media = runtime.sceneStore.addSource(SourceDefinition(name: "Owned paused media",
             payload: .media(MediaSourcePayload(bookmarkData: bookmark, fileName: mediaURL.lastPathComponent, autoplay: true))))
         runtime.controller.capturePool.restorePausedMediaPosition(media.id, seconds: 1.25)
@@ -306,6 +310,29 @@ private struct Ready: Codable {
         let file = try AVAudioFile(forWriting: url, settings: settings)
         try file.write(from: buffer)
         return url
+    }
+
+    static func qualifyOwnedMediaBoundary(_ media: URL) throws {
+        let sibling = media.deletingLastPathComponent().appendingPathComponent("rejected-owned-sibling.wav")
+        try Data("Owned boundary rejection fixture".utf8).write(to: sibling)
+        defer { try? FileManager.default.removeItem(at: sibling) }
+        let siblingBookmark = try sibling.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        var rejectedSibling = false
+        do { _ = try AbruptFixtureOwnedMedia.resolve(siblingBookmark) } catch { rejectedSibling = true }
+        try require(rejectedSibling, "Internal-media resolver admitted a different owned file")
+        // Probe the actual URL validation against a same-name symlink without
+        // changing the WAV bytes. Both paths belong exclusively to this child.
+        let backup = media.deletingLastPathComponent().appendingPathComponent("owned-local-media-identity.wav")
+        try FileManager.default.moveItem(at: media, to: backup)
+        defer {
+            try? FileManager.default.removeItem(at: media)
+            try? FileManager.default.moveItem(at: backup, to: media)
+        }
+        try FileManager.default.createSymbolicLink(at: media, withDestinationURL: backup)
+        var rejectedLink = false
+        do { _ = try AbruptFixtureOwnedMedia.validate(media) } catch { rejectedLink = true }
+        try require(rejectedLink, "Internal-media resolver admitted a symbolic link")
+        print("PASS: owned internal-media boundary rejects sibling bookmark and same-name symlink; no external security grant claimed")
     }
 
     static func requirePausedMedia(_ runtime: StudioRuntime, id: SourceDefinitionID) async throws {

@@ -34,6 +34,9 @@ StreamGuestFixtureBoundaries.apply(spec['targets']['StreamCore'], target, root, 
 # Do not remove these bytes at process exit, especially when media is unreadable.
 File.write(File.join(folder, 'fixtures/GuestFixtureEnvironment.swift'), <<'SWIFT')
 import Foundation
+#if !STREAM_NATIVE_VALIDATION
+#error("The owned internal-media resolver is restricted to generated native validation targets")
+#endif
 enum GuestFixtureDefaults {
     static let name = "com.joeblau.Stream.fixture.abrupt.\(ProcessInfo.processInfo.environment["STREAM_ABRUPT_FIXTURE_ID"]!)"
     nonisolated(unsafe) static let value = UserDefaults(suiteName: name)!
@@ -42,6 +45,31 @@ enum GuestFixtureStorage {
     static let artifactRoot = URL(fileURLWithPath: ProcessInfo.processInfo.environment["STREAM_ABRUPT_FIXTURE_ROOT"]!, isDirectory: true)
     static let machineDirectory = artifactRoot.appendingPathComponent("Studio", isDirectory: true)
     static let recordingsDirectory = artifactRoot.appendingPathComponent("Recordings", isDirectory: true)
+}
+/// This unsigned tool owns one internal WAV. This is ordinary file access,
+/// not an external sandbox grant or a security-scoped bookmark qualification.
+enum AbruptFixtureOwnedMedia {
+    static func validate(_ url: URL) throws -> URL {
+        let root = GuestFixtureStorage.artifactRoot.standardizedFileURL.resolvingSymlinksInPath()
+        let expected = root.appendingPathComponent("owned-local-media.wav")
+        guard url.isFileURL, url.lastPathComponent == expected.lastPathComponent,
+              url.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath().path == root.path else {
+            throw CocoaError(.fileReadNoPermission)
+        }
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true,
+              url.standardizedFileURL.resolvingSymlinksInPath().path == expected.path else {
+            throw CocoaError(.fileReadNoPermission)
+        }
+        return url
+    }
+    static func resolve(_ bookmark: Data) throws -> URL {
+        var stale = false
+        let url = try URL(resolvingBookmarkData: bookmark, options: [.withoutUI],
+                          relativeTo: nil, bookmarkDataIsStale: &stale)
+        guard !stale else { throw CocoaError(.fileReadNoPermission) }
+        return try validate(url)
+    }
 }
 SWIFT
 def fixture_replace(target, root, folder, relative)
@@ -88,6 +116,25 @@ end
 # for asynchronous seek/load or paused recovery behavior. Private storage is
 # exposed only by same-file extensions in these generated tool copies.
 fixture_replace(target, root, folder, 'MediaSourcePlayback.swift') do |source|
+  boundary = <<'SWIFT'
+            var isStale = false
+            let url = try URL(resolvingBookmarkData: bookmark,
+                              options: [.withSecurityScope],
+                              relativeTo: nil,
+                              bookmarkDataIsStale: &isStale)
+            guard url.startAccessingSecurityScopedResource() else {
+                fail("macOS denied access to \"\(url.lastPathComponent)\". Relink the file to restore access.")
+                return
+            }
+            // Access is held for the rest of the session (one startAccessing
+            // per load; a relink resolves the new bookmark the same way).
+SWIFT
+  abort 'Owned internal-media fixture boundary changed' unless source.include?(boundary)
+  source.sub!(boundary, <<'SWIFT')
+            // Generated validation only: exact owned internal WAV, no scope
+            // grant claimed. Real asset load, player and recovery stay below.
+            let url = try AbruptFixtureOwnedMedia.resolve(bookmark)
+SWIFT
   source + <<'SWIFT'
 
 extension MediaSourcePlayback {

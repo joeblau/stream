@@ -48,6 +48,19 @@ network transport and capture-permission acquisition. No physical capture,
 monitor, global shortcut or external provider is started. Native source stores,
 recovery logic, writer, player and library remain shipping implementations.
 
+The fixture's WAV is an internal file created by its own child. Hosted unsigned
+Intel tools rejected security-scoped bookmark creation with
+`NSCocoaErrorDomain/256` before any writer started. This runner therefore uses
+an ordinary bookmark and a generated, `STREAM_NATIVE_VALIDATION`-only URL
+resolver restricted to the exact regular, nonsymlink
+`artifacts-<UUID>/owned-local-media.wav`. It rejects an actual sibling bookmark
+and same-name symlink. Only the generated player's file-access boundary changes;
+its real AVAsset/AVPlayer load, asynchronous seek, rate, mute and recovery remain
+shipping. Production scoped access is unchanged. No external security grant or
+external AVPlayer bookmark restoration is qualified by this internal-file test;
+the separate signed portable-entry fixture qualifies its own external asset
+access and restart flow.
+
 The owned review window requires a logged-in WindowServer session; unavailable
 presentation returns `77` with `UNQUALIFIED`, not `PASS`. Child readiness is
 bounded to 18 seconds, owned child termination to five seconds, media hold
