@@ -59,6 +59,7 @@ Set `STREAM_GUEST_RTC_INCLUDE` to its libdatachannel include directory containin
 apple/scripts/run_native_guest_receive_harness.zsh
 apple/scripts/run_guest_frame_store_harness.zsh
 apple/scripts/run_guest_audio_harness.zsh
+apple/scripts/run_fractional_iso_audio_harness.zsh
 apple/scripts/run_guest_renderer_harness.zsh
 apple/scripts/run_guest_persisted_mixer_harness.zsh
 apple/scripts/run_native_guest_program_iso_harness.zsh
@@ -78,7 +79,7 @@ SDK media through the compositor, mixer and recorders and compares decoded file
 cues and endpoints.
 
 The generated controller, persisted-mixer and Program/ISO tools use
-`guest_fixture_boundaries.rb` to replace credential access with an in-memory store
+`guest_fixture_boundaries.rb` to replace credential access with an empty, no-op stub
 and standard defaults/storage with temporary fixture locations. They retain the
 shipping registration, rendering, mixing, persistence and recording code. These
 substitutions apply only to generated qualification targets; the production app's
@@ -86,9 +87,14 @@ credential store, entitlements and embedded extension declarations remain intact
 
 The Native guest media workflow runs these checks on Apple Silicon and Intel,
 retaining logs and recording artifacts. A queued workflow is not qualification.
-Local codec, Chrome, renderer, mixer and persisted-settings checks pass on
-macOS 27.0.1/M3 Max with Xcode 26.6. Program/ISO repetition is investigating
-fractional sample-origin alignment before its final qualification is accepted.
+Local codec, Chrome, renderer, mixer, persisted-settings and actual SDK
+Program/ISO checks pass on macOS 27.0.1/M3 Max with Xcode 26.6. Two strengthened
+transport repetitions on opposite sides of half a PCM sample preserve exact
+live timestamps/bytes, every source frame at rounded nanosecond boundaries,
+identical recorded starts/counts/ends and every decoded Float32 value. Five
+controlled AAC regressions also preserve the original fractional PCM grid and
+genuine whole-sample gaps. These local results do not establish hosted Intel
+qualification before its workflow finishes.
 
 Native interview UI, deployed TURN, real screen-picker/capture permissions,
 mobile and restricted networks, guest returns, recipient-specific mix-minus,

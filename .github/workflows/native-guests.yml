@@ -27,6 +27,7 @@ on:
       - 'apple/Vendor/**'
       - 'apple/scripts/repair_desktop_transport_archives.py'
       - 'apple/scripts/*guest*'
+      - 'apple/scripts/*fractional_iso_audio*'
       - 'workers/interviews/public/guest.*'
       - 'workers/interviews/package*.json'
       - 'workers/interviews/test/browser/native-host-*'
@@ -87,6 +88,7 @@ jobs:
           apple/scripts/run_native_guest_receive_harness.zsh 2>&1 | tee apple/build/native-guest-results/receiver.log
           apple/scripts/run_guest_frame_store_harness.zsh 2>&1 | tee apple/build/native-guest-results/store.log
           apple/scripts/run_guest_audio_harness.zsh 2>&1 | tee apple/build/native-guest-results/audio.log
+          STREAM_FRACTIONAL_ISO_FRAMEWORKS="$PWD/apple/build/guest-audio-validation/core-derived/Build/Products/Debug" apple/scripts/run_fractional_iso_audio_harness.zsh 2>&1 | tee apple/build/native-guest-results/fractional-iso.log
           GUEST_RENDERER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_renderer_harness.zsh 2>&1 | tee apple/build/native-guest-results/controller-renderer.log
           GUEST_PERSISTED_MIXER_BUILD_PATH="$PWD/apple/build/native-guest-ci" apple/scripts/run_guest_persisted_mixer_harness.zsh 2>&1 | tee apple/build/native-guest-results/persisted-mixer.log
       - name: Qualify actual decoded guest Program and ISO files
@@ -110,5 +112,6 @@ jobs:
             apple/build/native-guest-results
             apple/build/native-guest-program-iso-validation/media-*
             apple/build/guest-audio-validation/media-*
+            apple/build/fractional-iso-audio-validation/media-*
           if-no-files-found: warn
           retention-days: 14
