@@ -54,6 +54,13 @@ It checks both directions and real receipts, literal Unicode/HTML, body/envelope
 bounds, duplicate delivery, eight occupied receipts and ninth refusal, ten-second
 unknown delivery without resend, late/unsolicited ACKs, malformed/stale/flood
 isolation while real H.264/Opus media advances, and fresh rejoin/end cleanup.
+The existing `run_native_interview_return_audio_harness.zsh` also exercises
+messages through the shipping dispatcher/manager/default native receiver factory,
+actual controller-issued sink and local relay Chrome. Both directions receive
+actual acknowledgments while Backstage remains private, unchanged stereo return
+spectra remain correct, rejoin clears history, a retained full-context dispatcher
+command is refused and a new deliberate message succeeds.
+
 Only message hashes and bounded delivery metadata enter fixture IPC or logs.
 Synthetic credentials/state are removed during bounded child cleanup. The native
 workflow runs this mode on ARM and Intel; hosted results remain separate from a

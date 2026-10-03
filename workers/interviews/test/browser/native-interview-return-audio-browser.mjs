@@ -1,7 +1,7 @@
 // Actual local Worker control + owned Coturn relay + shipping native session,
 // receiver adapter and leased sink. Generated capture inputs only, no devices.
 import assert from 'node:assert/strict';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,createHash} from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -189,6 +189,18 @@ try {
   const pair=await browser.evaluate(g,`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats();let result={};for(const s of stats.values()){if(s.type==='inbound-rtp'&&s.kind==='audio'){result={...result,packets:s.packetsReceived,samples:s.totalSamplesReceived,codec:stats.get(s.codecId)?.mimeType,channels:stats.get(s.codecId)?.channels};}if(s.type==='transport'&&s.selectedCandidatePairId){const pair=stats.get(s.selectedCandidatePairId);result={...result,local:stats.get(pair.localCandidateId)?.candidateType,remote:stats.get(pair.remoteCandidateId)?.candidateType};}}return result;})()`);
   assert(pair.local==='relay'&&pair.packets>10&&pair.samples>24000&&pair.codec==='audio/opus'&&state.transport.local==='relay'&&state.transport.udp);
   console.log(`Actual decoded Opus and both-local relay metadata: ${JSON.stringify(pair)}`);
+  const messageDigest=text=>createHash('sha256').update(text).digest('hex');
+  const privateHostText='Owned shipping Manager private message ✓';
+  await browser.until(g,"!document.getElementById('message').disabled",'shipping native capability enables private composer');
+  assert(!state.programAllowed,'Private message proof begins backstage');
+  command({type:'message',id:guest,text:privateHostText});
+  await wait('shipping Dispatcher/Manager/default SDK actual guest receipt',()=>{check();return state.privateMessages?.some(value=>!value.fromGuest&&value.digest===messageDigest(privateHostText)&&value.delivery==='received');});
+  const privateGuestText='Owned shipping guest private message ✓';
+  await browser.evaluate(g,`document.getElementById('message').value=${JSON.stringify(privateGuestText)};document.getElementById('message').dispatchEvent(new Event('input'));document.getElementById('sendmessage').click()`);
+  await wait('actual guest SDK text enters shipping Manager',()=>{check();return state.privateMessages?.some(value=>value.fromGuest&&value.digest===messageDigest(privateGuestText));});
+  await browser.until(g,"document.getElementById('messages').textContent.includes('Host received')",'actual shipping host acknowledgment');
+  assert(!state.programAllowed,'Private conversation cannot open Program admission');
+  await spectrum('backstage-private-messages-no-audio-route-change',.4,.2);
   command({type:'onair',id:guest});await wait('actual Program guest admission',()=>{check();return state.programAllowed&&state.members[0]?.returnAudio==='ready'&&state.program?.own440and880[0]>.07&&state.program?.own440and880[1]>.025;});
   console.log(`Actual own signal positive in shipping Program before return exclusion: ${JSON.stringify(state.program)}`);await spectrum('onair-own440-880-excluded',.4,.2);
   ack=undefined;command({type:'mute'});await wait('actual local mixer mute acknowledged',()=>{check();return ack==='mute';});await pause(400);await spectrum('local-muted',0,0);
@@ -202,6 +214,13 @@ try {
   await browser.until(g,"document.getElementById('return').srcObject?.getAudioTracks().length===1",'new shipping return stream');
   await browser.evaluate(g,returnAnalyzer);await spectrum('rejoined-new-fulllease',.16,.08);
   assert(await browser.evaluate(g,'window.__returnAnalysis.track!==window.__priorReturnTrack')===true,'A fresh actual remote track object must replace the retired track; role ID may remain stable');
+  await wait('shipping Manager private history cleared on actual rejoin',()=>{check();return state.privateMessages?.length===0;});
+  assert(await browser.evaluate(g,"document.getElementById('messages').children.length===0 && document.getElementById('message').value===''")===true,'Guest private history/draft clears after actual fulllease replacement');
+  ack=undefined;command({type:'stale-message'});await wait('retained real Manager private command rejected',()=>{check();return ack==='stale-message-rejected';});
+  assert(state.privateMessages.length===0,'Stale command cannot populate replacement conversation');
+  command({type:'message',id:guest,text:'Owned new explicit private message'});
+  await wait('new fulllease accepts deliberate private message',()=>{check();return state.privateMessages?.some(value=>value.delivery==='received');});
+  console.log('PASS actual shipping Dispatcher/Manager/current fulllease/default native SDK + local relay Chrome private conversation: both directions/receipts, backstage route independence, actual rejoin wipe, retained command rejection and deliberate fresh send');
   command({type:'remove',id:guest});await browser.until(g,"document.getElementById('return').srcObject===null",'removed guest retires remote return');
   await wait('native removal retires fulllease',()=>{check();return !state.lease&&!state.members.some(member=>member.id===guest);});
   command({type:'end'});await wait('actual room ended',()=>{check();return state.phase==='ended';});
