@@ -65,7 +65,7 @@ final class NativeGuestReceiver: @unchecked Sendable {
          video: @escaping @Sendable (GuestVideoFrame) -> Void,
          audio: @escaping @Sendable (GuestAudioFrame) -> Void,
          signal: @escaping @Sendable (String, String, String) -> Void,
-         transport: NativeGuestTransport = .loopbackValidation) throws {
+         transport: NativeGuestTransport = .loopbackValidation, returnAudioEnabled: Bool = false) throws {
         guard lease.generation > 0 else { throw GuestDecodeError.malformed }
         self.lease = lease; self.screenApproved = screenApproved; videoOutput = video; audioOutput = audio; signalOutput = signal
         let mediaCallback: SGMediaCallback = { context, generation, role, event, data, size, rtp, ntp in
@@ -111,6 +111,9 @@ final class NativeGuestReceiver: @unchecked Sendable {
             }
         }
         guard handle != nil else { throw GuestDecodeError.unsupported }
+        if returnAudioEnabled, SGReceiverEnableReturnAudio(handle, lease.generation) == 0 {
+            SGReceiverDestroy(handle); handle = nil; throw GuestDecodeError.unsupported
+        }
         expiry = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(50))
@@ -124,6 +127,14 @@ final class NativeGuestReceiver: @unchecked Sendable {
     func startHost() -> Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverStartHost(handle) != 0 }
     func answer(_ sdp: String) -> Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverAnswer(handle, sdp) != 0 }
     var hostReady: Bool { transportLock.lock(); defer { transportLock.unlock() }; return SGReceiverHostReady(handle) != 0 }
+    func sendReturnOpus(_ data: Data, lease: GuestReceiveLease, rtp: UInt32, ntp: UInt64) -> Bool {
+        guard lease == self.lease, !data.isEmpty, data.count <= 1275 else { return false }
+        transportLock.lock(); defer { transportLock.unlock() }
+        return data.withUnsafeBytes {
+            SGReceiverSendReturnOpus(handle, lease.generation, $0.bindMemory(to: UInt8.self).baseAddress,
+                                     $0.count, rtp, ntp) != 0
+        }
+    }
     func approveScreen(_ approved: Bool) -> Bool {
         approveScreen(approved) { [self] message in
             transportLock.lock(); defer { transportLock.unlock() }

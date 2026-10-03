@@ -1,4 +1,5 @@
 import Foundation
+import CoreMedia
 
 /// SDK callbacks already use the receiver's bounded signaling mailbox. This
 /// relay converts only allowlisted state and forwards media directly to its
@@ -30,6 +31,10 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
             close(failure: .unavailable); return nil
         }
         return native
+    }
+    func permitsReturn(_ native: NativeGuestReceiver) -> Bool {
+        guard native.hostReady else { return false }
+        return permittedReceiver() === native
     }
     func receive(_ frame: GuestVideoFrame) {
         guard let native = permittedReceiver() else { return }
@@ -113,12 +118,67 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
     }
 }
 
+/// The actual mixer mailbox supplies a single serial encoder consumer.
+/// Retirement fences queued PCM/encoded packets before destroying the SDK.
+private final class NativeGuestReturnSender: @unchecked Sendable {
+    private let gate = NSLock()
+    private var active = true
+    private let token = UUID()
+    private let sink: NativeGuestMediaSink
+    private weak var receiver: NativeGuestReceiver?
+    private let encoder: NativeGuestReturnAudioEncoder
+    private let callbacks: NativeInterviewReceiverEvents
+    private let events: @Sendable (NativeInterviewMediaEvent) -> Bool
+    private var reportedReady = false // Owned by one return tap callback queue.
+    init(sink: NativeGuestMediaSink, receiver: NativeGuestReceiver,
+         encoder: NativeGuestReturnAudioEncoder, callbacks: NativeInterviewReceiverEvents,
+         events: @escaping @Sendable (NativeInterviewMediaEvent) -> Bool) {
+        self.sink = sink; self.receiver = receiver; self.encoder = encoder; self.callbacks = callbacks; self.events = events
+    }
+    func prepare() async -> Bool {
+        guard await sink.installReturnAudio(token: token, sink: { [weak self] in self?.receive($0) }) else { return false }
+        return activateInstalledTap()
+    }
+    private func activateInstalledTap() -> Bool {
+        gate.lock(); defer { gate.unlock() }
+        guard active, sink.allowReturnAudio(true) else {
+            active = false; sink.removeReturnAudio(token: token); return false
+        }
+        return true
+    }
+    private func isActive() -> Bool { gate.lock(); defer { gate.unlock() }; return active }
+    private func receive(_ frame: GuestReturnAudioFrame) {
+        let age = (CMClockGetTime(CMClockGetHostTimeClock()) - frame.pts).seconds
+        guard isActive(), age >= 0, age <= 0.25, let native = receiver, callbacks.permitsReturn(native) else { return }
+        do {
+            for packet in try encoder.encode(frame) {
+                guard isActive(), callbacks.permitsReturn(native) else { return }
+                let sent = sink.sendReturnIfCurrent(frame) {
+                    native.sendReturnOpus(packet.data, lease: frame.lease, rtp: packet.rtp, ntp: packet.ntp)
+                }
+                if sent && !reportedReady {
+                    reportedReady = true
+                    if !events(.returnAudio(.ready)) { close() }
+                }
+            }
+        } catch {
+            close(); _ = events(.returnAudio(.failed))
+        }
+    }
+    func close() {
+        gate.lock(); let wasActive = active; active = false; gate.unlock()
+        guard wasActive else { return }
+        _ = sink.allowReturnAudio(false); sink.removeReturnAudio(token: token)
+    }
+}
+
 /// One fresh SDK peer per admitted full lease. A service relay configuration is
 /// mandatory here; the prototype's loopback transport is never a fallback.
 @MainActor final class NativeInterviewReceiverAdapter: NativeInterviewMediaHost {
     private let sink: NativeGuestMediaSink
     private let callbacks: NativeInterviewReceiverEvents
     private let receiver: NativeGuestReceiver
+    private let returnSender: NativeGuestReturnSender?
     private var expiry: Task<Void, Never>?
     private(set) var isRetired = false
     var selectedICEPair: NativeGuestReceiver.ICEPair? { isRetired ? nil : receiver.selectedICEPair }
@@ -139,13 +199,19 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
         self.sink = sink
         callbacks = NativeInterviewReceiverEvents(sink: sink, media: media, events: events)
         let callbacks = callbacks
+        let returnEncoder = try? NativeGuestReturnAudioEncoder()
         do {
             receiver = try NativeGuestReceiver(admitted: context.receive, cameraMID: media.camera,
                 screenMID: media.screen, audioMID: media.audio,
                 video: { callbacks.receive($0) }, audio: { callbacks.receive($0) },
-                signal: { callbacks.receive($0, $1, $2) }, transport: .relay(servers))
+                signal: { callbacks.receive($0, $1, $2) }, transport: .relay(servers), returnAudioEnabled: returnEncoder != nil)
         } catch { sink.close(); throw NativeInterviewError.unavailable }
         callbacks.bind(receiver)
+        let returnNative = receiver
+        returnSender = returnEncoder.map {
+            NativeGuestReturnSender(sink: sink, receiver: returnNative, encoder: $0, callbacks: callbacks, events: events)
+        }
+        _ = events(.returnAudio(returnSender == nil ? .unavailable : .preparing))
         let delay = max(0, relay.expires.timeIntervalSinceNow)
         expiry = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(delay)) }
@@ -154,6 +220,12 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
             self.retire(); _ = events(.failed(.expired))
         }
     }
+    func prepareReturnAudio() async {
+        if let returnSender, !isRetired, !(await returnSender.prepare()) { returnSender.close() }
+    }
+    #if STREAM_GUEST_VALIDATION
+    func validationCloseReturnAudio() { returnSender?.close() }
+    #endif
     func startHost() throws {
         guard !isRetired else { throw NativeInterviewError.closed }
         guard receiver.startHost() else { retire(); throw NativeInterviewError.transport }
@@ -181,9 +253,9 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
     }
     func retire() {
         guard !isRetired else { return }
-        isRetired = true; expiry?.cancel(); expiry = nil; callbacks.close()
+        isRetired = true; expiry?.cancel(); expiry = nil; returnSender?.close(); callbacks.close()
     }
-    deinit { expiry?.cancel(); callbacks.close() }
+    deinit { expiry?.cancel(); returnSender?.close(); callbacks.close() }
 }
 
 /// The runtime supplies admission and its controller-issued sink. The factory
@@ -210,6 +282,10 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
         let host: NativeInterviewReceiverAdapter
         do { host = try NativeInterviewReceiverAdapter(context: context, relay: relay, sink: sink, events: events) }
         catch { sink.close(); throw error }
+        await host.prepareReturnAudio()
+        guard !closed, !Task.isCancelled, pending == ticket, !host.isRetired else {
+            host.retire(); throw NativeInterviewError.changed
+        }
         current = host; return host
     }
     func retire() {

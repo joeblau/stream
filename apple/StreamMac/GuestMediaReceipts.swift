@@ -22,3 +22,12 @@ struct GuestAudioFrame: @unchecked Sendable {
     let mappingGeneration: UUID
     let clockQuality: GuestClockQuality
 }
+
+/// A recipient-specific public Program sum, excluding that full lease's own
+/// channel before any bus clamp. Revision fences queued PCM across revocation.
+struct GuestReturnAudioFrame: @unchecked Sendable {
+    let lease: GuestReceiveLease
+    let routingRevision: UInt64
+    let sample: CMSampleBuffer
+    var pts: CMTime { sample.presentationTimeStamp }
+}
