@@ -1,0 +1,63 @@
+name: Native transport recovery
+
+on:
+  pull_request:
+    paths:
+      - 'apple/StreamMac/Destination*'
+      - 'apple/StreamMac/ProgramRecordingSession.swift'
+      - 'apple/StreamBroadcast/**'
+      - 'apple/StreamCore/**'
+      - 'apple/project.yml'
+      - 'apple/Vendor/**'
+      - 'apple/scripts/shared_encoder_harness.swift'
+      - 'apple/scripts/run_shared_encoder_harness.zsh'
+      - 'apple/scripts/program_recording_fixtures.swift'
+      - 'apple/scripts/desktop_transport_fixture.rb'
+      - 'apple/scripts/repair_desktop_transport_archives.py'
+      - '.github/workflows/native-transport-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-transport-recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  recovery:
+    name: Actual RTMP recovery with healthy SRT (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Show environment and install actual receiver tools
+        run: |
+          xcodebuild -version
+          sw_vers
+          uname -m
+          brew install xcodegen cmake ffmpeg
+          ffmpeg -version
+      - name: Qualify real endpoint loss and independent continuous decode
+        run: |
+          mkdir -p build/native-transport-results
+          set -euo pipefail
+          STREAM_TRANSPORT_ARTIFACT_ROOT="$PWD/build/native-transport-results" SHARED_ENCODER_BUILD_PATH="$PWD/build/native-transport" zsh scripts/run_shared_encoder_harness.zsh --transport-recovery-only 2>&1 | tee build/native-transport-results/recovery.log
+          STREAM_TRANSPORT_ARTIFACT_ROOT="$PWD/build/native-transport-results" SHARED_ENCODER_BUILD_PATH="$PWD/build/native-transport" zsh scripts/run_shared_encoder_harness.zsh --transport-recovery-only --software 2>&1 | tee build/native-transport-results/recovery-software.log
+      - name: Retain receiver diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-transport-recovery-${{ matrix.runner }}
+          path: apple/build/native-transport-results
+          if-no-files-found: warn
+          retention-days: 14

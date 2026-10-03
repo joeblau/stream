@@ -167,6 +167,109 @@ private actor EncodedPublisherProbe: Publisher {
         }
         report("PASS: one actual fixed encoder -> RTMPPublisher/RTMPStream and SessionPublisher/SRTStream compressed passthrough -> simultaneous localhost ffmpeg MP4 receivers; H.264/AAC decode/sync/metadata, SRT startup primer and independent acknowledged stops")
     }
+    static func localhostRecovery(directory: URL, settings: StreamSettings) async throws {
+        guard let path = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first(where: FileManager.default.isExecutableFile(atPath:)) else {
+            throw NSError(domain: "SharedEncoderHarness", code: 77, userInfo: [NSLocalizedDescriptionKey: "Real RTMP/SRT recovery requires owned ffmpeg receivers"])
+        }
+        var processes: [Process] = [], handles: [FileHandle] = []
+        defer {
+            for process in processes where process.isRunning { process.interrupt() }
+            for handle in handles { try? handle.close() }
+        }
+        let rtmpPort = Int.random(in: 20_000...30_000), srtPort = Int.random(in: 30_001...40_000)
+        func launch(_ transport: StreamCore.StreamProtocol, port: Int, name: String) throws -> Process {
+            let log = directory.appendingPathComponent(name + ".log")
+            FileManager.default.createFile(atPath: log.path, contents: nil)
+            let handle = try FileHandle(forWritingTo: log); handles.append(handle)
+            let process = Process(); process.executableURL = URL(fileURLWithPath: path)
+            let input = transport == .srt ? ["-i", "srt://127.0.0.1:\(port)?mode=listener&latency=50000"] : ["-listen", "1", "-i", "rtmp://127.0.0.1:\(port)/live/shared"]
+            process.arguments = ["-y", "-hide_banner", "-loglevel", "error"] + input + ["-map", "0:v:0", "-map", "0:a:0", "-c", "copy", directory.appendingPathComponent(name + ".mp4").path]
+            process.standardOutput = handle; process.standardError = handle
+            try process.run(); processes.append(process); return process
+        }
+        let first = try launch(.rtmp, port: rtmpPort, name: "recovery-rtmp-before")
+        let survivor = try launch(.srt, port: srtPort, name: "recovery-srt-continuous")
+        try await settle(seconds: 10) { receiverReady(first, transport: .rtmp, port: rtmpPort) && receiverReady(survivor, transport: .srt, port: srtPort) }
+        var factoryCalls = 0
+        let outputs = DestinationOutputController(factory: { transport in
+            factoryCalls += 1
+            if transport == .rtmp { return RTMPPublisher() }
+            return SessionPublisher(protocol: .srt)
+        }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
+        outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
+        defer { outputs.stopAll() }
+        let interrupted = StreamDestination(name: "Owned interrupted RTMP", transport: .rtmp)
+        let healthy = StreamDestination(name: "Owned continuous SRT", transport: .srt)
+        var rtmp = settings; rtmp.rtmpURL = "rtmp://127.0.0.1:\(rtmpPort)/live"; rtmp.streamKey = "shared"
+        var srt = settings; srt.selectedProtocol = .srt; srt.rtmpURL = "srt://127.0.0.1:\(srtPort)?mode=caller&latency=50"; srt.streamKey = ""
+        outputs.start(interrupted, settings: rtmp); outputs.start(healthy, settings: srt)
+        try await settle(seconds: 10) { outputs.liveCount == 2 }
+        let initial = await outputs.diagnosticsSnapshot()
+        let healthyStart = initial.first { $0.id == healthy.id.uuidString }?.startedAt
+        try check(healthyStart != nil && outputs.encoderSessionCount == 1 && factoryCalls == 2, "Actual initial sessions were not acknowledged/shared")
+        try await feed(outputs, start: 0, ticks: 400)
+        first.interrupt() // Only the exact Process created above; no system-wide PID/name lookup.
+        let producer = Task { @MainActor in
+            for tick in 400..<1600 {
+                let time = Double(tick) / 100
+                if tick % 4 == 0 { outputs.fanout.enqueueVideo(try ProgramRecordingFixtures.video(at: time, eventSeconds: 12)) }
+                outputs.fanout.enqueueAudio(try ProgramRecordingFixtures.audio(at: time, eventSeconds: 12))
+                try check(outputs.states[healthy.id] == .live && outputs.encoderSessionCount == 1 && factoryCalls == 2,
+                          "RTMP recovery reset the healthy SRT session or shared encoder")
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        defer { producer.cancel() }
+        try await settle(seconds: 10) {
+            if case .reconnecting = outputs.states[interrupted.id] { return !first.isRunning }
+            return false
+        }
+        report("Observed: actual owned RTMP socket loss -> reconnecting; SRT remains live with its original acknowledged start")
+        let resumed = try launch(.rtmp, port: rtmpPort, name: "recovery-rtmp-after")
+        try await settle(seconds: 10) { receiverReady(resumed, transport: .rtmp, port: rtmpPort) }
+        try await settle(seconds: 10) { outputs.states[interrupted.id] == .live }
+        try await producer.value
+        let final = await outputs.diagnosticsSnapshot()
+        try check(final.first { $0.id == healthy.id.uuidString }?.startedAt == healthyStart && factoryCalls == 2,
+                  "The healthy acknowledgment or publisher identity changed during recovery")
+        outputs.stopAll()
+        try await settle { outputs.encoderSessionCount == 0 }
+        try await settle(seconds: 10) { outputs.activeCount == 0 }
+        try await settle(seconds: 10) { processes.allSatisfy { !$0.isRunning } }
+        for name in ["recovery-rtmp-before", "recovery-rtmp-after", "recovery-srt-continuous"] {
+            try await ProgramRecordingFixtures.inspect(directory.appendingPathComponent(name + ".mp4"), expectedDuration: nil, checkSync: name != "recovery-rtmp-after")
+        }
+        let asset = AVURLAsset(url: directory.appendingPathComponent("recovery-srt-continuous.mp4"))
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let reader = try AVAssetReader(asset: asset)
+        let decoded = AVAssetReaderTrackOutput(track: tracks[0], outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        reader.add(decoded); try check(reader.startReading(), "Continuous SRT decode cannot start")
+        var previous: Double?, frames = 0, firstFlash: Double?, lateFlash: Double?
+        while let sample = decoded.copyNextSampleBuffer() {
+            let pts = sample.presentationTimeStamp.seconds
+            if let previous { try check(pts > previous && pts - previous < 0.0415, "Healthy SRT decoded timeline reset or lost a cadence tick") }
+            previous = pts; frames += 1
+            if let image = sample.imageBuffer {
+                CVPixelBufferLockBaseAddress(image, .readOnly)
+                let bright = CVPixelBufferGetBaseAddress(image)!.load(as: UInt8.self)
+                CVPixelBufferUnlockBaseAddress(image, .readOnly)
+                if bright > 150 {
+                    if firstFlash == nil { firstFlash = pts }
+                    if pts > 11 && lateFlash == nil { lateFlash = pts }
+                }
+            }
+        }
+        try check(reader.status == .completed && firstFlash != nil && lateFlash != nil,
+                  "Healthy SRT must decode both original source cues: frames=\(frames), end=\(previous ?? -1), lateFlash=\(lateFlash ?? -1), status=\(reader.status.rawValue)")
+        // SRT's actual startup primer can omit an initial GOP prefix. Anchor
+        // independently to the original .52s flash, rather than pretending its
+        // first received compressed sample had source PTS zero. Failure must
+        // not alter the 11.48s cue distance or 15.44s cue-to-final-frame distance.
+        try check(abs(lateFlash! - firstFlash! - 11.48) < 0.0415 &&
+                  abs((previous ?? 0) - firstFlash! - 15.44) < 0.0415,
+                  "Recovery shifted or truncated the healthy output's original source timeline")
+        report("PASS: actual RTMP loss/backoff/reconnect to replacement owned receiver; unchanged live SRT publisher/start/shared encoder, \(frames) continuous decoded frames, original first/late flashes \(firstFlash!)/\(lateFlash!)s and final PTS \(previous ?? -1)s; both acknowledged stops")
+    }
     static func rawFinalization(settings: StreamSettings) async throws {
         let failed = EncodedPublisherProbe(shared: false), retry = EncodedPublisherProbe(shared: false)
         var pending = [failed, retry]
@@ -273,9 +376,13 @@ private actor EncodedPublisherProbe: Publisher {
         report("PASS: fixed profiles requesting more fps than the taken canvas use actual separate raw publishers and receive no sharing budget discount")
     }
     static func main() async throws {
+        setbuf(stdout, nil)
         report("Encoder qualification: \(prefersHardwareEncoder ? "shipping hardware preference with public software fallback" : "explicit public VideoToolbox software encoder; no hardware throughput claim")")
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("stream-shared-encoder-\(UUID())")
+        let artifactRoot = ProcessInfo.processInfo.environment["STREAM_TRANSPORT_ARTIFACT_ROOT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory
+        let directory = artifactRoot.appendingPathComponent("stream-shared-encoder-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        report("Artifacts: \(directory.path)")
         let first = EncodedPublisherProbe(), second = EncodedPublisherProbe(), separate = EncodedPublisherProbe(), rejoin = EncodedPublisherProbe()
         var pending = [first, second, separate, rejoin]
         let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
@@ -284,6 +391,10 @@ private actor EncodedPublisherProbe: Publisher {
         var settings = StreamSettings.default
         settings.outputProfile = .init(canvasWidth: 320, canvasHeight: 180, frameRate: 25)
         settings.videoBitrate = 500_000; settings.audioBitrate = 128_000
+        if CommandLine.arguments.contains("--transport-recovery-only") {
+            try await localhostRecovery(directory: directory, settings: settings)
+            report("Artifacts: \(directory.path)"); return
+        }
         let a = StreamDestination(name: "RTMP", transport: .rtmp), b = StreamDestination(name: "SRT", transport: .srt)
         outputs.start(a, settings: settings); outputs.start(b, settings: settings)
         try await settle { outputs.liveCount == 2 }
