@@ -102,6 +102,22 @@ async function iceServers() {
   cachedRelay = {servers:data.iceServers,expires:Date.now()+480000};
   return data.iceServers;
 }
+function stereoAudioAnswer(description, audioMID) {
+  if(description.type!=='answer' || typeof description.sdp!=='string' || description.sdp.length>65536)throw new Error('Invalid host media answer.');
+  const sections=description.sdp.split(/(?=^m=)/m);
+  const audio=sections.findIndex(section=>section.startsWith('m=audio ') && section.split('\r\n').includes(`a=mid:${audioMID}`));
+  if(audio<0)throw new Error('The host audio identity is unavailable.');
+  const lines=sections[audio].split('\r\n'), opus=lines.map(line=>/^a=rtpmap:(\d+) opus\/48000\/2$/i.exec(line)).find(Boolean);
+  if(!opus)throw new Error('The host audio codec is unavailable.');
+  const prefix=`a=fmtp:${opus[1]} `, index=lines.findIndex(line=>line.startsWith(prefix));
+  const parameters=index<0?[]:lines[index].slice(prefix.length).split(';').filter(value=>!/^\s*(?:stereo|sprop-stereo)\s*=/.test(value));
+  // RFC7587 stereo is a receiver preference; Chrome's default answer omits
+  // it and downmixes a real stereo return despite the host's stereo offer.
+  const fmtp=prefix+[...parameters,'stereo=1','sprop-stereo=1'].join(';');
+  if(index<0)lines.splice(lines.length-1,0,fmtp);else lines[index]=fmtp;
+  sections[audio]=lines.join('\r\n');
+  return {type:'answer',sdp:sections.join('')};
+}
 async function acceptSignal(data, epoch) {
   if (epoch!==joinEpoch || data.targetGeneration!==generation || data.from!==host || data.generation!==hostGeneration || !admitted) return;
   const payload = JSON.parse(data.payload);
@@ -113,7 +129,8 @@ async function acceptSignal(data, epoch) {
     const negotiation = payload.negotiation;
     activeNegotiation = negotiation; clearTimeout(relayTimer); stopShare();
     control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();
-    pc?.close(); const next = new RTCPeerConnection({iceServers:await iceServers()});
+    pc?.close(); $('return').srcObject = null;
+    const next = new RTCPeerConnection({iceServers:await iceServers()});
     if (epoch!==joinEpoch || !admitted || activeNegotiation!==negotiation || hostGeneration!==data.generation || host!==data.from) { next.close(); return; } pc = next;
     const current=()=>epoch===joinEpoch && admitted && pc===next && activeNegotiation===negotiation && hostGeneration===data.generation && host===data.from;
     next.ondatachannel=event=>{
@@ -135,7 +152,16 @@ async function acceptSignal(data, epoch) {
     };
     clearTimeout(relayTimer); relayTimer=setTimeout(refreshRelay,480000);
     next.onicecandidate = event => { if(event.candidate && pc===next) signal('candidate',{negotiation,candidate:event.candidate.toJSON()}); };
-    next.ontrack = event => { if(pc===next) $('return').srcObject = event.streams[0] ?? new MediaStream([event.track]); };
+    const returnStream = new MediaStream();
+    next.ontrack = event => {
+      if(!current())return;
+      const kind=event.transceiver.mid===identities.audio?'audio':event.transceiver.mid===identities.camera?'video':undefined;
+      if(!kind || event.track.kind!==kind)return;
+      for(const previous of returnStream.getTracks().filter(track=>track.kind===kind)){returnStream.removeTrack(previous);previous.stop();}
+      returnStream.addTrack(event.track);$('return').srcObject=returnStream;
+      event.track.addEventListener('ended',()=>{if(current() && $('return').srcObject===returnStream){returnStream.removeTrack(event.track);if(!returnStream.getTracks().length)$('return').srcObject=null;}});
+      $('return').play().catch(()=>{if(current())status('Press Play on the host return feed to hear the show.');});
+    };
     next.onconnectionstatechange = () => { if(pc===next) status(`Host media: ${next.connectionState}.`); };
     await next.setRemoteDescription(payload.description);
     if(!current())return;
@@ -155,7 +181,7 @@ async function acceptSignal(data, epoch) {
       if(!current())return;
     }
     candidateQueue = [];
-    const answer=await next.createAnswer();if(!current())return;
+    const answer=stereoAudioAnswer(await next.createAnswer(),identities.audio);if(!current())return;
     await next.setLocalDescription(answer);if(!current())return;
     signal('answer',{negotiation,description:next.localDescription});updateShareControls();
   } else if (data.kind === 'candidate') {

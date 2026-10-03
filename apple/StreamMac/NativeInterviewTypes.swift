@@ -147,6 +147,7 @@ enum NativeInterviewMediaEvent: Sendable {
     case offer(sdp: String, media: NativeInterviewMediaMIDs)
     case candidate(value: String, mid: String)
     case ready
+    case returnAudio(NativeInterviewReturnAudioState)
     case screenSharing(Bool)
     case controlClosed
     case failed(NativeInterviewError)
@@ -176,11 +177,13 @@ enum NativeInterviewMediaEvent: Sendable {
 
 enum NativeInterviewMembership: String, Sendable { case waiting, backstage, onair }
 enum NativeInterviewMediaState: String, Sendable { case unavailable, preparing, negotiating, ready, failed }
+enum NativeInterviewReturnAudioState: String, Sendable { case unavailable, preparing, ready, failed }
 struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     let id: UUID
     let name: String
     var membership: NativeInterviewMembership
     var media: NativeInterviewMediaState = .unavailable
+    var returnAudio: NativeInterviewReturnAudioState = .unavailable
     var screenApproved = false
     var screenSharing = false
     /// Increments only on an actual admitted/stage/backstage receipt, so a

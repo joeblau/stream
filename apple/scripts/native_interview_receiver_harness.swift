@@ -10,6 +10,15 @@ struct SourceDefinitionID: Hashable, Sendable, CustomStringConvertible {
     let id: UUID
     var description: String { id.uuidString }
 }
+private final class ReceiverHeldReturnPreparation: @unchecked Sendable {
+    private let entered = DispatchSemaphore(value: 0), released = DispatchSemaphore(value: 0)
+    func hold() { entered.signal(); precondition(released.wait(timeout: .now() + 3) == .success) }
+    func waitEntered() -> Bool { entered.wait(timeout: .now() + 2) == .success }
+    func release() { released.signal() }
+}
+extension AudioMixEngine {
+    fileprivate func validationHoldReturnPreparation(_ held: ReceiverHeldReturnPreparation) { held.hold() }
+}
 private final class ReceiverEventProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var values: [NativeInterviewMediaEvent] = []
@@ -102,12 +111,36 @@ private final class ReceiverHeldControlSend: @unchecked Sendable {
         while !ready() { guard ContinuousClock.now < deadline else { throw NativeInterviewError.timeout }; try await Task.sleep(for: .milliseconds(5)) }
     }
     static func main() async throws {
+        try await returnPrepareRetirement()
         try await receiverControlCompletion()
         try await eventControlCompletion()
         try await sinkBoundaries()
         try await screenControlOrdering()
         try await factoryAndSDK()
         log("PASS: actual production SDK relay constructor and leased native sink/factory; no TURN availability, remote media or application entrypoint qualification")
+    }
+    static func returnPrepareRetirement() async throws {
+        let audio = AudioMixEngine(), store = GuestVideoFrameStore(), current = lease(), probe = ReceiverEventProbe()
+        let sink = try await register(current, store: store, audio: audio)
+        let adapter = try NativeInterviewReceiverAdapter(context: context(current), relay: relay(), sink: sink, events: probe.receive)
+        let held = ReceiverHeldReturnPreparation()
+        let hold = Task { await audio.validationHoldReturnPreparation(held) }
+        let entered = await Task.detached { held.waitEntered() }.value
+        precondition(entered, "Actual mix actor did not enter held preparation")
+        var started = false
+        let preparation = Task { started = true; await adapter.prepareReturnAudio() }
+        try await wait { started }
+        adapter.validationCloseReturnAudio()
+        held.release(); await hold.value; await preparation.value
+        var statistics = await audio.statsSnapshot()
+        let deadline = ContinuousClock.now + .seconds(2)
+        while statistics.tapDrops.keys.contains(where: { $0.hasPrefix("guest-return.") }) && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5)); statistics = await audio.statsSnapshot()
+        }
+        precondition(!statistics.tapDrops.keys.contains { $0.hasPrefix("guest-return.") }, "Closed preparation retained its actual return tap")
+        precondition(audio.registeredGuestChannelID(slot: current.slot) != nil, "Return-only close retired incoming guest media")
+        adapter.retire(); await audio.stop()
+        log("PASS: actual return preparation held on mix actor, return-only close before installation completion removes retained tap and preserves incoming guest lease")
     }
     static func receiverControlCompletion() async throws {
         for boundary in ["control-close", "revoke", "stop"] {

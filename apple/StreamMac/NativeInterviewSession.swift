@@ -285,11 +285,11 @@ import Foundation
                 }
                 if role == "guest" {
                     var member = snapshot.members.first { $0.id == id } ?? .init(id: id, name: name, membership: state)
-                    member = .init(id: id, name: name, membership: state, media: member.media,
+                    member = .init(id: id, name: name, membership: state, media: member.media, returnAudio: member.returnAudio,
                                    screenApproved: member.screenApproved, screenSharing: member.screenSharing,
                                    membershipRevision: member.membershipRevision)
                     if state == .waiting {
-                        member.media = .unavailable; member.screenApproved = false; member.screenSharing = false
+                        member.media = .unavailable; member.returnAudio = .unavailable; member.screenApproved = false; member.screenSharing = false
                     }
                     members.append(member)
                 }
@@ -442,8 +442,9 @@ import Foundation
             guard peer.offered, peer.answered else { failPeer(id, .malformed); return }
             peer.deadline?.cancel(); peer.deadline = nil
             updateMember(id) { $0.media = .ready }
+        case .returnAudio(let value): updateMember(id) { $0.returnAudio = value }
         case .screenSharing(let value): updateMember(id) { $0.screenSharing = value && $0.screenApproved }
-        case .controlClosed: updateMember(id) { $0.screenApproved = false; $0.screenSharing = false }
+        case .controlClosed: updateMember(id) { $0.screenApproved = false; $0.screenSharing = false; $0.returnAudio = .unavailable }
         case .failed(let failure): failPeer(id, failure)
         }
     }
@@ -550,7 +551,7 @@ import Foundation
     }
     private func dropPeer(_ id: UUID) {
         peers.removeValue(forKey: id)?.retire()
-        updateMember(id) { $0.media = .unavailable; $0.screenApproved = false; $0.screenSharing = false }
+        updateMember(id) { $0.media = .unavailable; $0.returnAudio = .unavailable; $0.screenApproved = false; $0.screenSharing = false }
     }
     private func failPeer(_ id: UUID, _ failure: NativeInterviewError) {
         dropPeer(id); updateMember(id) { $0.media = .failed }; snapshot.failure = failure

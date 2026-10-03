@@ -17,6 +17,7 @@ xcrun swiftc -swift-version 6 -strict-concurrency=complete -parse-as-library -DS
   "${APPLE_DIR}/StreamMac/RecordingChatTypes.swift" "${APPLE_DIR}/StreamMac/RecordingChatArchive.swift" \
   "${APPLE_DIR}/StreamMac/RecordingChatReader.swift" "${APPLE_DIR}/StreamMac/RecordingPreferences.swift" \
   "${APPLE_DIR}/StreamMac/ProgramRecordingSession.swift" "${APPLE_DIR}/StreamMac/AudioMixEngine.swift" \
+  "${APPLE_DIR}/StreamMac/NativeGuestReturnAudioEncoder.swift" \
   "${APPLE_DIR}/NativeGuestReceivePrototype/NativeGuestReceiver.swift" \
   "${APPLE_DIR}/StreamMac/NativeInterviewTypes.swift" "${APPLE_DIR}/StreamMac/NativeGuestMediaSink.swift" \
   "${APPLE_DIR}/StreamMac/NativeInterviewReceiverAdapter.swift" \

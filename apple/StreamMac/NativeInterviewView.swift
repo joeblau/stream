@@ -16,7 +16,7 @@ struct NativeInterviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Guests").font(.headline)
-                Text("One guest connection. Incoming camera, screen and audio; studio return audio is not connected yet.")
+                Text("One guest connection with incoming camera, screen and audio. Audio return availability appears below; video return is unavailable.")
                     .font(.caption).foregroundStyle(.secondary)
                 GuestSlotsView(store: sceneStore)
                 if [.idle, .ended, .expired, .failed, .closed].contains(manager.state.snapshot.phase) {
@@ -96,6 +96,10 @@ struct NativeInterviewView: View {
                         localName: sceneStore.guestSlots.first(where: { $0.id == context.receive.slot })?.localName ?? "")
                         .id(context.receive.negotiation)
                 }
+                Text(member.returnAudio == .ready ? "Public show audio return is active; your own audio is excluded." :
+                    member.returnAudio == .preparing ? "Preparing public show audio return. Start local preview to supply the mix." :
+                    "Public show audio return is unavailable.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     commandButton("On Air", .onair(member.id))
                     commandButton("Backstage", .backstage(member.id))

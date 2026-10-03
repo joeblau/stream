@@ -43,6 +43,12 @@ int SGReceiverOffer(SGReceiver *, const char *sdp);
 int SGReceiverStartHost(SGReceiver *);
 int SGReceiverAnswer(SGReceiver *, const char *sdp);
 int SGReceiverHostReady(SGReceiver *);
+// Explicit host-offer capability only; receive-only prototype stays unchanged.
+int SGReceiverEnableReturnAudio(SGReceiver *, uint64_t admitted_generation);
+// One bounded already-encoded20ms Opus packet. Caller supplies its ORIGINAL
+// source-clock RTP/NTP mapping; the SDK owns SRTP/DTLS/ICE delivery.
+int SGReceiverSendReturnOpus(SGReceiver *, uint64_t admitted_generation,
+                            const uint8_t *, size_t, uint32_t rtp, uint64_t ntp);
 int SGReceiverSendControl(SGReceiver *, const char *message);
 int SGReceiverCandidate(SGReceiver *, const char *candidate, const char *mid);
 void SGReceiverExpire(SGReceiver *);
