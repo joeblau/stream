@@ -232,10 +232,9 @@ struct MainWindowView: View {
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
         }
         .onDisappear {
-            controller.shutdownManagedStart()
+            controller.managedStart?.cancelAll()
             controller.ending.shutdown()
             controller.stopVirtualCameraOutput()
-            workspace.runtime.providerAccounts.shutdown()
             controller.stopExternalDisplayOutput()
             dispatcher.macros.cancel()
             localControl.shutdown()
