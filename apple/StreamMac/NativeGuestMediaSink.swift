@@ -1,4 +1,32 @@
 import Foundation
+import CoreMedia
+
+final class NativeGuestProgramReturnAuthority: @unchecked Sendable {
+    private let gate = NSLock()
+    private var active = false, frontier = CMTime.invalid
+    func change(active: Bool? = nil) {
+        gate.lock(); if let active { self.active = active }
+        frontier = CMClockGetTime(CMClockGetHostTimeClock()); gate.unlock()
+    }
+    func sendIfCurrent(_ pts: CMTime, _ send: () -> Bool) -> Bool {
+        gate.lock(); defer { gate.unlock() }
+        guard active, pts.isNumeric, !frontier.isNumeric || CMTimeCompare(pts, frontier) >= 0 else { return false }
+        return send()
+    }
+}
+struct NativeGuestProgramReturnSource: Sendable {
+    typealias Consumer = @Sendable (CMSampleBuffer) -> Void
+    let id = UUID()
+    let authority: NativeGuestProgramReturnAuthority
+    let install: @Sendable (UUID, @escaping Consumer) async -> Bool
+    let remove: @Sendable (UUID) async -> Void
+}
+struct GuestReturnVideoFrame: @unchecked Sendable {
+    let lease: GuestReceiveLease
+    let token: UUID
+    let sample: CMSampleBuffer
+    var pts: CMTime { sample.presentationTimeStamp }
+}
 
 /// An inlet capability issued only after the controller has registered this
 /// full lease. Media callbacks never register sources or create actor tasks.
@@ -9,6 +37,9 @@ final class NativeGuestMediaSink: @unchecked Sendable {
     private let audio: AudioMixEngine
     private var active = true
     private var returnTokens: Set<UUID> = []
+    private var programReturn: NativeGuestProgramReturnSource?
+    private var returnVideoToken: UUID?
+    private var videoRetirement: (@Sendable () -> Void)?
     private let acceptedVideo: (@Sendable (GuestVideoFrame) -> Void)?
     private let acceptedAudio: (@Sendable (GuestAudioFrame) -> Void)?
 
@@ -41,6 +72,55 @@ final class NativeGuestMediaSink: @unchecked Sendable {
         guard active else { return }
         if enabled { video.enable(.screen, lease: lease) }
         else { video.disable(.screen, lease: lease) }
+    }
+
+    func bindProgramReturn(_ source: NativeGuestProgramReturnSource) {
+        gate.lock(); defer { gate.unlock() }
+        guard active, programReturn == nil else { return }
+        programReturn = source
+    }
+    var supportsProgramReturn: Bool {
+        gate.lock(); defer { gate.unlock() }; return active && programReturn != nil
+    }
+    func bindVideoRetirement(_ retire: @escaping @Sendable () -> Void) {
+        gate.lock(); videoRetirement = retire; let closed = !active; gate.unlock()
+        if closed { retire() }
+    }
+    func stopProgramReturn() {
+        gate.lock(); returnVideoToken = nil; let retire = videoRetirement; gate.unlock(); retire?()
+    }
+    func videoTokenIsCurrent(_ token: UUID) -> Bool {
+        gate.lock(); defer { gate.unlock() }; return active && returnVideoToken == token
+    }
+    private func beginReturnVideo(_ token: UUID) -> NativeGuestProgramReturnSource? {
+        gate.lock(); defer { gate.unlock() }
+        guard active, returnVideoToken == nil, let source = programReturn else { return nil }
+        returnVideoToken = token; return source
+    }
+    func installReturnVideo(token: UUID, sink: @escaping @Sendable (GuestReturnVideoFrame) -> Void) async -> Bool {
+        guard let source = beginReturnVideo(token) else { return false }
+        guard await source.install(token, { [weak self] sample in
+            guard let self else { return }; sink(.init(lease: self.lease, token: token, sample: sample))
+        }) else { clearVideoToken(token); return false }
+        guard retainReturnVideoToken(token, source: source.id) else { await source.remove(token); return false }
+        return true
+    }
+    private func clearVideoToken(_ token: UUID) {
+        gate.lock(); if returnVideoToken == token { returnVideoToken = nil }; gate.unlock()
+    }
+    func revokeReturnVideo(token: UUID) { clearVideoToken(token) }
+    private func retainReturnVideoToken(_ token: UUID, source: UUID) -> Bool {
+        gate.lock(); defer { gate.unlock() }
+        return active && returnVideoToken == token && programReturn?.id == source
+    }
+    func removeReturnVideo(token: UUID) {
+        gate.lock(); if returnVideoToken == token { returnVideoToken = nil }; let source = programReturn; gate.unlock()
+        if let source { Task { await source.remove(token) } }
+    }
+    func sendReturnVideoIfCurrent(_ frame: GuestReturnVideoFrame, _ send: () -> Bool) -> Bool {
+        gate.lock(); defer { gate.unlock() }
+        guard active, frame.lease == lease, returnVideoToken == frame.token, let source = programReturn else { return false }
+        return source.authority.sendIfCurrent(frame.pts, send)
     }
 
     func installReturnAudio(token: UUID, sink: @escaping @Sendable (GuestReturnAudioFrame) -> Void) async -> Bool {
@@ -77,10 +157,16 @@ final class NativeGuestMediaSink: @unchecked Sendable {
     /// Revocation waits for an entered receipt and clears retained output
     /// synchronously. Full-lease removal cannot touch a replacement peer.
     func close() {
-        gate.lock(); defer { gate.unlock() }
-        guard active else { return }
+        gate.lock()
+        guard active else { gate.unlock(); return }
         active = false; video.remove(lease); _ = audio.removeGuest(lease)
         let tokens = returnTokens; returnTokens.removeAll()
+        returnVideoToken = nil
+        let retire = videoRetirement; videoRetirement = nil
+        gate.unlock()
+        // Encoder owner retires outside the sink lock, before releasing its
+        // reservation. A late installation rechecks active/token/source identity.
+        retire?()
         if !tokens.isEmpty {
             let audio = self.audio
             Task { for token in tokens { await audio.removeTap(token) } }

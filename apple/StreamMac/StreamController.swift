@@ -176,6 +176,9 @@ final class StreamController: ObservableObject {
     /// monitor. Pulls the latest screen/camera frames through the
     /// lock-protected holders below; runs only while the W02 pipeline demand
     /// is > 0.
+    private let guestProgramReturnAuthority = NativeGuestProgramReturnAuthority()
+    private weak var guestReturnVideoSink: NativeGuestMediaSink?
+    private var guestReturnVideoRemovals: Set<UUID> = []
     private let engine: CompositionEngine
     /// The W03 preview engine: composites the STAGED scene for the PREVIEW
     /// monitor only. Same source providers, independent tick — preview work
@@ -1121,7 +1124,30 @@ final class StreamController: ObservableObject {
             removeGuestMedia(lease)
             return nil
         }
-        return NativeGuestMediaSink(registered: lease, video: guestVideoFrames, audio: audioEngine)
+        let sink = NativeGuestMediaSink(registered: lease, video: guestVideoFrames, audio: audioEngine)
+        guestReturnVideoSink = sink
+        let program = engine, authority = guestProgramReturnAuthority
+        sink.bindProgramReturn(.init(authority: authority, install: { [weak self, weak sink] token, consume in
+            let reserved = await MainActor.run {
+                guard let self, let sink, sink.videoTokenIsCurrent(token), self.isPipelineRunning,
+                      self.guestLease == lease else { return false }
+                return self.reserveRecordingEncoders(token, count: 1, canvas: .program) == nil
+            }
+            guard reserved else { return false }
+            await program.addSink(token: token, capacity: 1) { consume($0.sampleBuffer) }
+            return true
+        }, remove: { [weak self] token in
+            let reserved = await MainActor.run {
+                guard let self, self.recordingEncoderReservations.recordings[token] != nil else { return false }
+                return self.guestReturnVideoRemovals.insert(token).inserted
+            }
+            guard reserved else { return }
+            await program.removeSink(token)
+            await MainActor.run {
+                self?.releaseRecordingEncoders(token); self?.guestReturnVideoRemovals.remove(token)
+            }
+        }))
+        return sink
     }
 
     /// Called only after session admission. Receipts cannot create slots or
@@ -1756,6 +1782,7 @@ final class StreamController: ObservableObject {
     }
 
     private func startPipeline() {
+        guestProgramReturnAuthority.change(active: true)
         isPipelineRunning = true
         resilienceTask = Task { [weak self] in
             while !Task.isCancelled && self != nil {
@@ -1912,6 +1939,8 @@ final class StreamController: ObservableObject {
 
     private func stopPipeline() {
         audioEngine.cancelGuestTalkback()
+        guestProgramReturnAuthority.change(active: false)
+        guestReturnVideoSink?.stopProgramReturn()
         isPipelineRunning = false
         resilienceTask?.cancel(); resilienceTask = nil
         failureTracker.resetObservations()
@@ -2107,6 +2136,8 @@ final class StreamController: ObservableObject {
         failureTracker.restore()
         privacySlateActive = false
         privacySlateScene = nil
+        guestProgramReturnAuthority.change()
+        guestReturnVideoSink?.stopProgramReturn()
         privacyGate.setScene(nil)
         applyMixerBusGain(.program, gain: programBusGain)
         reconcileSourceDemand(); evaluateSourceResilience()
@@ -2124,6 +2155,8 @@ final class StreamController: ObservableObject {
         fallbackSceneID = slate.id
         privacySlateScene = slate
         privacySlateActive = true
+        guestProgramReturnAuthority.change()
+        guestReturnVideoSink?.stopProgramReturn()
         privacyGate.setScene(slate)
         applyMixerBusGain(.program, gain: programBusGain)
         previewProgram.setResilienceProgram(slate)

@@ -159,6 +159,7 @@ enum NativeInterviewMediaEvent: Sendable {
     case candidate(value: String, mid: String)
     case ready
     case returnAudio(NativeInterviewReturnAudioState)
+    case returnVideo(NativeInterviewReturnVideoState)
     case screenSharing(Bool)
     case privateControl(NativeInterviewPrivateEnvelope)
     case controlClosed
@@ -178,6 +179,8 @@ enum NativeInterviewMediaEvent: Sendable {
     func acceptAnswer(_ sdp: String) throws
     func acceptCandidate(_ value: String, mid: String) throws
     func approveScreen(_ approved: Bool) -> Bool
+    var supportsProgramReturn: Bool { get }
+    func setProgramReturnEnabled(_ enabled: Bool) -> Bool
     var supportsPrivateMessages: Bool { get }
     func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool
     /// Closes the full-lease sink synchronously before native callback teardown.
@@ -185,6 +188,8 @@ enum NativeInterviewMediaEvent: Sendable {
 }
 
 extension NativeInterviewMediaHost {
+    var supportsProgramReturn: Bool { false }
+    func setProgramReturnEnabled(_ enabled: Bool) -> Bool { false }
     var supportsPrivateMessages: Bool { false }
     func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool { false }
 }
@@ -197,6 +202,7 @@ extension NativeInterviewMediaHost {
 
 enum NativeInterviewMembership: String, Sendable { case waiting, backstage, onair }
 enum NativeInterviewMediaState: String, Sendable { case unavailable, preparing, negotiating, ready, failed }
+enum NativeInterviewReturnVideoState: String, Sendable { case off, unavailable, preparing, ready, failed }
 enum NativeInterviewReturnAudioState: String, Sendable { case unavailable, preparing, ready, failed }
 struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     let id: UUID
@@ -204,6 +210,7 @@ struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     var membership: NativeInterviewMembership
     var media: NativeInterviewMediaState = .unavailable
     var returnAudio: NativeInterviewReturnAudioState = .unavailable
+    var returnVideo: NativeInterviewReturnVideoState = .unavailable
     var screenApproved = false
     var screenSharing = false
     /// Increments only on an actual admitted/stage/backstage receipt, so a

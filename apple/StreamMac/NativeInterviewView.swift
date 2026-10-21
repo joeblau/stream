@@ -16,7 +16,7 @@ struct NativeInterviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Guests").font(.headline)
-                Text("One guest connection with incoming camera, screen and audio. Audio return availability appears below; video return is unavailable.")
+                Text("One guest connection with incoming camera, screen and audio. Public audio and optional fixed Program video return availability appear below.")
                     .font(.caption).foregroundStyle(.secondary)
                 GuestSlotsView(store: sceneStore)
                 if [.idle, .ended, .expired, .failed, .closed].contains(manager.state.snapshot.phase) {
@@ -108,6 +108,16 @@ struct NativeInterviewView: View {
                     member.returnAudio == .preparing ? "Preparing public show audio return. Start local preview to supply the mix." :
                     "Public show audio return is unavailable.")
                     .font(.caption).foregroundStyle(.secondary)
+                if let context = manager.currentReadyLease, context.receive.peerID == member.id,
+                   member.returnVideo != .unavailable {
+                    let enabled = member.returnVideo == .preparing || member.returnVideo == .ready
+                    commandButton(enabled ? "Stop Program Video Return" : "Start Program Video Return", .setProgramReturn(context, !enabled))
+                    Text(member.returnVideo == .ready ? "Sending Program video, up to 320 × 180 at 15 fps / 250 kbps. Remote playback is not confirmed." :
+                        member.returnVideo == .preparing ? "Preparing fixed Program video return." :
+                        member.returnVideo == .failed ? "Video return could not start. Start local preview and check the studio encoder budget, then retry." :
+                        "Program video return is off. It uses one encoder when enabled.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     commandButton("On Air", .onair(member.id))
                     commandButton("Backstage", .backstage(member.id))
