@@ -1,4 +1,5 @@
 #include "../NativeGuestReceivePrototype/GuestReturnH264.hpp"
+#include "../NativeGuestReceivePrototype/GuestReturnClock.hpp"
 #include <cassert>
 #include <iostream>
 #include <vector>
@@ -44,6 +45,12 @@ static void roundTrip(const std::vector<size_t> &sizes) {
     assert(octets == payloadBytes && decoded == data);
 }
 int main() {
+    const uint64_t sourceTime = 100ULL << 32;
+    assert(reportRtp(1000, sourceTime, sourceTime + (3ULL << 31), 48000) == 73000);
+    assert(reportRtp(1000, sourceTime, sourceTime - (1ULL << 31), 48000) == uint32_t(1000 - 24000));
+    assert(reportRtp(0xfffffff0, sourceTime, sourceTime + (3ULL << 31), 90000) == uint32_t(0xfffffff0 + 135000ULL));
+    assert(reportRtp(1234, UINT64_MAX - (1ULL << 31) + 1, 1ULL << 31, 48000) == 49234);
+    assert(reportRtp(1234, 0, 1, 48000) == 1234);
     for (const auto &sizes : std::vector<std::vector<size_t>>{{2}, {1188}, {1189}, {2373}, {2374}, {65532}, {7, 6, 4000}, std::vector<size_t>(64, 2)}) roundTrip(sizes);
     AccessUnit au;
     const auto reject = [&](const std::vector<uint8_t> &bytes) { assert(!parse(bytes.data(), bytes.size(), au)); };
@@ -64,4 +71,5 @@ int main() {
         [&](const uint8_t *, size_t) { return ++attempts < 2; }));
     assert(attempts == 2 && sequence == 102 && packets == 1 && octets == 1188);
     std::cout << "PASS: actual bounded H264 parser/packetizer, FU-A byte round trips, RTP marker/SSRC/PTS, sequence wrap, 64NAL/64KiB/1200byte caps, malformed rejection and failed-send sequence consumption\n";
+    std::cout << "PASS: sender-report send-time clock extrapolation preserves original packet mapping across fractional, negative and NTP/RTP rollover cases\n";
 }
