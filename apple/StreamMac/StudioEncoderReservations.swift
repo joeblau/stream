@@ -10,7 +10,7 @@ struct StudioEncoderReservations: Sendable {
         let others = recordingCount - (recordings[id] ?? 0)
         guard encoders >= 1, encoders <= maximum, publishing >= 0, publishing <= maximum,
               others + encoders + publishing <= maximum else {
-            return "Program, secondary recording, isolated video and publishers exceed the \(maximum)-encoder studio budget. Stop an output or reduce isolated tracks before starting."
+            return "Publishing, recordings and guest video return exceed the \(maximum)-encoder studio budget. Stop a video output or reduce isolated tracks before starting."
         }
         recordings[id] = encoders
         return nil
@@ -19,7 +19,7 @@ struct StudioEncoderReservations: Sendable {
     func publishingError(current: Int, starting: Int) -> String? {
         guard current >= 0, current <= maximum, starting >= 0, starting <= maximum,
               recordingCount + current + starting <= maximum else {
-            return "The selected publishers exceed the encoder budget reserved by all studio recordings. Stop a recording or reduce destinations."
+            return "The selected publishers exceed the encoder budget reserved by recordings and guest video return. Stop a video output or reduce destinations."
         }
         return nil
     }
