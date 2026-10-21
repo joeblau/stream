@@ -48,7 +48,11 @@ private actor EncodedPublisherProbe: Publisher {
         if !value { throw NSError(domain: "SharedEncoderHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
     }
     static func settle(seconds: Double = 3, file: String = #fileID, line: Int = #line, _ check: @escaping @MainActor () async -> Bool) async throws {
-        for _ in 0..<Int(seconds * 100) { if await check() { return }; try await Task.sleep(for: .milliseconds(10)) }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
+        while ContinuousClock.now < deadline {
+            if await check() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
         throw NSError(domain: "SharedEncoderHarness", code: 2, userInfo: [NSLocalizedDescriptionKey: "Timed out awaiting actual encoder/output at \(file):\(line)"])
     }
     static func bytes(_ sample: CMSampleBuffer) -> Data {
@@ -102,12 +106,37 @@ private actor EncodedPublisherProbe: Publisher {
         probe.standardOutput = FileHandle.nullDevice; probe.standardError = FileHandle.nullDevice
         do { try probe.run(); probe.waitUntilExit(); return probe.terminationStatus == 0 } catch { return false }
     }
+    static func receiverExecutable() throws -> URL? {
+        let override = ProcessInfo.processInfo.environment["STREAM_FFMPEG_BIN"]
+        let candidates = override.map { [$0] } ?? ["/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg", "/usr/local/opt/ffmpeg-full/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
+        guard let path = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
+            if override != nil {
+                report("UNQUALIFIED: STREAM_FFMPEG_BIN must select an executable receiver")
+                exit(77)
+            }
+            return nil
+        }
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = ["-hide_banner", "-protocols"]
+        process.standardOutput = output; process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let protocols = Set(String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        })
+        guard process.terminationStatus == 0, protocols.contains("rtmp"), protocols.contains("srt") else {
+            report("UNQUALIFIED: selected ffmpeg receiver lacks RTMP/SRT protocols; install ffmpeg-full or select STREAM_FFMPEG_BIN")
+            return nil
+        }
+        return URL(fileURLWithPath: path)
+    }
     static func localhostTransports(directory: URL, settings: StreamSettings) async throws {
-        guard let path = ["/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg", "/usr/local/opt/ffmpeg-full/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].first(where: FileManager.default.isExecutableFile(atPath:)) else {
+        guard let ffmpeg = try receiverExecutable() else {
             report("UNQUALIFIED: localhost transport fixtures require ffmpeg with libsrt/RTMP; no transport acceptance claimed")
             return
         }
-        let ffmpeg = URL(fileURLWithPath: path)
         var processes: [Process] = [], handles: [FileHandle] = [], ports: [Int] = []
         let transports: [StreamCore.StreamProtocol] = [.rtmp, .srt]
         defer {
@@ -168,8 +197,9 @@ private actor EncodedPublisherProbe: Publisher {
         report("PASS: one actual fixed encoder -> RTMPPublisher/RTMPStream and SessionPublisher/SRTStream compressed passthrough -> simultaneous localhost ffmpeg MP4 receivers; H.264/AAC decode/sync/metadata, SRT startup primer and independent acknowledged stops")
     }
     static func localhostRecovery(directory: URL, settings: StreamSettings) async throws {
-        guard let path = ["/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg", "/usr/local/opt/ffmpeg-full/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first(where: FileManager.default.isExecutableFile(atPath:)) else {
-            throw NSError(domain: "SharedEncoderHarness", code: 77, userInfo: [NSLocalizedDescriptionKey: "Real RTMP/SRT recovery requires owned ffmpeg receivers"])
+        guard let ffmpeg = try receiverExecutable() else {
+            report("UNQUALIFIED: real RTMP/SRT recovery requires owned ffmpeg receivers with both protocols")
+            exit(77)
         }
         var processes: [Process] = [], handles: [FileHandle] = []
         defer {
@@ -181,7 +211,7 @@ private actor EncodedPublisherProbe: Publisher {
             let log = directory.appendingPathComponent(name + ".log")
             FileManager.default.createFile(atPath: log.path, contents: nil)
             let handle = try FileHandle(forWritingTo: log); handles.append(handle)
-            let process = Process(); process.executableURL = URL(fileURLWithPath: path)
+            let process = Process(); process.executableURL = ffmpeg
             let input = transport == .srt ? ["-i", "srt://127.0.0.1:\(port)?mode=listener&latency=50000"] : ["-listen", "1", "-i", "rtmp://127.0.0.1:\(port)/live/shared"]
             process.arguments = ["-y", "-hide_banner", "-loglevel", "error"] + input + ["-map", "0:v:0", "-map", "0:a:0", "-c", "copy", directory.appendingPathComponent(name + ".mp4").path]
             process.standardOutput = handle; process.standardError = handle
@@ -378,6 +408,14 @@ private actor EncodedPublisherProbe: Publisher {
     static func main() async throws {
         setbuf(stdout, nil)
         report("Encoder qualification: \(prefersHardwareEncoder ? "shipping hardware preference with public software fallback" : "explicit public VideoToolbox software encoder; no hardware throughput claim")")
+        if CommandLine.arguments.contains("--receiver-check-only") {
+            guard let receiver = try receiverExecutable() else {
+                report("UNQUALIFIED: real RTMP/SRT recovery requires both receiver protocols")
+                exit(77)
+            }
+            report("PASS: actual receiver advertises RTMP and SRT: \(receiver.path)")
+            return
+        }
         let artifactRoot = ProcessInfo.processInfo.environment["STREAM_TRANSPORT_ARTIFACT_ROOT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? FileManager.default.temporaryDirectory
         let directory = artifactRoot.appendingPathComponent("stream-shared-encoder-\(UUID())")
