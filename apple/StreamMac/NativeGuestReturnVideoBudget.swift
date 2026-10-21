@@ -13,13 +13,14 @@ struct NativeGuestReturnVideoProfile: Equatable, Sendable {
     static let high = Self(width: 1280, height: 720, framesPerSecond: 30, maximumBitrate: 1_500_000)
     static let all = [low, balanced, high]
     /// Quantized ceilings avoid replacing VT for every small REMB update.
-    /// Below64kbps the optional video source is no longer usable.
+    /// The codec has a4kbps floor. Actual RTP byte admission independently
+    /// enforces receiver capacity, even below that encoder target.
     func constrained(capacityBitsPerSecond capacity: UInt64) -> Self? {
-        guard capacity >= 64_000 else { return nil }
+        guard capacity > 0 else { return nil }
         let allowed = Int(min(capacity, 100_000_000)) * 8 / 10
-        let tiers = [32_000, 48_000, 64_000, 96_000, 128_000, 192_000, 250_000, 320_000, 480_000, 650_000, 960_000, 1_500_000]
+        let tiers = [4_000, 6_000, 8_000, 12_000, 16_000, 24_000, 32_000, 48_000, 64_000, 96_000, 128_000, 192_000, 250_000, 320_000, 480_000, 650_000, 960_000, 1_500_000]
         return Self(width: width, height: height, framesPerSecond: framesPerSecond,
-            maximumBitrate: min(maximumBitrate, tiers.last(where: { $0 <= allowed }) ?? 32_000))
+            maximumBitrate: min(maximumBitrate, tiers.last(where: { $0 <= allowed }) ?? 4_000))
     }
 }
 
@@ -86,5 +87,33 @@ struct NativeGuestReturnVideoBudget: Sendable {
         profile = next
         lastChange = monotonicMilliseconds; goodWindows = 0; goodBegan = nil
         return true
+    }
+}
+
+/// Whole access units consume exact packetizer RTP payload+header bytes before
+/// the SDK sees any packet. This bounds attempted bytes, including failed AUs.
+/// A2second burst admits a small recovery IDR without borrowing unlimited debt.
+struct NativeGuestReturnVideoByteBudget: Sendable {
+    private var rate: Double = 0, balance: Double = 0
+    private var lastTime: UInt64?
+    private(set) var limited = false
+    private var maximum: Double { min(16_384, rate * 2) }
+    private mutating func advance(_ now: UInt64) {
+        if let lastTime, now >= lastTime { balance = min(maximum, balance + Double(now - lastTime) * rate / 1000) }
+        lastTime = now
+    }
+    mutating func constrain(capacityBitsPerSecond: UInt64, at now: UInt64) {
+        advance(now)
+        rate = Double(min(capacityBitsPerSecond, 100_000_000)) / 10 //80% /8bits.
+        if !limited { limited = true; balance = maximum }
+        else { balance = min(balance, maximum) }
+    }
+    func canFit(rtpBytes: UInt32) -> Bool { !limited || Double(rtpBytes) <= maximum }
+    mutating func admit(rtpBytes: UInt32, at now: UInt64) -> Bool {
+        guard rtpBytes > 0 else { return false }
+        guard limited else { return true }
+        advance(now)
+        guard Double(rtpBytes) <= balance else { return false }
+        balance -= Double(rtpBytes); return true
     }
 }
