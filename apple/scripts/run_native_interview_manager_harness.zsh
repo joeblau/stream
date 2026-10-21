@@ -85,7 +85,7 @@ xcodebuild -resolvePackageDependencies -project "$INTERVIEW_DIR/NativeInterviewM
   -scheme NativeInterviewManagerHarness -derivedDataPath "$INTERVIEW_MANAGER_BUILD_PATH"
 python3 scripts/repair_desktop_transport_archives.py "$INTERVIEW_MANAGER_BUILD_PATH" --require-relay-policy
 xcodebuild -project "$INTERVIEW_DIR/NativeInterviewManagerValidation.xcodeproj" -scheme NativeInterviewManagerHarness \
-  -destination 'platform=macOS' -derivedDataPath "$INTERVIEW_MANAGER_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -destination 'platform=macOS' -jobs "${STREAM_XCODE_JOBS:-4}" -derivedDataPath "$INTERVIEW_MANAGER_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 readonly INTERVIEW_MANAGER_PRODUCTS="${INTERVIEW_MANAGER_BUILD_PATH:A}/Build/Products/Debug"
 readonly INTERVIEW_RUN="$INTERVIEW_DIR/run-$(uuidgen)"
 readonly INTERVIEW_NODE="${STREAM_INTERVIEW_NODE:-node}"
