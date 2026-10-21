@@ -86,7 +86,21 @@ struct AnnotationToolbarView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Annotation color")
+                .accessibilityLabel("Annotation color: \(annotationColorName(hex))")
+                .accessibilityValue(uiState.colorHex == hex ? "Selected" : "Not selected")
             }
+        }
+    }
+
+    private func annotationColorName(_ hex: String) -> String {
+        switch hex {
+        case "#FF3B30": "Red"
+        case "#FF9500": "Orange"
+        case "#FFCC00": "Yellow"
+        case "#34C759": "Green"
+        case "#0A84FF": "Blue"
+        case "#FFFFFF": "White"
+        default: hex
         }
     }
 

@@ -57,7 +57,15 @@ final class StudioShortcutController: ObservableObject {
         registerGlobals()
     }
     func rememberCommandFocus() {
-        if responderBeforeCommands == nil { responderBeforeCommands = studioWindow?.firstResponder }
+        guard responderBeforeCommands == nil, let window = studioWindow else { return }
+        // A field editor is shared and loses its window when editing ends.
+        // Remember the owning control as the restoration target instead.
+        if let editor = window.firstResponder as? NSTextView, editor.isFieldEditor,
+           let control = editor.delegate as? NSView, control.window === window {
+            responderBeforeCommands = control
+        } else {
+            responderBeforeCommands = window.firstResponder
+        }
     }
     func restoreCommandFocus() {
         guard let window = studioWindow, let responder = responderBeforeCommands else { return }

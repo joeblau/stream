@@ -7,7 +7,9 @@ import SwiftUI
 // importing or changing an operator's credentials, preferences or recordings.
 enum WorkspaceFixtureDefaults {
     static let name = "stream.workspace-validation.\(UUID())"
-    static var value: UserDefaults { UserDefaults(suiteName: name)! }
+    // Share one thread-safe instance so AppStorage observes native control
+    // changes made through the fixture's isolated default store.
+    nonisolated(unsafe) static let value = UserDefaults(suiteName: name)!
 }
 enum WorkspaceFixtureStorage {
     static let root = FileManager.default.temporaryDirectory.appendingPathComponent("stream-workspace-\(UUID())")
@@ -35,7 +37,11 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         app.setActivationPolicy(.accessory); app.finishLaunching()
         Task { @MainActor in
             do { try await run(); exit(0) }
-            catch { print("FAIL: \(error.localizedDescription)"); exit(1) }
+            catch {
+                let unqualified = (error as NSError).code == 77
+                print("\(unqualified ? "UNQUALIFIED" : "FAIL"): \(error.localizedDescription)")
+                exit(unqualified ? 77 : 1)
+            }
         }
         app.run()
     }
@@ -120,6 +126,10 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         window.makeKeyAndOrderFront(nil)
         defer { window.contentView = nil; window.close() }
         try await waitForView(workspace)
+        if CommandLine.arguments.contains("--accessibility") {
+            try await StudioAccessibilityHarness.run(workspace: workspace, window: window)
+            return
+        }
         let initialRuntime = workspace.runtime
         let firstAppear = WorkspaceViewReceipts.appeared[ObjectIdentifier(initialRuntime), default: 0]
         let firstDisappear = WorkspaceViewReceipts.disappeared[ObjectIdentifier(initialRuntime), default: 0]

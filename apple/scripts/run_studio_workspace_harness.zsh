@@ -94,6 +94,7 @@ abort 'Shipping App window-content boundary changed' unless first && last
 content=app[first...last].strip
 content.sub!('MainWindowView(firstRunCompleted: $hasCompletedFirstRun)', <<'SWIFT'.strip)
 MainWindowView(firstRunCompleted: $hasCompletedFirstRun)
+                .background { if CommandLine.arguments.contains("--accessibility") { WorkspaceAccessibilityProbe() } }
                 .onAppear { WorkspaceViewReceipts.appeared[ObjectIdentifier(observedRuntime), default: 0] += 1 }
                 .onDisappear { WorkspaceViewReceipts.disappeared[ObjectIdentifier(observedRuntime), default: 0] += 1 }
 SWIFT
@@ -117,6 +118,7 @@ applicationRoot += content + "\n.defaultAppStorage(WorkspaceFixtureDefaults.valu
 fixture_write(File.join(folder,'fixtures/WorkspaceApplicationRoot.swift'),applicationRoot)
 h['sources'] << File.join(folder,'fixtures/WorkspaceApplicationRoot.swift')
 h['sources'] << File.join(root,'scripts/studio_workspace_harness.swift')
+h['sources'] << File.join(root,'scripts/studio_accessibility_harness.swift')
 spec['targets']['StudioWorkspaceHarness']=h
 spec['schemes']['StudioWorkspaceHarness']={'build'=>{'targets'=>{'StudioWorkspaceHarness'=>'all'}}}
 require File.join(root, 'scripts/desktop_transport_fixture')
@@ -131,10 +133,11 @@ xcodebuild -project "$WORKSPACE_DIR/StudioWorkspaceValidation.xcodeproj" \
     -scheme StudioWorkspaceHarness -destination 'platform=macOS' \
     -derivedDataPath "$WORKSPACE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 readonly WORKSPACE_PRODUCTS="${WORKSPACE_BUILD_PATH:A}/Build/Products/Debug"
-env DYLD_FRAMEWORK_PATH="$WORKSPACE_PRODUCTS" python3 - "$WORKSPACE_PRODUCTS/StudioWorkspaceHarness" <<'PY'
+swiftc scripts/studio_accessibility_client.swift -o "$WORKSPACE_DIR/StudioAccessibilityClient"
+env STREAM_ACCESSIBILITY_ARTIFACTS="${WORKSPACE_DIR:A}/accessibility" STREAM_ACCESSIBILITY_CLIENT="${WORKSPACE_DIR:A}/StudioAccessibilityClient" DYLD_FRAMEWORK_PATH="$WORKSPACE_PRODUCTS" python3 - "$WORKSPACE_PRODUCTS/StudioWorkspaceHarness" "$@" <<'PY'
 import subprocess,sys
 try:
-    raise SystemExit(subprocess.run([sys.argv[1]],timeout=90).returncode)
+    raise SystemExit(subprocess.run(sys.argv[1:],timeout=90).returncode)
 except subprocess.TimeoutExpired:
     print('FAIL: shipping workspace fixture exceeded its 90-second bound',flush=True)
     raise SystemExit(1)
