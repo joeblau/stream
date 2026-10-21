@@ -20,7 +20,8 @@ private final class ReturnVideoResult: @unchecked Sendable {
 enum NativeGuestReturnVideoError: Error { case accessUnitTooLarge }
 struct NativeGuestReturnH264Frame: Sendable {
     let data: Data
-    let rtpBytes: UInt32
+    /// Exact RTP packets plus the SDK's per-AU compound sender report.
+    let sendBytes: UInt32
     let rtp: UInt32, ntp: UInt64
 }
 
@@ -116,9 +117,9 @@ final class NativeGuestReturnVideoEncoder {
         let seconds = pts.seconds + NativeGuestReturnClock.ntpHostOffset
         guard seconds > 0, seconds < Double(UInt32.max) else { throw NativeGuestReturnAudioError.malformed }
         let whole = UInt64(seconds.rounded(.down)), fraction = UInt64((seconds - Double(whole)) * 4_294_967_296)
-        let projected = data.withUnsafeBytes { SGReturnH264RTPBytes($0.bindMemory(to: UInt8.self).baseAddress, $0.count) }
+        let projected = data.withUnsafeBytes { SGReturnH264SendBytes($0.bindMemory(to: UInt8.self).baseAddress, $0.count) }
         guard projected > 0 else { throw NativeGuestReturnAudioError.malformed }
-        return .init(data: data, rtpBytes: projected,
+        return .init(data: data, sendBytes: projected,
             rtp: UInt32(truncatingIfNeeded: CMTimeConvertScale(pts, timescale: 90_000, method: .roundHalfAwayFromZero).value),
             ntp: whole << 32 | fraction)
     }

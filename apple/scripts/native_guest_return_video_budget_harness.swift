@@ -13,14 +13,14 @@ struct NativeGuestReturnVideoBudgetHarness {
             "application-limited static receiver capacity constrains codec without retiring usable video")
         var admission = NativeGuestReturnVideoByteBudget()
         admission.constrain(capacityBitsPerSecond: 10_000, at: 0)
-        require(admission.admit(rtpBytes: 1800, at: 0), "bounded2second recovery burst")
-        require(!admission.admit(rtpBytes: 300, at: 0), "a whole AU is refused before any packet overdraw")
-        require(admission.admit(rtpBytes: 1000, at: 1000), "capacity replenishes only at80% of estimated bits")
+        require(admission.admit(sendBytes: 1800, at: 0), "bounded2second recovery burst")
+        require(!admission.admit(sendBytes: 300, at: 0), "a whole AU is refused before any packet overdraw")
+        require(admission.admit(sendBytes: 1000, at: 1000), "capacity replenishes only at80% of estimated bits")
         admission.constrain(capacityBitsPerSecond: 10_000, at: 1000)
-        require(!admission.admit(rtpBytes: 300, at: 1000), "repeated reports do not refill the bucket")
-        require(!admission.admit(rtpBytes: 2001, at: 10_000), "long idle never accumulates an unbounded burst")
+        require(!admission.admit(sendBytes: 300, at: 1000), "repeated reports do not refill the bucket")
+        require(!admission.admit(sendBytes: 2001, at: 10_000), "long idle never accumulates an unbounded burst")
         admission.constrain(capacityBitsPerSecond: 1_000, at: 10_000)
-        require(!admission.admit(rtpBytes: 201, at: 10_000), "a smaller estimate immediately constrains a minimum recovery AU")
+        require(!admission.admit(sendBytes: 201, at: 10_000), "a smaller estimate immediately constrains a minimum recovery AU")
         for capacity: UInt64 in [64_000, 99_209, 250_000, 1_105_000, 3_000_000] {
             for original in NativeGuestReturnVideoProfile.all {
                 let bounded = original.constrained(capacityBitsPerSecond: capacity)!

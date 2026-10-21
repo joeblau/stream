@@ -41,6 +41,16 @@ private final class EncodeHold: @unchecked Sendable {
     let entered = DispatchSemaphore(value: 0), resume = DispatchSemaphore(value: 0)
     func wait() { entered.signal(); require(resume.wait(timeout: .now() + 5) == .success, "Actual VT submission resumed") }
 }
+private final class AdmissionReceipt: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: (charged: UInt32, rtp: UInt32)?
+    let received = DispatchSemaphore(value: 0)
+    func observe(_ data: Data, _ charged: UInt32) {
+        let rtp = data.withUnsafeBytes { SGReturnH264RTPBytes($0.bindMemory(to: UInt8.self).baseAddress, $0.count) }
+        lock.lock(); value = (charged, rtp); lock.unlock(); received.signal()
+    }
+    var cost: (charged: UInt32, rtp: UInt32)? { lock.lock(); defer { lock.unlock() }; return value }
+}
 private final class InstallEntryHold: @unchecked Sendable {
     private let lock = NSLock()
     private var first = true
@@ -102,6 +112,20 @@ private func sample(width: Int = 64, height: Int = 36, pts: CMTime? = nil) -> CM
             timescale: 90_000, method: .roundHalfAwayFromZero).value), "Profile replacement never rebases source RTP PTS")
         reconfigured.close()
         print("PASS actual VT high→low replacement: old session invalidated before new allocation, source dimensions never upscaled and original90kPTS preserved")
+        let receipt = AdmissionReceipt()
+        let costSender = NativeGuestReturnVideoSender(sink: sink, receiver: receiver, callbacks: callbacks, events: { _ in true })
+        costSender.validationAdmissionCost = receipt.observe
+        let costClaim = costSender.claimPreparation()!
+        require(await costSender.prepare(costClaim), "Actual encoded admission source installed")
+        source.emit(sample())
+        require(await Task.detached { wait(receipt.received, seconds: 5) }.value, "Actual VT access unit reached byte admission")
+        let actualCost = receipt.cost!
+        require(actualCost.rtp > 0 && actualCost.charged == actualCost.rtp + 52,
+            "Byte admission must charge actual RTP plus the per-AU52-byte compound sender report")
+        print("PASS actual VT→sender admission: RTP=\(actualCost.rtp)bytes plus52-byte SR/SDES charged before SDK entry")
+        costSender.stop()
+        for _ in 0..<100 { if source.tokens.isEmpty { break }; try await Task.sleep(for: .milliseconds(10)) }
+        require(source.tokens.isEmpty, "Admission fixture releases its actual source reservation")
         let hold = EncodeHold(), encoder = NativeGuestReturnVideoEncoder()
         encoder.validationBeforeCompletion = hold.wait
         let sender = NativeGuestReturnVideoSender(sink: sink, receiver: receiver, callbacks: callbacks, encoder: encoder, events: { _ in true })

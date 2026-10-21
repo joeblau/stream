@@ -259,6 +259,7 @@ struct SGReceiver {
     bool returnVideoStarted = false;
     uint16_t returnVideoSequence = 0;
     uint32_t returnVideoLastRTP = 0, returnVideoPackets = 0, returnVideoBytes = 0;
+    uint32_t returnVideoReportBytes = 0;
     uint32_t returnVideoSSRC = 0;
     #ifdef STREAM_GUEST_VALIDATION
     int validationReturnVideoFailAfter = -1;
@@ -543,6 +544,7 @@ extern "C" SGReturnVideoFeedback SGReceiverReturnVideoFeedback(SGReceiver *recei
         result.remb_negotiated = receiver->state->returnVideoRembNegotiated;
         result.sent_packets = receiver->returnVideoPackets;
         result.sent_payload_bytes = receiver->returnVideoBytes;
+        result.sent_sender_report_bytes = receiver->returnVideoReportBytes;
         result.buffered_bytes = uint32_t(std::min(uint64_t(track->bufferedAmount()), uint64_t(UINT32_MAX)));
         return result;
     } catch (...) {
@@ -551,6 +553,9 @@ extern "C" SGReturnVideoFeedback SGReceiverReturnVideoFeedback(SGReceiver *recei
 }
 extern "C" uint32_t SGReturnH264RTPBytes(const uint8_t *data, size_t bytes) {
     return stream_guest_return::rtpBytes(data, bytes);
+}
+extern "C" uint32_t SGReturnH264SendBytes(const uint8_t *data, size_t bytes) {
+    return stream_guest_return::sendBytes(data, bytes);
 }
 extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generation,
                                         const uint8_t *data, size_t bytes, uint32_t timestamp, uint64_t ntp) {
@@ -614,13 +619,13 @@ extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generatio
         // extrapolated to that same instant. Both media share their CNAME.
         const uint64_t reportNtp = stream_guest_return::reportNtpNow();
         const uint32_t reportRtp = stream_guest_return::reportRtp(timestamp, ntp, reportNtp, 90000);
-        rtc::binary sr(52); auto r = reinterpret_cast<uint8_t *>(sr.data());
+        rtc::binary sr(stream_guest_return::senderReportBytes); auto r = reinterpret_cast<uint8_t *>(sr.data());
         std::memset(r, 0, sr.size()); r[0] = 128; r[1] = 200; r[3] = 6;
         store32(r + 4, ssrc); store32(r + 8, uint32_t(reportNtp >> 32)); store32(r + 12, uint32_t(reportNtp));
         store32(r + 16, reportRtp); store32(r + 20, receiver->returnVideoPackets); store32(r + 24, receiver->returnVideoBytes);
         r[28] = 129; r[29] = 202; r[31] = 5; store32(r + 32, ssrc);
         r[36] = 1; r[37] = 13; std::memcpy(r + 38, "stream-return", 13);
-        (void)track->send(std::move(sr));
+        if (track->send(std::move(sr))) receiver->returnVideoReportBytes += stream_guest_return::senderReportBytes;
         return 1;
     } catch (...) { return 0; }
 }

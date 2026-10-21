@@ -6,6 +6,9 @@
 #include <cstring>
 
 namespace stream_guest_return {
+// The production sender appends one compound SR/SDES after each accepted AU.
+// Its cost belongs to the same capacity reservation as the media packets.
+inline constexpr uint32_t senderReportBytes = 52;
 struct NAL { size_t offset = 0, bytes = 0; };
 struct AccessUnit { std::array<NAL, 64> nals{}; size_t count = 0; };
 
@@ -68,7 +71,7 @@ bool packetize(const uint8_t *data, const AccessUnit &unit, uint32_t timestamp, 
     }
     return true;
 }
-// Exact next-AU admission charge, using the shipping packetizer with local
+// Exact next-AU RTP cost, using the shipping packetizer with local
 // counters only. No network callback, sequence reservation or sender mutation.
 inline uint32_t rtpBytes(const uint8_t *data, size_t bytes) {
     AccessUnit unit;
@@ -78,5 +81,9 @@ inline uint32_t rtpBytes(const uint8_t *data, size_t bytes) {
     if (!packetize(data, unit, 0, 1, sequence, packets, octets,
                    [](const uint8_t *, size_t) { return true; })) return 0;
     return octets + 12 * packets;
+}
+inline uint32_t sendBytes(const uint8_t *data, size_t bytes) {
+    const auto rtp = rtpBytes(data, bytes);
+    return rtp ? rtp + senderReportBytes : 0;
 }
 }
