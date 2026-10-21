@@ -148,13 +148,11 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         currentPosition = Self.effectivePosition(settings.cameraPosition)
         let device = input.device
 
-        output.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-        ]
         output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: queue)
         if session.canAddOutput(output) {
             session.addOutput(output)
+            applyPixelFormat(for: device)
             applyRotation(for: device)
         }
 
@@ -187,6 +185,8 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         session.addInput(input)
         videoInput = input
         currentPosition = position
+        // Available output formats depend on the newly connected sensor.
+        applyPixelFormat(for: input.device)
         // Front and back sensors can sit at different angles, so the physical
         // rotation the output applies has to be recomputed for the new device.
         applyRotation(for: input.device)
@@ -200,6 +200,24 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
               let input = try? AVCaptureDeviceInput(device: device) else { return nil }
         inputsByPosition[position] = input
         return input
+    }
+
+    /// Both preview and compositor accept bi-planar camera buffers directly through
+    /// Core Image. Keep the sensor's native 8-bit YUV range when available instead
+    /// of asking capture to convert every frame to the larger BGRA representation.
+    /// Called after connecting the output, inside a configuration transaction, and
+    /// repeated on each camera switch because supported formats can differ.
+    private func applyPixelFormat(for device: AVCaptureDevice) {
+        let nativeFormat = CMFormatDescriptionGetMediaSubType(device.activeFormat.formatDescription)
+        let fullRange = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        let videoRange = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        let preferredFormats = nativeFormat == videoRange
+            ? [videoRange, fullRange]
+            : [fullRange, videoRange]
+        let availableFormats = output.availableVideoPixelFormatTypes
+        let pixelFormat = preferredFormats.first(where: availableFormats.contains)
+            ?? kCVPixelFormatType_32BGRA
+        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
     }
 
     /// AVCaptureVideoDataOutput otherwise delivers buffers in the camera sensor's

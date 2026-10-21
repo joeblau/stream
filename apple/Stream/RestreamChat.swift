@@ -389,12 +389,12 @@ final class RestreamChat: NSObject {
                 guard let self, self.webSocket === socket else { return }
                 switch result {
                 case .success(.string(let text)):
-                    self.ingest(text)
+                    self.ingest(Data(text.utf8))
                     self.reconnectAttempts = 0
                     self.status = .connected
                     self.receive(from: socket)
                 case .success(.data(let data)):
-                    self.ingest(String(decoding: data, as: UTF8.self))
+                    self.ingest(data)
                     self.reconnectAttempts = 0
                     self.status = .connected
                     self.receive(from: socket)
@@ -429,13 +429,12 @@ final class RestreamChat: NSObject {
 
     /// The desktop decoder consumes documented typed events. The existing
     /// mobile feed retains its presentation mapping without logging content.
-    private func ingest(_ json: String) {
-        guard let envelope = json.data(using: .utf8), envelope.count <= 262_144 else { return }
+    private func ingest(_ envelope: Data) {
+        guard envelope.count <= 262_144 else { return }
         #if os(macOS)
         onStudioEnvelope?(envelope)
         #endif
-        guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let obj = try? JSONSerialization.jsonObject(with: envelope) as? [String: Any],
               (obj["action"] as? String) == "event" else { return }
 
         let payload = obj["payload"] as? [String: Any]
