@@ -64,6 +64,9 @@ used. Physical devices, deployed brokers and signed installation were not used.
 | Program/Secondary/Clean selection | Actual purple landscape Program and blue 100×180 portrait Secondary; independent scene content, source-demand ownership, layout removal and explicit restoration; separately composed Clean omits the actual red project overlay |
 | Rejoin and terminal lease | Old remote track ends; selected Secondary resets to Program/off; explicit enable decodes current Program; retained source/start commands from old full lease rejected |
 | Partial network send | Four actual SDK RTP packets include FU-A START without END; next successful AU is IDR; Chrome recovers fresh green pixels |
+| Measured capacity | Actual negotiated single-source REMB/RR; Chrome received 73,196 bps and SDK-accepted RTP payload plus headers 75,591 bps remain below fresh 119,451 bps REMB; learned bucket survives same-lease Off/On |
+| Static application-limited estimate | Actual Clean remains ready through a late white update at 6,400 bps REMB/4,000 bps codec target; fresh remote decoded frame and strict A/V bounds |
+| Persistent video-only failure | Controlled actual SDK sends fail for 2 seconds; optional video hides and releases its VT reservation, real decoded stereo public audio continues, restored source cannot replay Start |
 | Held VT teardown | Real submitted VT frame held; Off returns under 100 ms, late send rejected; reservation remains until actual VT invalidation |
 | Installation races | Held Program installation→Secondary replacement and held-before-Secondary-install→Program replacement preserve only the new token/capability/reservation |
 | Privacy snapshot race | Actual Program, Secondary and Clean Composer old red snapshots receive post-cutoff PTS and are rejected; fresh actor-installed subscriptions admit black slate |
@@ -72,7 +75,7 @@ used. Physical devices, deployed brokers and signed installation were not used.
 | Pre-BEGIN Host cancellation | Actual Host claims source intent before scheduling; no-yield Start→privacy stop→restore cannot replay; explicit replacement Start survives held old installation; outstanding jobs bounded at two |
 | Control close | Immediate audio/video authority revoke and eventual return reservation removal |
 | Packetization | ASan/UBSan checks exact FU-A reconstruction,1188/1189-byte boundaries, 64 KiB/64-NAL caps, RTP marker/SSRC/original PTS, sequence wrap and partial-send sequence consumption |
-| End-to-end A/V synchronization | Two fresh rendered captures per source: Program 64.44/37.02 ms, Secondary 10.65/74.23 ms, Clean 76.96/43.98 ms; every decoded/rendered cue within strict 100 ms and native Program cue within 50 ms; independent element/worklet bound also 100 ms |
+| End-to-end A/V synchronization | Two fresh rendered captures per source: Program 67.94/76.19 ms, Secondary 37.06/64.58 ms, Clean 84.73/13.63 ms; every decoded/rendered cue within strict 100 ms and native Program cue within 50 ms; independent element/worklet bound also 100 ms |
 
 The generated PCM uses the retained primary-microphone channel identity while
 the fixture refuses physical capture and disables VoicePolish. An earlier
@@ -122,7 +125,7 @@ admission bucket charges the exact projected RTP payload plus 12 byte headers
 from the actual packetizer, at 80% of fresh REMB with a maximum 2 second/16 KiB
 burst. Repeated reports and same-lease Off/On do not refill it, and rejected or
 failed AUs cannot borrow unbounded debt. Static low-entropy pictures remain
-useful even when an application-limited receiver estimate is only 8–10 kbps.
+useful even when an application-limited receiver estimate is only 6–10 kbps.
 If no complete fresh frame can be delivered for 2 seconds, video stops with a
 measured bandwidth message and requires a new deliberate Start. Audio continues
 independently. These charges exclude SRTP, UDP/IP, TURN and RTCP overhead;
