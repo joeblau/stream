@@ -87,3 +87,38 @@ chooser is reported as **UNQUALIFIED** and cannot establish picker acceptance.
 The combined local branch passed the signed sandbox fixture after merging the
 current native guest baseline and main; its final log is
 `/tmp/stream-portable-native-final-artifacts.log` (Xcode 26.6, macOS 27.0.1, ARM).
+
+## Frozen combined-source verification, 2026-10-21
+
+The combined source at `703e8b9` was built and exercised again from an isolated
+worktree on Mac15,8, macOS 27.2 (26B118), Xcode 27.2 (27B5038j), arm64. This
+source includes the native intake/read-ownership changes together with the
+recursive folder-media export, explicit unavailable-media errors, bounded
+manifest/document reads, guest-title/public-chat preservation and actual signed
+metadata audit changes from main.
+
+The freshly built, ad hoc signed sandbox app passed hot/cold LaunchServices
+intake, a real typed `NSItemProvider` drop, explicit import/Apply, distinct-show
+conflict handling, scene/asset/LUT remapping and bytes, private sentinel
+redaction, actual denied ungranted reads, granted linked-asset repair, normal
+Quit/cold restart with the persisted app-scope bookmark, unchanged source
+package bytes, repeated non-package delivery and multi-package rejection. The
+exact three sandbox/file/bookmark entitlements and nested signature seal were
+verified before launch. Eight PortableShow tests and three StudioProjects tests
+also passed against these production sources; five distribution-audit fixture
+tests passed separately. Signature metadata fixtures are not a notarized release.
+
+The real shipping `NSOpenPanel` attempt again canceled/aborted and remained
+**UNQUALIFIED**. Read-only session inspection reported
+`CGSSessionScreenIsLocked = 1` with `loginwindow` foreground. Owned-process input
+guards refused events into another foreground process; no unlock attempt or
+permission change was made. Successful keyboard picker selection requires an
+unlocked session. The physical Finder double-click, pointer drag and device
+repair limits above remain explicit.
+
+Fresh logs: `/tmp/stream-portable-final-build-20261021.log` and
+`/tmp/stream-portable-final-native-20261021.log`. The run retained native receipts
+and synthetic package bytes in
+`build/portable-show-native-validation/artifacts-d7b88e40-0b39-4990-969a-54cb9fdba6f9`
+of the isolated worktree. The unique owned app container and bookmark remain
+available under the fixture bundle identifier printed in the native log.
