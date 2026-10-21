@@ -463,8 +463,14 @@ final class CaptureSourcePool: ObservableObject {
     private var webHosts: [CaptureSourceKey: BrowserOverlayHost] = [:]
     private var programBrowserAudioKeys: Set<CaptureSourceKey> = []
     private var browserAudioCaptureConflict: String?
+    weak var browserAudioMixer: AudioMixEngine?
+    private var ownedBrowserAudioSession: BrowserWidgetHelperSession? {
+        guard let mixer = browserAudioMixer,
+              let session = BrowserOverlayHelperBackend.qualificationSession, session.ownsMixer(mixer) else { return nil }
+        return session
+    }
     var browserAudioChannels: Set<AudioChannelID> {
-        BrowserOverlayHelperBackend.qualificationSession?.demandedAudioChannels ?? []
+        ownedBrowserAudioSession?.demandedAudioChannels ?? []
     }
     var requiredBrowserAudioExclusions: Set<String> {
         BrowserOverlayHelperBackend.qualificationSession?.requiredSystemAudioExclusions ?? []
@@ -591,7 +597,7 @@ final class CaptureSourcePool: ObservableObject {
     }
     private func refreshBrowserAudioDemand() {
         let leases = Set(programBrowserAudioKeys.compactMap { webHosts[$0]?.helperPageLease })
-        BrowserOverlayHelperBackend.qualificationSession?.setProgramAudioDemand(leases,
+        ownedBrowserAudioSession?.setProgramAudioDemand(leases,
             applyingExclusions: requiredBrowserAudioExclusions, unavailableReason: browserAudioCaptureConflict)
     }
     func retireBrowserAudio() {
@@ -1479,6 +1485,12 @@ final class CaptureSourcePool: ObservableObject {
     private func startWeb(_ key: CaptureSourceKey, payload: WebSourcePayload) {
         sourceErrors[key] = nil
         let configuration = payload.browserOverlay
+        if configuration.audioRoute == .helperApp,
+           BrowserOverlayHelperBackend.qualificationSession != nil, ownedBrowserAudioSession == nil {
+            let reason = "Independent browser audio belongs to a different runtime mixer. Create a fresh qualification session after the previous runtime stops."
+            sourceErrors[key] = reason; webStates[key] = .failed(reason)
+            return
+        }
         guard let storeKey = payload.browserOverlayStoreKey else {
             sourceErrors[key] = "The web source has no widget URL or local HTML asset."
             return

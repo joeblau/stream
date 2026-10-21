@@ -2,10 +2,22 @@ import AppKit
 import AVFoundation
 import CoreMedia
 import StreamCore
+import SwiftUI
 
 @MainActor enum BrowserLifecycleCaptureReceipts {
     static var screenPrivacy: [EffectiveCapturePrivacy] = []
     static var appExclusions: [Set<String>] = []
+}
+@MainActor enum BrowserOperatorSeedGate {
+    static var armed = false, held = false
+    private static var continuation: CheckedContinuation<Void, Never>?
+    static func pause() async {
+        guard armed else { return }
+        armed = false; held = true
+        await withCheckedContinuation { continuation = $0 }
+        held = false
+    }
+    static func release() { continuation?.resume(); continuation = nil }
 }
 private func require(_ value: Bool, _ message: String) { precondition(value, message) }
 private func hostNow() -> CMTime { CMClockGetTime(CMClockGetHostTimeClock()) }
@@ -106,6 +118,8 @@ private final class QueuedISO: @unchecked Sendable {
     private(set) var startIsHeld = false
     private var startContinuation: CheckedContinuation<Void, Never>?
     private(set) var generation = UUID()
+    var generatedAmplitude: Float?
+    private var generatedTask: Task<Void, Never>?
     init(mixer: AudioMixEngine) {
         inlet = BrowserWidgetPCMInlet { mixer.enqueue(.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID), $0) }
     }
@@ -118,10 +132,25 @@ private final class QueuedISO: @unchecked Sendable {
             startIsHeld = false
         }
         generation = inlet.begin(); isCapturing = true
+        if let value = generatedAmplitude {
+            let inlet = self.inlet, generation = self.generation
+            generatedTask = Task.detached(priority: .userInitiated) {
+                var pts = hostNow() - CMTime(value: 512, timescale: 48_000)
+                while !Task.isCancelled {
+                    inlet.post(pcm(pts, value: value), generation: generation)
+                    pts = pts + CMTime(value: 512, timescale: 48_000)
+                    try? await Task.sleep(for: .seconds(max(0, (pts + CMTime(value: 512, timescale: 48_000) - hostNow()).seconds)))
+                }
+            }
+        }
     }
     func releaseStart() { startContinuation?.resume(); startContinuation = nil }
     func invalidateInput() { inlet.invalidate() }
-    func stop() async { isCapturing = false; stops += 1; await inlet.stop() }
+    func stop() async {
+        isCapturing = false; stops += 1
+        generatedTask?.cancel(); await generatedTask?.value; generatedTask = nil
+        await inlet.stop()
+    }
     func post(_ sample: CMSampleBuffer, generation: UUID? = nil) { inlet.post(sample, generation: generation ?? self.generation) }
 }
 @main @MainActor struct BrowserWidgetLifecycleHarness {
@@ -133,17 +162,33 @@ private final class QueuedISO: @unchecked Sendable {
         }
         throw NSError(domain: "BrowserLifecycle", code: 1, userInfo: [NSLocalizedDescriptionKey: reason])
     }
-    static func main() async throws {
+    static func main() {
         setbuf(stdout, nil); signal(SIGPIPE, SIG_IGN)
         guard CGSessionCopyCurrentDictionary() != nil else { print("UNQUALIFIED: owned helper IPC needs WindowServer"); exit(77) }
-        NSApplication.shared.setActivationPolicy(.accessory)
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory); app.finishLaunching()
+        Task { @MainActor in
+            do { try await run(); exit(0) }
+            catch {
+                let unqualified = (error as NSError).code == 77
+                print("\(unqualified ? "UNQUALIFIED" : "FAIL"): \(error.localizedDescription)")
+                exit(unqualified ? 77 : 1)
+            }
+        }
+        app.run()
+    }
+    static func run() async throws {
         precondition(!BrowserWidgetAudioIdentity.productionRouteQualified)
         let application = URL(fileURLWithPath: CommandLine.arguments[1])
         try await queuedISOChecks()
         try await canceledLoadChecks(application)
         try await sessionChecks(application)
         try await controllerChecks(application)
+        try await operatorChecks(application)
         print("PASS: actual helper IPC/Program leases + controller capture demand + native mixer retirement. Captured PCM is synthetic; no SCK capture, audible page, permission request, signing/install operation or production activation.")
+        if let path = ProcessInfo.processInfo.environment["BROWSER_LIFECYCLE_COMPLETION"] {
+            try Data("PASS".utf8).write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
     }
     static func queuedISOChecks() async throws {
         let mixer = AudioMixEngine(), channel = AudioChannelID.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID)
@@ -277,7 +322,7 @@ private final class QueuedISO: @unchecked Sendable {
         let freshStart = hostNow().seconds
         try await Task.sleep(for: .milliseconds(200))
         driver.post(pcm(hostNow() - CMTime(value: 512, timescale: 48_000), value: 0))
-        try await Task.sleep(for: .milliseconds(180))
+        try await Task.sleep(for: .milliseconds(240))
         for trace in [program, monitor, aux, pre, post] { require(trace.maxAbs(after: freshStart + 0.025) == 0, "Fresh inlet accepted old PTS or retained insert FX tail") }
         let origin = hostNow() - CMTime(value: 512, timescale: 48_000)
         let freshProducer = Task { @MainActor in
@@ -416,5 +461,186 @@ private final class QueuedISO: @unchecked Sendable {
         controller.capturePool.stopAll(); await session.waitUntilStopped(); await mixer.stop()
         require(session.demandCount == 0 && !driver.isCapturing && !mixer.captureRouteIsAllowed(session.channel), "Controller stop retained helper capture authority")
         print("PASS: actual Controller Program/Preview/Take and shared application-channel retention; opaque screen + system-audio conflicts explicit/latched unavailable until real stop qualification, required exclusions consumed, unrelated native Program PCM stays0.2; stop retires allpages")
+    }
+    private struct OperatorNode: Decodable, Sendable {
+        let role: String, label: String, value: String
+        let enabled: Bool
+    }
+    private static func operatorClient(_ arguments: [String] = []) async throws -> [OperatorNode] {
+        let parent = String(getpid())
+        guard let path = ProcessInfo.processInfo.environment["STREAM_ACCESSIBILITY_CLIENT"] else {
+            throw NSError(domain: "BrowserOperator", code: 77, userInfo: [NSLocalizedDescriptionKey: "Use lifecycle runner for the owned-process AX client"])
+        }
+        return try await Task.detached {
+            let process = Process(), output = Pipe(), errors = Pipe()
+            process.executableURL = URL(fileURLWithPath: path); process.arguments = [parent] + arguments
+            process.standardOutput = output; process.standardError = errors
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw NSError(domain: "BrowserOperator", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)])
+            }
+            return try JSONDecoder().decode([OperatorNode].self, from: data)
+        }.value
+    }
+    static func operatorChecks(_ application: URL) async throws {
+        let mixer = AudioMixEngine(), driver = SyntheticCapture(mixer: mixer)
+        let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver)
+        inspectedSession = session
+        BrowserOverlayHelperBackend.qualificationSession = session
+        defer { BrowserOverlayHelperBackend.qualificationSession = nil }
+        let channel = session.channel, label = channel.label, target = "channel." + label
+        let store = SceneStore(directory: GuestFixtureStorage.machineDirectory.appendingPathComponent("BrowserOperatorScenes"))
+        let config = BrowserOverlayConfiguration(urlString: "https://lifecycle.invalid/operator", audioRoute: .helperApp)
+        let scene = Scene(name: "Operator helper", layers: [.init(name: "Helper", payload: .web(.init(configuration: config)), transform: .fullscreen)])
+        let blank = Scene(name: "No helper", layers: [])
+        store.scenes = [scene, blank]
+        let model = PreviewProgramModel(selected: scene)
+        let controller = StreamController(sceneStore: store, previewProgram: model, permissions: PermissionsManager(), audioEngine: mixer)
+        let settings = SettingsSession(controller: controller), recorder = RecordingController()
+        recorder.loadPreferences(directory: GuestFixtureStorage.machineDirectory.appendingPathComponent("BrowserOperatorRecordings"))
+        var saved = settings.activeSettings.mixer
+        saved.channelVolumes[label] = 0.8; saved.channelMutes[label] = false
+        saved.soloedChannels = []; saved.channelAuxSends[label] = 0.8
+        settings.persistMixer(saved)
+        let dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: store, session: settings, recorder: recorder, previewProgram: model)
+        let unavailable = await controller.recordingAudioSources()
+        require(!unavailable.contains { $0.id == target }, "Saved mixer state fabricated helper ISO capability without demand")
+        require(controller.addRecordingAudioTap(targetID: target, processing: .afterEffects, sink: { _ in }) == nil,
+                "Stale helper ISO selection started a tap before qualification demand")
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1000, height: 330), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = "Owned Browser Operator Proof"; window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: VStack {
+            MixerPanelView().environmentObject(dispatcher).environmentObject(controller).environmentObject(store).environmentObject(model)
+            RecordingOptionsView(recorder: recorder).environmentObject(controller)
+        }.frame(width: 1000, height: 330))
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(150))
+        require(!(try await operatorClient()).contains { $0.label.contains(BrowserWidgetAudioIdentity.channelTitle) }, "Dormant saved helper strip was exposed")
+        let wrongModel = PreviewProgramModel(selected: scene)
+        let wrong = StreamController(sceneStore: store, previewProgram: wrongModel, permissions: PermissionsManager(), audioEngine: AudioMixEngine())
+        wrong.startPreview()
+        require(wrong.capturePool.sourceErrors.values.contains { $0.contains("different runtime mixer") }, "Replacement runtime reused old qualification mixer")
+        require(wrong.browserAudioChannels.isEmpty && session.demandCount == 0 && session.helperPID == nil,
+                "Wrong runtime fabricated helper capability or launched a page")
+        require(wrong.addRecordingAudioTap(targetID: target, processing: .afterEffects, sink: { _ in }) == nil,
+                "Wrong runtime installed a helper tap on its different mixer")
+        wrong.capturePool.stopAll()
+        let program = Trace(), monitor = Trace(), aux = Trace(), iso = Trace()
+        // Match the real driver's existing bounded 80ms capture holdback; source
+        // workers preserve original host PTS and run independently of UI/AX work.
+        let holdback = UUID()
+        require(await mixer.reserveCaptureHoldback(token: holdback, milliseconds: BrowserWidgetAudioCapture.qualificationHoldbackMilliseconds), "Owned operator fixture holdback unavailable")
+        driver.generatedAmplitude = 0.3
+        await mixer.run()
+        await mixer.setChannelGain(.microphone(deviceUID: nil), volume: 1, isMuted: false)
+        await mixer.setBusGain(.program, gain: 1); await mixer.setBusGain(.monitor, gain: 1); await mixer.setBusGain(.aux, gain: 1)
+        await mixer.addTap(bus: .program, token: UUID(), sink: program.append)
+        await mixer.addTap(bus: .monitor, token: UUID(), sink: monitor.append)
+        await mixer.addTap(bus: .aux, token: UUID(), sink: aux.append)
+        let producer = Task.detached(priority: .userInitiated) {
+            var pts = hostNow() - CMTime(value: 512, timescale: 48_000)
+            while !Task.isCancelled {
+                mixer.enqueue(.microphone(deviceUID: nil), pcm(pts, value: 0.2))
+                pts = pts + CMTime(value: 512, timescale: 48_000)
+                try? await Task.sleep(for: .seconds(max(0, (pts + CMTime(value: 512, timescale: 48_000) - hostNow()).seconds)))
+            }
+        }
+        BrowserOperatorSeedGate.armed = true
+        let admissionStart = hostNow().seconds
+        controller.startPreview()
+        try await wait("Actual Controller did not hold the old mixer seed") { BrowserOperatorSeedGate.held }
+        _ = dispatcher.execute(.setChannelVolume(channel, 0.5))
+        _ = dispatcher.execute(.setChannelMuted(channel, true))
+        _ = dispatcher.execute(.setChannelSolo(channel, true))
+        _ = dispatcher.execute(.setChannelAuxSend(channel, 0.25))
+        try await Task.sleep(for: .milliseconds(40))
+        _ = await mixer.statsSnapshot() // Newer live pushes reach the real actor before releasing the stale seed.
+        require(!mixer.captureRouteIsAllowed(channel), "Held mixer seed admitted PCM before validation")
+        BrowserOperatorSeedGate.release()
+        try await wait("Operator helper did not complete actual Program media ACKs") { session.audibleLeases.count == 1 }
+        let initial = hostNow().seconds
+        try await Task.sleep(for: .milliseconds(160))
+        require(program.maxAbs(after: admissionStart) <= 0.201, "Saved helper mute leaked unity PCM on first route admission")
+        require(abs(monitor.mean(from: initial, to: hostNow().seconds)) < 0.001, "Saved muted helper solo was not restored before admission")
+        require(aux.maxAbs(after: admissionStart) <= 0.0751, "Stale saved Aux send leaked before current preparation")
+        print("PASS: actual held stale mixer seed revalidates newer gain/mute/solo/Aux before first-buffer admission; wrong-runtime mixer session rejected without launch or tap")
+        let discovered = await controller.recordingAudioSources()
+        require(discovered.filter { $0.id == target }.count == 1 && discovered.first { $0.id == target }?.name == BrowserWidgetAudioIdentity.channelTitle,
+                "Shared helper ISO discovery duplicated or mislabeled the actual application channel")
+        require(discovered.first { $0.id == target }?.isAvailable == true, "Actual helper PCM remained falsely unavailable")
+        let nodes = try await operatorClient()
+        require(nodes.contains { $0.label == "Unmute " + BrowserWidgetAudioIdentity.channelTitle && $0.enabled }, "Actual SwiftUI helper strip did not expose restored mute")
+        require(nodes.contains { $0.label == "Clear solo for " + BrowserWidgetAudioIdentity.channelTitle }, "Actual SwiftUI helper strip lost monitor-only solo")
+        _ = try await operatorClient(["increment", BrowserWidgetAudioIdentity.channelTitle + " volume"])
+        try await wait("Actual native helper fader did not dispatch its value") { (dispatcher.state.mixer.channelVolumes[label] ?? 0) > 0.5 }
+        _ = dispatcher.execute(.setChannelVolume(channel, 0.5))
+        _ = try await operatorClient(["press", "Unmute " + BrowserWidgetAudioIdentity.channelTitle])
+        try await wait("Native helper mute button did not dispatch unmute") { dispatcher.state.mixer.channelMutes[label] != true }
+        guard let tap = controller.addRecordingAudioTap(targetID: target, processing: .afterEffects, sink: iso.append) else { preconditionFailure("Actual qualified helper ISO tap unavailable") }
+        let loud = hostNow().seconds + 0.04
+        try await Task.sleep(for: .milliseconds(240))
+        print("Operator PCM: Program=\(program.mean(from: loud, to: hostNow().seconds)), Monitor=\(monitor.mean(from: loud, to: hostNow().seconds)), Aux=\(aux.mean(from: loud, to: hostNow().seconds)), ISO=\(iso.mean(from: loud, to: hostNow().seconds)); mixer=\(dispatcher.state.mixer.channelVolumes[label] ?? -1), muted=\(dispatcher.state.mixer.channelMutes[label] == true)")
+        require(abs(program.mean(from: loud, to: hostNow().seconds) - 0.35) < 0.003, "Helper fader did not change actual Program PCM")
+        require(abs(monitor.mean(from: loud, to: hostNow().seconds) - 0.15) < 0.003, "Helper solo affected Program or failed to isolate Monitor")
+        require(abs(aux.mean(from: loud, to: hostNow().seconds) - 0.075) < 0.003, "Saved helper Aux send did not initialize actual channel")
+        require(abs(iso.mean(from: loud, to: hostNow().seconds) - 0.3) < 0.003, "Helper isolated tap used Program mix or fader gain")
+        _ = try await operatorClient(["press", "Clear solo for " + BrowserWidgetAudioIdentity.channelTitle])
+        _ = try await operatorClient(["press", BrowserWidgetAudioIdentity.channelTitle + " aux send"])
+        let clear = hostNow().seconds + 0.04
+        try await Task.sleep(for: .milliseconds(240))
+        require(abs(monitor.mean(from: clear, to: hostNow().seconds) - 0.35) < 0.003 && aux.maxAbs(after: clear) < 0.001,
+                "Native helper monitor/Aux buttons did not route actual PCM")
+        _ = try await operatorClient(["press", "Mute " + BrowserWidgetAudioIdentity.channelTitle])
+        try await wait("Native helper mute did not persist") { dispatcher.state.mixer.channelMutes[label] == true }
+        print("PASS: actual external AX fader/mute/solo/Aux actions reached shared channel PCM; opening existing Recording Options")
+        _ = try await operatorClient(["press", "Recording Options"])
+        try await Task.sleep(for: .milliseconds(240))
+        _ = try await operatorClient(["press", BrowserWidgetAudioIdentity.channelTitle])
+        require(recorder.preferences.isolatedTracks.contains { $0.targetID == target }, "Actual recording options did not select the shared helper ISO track")
+        require(recorder.preferences.isolatedTracks.count <= 8, "Helper selection bypassed existing track capacity")
+        window.makeFirstResponder(nil)
+        // Close the owned popover by its native escape before changing demand.
+        let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+        NSApp.sendEvent(escape)
+        model.stage(blank); _ = model.take()
+        try await wait("Last helper page did not retire despite saved ISO selection") { session.demandCount == 0 && !driver.isCapturing }
+        await session.waitUntilStopped()
+        try await Task.sleep(for: .milliseconds(150))
+        require(!(await controller.recordingAudioSources()).contains { $0.id == target }, "Retired helper retained ISO capability through its old tap")
+        require(controller.addRecordingAudioTap(targetID: target, processing: .afterEffects, sink: { _ in }) == nil, "Saved retired helper ISO restarted capture")
+        let retired = hostNow().seconds
+        try await Task.sleep(for: .milliseconds(120))
+        require(iso.maxAbs(after: retired) == 0, "Retired helper ISO emitted queued or retained PCM")
+        require(!(try await operatorClient()).contains { $0.label == "Mute " + BrowserWidgetAudioIdentity.channelTitle || $0.label == "Unmute " + BrowserWidgetAudioIdentity.channelTitle }, "Retired helper retained enabled mixer controls")
+        require(settings.activeSettings.mixer.channelMutes[label] == true && settings.activeSettings.mixer.channelVolumes[label] == 0.5,
+                "Retirement erased the operator's saved mixer intent")
+        controller.removeAudioTap(tap)
+        settings.flushPendingWrites()
+        let reloaded = SettingsSession(controller: controller)
+        require(reloaded.activeSettings.mixer.channelMutes[label] == true && reloaded.activeSettings.mixer.channelVolumes[label] == 0.5,
+                "Helper mixer intent did not survive actual owned settings persistence")
+        let restored = hostNow().seconds
+        model.stage(scene); _ = model.take()
+        try await wait("Fresh demanded helper did not return") { session.audibleLeases.count == 1 }
+        try await Task.sleep(for: .milliseconds(130))
+        require(program.maxAbs(after: restored) <= 0.201, "Demand restart forgot saved helper mute")
+        BrowserOperatorSeedGate.armed = true
+        let currentKey = CaptureSourceKey.demanded(layers: scene.layers, sources: store.sources).first!
+        controller.capturePool.webHost(for: currentKey)!.reload()
+        try await wait("Reload did not hold final mixer preparation") { BrowserOperatorSeedGate.held }
+        model.stage(blank); _ = model.take()
+        try await wait("Retired held preparation retained page demand") { session.demandCount == 0 }
+        BrowserOperatorSeedGate.release()
+        await session.waitUntilStopped()
+        require(session.audibleLeases.isEmpty && !mixer.captureRouteIsAllowed(channel) && !driver.isCapturing,
+                "Late held mixer preparation reopened retired source")
+        producer.cancel(); await producer.value
+        controller.capturePool.stopAll(); await session.waitUntilStopped()
+        await mixer.releaseCaptureHoldback(holdback); await mixer.stop()
+        require(!BrowserWidgetAudioIdentity.productionRouteQualified, "Operator controls enabled production helper selection")
+        print("PASS: actual shared helper + installed SwiftUI mixer/recording UI via owned external public AX; native fader/mute/monitor-only solo/Aux dispatch to exact Program0.35/Monitor0.15/Aux0.075/ISO0.3 PCM; saved first-buffer mute and real settings persistence; no dormant/stale ISO authority, saved track never starts a page, last-demand retirement removes controls and zeroes held ISO; restart restores saved mute. No physical capture or permission change.")
     }
 }

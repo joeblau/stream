@@ -1069,6 +1069,7 @@ final class StudioCommandDispatcher: ObservableObject {
         controller.guestMixerSettings = { [weak session] in
             session?.activeSettings.mixer ?? MixerSettings()
         }
+        controller.browserAudioMixerSettings = { [weak session] in session?.activeSettings.mixer }
         let soundboardStore = SoundboardStore()
         self.soundboardStore = soundboardStore
         self.soundboard = SoundboardController(store: soundboardStore,
@@ -3734,6 +3735,7 @@ final class StudioCommandDispatcher: ObservableObject {
             annotations: annotations.uiState(stagedSceneID: staged?.id),
             interview: interviewManager?.state ?? .init())
         registerAppAudioMixerChannels()
+        registerBrowserAudioMixerChannel()
         registerGuestMixerChannels()
         pushMixerStateToEngine()
     }
@@ -3749,8 +3751,23 @@ final class StudioCommandDispatcher: ObservableObject {
         for source in sceneStore.sources {
             guard case .appAudio(let payload) = source.payload, payload.isEnabled
             else { continue }
+            guard payload.channelBundleID != BrowserWidgetAudioIdentity.helperBundleID else { continue }
             let id = AudioChannelID.application(bundleID: payload.channelBundleID)
             channelIDsByLabel[id.label] = id
+        }
+    }
+
+    /// A helper capability exists only for actual explicit qualification demand.
+    /// Saved faders survive retirement; the channel lookup does not authorize capture.
+    private func registerBrowserAudioMixerChannel() {
+        let id = AudioChannelID.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID)
+        if controller.browserAudioChannels.contains(id) {
+            if channelIDsByLabel[id.label] != id {
+                channelIDsByLabel[id.label] = id
+                lastPushedMixer = nil
+            }
+        } else if channelIDsByLabel.removeValue(forKey: id.label) != nil {
+            lastPushedMixer = nil
         }
     }
 

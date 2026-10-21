@@ -71,13 +71,13 @@ private enum StudioAXClient {
         }
         return result
     }
-    static func action(_ label: String, focus: Bool = false) throws {
+    static func action(_ label: String, focus: Bool = false, increment: Bool = false) throws {
         guard let node = try snapshot().first(where: { $0.label == label }) else {
             throw NSError(domain: "StudioAccessibility", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing public AX control: \(label)"])
         }
         let status = focus
             ? AXUIElementSetAttributeValue(node.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-            : AXUIElementPerformAction(node.element, kAXPressAction as CFString)
+            : AXUIElementPerformAction(node.element, (increment ? kAXIncrementAction : kAXPressAction) as CFString)
         guard status == .success else {
             throw NSError(domain: "StudioAccessibility", code: 2, userInfo: [NSLocalizedDescriptionKey: "AX press \(label): \(status.rawValue)"])
         }
@@ -87,6 +87,8 @@ private enum StudioAXClient {
 do {
     if CommandLine.arguments.count > 3 && CommandLine.arguments[2] == "press" {
         try StudioAXClient.action(CommandLine.arguments[3]); print("[]")
+    } else if CommandLine.arguments.count > 3 && CommandLine.arguments[2] == "increment" {
+        try StudioAXClient.action(CommandLine.arguments[3], increment: true); print("[]")
     } else if CommandLine.arguments.count > 3 && CommandLine.arguments[2] == "focus" {
         try StudioAXClient.action(CommandLine.arguments[3], focus: true); print("[]")
     } else {

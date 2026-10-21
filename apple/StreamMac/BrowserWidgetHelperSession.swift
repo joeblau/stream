@@ -29,8 +29,9 @@ import CoreVideo
     private(set) var lastFrameHeader: BrowserWidgetVisualHeader?
     var demandCount: Int { demands.count }
     /// Qualification runtime owners can include this identity when reconciling mixer channels.
-    /// The existing product `.web` keys do not yet register an audio channel automatically.
+    /// Only actual qualification demand advertises it; saved web keys confer no capability.
     var demandedAudioChannels: Set<AudioChannelID> { demands.isEmpty ? [] : [channel] }
+    func ownsMixer(_ candidate: AudioMixEngine) -> Bool { mixer === candidate }
     var helperPID: Int32? { connection?.pid }
     var audioIsCapturing: Bool { audio.isCapturing }
     private let applicationURL: URL
@@ -48,6 +49,10 @@ import CoreVideo
     private var suspendedLeases: Set<BrowserWidgetPageLease> = []
     private(set) var audibleLeases: Set<BrowserWidgetPageLease> = []
     private(set) var audioUnavailableReason: String?
+    /// Runtime owner seeds saved mixer intent while the final route gate is closed.
+    /// A missing preparation leaves the route unavailable; this callback never starts capture.
+    struct MixerPreparation { var isCurrent: @MainActor () -> Bool }
+    var prepareMixerForAudio: (@MainActor () async -> MixerPreparation?)?
     private var appliedExclusions: Set<String> = []
     private var captureConflict: String?
     private var pendingMedia: [UUID: PendingMedia] = [:]
@@ -224,6 +229,7 @@ import CoreVideo
         guard audioTask == nil, shutdownTask == nil else { return }
         audioTask = Task { [weak self] in
             guard let self else { return }
+            var staleMixerPreparations = 0
             while !Task.isCancelled, !demands.isEmpty || !retiredLeases.isEmpty {
                 let revision = audioRevision
                 await audio.stop()
@@ -271,6 +277,18 @@ import CoreVideo
                 guard !Task.isCancelled else { break }
                 if revision != audioRevision { continue }
                 guard allResumed, audio.isCapturing else { failSession("helper_media_resume_failed"); break }
+                if let prepareMixerForAudio {
+                    let prepared = await prepareMixerForAudio()
+                    guard revision == audioRevision, !Task.isCancelled else { continue }
+                    guard let prepared else { failSession("helper_mixer_unavailable"); break }
+                    // No await between this live settings check and final gate-open.
+                    if !prepared.isCurrent() {
+                        staleMixerPreparations += 1
+                        if staleMixerPreparations >= 8 { failSession("helper_mixer_unavailable"); break }
+                        continue
+                    }
+                }
+                guard revision == audioRevision, !Task.isCancelled else { continue }
                 audibleLeases = target
                 mixer?.setCaptureRouteAllowed(channel, allowed: true)
                 publishAudioState(nil)

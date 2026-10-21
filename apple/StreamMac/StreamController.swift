@@ -365,6 +365,7 @@ final class StreamController: ObservableObject {
         self.programBusGain = persisted.mixer.mutedBuses.contains(AudioBus.program.rawValue) ? 0 : Float(persisted.mixer.busGains[AudioBus.program.rawValue] ?? 1)
         self.settings = persisted
         self.activeProfile = persisted.outputProfile
+        self.capturePool.browserAudioMixer = audioEngine
 
         // The engines pull source pixels off-main through the pool's frame
         // providers; they never touch this controller's MainActor state. Both
@@ -787,6 +788,10 @@ final class StreamController: ObservableObject {
         if isolatedCaptureSubscriptions.removeValue(forKey: subscription) != nil { reconcileSourceDemand() }
     }
 
+    /// Ephemeral qualification capability, never restored from a saved source or ISO selection.
+    var browserAudioChannels: Set<AudioChannelID> { capturePool.browserAudioChannels }
+    var browserAudioMixerSettings: (() -> MixerSettings?)?
+
     /// Stable registry source IDs survive rename/retarget. Non-registry mixer
     /// channels use their stable mic/device/media/app/guest identities.
     func recordingAudioSources() async -> [RecordingAudioSource] {
@@ -799,7 +804,11 @@ final class StreamController: ObservableObject {
         func add(_ id: String, _ name: String, _ channel: AudioChannelID) {
             guard seen.insert(channel).inserted else { return }
             result.append(RecordingAudioSource(id: id, name: name, isBus: false,
-                isAvailable: (statistics.channels[channel.label]?.receivedFrames ?? 0) > 0))
+                isAvailable: (statistics.channels[channel.label]?.receivedFrames ?? 0) > 0
+                    && (channel != .application(bundleID: BrowserWidgetAudioIdentity.helperBundleID) || active.contains(channel))))
+        }
+        for channel in browserAudioChannels {
+            add("channel.\(channel.label)", BrowserWidgetAudioIdentity.channelTitle, channel)
         }
         add("channel.mic.default", "Microphone", .microphone(deviceUID: nil))
         for input in audio.additionalInputs {
@@ -813,7 +822,9 @@ final class StreamController: ObservableObject {
             switch channel {
             case .microphone(let uid): add("channel.\(channel.label)", audio.deviceNamesByUID[uid ?? ""] ?? "Microphone", channel)
             case .media(let id): add("channel.\(channel.label)", "Media / Sound \(id.description.prefix(8))", channel)
-            case .application(let bundle): add("channel.\(channel.label)", bundle.components(separatedBy: ".").last ?? "Application", channel)
+            case .application(let bundle):
+                guard bundle != BrowserWidgetAudioIdentity.helperBundleID else { continue }
+                add("channel.\(channel.label)", bundle.components(separatedBy: ".").last ?? "Application", channel)
             case .guest(let id): add("channel.\(channel.label)", "Guest \(id.prefix(8))", channel)
             case .capture: break // Registered sources provide a stable, secret-free ID.
             }
@@ -844,7 +855,9 @@ final class StreamController: ObservableObject {
            let source = sceneStore.sources.first(where: { $0.id.rawValue == uuid }) {
             switch source.payload {
             case .screen(let payload): return (nil, .capture(.screen(payload)), .screen(payload))
-            case .appAudio(let payload): return (nil, .application(bundleID: payload.channelBundleID), .appAudio(payload))
+            case .appAudio(let payload):
+                guard payload.channelBundleID != BrowserWidgetAudioIdentity.helperBundleID else { return nil }
+                return (nil, .application(bundleID: payload.channelBundleID), .appAudio(payload))
             case .media: return (nil, .media(source.id), .media(source.id))
             case .guest(let payload):
                 guard let slot = payload.slotID, let channel = audioEngine.registeredGuestChannelID(slot: slot) else { return nil }
@@ -858,7 +871,11 @@ final class StreamController: ObservableObject {
             let uid = String(label.dropFirst(4)); return (nil, .microphone(deviceUID: uid == "default" ? nil : uid), nil)
         }
         if label.hasPrefix("media."), let uuid = UUID(uuidString: String(label.dropFirst(6))) { return (nil, .media(SourceDefinitionID(uuid)), nil) }
-        if label.hasPrefix("app.") { return (nil, .application(bundleID: String(label.dropFirst(4))), nil) }
+        if label.hasPrefix("app.") {
+            let channel = AudioChannelID.application(bundleID: String(label.dropFirst(4)))
+            if channel == .application(bundleID: BrowserWidgetAudioIdentity.helperBundleID), !browserAudioChannels.contains(channel) { return nil }
+            return (nil, channel, nil)
+        }
         if label.hasPrefix("guest."), let slot = UUID(uuidString: String(label.dropFirst(6))),
            let channel = audioEngine.registeredGuestChannelID(slot: slot) { return (nil, channel, nil) }
         return nil
@@ -2039,6 +2056,24 @@ final class StreamController: ObservableObject {
     /// layout may need one user confirmation; a cancel simply leaves the scene
     /// showing its other source, and restarts of an unchanged source reuse the
     /// remembered selection instead of re-prompting.
+    private func currentBrowserAudioMixer() -> MixerSettings? {
+        if let current = browserAudioMixerSettings { return current() }
+        return settings.mixer
+    }
+    private func prepareBrowserAudioMixer() async -> BrowserWidgetHelperSession.MixerPreparation? {
+        // Live commands can run while the engine actor is awaited. Never let an
+        // older seed replace their newer intent and then open the privacy gate.
+        for _ in 0..<8 {
+            guard let snapshot = currentBrowserAudioMixer() else { return nil }
+            let prepared = await audioEngine.prepareClosedApplicationMixer(.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID), mixer: snapshot)
+            guard prepared else { return nil }
+            if currentBrowserAudioMixer() == snapshot {
+                return .init(isCurrent: { [weak self] in self?.currentBrowserAudioMixer() == snapshot })
+            }
+        }
+        return nil // Sustained churn remains unavailable, with no unbounded preparation work.
+    }
+
     private func reconcileSourceDemand() {
         guard isPipelineRunning else { return }
         let staged = previewState == .active ? previewProgram.stagedScene : nil
@@ -2090,6 +2125,9 @@ final class StreamController: ObservableObject {
         }
         let programAudioKeys = privacySlateActive || previewProgram.programScene == nil ? [] : CaptureSourceKey.demanded(
             layers: programLayers + programOverlays, sources: sceneStore.sources)
+        if let browserSession = BrowserOverlayHelperBackend.qualificationSession, browserSession.ownsMixer(audioEngine) {
+            browserSession.prepareMixerForAudio = { [weak self] in await self?.prepareBrowserAudioMixer() }
+        }
         capturePool.reconcile(demand: demand, settings: settings, programAudioKeys: programAudioKeys)
         configureResilientFrames(demand: demand)
         // A01: the audio engine keeps exactly the channels its captures can
