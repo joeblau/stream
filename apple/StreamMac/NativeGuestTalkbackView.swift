@@ -44,7 +44,10 @@ private struct NativeTalkbackHoldButton: NSViewRepresentable {
             setHeld(true); defer { setHeld(false) }; super.mouseDown(with: event)
         }
         override func keyDown(with event: NSEvent) {
-            guard isEnabled, event.keyCode == 49 else { super.keyDown(with: event); return }
+            guard isEnabled, event.keyCode == 49,
+                  event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else {
+                super.keyDown(with: event); return
+            }
             if !event.isARepeat { setHeld(true) }
         }
         override func keyUp(with event: NSEvent) {

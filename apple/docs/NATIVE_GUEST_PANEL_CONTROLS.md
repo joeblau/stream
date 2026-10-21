@@ -99,3 +99,8 @@ Inputs are generated; device capture and operator permissions are refused by
 the fixture. Physical microphone/AEC, signed installation, accessibility and
 operator hold behavior, mobile and deployed/restricted networks remain separate
 qualification gates.
+
+`run_native_talkback_button_harness.zsh` additionally passes the exact shipping
+Cocoa control in an owned window: real mouse tracking until its posted mouse-up,
+Space down/repeat/up, modified-key refusal, responder loss and view removal.
+It initializes no runtime, capture, credential store or permission request.
