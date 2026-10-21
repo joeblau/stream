@@ -1,15 +1,23 @@
-# Native guest Program video return
+# Native guest selectable video return
 
-The native interview receiver can send one explicitly enabled Program video
-return to the current admitted guest. Start/Stop Program Video Return uses the
+The native interview receiver can send one explicitly enabled Program or
+Secondary canvas video return to the current admitted guest. Source selection
+and Start/Stop Video Return use the
 shared command dispatcher and the complete slot/peer/negotiation/generation
-lease. Joining or rejoining does not enable video. Public stereo mix-minus
+lease. Changing the source stops video and requires a new Start. Joining or
+rejoining resets the selection to Program and does not enable video. Public stereo mix-minus
 return continues independently.
 
-The first profile is fixed Program, constrained Baseline H264, at most 320×180,
+The first encoding profile is fixed constrained Baseline H264, at most 320×180,
 15 fps and 250 kbps. The encoder scales down without upscaling. It reserves one
 encoder through the existing shared publishing/recording budget before adding
-its Program tap. Insufficient capacity refuses this optional return. The UI's
+its composition tap. Secondary also owns canvas source demand through that
+subscription and uses the existing qualified additional-canvas gate. Currently
+that gate admits the measured 16-core M3 Max Mac15,8 only; other machine classes
+refuse Secondary explicitly. Removing the configured Secondary layout stops
+return and releases its encoder/demand after teardown; restoring the layout
+does not replay an earlier Start. Insufficient capacity refuses this optional
+return. The UI's
 ready state means a current encoded frame was accepted by the SDK; it does not
 claim remote decode or playback.
 
@@ -43,14 +51,15 @@ used. Physical devices, deployed brokers and signed installation were not used.
 | --- | --- |
 | Explicit start/stop/restart | Actual H264 Chrome decode of green→black→purple Program; stopped track hidden; fresh opt-in required |
 | Bounds and budget | Actual remote 320×180 H264; shared four-encoder admission denied while return holds one and succeeds after VT teardown |
-| Rejoin and terminal lease | Old remote track ends; fresh lease begins video off; explicit enable decodes current Program; old full lease rejected |
+| Program/Secondary selection | Actual purple landscape Program and blue 100×180 portrait Secondary; independent scene content, source-demand ownership, layout removal and explicit restoration |
+| Rejoin and terminal lease | Old remote track ends; selected Secondary resets to Program/off; explicit enable decodes current Program; retained source/start commands from old full lease rejected |
 | Partial network send | Four actual SDK RTP packets include FU-A START without END; next successful AU is IDR; Chrome recovers fresh green pixels |
 | Held VT teardown | Real submitted VT frame held; Off returns under 100 ms, late send rejected; reservation remains until actual VT invalidation |
-| Installation races | Held installation and held-before-install cancellation followed by replacement preserve only the replacement token/reservation |
-| Privacy snapshot race | Actual Composer old red snapshot receives post-cutoff PTS and is rejected; fresh actor-installed subscription admits black slate |
+| Installation races | Held Program installation→Secondary replacement and held-before-Secondary-install→Program replacement preserve only the new token/capability/reservation |
+| Privacy snapshot race | Actual Program and Secondary Composer old red snapshots receive post-cutoff PTS and are rejected; fresh actor-installed subscriptions admit black slate |
 | Control close | Immediate audio/video authority revoke and eventual return reservation removal |
 | Packetization | ASan/UBSan checks exact FU-A reconstruction,1188/1189-byte boundaries, 64 KiB/64-NAL caps, RTP marker/SSRC/original PTS, sequence wrap and partial-send sequence consumption |
-| End-to-end A/V synchronization | Actual decoded element-capture WebM flash/tone 6.35–74.92 ms apart in two full runs, strict 100 ms bound; independent video-element/AudioWorklet clock 17.97–80.25 ms apart; native Program cue 12.09–21.72 ms apart |
+| End-to-end A/V synchronization | Actual decoded remote-track WebM flash/tone 47.23 ms apart for Program and 10.90 ms for Secondary, strict 100 ms bound; native cues 29.65/32.18 ms apart and independently measured element/worklet clock |
 
 The generated PCM uses the retained primary-microphone channel identity while
 the fixture refuses physical capture and disables VoicePolish. An earlier
@@ -61,7 +70,12 @@ production audio clock, deadline or assertion was relaxed. Independent native
 Opus leading-silence/onset checks locate the decoded cue within 21 microseconds
 and the NTP/source-PTS round trip within 0.24 microseconds.
 
-Clean/secondary selection, receiver-feedback adaptation, multi-guest allocation,
+The browser fixture records actual decoded remote tracks directly. The earlier
+HTMLMediaElement.captureStream observation path changed the source stream
+lifecycle during later source switches and was removed; no speculative
+production browser change was required.
+
+Clean selection, receiver-feedback adaptation, multi-guest allocation,
 AEC/physical microphone behavior, Internet/mobile impairment and signed install
 remain separate gates. The existing adaptation-policy harness qualifies policy
 arithmetic only; this fixed profile does not claim measured feedback adaptation.

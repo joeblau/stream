@@ -156,9 +156,9 @@ stale-command rejection and a deliberate new-lease message.
 
 Issue #127 stays open. This implementation has one native admitted guest, not a
 qualified multi-guest product. An explicitly enabled
-[fixed Program video return](NATIVE_GUEST_RETURN_VIDEO.md) now has native H264
+[selectable Program/Secondary video return](NATIVE_GUEST_RETURN_VIDEO.md) now has native H264
 encoding/routing, actual Chrome decode and bounded local audio/video
-synchronization evidence. Clean/secondary selection and broader network/device
+synchronization evidence. Clean selection and broader network/device
 qualification remain acceptance gates. Addressed
 private talkback has separate qualification. A bounded video target policy now
 defines three profiles (320x180@15/250 kbps, 640x360@24/650 kbps and

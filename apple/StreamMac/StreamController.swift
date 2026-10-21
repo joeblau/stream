@@ -179,6 +179,7 @@ final class StreamController: ObservableObject {
     private let guestProgramReturnAuthority = NativeGuestProgramReturnAuthority()
     private weak var guestReturnVideoSink: NativeGuestMediaSink?
     private var guestReturnVideoRemovals: Set<UUID> = []
+    private var guestSecondaryReturnTokens: Set<UUID> = []
     private let engine: CompositionEngine
     /// The W03 preview engine: composites the STAGED scene for the PREVIEW
     /// monitor only. Same source providers, independent tick — preview work
@@ -1019,7 +1020,7 @@ final class StreamController: ObservableObject {
     }
     private var secondaryProgramOutputDemanded: Bool {
         destinationOutputs.usesSecondaryCanvas || secondaryRecordingDemand > 0 ||
-            secondaryVirtualCameraDemand > 0 || secondaryExternalDisplayDemand > 0
+            secondaryVirtualCameraDemand > 0 || secondaryExternalDisplayDemand > 0 || !guestSecondaryReturnTokens.isEmpty
     }
     var secondaryCanvasDemanded: Bool {
         (secondaryMonitorsEnabled && previewState == .active) || secondaryProgramOutputDemanded
@@ -1127,26 +1128,40 @@ final class StreamController: ObservableObject {
         let sink = NativeGuestMediaSink(registered: lease, video: guestVideoFrames, audio: audioEngine)
         guestReturnVideoSink = sink
         let program = engine, authority = guestProgramReturnAuthority
-        sink.bindProgramReturn(.init(authority: authority, install: { [weak self, weak sink] token, consume in
-            let reserved = await MainActor.run {
-                guard let self, let sink, sink.videoTokenIsCurrent(token), self.isPipelineRunning,
-                      self.guestLease == lease else { return false }
-                return self.reserveRecordingEncoders(token, count: 1, canvas: .program) == nil
-            }
-            guard reserved else { return false }
-            await program.addSink(token: token, capacity: 1) { consume($0.sampleBuffer) }
-            return true
-        }, remove: { [weak self] token in
-            let reserved = await MainActor.run {
-                guard let self, self.recordingEncoderReservations.recordings[token] != nil else { return false }
-                return self.guestReturnVideoRemovals.insert(token).inserted
-            }
-            guard reserved else { return }
-            await program.removeSink(token)
-            await MainActor.run {
-                self?.releaseRecordingEncoders(token); self?.guestReturnVideoRemovals.remove(token)
-            }
-        }))
+        for source in NativeInterviewReturnVideoSource.allCases {
+            let canvas: OutputCanvas = source == .program ? .program : .secondary
+            let capability = NativeGuestProgramReturnSource(authority: authority, install: { [weak self, weak sink] token, consume in
+                let size = await MainActor.run { () -> CGSize? in
+                    guard let self, let sink, sink.videoTokenIsCurrent(token), self.isPipelineRunning,
+                          self.guestLease == lease,
+                          self.reserveRecordingEncoders(token, count: 1, canvas: canvas) == nil else { return nil }
+                    if canvas == .secondary {
+                        self.guestSecondaryReturnTokens.insert(token)
+                        self.reconcileSourceDemand()
+                    }
+                    return canvas == .secondary ? self.activeSecondaryProfile.canvasSize : self.activeProfile.canvasSize
+                }
+                guard let size else { return false }
+                if canvas == .secondary { await program.setSecondaryOutput(canvasSize: size) }
+                await program.addSink(token: token, capacity: 1, canvas: canvas) { consume($0.sampleBuffer) }
+                return true
+            }, remove: { [weak self] token in
+                let reserved = await MainActor.run {
+                    guard let self, self.recordingEncoderReservations.recordings[token] != nil else { return false }
+                    return self.guestReturnVideoRemovals.insert(token).inserted
+                }
+                guard reserved else { return }
+                await program.removeSink(token)
+                await MainActor.run {
+                    guard let self else { return }
+                    self.guestSecondaryReturnTokens.remove(token)
+                    self.releaseRecordingEncoders(token); self.guestReturnVideoRemovals.remove(token)
+                    if canvas == .secondary { self.reconcileSourceDemand() }
+                }
+            })
+            if source == .program { sink.bindProgramReturn(capability) }
+            else { sink.bindSecondaryReturn(capability) }
+        }
         return sink
     }
 
@@ -2170,6 +2185,9 @@ final class StreamController: ObservableObject {
     /// Called from the controller's observation of
     /// `PreviewProgramModel.programScene`.
     func publishSceneToProgram(_ scene: Scene) {
+        if scene.secondaryCanvas?.isValid != true, guestReturnVideoSink?.returnVideoSource == .secondary {
+            guestReturnVideoSink?.stopProgramReturn()
+        }
         updateSecondaryGeometryIfIdle()
         Task { await engine.updateScene(scene) }
         // G08 (issue #115): program scene-entry applies each web widget's

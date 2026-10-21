@@ -160,6 +160,7 @@ enum NativeInterviewMediaEvent: Sendable {
     case ready
     case returnAudio(NativeInterviewReturnAudioState)
     case returnVideo(NativeInterviewReturnVideoState)
+    case returnVideoSource(NativeInterviewReturnVideoSource)
     case screenSharing(Bool)
     case privateControl(NativeInterviewPrivateEnvelope)
     case controlClosed
@@ -181,6 +182,7 @@ enum NativeInterviewMediaEvent: Sendable {
     func approveScreen(_ approved: Bool) -> Bool
     var supportsProgramReturn: Bool { get }
     func setProgramReturnEnabled(_ enabled: Bool) -> Bool
+    func selectReturnVideoSource(_ source: NativeInterviewReturnVideoSource) -> Bool
     var supportsPrivateMessages: Bool { get }
     func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool
     /// Closes the full-lease sink synchronously before native callback teardown.
@@ -190,6 +192,7 @@ enum NativeInterviewMediaEvent: Sendable {
 extension NativeInterviewMediaHost {
     var supportsProgramReturn: Bool { false }
     func setProgramReturnEnabled(_ enabled: Bool) -> Bool { false }
+    func selectReturnVideoSource(_ source: NativeInterviewReturnVideoSource) -> Bool { false }
     var supportsPrivateMessages: Bool { false }
     func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool { false }
 }
@@ -202,6 +205,10 @@ extension NativeInterviewMediaHost {
 
 enum NativeInterviewMembership: String, Sendable { case waiting, backstage, onair }
 enum NativeInterviewMediaState: String, Sendable { case unavailable, preparing, negotiating, ready, failed }
+enum NativeInterviewReturnVideoSource: String, CaseIterable, Sendable {
+    case program, secondary
+    var title: String { self == .program ? "Program" : "Secondary" }
+}
 enum NativeInterviewReturnVideoState: String, Sendable { case off, unavailable, preparing, ready, failed }
 enum NativeInterviewReturnAudioState: String, Sendable { case unavailable, preparing, ready, failed }
 struct NativeInterviewMember: Identifiable, Sendable, Equatable {
@@ -211,6 +218,7 @@ struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     var media: NativeInterviewMediaState = .unavailable
     var returnAudio: NativeInterviewReturnAudioState = .unavailable
     var returnVideo: NativeInterviewReturnVideoState = .unavailable
+    var returnVideoSource: NativeInterviewReturnVideoSource = .program
     var screenApproved = false
     var screenSharing = false
     /// Increments only on an actual admitted/stage/backstage receipt, so a

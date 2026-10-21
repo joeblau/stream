@@ -111,11 +111,17 @@ struct NativeInterviewView: View {
                 if let context = manager.currentReadyLease, context.receive.peerID == member.id,
                    member.returnVideo != .unavailable {
                     let enabled = member.returnVideo == .preparing || member.returnVideo == .ready
-                    commandButton(enabled ? "Stop Program Video Return" : "Start Program Video Return", .setProgramReturn(context, !enabled))
-                    Text(member.returnVideo == .ready ? "Sending Program video, up to 320 × 180 at 15 fps / 250 kbps. Remote playback is not confirmed." :
-                        member.returnVideo == .preparing ? "Preparing fixed Program video return." :
+                    HStack {
+                        ForEach(NativeInterviewReturnVideoSource.allCases, id: \.self) { source in
+                            commandButton(source.title, .selectReturnVideoSource(context, source))
+                                .disabled(member.returnVideoSource == source)
+                        }
+                    }
+                    commandButton(enabled ? "Stop Video Return" : "Start \(member.returnVideoSource.title) Video Return", .setProgramReturn(context, !enabled))
+                    Text(member.returnVideo == .ready ? "Sending \(member.returnVideoSource.title) video, up to 320 × 180 at 15 fps / 250 kbps. Remote playback is not confirmed." :
+                        member.returnVideo == .preparing ? "Preparing \(member.returnVideoSource.title) video return." :
                         member.returnVideo == .failed ? "Video return could not start. Start local preview and check the studio encoder budget, then retry." :
-                        "Program video return is off. It uses one encoder when enabled.")
+                        "\(member.returnVideoSource.title) video return is off. It uses one encoder when enabled. Secondary requires a configured layout in Program.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 HStack {

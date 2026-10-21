@@ -110,8 +110,9 @@ private func sample() -> CMSampleBuffer {
 
         let replacement = GuestReceiveLease(slot: lease.slot, peerID: UUID(), negotiation: UUID(), generation: 2)
         require(await audio.registerGuest(replacement) && video.register(replacement), "Replacement lease")
-        let nextSink = NativeGuestMediaSink(registered: replacement, video: video, audio: audio), nextSource = VideoSource()
+        let nextSink = NativeGuestMediaSink(registered: replacement, video: video, audio: audio), nextSource = VideoSource(), secondarySource = VideoSource()
         nextSink.bindProgramReturn(.init(authority: authority, install: nextSource.install, remove: { nextSource.remove($0) }))
+        nextSink.bindSecondaryReturn(.init(authority: authority, install: secondarySource.install, remove: { secondarySource.remove($0) }))
         let nextCallbacks = NativeInterviewReceiverEvents(sink: nextSink, media: try .init(audio: "audio", camera: "camera", screen: "screen"), events: { _ in true })
         let nextReceiver = try NativeGuestReceiver(admitted: replacement, cameraMID: "camera", screenMID: "screen", audioMID: "audio", video: { _ in }, audio: { _ in }, signal: { _, _, _ in })
         let nextSender = NativeGuestReturnVideoSender(sink: nextSink, receiver: nextReceiver, callbacks: nextCallbacks, events: { _ in true })
@@ -121,35 +122,37 @@ private func sample() -> CMSampleBuffer {
         require(await Task.detached { wait(nextSource.entered, seconds: 3) }.value, "Held first source install")
         let oldToken = nextSource.tokens[0]
         nextSender.stop()
+        require(nextSink.selectReturnVideoSource(.secondary), "Select a distinct source while old installation held")
         require(await nextSender.prepare(), "Fresh explicit enable while old installation held")
-        let current = nextSource.tokens.first { $0 != oldToken }!
+        let current = secondarySource.tokens[0]
         nextSource.resume.signal()
         require(await first.value == false, "Late old installation rejected")
         for _ in 0..<100 {
-            if nextSource.tokens == [current] { break }; try await Task.sleep(for: .milliseconds(10))
+            if nextSource.tokens.isEmpty { break }; try await Task.sleep(for: .milliseconds(10))
         }
-        require(nextSender.isEnabled && nextSource.tokens == [current], "Old failure cannot stop the replacement or release its reservation")
+        require(nextSender.isEnabled && nextSource.tokens.isEmpty && secondarySource.tokens == [current], "Old failure cannot stop the replacement or release its reservation")
         require(nextSink.sendReturnVideoIfCurrent(.init(lease: replacement, token: current, sample: sample())) { true }, "Fresh token retains outbound authority")
         require(!nextSink.sendReturnVideoIfCurrent(.init(lease: lease, token: oldToken, sample: original)) { true }, "Old full lease/token cannot send")
-        print("PASS: held installA→Off→installB→lateA failure preserves B token/reservation and rejects old full-lease sends")
+        print("PASS: held Program installA→Off→Secondary installB→lateA failure preserves B token/reservation and rejects old full-lease sends")
         nextSender.stop()
-        for _ in 0..<100 { if nextSource.tokens.isEmpty { break }; try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<100 { if nextSource.tokens.isEmpty && secondarySource.tokens.isEmpty { break }; try await Task.sleep(for: .milliseconds(10)) }
         let entry = InstallEntryHold()
         nextSender.validationBeforeInstall = entry.pause
         let beforeInstall = Task { await nextSender.prepare() }
         require(await Task.detached { wait(entry.entered, seconds: 3) }.value, "Held before source install entry")
-        require(nextSource.tokens.isEmpty, "No source reservation before install entry")
+        require(nextSource.tokens.isEmpty && secondarySource.tokens.isEmpty, "No source reservation before install entry")
         nextSender.stop()
+        require(nextSink.selectReturnVideoSource(.program), "Replacement source selected during old pre-install suspension")
         require(await nextSender.prepare(), "Replacement can claim during old pre-install suspension")
         let replacementToken = nextSource.tokens[0]
         entry.resume.signal()
         require(await beforeInstall.value == false, "Old canceled token cannot begin late source installation")
         try await Task.sleep(for: .milliseconds(100))
-        require(nextSender.isEnabled && nextSource.tokens == [replacementToken], "Late entry neither leaks a reservation nor retires replacement")
+        require(nextSender.isEnabled && nextSource.tokens == [replacementToken] && secondarySource.tokens.isEmpty, "Late entry neither leaks a reservation nor retires replacement")
         nextCallbacks.receive("control-closed", "", "")
         for _ in 0..<100 { if nextSource.tokens.isEmpty { break }; try await Task.sleep(for: .milliseconds(10)) }
         require(!nextSender.isEnabled && nextSource.tokens.isEmpty, "Control close retires return subscription and reservation")
         nextSink.close(); nextReceiver.stop()
-        print("PASS: held before-installA→Off→installB→lateA cannot allocate or retire B; control close releases the active return")
+        print("PASS: held before-Secondary-installA→Off→Program-installB→lateA cannot allocate or retire B; control close releases the active return")
     }
 }

@@ -231,6 +231,10 @@ import Foundation
         guard canSetProgramReturn(context: context) else { return false }
         return peers[context.receive.peerID]?.host?.setProgramReturnEnabled(enabled) == true
     }
+    @discardableResult func selectReturnVideoSource(_ source: NativeInterviewReturnVideoSource, context: NativeInterviewPeerLease) -> Bool {
+        guard canSetProgramReturn(context: context) else { return false }
+        return peers[context.receive.peerID]?.host?.selectReturnVideoSource(source) == true
+    }
     @discardableResult func sendPrivateMessage(_ text: String, context: NativeInterviewPeerLease) -> Bool {
         guard NativeInterviewPrivateEnvelope.validText(text), canSendPrivateMessage(context: context),
               let host = peers[context.receive.peerID]?.host else { return false }
@@ -351,11 +355,11 @@ import Foundation
                 }
                 if role == "guest" {
                     var member = snapshot.members.first { $0.id == id } ?? .init(id: id, name: name, membership: state)
-                    member = .init(id: id, name: name, membership: state, media: member.media, returnAudio: member.returnAudio, returnVideo: member.returnVideo,
+                    member = .init(id: id, name: name, membership: state, media: member.media, returnAudio: member.returnAudio, returnVideo: member.returnVideo, returnVideoSource: member.returnVideoSource,
                                    screenApproved: member.screenApproved, screenSharing: member.screenSharing,
                                    membershipRevision: member.membershipRevision)
                     if state == .waiting {
-                        member.media = .unavailable; member.returnAudio = .unavailable; member.returnVideo = .unavailable; member.screenApproved = false; member.screenSharing = false
+                        member.media = .unavailable; member.returnAudio = .unavailable; member.returnVideo = .unavailable; member.returnVideoSource = .program; member.screenApproved = false; member.screenSharing = false
                     }
                     members.append(member)
                 }
@@ -511,6 +515,7 @@ import Foundation
             if peer.host?.supportsPrivateMessages == true { _ = peer.host?.sendPrivateControl(.availability(true)) }
         case .returnAudio(let value): updateMember(id) { $0.returnAudio = value }
         case .returnVideo(let value): updateMember(id) { $0.returnVideo = value }
+        case .returnVideoSource(let source): updateMember(id) { $0.returnVideoSource = source; $0.returnVideo = .off }
         case .screenSharing(let value): updateMember(id) { $0.screenSharing = value && $0.screenApproved }
         case .privateControl(let envelope):
             guard readyPeerLease(for: id) == context, peer.controlOpen else { return }
@@ -640,7 +645,7 @@ import Foundation
     private func dropPeer(_ id: UUID) {
         clearPrivateMessages()
         peers.removeValue(forKey: id)?.retire()
-        updateMember(id) { $0.media = .unavailable; $0.returnAudio = .unavailable; $0.returnVideo = .unavailable; $0.screenApproved = false; $0.screenSharing = false }
+        updateMember(id) { $0.media = .unavailable; $0.returnAudio = .unavailable; $0.returnVideo = .unavailable; $0.returnVideoSource = .program; $0.screenApproved = false; $0.screenSharing = false }
     }
     private func failPeer(_ id: UUID, _ failure: NativeInterviewError) {
         dropPeer(id); updateMember(id) { $0.media = .failed }; snapshot.failure = failure

@@ -42,7 +42,8 @@ private final class SnapshotState: @unchecked Sendable {
     @MainActor static func main() async throws {
         setbuf(stdout, nil)
         _ = NSApplication.shared
-        let red = Scene(name: "Owned public red", layers: [], background: .solid(colorHex: "#FF0000"))
+        let canvas: OutputCanvas = CommandLine.arguments.contains("--secondary") ? .secondary : .program
+        let red = Scene(name: "Owned public red", layers: [], background: .solid(colorHex: "#FF0000"), secondaryCanvas: .init(size: .init(width: 64, height: 36)))
         let black = Scene(name: "Owned private slate", layers: [], background: .solid(colorHex: "#000000"))
         let state = SnapshotState(), authority = NativeGuestProgramReturnAuthority()
         authority.change(active: true)
@@ -56,8 +57,14 @@ private final class SnapshotState: @unchecked Sendable {
         require(await audio.registerGuest(lease), "Owned audio registration")
         let sink = NativeGuestMediaSink(registered: lease, video: frames, audio: audio)
         sink.bindProgramReturn(.init(authority: authority, install: { token, consume in
-            await engine.addSink(token: token, capacity: 1) { consume($0.sampleBuffer) }; return true
+            await engine.addSink(token: token, capacity: 1, canvas: canvas) { consume($0.sampleBuffer) }; return true
         }, remove: { token in await engine.removeSink(token) }))
+        if canvas == .secondary {
+            sink.bindSecondaryReturn(.init(authority: authority, install: { token, consume in
+                await engine.addSink(token: token, capacity: 1, canvas: .secondary) { consume($0.sampleBuffer) }; return true
+            }, remove: { token in await engine.removeSink(token) }))
+            require(sink.selectReturnVideoSource(.secondary), "Select actual Secondary subscription")
+        }
         let original = UUID()
         require(sink.claimReturnVideo(original), "Owned original token claim")
         require(await sink.installReturnVideo(token: original) { state.receive($0, sink: sink) }, "Owned original subscription")
@@ -98,7 +105,7 @@ private final class SnapshotState: @unchecked Sendable {
             }
             require(state.snapshot().contains(where: { $0.pts >= cutoff && $0.accepted && $0.red < 10 && $0.green < 10 && $0.blue < 10 }), "Fresh actual slate pixels missing")
             sink.removeReturnVideo(token: current)
-            print("PASS: actual compositor held old snapshot receives newer host PTS; synchronous token revoke rejects old pixels; explicit actor-barrier install admits only fresh black slate")
+            print("PASS \(canvas.rawValue): actual compositor held old snapshot receives newer host PTS; synchronous token revoke rejects old pixels; explicit actor-barrier install admits only fresh black slate")
         }
         await engine.stop(); sink.close()
     }

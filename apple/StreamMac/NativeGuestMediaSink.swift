@@ -37,7 +37,9 @@ final class NativeGuestMediaSink: @unchecked Sendable {
     private let audio: AudioMixEngine
     private var active = true
     private var returnTokens: Set<UUID> = []
-    private var programReturn: NativeGuestProgramReturnSource?
+    private var programReturns: [NativeInterviewReturnVideoSource: NativeGuestProgramReturnSource] = [:]
+    private var returnVideoSources: [UUID: NativeGuestProgramReturnSource] = [:]
+    private var selectedReturnVideoSource: NativeInterviewReturnVideoSource = .program
     private var returnVideoToken: UUID?
     private var videoRetirement: (@Sendable () -> Void)?
     private let acceptedVideo: (@Sendable (GuestVideoFrame) -> Void)?
@@ -76,11 +78,24 @@ final class NativeGuestMediaSink: @unchecked Sendable {
 
     func bindProgramReturn(_ source: NativeGuestProgramReturnSource) {
         gate.lock(); defer { gate.unlock() }
-        guard active, programReturn == nil else { return }
-        programReturn = source
+        guard active, programReturns[.program] == nil else { return }
+        programReturns[.program] = source
     }
     var supportsProgramReturn: Bool {
-        gate.lock(); defer { gate.unlock() }; return active && programReturn != nil
+        gate.lock(); defer { gate.unlock() }; return active && programReturns[.program] != nil
+    }
+    func bindSecondaryReturn(_ source: NativeGuestProgramReturnSource) {
+        gate.lock(); defer { gate.unlock() }
+        guard active, programReturns[.secondary] == nil else { return }
+        programReturns[.secondary] = source
+    }
+    var returnVideoSource: NativeInterviewReturnVideoSource {
+        gate.lock(); defer { gate.unlock() }; return selectedReturnVideoSource
+    }
+    func selectReturnVideoSource(_ source: NativeInterviewReturnVideoSource) -> Bool {
+        gate.lock(); defer { gate.unlock() }
+        guard active, returnVideoToken == nil, programReturns[source] != nil else { return false }
+        selectedReturnVideoSource = source; return true
     }
     func bindVideoRetirement(_ retire: @escaping @Sendable () -> Void) {
         gate.lock(); videoRetirement = retire; let closed = !active; gate.unlock()
@@ -94,13 +109,13 @@ final class NativeGuestMediaSink: @unchecked Sendable {
     }
     func claimReturnVideo(_ token: UUID) -> Bool {
         gate.lock(); defer { gate.unlock() }
-        guard active, returnVideoToken == nil, programReturn != nil else { return false }
-        returnVideoToken = token; return true
+        guard active, returnVideoToken == nil, let source = programReturns[selectedReturnVideoSource] else { return false }
+        returnVideoToken = token; returnVideoSources[token] = source; return true
     }
     private func claimedReturnVideo(_ token: UUID) -> NativeGuestProgramReturnSource? {
         gate.lock(); defer { gate.unlock() }
         guard active, returnVideoToken == token else { return nil }
-        return programReturn
+        return returnVideoSources[token]
     }
     func installReturnVideo(token: UUID, sink: @escaping @Sendable (GuestReturnVideoFrame) -> Void) async -> Bool {
         guard let source = claimedReturnVideo(token) else { return false }
@@ -116,15 +131,15 @@ final class NativeGuestMediaSink: @unchecked Sendable {
     func revokeReturnVideo(token: UUID) { clearVideoToken(token) }
     private func retainReturnVideoToken(_ token: UUID, source: UUID) -> Bool {
         gate.lock(); defer { gate.unlock() }
-        return active && returnVideoToken == token && programReturn?.id == source
+        return active && returnVideoToken == token && returnVideoSources[token]?.id == source
     }
     func removeReturnVideo(token: UUID) {
-        gate.lock(); if returnVideoToken == token { returnVideoToken = nil }; let source = programReturn; gate.unlock()
+        gate.lock(); if returnVideoToken == token { returnVideoToken = nil }; let source = returnVideoSources.removeValue(forKey: token); gate.unlock()
         if let source { Task { await source.remove(token) } }
     }
     func sendReturnVideoIfCurrent(_ frame: GuestReturnVideoFrame, _ send: () -> Bool) -> Bool {
         gate.lock(); defer { gate.unlock() }
-        guard active, frame.lease == lease, returnVideoToken == frame.token, let source = programReturn else { return false }
+        guard active, frame.lease == lease, returnVideoToken == frame.token, let source = returnVideoSources[frame.token] else { return false }
         return source.authority.sendIfCurrent(frame.pts, send)
     }
 

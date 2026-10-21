@@ -14,11 +14,12 @@ enum NativeInterviewCommand: Equatable, Sendable {
     case beginTalkback(NativeInterviewPeerLease, AudioChannelID, UUID)
     case endTalkback(NativeInterviewPeerLease, UUID)
     case setProgramReturn(NativeInterviewPeerLease, Bool)
+    case selectReturnVideoSource(NativeInterviewPeerLease, NativeInterviewReturnVideoSource)
     case lock(Bool), disconnect, rejoin, end
 
     var capturesConnection: Bool {
         switch self {
-        case .setMuted, .setSolo, .rename, .sendPrivateMessage, .beginTalkback, .endTalkback, .setProgramReturn: return true
+        case .setMuted, .setSolo, .rename, .sendPrivateMessage, .beginTalkback, .endTalkback, .setProgramReturn, .selectReturnVideoSource: return true
         default: return false
         }
     }
@@ -27,7 +28,7 @@ enum NativeInterviewCommand: Equatable, Sendable {
         switch self {
         case .admit(let id), .backstage(let id), .onair(let id), .remove(let id), .restartMedia(let id),
              .monitor(let id, _), .approveScreen(let id, _): return id
-        case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _), .sendPrivateMessage(let context, _), .setProgramReturn(let context, _): return context.receive.peerID
+        case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _), .sendPrivateMessage(let context, _), .setProgramReturn(let context, _), .selectReturnVideoSource(let context, _): return context.receive.peerID
         case .beginTalkback(let context, _, _), .endTalkback(let context, _): return context.receive.peerID
         default: return nil
         }
@@ -47,7 +48,8 @@ enum NativeInterviewCommand: Equatable, Sendable {
         case .sendPrivateMessage: return "Send Private Guest Message"
         case .beginTalkback: return "Hold to Talk Privately to Guest"
         case .endTalkback: return "Release Private Guest Talkback"
-        case .setProgramReturn(_, let enabled): return enabled ? "Start Program Video Return" : "Stop Program Video Return"
+        case .setProgramReturn(_, let enabled): return enabled ? "Start Guest Video Return" : "Stop Guest Video Return"
+        case .selectReturnVideoSource(_, let source): return "Select \(source.title) Guest Return"
         case .lock(let locked): return locked ? "Lock Guest Room" : "Unlock Guest Room"
         case .disconnect: return "Disconnect Guest Room"
         case .rejoin: return "Rejoin Guest Room"
@@ -231,7 +233,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
             return nil
         case .monitor(let id, false), .approveScreen(let id, false):
             return registered?.receive.peerID == id ? nil : .unavailable("This guest has no local media connection.")
-        case .setProgramReturn(let context, _):
+        case .setProgramReturn(let context, _), .selectReturnVideoSource(let context, _):
             guard currentReadyLease == context else { return .invalidTarget("The guest connection changed.") }
             return session.canSetProgramReturn(context: context) ? nil : .unavailable("Program video return requires the current open native relay connection.")
         case .sendPrivateMessage(let context, let text):
@@ -371,6 +373,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
             }
         case .endTalkback: cancelTalkback(); result = true
         case .setProgramReturn(let context, let enabled): result = session.setProgramReturn(enabled, context: context)
+        case .selectReturnVideoSource(let context, let source): result = session.selectReturnVideoSource(source, context: context)
         case .rename(let context, let name):
             guard var slot = controller.sceneStore.guestSlots.first(where: { $0.id == context.receive.slot }) else { return false }
             slot.localName = name; controller.sceneStore.replaceGuestSlot(slot); result = true
