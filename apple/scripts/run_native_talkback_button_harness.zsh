@@ -15,7 +15,10 @@ File.write(File.join(folder,'HoldValidation.swift'), "import AppKit\nimport Swif
 RUBY
 xcrun swiftc -swift-version 6 -parse-as-library -target "$(uname -m)-apple-macos14.0" \
   -framework AppKit -framework SwiftUI "$BUTTON_DIR/HoldValidation.swift" -o "$BUTTON_DIR/HoldValidation"
-python3 - "$BUTTON_DIR/HoldValidation" <<'PY'
+if [[ " ${*} " == *" --external-ax "* ]]; then
+    xcrun swiftc scripts/studio_accessibility_client.swift -o "$BUTTON_DIR/AccessibilityClient"
+fi
+env STREAM_TALKBACK_AX_CLIENT="${BUTTON_DIR:A}/AccessibilityClient" python3 - "$BUTTON_DIR/HoldValidation" "$@" <<'PY'
 import subprocess,sys
 try: raise SystemExit(subprocess.run(sys.argv[1:],timeout=20).returncode)
 except subprocess.TimeoutExpired: raise SystemExit('FAIL: owned hold control exceeded its twenty-second cleanup bound')
