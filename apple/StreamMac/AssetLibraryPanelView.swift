@@ -14,15 +14,9 @@ import UniformTypeIdentifiers
 /// badge with an inline "Relink…" repair — the rest of the library (and the
 /// program output) is unaffected.
 ///
-/// **Integration hook (for the app shell — MainWindowView is G03's):**
-/// create one `@StateObject AssetLibraryStore()` in `StreamMacApp` next to
-/// `dispatcher`, inject it with `.environmentObject(assetLibrary)` on
-/// `MainWindowView`, and embed `AssetLibraryPanelView()` as an inspector tab
-/// next to `SoundboardPanelView` (same hosting pattern:
-/// `.environmentObject(dispatcher.assetLibraryStore)` if the store is parked
-/// on the dispatcher instead). No other wiring is required — the panel reads
-/// and drives the store directly; asset registry ops are NOT scene edits and
-/// deliberately bypass the undo stack and the preview/program staging.
+/// `StreamMacApp` injects the dispatcher's shared asset library. Registry
+/// operations bypass scene undo and Preview/Program staging; runtime asset
+/// resolution uses the same store.
 struct AssetLibraryPanelView: View {
     @EnvironmentObject private var store: AssetLibraryStore
 
