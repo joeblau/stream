@@ -52,14 +52,14 @@ private final class InstallEntryHold: @unchecked Sendable {
         require(await Task.detached { wait(self.resume, seconds: 5) }.value, "Pre-install suspension resumed")
     }
 }
-private func sample() -> CMSampleBuffer {
+private func sample(width: Int = 64, height: Int = 36) -> CMSampleBuffer {
     var pixels: CVPixelBuffer?
-    require(CVPixelBufferCreate(nil, 64, 36, kCVPixelFormatType_32BGRA,
+    require(CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA,
         [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pixels) == kCVReturnSuccess, "Owned pixels")
     let image = pixels!
     CVPixelBufferLockBaseAddress(image, [])
     let bytes = CVPixelBufferGetBaseAddress(image)!.assumingMemoryBound(to: UInt8.self)
-    for y in 0..<36 { for x in 0..<64 {
+    for y in 0..<height { for x in 0..<width {
         let offset = y * CVPixelBufferGetBytesPerRow(image) + x * 4
         bytes[offset] = 0; bytes[offset + 1] = 180; bytes[offset + 2] = 0; bytes[offset + 3] = 255
     }}
@@ -84,6 +84,24 @@ private func sample() -> CMSampleBuffer {
         let callbacks = NativeInterviewReceiverEvents(sink: sink, media: try .init(audio: "audio", camera: "camera", screen: "screen"), events: { _ in true })
         callbacks.validationReturnReady = true // Only the readiness seam is controlled; the actual VT encoder and sink remain real.
         let receiver = try NativeGuestReceiver(admitted: lease, cameraMID: "camera", screenMID: "screen", audioMID: "audio", video: { _ in }, audio: { _ in }, signal: { _, _, _ in })
+        let reconfigured = NativeGuestReturnVideoEncoder()
+        reconfigured.setProfile(.high)
+        let highFrame = sample(width: 640, height: 360)
+        let highEncoded = try reconfigured.encode(.init(lease: lease, token: UUID(), sample: highFrame))
+        require(highEncoded != nil && reconfigured.validationSessionActive
+            && reconfigured.validationDimensions == (640, 360), "Actual high-target VT session never upscales its source")
+        require(highEncoded!.rtp == UInt32(truncatingIfNeeded: CMTimeConvertScale(highFrame.presentationTimeStamp,
+            timescale: 90_000, method: .roundHalfAwayFromZero).value), "High profile keeps original source RTP PTS")
+        reconfigured.setProfile(.low)
+        require(!reconfigured.validationSessionActive, "Actual old VT session invalidated before lower replacement")
+        let lowFrame = sample(width: 640, height: 360)
+        let lowEncoded = try reconfigured.encode(.init(lease: lease, token: UUID(), sample: lowFrame))
+        require(lowEncoded != nil && reconfigured.validationSessionActive && reconfigured.validationDimensions == (320, 180),
+            "Actual lower VT replacement enforces320x180 without simultaneous sessions")
+        require(lowEncoded!.rtp == UInt32(truncatingIfNeeded: CMTimeConvertScale(lowFrame.presentationTimeStamp,
+            timescale: 90_000, method: .roundHalfAwayFromZero).value), "Profile replacement never rebases source RTP PTS")
+        reconfigured.close()
+        print("PASS actual VT high→low replacement: old session invalidated before new allocation, source dimensions never upscaled and original90kPTS preserved")
         let hold = EncodeHold(), encoder = NativeGuestReturnVideoEncoder()
         encoder.validationBeforeCompletion = hold.wait
         let sender = NativeGuestReturnVideoSender(sink: sink, receiver: receiver, callbacks: callbacks, encoder: encoder, events: { _ in true })

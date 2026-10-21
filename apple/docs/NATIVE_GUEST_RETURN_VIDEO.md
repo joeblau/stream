@@ -7,8 +7,12 @@ lease. Changing the source stops video and requires a new Start. Joining or
 rejoining resets the selection to Program and does not enable video. Public stereo mix-minus
 return continues independently.
 
-The first encoding profile is fixed constrained Baseline H264, at most 320×180,
-15 fps and 250 kbps. The encoder scales down without upscaling. It reserves one
+Every fresh opt-in starts constrained Baseline H264 at most 320×180,
+15 fps and 250 kbps. The encoder scales down without upscaling or duplicating
+source frames. Authenticated receiver feedback can constrain the current target;
+the UI displays its current resolution, cadence and bitrate ceiling. Qualified
+hardware permits policy ceilings of 640×360/24 fps/650 kbps and 1280×720/30 fps/1.5 Mbps.
+Other Mac classes remain capped at the low profile. It reserves one
 encoder through the existing shared publishing/recording budget before adding
 its composition tap. Clean is a separate render of the same Program scene,
 background and transition at the same source PTS, with project overlay nodes
@@ -97,10 +101,48 @@ source descriptor during later track changes, hence the isolated final-phase
 rendered measurements. No production browser stream replacement or timestamp
 rebase was introduced, and no numerical synchronization bound was relaxed.
 
-Receiver-feedback adaptation, multi-guest allocation,
-AEC/physical microphone behavior, Internet/mobile impairment and signed install
-remain separate gates. The existing adaptation-policy harness qualifies policy
-arithmetic only; this fixed profile does not claim measured feedback adaptation.
+## Measured receiver feedback and remaining adaptation gates
+
+The native SDK observes authenticated RTCP SR/RR report blocks for the current
+outbound video SSRC, and negotiated single-source goog-remb messages addressed
+to that SSRC. The entire bounded compound packet is validated before publishing
+observations. Old extended sequences, other sources, aggregate multi-source
+REMB, unnegotiated estimates, retired peers and old generations cannot supply
+capacity. RR fields follow [RFC3550§6.4.1/6.4.2](https://www.rfc-editor.org/rfc/rfc3550.html#section-6.4.1).
+The deployed goog-remb format is an [expired experimental draft](https://datatracker.ietf.org/doc/html/draft-alvestrand-rmcat-remb-03#section-2.2),
+not an RFC standard. Queue bytes come from the actual outbound SDK track.
+
+The sender samples at 500 ms intervals and requires new reports after each
+explicit opt-in. Reports older than 2 seconds or missing capacity reset the
+resolution policy to low. A previously learned tighter bitrate restriction
+survives a feedback gap. Fresh scoped REMB limits the actual VT target to a
+quantized ceiling no greater than 80% of that estimate; below 64 kbps the optional
+video return stops, explains the measured bandwidth condition, and requires a new deliberate Start. This leaves headroom
+for packet overhead and the independently routed audio. Received throughput is
+never treated as spare capacity. RR loss, actual latest-frame replacement,
+SDK send failures and the 16 KiB outbound queue limit provide congestion signals.
+Three bad windows lower one policy level; eight good windows spanning at least
+3 seconds admit one increase with 1.7 times the next target's capacity and a
+2 second dwell. Upward bitrate changes additionally require fresh loss-free RR.
+Profile replacement invalidates the old VT session before allocating another,
+while the same shared encoder reservation remains held. Source timestamps and
+lease/privacy fences remain unchanged. An oversized high-profile access unit
+falls back to the low raster without relaxing the 64 KiB bound.
+
+Actual owned Chrome155 relay reports negotiated goog-remb and current-source
+RR. A 24 second probe obtained fresh receiver estimates around 90–120 kbps and
+lowered the real VT target to 64 kbps, retaining 320×180 without invented capacity.
+Actual partial-FU-A loss and next-IDR decode recovery use the existing bounded
+network fault seam. The standalone policy checks additionally exercise RR-loss
+and SDK-backpressure downsteps; actual VT high-to-low replacement proves
+invalidation, no upscaling and original 90 kHz PTS.
+
+Natural higher-profile upshift, real impairment-driven high-to-low adaptation
+and capacity-bootstrap probing remain unqualified. The application-limited
+receiver estimate in this owned test cannot authorize the 1.105 Mbps capacity
+needed for the next profile. No padding probes or fake estimates were added.
+Multi-guest allocation, AEC/physical microphones, Internet/mobile impairment
+and signed installation remain separate gates.
 
 ## Reproduce
 
@@ -112,6 +154,10 @@ the pinned owned TURN server produced by `build_owned_interview_turn.zsh`.
 apple/scripts/run_native_interview_return_video_harness.zsh
 # Independent partial-AU/lifecycle phase:
 apple/scripts/run_native_interview_return_video_harness.zsh --video-fault-only
+# Focused actual authenticated RR/REMB and receiver-capacity constraints:
+apple/scripts/run_native_interview_return_video_harness.zsh --video-fault-only --video-feedback-probe
+apple/scripts/run_native_guest_return_feedback_harness.zsh
+apple/scripts/run_native_guest_return_video_budget.zsh
 apple/scripts/run_native_guest_return_h264_harness.zsh
 apple/scripts/run_native_guest_return_video_privacy_harness.zsh
 ```

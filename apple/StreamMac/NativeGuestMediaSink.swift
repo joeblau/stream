@@ -17,6 +17,7 @@ final class NativeGuestProgramReturnAuthority: @unchecked Sendable {
 struct NativeGuestProgramReturnSource: Sendable {
     typealias Consumer = @Sendable (CMSampleBuffer) -> Void
     let id = UUID()
+    var maximumProfile: NativeGuestReturnVideoProfile = .low
     let authority: NativeGuestProgramReturnAuthority
     let install: @Sendable (UUID, @escaping Consumer) async -> Bool
     let remove: @Sendable (UUID) async -> Void
@@ -116,6 +117,9 @@ final class NativeGuestMediaSink: @unchecked Sendable {
         gate.lock(); defer { gate.unlock() }
         guard active, returnVideoToken == nil, let source = programReturns[selectedReturnVideoSource] else { return false }
         returnVideoToken = token; returnVideoSources[token] = source; return true
+    }
+    func maximumReturnVideoProfile(_ token: UUID) -> NativeGuestReturnVideoProfile {
+        gate.lock(); defer { gate.unlock() }; return returnVideoSources[token]?.maximumProfile ?? .low
     }
     private func claimedReturnVideo(_ token: UUID) -> NativeGuestProgramReturnSource? {
         gate.lock(); defer { gate.unlock() }

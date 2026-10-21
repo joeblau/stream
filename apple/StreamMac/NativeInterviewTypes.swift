@@ -161,6 +161,7 @@ enum NativeInterviewMediaEvent: Sendable {
     case returnAudio(NativeInterviewReturnAudioState)
     case returnVideo(NativeInterviewReturnVideoState)
     case returnVideoSource(NativeInterviewReturnVideoSource)
+    case returnVideoProfile(NativeGuestReturnVideoProfile)
     case screenSharing(Bool)
     case privateControl(NativeInterviewPrivateEnvelope)
     case controlClosed
@@ -209,7 +210,7 @@ enum NativeInterviewReturnVideoSource: String, CaseIterable, Sendable {
     case program, secondary, clean
     var title: String { switch self { case .program: return "Program"; case .secondary: return "Secondary"; case .clean: return "Clean" } }
 }
-enum NativeInterviewReturnVideoState: String, Sendable { case off, unavailable, preparing, ready, failed }
+enum NativeInterviewReturnVideoState: String, Sendable { case off, unavailable, preparing, ready, failed, bandwidthLimited }
 enum NativeInterviewReturnAudioState: String, Sendable { case unavailable, preparing, ready, failed }
 struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     let id: UUID
@@ -219,6 +220,7 @@ struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     var returnAudio: NativeInterviewReturnAudioState = .unavailable
     var returnVideo: NativeInterviewReturnVideoState = .unavailable
     var returnVideoSource: NativeInterviewReturnVideoSource = .program
+    var returnVideoProfile: NativeGuestReturnVideoProfile = .low
     var screenApproved = false
     var screenSharing = false
     /// Increments only on an actual admitted/stage/backstage receipt, so a

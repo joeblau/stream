@@ -352,7 +352,7 @@ import Foundation
                 }
                 if role == "guest" {
                     var member = snapshot.members.first { $0.id == id } ?? .init(id: id, name: name, membership: state)
-                    member = .init(id: id, name: name, membership: state, media: member.media, returnAudio: member.returnAudio, returnVideo: member.returnVideo, returnVideoSource: member.returnVideoSource,
+                    member = .init(id: id, name: name, membership: state, media: member.media, returnAudio: member.returnAudio, returnVideo: member.returnVideo, returnVideoSource: member.returnVideoSource, returnVideoProfile: member.returnVideoProfile,
                                    screenApproved: member.screenApproved, screenSharing: member.screenSharing,
                                    membershipRevision: member.membershipRevision)
                     if state == .waiting {
@@ -512,6 +512,7 @@ import Foundation
             if peer.host?.supportsPrivateMessages == true { _ = peer.host?.sendPrivateControl(.availability(true)) }
         case .returnAudio(let value): updateMember(id) { $0.returnAudio = value }
         case .returnVideo(let value): updateMember(id) { $0.returnVideo = value }
+        case .returnVideoProfile(let profile): updateMember(id) { $0.returnVideoProfile = profile }
         case .returnVideoSource(let source): updateMember(id) { $0.returnVideoSource = source; $0.returnVideo = .off }
         case .screenSharing(let value): updateMember(id) { $0.screenSharing = value && $0.screenApproved }
         case .privateControl(let envelope):

@@ -60,6 +60,13 @@ extension NativeInterviewManager {
         guard let factory = binding?.factory as? NativeInterviewReceiverFactory else { return false }
         return await factory.validationFailReturnVideo(after: packets)
     }
+    var fixtureReturnVideoFeedback: [String: Any] {
+        guard let factory = binding?.factory as? NativeInterviewReceiverFactory,
+              let report = factory.validationReturnVideoFeedback else { return [:] }
+        return ["rr": report.rr_reports, "remb": report.remb_reports, "rrAge": report.rr_age_milliseconds,
+            "rembAge": report.remb_age_milliseconds, "loss": report.fraction_lost, "jitter": report.jitter_90khz,
+            "capacity": report.remb_bits_per_second, "queue": report.buffered_bytes, "negotiated": report.remb_negotiated != 0]
+    }
     var fixtureReturnVideoFault: [String: Any] {
         guard let factory = binding?.factory as? NativeInterviewReceiverFactory,
               let receipt = factory.validationReturnVideoFault else { return [:] }
