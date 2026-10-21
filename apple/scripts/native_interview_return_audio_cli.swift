@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import CoreMedia
 import CryptoKit
@@ -107,7 +108,7 @@ private final class ReturnProgramProbe: @unchecked Sendable {
     func snapshot() -> [String: Any] {
         lock.lock(); let packets = packets; lock.unlock()
         var amplitudes: [Double] = []
-        for (side, frequency) in [(0, 440.0), (1, 880.0)] {
+        for (side, frequency) in [(0, 440.0), (1, 880.0), (0, 2_600.0), (1, 2_600.0)] {
             var re = 0.0, im = 0.0, count = 0
             for (pts, values) in packets {
                 for index in 0..<512 {
@@ -118,21 +119,34 @@ private final class ReturnProgramProbe: @unchecked Sendable {
             }
             amplitudes.append(count > 0 ? 2 * hypot(re, im) / Double(count) : 0)
         }
-        return ["chunks": packets.count, "pts": packets.last?.0.seconds ?? 0, "own440and880": amplitudes]
+        return ["chunks": packets.count, "pts": packets.last?.0.seconds ?? 0,
+                "own440and880": Array(amplitudes.prefix(2)), "private2600": Array(amplitudes.suffix(2))]
     }
+}
+private final class ReturnPrivateTone: @unchecked Sendable {
+    private let lock = NSLock()
+    private var audible = false
+    func set(_ value: Bool) { lock.lock(); audible = value; lock.unlock() }
+    func get() -> Bool { lock.lock(); defer { lock.unlock() }; return audible }
 }
 @MainActor private final class ReturnStudio {
     let mixer = AudioMixEngine(), scenes: SceneStore, preview: PreviewProgramModel
     let controller: StreamController, settings: SettingsSession, recorder: RecordingController, dispatcher: StudioCommandDispatcher
     let manager: NativeInterviewManager
     let program = ReturnProgramProbe(), programToken = UUID()
+    let privacyProbes = (0..<4).map { _ in ReturnProgramProbe() }
+    let privacyTokens = (0..<4).map { _ in UUID() }
+    let recipientProbe = ReturnProgramProbe(), recipientProbeToken = UUID()
     let local = AudioChannelID.media(SourceDefinitionID())
     private var producer: Task<Void, Never>?
+    private var privateMicProducer: Task<Void, Never>?
+    private let privateMicTone = ReturnPrivateTone()
     init(configuration: NativeInterviewConfiguration, relay: NativeInterviewRelayConfiguration, directory: URL) throws {
         try DesktopStorage.prepare(directory.appendingPathComponent("project"))
         var saved = StreamSettings.default
         saved.outputProfile = .init(canvasWidth: 320, canvasHeight: 180, frameRate: 30)
         saved.monitoringEnabled = false; saved.audioInputs = []
+        saved.micVolume = 0
         DesktopSettingsStore().saveNonSecret(saved)
         scenes = SceneStore(directory: DesktopStorage.projectDirectory)
         let blank = scenes.addScene(Scene(name: "Owned Guest Return", layers: [], background: .solid(colorHex: "#000000")))
@@ -147,11 +161,35 @@ private final class ReturnProgramProbe: @unchecked Sendable {
         })
         dispatcher.bindInterviewManager(manager)
         controller.noteRecordingStarted()
+        controller.guestTalkbackFixtureCapture = { $0 == .microphone(deviceUID: nil) }
     }
     func command(_ command: NativeInterviewCommand) throws {
         guard dispatcher.execute(.interview(command)).error == nil else { throw NativeInterviewError.changed }
     }
     func startTone() async {
+        _ = await mixer.reserveCaptureHoldback(token: UUID(), milliseconds: 60)
+        await mixer.addTap(bus: .monitor, token: privacyTokens[0], sink: privacyProbes[0].receive)
+        await mixer.addTap(bus: .aux, token: privacyTokens[1], sink: privacyProbes[1].receive)
+        await mixer.addIsolatedTap(channel: .microphone(deviceUID: nil), token: privacyTokens[2], processing: .beforeEffects, sink: privacyProbes[2].receive)
+        await mixer.addIsolatedTap(channel: .microphone(deviceUID: nil), token: privacyTokens[3], processing: .afterEffects, sink: privacyProbes[3].receive)
+        let micEngine = mixer, micTone = privateMicTone
+        privateMicProducer = Task.detached {
+            let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false)!
+            let origin = CMClockGetTime(CMClockGetHostTimeClock()) - CMTime(value: 512, timescale: 48_000)
+            var index: Int64 = 0
+            while !Task.isCancelled {
+                let pts = origin + CMTime(value: index * 512, timescale: 48_000)
+                let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512)!; pcm.frameLength = 512
+                for frame in 0..<512 {
+                    let phase = (pts.seconds + Double(frame) / 48_000) * 2 * .pi * 2_600
+                    let value = micTone.get() ? Float(0.25 * sin(phase)) : 0
+                    pcm.floatChannelData![0][frame] = value; pcm.floatChannelData![1][frame] = value
+                }
+                micEngine.enqueue(.microphone(deviceUID: nil), ReturnFixturePCM.sample(pcm, pts: pts))
+                index += 1
+                try? await Task.sleep(for: .seconds(max(0, (origin + CMTime(value: index * 512 + 512, timescale: 48_000) - CMClockGetTime(CMClockGetHostTimeClock())).seconds)))
+            }
+        }
         await mixer.setChannelGain(local, volume: 1, isMuted: false)
         await mixer.addTap(bus: .program, token: programToken, sink: program.receive)
         let engine = mixer, local = local
@@ -176,9 +214,14 @@ private final class ReturnProgramProbe: @unchecked Sendable {
         }
     }
     func volume(_ value: Float, muted: Bool) async { await mixer.setChannelGain(local, volume: value, isMuted: muted) }
+    func privateTone(_ enabled: Bool) { privateMicTone.set(enabled) }
     func close() async {
+        privateMicProducer?.cancel(); privateMicProducer = nil
         producer?.cancel(); producer = nil
-        manager.shutdown(); controller.retireGuestMedia(); controller.noteRecordingStopped(); await mixer.removeTap(programToken); await mixer.stop()
+        manager.shutdown(); controller.retireGuestMedia(); controller.noteRecordingStopped(); await mixer.removeTap(programToken)
+        for token in privacyTokens { await mixer.removeTap(token) }
+        await mixer.removeTap(recipientProbeToken)
+        await mixer.stop()
         scenes.flushPendingWrites()
     }
 }
@@ -214,7 +257,10 @@ private final class ReturnProgramProbe: @unchecked Sendable {
                              "media": $0.media.rawValue, "returnAudio": $0.returnAudio.rawValue,
                              "approved": $0.screenApproved, "sharing": $0.screenSharing] as [String: Any]
                         }, "audioAccepted": admission.acceptedPackets, "program": current.program.snapshot(),
-                        "programAllowed": current.manager.state.routes.values.contains { $0.programAllowed }]
+                        "programAllowed": current.manager.state.routes.values.contains { $0.programAllowed },
+                        "privateTalkback": current.manager.talkback != nil]
+                    state["privacyBuses"] = current.privacyProbes.map { $0.snapshot() }
+                    state["recipientPCM"] = current.recipientProbe.snapshot()
                     if let context = current.manager.currentReadyLease {
                         state["lease"] = ["generation": context.receive.generation, "slot": context.receive.slot.uuidString.lowercased(),
                                           "peer": context.receive.peerID.uuidString.lowercased(), "negotiation": context.receive.negotiation.uuidString.lowercased()]
@@ -237,6 +283,7 @@ private final class ReturnProgramProbe: @unchecked Sendable {
                 if data.isEmpty { handle.readabilityHandler = nil; input.close() } else { input.receive(data) }
             }
             var retainedPrivateContext: NativeInterviewPeerLease?
+            var retainedTalkback: (NativeInterviewPeerLease, UUID)?
             commandLoop: for await line in input.stream {
                 guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                       let command = object["type"] as? String else { throw NativeInterviewError.malformed }
@@ -260,11 +307,34 @@ private final class ReturnProgramProbe: @unchecked Sendable {
                         throw NativeInterviewError.changed
                     }
                     _ = output.emit(["type": "ack", "command": "stale-message-rejected"])
+                case "talkback-start":
+                    guard let context = current.manager.currentReadyLease else { throw NativeInterviewError.changed }
+                    guard await current.mixer.addGuestReturnTap(context.receive, token: current.recipientProbeToken,
+                        sink: { [probe = current.recipientProbe] in probe.receive($0.sample) }) else { throw NativeInterviewError.changed }
+                    let press = UUID()
+                    try current.command(.beginTalkback(context, .microphone(deviceUID: nil), press))
+                    if retainedTalkback == nil { retainedTalkback = (context, press) }
+                    current.privateTone(true)
+                    _ = output.emit(["type": "ack", "command": "talkback-start"])
+                case "talkback-stop":
+                    current.privateTone(false)
+                    guard let hold = current.manager.talkback else { throw NativeInterviewError.changed }
+                    try current.command(.endTalkback(hold.context, hold.press))
+                    _ = output.emit(["type": "ack", "command": "talkback-stop"])
+                case "talkback-focus-loss":
+                    current.privateTone(false)
+                    NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: nil)
+                    _ = output.emit(["type": "ack", "command": "talkback-focus-loss"])
+                case "stale-talkback":
+                    guard let (context, press) = retainedTalkback,
+                          current.dispatcher.execute(.interview(.beginTalkback(context, .microphone(deviceUID: nil), press))).error != nil,
+                          current.dispatcher.execute(.interview(.endTalkback(context, press))).error != nil else { throw NativeInterviewError.changed }
+                    _ = output.emit(["type": "ack", "command": "stale-talkback-rejected"])
                 case "onair": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.onair(guest))
                 case "backstage": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.backstage(guest))
                 case "mute": await current.volume(1, muted: true); _ = output.emit(["type": "ack", "command": "mute"])
                 case "restore": await current.volume(0.4, muted: false); _ = output.emit(["type": "ack", "command": "restore"])
-                case "rejoin": try current.command(.disconnect); try current.command(.rejoin)
+                case "rejoin": current.privateTone(false); try current.command(.disconnect); try current.command(.rejoin)
                 case "remove": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.remove(guest))
                 case "end": try current.command(.end)
                 case "stop": break commandLoop

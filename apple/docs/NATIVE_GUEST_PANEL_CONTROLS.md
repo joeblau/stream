@@ -46,9 +46,9 @@ manager media host is controlled; these tests do not qualify browser decoding,
 deployed TURN, Internet/mobile/restricted networks or operator devices.
 
 One native admitted media peer remains the measured limit. Private text is
-implemented separately in `NATIVE_GUEST_PRIVATE_MESSAGES.md`. Private microphone
-talkback and external browser/network/operator qualification remain open; this
-change does not close issue #128.
+implemented separately in `NATIVE_GUEST_PRIVATE_MESSAGES.md`. Addressed private
+microphone talkback is described below. External browser/network/operator
+qualification remains open; this change does not close issue #128.
 
 Local software qualification on 2026-10-21 passed with Xcode 27.2 on Apple
 silicon: the whole-source manager/Worker/SwiftUI fixture, standalone native
@@ -57,3 +57,45 @@ also checks that pending admission immediately becomes unavailable, a second
 actual guest is refused by the configured one-guest Worker room, and the active
 full lease remains unchanged. This establishes the configured capacity guard;
 it does not qualify multiple simultaneous native media peers.
+
+## Addressed private microphone hold
+
+Hold to Talk Privately uses the already running primary microphone and the
+guest's current ready audio return. It never starts capture or requests consent.
+The existing microphone permission must still be granted. A duplicate capture
+of the same physical input is refused. The hold captures the full peer lease
+and a fresh press UUID; an old press cannot start or end a replacement hold.
+Mouse/Space release, focus loss, view removal, sleep/lock, source changes, guest
+replacement, room end and runtime shutdown end the hold. Ten seconds is the
+maximum; reconnect and wake never replay it.
+
+Only the selected recipient's return receives the microphone at unity while
+held. The microphone is hard-excluded from Program, Monitor, Aux and both
+pre/post-insert isolated recording taps. Other sources keep their routes, and
+private microphone levels cannot drive public music ducking. Public mixer
+faders, mute, solo, sends, delays and project documents are unchanged. Private
+speech bypasses microphone effects; both transitions clear the microphone's
+FX/converter/ring history. Release restores its prior routing, so newly captured
+speech after release or safety cancellation may be public under those settings.
+
+Capture timestamps are retained. Transition floors reject old, invalid or
+future-dated buffers and survive channel replacement. Private return work uses
+the existing synchronous full-lease/revision gate; release invalidates queued
+PCM and the Opus encoder discards its old partial packet and codec history.
+SDK bytes accepted before revocation cannot be recalled. No private route or
+hold is persisted, exported, recorded or automatically retried.
+
+On 2026-10-21, `run_guest_return_audio_harness.zsh` passed native PCM/Opus and
+real mixer checks for private-positive return, public/Monitor/Aux/pre+post ISO
+exclusion, unaffected public music with an enabled mic sidechain, exact fader/
+Aux/140ms delay restoration, FX bypass/reset, late captured buffers across
+channel replacement, queued-return revision invalidation and stale press/lease
+refusal. `run_native_interview_return_audio_harness.zsh` passed with the shipping
+manager/dispatcher/default receiver/controller sink, owned local Worker/Coturn
+and Chrome 155.0.8059.85: native recipient PCM and actual decoded Opus carry the
+private tone while actual forbidden taps exclude it; explicit/focus/deadline
+release, active reconnect cancellation and deliberate new-lease holds pass.
+Inputs are generated; device capture and operator permissions are refused by
+the fixture. Physical microphone/AEC, signed installation, accessibility and
+operator hold behavior, mobile and deployed/restricted networks remain separate
+qualification gates.

@@ -104,6 +104,10 @@ final class StreamController: ObservableObject {
     var guestMixerSettings: (() -> MixerSettings)?
     private var guestRegistration = UUID()
     private var guestMediaRetired = false
+    #if STREAM_NATIVE_VALIDATION
+    /// Owned synthetic PCM fixture only; never requests capture or OS consent.
+    var guestTalkbackFixtureCapture: ((AudioChannelID) -> Bool)?
+    #endif
     private var resilienceTask: Task<Void, Never>?
     private var failureTracker = SourceFailureTracker<CaptureSourceKey>()
     private var resilienceDemand: Set<CaptureSourceKey> = []
@@ -408,6 +412,7 @@ final class StreamController: ObservableObject {
         OutputCanvasStore.shared.publish(persisted.outputProfile.canvasSize)
         resilience.stopOutputs = { [weak self] in
             guard let self else { return }
+            self.audioEngine.cancelGuestTalkback()
             self.stopStream(); self.stopRecordingForLifecycle?(); self.stopSecondaryRecording(); self.stopExternalDisplayOutput(); self.stopVirtualCameraOutput(); self.stopPreview()
             self.resilientFrames.clear()
         }
@@ -1213,6 +1218,25 @@ final class StreamController: ObservableObject {
         if enabled { guestVideoFrames.enable(.screen, lease: lease) }
         else { guestVideoFrames.disable(.screen, lease: lease) }
     }
+    func guestTalkbackSourceAvailable(_ source: AudioChannelID) -> Bool {
+        guard case .microphone = source, isPipelineRunning, !guestMediaRetired,
+              !resilience.isLocked, !privacySlateActive else { return false }
+        #if STREAM_NATIVE_VALIDATION
+        if let guestTalkbackFixtureCapture { return guestTalkbackFixtureCapture(source) }
+        #endif
+        return permissions.status(for: .microphone) == .granted
+            && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized && audio.isCapturing(source)
+    }
+    @discardableResult func beginGuestTalkback(_ lease: GuestReceiveLease, source: AudioChannelID, press: UUID) -> Bool {
+        guard guestLease == lease, guestTalkbackSourceAvailable(source) else { return false }
+        return audioEngine.beginGuestTalkback(lease, source: source, press: press)
+    }
+    @discardableResult func endGuestTalkback(_ lease: GuestReceiveLease, press: UUID) -> Bool {
+        audioEngine.endGuestTalkback(lease, press: press)
+    }
+    func guestTalkbackIsActive(_ lease: GuestReceiveLease, source: AudioChannelID, press: UUID) -> Bool {
+        guestLease == lease && audioEngine.guestTalkbackIsActive(lease, source: source, press: press)
+    }
     func removeGuestMedia(_ lease: GuestReceiveLease) {
         guard guestLease == lease || pendingGuestLease == lease else { return }
         guestRegistration = UUID(); pendingGuestLease = nil
@@ -1616,6 +1640,9 @@ final class StreamController: ObservableObject {
     /// polish) is read at the next session start, exactly as before.
     func applySavedSettings(_ newSettings: StreamSettings) {
         let previous = settings
+        if newSettings.audioInputs != previous.audioInputs || newSettings.preferredAudioInputUID != previous.preferredAudioInputUID {
+            audioEngine.cancelGuestTalkback()
+        }
         settings = newSettings
         applyOutputProfile(newSettings.outputProfile,
                            destination: newSettings.selectedProtocol)
@@ -1771,7 +1798,7 @@ final class StreamController: ObservableObject {
         Task {
             await audioEngine.run()
             await audioEngine.setBusGain(.program, gain: self.privacySlateActive ? 0 : self.programBusGain)
-            await audioEngine.addChannel(micID) { sample in
+            await audioEngine.addChannel(micID, resetInsert: { micBox.reset() }) { sample in
                 micBox.process(sample)
             }
             await audioEngine.setChannelGain(.microphone(deviceUID: nil),
@@ -1830,7 +1857,7 @@ final class StreamController: ObservableObject {
             }
             for id in added {
                 let box = boxes[id]!
-                await audioEngine.addChannel(id) { sample in
+                await audioEngine.addChannel(id, resetInsert: { box.reset() }) { sample in
                     box.process(sample)
                 }
                 await audioEngine.setChannelGain(id,
@@ -1884,6 +1911,7 @@ final class StreamController: ObservableObject {
     }
 
     private func stopPipeline() {
+        audioEngine.cancelGuestTalkback()
         isPipelineRunning = false
         resilienceTask?.cancel(); resilienceTask = nil
         failureTracker.resetObservations()
@@ -2086,6 +2114,7 @@ final class StreamController: ObservableObject {
     }
 
     private func enterPrivacySlate() {
+        audioEngine.cancelGuestTalkback()
         guard !privacySlateActive else { return }
         fallbackOriginalScene = previewProgram.programScene
         let slate = Scene(name: "Offline", layers: [LayerNode(name: "Offline notice",
@@ -2255,6 +2284,8 @@ private final class ChannelFXInsertBox: @unchecked Sendable {
         self.chain = chain
         os_unfair_lock_unlock(&lock)
     }
+    /// Called only under the channel ingest lock, like process(_:).
+    func reset() { processor.reset() }
 
     /// Capture-thread read + process (under the channel's ingest lock).
     func process(_ sample: CMSampleBuffer) -> CMSampleBuffer {

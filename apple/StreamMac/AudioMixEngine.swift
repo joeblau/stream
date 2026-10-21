@@ -208,6 +208,17 @@ actor AudioMixEngine {
     nonisolated func guestReturnFrameIsCurrent(_ frame: GuestReturnAudioFrame) -> Bool {
         registry.guestReturnRevision(frame.lease) == frame.routingRevision
     }
+    /// Temporary, addressed microphone routing. No persisted mixer setting is edited.
+    @discardableResult nonisolated func beginGuestTalkback(_ lease: GuestReceiveLease, source: AudioChannelID, press: UUID) -> Bool {
+        registry.beginTalkback(lease, source: source, press: press)
+    }
+    @discardableResult nonisolated func endGuestTalkback(_ lease: GuestReceiveLease, press: UUID) -> Bool {
+        registry.endTalkback(lease, press: press)
+    }
+    nonisolated func guestTalkbackIsActive(_ lease: GuestReceiveLease, source: AudioChannelID, press: UUID) -> Bool {
+        registry.talkbackIsActive(lease, source: source, press: press)
+    }
+    nonisolated func cancelGuestTalkback() { registry.cancelTalkback() }
     @discardableResult func addGuestReturnTap(_ lease: GuestReceiveLease, token: UUID, capacity: Int = 8,
                 sink: @escaping @Sendable (GuestReturnAudioFrame) -> Void) -> Bool {
         guard cancelledTokens.remove(token) == nil, taps[token] == nil,
@@ -280,8 +291,9 @@ actor AudioMixEngine {
     /// normalization. The mic's `VoicePolishProcessor` lives here; A08/A11 FX
     /// racks insert through the same seam. Safe to call before `run`.
     func addChannel(_ id: AudioChannelID,
+                    resetInsert: (@Sendable () -> Void)? = nil,
                     insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)? = nil) {
-        registry.addChannel(id, insert: insert, gain: pendingGains[id])
+        registry.addChannel(id, insert: insert, resetInsert: resetInsert, gain: pendingGains[id])
     }
 
     /// Removes a channel (its capture left demand). Late buffers for the ID
@@ -557,7 +569,7 @@ actor AudioMixEngine {
         // only on envelope transitions — the channels' own ramps do the
         // click-free attack/release trajectories between pushes.
         if let ducking {
-            let levels = registry.levelsSnapshot()
+            let levels = registry.levelsSnapshot(excludingPrivate: true)
             var sidechain: Float = 0
             var targets: [AudioChannelID] = []
             for (id, channelLevels) in levels {
@@ -607,7 +619,8 @@ actor AudioMixEngine {
                                 contribution: &contributionScratch,
                                 soloActive: soloActive)
             for (tap, _) in returnWindows where id != Self.guestChannelID(for: tap.lease) {
-                tap.accumulate(contributionScratch)
+                if gaps.privateRecipient == tap.lease { tap.accumulatePrivate(contributionScratch) }
+                else if gaps.privateRecipient == nil { tap.accumulate(contributionScratch) }
             }
             if wantsISO {
                 let pts = chunkPTS(at: position)
@@ -629,7 +642,8 @@ actor AudioMixEngine {
         postBus(.aux, from: auxScratch, at: position, wanted: wantAux)
         for (tap, revision) in returnWindows {
             var samples = tap.scratch
-            AudioMixerCore.applyBusGainAndClamp(&samples, gain: busGains[.program] ?? 1)
+            let publicGain = busGains[.program] ?? 1
+            for index in samples.indices { samples[index] = max(-1, min(1, samples[index] * publicGain + tap.privateScratch[index])) }
             if let sample = makeSampleBuffer(samples, frames: frames, pts: chunkPTS(at: position)) {
                 tap.post(.init(lease: tap.lease, routingRevision: revision, sample: sample))
             }
@@ -734,6 +748,48 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     /// channels that auto-register on their first buffer.
     private var delayFramesByLabel: [String: Int] = [:]
     private var preEffectsIDs: Set<AudioChannelID> = []
+    private struct Talkback {
+        let lease: GuestReceiveLease, source: AudioChannelID, press: UUID
+    }
+    private var talkback: Talkback?
+    // A bounded runtime-only rejection floor survives capture/ring replacement.
+    private var captureFloors: [AudioChannelID: CMTime] = [:]
+
+    func beginTalkback(_ lease: GuestReceiveLease, source: AudioChannelID, press: UUID) -> Bool {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        guard case .microphone = source, !guestRetired, guest?.lease == lease, guest?.returnAllowed == true,
+              guest!.returnRevision < UInt64.max, talkback == nil,
+              captureFloors[source] != nil || captureFloors.count < 32,
+              let channel = channels[source] else { return false }
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        guard channel.beginTalkback(at: now) else { return false }
+        captureFloors[source] = now; talkback = Talkback(lease: lease, source: source, press: press)
+        guest!.returnRevision += 1
+        return true
+    }
+    func endTalkback(_ lease: GuestReceiveLease, press: UUID) -> Bool {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        guard let talkback, talkback.lease == lease, talkback.press == press else { return false }
+        endTalkbackLocked(); return true
+    }
+    func cancelTalkback() {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }; endTalkbackLocked()
+    }
+    private func endTalkbackLocked() {
+        guard let talkback else { return }
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        captureFloors[talkback.source] = now
+        channels[talkback.source]?.endTalkback(at: now)
+        self.talkback = nil
+        if guest != nil {
+            if guest!.returnRevision < UInt64.max { guest!.returnRevision += 1 }
+            else { guest!.returnAllowed = false }
+        }
+    }
+    func talkbackIsActive(_ lease: GuestReceiveLease, source: AudioChannelID, press: UUID) -> Bool {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return talkback?.lease == lease && talkback?.source == source && talkback?.press == press
+    }
 
     private struct GuestAdmission {
         let lease: GuestReceiveLease
@@ -765,6 +821,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         // Runtime generations are monotonically increasing, including after
         // removal. A delayed explicit registration cannot resurrect an old lease.
         guard lease.generation > highestGuestGeneration else { return (false, false) }
+        endTalkbackLocked()
         if let current = guest { channels[current.channelID] = nil }
         highestGuestGeneration = lease.generation
         let id = AudioMixEngine.guestChannelID(for: lease)
@@ -795,7 +852,9 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         guard guest?.lease == lease, !guestRetired,
               guest!.returnRevision < UInt64.max else { return false }
         if guest!.returnAllowed != allowed {
-            guest!.returnRevision += 1; guest!.returnAllowed = allowed
+            if !allowed { endTalkbackLocked() }
+            if guest!.returnRevision < UInt64.max { guest!.returnRevision += 1 }
+            guest!.returnAllowed = allowed
         }
         return true
     }
@@ -845,6 +904,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         guard let current = guest, current.lease == lease else { return false }
+        endTalkbackLocked()
         channels[current.channelID] = nil
         guest = nil
         return true
@@ -852,6 +912,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func retireGuestAdmissions() {
         os_unfair_lock_lock(&lock)
+        endTalkbackLocked()
         if let guest { channels[guest.channelID] = nil }
         guest = nil
         guestRetired = true
@@ -936,6 +997,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func reset() {
         os_unfair_lock_lock(&lock)
+        endTalkbackLocked()
         channels.removeAll()
         if var current = guest {
             if current.returnRevision < UInt64.max { current.returnRevision += 1 }
@@ -950,14 +1012,16 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func addChannel(_ id: AudioChannelID,
                     insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?,
+                    resetInsert: (@Sendable () -> Void)?,
                     gain: AudioMixEngine.ChannelGain?) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         guard !isGuest(id) else { return }
+        if talkback?.source == id { endTalkbackLocked() }
         // Replace, not just insert-if-absent: an early buffer may have
         // auto-registered the channel (insert-less) just before this call,
         // and the explicit registration (VoicePolish on the mic) must win.
-        channels[id] = ChannelIngest(insert: insert,
+        channels[id] = ChannelIngest(insert: insert, resetInsert: resetInsert, captureFloor: captureFloors[id],
                                      initialGain: gain?.effectiveGain ?? localGains[id] ?? Self.defaultGain(for: id),
                                      soloed: soloedIDs.contains(id),
                                      delayFrames: delayFramesByLabel[id.label] ?? 0,
@@ -967,7 +1031,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     func ensureChannel(_ id: AudioChannelID, gain: AudioMixEngine.ChannelGain?) {
         os_unfair_lock_lock(&lock)
         if !isGuest(id), channels[id] == nil {
-            channels[id] = ChannelIngest(insert: nil, initialGain: gain?.effectiveGain ?? localGains[id] ?? Self.defaultGain(for: id),
+            channels[id] = ChannelIngest(insert: nil, captureFloor: captureFloors[id], initialGain: gain?.effectiveGain ?? localGains[id] ?? Self.defaultGain(for: id),
                 soloed: soloedIDs.contains(id), delayFrames: delayFramesByLabel[id.label] ?? 0,
                 preEffectsEnabled: preEffectsIDs.contains(id))
         }
@@ -1006,15 +1070,16 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     }
 
     /// A04: the per-channel PRE-FADER meter readings for the mixer UI.
-    func levelsSnapshot() -> [AudioChannelID: AudioLevels] {
+    func levelsSnapshot(excludingPrivate: Bool = false) -> [AudioChannelID: AudioLevels] {
         os_unfair_lock_lock(&lock)
-        let entries = channels.map { ($0.key, $0.value.levels) }
+        let entries = channels.filter { !excludingPrivate || talkback?.source != $0.key }.map { ($0.key, $0.value.levels) }
         os_unfair_lock_unlock(&lock)
         return Dictionary(uniqueKeysWithValues: entries)
     }
 
     func removeChannel(_ id: AudioChannelID) {
         os_unfair_lock_lock(&lock)
+        if talkback?.source == id || guest?.channelID == id { endTalkbackLocked() }
         channels[id] = nil
         if guest?.channelID == id { guest = nil }
         os_unfair_lock_unlock(&lock)
@@ -1022,6 +1087,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func prune(keeping ids: Set<AudioChannelID>) {
         os_unfair_lock_lock(&lock)
+        if let talkback, !ids.contains(talkback.source) { endTalkbackLocked() }
         channels = channels.filter { ids.contains($0.key) || guest?.channelID == $0.key }
         os_unfair_lock_unlock(&lock)
     }
@@ -1072,7 +1138,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         guard !isGuest(id) else { os_unfair_lock_unlock(&lock); return }
         let anchor = self.anchor
         let channel = channels[id] ?? {
-            let created = ChannelIngest(insert: nil,
+            let created = ChannelIngest(insert: nil, captureFloor: captureFloors[id],
                                         initialGain: localGains[id] ?? Self.defaultGain(for: id),
                                         soloed: soloedIDs.contains(id),
                                         delayFrames: delayFramesByLabel[id.label] ?? 0,
@@ -1094,17 +1160,19 @@ private final class AudioChannelRegistry: @unchecked Sendable {
                     program: inout [Float], aux: inout [Float],
                     isolated: inout [Float], preEffects: inout [Float], monitor: inout [Float],
                     contribution: inout [Float],
-                    soloActive: Bool) -> (pre: Int, post: Int) {
+                    soloActive: Bool) -> (pre: Int, post: Int, privateRecipient: GuestReceiveLease?) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         let isRegisteredGuest = isGuest(id)
-        let programAllowed = !isRegisteredGuest || (guest?.channelID == id && guest?.programAllowed == true)
-        let monitorAllowed = !isRegisteredGuest || (guest?.channelID == id && guest?.monitorAllowed == true)
-        return channels[id]?.mix(at: position, frameCount: frameCount,
+        let privateRecipient = talkback?.source == id ? talkback?.lease : nil
+        let programAllowed = privateRecipient == nil && (!isRegisteredGuest || (guest?.channelID == id && guest?.programAllowed == true))
+        let monitorAllowed = privateRecipient == nil && (!isRegisteredGuest || (guest?.channelID == id && guest?.monitorAllowed == true))
+        let result = channels[id]?.mix(at: position, frameCount: frameCount,
                      program: &program, aux: &aux, isolated: &isolated, preEffects: &preEffects,
                      monitor: &monitor, programAllowed: programAllowed,
-                     contribution: &contribution,
+                     contribution: &contribution, privateTalkback: privateRecipient != nil,
                      monitorAllowed: monitorAllowed, soloActive: soloActive) ?? (pre: frameCount, post: frameCount)
+        return (result.pre, result.post, privateRecipient)
     }
 
     func statistics() -> AudioEngineStatistics {
@@ -1134,6 +1202,10 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 private final class ChannelIngest: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
     private let insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?
+    private let resetInsert: (@Sendable () -> Void)?
+    private var captureFloor: CMTime?
+    private var privateTalkback = false
+    private var lastCapturePTS = CMTime.invalid
     private var converter = CanonicalAudioConverter()
     private var preConverter: CanonicalAudioConverter?
     private var preRing: AudioRingBuffer?
@@ -1157,9 +1229,11 @@ private final class ChannelIngest: @unchecked Sendable {
     /// ramp is active).
     private var duckedChunk = [Float](repeating: 0, count: AudioMixEngine.chunkFrames * 2)
 
-    init(insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?, initialGain: Float, initialAuxSend: Float = 0,
+    init(insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?, resetInsert: (@Sendable () -> Void)? = nil,
+         captureFloor: CMTime? = nil, initialGain: Float, initialAuxSend: Float = 0,
          soloed: Bool = false, delayFrames: Int = 0, preEffectsEnabled: Bool = false) {
         self.insert = insert
+        self.resetInsert = resetInsert; self.captureFloor = captureFloor
         self.gain = ChannelGainRamp(gain: initialGain)
         self.auxSend = ChannelGainRamp(gain: initialAuxSend)
         self.soloed = soloed
@@ -1168,6 +1242,28 @@ private final class ChannelIngest: @unchecked Sendable {
             preConverter = CanonicalAudioConverter()
             preRing = AudioRingBuffer(capacityFrames: AudioMixEngine.ringCapacityFrames)
         }
+    }
+
+    func beginTalkback(at now: CMTime) -> Bool {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        guard insert == nil || resetInsert != nil, lastCapturePTS.isNumeric,
+              (now - lastCapturePTS).seconds >= 0, (now - lastCapturePTS).seconds < 0.25 else { return false }
+        privateTalkback = true; resetPrivateBoundary(at: now); return true
+    }
+    func endTalkback(at now: CMTime) {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        privateTalkback = false; resetPrivateBoundary(at: now)
+    }
+    private func resetPrivateBoundary(at now: CMTime) {
+        captureFloor = now
+        meter = LevelMeter()
+        ring = AudioRingBuffer(capacityFrames: AudioMixEngine.ringCapacityFrames)
+        converter = CanonicalAudioConverter()
+        if preRing != nil {
+            preRing = AudioRingBuffer(capacityFrames: AudioMixEngine.ringCapacityFrames)
+            preConverter = CanonicalAudioConverter()
+        }
+        resetInsert?()
     }
 
     func setPreEffectsEnabled(_ enabled: Bool) {
@@ -1219,6 +1315,12 @@ private final class ChannelIngest: @unchecked Sendable {
     func enqueue(_ sampleBuffer: CMSampleBuffer, anchor: CMTime) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
+        let originalPTS = sampleBuffer.presentationTimeStamp
+        if let captureFloor {
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            guard originalPTS.isNumeric, originalPTS >= captureFloor, originalPTS <= now else { return }
+        }
+        lastCapturePTS = originalPTS
         if let preConverter, let pcm = preConverter.convert(sampleBuffer),
            let raw = CanonicalAudioConverter.interleavedFloats(pcm), !raw.isEmpty {
             let pts = sampleBuffer.presentationTimeStamp
@@ -1227,7 +1329,7 @@ private final class ChannelIngest: @unchecked Sendable {
                 : preRing?.nextWritePosition ?? 0
             preRing?.write(raw, at: position)
         }
-        let processed = insert?(sampleBuffer) ?? sampleBuffer
+        let processed = privateTalkback ? sampleBuffer : (insert?(sampleBuffer) ?? sampleBuffer)
         guard let pcm = converter.convert(processed),
               let samples = CanonicalAudioConverter.interleavedFloats(pcm),
               !samples.isEmpty else { return }
@@ -1263,13 +1365,14 @@ private final class ChannelIngest: @unchecked Sendable {
     func mix(at position: Int64, frameCount: Int,
              program: inout [Float], aux: inout [Float],
              isolated: inout [Float], preEffects: inout [Float], monitor: inout [Float],
-             programAllowed: Bool, contribution: inout [Float], monitorAllowed: Bool, soloActive: Bool) -> (pre: Int, post: Int) {
+             programAllowed: Bool, contribution: inout [Float], privateTalkback: Bool, monitorAllowed: Bool, soloActive: Bool) -> (pre: Int, post: Int) {
         os_unfair_lock_lock(&lock)
         let postBefore = ring.underrunFrames
         let preBefore = preRing?.underrunFrames ?? 0
-        preRing?.fill(at: position - Int64(delayFrames), frameCount: frameCount, into: &preEffects)
+        let readPosition = position - Int64(privateTalkback ? 0 : delayFrames)
+        preRing?.fill(at: readPosition, frameCount: frameCount, into: &preEffects)
         let preGaps = preRing.map { Int($0.underrunFrames - preBefore) } ?? frameCount
-        ring.fill(at: position - Int64(delayFrames), frameCount: frameCount, into: &chunk)
+        ring.fill(at: readPosition, frameCount: frameCount, into: &chunk)
         let postGaps = Int(ring.underrunFrames - postBefore)
         meter.ingest(interleaved: chunk)
         for index in 0..<(frameCount * 2) { isolated[index] = chunk[index] }
@@ -1294,6 +1397,7 @@ private final class ChannelIngest: @unchecked Sendable {
                 let index = frame * 2 + side
                 let value = source[index]
                 contribution[index] = programAllowed ? value * channelGain : 0
+                if privateTalkback { contribution[index] = chunk[index] }
                 if programAllowed {
                     program[index] += contribution[index]
                     aux[index] += value * sendGain
@@ -1331,6 +1435,7 @@ private final class ChannelIngest: @unchecked Sendable {
 private final class GuestReturnMailbox: @unchecked Sendable {
     let lease: GuestReceiveLease
     var scratch = [Float](repeating: 0, count: AudioMixEngine.chunkFrames * 2)
+    var privateScratch = [Float](repeating: 0, count: AudioMixEngine.chunkFrames * 2)
     private let lock = NSLock()
     private let queue: DispatchQueue
     private let capacity: Int
@@ -1346,9 +1451,12 @@ private final class GuestReturnMailbox: @unchecked Sendable {
         self.current = current; self.sink = sink
         queue = DispatchQueue(label: "stream.audio.guest-return.\(token.uuidString)", qos: .userInitiated)
     }
-    func clearScratch() { for index in scratch.indices { scratch[index] = 0 } }
+    func clearScratch() { for index in scratch.indices { scratch[index] = 0; privateScratch[index] = 0 } }
     func accumulate(_ samples: [Float]) {
         for index in scratch.indices { scratch[index] += samples[index] }
+    }
+    func accumulatePrivate(_ samples: [Float]) {
+        for index in privateScratch.indices { privateScratch[index] += samples[index] }
     }
     func dropCount() -> Int64 { lock.lock(); defer { lock.unlock() }; return drops }
     func close() { lock.lock(); closed = true; pending.removeAll(); lock.unlock() }

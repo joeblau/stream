@@ -101,6 +101,8 @@ struct NativeInterviewView: View {
                         .id(context)
                     NativeGuestPrivateMessages(manager: manager, dispatcher: dispatcher, context: context)
                         .id(context)
+                    NativeGuestTalkbackView(manager: manager, dispatcher: dispatcher, context: context)
+                        .id(context)
                 }
                 Text(member.returnAudio == .ready ? "Public show audio return is active; your own audio is excluded." :
                     member.returnAudio == .preparing ? "Preparing public show audio return. Start local preview to supply the mix." :
