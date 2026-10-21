@@ -9,6 +9,9 @@ folder=ARGV[0]
 spec=YAML.load_file('project.yml')
 spec['name']='StudioPerformanceValidation'
 spec['packages'].each_value{|p| p['path']=File.join(root,p['path']) if p['path']}
+if ENV['STREAM_VENDOR_ROOT']
+  spec['packages'].each_value{|p| p['path']=File.join(ENV['STREAM_VENDOR_ROOT'],File.basename(p['path'])) if p['path']}
+end
 spec['targets'].select!{|name,_| ['StreamCore','StreamMac'].include?(name)}
 # Tool fixtures exercise host code; they neither embed nor activate extensions.
 spec['targets'].each_value{|t| t['dependencies']&.reject!{|d| d['target'] && !spec['targets'].key?(d['target'])}}
