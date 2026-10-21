@@ -36,6 +36,7 @@ struct BrowserWidgetAudioCommand: Codable, Sendable {
         guard action == .load else {
             guard html == nil, url == nil, options == nil else { throw CommandError.invalidContent }
             if action == .snapshot, requestID == nil || generation == nil { throw CommandError.invalidContent }
+            if (action == .suspend || action == .resume), generation == nil { throw CommandError.invalidContent }
             return
         }
         try options?.validate()

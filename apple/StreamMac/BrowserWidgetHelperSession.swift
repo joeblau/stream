@@ -127,8 +127,8 @@ import CoreVideo
             }
         }
     }
-    func setSuspended(id: UUID, suspended: Bool) {
-        guard let demand = demands[id] else { return }
+    func setSuspended(id: UUID, generation: UUID, suspended: Bool) {
+        guard let demand = demands[id], demand.generation == generation else { return }
         try? connection?.send(.init(action: suspended ? .suspend : .resume, widgetID: id, generation: demand.generation))
     }
 

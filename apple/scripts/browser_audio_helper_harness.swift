@@ -160,9 +160,9 @@ final class AudioTrace: @unchecked Sendable {
         defer { helper.close(); noise.close() }
         print("Fixture stage: waiting for helper/noise readiness"); fflush(nil)
         try await wait { helper.has(.ready) && noise.has(.ready) }
-        let left = UUID(), right = UUID()
-        try helper.send(.init(action: .load, widgetID: left, html: toneHTML(frequency: 440, pan: -1)))
-        try helper.send(.init(action: .load, widgetID: right, html: toneHTML(frequency: 880, pan: 1)))
+        let left = UUID(), right = UUID(), leftGeneration = UUID(), rightGeneration = UUID()
+        try helper.send(.init(action: .load, widgetID: left, html: toneHTML(frequency: 440, pan: -1), generation: leftGeneration))
+        try helper.send(.init(action: .load, widgetID: right, html: toneHTML(frequency: 880, pan: 1), generation: rightGeneration))
         print("Fixture stage: waiting for widget navigation"); fflush(nil)
         try await wait { helper.has(.loaded, id: left) && helper.has(.loaded, id: right) }
         try helper.send(.init(action: .probe, widgetID: left)); try helper.send(.init(action: .probe, widgetID: right))
@@ -274,10 +274,10 @@ final class AudioTrace: @unchecked Sendable {
         await mixer.setChannelGain(capture.channel, volume: 1, isMuted: false)
 
         // Hiding a widget in the prototype is explicit media suspension; the sibling and noise continue.
-        try helper.send(.init(action: .suspend, widgetID: left))
+        try helper.send(.init(action: .suspend, widgetID: left, generation: leftGeneration))
         try await Task.sleep(for: .seconds(0.8))
         precondition(raw.amplitude(440, channel: 0) < leftBaseline * 0.02 && raw.amplitude(880, channel: 1) > rightBaseline * 0.8 && unrelated.amplitude(1320, channel: 0) > noiseBaseline * 0.8)
-        try helper.send(.init(action: .resume, widgetID: left))
+        try helper.send(.init(action: .resume, widgetID: left, generation: leftGeneration))
         try await Task.sleep(for: .seconds(0.8))
         precondition(raw.amplitude(440, channel: 0) > leftBaseline * 0.8)
         try helper.send(.init(action: .reload, widgetID: left))
@@ -347,6 +347,13 @@ final class AudioTrace: @unchecked Sendable {
             preconditionFailure("Encoded IPC size must also be bounded")
         } catch {}
         let id = UUID()
+        for action in [BrowserWidgetAudioCommand.Action.suspend, .resume] {
+            do {
+                try BrowserWidgetAudioCommand(action: action, widgetID: id).validate()
+                preconditionFailure("Media lifecycle commands must identify the page generation")
+            } catch {}
+            try BrowserWidgetAudioCommand(action: action, widgetID: id, generation: UUID()).validate()
+        }
         for options in [BrowserWidgetPageOptions(width: 1_921), BrowserWidgetPageOptions(height: 1_081), BrowserWidgetPageOptions(width: -1)] {
             do { try options.validate(); preconditionFailure("Unqualified viewports must fail before allocating") } catch {}
         }
