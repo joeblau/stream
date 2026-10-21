@@ -1,5 +1,6 @@
 #include "GuestReceive.h"
 #include "GuestReturnH264.hpp"
+#include "GuestReturnClock.hpp"
 #include <rtc/rtc.hpp>
 #include <rtc/version.h>
 #include <algorithm>
@@ -543,12 +544,14 @@ extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generatio
                 #endif
                 return sent;
             })) return 0;
-        // Every frame publishes a compound source-clock SR/SDES. The shared
-        // CNAME aligns this camera return and the separate public Opus return.
+        // The SR is anchored at send wallclock, with the original source clock
+        // extrapolated to that same instant. Both media share their CNAME.
+        const uint64_t reportNtp = stream_guest_return::reportNtpNow();
+        const uint32_t reportRtp = stream_guest_return::reportRtp(timestamp, ntp, reportNtp, 90000);
         rtc::binary sr(52); auto r = reinterpret_cast<uint8_t *>(sr.data());
         std::memset(r, 0, sr.size()); r[0] = 128; r[1] = 200; r[3] = 6;
-        store32(r + 4, ssrc); store32(r + 8, uint32_t(ntp >> 32)); store32(r + 12, uint32_t(ntp));
-        store32(r + 16, timestamp); store32(r + 20, receiver->returnVideoPackets); store32(r + 24, receiver->returnVideoBytes);
+        store32(r + 4, ssrc); store32(r + 8, uint32_t(reportNtp >> 32)); store32(r + 12, uint32_t(reportNtp));
+        store32(r + 16, reportRtp); store32(r + 20, receiver->returnVideoPackets); store32(r + 24, receiver->returnVideoBytes);
         r[28] = 129; r[29] = 202; r[31] = 5; store32(r + 32, ssrc);
         r[36] = 1; r[37] = 13; std::memcpy(r + 38, "stream-return", 13);
         (void)track->send(std::move(sr));
@@ -613,12 +616,12 @@ extern "C" int SGReceiverSendReturnOpus(SGReceiver *receiver, uint64_t generatio
         const bool report = !receiver->returnStarted || receiver->returnPackets % 25 == 0;
         receiver->returnStarted = true;
         if (report) {
-            // Compound SR+SDES describes the captured source time, not encode
-            // or network arrival. Future return video can use this same map.
+            const uint64_t reportNtp = stream_guest_return::reportNtpNow();
+            const uint32_t reportRtp = stream_guest_return::reportRtp(timestamp, ntp, reportNtp, 48000);
             rtc::binary sr(52); auto r = reinterpret_cast<uint8_t *>(sr.data());
             std::memset(r, 0, sr.size()); r[0] = 128; r[1] = 200; r[3] = 6;
-            store32(r + 4, receiver->returnSSRC); store32(r + 8, uint32_t(ntp >> 32));
-            store32(r + 12, uint32_t(ntp)); store32(r + 16, timestamp);
+            store32(r + 4, receiver->returnSSRC); store32(r + 8, uint32_t(reportNtp >> 32));
+            store32(r + 12, uint32_t(reportNtp)); store32(r + 16, reportRtp);
             store32(r + 20, receiver->returnPackets); store32(r + 24, receiver->returnBytes);
             r[28] = 129; r[29] = 202; r[31] = 5; store32(r + 32, receiver->returnSSRC);
             r[36] = 1; r[37] = 13; std::memcpy(r + 38, "stream-return", 13);
