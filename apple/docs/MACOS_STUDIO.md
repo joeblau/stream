@@ -4,11 +4,15 @@ Generate the project with `cd apple && xcodegen generate`, open `Stream.xcodepro
 and run the StreamMac scheme. The deployment floor is macOS 14.
 The pinned transport archives omit SRT/WebRTC implementation symbols in their
 Intel slices. CI resolves packages into its own derived-data directory, then
-`python3 scripts/repair_desktop_transport_archives.py build/desktop` rebuilds
+`python3 scripts/repair_desktop_transport_archives.py build/desktop --require-relay-policy` rebuilds
 missing implementations from pinned sources with static OpenSSL at the same
 macOS 14 floor. Install CMake for this step. Source revisions and license notices
 remain in `build/desktop/TransportSourceBuild/<architecture>`. Use the same
-resolve/repair step before an Intel local build. The script changes only that
+resolve/repair step before local builds on either architecture: shipping guest
+media requires the verified compiled relay policy, even when transport symbols
+already exist. The receipt binds the exact pinned sources, patch and archive
+slice; selected relay pairs and actual decoded media still need qualification.
+The script changes only that
 build's downloaded artifacts and retains the other architecture's slice.
 CI builds the
 desktop app and runs the shared logic suite on Apple Silicon and Intel hosted
