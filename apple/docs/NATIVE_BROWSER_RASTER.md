@@ -53,7 +53,7 @@ These are local M3 Max / Mac15,8 results on macOS 27.2 (26B118), Xcode 27.2
 | Transparent, half-green, red and opaque-white DOM pixels | Premultiplied BGRA `[0,0,0,0]`, `[0,128,0,128]`, `[0,0,255,255]`, `[255,255,255,255]` |
 | Immediate script-updated 2D canvas and screen CSS | Current cyan/orange canvas preserved; screen blue retained despite yellow `@media print` rule |
 | Local muted H264 video, preserved/default-buffer WebGL, CSS animation | Actual seeks, looped playback and successive animation/script colors retained |
-| Eight actual legacy hosts at 1920×1080 / requested 15 fps | All eight delivered 42 fresh frames over the measured two-second interval |
+| Eight actual legacy hosts at 1920×1080 / requested 15 fps | All eight exceed ten additional fresh frames over a two-second interval after warmup; the runner prints cumulative counts and interval deltas separately |
 | One held maximum viewport, another maximum viewport queued ahead of HD clients | Seven healthy HD clients finish while held callback retains ownership; stale queued/completed work refuses pixels |
 | Helper IPC and current/stale Suspend, Resume, Stop | Exact helper pixels retain alpha; old commands cannot retire the blue replacement page |
 | Actual legacy/helper → Program composition → shipping Program writer → native H264 decode | Raw magenta preserved exactly, half-green blends correctly, red/white content retained; decoded background matches pre-widget same-codec baseline within existing 12-level tolerance |
