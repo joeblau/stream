@@ -1,6 +1,20 @@
 
 @main @MainActor enum OwnedTalkbackHoldProbe {
+    static func externalPress(_ label: String, client: String) async throws -> (Int32, String) {
+        let parent = getpid()
+        return try await Task.detached {
+            let process = Process(), output = Pipe()
+            process.executableURL = URL(fileURLWithPath: client)
+            process.arguments = [String(parent), "press", label]
+            process.standardOutput = output; process.standardError = output
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+        }.value
+    }
     static func main() {
+        setbuf(stdout, nil)
         guard CGSessionCopyCurrentDictionary() != nil else {
             print("UNQUALIFIED: owned AppKit hold control requires WindowServer"); exit(77)
         }
@@ -61,7 +75,7 @@
         button.change = { held in transitions.append(held); times.append(ProcessInfo.processInfo.systemUptime); return true }
         precondition(button.accessibilityPerformPress() && transitions.last == true,
                      "Public accessibility Press failed to begin through the same accepted callback")
-        precondition(button.accessibilityLabel() == "Stop private talkback" && button.accessibilityValue() as? String == "Private microphone active",
+        precondition(button.accessibilityTitle() == "Stop private talkback" && button.accessibilityLabel() == "Stop private talkback" && button.accessibilityValue() as? String == "Private microphone active",
                      "Accessible state does not announce the stop action and private interval")
         precondition(button.accessibilityPerformPress() && transitions.suffix(2) == [true, false],
                      "A second accessibility Press failed to release the exact local hold")
@@ -73,7 +87,7 @@
         RunLoop.main.run(until: Date().addingTimeInterval(0.4))
         precondition(transitions.suffix(2) == [true, false] && times.last! - boundedStart >= 9.95 && times.last! - boundedStart < 10.25,
                      "Accessibility activation failed its ten-second maximum release")
-        precondition(button.accessibilityLabel() == "Start private talkback (10 seconds maximum)" && button.accessibilityValue() as? String == "Inactive",
+        precondition(button.accessibilityTitle() == "Start private talkback (10 seconds maximum)" && button.accessibilityLabel() == "Start private talkback (10 seconds maximum)" && button.accessibilityValue() as? String == "Inactive",
                      "Automatic release left stale accessible state")
         precondition(button.accessibilityPerformPress(), "Accessibility interval before focus loss failed")
         _ = button.resignFirstResponder()
@@ -91,7 +105,24 @@
         button.isEnabled = false
         precondition(button.accessibilityPerformPress() && transitions.suffix(2) == [true, false],
                      "Disabling new starts prevented an existing accessibility interval from being stopped")
-        window.close()
         print("PASS: actual AppKit PTT mouse tracking, Space down/repeat/up, modifier refusal, responder loss and view removal; public accessibility Press begin/stop, disabled/stale refusal, exact ten-second automatic release, prior-timer cancellation, manager revocation and fresh restart; no capture or permissions")
+        if CommandLine.arguments.contains("--external-ax") {
+            guard let client = ProcessInfo.processInfo.environment["STREAM_TALKBACK_AX_CLIENT"] else { window.close(); exit(77) }
+            button.isEnabled = true; button.reconcile(active: false)
+            transitions.removeAll()
+            Task { @MainActor in
+                do {
+                    let begin = try await externalPress("Start private talkback (10 seconds maximum)", client: client)
+                    guard begin.0 != 77 else { print("UNQUALIFIED: \(begin.1)"); window.close(); exit(77) }
+                    precondition(begin.0 == 0 && transitions == [true], "Owned public AX begin failed: \(begin)")
+                    let stop = try await externalPress("Stop private talkback", client: client)
+                    precondition(stop.0 == 0 && transitions == [true, false], "Owned public AX release failed: \(stop)")
+                    print("PASS: separate owned public AXUIElement client resolves the real Start/Stop AX titles and activates/releases the exact shipping control")
+                    window.close(); exit(0)
+                } catch { print("FAIL: \(error)"); window.close(); exit(1) }
+            }
+            app.run()
+        }
+        window.close()
     }
 }

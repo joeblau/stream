@@ -57,7 +57,11 @@ private struct NativeTalkbackHoldButton: NSViewRepresentable {
             return accepted
         }
         private func updateAccessibleState() {
-            setAccessibilityLabel(held ? "Stop private talkback" : "Start private talkback (10 seconds maximum)")
+            let action = held ? "Stop private talkback" : "Start private talkback (10 seconds maximum)"
+            // AppKit retains the visual button title as AXTitle unless it is
+            // explicitly overridden; clients commonly read it before AXLabel.
+            setAccessibilityTitle(action)
+            setAccessibilityLabel(action)
             setAccessibilityValue(held ? "Private microphone active" : "Inactive")
             setAccessibilityHelp("Activate to start a private microphone interval of up to ten seconds; activate again to stop. Space or mouse holds end on release. Focus loss, removal and connection changes also stop it. Speech after stopping may return to public outputs.")
         }

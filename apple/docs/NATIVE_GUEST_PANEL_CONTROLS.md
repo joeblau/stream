@@ -127,3 +127,9 @@ cancelled prior timers, focus/removal, manager revocation and a fresh deliberate
 start all pass. These are actual control/callback proofs; they do not claim a
 spoken VoiceOver session or qualify the studio's remaining contrast/traversal
 requirements in #90.
+
+Add `--external-ax` to the same small runner to exercise a separate owned public
+AXUIElement client against the real button in its parent window. This resolves
+the native Start/Stop AX titles and performs both actions through IPC; it passed
+on the named local host. Missing existing native AX access is explicitly
+unqualified (77). The client never requests trust or addresses another app.
