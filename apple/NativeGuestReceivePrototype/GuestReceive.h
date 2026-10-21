@@ -65,7 +65,7 @@ void SGReceiverDestroy(SGReceiver *);
 #ifdef STREAM_GUEST_VALIDATION
 typedef struct {
     uint32_t forwarded_packets;
-    int fragmented_prefix, failed;
+    int fragmented_prefix, failed, recovery_checked, recovered_idr;
 } SGReturnVideoFaultReceipt;
 // Fault injection for exactly the next admitted AU. Receipts prove whether
 // the owned peer actually accepted a fragmented prefix before the failure.

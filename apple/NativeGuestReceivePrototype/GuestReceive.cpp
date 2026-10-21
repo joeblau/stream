@@ -543,6 +543,14 @@ extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generatio
                 #endif
                 return sent;
             })) return 0;
+        #ifdef STREAM_GUEST_VALIDATION
+        auto &fault = receiver->validationReturnVideoFault;
+        if (fault.failed && !fault.recovery_checked) {
+            fault.recovery_checked = 1;
+            for (size_t index = 0; index < unit.count; ++index)
+                if ((data[unit.nals[index].offset] & 31) == 5) fault.recovered_idr = 1;
+        }
+        #endif
         // Every frame publishes a compound source-clock SR/SDES. The shared
         // CNAME aligns this camera return and the separate public Opus return.
         rtc::binary sr(52); auto r = reinterpret_cast<uint8_t *>(sr.data());
