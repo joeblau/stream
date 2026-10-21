@@ -232,11 +232,15 @@ struct SGReceiver {
     std::array<uint32_t, 3> ssrcs{};
     bool configured = false;
     bool host = false;
-    bool returnAudio = false, returnVideo = false, relayRequired = false, returnStarted = false;
+    bool returnAudio = false, returnVideo = false, relayRequired = false, returnStarted = false, returnAudioAttempted = false;
     bool returnVideoStarted = false;
     uint16_t returnVideoSequence = 0;
     uint32_t returnVideoLastRTP = 0, returnVideoPackets = 0, returnVideoBytes = 0;
     uint32_t returnVideoSSRC = 0;
+    #ifdef STREAM_GUEST_VALIDATION
+    int validationReturnVideoFailAfter = -1;
+    SGReturnVideoFaultReceipt validationReturnVideoFault{};
+    #endif
     uint16_t returnSequence = 0;
     uint32_t returnSSRC = 0, returnLastRTP = 0, returnPackets = 0, returnBytes = 0;
     std::shared_ptr<rtc::DataChannel> control;
@@ -510,13 +514,34 @@ extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generatio
         // replay a partially sent access unit; the Swift sender requests IDR.
         receiver->returnVideoStarted = true; receiver->returnVideoLastRTP = timestamp;
         const uint32_t ssrc = receiver->returnVideoSSRC;
+        #ifdef STREAM_GUEST_VALIDATION
+        const int failAfter = receiver->validationReturnVideoFailAfter;
+        receiver->validationReturnVideoFailAfter = -1;
+        if (failAfter >= 0) receiver->validationReturnVideoFault = {};
+        #endif
         const auto store32 = [](uint8_t *p, uint32_t value) { for (int i = 0; i < 4; ++i) p[i] = uint8_t(value >> (24 - 8 * i)); };
         if (!stream_guest_return::packetize(data, unit, timestamp, ssrc,
             receiver->returnVideoSequence, receiver->returnVideoPackets, receiver->returnVideoBytes,
             [&](const uint8_t *packet, size_t count) {
                 if (track->bufferedAmount() > 16384) return false;
-                return track->send(rtc::binary(reinterpret_cast<const std::byte *>(packet),
-                                               reinterpret_cast<const std::byte *>(packet + count)));
+                #ifdef STREAM_GUEST_VALIDATION
+                if (failAfter >= 0 && receiver->validationReturnVideoFault.forwarded_packets >= uint32_t(failAfter)) {
+                    receiver->validationReturnVideoFault.failed = 1;
+                    return false;
+                }
+                #endif
+                const bool sent = track->send(rtc::binary(reinterpret_cast<const std::byte *>(packet),
+                                                          reinterpret_cast<const std::byte *>(packet + count)));
+                #ifdef STREAM_GUEST_VALIDATION
+                if (sent && failAfter >= 0) {
+                    auto &receipt = receiver->validationReturnVideoFault;
+                    ++receipt.forwarded_packets;
+                    if (count >= 15 && (packet[12] & 31) == 28 && (packet[13] & 128) && !(packet[13] & 64)) {
+                        receipt.fragmented_prefix = 1;
+                    }
+                }
+                #endif
+                return sent;
             })) return 0;
         // Every frame publishes a compound source-clock SR/SDES. The shared
         // CNAME aligns this camera return and the separate public Opus return.
@@ -530,6 +555,21 @@ extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generatio
         return 1;
     } catch (...) { return 0; }
 }
+#ifdef STREAM_GUEST_VALIDATION
+extern "C" int SGReceiverValidationFailReturnVideoAfter(SGReceiver *receiver, int forwarded_packets) {
+    if (!receiver || forwarded_packets < 0 || forwarded_packets > 128) return 0;
+    std::lock_guard lock(receiver->state->mutex);
+    if (!receiver->state->active) return 0;
+    receiver->validationReturnVideoFailAfter = forwarded_packets;
+    receiver->validationReturnVideoFault = {};
+    return 1;
+}
+extern "C" SGReturnVideoFaultReceipt SGReceiverValidationReturnVideoFault(SGReceiver *receiver) {
+    if (!receiver) return {};
+    std::lock_guard lock(receiver->state->mutex);
+    return receiver->validationReturnVideoFault;
+}
+#endif
 extern "C" int SGReceiverSendReturnOpus(SGReceiver *receiver, uint64_t generation,
                                          const uint8_t *data, size_t bytes, uint32_t timestamp, uint64_t ntp) {
     if (!receiver || !data || !bytes || bytes > 1275 || !ntp) return 0;
@@ -552,7 +592,7 @@ extern "C" int SGReceiverSendReturnOpus(SGReceiver *receiver, uint64_t generatio
             rtc::Candidate local, remote;
             if (!receiver->peer->getSelectedCandidatePair(&local, &remote) || local.type() != rtc::Candidate::Type::Relayed) return 0;
         }
-        if (receiver->returnStarted && int32_t(timestamp - receiver->returnLastRTP) <= 0) return 0;
+        if (receiver->returnAudioAttempted && int32_t(timestamp - receiver->returnLastRTP) <= 0) return 0;
         // Only one20ms packet is admitted per source window. There is no
         // application-owned outbound byte queue, retry backlog or clock rebase.
         const auto store32 = [](uint8_t *p, uint32_t value) {
@@ -564,10 +604,14 @@ extern "C" int SGReceiverSendReturnOpus(SGReceiver *receiver, uint64_t generatio
         p[2] = uint8_t(receiver->returnSequence >> 8); p[3] = uint8_t(receiver->returnSequence);
         store32(p + 4, timestamp); store32(p + 8, receiver->returnSSRC);
         std::memcpy(p + 12, data, bytes);
+        // SRTP protection can consume its packet index before the transport
+        // rejects a send. Never reuse an attempted sequence/source window.
+        ++receiver->returnSequence;
+        receiver->returnAudioAttempted = true; receiver->returnLastRTP = timestamp;
         if (!track->send(std::move(packet))) return 0;
-        ++receiver->returnSequence; ++receiver->returnPackets; receiver->returnBytes += uint32_t(bytes);
+        ++receiver->returnPackets; receiver->returnBytes += uint32_t(bytes);
         const bool report = !receiver->returnStarted || receiver->returnPackets % 25 == 0;
-        receiver->returnStarted = true; receiver->returnLastRTP = timestamp;
+        receiver->returnStarted = true;
         if (report) {
             // Compound SR+SDES describes the captured source time, not encode
             // or network arrival. Future return video can use this same map.
