@@ -64,8 +64,8 @@ used. Physical devices, deployed brokers and signed installation were not used.
 | Program/Secondary/Clean selection | Actual purple landscape Program and blue 100×180 portrait Secondary; independent scene content, source-demand ownership, layout removal and explicit restoration; separately composed Clean omits the actual red project overlay |
 | Rejoin and terminal lease | Old remote track ends; selected Secondary resets to Program/off; explicit enable decodes current Program; retained source/start commands from old full lease rejected |
 | Partial network send | Four actual SDK RTP packets include FU-A START without END; next successful AU is IDR; Chrome recovers fresh green pixels |
-| Measured capacity | Actual negotiated single-source REMB/RR; Chrome received 73,196 bps and SDK-accepted RTP payload plus headers 75,591 bps remain below fresh 119,451 bps REMB; learned bucket survives same-lease Off/On |
-| Static application-limited estimate | Actual Clean remains ready through a late white update at 6,400 bps REMB/4,000 bps codec target; fresh remote decoded frame and strict A/V bounds |
+| Measured capacity | Actual negotiated single-source REMB/RR; Chrome received 79,812 bps, SDK-accepted RTP 82,202 bps and RTP plus compound RTCP 88,306 bps remain below fresh 116,080 bps REMB; learned bucket survives same-lease Off/On |
+| Static application-limited estimate | Actual Clean remains ready through a late white update at 6,400 bps REMB/4,000 bps codec target with 93 decoded frames; fresh remote decoded frame and strict A/V bounds |
 | Persistent video-only failure | Controlled actual SDK sends fail for 2 seconds; optional video hides and releases its VT reservation, real decoded stereo public audio continues, restored source cannot replay Start |
 | Held VT teardown | Real submitted VT frame held; Off returns under 100 ms, late send rejected; reservation remains until actual VT invalidation |
 | Installation races | Held Program installation→Secondary replacement and held-before-Secondary-install→Program replacement preserve only the new token/capability/reservation |
@@ -191,13 +191,14 @@ resolution policy to low. A previously learned tighter bitrate restriction
 survives a feedback gap. Fresh scoped REMB limits the actual VT target to a
 quantized ceiling, down to the codec's 4 kbps target floor. A separate whole-AU
 admission bucket charges the exact projected RTP payload plus 12 byte headers
-from the actual packetizer, at 80% of fresh REMB with a maximum 2 second/16 KiB
+from the actual packetizer and the 52-byte compound SR/SDES emitted after each
+successful access unit, at 80% of fresh REMB with a maximum 2 second/16 KiB
 burst. Repeated reports and same-lease Off/On do not refill it, and rejected or
 failed AUs cannot borrow unbounded debt. Static low-entropy pictures remain
 useful even when an application-limited receiver estimate is only 6–10 kbps.
 If no complete fresh frame can be delivered for 2 seconds, video stops with a
 measured bandwidth message and requires a new deliberate Start. Audio continues
-independently. These charges exclude SRTP, UDP/IP, TURN and RTCP overhead;
+independently. These charges exclude SRTP, UDP/IP and TURN overhead;
 20% remains as headroom rather than claiming full wire accounting. Received throughput is
 never treated as spare capacity. RR loss, actual latest-frame replacement,
 SDK send failures and the 16 KiB outbound queue limit provide congestion signals.
@@ -222,6 +223,19 @@ Actual partial-FU-A loss and next-IDR decode recovery use the existing bounded
 network fault seam. The standalone policy checks additionally exercise RR-loss
 and SDK-backpressure downsteps; actual VT high-to-low replacement proves
 invalidation, no upscaling and original 90 kHz PTS.
+
+The 2026-10-21 RTCP accounting regression first failed against the previous
+sender: actual VT output reached admission with 207 RTP bytes while the SDK
+also emitted a 52-byte compound sender report outside that charge. The shared
+forecast now reserves all 259 bytes before SDK entry. A separate SDK-accepted
+sender-report counter lets the owned relay fixture measure RTP plus RTCP
+without reclassifying payload counters or claiming encrypted wire accounting.
+The complete production-source/owned-TURN/Chrome155 matrix passes the new
+RTP+RTCP capacity assertion, partial-AU loss and next-IDR recovery, video-only
+failure isolation and both fresh Program/Secondary/Clean A/V repetitions.
+The native 50 ms and decoded raw-track 100 ms cue limits remain unchanged;
+the six raw-track differences range from 23.79 to 76.75 ms. Actual Opus stereo,
+full-lease mix-minus and held-VT reservation/retirement fixtures also pass.
 
 Natural higher-profile upshift, real impairment-driven high-to-low adaptation
 and capacity-bootstrap probing remain unqualified. The application-limited

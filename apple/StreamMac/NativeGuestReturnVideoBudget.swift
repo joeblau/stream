@@ -90,8 +90,10 @@ struct NativeGuestReturnVideoBudget: Sendable {
     }
 }
 
-/// Whole access units consume exact packetizer RTP payload+header bytes before
-/// the SDK sees any packet. This bounds attempted bytes, including failed AUs.
+/// Whole access units consume exact packetizer RTP payload+header and compound
+/// sender-report bytes before the SDK sees any packet. This bounds attempted
+/// application send bytes, including failed AUs. Network/SRTP overhead remains
+/// outside this application budget.
 /// A2second burst admits a small recovery IDR without borrowing unlimited debt.
 struct NativeGuestReturnVideoByteBudget: Sendable {
     private var rate: Double = 0, balance: Double = 0
@@ -108,12 +110,12 @@ struct NativeGuestReturnVideoByteBudget: Sendable {
         if !limited { limited = true; balance = maximum }
         else { balance = min(balance, maximum) }
     }
-    func canFit(rtpBytes: UInt32) -> Bool { !limited || Double(rtpBytes) <= maximum }
-    mutating func admit(rtpBytes: UInt32, at now: UInt64) -> Bool {
-        guard rtpBytes > 0 else { return false }
+    func canFit(sendBytes: UInt32) -> Bool { !limited || Double(sendBytes) <= maximum }
+    mutating func admit(sendBytes: UInt32, at now: UInt64) -> Bool {
+        guard sendBytes > 0 else { return false }
         guard limited else { return true }
         advance(now)
-        guard Double(rtpBytes) <= balance else { return false }
-        balance -= Double(rtpBytes); return true
+        guard Double(sendBytes) <= balance else { return false }
+        balance -= Double(sendBytes); return true
     }
 }

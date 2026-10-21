@@ -207,6 +207,9 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
     private var blocked = false // Owned only by queue.
     private var lastCapacityBitrate = 250_000 // Retain a learned restriction through feedback gaps.
     private var lastProfileChange: UInt64 = 0
+    #if STREAM_GUEST_VALIDATION
+    var validationAdmissionCost: (@Sendable (Data, UInt32) -> Void)?
+    #endif
     private func adapt(_ native: NativeGuestReceiver, token current: UUID) {
         let now = DispatchTime.now().uptimeNanoseconds / 1_000_000
         guard now >= lastFeedback, now - lastFeedback >= 500 else { return }
@@ -351,13 +354,16 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
         catch { stop(ifCurrent: frame.token, state: .failed); return }
         guard let encoded, callbacks.permitsReturn(native), isActive(frame.token) else { return }
         let now = DispatchTime.now().uptimeNanoseconds / 1_000_000
-        guard byteBudget.admit(rtpBytes: encoded.rtpBytes, at: now) else {
+        guard byteBudget.admit(sendBytes: encoded.sendBytes, at: now) else {
             blocked = true; encoder.requestKeyframe()
-            if !byteBudget.canFit(rtpBytes: encoded.rtpBytes),
+            if !byteBudget.canFit(sendBytes: encoded.sendBytes),
                encoder.profile.width > 320 || encoder.profile.height > 180 { lowerRaster(frame.token) }
             else { deliveryBlocked(frame.token, at: now) }
             return
         }
+        #if STREAM_GUEST_VALIDATION
+        validationAdmissionCost?(encoded.data, encoded.sendBytes)
+        #endif
         gate.lock()
         guard token == frame.token else { gate.unlock(); return }
         let fresh = (CMClockGetTime(CMClockGetHostTimeClock()) - frame.pts).seconds <= 0.25

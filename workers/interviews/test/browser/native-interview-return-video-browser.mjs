@@ -310,7 +310,11 @@ try {
     const accepted=state.videoFeedback,packetDelta=(accepted.sentPackets-steadyFeedback.sentPackets)>>>0,payloadDelta=(accepted.sentPayloadBytes-steadyFeedback.sentPayloadBytes)>>>0;
     const acceptedRTPBitrate=(payloadDelta+12*packetDelta)*8000/(performance.now()-steadyTime);
     assert(Number.isFinite(acceptedRTPBitrate)&&acceptedRTPBitrate>0&&acceptedRTPBitrate<=receiverCeiling,'Actual SDK-accepted payload plus RTP headers stays within fresh capacity');
-    console.log(`PASS actual negotiated RR/REMB→bounded native VT bitrate; low raster retained without fresh higher-capacity evidence; received=${receivedBitrate.toFixed(0)}bps acceptedRTP=${acceptedRTPBitrate.toFixed(0)}bps scopedREMBfloor=${receiverCeiling}bps`);
+    const reportDelta=(accepted.sentSenderReportBytes-steadyFeedback.sentSenderReportBytes)>>>0;
+    assert(reportDelta>0&&reportDelta%52===0,'Actual SDK-accepted compound sender reports are counted separately');
+    const acceptedApplicationBitrate=(payloadDelta+12*packetDelta+reportDelta)*8000/(performance.now()-steadyTime);
+    assert(Number.isFinite(acceptedApplicationBitrate)&&acceptedApplicationBitrate<=receiverCeiling,'Actual SDK-accepted RTP plus compound RTCP stays within fresh receiver capacity');
+    console.log(`PASS actual negotiated RR/REMB→bounded native VT bitrate; low raster retained without fresh higher-capacity evidence; received=${receivedBitrate.toFixed(0)}bps acceptedRTP=${acceptedRTPBitrate.toFixed(0)}bps acceptedRTPandRTCP=${acceptedApplicationBitrate.toFixed(0)}bps scopedREMBfloor=${receiverCeiling}bps`);
     command({type:'video-green'});
   }
   ack=undefined;command({type:'video-budget-held'});await wait('actual aggregate reservation includes active return encoder',()=>{check();return ack==='video-budget-held';});

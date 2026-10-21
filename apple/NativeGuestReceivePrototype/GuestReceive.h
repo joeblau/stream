@@ -37,7 +37,7 @@ typedef struct {
     uint64_t remb_bits_per_second;
     uint32_t buffered_bytes;
     int remb_negotiated;
-    uint32_t sent_packets, sent_payload_bytes;
+    uint32_t sent_packets, sent_payload_bytes, sent_sender_report_bytes;
 } SGReturnVideoFeedback;
 // Prototype transport binds loopback only and uses no STUN/TURN service. Caller
 // must supply a current explicit admission generation before constructing it.
@@ -65,6 +65,9 @@ SGReturnVideoFeedback SGReceiverReturnVideoFeedback(SGReceiver *, uint64_t admit
 // 0 for invalid data. Excludes SRTP/UDP/IP/TURN overhead and RTCP. Snapshot sent
 // counters count SDK-accepted RTP (modulo2^32), never remote delivery receipts.
 uint32_t SGReturnH264RTPBytes(const uint8_t *, size_t);
+// Full bounded application send charge: the same RTP plus the compound52-byte
+// SR/SDES emitted after each successful AU. Excludes SRTP/UDP/IP/TURN overhead.
+uint32_t SGReturnH264SendBytes(const uint8_t *, size_t);
 // One bounded four-byte Annex-B H264 access unit, original90kHz RTP/NTP map.
 // Partial transmission consumes its RTP timestamp; callers must not retry it.
 int SGReceiverSendReturnH264(SGReceiver *, uint64_t admitted_generation,
