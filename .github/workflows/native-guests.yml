@@ -111,6 +111,7 @@ jobs:
           mkdir -p apple/build/native-guest-results
           set -euo pipefail
           apple/scripts/run_native_interview_control_harness.zsh 2>&1 | tee apple/build/native-guest-results/interview-service.log
+          apple/scripts/run_native_talkback_button_harness.zsh 2>&1 | tee apple/build/native-guest-results/talkback-button.log
           # The manager fixture resolves and repairs its own SwiftPM artifact
           # tree. Sharing the shipping app DerivedData exposes both the
           # original XCFramework and repaired product module maps to Clang.
