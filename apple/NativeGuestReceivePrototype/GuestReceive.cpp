@@ -544,6 +544,14 @@ extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generatio
                 #endif
                 return sent;
             })) return 0;
+        #ifdef STREAM_GUEST_VALIDATION
+        auto &fault = receiver->validationReturnVideoFault;
+        if (fault.failed && !fault.recovery_checked) {
+            fault.recovery_checked = 1;
+            for (size_t index = 0; index < unit.count; ++index)
+                if ((data[unit.nals[index].offset] & 31) == 5) fault.recovered_idr = 1;
+        }
+        #endif
         // The SR is anchored at send wallclock, with the original source clock
         // extrapolated to that same instant. Both media share their CNAME.
         const uint64_t reportNtp = stream_guest_return::reportNtpNow();
