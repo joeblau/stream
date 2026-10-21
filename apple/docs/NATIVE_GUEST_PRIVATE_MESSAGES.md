@@ -66,7 +66,7 @@ Synthetic credentials/state are removed during bounded child cleanup. The native
 workflow runs this mode on ARM and Intel; hosted results remain separate from a
 local pass.
 
-This is the private-text slice of issue #128. Private microphone talkback needs a
-separate addressed audio route and remains open. Native capacity remains one;
+This is the private-text slice of issue #128. The separate addressed microphone
+hold is documented in `NATIVE_GUEST_PANEL_CONTROLS.md`. Native capacity remains one;
 deployed broker/TURN, Internet/mobile/restricted-network, device permissions,
 operator services and signed installation are separate qualification gates.

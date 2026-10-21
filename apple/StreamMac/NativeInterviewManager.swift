@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import StreamCore
@@ -10,11 +11,13 @@ enum NativeInterviewCommand: Equatable, Sendable {
     case setMuted(NativeInterviewPeerLease, Bool), setSolo(NativeInterviewPeerLease, Bool)
     case rename(NativeInterviewPeerLease, String)
     case sendPrivateMessage(NativeInterviewPeerLease, String)
+    case beginTalkback(NativeInterviewPeerLease, AudioChannelID, UUID)
+    case endTalkback(NativeInterviewPeerLease, UUID)
     case lock(Bool), disconnect, rejoin, end
 
     var capturesConnection: Bool {
         switch self {
-        case .setMuted, .setSolo, .rename, .sendPrivateMessage: return true
+        case .setMuted, .setSolo, .rename, .sendPrivateMessage, .beginTalkback, .endTalkback: return true
         default: return false
         }
     }
@@ -24,6 +27,7 @@ enum NativeInterviewCommand: Equatable, Sendable {
         case .admit(let id), .backstage(let id), .onair(let id), .remove(let id), .restartMedia(let id),
              .monitor(let id, _), .approveScreen(let id, _): return id
         case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _), .sendPrivateMessage(let context, _): return context.receive.peerID
+        case .beginTalkback(let context, _, _), .endTalkback(let context, _): return context.receive.peerID
         default: return nil
         }
     }
@@ -40,6 +44,8 @@ enum NativeInterviewCommand: Equatable, Sendable {
         case .setSolo(_, let soloed): return soloed ? "Solo Guest in Monitor" : "Clear Guest Monitor Solo"
         case .rename: return "Rename Guest Locally"
         case .sendPrivateMessage: return "Send Private Guest Message"
+        case .beginTalkback: return "Hold to Talk Privately to Guest"
+        case .endTalkback: return "Release Private Guest Talkback"
         case .lock(let locked): return locked ? "Lock Guest Room" : "Unlock Guest Room"
         case .disconnect: return "Disconnect Guest Room"
         case .rejoin: return "Rejoin Guest Room"
@@ -73,6 +79,12 @@ struct NativeInterviewControlState: Equatable, Sendable {
     typealias HostFactory = @MainActor (@escaping NativeInterviewReceiverFactory.SinkFactory) -> NativeInterviewHostBinding
     @Published private(set) var state = NativeInterviewControlState()
     @Published private(set) var privateMessages: [NativeInterviewPrivateMessage] = []
+    struct Talkback: Equatable {
+        let context: NativeInterviewPeerLease, source: AudioChannelID, press: UUID
+    }
+    @Published private(set) var talkback: Talkback?
+    private var talkbackTask: Task<Void, Never>?
+    private var talkbackObservers = Set<AnyCancellable>()
     private let controller: StreamController
     private let serviceFactory: ServiceFactory
     private let hostFactory: HostFactory
@@ -102,6 +114,16 @@ struct NativeInterviewControlState: Equatable, Sendable {
              return .init(factory: factory, shutdown: { factory.retire() })
          }) {
         self.controller = controller; self.serviceFactory = serviceFactory; self.hostFactory = hostFactory
+        for name in [NSApplication.didResignActiveNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.publisher(for: name).receive(on: DispatchQueue.main).sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.cancelTalkback() }
+            }.store(in: &talkbackObservers)
+        }
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
+            .merge(with: NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.sessionDidResignActiveNotification))
+            .receive(on: DispatchQueue.main).sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.cancelTalkback() }
+            }.store(in: &talkbackObservers)
     }
 
     /// The view passes an explicit SecureField value, then clears its copy.
@@ -211,6 +233,15 @@ struct NativeInterviewControlState: Equatable, Sendable {
             guard currentReadyLease == context else { return .invalidTarget("The guest connection changed.") }
             guard NativeInterviewPrivateEnvelope.validText(text) else { return .invalidValue("A private message requires 1–512 UTF-8 bytes of plain text.") }
             return session.canSendPrivateMessage(context: context) ? nil : .unavailable("Private messages require the current open media control channel and fewer than eight pending receipts.")
+        case .beginTalkback(let context, let source, _):
+            guard currentReadyLease == context else { return .invalidTarget("The guest connection changed.") }
+            guard talkback == nil, snapshot.members.first(where: { $0.id == context.receive.peerID })?.returnAudio == .ready,
+                  controller.guestTalkbackSourceAvailable(source) else {
+                return .unavailable("Private talkback requires a ready guest audio return and an already capturing, permitted microphone. It never starts capture. Release within ten seconds.")
+            }
+            return nil
+        case .endTalkback(let context, let press):
+            return talkback?.context == context && talkback?.press == press ? nil : .invalidTarget("This private talkback hold has ended.")
         case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _):
             guard currentReadyLease == context,
                   controller.registeredGuestAudioChannel(slot: context.receive.slot) != nil else {
@@ -315,6 +346,25 @@ struct NativeInterviewControlState: Equatable, Sendable {
             // Mixer mutations belong to StudioCommandDispatcher.
             return false
         case .sendPrivateMessage(let context, let text): result = session.sendPrivateMessage(text, context: context)
+        case .beginTalkback(let context, let source, let press):
+            result = controller.beginGuestTalkback(context.receive, source: source, press: press)
+            if result {
+                let hold = Talkback(context: context, source: source, press: press)
+                talkback = hold
+                talkbackTask = Task { @MainActor [weak self] in
+                    let deadline = ContinuousClock.now + .seconds(10)
+                    while !Task.isCancelled {
+                        do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                        guard let self, self.talkback == hold else { return }
+                        guard ContinuousClock.now < deadline, self.currentReadyLease == context,
+                              self.controller.guestTalkbackSourceAvailable(source),
+                              self.controller.guestTalkbackIsActive(context.receive, source: source, press: press) else {
+                            self.cancelTalkback(); return
+                        }
+                    }
+                }
+            }
+        case .endTalkback: cancelTalkback(); result = true
         case .rename(let context, let name):
             guard var slot = controller.sceneStore.guestSlots.first(where: { $0.id == context.receive.slot }) else { return false }
             slot.localName = name; controller.sceneStore.replaceGuestSlot(slot); result = true
@@ -367,6 +417,10 @@ struct NativeInterviewControlState: Equatable, Sendable {
     private func reconcile(epoch current: UUID) {
         guard !closed, epoch == current, let session else { return }
         let snapshot = session.snapshot
+        if let talkback, currentReadyLease != talkback.context
+            || snapshot.members.first(where: { $0.id == talkback.context.receive.peerID })?.returnAudio != .ready {
+            cancelTalkback()
+        }
         for member in snapshot.members {
             if var slot = controller.sceneStore.guestSlots.first(where: { $0.reconnectPeerID == member.id }),
                slot.displayName != member.name {
@@ -409,15 +463,22 @@ struct NativeInterviewControlState: Equatable, Sendable {
         clearRegistration(context)
     }
     private func clearRegistration(_ context: NativeInterviewPeerLease) {
+        if talkback?.context == context { cancelTalkback() }
         controller.removeGuestMedia(context.receive)
         if registered == context { registered = nil; intent = nil; state.routes[context.receive.peerID] = nil }
     }
     private func retireSession() {
+        cancelTalkback()
         epoch = UUID(); observation = nil; reconciliation?.cancel(); reconciliation = nil; reconciliationID = nil
         operation?.cancel(); operation = nil; operationID = nil
         credentialSource?.retire(); credentialSource = nil
         revokeAll(); binding?.shutdown(); binding = nil; session?.shutdown(); session = nil
         configuration = nil; sharedInvite = nil; privateMessages.removeAll()
+    }
+    func cancelTalkback() {
+        talkbackTask?.cancel(); talkbackTask = nil
+        if let talkback { _ = controller.endGuestTalkback(talkback.context.receive, press: talkback.press) }
+        talkback = nil
     }
     private func publishBusy() { state.busy = !occupiedOperations.isEmpty }
     private func requireCurrent(_ current: UUID) throws {

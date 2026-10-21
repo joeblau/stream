@@ -106,6 +106,16 @@ final class MacAudioInput: ObservableObject {
         refreshDevices()
     }
 
+    /// Read-only: PTT never starts an input or requests microphone access.
+    func isCapturing(_ channel: AudioChannelID) -> Bool {
+        guard case .microphone(let uid) = channel else { return false }
+        if let uid {
+            return deviceCaptures[uid]?.session.isRunning == true && activeDevice?.uniqueID != uid
+        }
+        guard let activeDevice, !deviceCaptures.keys.contains(activeDevice.uniqueID) else { return false }
+        return session?.isRunning == true && activeDevice.isConnected
+    }
+
     /// Starts capture from the system default audio input device.
     func start() {
         guard let device = AVCaptureDevice.default(for: .audio) else {

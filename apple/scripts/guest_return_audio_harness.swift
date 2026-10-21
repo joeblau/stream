@@ -44,7 +44,119 @@ private final class Blocked: @unchecked Sendable {
         probe.receive(frame.sample, revision: frame.routingRevision)
     }
 }
+private final class TalkbackTone: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Float = 0
+    func set(_ value: Float) { lock.lock(); self.value = value; lock.unlock() }
+    func get() -> Float { lock.lock(); defer { lock.unlock() }; return value }
+}
+private final class TalkbackInsert: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts = (process: 0, reset: 0)
+    func process(_ sample: CMSampleBuffer) -> CMSampleBuffer { lock.lock(); counts.process += 1; lock.unlock(); return sample }
+    func reset() { lock.lock(); counts.reset += 1; lock.unlock() }
+    func snapshot() -> (process: Int, reset: Int) { lock.lock(); defer { lock.unlock() }; return counts }
+}
+private final class TalkbackReceipt: @unchecked Sendable {
+    private let lock = NSLock()
+    private var frame: GuestReturnAudioFrame?
+    func receive(_ frame: GuestReturnAudioFrame) { lock.lock(); self.frame = frame; lock.unlock() }
+    func last() -> GuestReturnAudioFrame? { lock.lock(); defer { lock.unlock() }; return frame }
+}
 @main struct GuestReturnAudioHarness {
+    private static func privateTalkback() async throws {
+        let engine = AudioMixEngine(), mic = AudioChannelID.microphone(deviceUID: nil)
+        let lease = GuestReceiveLease(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 1)
+        let music = AudioChannelID.media(SourceDefinitionID()), tone = TalkbackTone(), insert = TalkbackInsert(), receipt = TalkbackReceipt()
+        let program = Probe(), monitor = Probe(), aux = Probe(), pre = Probe(), post = Probe(), returned = Probe()
+        require(await engine.registerGuest(lease), "Talkback guest registration")
+        require(engine.setGuestReturnAllowed(lease, allowed: true), "Talkback return route")
+        _ = await engine.reserveCaptureHoldback(token: UUID(), milliseconds: 60)
+        await engine.run()
+        await engine.addChannel(mic, resetInsert: insert.reset, insert: insert.process)
+        await engine.setChannelGain(mic, volume: 0.6, isMuted: false)
+        await engine.setChannelAuxSend(mic, gain: 0.3)
+        await engine.setChannelDelays([mic.label: 140])
+        await engine.setChannelGain(music, volume: 1, isMuted: false)
+        await engine.addTap(bus: .program, token: UUID(), sink: { program.receive($0) })
+        await engine.addTap(bus: .monitor, token: UUID(), sink: { monitor.receive($0) })
+        await engine.addTap(bus: .aux, token: UUID(), sink: { aux.receive($0) })
+        await engine.addIsolatedTap(channel: mic, token: UUID(), processing: .beforeEffects, sink: { pre.receive($0) })
+        await engine.addIsolatedTap(channel: mic, token: UUID(), processing: .afterEffects, sink: { post.receive($0) })
+        require(await engine.addGuestReturnTap(lease, token: UUID(), sink: { receipt.receive($0); returned.receive($0.sample, revision: $0.routingRevision) }), "Talkback return tap")
+        let producer = Task {
+            let origin = now() - CMTime(value: 512, timescale: 48_000)
+            var index: Int64 = 0
+            while !Task.isCancelled {
+                let pts = origin + CMTime(value: index * 512, timescale: 48_000)
+                engine.enqueue(mic, sample(pcm(pts, frequency: 2_000, amplitude: Double(tone.get())), pts: pts))
+                engine.enqueue(music, sample(pcm(pts, frequency: 1_000, amplitude: 0.4), pts: pts))
+                index += 1
+                try? await Task.sleep(for: .seconds(max(0, (origin + CMTime(value: index * 512 + 512, timescale: 48_000) - now()).seconds)))
+            }
+        }
+        defer { producer.cancel() }
+        try await Task.sleep(for: .milliseconds(160))
+        let press = UUID()
+        require(engine.beginGuestTalkback(lease, source: mic, press: press), "Recent already-running mic refused private route")
+        var ducking = DuckingSettings()
+        ducking.isEnabled = true; ducking.sidechainLabels = [mic.label]; ducking.targetLabels = [music.label]
+        ducking.thresholdDb = -30; ducking.reductionDb = 12; ducking.attackMs = 1; ducking.holdMs = 0; ducking.releaseMs = 10
+        await engine.setDucking(.init(ducking, chunkDurationSeconds: 512.0 / 48_000))
+        let calls = insert.snapshot().process
+        tone.set(0.25)
+        let start = now().seconds + 0.12
+        try await Task.sleep(for: .milliseconds(480))
+        let end = program.snapshot().last!.pts.seconds
+        for probe in [program, monitor, aux, pre, post] {
+            require(amplitude(probe.snapshot(), frequency: 2_000, from: start, to: end) < 0.003,
+                    "Private talkback leaked into a public/private bus or pre/post ISO")
+        }
+        require(abs(amplitude(returned.snapshot(), frequency: 2_000, from: start, to: end) - 0.25) < 0.015,
+                "Addressed return did not carry unity private mic independently of its0.6 public fader")
+        require(abs(amplitude(program.snapshot(), frequency: 1_000, from: start, to: end) - 0.4) < 0.015,
+                "Private routing disturbed unrelated Program audio")
+        require(insert.snapshot().process == calls && insert.snapshot().reset == 1, "Private capture entered public insert history")
+        let oldPrivatePTS = now() - CMTime(value: 512, timescale: 48_000)
+        let retainedPrivateFrame = receipt.last()!
+        require(engine.endGuestTalkback(lease, press: press), "Matching release failed")
+        require(!engine.guestReturnFrameIsCurrent(retainedPrivateFrame), "Release left queued private PCM/Opus authority current")
+        tone.set(0)
+        engine.enqueue(mic, sample(pcm(oldPrivatePTS, frequency: 2_000, amplitude: 1), pts: oldPrivatePTS))
+        try await Task.sleep(for: .milliseconds(300))
+        let releasedEnd = program.snapshot().last!.pts.seconds
+        for probe in [program, monitor, aux, pre, post, returned] {
+            require(amplitude(probe.snapshot(), frequency: 2_000, from: releasedEnd - 0.16, to: releasedEnd) < 0.003,
+                    "Released private tail or late captured buffer escaped its privacy boundary")
+        }
+        require(insert.snapshot().reset == 2, "Release retained public insert history")
+        require(abs(amplitude(program.snapshot(), frequency: 1_000, from: releasedEnd - 0.16, to: releasedEnd) - 0.4) < 0.015,
+                "Private meter history modulated public music through ducking after release")
+        await engine.setDucking(nil)
+        tone.set(0.25)
+        try await Task.sleep(for: .milliseconds(520))
+        let restoredEnd = program.snapshot().last!.pts.seconds
+        for (probe, expected) in [(program, 0.15), (monitor, 0.15), (aux, 0.075), (pre, 0.25), (post, 0.25)] {
+            require(abs(amplitude(probe.snapshot(), frequency: 2_000, from: restoredEnd - 0.16, to: restoredEnd) - expected) < 0.015,
+                    "Release changed the saved microphone fader/Aux/delay/ISO routing")
+        }
+        tone.set(0)
+        await engine.addChannel(mic, resetInsert: insert.reset, insert: insert.process)
+        engine.enqueue(mic, sample(pcm(oldPrivatePTS, frequency: 2_000, amplitude: 1), pts: oldPrivatePTS))
+        try await Task.sleep(for: .milliseconds(300))
+        let rebuiltEnd = program.snapshot().last!.pts.seconds
+        require(amplitude(pre.snapshot(), frequency: 2_000, from: rebuiltEnd - 0.16, to: rebuiltEnd) < 0.003,
+                "Channel replacement forgot the capture rejection floor")
+        let secondPress = UUID()
+        require(engine.beginGuestTalkback(lease, source: mic, press: secondPress), "Explicit next hold refused")
+        require(!engine.endGuestTalkback(lease, press: press) && engine.guestTalkbackIsActive(lease, source: mic, press: secondPress),
+                "Old release altered a new deliberate hold")
+        require(engine.removeGuest(lease), "Talkback removal failed")
+        require(!engine.guestTalkbackIsActive(lease, source: mic, press: secondPress), "Removed guest retained private route")
+        require(!engine.beginGuestTalkback(lease, source: mic, press: UUID()), "Retired context reactivated private capture")
+        producer.cancel(); await producer.value; await engine.stop()
+        print("PASS: addressed private mic only in current recipient return; Program/Monitor/Aux/pre+post ISO silent for private voice, insert bypass+reset, unaffected music, late-buffer release, exact press and full-lease retirement")
+    }
     private static func opusCodec() throws {
         let encoder: NativeGuestReturnAudioEncoder
         do { encoder = try NativeGuestReturnAudioEncoder() }
@@ -216,6 +328,7 @@ private final class Blocked: @unchecked Sendable {
     static func main() async throws {
         setbuf(stdout, nil)
         try opusCodec()
+        try await privateTalkback()
         let engine = AudioMixEngine(), returned = Probe(), program = Probe(), aux = Probe()
         let lease = GuestReceiveLease(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 1)
         let foreign = GuestReceiveLease(slot: lease.slot, peerID: UUID(), negotiation: UUID(), generation: 1)

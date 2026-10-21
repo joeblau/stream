@@ -74,11 +74,11 @@ Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{value:async()=>{
 const returnMeterModule = `
 class ReturnMeter extends AudioWorkletProcessor {
   constructor(){super();this.revision=0;this.clear();this.port.onmessage=e=>{if(e.data?.type==='reset'&&Number.isSafeInteger(e.data.revision)){this.revision=e.data.revision;this.clear();}};}
-  clear(){this.frames=0;this.windowFrames=0;this.windows=0;this.squared=[0,0];this.amplitudes=[Array(4).fill(0),Array(4).fill(0)];this.re=[Array(4).fill(0),Array(4).fill(0)];this.im=[Array(4).fill(0),Array(4).fill(0)];}
+  clear(){this.frames=0;this.windowFrames=0;this.windows=0;this.squared=[0,0];this.amplitudes=[Array(5).fill(0),Array(5).fill(0)];this.re=[Array(5).fill(0),Array(5).fill(0)];this.im=[Array(5).fill(0),Array(5).fill(0)];}
   process(inputs,outputs){
     const channels=inputs[0];if(!channels?.length)return true;
-    const frequencies=[1000,1700,440,880],length=channels[0].length;
-    for(let f=0;f<4;f++){
+    const frequencies=[1000,1700,440,880,2600],length=channels[0].length;
+    for(let f=0;f<5;f++){
       const step=2*Math.PI*frequencies[f]/sampleRate,cs=Math.cos(step),sn=Math.sin(step),phase=step*(currentFrame%sampleRate);
       let c=Math.cos(phase),s=Math.sin(phase);
       for(let i=0;i<length;i++){for(let side=0;side<2;side++){const v=channels[Math.min(side,channels.length-1)][i],weight=.5-.5*Math.cos(2*Math.PI*(this.windowFrames+i)/2047);this.re[side][f]+=v*weight*c;this.im[side][f]+=v*weight*s;}
@@ -86,7 +86,7 @@ class ReturnMeter extends AudioWorkletProcessor {
     }
     for(let side=0;side<2;side++)for(const v of channels[Math.min(side,channels.length-1)])this.squared[side]+=v*v;
     this.frames+=length;this.windowFrames+=length;
-    if(this.windowFrames===2048){this.windowFrames=0;this.windows++;for(let side=0;side<2;side++)for(let f=0;f<4;f++){this.amplitudes[side][f]+=2*Math.hypot(this.re[side][f],this.im[side][f])/1023.5;this.re[side][f]=0;this.im[side][f]=0;}this.port.postMessage({revision:this.revision,rate:sampleRate,frames:this.frames,n:this.frames,windows:this.windows,channels:this.squared.map((sum,side)=>({rms:Math.sqrt(sum/this.frames),amplitudes:this.amplitudes[side].map(value=>value/this.windows)}))});}
+    if(this.windowFrames===2048){this.windowFrames=0;this.windows++;for(let side=0;side<2;side++)for(let f=0;f<5;f++){this.amplitudes[side][f]+=2*Math.hypot(this.re[side][f],this.im[side][f])/1023.5;this.re[side][f]=0;this.im[side][f]=0;}this.port.postMessage({revision:this.revision,rate:sampleRate,frames:this.frames,n:this.frames,windows:this.windows,channels:this.squared.map((sum,side)=>({rms:Math.sqrt(sum/this.frames),amplitudes:this.amplitudes[side].map(value=>value/this.windows)}))});}
     return true;
   }
 }
@@ -179,11 +179,11 @@ try {
     return{track:track.id,channels:track.getSettings().channelCount??0};
   })()`;
   await browser.evaluate(g,returnAnalyzer);
-  async function spectrum(label,left,right){
+  async function spectrum(label,left,right,privateVoice=0){
     await browser.evaluate(g,'window.__resetReturn()');
     let observed;
-    const result=await wait(label,async()=>{check();const r=await browser.evaluate(g,'window.__returnSpectrum()');observed=r;if(!r.n||r.n<24576)return false;const a=r.channels[0].amplitudes,b=r.channels[1].amplitudes;if(Math.abs(a[0]-left)>.035||Math.abs(b[1]-right)>.025||a[2]>.01||a[3]>.01||b[2]>.01||b[3]>.01)return false;return r;},6000).catch(error=>{console.error(`Observed actual Chrome ${label}: ${JSON.stringify(observed)}`);throw error;});
-    assert(result.rate===48000&&result.live==='live'&&result.channels.length===2);if(left===0&&right===0)assert(result.channels.every(c=>c.rms<.002),'Muted return must carry actual near-zero decoded PCM');console.log(`Actual Chrome decoded return ${label}: ${JSON.stringify(result)}`);return result;
+    const result=await wait(label,async()=>{check();const r=await browser.evaluate(g,'window.__returnSpectrum()');observed=r;if(!r.n||r.n<24576)return false;const a=r.channels[0].amplitudes,b=r.channels[1].amplitudes;const privateMatches=privateVoice===0?a[4]<.01&&b[4]<.01:a[4]>.12&&a[4]<.35&&b[4]>.12&&b[4]<.35;if(Math.abs(a[0]-left)>.035||Math.abs(b[1]-right)>.025||a[2]>.01||a[3]>.01||b[2]>.01||b[3]>.01||!privateMatches)return false;return r;},6000).catch(error=>{console.error(`Observed actual Chrome ${label}: ${JSON.stringify(observed)}; native recipient: ${JSON.stringify(state.recipientPCM)}`);throw error;});
+    assert(result.rate===48000&&result.live==='live'&&result.channels.length===2);if(left===0&&right===0&&privateVoice===0)assert(result.channels.every(c=>c.rms<.002),'Muted return must carry actual near-zero decoded PCM');console.log(`Actual Chrome decoded return ${label}: ${JSON.stringify(result)}`);return result;
   }
   const first=await spectrum('backstage-local-only',.4,.2);
   const pair=await browser.evaluate(g,`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats();let result={};for(const s of stats.values()){if(s.type==='inbound-rtp'&&s.kind==='audio'){result={...result,packets:s.packetsReceived,samples:s.totalSamplesReceived,codec:stats.get(s.codecId)?.mimeType,channels:stats.get(s.codecId)?.channels};}if(s.type==='transport'&&s.selectedCandidatePairId){const pair=stats.get(s.selectedCandidatePairId);result={...result,local:stats.get(pair.localCandidateId)?.candidateType,remote:stats.get(pair.remoteCandidateId)?.candidateType};}}return result;})()`);
@@ -201,10 +201,27 @@ try {
   await browser.until(g,"document.getElementById('messages').textContent.includes('Host received')",'actual shipping host acknowledgment');
   assert(!state.programAllowed,'Private conversation cannot open Program admission');
   await spectrum('backstage-private-messages-no-audio-route-change',.4,.2);
+  ack=undefined;command({type:'talkback-start'});await wait('actual addressed private microphone hold',()=>{check();return ack==='talkback-start'&&state.privateTalkback;});
+  await spectrum('backstage-addressed-private-mic',.4,.2,.25);
+  await wait('actual original native recipient PCM private source at unity',()=>{check();return state.recipientPCM?.chunks>=20&&state.recipientPCM.private2600.every(value=>Math.abs(value-.25)<.025);},3000).catch(error=>{console.error(`Native private source evidence: ${JSON.stringify({recipient:state.recipientPCM,program:state.program,privacy:state.privacyBuses,held:state.privateTalkback})}`);throw error;});
+  await wait('actual public/Monitor/Aux/pre+post ISO exclude private microphone',()=>{check();return state.program?.private2600?.every(value=>value<.004)&&state.privacyBuses?.length===4&&state.privacyBuses.every(probe=>probe.chunks>=20&&probe.private2600.every(value=>value<.004));});
+  assert(!state.programAllowed,'Private microphone must not admit guest to Program');
+  ack=undefined;command({type:'talkback-stop'});await wait('explicit private microphone release',()=>{check();return ack==='talkback-stop'&&!state.privateTalkback;});
+  await spectrum('released-private-mic-tail-absent',.4,.2);
+  ack=undefined;command({type:'talkback-start'});await wait('second deliberate private microphone hold',()=>{check();return ack==='talkback-start'&&state.privateTalkback;});
+  ack=undefined;command({type:'talkback-focus-loss'});await wait('actual application focus notification releases hold',()=>{check();return ack==='talkback-focus-loss'&&!state.privateTalkback;});
+  await spectrum('focus-loss-private-mic-tail-absent',.4,.2);
+  ack=undefined;command({type:'talkback-start'});await wait('bounded private microphone hold begins',()=>{check();return ack==='talkback-start'&&state.privateTalkback;});
+  const heldAt=Date.now();
+  await wait('private microphone hold ends at ten-second bound',()=>{check();return !state.privateTalkback;},12000);
+  assert(Date.now()-heldAt>=9000,'Owned hold must exercise its deadline rather than an unrelated early cancellation');
+  ack=undefined;command({type:'talkback-focus-loss'});await wait('owned microphone generator silenced after deadline',()=>{check();return ack==='talkback-focus-loss';});
+  await spectrum('deadline-private-mic-tail-absent',.4,.2);
   command({type:'onair',id:guest});await wait('actual Program guest admission',()=>{check();return state.programAllowed&&state.members[0]?.returnAudio==='ready'&&state.program?.own440and880[0]>.07&&state.program?.own440and880[1]>.025;});
   console.log(`Actual own signal positive in shipping Program before return exclusion: ${JSON.stringify(state.program)}`);await spectrum('onair-own440-880-excluded',.4,.2);
   ack=undefined;command({type:'mute'});await wait('actual local mixer mute acknowledged',()=>{check();return ack==='mute';});await pause(400);await spectrum('local-muted',0,0);
   ack=undefined;command({type:'restore'});await wait('actual local mixer nonunity restore acknowledged',()=>{check();return ack==='restore';});await pause(300);await spectrum('local-nonunity-restore',.16,.08);
+  ack=undefined;command({type:'talkback-start'});await wait('hold before actual host reconnect',()=>{check();return ack==='talkback-start'&&state.privateTalkback;});
   const oldGeneration=state.lease.generation;
   await browser.evaluate(g,'window.__priorReturnTrack=window.__returnAnalysis.track');command({type:'rejoin'});
   await browser.until(g,"document.getElementById('return').srcObject===null",'shipping guest reset clears return after host disconnect');
@@ -213,8 +230,14 @@ try {
   command({type:'admit',id:guest});await wait('fresh full lease actual return ready',()=>{check();return state.lease?.generation>oldGeneration&&state.members[0]?.returnAudio==='ready'&&state.transport?.local==='relay';},20000);
   await browser.until(g,"document.getElementById('return').srcObject?.getAudioTracks().length===1",'new shipping return stream');
   await browser.evaluate(g,returnAnalyzer);await spectrum('rejoined-new-fulllease',.16,.08);
+  assert(!state.privateTalkback,'Actual rejoin must not replay the prior hold');
   assert(await browser.evaluate(g,'window.__returnAnalysis.track!==window.__priorReturnTrack')===true,'A fresh actual remote track object must replace the retired track; role ID may remain stable');
   await wait('shipping Manager private history cleared on actual rejoin',()=>{check();return state.privateMessages?.length===0;});
+  ack=undefined;command({type:'talkback-start'});await wait('new context accepts a deliberate private hold',()=>{check();return ack==='talkback-start'&&state.privateTalkback;});
+  ack=undefined;command({type:'stale-talkback'});await wait('retained talkback context rejected after actual rejoin',()=>{check();return ack==='stale-talkback-rejected';});
+  assert(state.privateTalkback,'An old release cannot end a new fulllease hold');
+  await spectrum('fresh-lease-private-mic',.16,.08,.25);
+  ack=undefined;command({type:'talkback-stop'});await wait('fresh private hold release',()=>{check();return ack==='talkback-stop'&&!state.privateTalkback;});
   assert(await browser.evaluate(g,"document.getElementById('messages').children.length===0 && document.getElementById('message').value===''")===true,'Guest private history/draft clears after actual fulllease replacement');
   ack=undefined;command({type:'stale-message'});await wait('retained real Manager private command rejected',()=>{check();return ack==='stale-message-rejected';});
   assert(state.privateMessages.length===0,'Stale command cannot populate replacement conversation');
@@ -227,7 +250,8 @@ try {
   command({type:'stop'});await wait('native permanent cleanup receipt',()=>{check();return stopped&&closed;},10000);assert(linesAfterStop===0);
   assert(browser.errors.length===0,'Actual shipping guest page no runtime errors');
   console.log(`PASS ${version.product}: actual shipping NativeInterviewManager/default receiver/controller-issued sink→preclamp fulllease return→public native stereo Opus→SDK RTP/RTCP→owned TURN→shipping guest audio track/Chrome decoded48k PCM; own440/880 excluded, local1000/1700 preserved, mute/nonunity restore, new-generation rejoin and remove fence`);
-  console.log('Scope: owned local Worker/Coturn/synthetic captures only. Return video, addressed talkback, physical/browser AEC, mobile/restricted-network/deployed broker remain unqualified.');
+  console.log('PASS actual addressed private microphone: native recipient PCM and real Chrome decoded Opus positive, Program/Monitor/Aux/both ISO exclusion, explicit release, focus notification, ten-second deadline, active rejoin cancellation, retained-context refusal and deliberate fresh hold');
+  console.log('Scope: owned local Worker/Coturn/synthetic captures only. Return video, physical capture/operator UI/AEC, mobile/restricted-network/deployed broker remain unqualified.');
 } finally {
   browserSocket?.close();for(const value of children.reverse())await terminate(value);
   await fs.rm(owned,{recursive:true,force:true,maxRetries:5,retryDelay:100});
