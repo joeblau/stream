@@ -92,13 +92,18 @@ final class NativeGuestMediaSink: @unchecked Sendable {
     func videoTokenIsCurrent(_ token: UUID) -> Bool {
         gate.lock(); defer { gate.unlock() }; return active && returnVideoToken == token
     }
-    private func beginReturnVideo(_ token: UUID) -> NativeGuestProgramReturnSource? {
+    func claimReturnVideo(_ token: UUID) -> Bool {
         gate.lock(); defer { gate.unlock() }
-        guard active, returnVideoToken == nil, let source = programReturn else { return nil }
-        returnVideoToken = token; return source
+        guard active, returnVideoToken == nil, programReturn != nil else { return false }
+        returnVideoToken = token; return true
+    }
+    private func claimedReturnVideo(_ token: UUID) -> NativeGuestProgramReturnSource? {
+        gate.lock(); defer { gate.unlock() }
+        guard active, returnVideoToken == token else { return nil }
+        return programReturn
     }
     func installReturnVideo(token: UUID, sink: @escaping @Sendable (GuestReturnVideoFrame) -> Void) async -> Bool {
-        guard let source = beginReturnVideo(token) else { return false }
+        guard let source = claimedReturnVideo(token) else { return false }
         guard await source.install(token, { [weak self] sample in
             guard let self else { return }; sink(.init(lease: self.lease, token: token, sample: sample))
         }) else { clearVideoToken(token); return false }

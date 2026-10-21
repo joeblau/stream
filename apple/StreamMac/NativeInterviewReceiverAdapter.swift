@@ -36,6 +36,8 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
     var validationReturnReady = false
     #endif
     func permitsReturn(_ native: NativeGuestReceiver) -> Bool {
+        gate.lock(); let permitted = active && !controlClosed; gate.unlock()
+        guard permitted else { return false }
         #if STREAM_GUEST_VALIDATION
         if validationReturnReady { return true }
         #endif
@@ -92,7 +94,10 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
         case "control-closed":
             gate.lock()
             controlClosed = true; approvalIntent = UUID(); approved = false; sink.enableScreen(false)
-            gate.unlock(); event = .controlClosed
+            gate.unlock()
+            // No further control-authorized return can be delivered. Retire
+            // outside this gate because retirement reports an ordered event.
+            sink.stopProgramReturn(); event = .controlClosed
         case "private-control":
             guard let native, permittedReceiver() === native,
                   let envelope = NativeInterviewPrivateEnvelope.parse(value, negotiation: sink.lease.negotiation) else { return }
@@ -215,14 +220,27 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
     private func begin() -> UUID? {
         gate.lock(); defer { gate.unlock() }
         guard token == nil else { return nil }
-        let value = UUID(); token = value; reportedReady = false; return value
+        let value = UUID()
+        // Claim before publishing the sender token and before any suspension.
+        // Stop can therefore always revoke even a not-yet-entered install.
+        guard sink.claimReturnVideo(value) else { return nil }
+        token = value; reportedReady = false; return value
     }
+    #if STREAM_GUEST_VALIDATION
+    var validationBeforeInstall: (@Sendable () async -> Void)?
+    #endif
     func prepare() async -> Bool {
         guard !Task.isCancelled, let current = begin() else { return false }
+        #if STREAM_GUEST_VALIDATION
+        await validationBeforeInstall?()
+        #endif
         guard await sink.installReturnVideo(token: current, sink: { [weak self] in self?.receive($0) }) else {
             stop(ifCurrent: current); return false
         }
-        return isActive(current)
+        guard isActive(current) else {
+            sink.revokeReturnVideo(token: current); sink.removeReturnVideo(token: current); return false
+        }
+        return true
     }
     private func isActive(_ current: UUID) -> Bool { gate.lock(); defer { gate.unlock() }; return token == current }
     var isEnabled: Bool { gate.lock(); defer { gate.unlock() }; return token != nil }
