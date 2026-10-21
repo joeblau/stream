@@ -97,7 +97,7 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
             gate.unlock()
             // No further control-authorized return can be delivered. Retire
             // outside this gate because retirement reports an ordered event.
-            sink.stopProgramReturn(); event = .controlClosed
+            _ = sink.allowReturnAudio(false); sink.stopProgramReturn(); event = .controlClosed
         case "private-control":
             guard let native, permittedReceiver() === native,
                   let envelope = NativeInterviewPrivateEnvelope.parse(value, negotiation: sink.lease.negotiation) else { return }
