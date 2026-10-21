@@ -1,0 +1,707 @@
+{
+  "version": 1,
+  "recordedAt": "2026-10-21",
+  "source": "https://github.com/joeblau/stream/issues/47",
+  "branch": "work/macos-completion-20261021",
+  "integrationBase": "f5d5ffd",
+  "platform": {
+    "hardware": "Mac15,8",
+    "os": "macOS 27.2 (26B118)",
+    "toolchain": "Xcode 27.2 (27B5038j)"
+  },
+  "scope": "Inventory of every macOS issue returned by the open issue query. An open issue or passing fixture is not full product qualification; no GitHub issues are closed by this local report.",
+  "prerequisites": {
+    "ndi": "SDK headers/runtime missing (actual read-only probe)",
+    "deckLink": "SDK headers/runtime missing (actual read-only probe)",
+    "screenRecordingAccess": true,
+    "signing": "Five installed macOS profiles; zero unexpired app/helper/camera matches. No Developer ID distribution artifact, notarization, or extension/driver installation."
+  },
+  "validation": {
+    "sharedCore": "562 tests in 80 suites passed",
+    "shippingApp": "Unsigned arm64 build and bundle/sandbox declaration audit passed",
+    "diagnosticLifecycle": "Shipping workspace fixture passed pre-view/hidden/detached sampling and retired-runtime sample fencing",
+    "guestHealth": "Actual frame-store state/count/generation regression passed",
+    "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
+    "colorTransforms": "Native Core Image key/alpha, LUT channel/intensity/color-space and bypass passed; 1011 fractional-alpha edge pixels",
+    "recoveryOutputs": "See MACOS_RECOVERY_OUTPUT_QUALIFICATION.md for16 successful native media, storage, sandbox and transport scenarios",
+    "guestMedia": "Actual H264/Opus receive, mixer, Program/ISO decoded PCM identity, stereo return and private messages through local TURN/Chrome passed; see NATIVE_GUEST_ROUTING.md",
+    "controllers": "Native automation/shortcuts/MIDI/OSC/local-control/macros, saved slots and owned SwiftUI manager passed; Stream Deck8 tests, typecheck, universal helper, official packaging passed",
+    "nativeInterviewProgramISO": "Actual manager/default native receiver through local TURN/Chrome decoded Program and guest ISO:316946/294390 identical Float32 values, zero rational cue difference/history misses; separate screen approval/stop and Backstage privacy pass",
+    "guestPrivateMessages": "Actual shipping dispatcher/manager/default receiver through local TURN/Chrome passes both directions/receipts, private Backstage routes, rejoin history wipe and stale-context refusal alongside unchanged stereo audio return",
+    "review": "Independent subagent found no actionable lifecycle/cross-branch issue in runtime diagnostics; independently compiled exact integrated frame-store regression passed",
+    "performance": "Four ten-second12-layer H264/AAC workloads complete with valid decoded tracks and zero recorder drops; actual28.68/28.98/59.47/29.98fps. See PERFORMANCE_BASELINE_2026-10-21.json; physical/sustained/Intel qualification remains open."
+  },
+  "issues": [
+    {
+      "number": 180,
+      "code": "D12",
+      "title": "[macOS][D12] Expose selected studio actions to Shortcuts and macOS automation",
+      "url": "https://github.com/joeblau/stream/issues/180",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Manual Shortcuts/App Intents launch and permission/UI acceptance."
+      ]
+    },
+    {
+      "number": 178,
+      "code": "O12",
+      "title": "[macOS][O12] Design and output horizontal and vertical canvases simultaneously",
+      "url": "https://github.com/joeblau/stream/issues/178",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Sustained full-resolution simultaneous outputs, physical consumers and portrait-provider ingest."
+      ]
+    },
+    {
+      "number": 177,
+      "code": "O11",
+      "title": "[macOS][O11] Send program output to compatible DeckLink/UltraStudio devices",
+      "url": "https://github.com/joeblau/stream/issues/177",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "DeckLink SDK/runtime/device missing; output bridge, supported modes and synchronized hardware audio/video not implemented or qualified."
+      ]
+    },
+    {
+      "number": 176,
+      "code": "O10",
+      "title": "[macOS][O10] Send NDI program or clean feeds with audio and tally status",
+      "url": "https://github.com/joeblau/stream/issues/176",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "NDI SDK/runtime missing; send adapter, receiver/tally handling and distributable runtime not implemented or qualified."
+      ]
+    },
+    {
+      "number": 175,
+      "code": "O09",
+      "title": "[macOS][O09] Add optional clean program output to external displays and AirPlay",
+      "url": "https://github.com/joeblau/stream/issues/175",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Physical external display/AirPlay presentation, hot unplug and receiver qualification."
+      ]
+    },
+    {
+      "number": 174,
+      "code": "O08",
+      "title": "[macOS][O08] Implement the validated virtual microphone output and routing controls",
+      "url": "https://github.com/joeblau/stream/issues/174",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Installed-device/signing/distribution gate in #173; shipping microphone routing remains gated."
+      ]
+    },
+    {
+      "number": 173,
+      "code": "O07",
+      "title": "[macOS][O07] Validate a distributable virtual microphone implementation",
+      "url": "https://github.com/joeblau/stream/issues/173",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Installed signed AudioServerPlugIn capture by another app, supported install/update/remove and sandbox IPC qualification."
+      ]
+    },
+    {
+      "number": 172,
+      "code": "O06",
+      "title": "[macOS][O06] Ship a Core Media I/O virtual camera with embedded setup controls",
+      "url": "https://github.com/joeblau/stream/issues/172",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Matching camera-extension signing profile, OS activation and real conferencing/browser/FaceTime consumer checks."
+      ]
+    },
+    {
+      "number": 171,
+      "code": "O04",
+      "title": "[macOS][O04] Record isolated camera, screen, and guest video sources",
+      "url": "https://github.com/joeblau/stream/issues/171",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Physical source/device and sustained multi-track workloads; native guest files have controlled local evidence."
+      ]
+    },
+    {
+      "number": 170,
+      "code": "T07",
+      "title": "[macOS][T07] Add guided custom destinations for Instagram, Amazon, X, TikTok, and relays",
+      "url": "https://github.com/joeblau/stream/issues/170",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Authorized provider test ingest and current account-specific encoder/key/eligibility verification."
+      ]
+    },
+    {
+      "number": 169,
+      "code": "T06",
+      "title": "[macOS][T06] Integrate Facebook Pages and LinkedIn Live with capability gates",
+      "url": "https://github.com/joeblau/stream/issues/169",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Approved Meta and LinkedIn applications/scopes and actual capability-qualified connectors."
+      ]
+    },
+    {
+      "number": 168,
+      "code": "I08",
+      "title": "[macOS][I08] Integrate Zoom participants, active speaker, and program return",
+      "url": "https://github.com/joeblau/stream/issues/168",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Zoom feasibility gate #167; participant capture, active speaker and native return integration."
+      ]
+    },
+    {
+      "number": 167,
+      "code": "I07",
+      "title": "[macOS][I07] Validate Zoom SDK raw-media access and one-window integration",
+      "url": "https://github.com/joeblau/stream/issues/167",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Public SDK and licensed account/raw-media permissions, working prototype, native return and distribution qualification."
+      ]
+    },
+    {
+      "number": 161,
+      "code": "C07",
+      "title": "[macOS][C07] Add Blackmagic DeckLink and UltraStudio capture adapters",
+      "url": "https://github.com/joeblau/stream/issues/161",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Actual DeckLink SDK/runtime and hardware missing; bridge/modes/signal loss/reconnect qualification."
+      ]
+    },
+    {
+      "number": 160,
+      "code": "C06",
+      "title": "[macOS][C06] Integrate NDI input discovery, audio, and tally",
+      "url": "https://github.com/joeblau/stream/issues/160",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Actual NDI SDK/runtime and sender missing; capture/discovery/tally bridge and distribution qualification."
+      ]
+    },
+    {
+      "number": 159,
+      "code": "R06",
+      "title": "[macOS][R06] Persist live session recovery metadata and offer safe restart recovery",
+      "url": "https://github.com/joeblau/stream/issues/159",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "External security-scoped recovery, incomplete tails and physical-volume failure; supported provider state review."
+      ]
+    },
+    {
+      "number": 158,
+      "code": "R02",
+      "title": "[macOS][R02] Apply desktop session resilience and configurable source failover",
+      "url": "https://github.com/joeblau/stream/issues/158",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Physical unplug/permission/sleep and sustained combined output/device qualification."
+      ]
+    },
+    {
+      "number": 155,
+      "code": "P04",
+      "title": "[macOS][P04] Import and export portable scenes and complete show packages",
+      "url": "https://github.com/joeblau/stream/issues/155",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Manual native chooser/share/editor/Finder gesture acceptance; signed distribution."
+      ]
+    },
+    {
+      "number": 152,
+      "code": "D09",
+      "title": "[macOS][D09] Build Stream Deck configuration, dynamic feedback, profiles, and release packaging",
+      "url": "https://github.com/joeblau/stream/issues/152",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Real supported Stream Deck/Plus/Pedal/Mobile install, restart, update/uninstall and feedback qualification."
+      ]
+    },
+    {
+      "number": 151,
+      "code": "D08",
+      "title": "[macOS][D08] Support Stream Deck Plus dials and touch-strip feedback",
+      "url": "https://github.com/joeblau/stream/issues/151",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Physical Stream Deck Plus dial/touch-strip behavior."
+      ]
+    },
+    {
+      "number": 150,
+      "code": "D07",
+      "title": "[macOS][D07] Add Stream Deck guest, comment, profile, and audience-stat actions",
+      "url": "https://github.com/joeblau/stream/issues/150",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Physical guest/comment/audience hardware feedback; live provider/guest-return capabilities."
+      ]
+    },
+    {
+      "number": 149,
+      "code": "D06",
+      "title": "[macOS][D06] Add Stream Deck audio, soundboard, media, PDF, and marker actions",
+      "url": "https://github.com/joeblau/stream/issues/149",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Physical device key/dial/media/PDF/soundboard/marker qualification."
+      ]
+    },
+    {
+      "number": 148,
+      "code": "D05",
+      "title": "[macOS][D05] Add Stream Deck layer, camera, PIP, animation, and effect actions",
+      "url": "https://github.com/joeblau/stream/issues/148",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Physical device source/effect/PIP controls and reconnect qualification."
+      ]
+    },
+    {
+      "number": 147,
+      "code": "D04",
+      "title": "[macOS][D04] Add Stream Deck scene, Take, live, and recording actions",
+      "url": "https://github.com/joeblau/stream/issues/147",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Physical Stream Deck production transitions/record/live/reconnect qualification."
+      ]
+    },
+    {
+      "number": 146,
+      "code": "D03",
+      "title": "[macOS][D03] Create the first-party Elgato Stream Deck plugin and app pairing",
+      "url": "https://github.com/joeblau/stream/issues/146",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Signed app/plugin pairing, real hardware install/update/reconnect qualification."
+      ]
+    },
+    {
+      "number": 143,
+      "code": "H05",
+      "title": "[macOS][H05] Display viewer counts, reactions, emotes, and monetization events",
+      "url": "https://github.com/joeblau/stream/issues/143",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Authorized live events, emote/sticker media rendering, reaction/monetization filters and alert promotion."
+      ]
+    },
+    {
+      "number": 142,
+      "code": "H04",
+      "title": "[macOS][H04] Reply to chats and expose supported moderation actions",
+      "url": "https://github.com/joeblau/stream/issues/142",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Authorized live replies/moderation and supported provider-specific behavior."
+      ]
+    },
+    {
+      "number": 139,
+      "code": "H01",
+      "title": "[macOS][H01] Unify provider chats in a shared embedded conversation panel",
+      "url": "https://github.com/joeblau/stream/issues/139",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Guest public-chat return integration and authorized live-provider chat acceptance."
+      ]
+    },
+    {
+      "number": 135,
+      "code": "T09",
+      "title": "[macOS][T09] Add live destination health, broadcast links, and clean ending behavior",
+      "url": "https://github.com/joeblau/stream/issues/135",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Authorized provider start/end/partial-failure and ingest lifecycle acceptance."
+      ]
+    },
+    {
+      "number": 134,
+      "code": "T08",
+      "title": "[macOS][T08] Create, schedule, edit, and select upcoming live events",
+      "url": "https://github.com/joeblau/stream/issues/134",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Other-provider scheduling/CRUD, cross-provider partial coordination and authorized live events."
+      ]
+    },
+    {
+      "number": 133,
+      "code": "T05",
+      "title": "[macOS][T05] Integrate YouTube, Twitch, and Restream accounts and stream metadata",
+      "url": "https://github.com/joeblau/stream/issues/133",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Registered OAuth apps and real consent, refresh and authorized ingest verification."
+      ]
+    },
+    {
+      "number": 132,
+      "code": "T03",
+      "title": "[macOS][T03] Negotiate destination video profiles and share compatible encoders",
+      "url": "https://github.com/joeblau/stream/issues/132",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Automatic profile negotiation beyond explicit fixed-profile sharing; public TLS/provider ingest and sustained workload qualification."
+      ]
+    },
+    {
+      "number": 130,
+      "code": "I06",
+      "title": "[macOS][I06] Receive remote guest screen shares as independent scene sources",
+      "url": "https://github.com/joeblau/stream/issues/130",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Real browser/mobile independent sharing and Internet/restricted-network/endurance qualification."
+      ]
+    },
+    {
+      "number": 129,
+      "code": "I04",
+      "title": "[macOS][I04] Add persistent guest slots, layouts, placeholders, and automatic names",
+      "url": "https://github.com/joeblau/stream/issues/129",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Sustained multiple guests beyond current one admitted peer; manual layout workflow acceptance."
+      ]
+    },
+    {
+      "number": 128,
+      "code": "I03",
+      "title": "[macOS][I03] Add an embedded backstage guest panel and private talkback",
+      "url": "https://github.com/joeblau/stream/issues/128",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Addressed private audio talkback; real native UI/mobile/restricted-network/endurance qualification."
+      ]
+    },
+    {
+      "number": 127,
+      "code": "I05",
+      "title": "[macOS][I05] Provide per-guest mix-minus return audio and selectable video returns",
+      "url": "https://github.com/joeblau/stream/issues/127",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Native return video encoder/SDP/RTP sender and canvas selection not implemented; adaptation policy alone supplies no video. Broader per-recipient mix-minus/capacity qualification."
+      ]
+    },
+    {
+      "number": 126,
+      "code": "I02",
+      "title": "[macOS][I02] Create a browser guest joining and device-check experience",
+      "url": "https://github.com/joeblau/stream/issues/126",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Real desktop/mobile devices, permissions, AEC/headphones and restricted Internet network acceptance."
+      ]
+    },
+    {
+      "number": 125,
+      "code": "I01",
+      "title": "[macOS][I01] Build browser interview sessions, signaling, and NAT traversal",
+      "url": "https://github.com/joeblau/stream/issues/125",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Deployed authenticated TURN broker, Internet/mobile/restricted networks, long calls and measured native capacity above one."
+      ]
+    },
+    {
+      "number": 124,
+      "code": "A12",
+      "title": "[macOS][A12] Route browser-widget audio into dedicated mixer channels",
+      "url": "https://github.com/joeblau/stream/issues/124",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Production audio path remains disabled: transparent widget pixels, signed shared-container IPC, lifecycle/channel registration and all capture exclusions still need integration/qualification."
+      ]
+    },
+    {
+      "number": 108,
+      "code": "E04",
+      "title": "[macOS][E04] Support color LUT import and per-source LUT intensity",
+      "url": "https://github.com/joeblau/stream/issues/108",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Representative live-camera/LUT color footage and sustained render-cost qualification."
+      ]
+    },
+    {
+      "number": 107,
+      "code": "E02",
+      "title": "[macOS][E02] Implement chroma key with spill suppression and edge masks",
+      "url": "https://github.com/joeblau/stream/issues/107",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Representative hair/edge footage and physical camera/sustained render-cost qualification."
+      ]
+    },
+    {
+      "number": 94,
+      "code": "R05",
+      "title": "[macOS][R05] Add macOS build, signing, sandbox, and distribution validation",
+      "url": "https://github.com/joeblau/stream/issues/94",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Unexpired matching app/helper/camera signing profiles and signed/notarized installation/update/uninstall qualification."
+      ]
+    },
+    {
+      "number": 93,
+      "code": "R04",
+      "title": "[macOS][R04] Handle low disk space, external volumes, and interrupted recordings",
+      "url": "https://github.com/joeblau/stream/issues/93",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Physical removable-volume/power-loss and sustained storage qualification; controlled writer failures and recovery are locally tested."
+      ]
+    },
+    {
+      "number": 92,
+      "code": "R03",
+      "title": "[macOS][R03] Qualify Apple Silicon and Intel performance and resource budgets",
+      "url": "https://github.com/joeblau/stream/issues/92",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Representative physical workloads and sustained Apple Silicon/Intel resource/thermal/A/V/UI measurements."
+      ]
+    },
+    {
+      "number": 91,
+      "code": "R01",
+      "title": "[macOS][R01] Expose source, compositor, encoder, network, audio, and storage diagnostics",
+      "url": "https://github.com/joeblau/stream/issues/91",
+      "githubState": "open",
+      "completion": "software verified locally; GitHub issue remains open",
+      "remaining": [
+        "Human acceptance and final combined app/native fixture verification; physical-source and sustained performance requirements remain in dependent tasks."
+      ]
+    },
+    {
+      "number": 90,
+      "code": "P06",
+      "title": "[macOS][P06] Make the single-window studio accessible and keyboard navigable",
+      "url": "https://github.com/joeblau/stream/issues/90",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Actual VoiceOver, Full Keyboard Access, focus restoration, text/contrast and small-display manual acceptance."
+      ]
+    },
+    {
+      "number": 88,
+      "code": "D01",
+      "title": "[macOS][D01] Add configurable shortcuts and a command palette for studio actions",
+      "url": "https://github.com/joeblau/stream/issues/88",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Opt-in global shortcuts with another foreground app, physical/native accessibility acceptance."
+      ]
+    },
+    {
+      "number": 87,
+      "code": "T04",
+      "title": "[macOS][T04] Add preflight checks, uplink measurement, and a local rehearsal mode",
+      "url": "https://github.com/joeblau/stream/issues/87",
+      "githubState": "open",
+      "completion": "remaining acceptance",
+      "remaining": [
+        "Real uplink/provider private test, constrained network and combined full-resolution rehearsal qualification."
+      ]
+    },
+    {
+      "number": 60,
+      "code": "EP13",
+      "title": "[macOS][EP13] Diagnostics, resilience, performance, and release readiness",
+      "url": "https://github.com/joeblau/stream/issues/60",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 59,
+      "code": "EP12",
+      "title": "[macOS][EP12] Projects, profiles, assets, and native workflows",
+      "url": "https://github.com/joeblau/stream/issues/59",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 58,
+      "code": "EP11",
+      "title": "[macOS][EP11] Elgato Stream Deck plugin and automation controls",
+      "url": "https://github.com/joeblau/stream/issues/58",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 57,
+      "code": "EP10",
+      "title": "[macOS][EP10] Audience chat, comments, reactions, and moderation",
+      "url": "https://github.com/joeblau/stream/issues/57",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 56,
+      "code": "EP09",
+      "title": "[macOS][EP09] Recording, virtual devices, and program outputs",
+      "url": "https://github.com/joeblau/stream/issues/56",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 55,
+      "code": "EP08",
+      "title": "[macOS][EP08] Destinations, multistreaming, and scheduling",
+      "url": "https://github.com/joeblau/stream/issues/55",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 54,
+      "code": "EP07",
+      "title": "[macOS][EP07] Remote interviews and Zoom production",
+      "url": "https://github.com/joeblau/stream/issues/54",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 53,
+      "code": "EP06",
+      "title": "[macOS][EP06] Audio mixer, media playback, soundboard, and effects",
+      "url": "https://github.com/joeblau/stream/issues/53",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 52,
+      "code": "EP05",
+      "title": "[macOS][EP05] Graphics, titles, presentations, and web overlays",
+      "url": "https://github.com/joeblau/stream/issues/52",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 51,
+      "code": "EP04",
+      "title": "[macOS][EP04] Camera effects, keying, framing, and PTZ",
+      "url": "https://github.com/joeblau/stream/issues/51",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 50,
+      "code": "EP03",
+      "title": "[macOS][EP03] Desktop, camera, phone, and professional inputs",
+      "url": "https://github.com/joeblau/stream/issues/50",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 48,
+      "code": "EP01",
+      "title": "[macOS][EP01] One-window workspace and media foundations",
+      "url": "https://github.com/joeblau/stream/issues/48",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    },
+    {
+      "number": 47,
+      "code": "ROADMAP",
+      "title": "[macOS] Desktop studio roadmap: Ecamm-inspired production in one window",
+      "url": "https://github.com/joeblau/stream/issues/47",
+      "githubState": "open",
+      "completion": "epic depends on open feature acceptance",
+      "remaining": [
+        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+      ]
+    }
+  ]
+}

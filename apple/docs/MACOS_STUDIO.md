@@ -227,12 +227,24 @@ The tool builds the actual compositor and writer, then measures four ten-second
 synthetic static-screen/camera scenes with twelve editable layers, H.264/AAC
 recording, a slow secondary sink, and main-actor scheduling probes. Each run
 uses a new artifact directory and writes JSON alongside its synthetic recordings.
-[Recorded baseline](PERFORMANCE_BASELINE.json): Mac15,8, macOS 27.0.1, 720p30,
+[2026-10-02 baseline](PERFORMANCE_BASELINE.json): Mac15,8, macOS 27.0.1, 720p30,
 1080p30, 1080p60 and 4K30 completed with valid tracks, zero recorder drops, about
 30/60 achieved fps and under 4 ms maximum main-actor scheduling delay in that run.
 All timestamps use the same host clock as audio; rendering skips overdue
 opportunities instead of compressing the video timeline. Slow sink drops remain
 isolated and visible.
+
+The [2026-10-21 repeat](PERFORMANCE_BASELINE_2026-10-21.json), on Mac15,8,
+macOS 27.2 (26B118) and Xcode 27.1, completed all four recordings with zero
+recorder audio/video drops and valid decoded tracks. Actual achieved rates
+were 28.68, 28.98, 59.47 and 29.98 fps; maximum main-actor scheduling delay was
+16.9 ms. Concurrent workspace builds can affect these measurements. The
+independent PCM producer stays on its original exact 48 kHz grid until it
+covers the sealed final video boundary; measured source audio coverage was
+2.54–5.95 ms. Stopping synthetic audio at an arbitrary ten-second frontier
+would leave final video frames without PCM and correctly fail the recorder's
+unchanged three-second drain deadline. This fixture does not extend the
+supported physical-device or sustained-workload matrix.
 
 An earlier 4K30 run failed with a writer-wide encoding error while other builds
 were active; two subsequent runs completed. Completed writers now release their
