@@ -342,6 +342,8 @@ private final class ReturnAVProbe: @unchecked Sendable {
                     }
                     state["av"] = current.av.snapshot(); state["authoredAV"] = current.toneCue.snapshot()
                     state["videoFault"] = current.manager.fixtureReturnVideoFault
+                    state["videoFeedback"] = current.manager.fixtureReturnVideoFeedback
+                    if let profile = value.members.first?.returnVideoProfile { state["videoProfile"] = ["width": profile.width, "height": profile.height, "fps": profile.framesPerSecond, "bitrate": profile.maximumBitrate] }
                     state["privateMessages"] = current.manager.privateMessages.map {
                         ["fromGuest": $0.fromGuest, "delivery": $0.delivery.rawValue,
                          "digest": SHA256.hash(data: Data($0.text.utf8)).map { String(format: "%02x", $0) }.joined()] as [String: Any]

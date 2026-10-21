@@ -1,8 +1,7 @@
 import Foundation
 
-/// A bounded encoding target for a future guest return video sender. The
-/// controller consumes caller-supplied transport observations; it does not
-/// measure network capacity or create an encoder itself.
+/// Bounded targets for measured guest return adaptation. Capacity estimates
+/// come only from negotiated, authenticated receiver feedback.
 struct NativeGuestReturnVideoProfile: Equatable, Sendable {
     let width: Int
     let height: Int
@@ -13,6 +12,15 @@ struct NativeGuestReturnVideoProfile: Equatable, Sendable {
     static let balanced = Self(width: 640, height: 360, framesPerSecond: 24, maximumBitrate: 650_000)
     static let high = Self(width: 1280, height: 720, framesPerSecond: 30, maximumBitrate: 1_500_000)
     static let all = [low, balanced, high]
+    /// Quantized ceilings avoid replacing VT for every small REMB update.
+    /// Below64kbps the optional video source is no longer usable.
+    func constrained(capacityBitsPerSecond capacity: UInt64) -> Self? {
+        guard capacity >= 64_000 else { return nil }
+        let allowed = Int(min(capacity, 100_000_000)) * 8 / 10
+        let tiers = [32_000, 48_000, 64_000, 96_000, 128_000, 192_000, 250_000, 320_000, 480_000, 650_000, 960_000, 1_500_000]
+        return Self(width: width, height: height, framesPerSecond: framesPerSecond,
+            maximumBitrate: min(maximumBitrate, tiers.last(where: { $0 <= allowed }) ?? 32_000))
+    }
 }
 
 /// Three bad observations lower quality one step. Eight good observations over
@@ -32,12 +40,15 @@ struct NativeGuestReturnVideoBudget: Sendable {
                           estimatedAvailableBitsPerSecond: Int,
                           bufferedBytes: Int,
                           droppedFrames: Int,
-                          sentFrames: Int) -> Bool {
-        guard estimatedAvailableBitsPerSecond >= 0,
+                          observedFrames: Int,
+                          receiverLossFraction: Double = 0,
+                          senderBlocked: Bool = false) -> Bool {
+        guard receiverLossFraction.isFinite, receiverLossFraction >= 0, receiverLossFraction <= 1,
+              estimatedAvailableBitsPerSecond >= 0,
               estimatedAvailableBitsPerSecond <= 100_000_000,
               bufferedBytes >= 0, bufferedBytes <= 1_048_576,
-              sentFrames > 0, sentFrames <= 300,
-              droppedFrames >= 0, droppedFrames <= sentFrames,
+              observedFrames > 0, observedFrames <= 300,
+              droppedFrames >= 0, droppedFrames <= observedFrames,
               lastObservation.map({ monotonicMilliseconds > $0 && monotonicMilliseconds - $0 >= 250 }) ?? true else {
             return false
         }
@@ -48,12 +59,12 @@ struct NativeGuestReturnVideoBudget: Sendable {
             badWindows = 0; goodWindows = 0; goodBegan = nil
         }
         lastObservation = monotonicMilliseconds
-        let loss = Double(droppedFrames) / Double(sentFrames)
+        let loss = max(receiverLossFraction, Double(droppedFrames) / Double(observedFrames))
         let profiles = NativeGuestReturnVideoProfile.all
         guard let index = profiles.firstIndex(of: profile) else { return false }
         let canChange = monotonicMilliseconds >= lastChange && monotonicMilliseconds - lastChange >= 2_000
         let congested = estimatedAvailableBitsPerSecond < profile.maximumBitrate
-            || bufferedBytes >= 96 * 1_024 || loss >= 0.08
+            || bufferedBytes >= 16 * 1_024 || loss >= 0.08 || senderBlocked
         if congested {
             badWindows = min(badWindows + 1, 3); goodWindows = 0; goodBegan = nil
             guard canChange, badWindows >= 3, index > 0 else { return false }

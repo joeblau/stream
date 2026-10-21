@@ -13,7 +13,7 @@ import {analyzeReturnAV} from './native-return-video-analysis.mjs';
 import {chromeFixtureExecutable, chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
 const isolatedMode=process.argv.includes('--video-flow-only')||process.argv.includes('--video-fault-only')||process.argv.some(value=>value.startsWith('--video-av-final='));
 if(!isolatedMode){
-  const plans=[['--video-flow-only'],...Array.from({length:2},()=>['program','secondary','clean'].map(source=>[`--video-av-final=${source}`])).flat()];
+  const plans=[['--video-flow-only','--video-feedback-probe'],...Array.from({length:2},()=>['program','secondary','clean'].map(source=>[`--video-av-final=${source}`])).flat()];
   for(const arguments_ of plans){
     const code=await new Promise((resolve,reject)=>{const run=spawn(process.execPath,[fileURLToPath(import.meta.url),...arguments_],{stdio:'inherit'});run.once('error',reject);run.once('exit',(code,signal)=>resolve(signal?1:code));});
     assert(code===0,`Owned native video qualification phase ${arguments_[0]} failed`);
@@ -197,7 +197,7 @@ try {
   }
   const first=await spectrum('backstage-local-only',.4,.2);
   const videoPixels=`(()=>{const v=document.getElementById('return');if(!v.srcObject?.getVideoTracks().length||v.readyState<2)return null;const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);const pixel=[...c.getContext('2d').getImageData(c.width/2,c.height/2,1,1).data].slice(0,3);return{width:c.width,height:c.height,pixel,track:v.srcObject.getVideoTracks()[0].id};})()`;
-  const decodedVideoStats=`(async()=>{const stats=await window.__fixturePeers.at(-1).getStats();for(const r of stats.values())if(r.type==='inbound-rtp'&&r.kind==='video')return{frames:r.framesDecoded,width:r.frameWidth,height:r.frameHeight,fps:r.framesPerSecond,codec:stats.get(r.codecId)?.mimeType};return null;})()`;
+  const decodedVideoStats=`(async()=>{const stats=await window.__fixturePeers.at(-1).getStats();for(const r of stats.values())if(r.type==='inbound-rtp'&&r.kind==='video')return{bytes:r.bytesReceived,packetsLost:r.packetsLost,timestamp:r.timestamp,frames:r.framesDecoded,width:r.frameWidth,height:r.frameHeight,fps:r.framesPerSecond,codec:stats.get(r.codecId)?.mimeType};return null;})()`;
   async function qualifyAV(sourceName){
   await pause(3500); // Require late cues after multiple shared-clock sender reports.
   command({type:'video-black'});ack=undefined;command({type:'mute'});await wait('mute before return AV recording',()=>{check();return ack==='mute';});
@@ -250,6 +250,27 @@ try {
   await wait('actual fixed Program return decoded green pixels',async()=>{check();const r=await browser.evaluate(g,videoPixels);return r?.pixel[1]>150&&r.pixel[0]<60&&r.pixel[2]<110&&r.width<=320&&r.height<=180;},20000);
   const originalVideo=await browser.evaluate(g,videoPixels);console.log(`Actual native Program return green: ${JSON.stringify(originalVideo)}`);
   await wait('real Chrome H264 return codec and frame count',async()=>{const r=await browser.evaluate(g,decodedVideoStats);return r?.codec==='video/H264'&&r.frames>=5&&r.width<=320&&r.height<=180;});
+  await wait('Authenticated actual Chrome receiver reports for current outbound SSRC',()=>{check();return state.videoFeedback?.rr>0;},15000);
+  console.log(`Actual Chrome return feedback: ${JSON.stringify(state.videoFeedback)}; profile=${JSON.stringify(state.videoProfile)}`);
+  if(process.argv.includes('--video-feedback-probe')){
+    command({type:'video-noise'});
+    const receipts=[];
+    let steadyStats;
+    for(let sample=0;sample<24;sample++){
+      await pause(1000);check();receipts.push({feedback:structuredClone(state.videoFeedback),profile:structuredClone(state.videoProfile)});
+      if(sample===10)steadyStats=await browser.evaluate(g,decodedVideoStats);
+      console.log(`MEASURED feedback ${sample}: ${JSON.stringify(state.videoFeedback)} profile=${JSON.stringify(state.videoProfile)}`);
+    }
+    assert(receipts.some(r=>r.feedback.negotiated&&r.feedback.remb>0&&r.feedback.rembAge>=0&&r.feedback.rembAge<=2000),'Actual Chrome negotiated single-SSRC REMB received through shipping SDK');
+    assert(receipts.some(r=>r.profile.bitrate<250000&&r.profile.bitrate<=r.feedback.capacity*.8),'Actual sender lowers encoder bitrate under measured capacity, leaving20% headroom');
+    assert(receipts.every(r=>r.profile.width<=320&&r.profile.height<=180),'Application-limited REMB never falsely authorizes a higher raster');
+    const finalStats=await browser.evaluate(g,decodedVideoStats);
+    const receivedBitrate=(finalStats.bytes-steadyStats.bytes)*8000/(finalStats.timestamp-steadyStats.timestamp);
+    const receiverCeiling=Math.min(...receipts.slice(11).map(r=>r.feedback.capacity));
+    assert(Number.isFinite(receivedBitrate)&&receivedBitrate>0&&receivedBitrate<=receiverCeiling,'Actual Chrome received video bitrate stays within fresh receiver capacity after settling');
+    console.log(`PASS actual negotiated RR/REMB→bounded native VT bitrate; low raster retained without fresh higher-capacity evidence; received=${receivedBitrate.toFixed(0)}bps scopedREMBfloor=${receiverCeiling}bps`);
+    command({type:'video-green'});
+  }
   ack=undefined;command({type:'video-budget-held'});await wait('actual aggregate reservation includes active return encoder',()=>{check();return ack==='video-budget-held';});
   command({type:'video-black'});
   await wait('actual taken black Program replaces prior return pixels',async()=>{check();const r=await browser.evaluate(g,videoPixels);return r&&r.pixel.every(v=>v<8);});
@@ -270,6 +291,10 @@ try {
   command({type:'video-green'});
   await wait('actual Chrome H264 pixels recover after partial AU send failure',async()=>{check();const p=await browser.evaluate(g,videoPixels),r=await browser.evaluate(g,decodedVideoStats);return p?.pixel[1]>150&&p.pixel[0]<60&&p.pixel[2]<110&&r.frames>beforeFault.frames+2;});
   console.log(`PASS actual SDK fragmented partial AU failure and next-IDR Chrome decode recovery: ${JSON.stringify(state.videoFault)}`);
+  if(process.argv.includes('--video-feedback-probe')){
+    await wait('Actual Chrome RR reports controlled RTP loss',()=>{check();return state.videoFeedback?.loss>0;},15000);
+    console.log(`PASS actual controlled partial-AU impairment appears in authenticated receiver loss: ${JSON.stringify(state.videoFeedback)}`);
+  }
   command({type:'video-purple'});
   await wait('current purple Program restored after recovery',async()=>{const r=await browser.evaluate(g,videoPixels);return r?.pixel[0]>100&&r.pixel[1]<80&&r.pixel[2]>140;});
   const blue=async()=>{check();const r=await browser.evaluate(g,videoPixels);return r?.pixel[0]<40&&r.pixel[1]<60&&r.pixel[2]>180&&r.width<r.height&&r.height<=180;};
@@ -380,7 +405,7 @@ try {
   command({type:'stop'});await wait('native permanent cleanup receipt',()=>{check();return stopped&&closed;},10000);assert(linesAfterStop===0);
   assert(browser.errors.length===0,'Actual shipping guest page no runtime errors');
   console.log(`PASS ${version.product}: actual shipping NativeInterviewManager/default receiver/controller-issued sink→preclamp fulllease return→public native stereo Opus→SDK RTP/RTCP→owned TURN→shipping guest audio track/Chrome decoded48k PCM; own440/880 excluded, local1000/1700 preserved, mute/nonunity restore, new-generation rejoin and remove fence`);
-  console.log('Scope: owned local Worker/Coturn/synthetic captures only. Program/Secondary/Clean video and public stereo audio only; adaptive transport feedback, addressed talkback, physical/browser AEC, mobile/restricted-network/deployed broker remain unqualified.');
+  console.log('Scope: owned local Worker/Coturn/synthetic captures only. Program/Secondary/Clean video and public stereo audio only; higher-profile adaptive upshift/bootstrap, addressed talkback, physical/browser AEC, mobile/restricted-network/deployed broker remain unqualified.');
   }
 } finally {
   browserSocket?.close();for(const value of children.reverse())await terminate(value);

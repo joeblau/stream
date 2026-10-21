@@ -20,7 +20,7 @@ xcrun swiftc -swift-version 6 -strict-concurrency=complete -parse-as-library -DS
   "${APPLE_DIR}/StreamMac/NativeGuestReturnAudioEncoder.swift" \
   "${APPLE_DIR}/StreamMac/NativeGuestReturnVideoEncoder.swift" \
   "${APPLE_DIR}/NativeGuestReceivePrototype/NativeGuestReceiver.swift" \
-  "${APPLE_DIR}/StreamMac/NativeInterviewTypes.swift" "${APPLE_DIR}/StreamMac/NativeGuestMediaSink.swift" \
+  "${APPLE_DIR}/StreamMac/NativeGuestReturnVideoBudget.swift" "${APPLE_DIR}/StreamMac/NativeInterviewTypes.swift" "${APPLE_DIR}/StreamMac/NativeGuestMediaSink.swift" \
   "${APPLE_DIR}/StreamMac/NativeInterviewReceiverAdapter.swift" \
   "${SCRIPT_DIR}/program_recording_fixtures.swift" "${SCRIPT_DIR}/native_interview_receiver_harness.swift" \
   "${BUILD_DIR}/GuestReceive.o" "${STREAM_GUEST_RTC_LIBRARY}" -Xlinker -lc++ -lz \

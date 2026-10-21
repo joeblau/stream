@@ -64,7 +64,7 @@ while time.monotonic()<until:
 else: raise SystemExit('Actual local interview Worker did not become ready')
 PY
 xcrun swiftc -swift-version 6 -parse-as-library -target "$(uname -m)-apple-macos14.0" \
-  StreamMac/GuestMediaReceipts.swift StreamMac/NativeInterviewTypes.swift \
+  StreamMac/GuestMediaReceipts.swift StreamMac/NativeGuestReturnVideoBudget.swift StreamMac/NativeInterviewTypes.swift \
   StreamMac/NativeInterviewServiceClient.swift StreamMac/NativeInterviewSession.swift \
   scripts/native_interview_control_harness.swift -o "$INTERVIEW_DIR/native-interview-control"
 "$INTERVIEW_DIR/native-interview-control" "http://127.0.0.1:$INTERVIEW_PORT"

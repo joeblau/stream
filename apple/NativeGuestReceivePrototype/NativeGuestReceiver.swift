@@ -156,6 +156,10 @@ final class NativeGuestReceiver: @unchecked Sendable {
         return SGReceiverValidationReturnVideoFault(handle)
     }
     #endif
+    var returnVideoFeedback: SGReturnVideoFeedback {
+        transportLock.lock(); defer { transportLock.unlock() }
+        return SGReceiverReturnVideoFeedback(handle, lease.generation)
+    }
     func sendReturnH264(_ data: Data, lease: GuestReceiveLease, rtp: UInt32, ntp: UInt64) -> Bool {
         guard lease == self.lease, !data.isEmpty, data.count <= 65_536 else { return false }
         transportLock.lock(); defer { transportLock.unlock() }

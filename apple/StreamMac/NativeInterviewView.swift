@@ -16,7 +16,7 @@ struct NativeInterviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Guests").font(.headline)
-                Text("One guest connection with incoming camera, screen and audio. Public audio and optional fixed Program video return availability appear below.")
+                Text("One guest connection with incoming camera, screen and audio. Public audio and optional Program, Secondary, or Clean video return availability appear below.")
                     .font(.caption).foregroundStyle(.secondary)
                 GuestSlotsView(store: sceneStore)
                 if [.idle, .ended, .expired, .failed, .closed].contains(manager.state.snapshot.phase) {
@@ -126,9 +126,10 @@ struct NativeInterviewView: View {
                         }
                     }
                     commandButton(enabled ? "Stop Video Return" : "Start \(member.returnVideoSource.title) Video Return", .setProgramReturn(context, !enabled))
-                    Text(member.returnVideo == .ready ? "Sending \(member.returnVideoSource.title) video, up to 320 × 180 at 15 fps / 250 kbps. Remote playback is not confirmed." :
+                    Text(member.returnVideo == .ready ? "Sending \(member.returnVideoSource.title) video, up to \(member.returnVideoProfile.width) × \(member.returnVideoProfile.height) at \(member.returnVideoProfile.framesPerSecond) fps / \(member.returnVideoProfile.maximumBitrate / 1000) kbps. Quality follows measured receiver feedback. Remote playback is not confirmed." :
                         member.returnVideo == .preparing ? "Preparing \(member.returnVideoSource.title) video return." :
-                        member.returnVideo == .failed ? "Video return could not start. Start local preview and check the studio encoder budget, then retry." :
+                        member.returnVideo == .bandwidthLimited ? "Video return stopped because measured video capacity fell below64kbps. Audio continues. Check the connection, then explicitly start video again." :
+                        member.returnVideo == .failed ? "Video return stopped or could not start. Check local preview and the studio encoder budget, then retry." :
                         "\(member.returnVideoSource.title) video return is off. It uses one encoder when enabled. Secondary requires a configured layout in Program. Clean omits project overlays and live annotations; scene layers remain. Additional compositions require qualified hardware.")
                         .font(.caption).foregroundStyle(.secondary)
                 }

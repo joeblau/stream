@@ -17,6 +17,7 @@ private final class ReturnVideoResult: @unchecked Sendable {
         return sample
     }
 }
+enum NativeGuestReturnVideoError: Error { case accessUnitTooLarge }
 struct NativeGuestReturnH264Frame: Sendable {
     let data: Data
     let rtp: UInt32, ntp: UInt64
@@ -24,15 +25,22 @@ struct NativeGuestReturnH264Frame: Sendable {
 
 /// One serial capacity-one Program consumer owns this encoder. Every submitted
 /// frame is completed before accepting another; source PTS is never restamped.
-/// The fixed low ceiling is 320x180, 15fps and 250kbps, with no upscaling.
+/// A measured profile sets an upper bound; source frames are never upscaled or duplicated.
 final class NativeGuestReturnVideoEncoder {
     private var session: VTCompressionSession?
+    private(set) var profile: NativeGuestReturnVideoProfile = .low
+    func setProfile(_ value: NativeGuestReturnVideoProfile) {
+        guard profile != value else { return }
+        // Same owner/reservation spans invalidation and the next allocation.
+        close(); profile = value
+    }
     private var width = 0, height = 0
     private var nextPTS = CMTime.invalid
     private var forceKeyframe = true
     #if STREAM_GUEST_VALIDATION
     var validationBeforeCompletion: (@Sendable () -> Void)?
     private(set) var validationSessionActive = false
+    var validationDimensions: (Int, Int) { (width, height) }
     #endif
     private let context = CIContext(options: [.cacheIntermediates: false])
     func requestKeyframe() { forceKeyframe = true }
@@ -59,11 +67,11 @@ final class NativeGuestReturnVideoEncoder {
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
             kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_Baseline_3_1,
-            kVTCompressionPropertyKey_AverageBitRate: 250_000,
-            kVTCompressionPropertyKey_DataRateLimits: [31_250, 1],
-            kVTCompressionPropertyKey_ExpectedFrameRate: 15,
+            kVTCompressionPropertyKey_AverageBitRate: profile.maximumBitrate,
+            kVTCompressionPropertyKey_DataRateLimits: [profile.maximumBitrate / 8, 1],
+            kVTCompressionPropertyKey_ExpectedFrameRate: profile.framesPerSecond,
             kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: 1,
-            kVTCompressionPropertyKey_MaxKeyFrameInterval: 15
+            kVTCompressionPropertyKey_MaxKeyFrameInterval: profile.framesPerSecond
         ]
         guard VTSessionSetProperties(created, propertyDictionary: properties as CFDictionary) == noErr,
               VTCompressionSessionPrepareToEncodeFrames(created) == noErr else { throw NativeGuestReturnAudioError.unavailable }
@@ -74,7 +82,7 @@ final class NativeGuestReturnVideoEncoder {
         if nextPTS.isNumeric, CMTimeCompare(pts, nextPTS) < 0 { return nil }
         let iw = CVPixelBufferGetWidth(input), ih = CVPixelBufferGetHeight(input)
         guard iw >= 2, ih >= 2, iw <= 8192, ih <= 8192 else { throw NativeGuestReturnAudioError.malformed }
-        let scale = min(1, min(320 / Double(iw), 180 / Double(ih)))
+        let scale = min(1, min(Double(profile.width) / Double(iw), Double(profile.height) / Double(ih)))
         let w = max(2, Int(Double(iw) * scale) / 2 * 2), h = max(2, Int(Double(ih) * scale) / 2 * 2)
         if session == nil || width != w || height != h { try prepare(width: w, height: h) }
         guard let session else { throw NativeGuestReturnAudioError.unavailable }
@@ -99,7 +107,7 @@ final class NativeGuestReturnVideoEncoder {
         }
         guard let encoded = try result.take() else { return nil }
         forceKeyframe = false
-        let step = CMTime(value: 1, timescale: 15)
+        let step = CMTime(value: 1, timescale: CMTimeScale(profile.framesPerSecond))
         if !nextPTS.isNumeric || (pts - nextPTS).seconds > 1 { nextPTS = pts + step }
         else { repeat { nextPTS = nextPTS + step } while CMTimeCompare(nextPTS, pts) <= 0 }
         let data = try Self.annexB(encoded)
@@ -112,9 +120,10 @@ final class NativeGuestReturnVideoEncoder {
     }
     private static func annexB(_ sample: CMSampleBuffer) throws -> Data {
         guard let block = sample.dataBuffer, let format = sample.formatDescription,
-              CMBlockBufferGetDataLength(block) > 0, CMBlockBufferGetDataLength(block) <= 65_536 else {
+              CMBlockBufferGetDataLength(block) > 0 else {
             throw NativeGuestReturnAudioError.malformed
         }
+        guard CMBlockBufferGetDataLength(block) <= 65_536 else { throw NativeGuestReturnVideoError.accessUnitTooLarge }
         var data = Data(), nalLength: Int32 = 0
         var pointer: UnsafePointer<UInt8>?, size = 0, count = 0
         guard CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, parameterSetIndex: 0,
@@ -137,7 +146,8 @@ final class NativeGuestReturnVideoEncoder {
         while offset < bytes.count {
             guard offset + 4 <= bytes.count, nals < 62 else { throw NativeGuestReturnAudioError.malformed }
             let length = bytes[offset..<offset + 4].reduce(0) { $0 * 256 + Int($1) }; offset += 4
-            guard length > 0, length <= bytes.count - offset, data.count + 4 + length <= 65_536 else { throw NativeGuestReturnAudioError.malformed }
+            guard length > 0, length <= bytes.count - offset else { throw NativeGuestReturnAudioError.malformed }
+            guard data.count + 4 + length <= 65_536 else { throw NativeGuestReturnVideoError.accessUnitTooLarge }
             data.append(contentsOf: [0, 0, 0, 1]); data.append(contentsOf: bytes[offset..<offset + length]); offset += length; nals += 1
         }
         return data

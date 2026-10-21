@@ -1143,7 +1143,7 @@ final class StreamController: ObservableObject {
         let program = engine, authority = guestProgramReturnAuthority
         for source in NativeInterviewReturnVideoSource.allCases {
             let canvas: OutputCanvas = source == .secondary ? .secondary : .program
-            let capability = NativeGuestProgramReturnSource(authority: authority, install: { [weak self, weak sink] token, consume in
+            let capability = NativeGuestProgramReturnSource(maximumProfile: IsolatedVideoBudget.current.qualified ? .high : .low, authority: authority, install: { [weak self, weak sink] token, consume in
                 let size = await MainActor.run { () -> CGSize? in
                     guard let self, let sink, sink.videoTokenIsCurrent(token), self.isPipelineRunning,
                           self.guestLease == lease,
