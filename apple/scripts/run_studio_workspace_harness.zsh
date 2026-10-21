@@ -130,7 +130,7 @@ xcodebuild -resolvePackageDependencies -project "$WORKSPACE_DIR/StudioWorkspaceV
     -scheme StudioWorkspaceHarness -derivedDataPath "$WORKSPACE_BUILD_PATH"
 python3 scripts/repair_desktop_transport_archives.py "$WORKSPACE_BUILD_PATH"
 xcodebuild -project "$WORKSPACE_DIR/StudioWorkspaceValidation.xcodeproj" \
-    -scheme StudioWorkspaceHarness -destination 'platform=macOS' \
+    -scheme StudioWorkspaceHarness -destination 'platform=macOS' -jobs "${STREAM_XCODE_JOBS:-4}" \
     -derivedDataPath "$WORKSPACE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 readonly WORKSPACE_PRODUCTS="${WORKSPACE_BUILD_PATH:A}/Build/Products/Debug"
 swiftc scripts/studio_accessibility_client.swift -o "$WORKSPACE_DIR/StudioAccessibilityClient"

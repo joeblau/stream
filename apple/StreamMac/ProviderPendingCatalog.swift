@@ -105,5 +105,9 @@ struct ProviderSchedulingReceipt {
     let resourceID: String
     let state: State
     let failure: ProviderFailure?
+    let operationID: UUID?
     let receivedAt = Date()
+    init(action: String, resourceID: String, state: State, failure: ProviderFailure?, operationID: UUID? = nil) {
+        self.action = action; self.resourceID = resourceID; self.state = state; self.failure = failure; self.operationID = operationID
+    }
 }

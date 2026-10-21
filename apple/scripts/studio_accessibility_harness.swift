@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import StreamCore
 
 private struct StudioAXNode: Codable, Sendable {
     let role: String
@@ -92,6 +93,38 @@ struct WorkspaceAccessibilityProbe: View {
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
             characters: characters, charactersIgnoringModifiers: characters.lowercased(), isARepeat: false, keyCode: code)!
         NSApp.sendEvent(event)
+    }
+    static func showScheduling(workspace: StudioWorkspace) async throws {
+        let accounts = workspace.runtime.providerAccounts
+        let plan = accounts.showScheduling
+        let youtube = StreamDestination(name: "Show YouTube", isEnabled: false, providerBinding: .init(provider: .youtube, channelID: "fixture-owner"))
+        let manual = StreamDestination(name: "Show Manual", isEnabled: false)
+        let window = NSWindow(contentRect: NSRect(x: 90, y: 90, width: 580, height: 640), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = NSHostingView(rootView: ProviderShowSchedulingEditor(coordinator: plan, destinations: [youtube, manual]))
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(250))
+        let initial = try await snapshot("show-scheduling-editor")
+        for label in ["Title (1–100 characters)", "Timezone", "Scheduled start", "Privacy", "Show YouTube · YouTube", "Show Manual · Manual / custom", "Schedule Selected Destinations"] {
+            try require(initial.contains { $0.label == label }, "Missing scheduling field: \(label)")
+        }
+        try require(initial.contains { $0.label == "Schedule Selected Destinations" && !$0.enabled }, "Empty show must not submit")
+        _ = try await client(["focus", "Title (1–100 characters)"])
+        guard let editor = window.firstResponder as? NSTextView else { throw NSError(domain: "StudioAccessibility", code: 1, userInfo: [NSLocalizedDescriptionKey: "Show title did not receive the native field editor"]) }
+        editor.selectAll(nil)
+        editor.insertText("Owned UI show", replacementRange: editor.selectedRange())
+        window.makeFirstResponder(nil)
+        _ = try await client(["press", "Show YouTube · YouTube"])
+        _ = try await client(["press", "Show Manual · Manual / custom"])
+        try await Task.sleep(for: .milliseconds(100))
+        let ready = try await snapshot("show-scheduling-selected")
+        try require(ready.contains { $0.label == "Schedule Selected Destinations" && $0.enabled }, "Selected valid show did not enable submission")
+        _ = try await client(["press", "Schedule Selected Destinations"])
+        try await Task.sleep(for: .milliseconds(100))
+        try require(plan.title == "Owned UI show" && plan.targets.map(\.state) == [.blocked, .manualRequired] && !plan.running, "Actual editor did not submit independent capability-gated outcomes")
+        try require(accounts.pending.document.records.isEmpty, "Unapproved UI fixture created a provider resource")
+        print("PASS: shipping show editor public AX title/timezone/date/privacy/destination fields, disabled empty submit, actual text/select/submit interactions and independent blocked/manual outcomes; no provider mutations")
     }
     static func run(workspace: StudioWorkspace, window: NSWindow) async throws {
         let baseline = try await snapshot("baseline-1440x900")

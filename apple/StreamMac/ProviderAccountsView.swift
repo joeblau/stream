@@ -17,10 +17,12 @@ extension EnvironmentValues {
 struct ProviderAccountsView: View {
     @ObservedObject var accounts: ProviderAccountSession
     @ObservedObject var destinations: DestinationSession
+    @ObservedObject private var scheduling: ProviderShowSchedulingCoordinator
     @ObservedObject private var pending: ProviderPendingCatalog
     init(accounts: ProviderAccountSession, destinations: DestinationSession) {
-        self.accounts = accounts; self.destinations = destinations; self.pending = accounts.pending
+        self.accounts = accounts; self.destinations = destinations; self.pending = accounts.pending; self.scheduling = accounts.showScheduling
     }
+    @State private var showSchedule = false
     @State private var provider = ManagedProvider.youtube
     @State private var clientID = ""
     @State private var channelID = ""
@@ -41,9 +43,15 @@ struct ProviderAccountsView: View {
     private var channel: ProviderChannel? { snapshot.channels.first { $0.id == channelID } }
     private var event: ProviderEvent? { snapshot.events.first { $0.id == eventID } }
     private var canManageYouTube: Bool { snapshot.scopes.contains("https://www.googleapis.com/auth/youtube") || snapshot.scopes.contains("https://www.googleapis.com/auth/youtube.force-ssl") }
+    private var scheduledEventWriteAvailable: Bool {
+        let snapshot = accounts.snapshot(.youtube)
+        return !snapshot.isWorking && snapshot.verifiedAt != nil && accounts.canRequest(.youtube) &&
+            snapshot.scopes.contains { ["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.force-ssl"].contains($0) }
+    }
     private var selectedEvents: [ProviderEvent] { snapshot.events.filter { $0.channelID == nil || $0.channelID == channelID } }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            showScheduling
             Picker("Provider account", selection: $provider) { ForEach(ManagedProvider.allCases) { Text($0.name).tag($0) } }
             Text(provider.accountGate).font(.caption).foregroundStyle(.secondary)
             Link("Account / access repair", destination: provider.repairURL)
@@ -124,6 +132,7 @@ struct ProviderAccountsView: View {
         .onChange(of: channelID) { _, _ in eventID = ""; thumbnail = nil }
         .onChange(of: eventID) { _, _ in thumbnail = nil }
         .onDisappear { importJob?.cancel(); importJob = nil }
+        .sheet(isPresented: $showSchedule) { ProviderShowSchedulingEditor(coordinator: scheduling, destinations: destinations.draft) }
         .sheet(item: $edit) { selection in
             YouTubeEventEditor(selection: selection) { draft in
                 if let event = selection.event { accounts.editYouTube(eventID: event.id, draft: draft) }
@@ -141,6 +150,33 @@ struct ProviderAccountsView: View {
         .confirmationDialog("Delete this upcoming YouTube event?", isPresented: Binding(get: { deleteEvent != nil }, set: { if !$0 { deleteEvent = nil } }), titleVisibility: .visible) {
             if let event = deleteEvent { Button("Delete \(event.title)", role: .destructive) { accounts.deleteYouTube(eventID: event.id); eventID = ""; deleteEvent = nil } }
         } message: { Text("This deletes the selected remote event. Local recording and other destinations continue.") }
+    }
+    private var showScheduling: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button("Schedule Show…") { showSchedule = true }.disabled(!scheduling.targets.isEmpty || destinations.draft.isEmpty)
+                if scheduling.running { Button("Cancel Scheduling") { scheduling.cancel() } }
+                if !scheduling.targets.isEmpty && !scheduling.running { Button("New Show Plan") { scheduling.newPlan() } }
+            }
+            if !scheduling.targets.isEmpty {
+                Text("\(scheduling.title) · \(scheduling.scheduledAt?.formatted(.iso8601) ?? "") · \(scheduling.timezone)").font(.headline)
+                ForEach(scheduling.targets) { target in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(target.name): \(target.state.label)")
+                        Text(target.detail).font(.caption).foregroundStyle(.secondary)
+                        if let id = target.eventID {
+                            HStack {
+                                Text("Event ID: \(id)").font(.caption.monospaced()).textSelection(.enabled)
+                                Button("Edit Event…") {
+                                    if let event = accounts.snapshot(.youtube).events.first(where: { $0.id == id }) { edit = .init(event: event) }
+                                }.disabled(!accounts.snapshot(.youtube).events.contains(where: { $0.id == id && $0.state == .upcoming }) || !scheduledEventWriteAvailable)
+                            }
+                        }
+                    }
+                }
+                Text("A new plan can create another event. Review unconfirmed operations in the provider first. Show selections do not change destination bindings or start outputs.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
     @ViewBuilder private var authorization: some View {
         if provider == .restream {
@@ -275,14 +311,7 @@ private struct YouTubeEventEditor: View {
     var body: some View {
         Form {
             Text(selection.event == nil ? "Create YouTube Event" : "Edit Upcoming YouTube Event").font(.title2)
-            TextField("Title (1–100 characters)", text: $draft.title)
-            TextEditor(text: $draft.description).frame(minHeight: 100).overlay(alignment: .topLeading) {
-                if draft.description.isEmpty { Text("Description (up to 5,000 characters)").foregroundStyle(.secondary).allowsHitTesting(false) }
-            }
-            Picker("Timezone", selection: $timezone) { ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { Text($0).tag($0) } }
-            DatePicker("Scheduled start", selection: $draft.scheduledAt, in: Date()...).environment(\.timeZone, zone)
-            Text("\(draft.scheduledAt.formatted(.iso8601)) · provider receives an absolute instant.").font(.caption).foregroundStyle(.secondary)
-            Picker("Privacy", selection: $draft.privacy) { ForEach(YouTubeEventDraft.Privacy.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+            ProviderEventDraftFields(draft: $draft, timezone: $timezone)
             Text("Saving applies this privacy selection. Automatic start/stop and other content settings are preserved.").font(.caption)
             Text("A scheduled time does not authorize Stream to publish automatically. Stream sends one request; after an uncertain error, refresh before creating again.").font(.caption).foregroundStyle(.secondary)
             HStack {
@@ -326,5 +355,55 @@ struct ProviderBroadcastStatus: View {
             if let event { Text("Remote state read \(event.verifiedAt.formatted(date: .omitted, time: .standard))").font(.caption2).foregroundStyle(.secondary) }
             if let failure = snapshot.failure { Text(failure.localizedDescription).font(.caption2).foregroundStyle(.orange) }
         }
+    }
+}
+
+private struct ProviderEventDraftFields: View {
+    @Binding var draft: YouTubeEventDraft
+    @Binding var timezone: String
+    private var zone: TimeZone { TimeZone(identifier: timezone) ?? .current }
+    var body: some View {
+        Group {
+            TextField("Title (1–100 characters)", text: $draft.title)
+            TextEditor(text: $draft.description).frame(minHeight: 100).overlay(alignment: .topLeading) {
+                if draft.description.isEmpty { Text("Description (up to 5,000 characters)").foregroundStyle(.secondary).allowsHitTesting(false) }
+            }
+            Picker("Timezone", selection: $timezone) { ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { Text($0).tag($0) } }
+            DatePicker("Scheduled start", selection: $draft.scheduledAt, in: Date()...).environment(\.timeZone, zone)
+            Text("\(draft.scheduledAt.formatted(.iso8601)) · provider receives an absolute instant.").font(.caption).foregroundStyle(.secondary)
+            Picker("Privacy", selection: $draft.privacy) { ForEach(YouTubeEventDraft.Privacy.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+        }
+    }
+}
+
+struct ProviderShowSchedulingEditor: View {
+    @ObservedObject var coordinator: ProviderShowSchedulingCoordinator
+    let destinations: [StreamDestination]
+    @State private var draft = YouTubeEventDraft()
+    @State private var timezone = TimeZone.current.identifier
+    @State private var selected: Set<UUID> = []
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        ScrollView {
+            Form {
+                Text("Schedule Show").font(.title2)
+                ProviderEventDraftFields(draft: $draft, timezone: $timezone)
+                Text("Destinations").font(.headline)
+                ForEach(destinations.prefix(64)) { destination in
+                    Toggle(isOn: Binding(get: { selected.contains(destination.id) }, set: { if $0 { selected.insert(destination.id) } else { selected.remove(destination.id) } })) {
+                        Text("\(destination.name) · \(destination.providerBinding?.provider.name ?? "Manual / custom")")
+                    }
+                }
+                Text("Creates one event per owned YouTube channel without an existing event selection. Other destinations require external scheduling. Existing event IDs are preserved. Thumbnail upload and event editing remain in the provider account after creation. This does not bind ingest, publish, or start any output.").font(.caption)
+                HStack {
+                    Button("Cancel") { dismiss() }
+                    Spacer()
+                    Button("Schedule Selected Destinations") {
+                        coordinator.schedule(draft, timezone: timezone, destinations: destinations.filter { selected.contains($0.id) })
+                        dismiss()
+                    }.disabled(selected.isEmpty || (try? draft.validate()) == nil || !coordinator.targets.isEmpty)
+                }
+            }.padding(20)
+        }.frame(width: 580, height: 640)
     }
 }

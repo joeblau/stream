@@ -113,6 +113,11 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try FileManager.default.createDirectory(at: seededDirectory, withIntermediateDirectories: true)
         try JSONEncoder().encode(seededCatalog).write(to: root.appendingPathComponent("projects.v1.json"))
         let workspace = StudioWorkspace(root: root)
+        if CommandLine.arguments.contains("--show-scheduling") {
+            try await StudioAccessibilityHarness.showScheduling(workspace: workspace)
+            workspace.runtime.providerAccounts.shutdown()
+            return
+        }
         // No view has ever been attached: counters still belong to the live
         // runtime rather than depending on the diagnostics panel's visibility.
         try await waitForDiagnostics(workspace.runtime, after: Date())
