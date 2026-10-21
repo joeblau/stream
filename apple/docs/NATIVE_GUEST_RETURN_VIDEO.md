@@ -75,7 +75,7 @@ used. Physical devices, deployed brokers and signed installation were not used.
 | Pre-BEGIN Host cancellation | Actual Host claims source intent before scheduling; no-yield Start→privacy stop→restore cannot replay; explicit replacement Start survives held old installation; outstanding jobs bounded at two |
 | Control close | Immediate audio/video authority revoke and eventual return reservation removal |
 | Packetization | ASan/UBSan checks exact FU-A reconstruction,1188/1189-byte boundaries, 64 KiB/64-NAL caps, RTP marker/SSRC/original PTS, sequence wrap and partial-send sequence consumption |
-| End-to-end A/V synchronization | Two fresh rendered captures per source: Program 67.94/76.19 ms, Secondary 37.06/64.58 ms, Clean 84.73/13.63 ms; every decoded/rendered cue within strict 100 ms and native Program cue within 50 ms; independent element/worklet bound also 100 ms |
+| Earlier raw-track A/V recordings | Two fresh recordings per source: Program 67.94/76.19 ms, Secondary 37.06/64.58 ms, Clean 84.73/13.63 ms passed the unchanged 100 ms check in that frozen run. A subsequent exact integrated Program run failed at 105.104 ms; this observation path is not qualified to the 100 ms bound. These are raw-track consumer recordings, not element-rendered captures. |
 
 The generated PCM uses the retained primary-microphone channel identity while
 the fixture refuses physical capture and disables VoicePolish. An earlier
@@ -86,14 +86,18 @@ production audio clock, deadline or assertion was relaxed. Independent native
 Opus leading-silence/onset checks locate the decoded cue within 21 microseconds
 and the NTP/source-PTS round trip within 0.24 microseconds.
 
-The default runner separates the complete source-control/lease/budget lifecycle
-from six fresh final-phase rendered captures (two per source) and one
-independent persistent video-delivery failure phase. Each capture
-retains strict 50 ms native-source and 100 ms rendered-recording and independent
-element/worklet bounds, then retires the full lease. A capture observer never
-precedes later source switching in that invocation.
+The earlier runner separated the complete source-control/lease/budget lifecycle
+from six fresh final-phase recordings (two per source) and one independent
+persistent video-delivery failure phase. Each recording checked 50 ms native
+source alignment and a 100 ms decoded recording bound, then retired its full
+lease. Its `HTMLMediaElement.captureStream()` call was initially described as
+rendered capture. The exact Chrome 155 implementation instead clones the
+element's source tracks when `srcObject` is a MediaStream, bypassing the audio
+and video element capturers. This records an additional raw-track consumer;
+it does not establish the element's final audio/video presentation timing.
+See the [exact Chromium implementation](https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/third_party/blink/renderer/modules/mediacapturefromelement/html_media_element_capture.cc).
 
-The earlier raw-track MediaRecorder path measured a 117.44 ms Secondary cue
+An earlier raw-track MediaRecorder path measured a 117.44 ms Secondary cue
 difference after controlled partial-FU-A loss while the independently measured
 video-element/worklet cue was 2.58 ms and the native cue was 13.40 ms. The owned
 raw artifact `decoded-return-1792611734235.webm` and log
@@ -101,9 +105,22 @@ raw artifact `decoded-return-1792611734235.webm` and log
 that failure. Raw-track re-encoding and synchronized element rendering are
 different observation paths; these results do not qualify raw-track recording
 as a universal playout oracle. HTMLMediaElement.captureStream also affects its
-source descriptor during later track changes, hence the isolated final-phase
-rendered measurements. No production browser stream replacement or timestamp
-rebase was introduced, and no numerical synchronization bound was relaxed.
+source descriptor during later track changes, hence isolated final-phase
+measurements. This isolation alone does not turn it into rendered capture.
+
+The final integrated repeat retained a second raw-track failure:
+`decoded-return-1792616136258.webm`, log
+`stream-macos-final-combined-video-20261021.log`. The flash was at 1.228 s and
+the tone at 1.333104 s, a 105.104 ms difference against the unchanged 100 ms
+bound. Contiguous decoded PCM still differs by 103.104 ms, so the failure is
+not merely a per-packet timestamp calculation error. Its native source cue
+difference was 11.48 ms. The separate video-element requestVideoFrameCallback
+and raw remote-track AudioWorklet consumers differed by 90.527 ms; they are
+also distinct consumption paths, and do not measure normal element audio
+hardware output. An unchanged observational repeat passed at 35.40 ms raw-track
+and 27.13 ms independent-consumer difference; this demonstrates variance, not a
+fix or qualification closure. No production timing change, packet timestamp
+rebase or relaxed numerical bound follows from these observations.
 
 ## Measured receiver feedback and remaining adaptation gates
 
