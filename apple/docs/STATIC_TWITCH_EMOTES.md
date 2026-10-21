@@ -76,3 +76,13 @@ shipping loader against Twitch's documented public sample and writes
 an authorized chat-feed test. No live OAuth grant or external chat event was
 used. Live provider authorization/order/rate acceptance remains open; these
 software proofs do not close #139 or #143.
+
+An independent rerun from integrated revision `29167ab` also passes the native
+audience and shared-reader fixtures. Its artwork has a truly transparent
+corner and a separate half-opaque green corner. Against an otherwise identical
+render using an all-clear artwork image (same inset/text/card), the shipping
+renderer preserves 12 exact backdrop pixels and 16 partly composited green
+pixels inside the 21 × 10 non-square tile bounds. The earlier synthetic pattern
+was fully opaque, so its aspect-ratio check alone did not establish alpha
+preservation; this comparison supplies that missing evidence. The PNG remains
+an owned local pattern, not an authorized live-provider result.
