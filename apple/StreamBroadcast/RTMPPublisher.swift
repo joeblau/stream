@@ -157,7 +157,10 @@ actor RTMPPublisher: Publisher {
     /// Re-sends the last frame if capture hasn't delivered one within the target
     /// interval — holding a steady fps and keyframe cadence on a static screen.
     private func repeatLastFrameIfIdle(interval: UInt64) async {
-        guard !encodedInput, outputSizeConfigured, isRunning, !isPaused, streamAttached,
+        // Studio Program already supplies continuous host-clock frames, even
+        // for static scenes. Capture repeats can overtake a true frame and
+        // force every later frame forward, accumulating video/audio drift.
+        guard !encodedInput, !usesProgramAudio, outputSizeConfigured, isRunning, !isPaused, streamAttached,
               let last = lastVideoBuffer else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         guard now &- lastVideoAppendAt >= interval else { return }
@@ -944,6 +947,12 @@ actor RTMPPublisher: Publisher {
         lastMicAppendAt = now
         let normalized = timeline.normalize(sb, kind: .program,
                                              fallbackDuration: CMTime(value: 512, timescale: 48_000))
+        #if os(macOS)
+        if let planar = PublisherProgramAudio.planar(normalized) {
+            await mixer.append(planar.buffer, when: planar.when, track: 0)
+            return
+        }
+        #endif
         await mixer.append(normalized, track: 0)
     }
 
