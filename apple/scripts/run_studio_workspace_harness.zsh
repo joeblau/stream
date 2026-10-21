@@ -119,6 +119,7 @@ fixture_write(File.join(folder,'fixtures/WorkspaceApplicationRoot.swift'),applic
 h['sources'] << File.join(folder,'fixtures/WorkspaceApplicationRoot.swift')
 h['sources'] << File.join(root,'scripts/studio_workspace_harness.swift')
 h['sources'] << File.join(root,'scripts/studio_accessibility_harness.swift')
+h['sources'] << File.join(root,'scripts/provider_viewer_ui_fixture.swift')
 spec['targets']['StudioWorkspaceHarness']=h
 spec['schemes']['StudioWorkspaceHarness']={'build'=>{'targets'=>{'StudioWorkspaceHarness'=>'all'}}}
 require File.join(root, 'scripts/desktop_transport_fixture')

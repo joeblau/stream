@@ -337,6 +337,8 @@ private struct YouTubeEventEditor: View {
 struct ProviderBroadcastStatus: View {
     @ObservedObject var accounts: ProviderAccountSession
     let binding: ProviderDestinationBinding
+    /// Rendering clock injection keeps expiry tests independent of account publication.
+    var now: (@MainActor () -> Date)? = nil
     private var snapshot: ProviderAccountSnapshot { accounts.snapshot(binding.provider) }
     private var event: ProviderEvent? { snapshot.verifiedAt == nil ? nil : accounts.event(binding) }
     private var publicURL: URL? {
@@ -345,9 +347,21 @@ struct ProviderBroadcastStatus: View {
         return nil
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Remote event: \(event?.state.rawValue ?? "unknown") · Viewers: \(accounts.viewerCount(binding).map(String.init) ?? "unavailable")")
+        // The mounted child owns expiry even when account/publisher state is idle.
+        // This schedule renders cached state only; it never polls the provider.
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            statusContent(at: now?() ?? context.date)
+        }
+    }
+    private func statusContent(at time: Date) -> some View {
+        let reading = accounts.viewerReading(binding, now: time)
+        return VStack(alignment: .leading, spacing: 3) {
+            Text("Remote event: \(event?.state.rawValue ?? "unknown") · Viewers: \(reading.count.map(String.init) ?? "unavailable")")
                 .font(.caption2).foregroundStyle(.secondary)
+            if let date = reading.readAt {
+                Text("Viewer reading: \(date.formatted(date: .omitted, time: .standard)) · \(reading.freshness.rawValue)")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Refresh Remote State") { accounts.refreshLive(binding) }.disabled(snapshot.isWorking || !accounts.canRequest(binding.provider))
                 if let url = publicURL {

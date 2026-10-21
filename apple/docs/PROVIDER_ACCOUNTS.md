@@ -75,3 +75,12 @@ scripts/run_studio_workspace_harness.zsh --show-scheduling
 ```
 
 No approved/live provider write was performed by these fixtures. Real OAuth application approval, eligible channel access, quota and actual provider scheduling acceptance remain operator qualification gates.
+
+
+## Viewer reading freshness (2026-10-21)
+
+The per-destination status child displays one consistent count/read-time/freshness snapshot. Valid zero remains **0**; missing, failed, expired, future-dated or closed-account readings remain **unavailable**. A mounted one-second timeline updates cached presentation without requesting new provider data. Readings expire after 60 seconds; negative or nonfinite clock ages are rejected. Twitch readings are keyed by channel even if an imported binding carries a stray event ID. YouTube requires the actual event ID and the channel identity verified by its read; a different owner or missing-event binding cannot borrow a cached count. No cross-platform unique-person total is inferred.
+
+Authorization replacement, Forget Authorization and workspace shutdown synchronously invalidate that provider's readings before vault work can complete; canceling reauthorization cannot revive them. Explicit Refresh Remote State remains the provider request path. Twitch and YouTube both show the actual read timestamp rather than borrowing an unrelated event timestamp.
+
+`STREAM_VENDOR_ROOT=/path/to/clean/vendor WORKSPACE_BUILD_PATH=/path/to/owned/derived scripts/run_studio_workspace_harness.zsh --viewer-freshness` exercises the shipping status child through external public AX, actual account/vault/provider decoders and owned fake responses. Its deliberately unobserved clock changes with no account publication: both YouTube zero and Twitch 7 must become expired, then reject clock rollback, with no extra provider request. It also checks unknown versus zero, independent Twitch channel keys, immediate authorization/forget/shutdown invalidation and unmount. The same actual child without its timeline reproduced stale values after the clock advanced beyond 60 seconds. The corrected native fixture passes. These are controlled local requests; authorized live audience/provider acceptance remains open.
