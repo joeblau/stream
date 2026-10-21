@@ -103,7 +103,11 @@ RTMP/RTMPS and SRT use the existing publisher adapters. WHIP is experimental;
 unsupported bearer-only endpoint authentication and HEVC combinations are
 explicitly rejected rather than silently substituted. Codec support at a
 provider must be checked against that provider. NDI, DeckLink and Zoom inputs remain gated by their actual installed adapters.
-Native browser-interview guest media is not implemented. Provider accounts and
+Native browser interviews support one deliberately admitted camera/audio peer
+and independently approved screen share, with full connection identity fences.
+Public-show audio return excludes the recipient. Private text and microphone
+holds, plus explicitly enabled low-resolution Program video, use that current
+connection; see the native interview evidence below. Provider accounts and
 public readers have [documented granted-scope controls](PROVIDER_ACCOUNTS.md);
 authorization, real ingest and provider completion acceptance remain unqualified.
 Installed AVFoundation/Continuity Camera and Syphon paths do not establish
@@ -119,14 +123,16 @@ Program/Monitor/Aux buses select isolated WAV or M4A taps. Channel taps choose
 before or after the insert chain; bus taps contain their mixed processing.
 Files share program pause, rotation and host-clock alignment. Missing sources
 fail their own tracks while the program recording continues. Independent widget
-audio and native interview guest capture are unavailable; an explicitly routed
-System Mix is the supported widget recording path.
+audio remains unavailable; an explicitly routed System Mix is the supported
+widget recording path. Admitted guest camera/screen and audio tracks support
+separate recordings; Backstage and revoked media stay private.
 
 Recording Options chooses MP4/MOV, H.264/HEVC, quality, folder, filename prefix,
 optional record-only countdown, auto-record on Go Live, and size/duration splits.
 Pause/Resume and New File affect recording independently of network delivery.
-Recording uses a separate encoder; encoded network-stream sharing is not
-implemented (#132). High quality, HEVC and overlapping file finalization can
+Recording uses a separate encoder. Compatible publishing destinations may opt
+into fixed-profile H.264/AAC sharing; see [shared encoder qualification](TRANSPORT_RECOVERY_QUALIFICATION.md).
+High quality, HEVC and overlapping file finalization can
 consume additional storage/encoder budget. The [recording guide](../PROGRAM_RECORDING.md)
 records the actual media checks and limits.
 
@@ -296,7 +302,7 @@ A failed preliminary check or lost/sent/cancelled reply leaves remote state unkn
 | Native media | Mac15,8, Apple M3 Max, 16 CPUs, macOS 27.0.1; decoded H.264/AAC MP4, MOV/HEVC and WAV/M4A, static-source cadence, bounded failures and paired small canvas files | Specific local observations only. Other Macs, oldest deployment OS, physical capture/unplug, sustained thermal/network workloads remain unqualified. |
 | Platform builds | Unsigned StreamMac/shared suites on Apple Silicon and Intel CI; retained iOS simulator/shared checks | Build coverage does not qualify physical devices, signed sandbox installation or macOS 14 runtime behavior. |
 | Providers | Protocol validation and independent injected publishers; granted-scope YouTube/Twitch account/public-chat HTTP/WebSocket fixtures; Restream public-event fixtures | No live-provider account, ingest, public feed, remote completion or audience acceptance is qualified. Missing approvals/scopes stay gated. |
-| Native interviews | One deliberately admitted camera/screen/audio peer, saved slots/layouts, stereo public-show mix-minus, and native Program/ISO files; see [native control](NATIVE_INTERVIEW_CONTROL.md), [recordings](NATIVE_INTERVIEW_PROGRAM_ISO.md) and [return audio](NATIVE_GUEST_RETURN_AUDIO.md) | Return video, addressed private talkback, deployed TURN/Internet/mobile, long calls, multiple simultaneous guests and signed installation remain open. Controlled local evidence does not qualify these workloads. |
+| Native interviews | One deliberately admitted camera/screen/audio peer, saved slots/layouts, stereo public-show mix-minus, native Program/ISO files, private messages and addressed microphone holds; explicitly enabled small Program video. See [native control](NATIVE_INTERVIEW_CONTROL.md), [recordings](NATIVE_INTERVIEW_PROGRAM_ISO.md), [return audio](NATIVE_GUEST_RETURN_AUDIO.md) and [private holds](NATIVE_GUEST_PANEL_CONTROLS.md). | Selectable return canvases and network-driven video adaptation, deployed TURN/Internet/mobile, long calls, multiple simultaneous guests and signed installation remain open. Return A/V timing is still under investigation. Controlled local evidence does not qualify these workloads. |
 | Optional adapters/outputs | Explicit prerequisites, native lifecycle and bounded-frame fixtures; native virtual-camera/microphone source builds | Installed/signed device consumers, NDI/DeckLink/Zoom and physical display/AirPlay behavior remain separate gates. |
 | Controllers and transfer | Shared dispatcher, stable IDs, actual local sockets and profile/package/recovery fixtures; Stream Deck SDK simulation | Physical Stream Deck/Plus, signed helper pairing, native share/editor/picker and VoiceOver flows still need manual qualification. |
 
