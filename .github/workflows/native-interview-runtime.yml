@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'apple/StreamMac/**'
+      - 'apple/BrowserAudioHelper/**'
       - 'apple/StreamCore/**'
       - 'apple/NativeGuestReceivePrototype/**'
       - 'apple/scripts/**'
