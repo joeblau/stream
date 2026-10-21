@@ -84,7 +84,8 @@ Opus leading-silence/onset checks locate the decoded cue within 21 microseconds
 and the NTP/source-PTS round trip within 0.24 microseconds.
 
 The default runner separates the complete source-control/lease/budget lifecycle
-from six fresh final-phase rendered captures (two per source). Each capture
+from six fresh final-phase rendered captures (two per source) and one
+independent persistent video-delivery failure phase. Each capture
 retains strict 50 ms native-source and 100 ms rendered-recording and independent
 element/worklet bounds, then retires the full lease. A capture observer never
 precedes later source switching in that invocation.
@@ -116,22 +117,33 @@ The sender samples at 500 ms intervals and requires new reports after each
 explicit opt-in. Reports older than 2 seconds or missing capacity reset the
 resolution policy to low. A previously learned tighter bitrate restriction
 survives a feedback gap. Fresh scoped REMB limits the actual VT target to a
-quantized ceiling no greater than 80% of that estimate; below 64 kbps the optional
-video return stops, explains the measured bandwidth condition, and requires a new deliberate Start. This leaves headroom
-for packet overhead and the independently routed audio. Received throughput is
+quantized ceiling, down to the codec's 4 kbps target floor. A separate whole-AU
+admission bucket charges the exact projected RTP payload plus 12 byte headers
+from the actual packetizer, at 80% of fresh REMB with a maximum 2 second/16 KiB
+burst. Repeated reports and same-lease Off/On do not refill it, and rejected or
+failed AUs cannot borrow unbounded debt. Static low-entropy pictures remain
+useful even when an application-limited receiver estimate is only 8–10 kbps.
+If no complete fresh frame can be delivered for 2 seconds, video stops with a
+measured bandwidth message and requires a new deliberate Start. Audio continues
+independently. These charges exclude SRTP, UDP/IP, TURN and RTCP overhead;
+20% remains as headroom rather than claiming full wire accounting. Received throughput is
 never treated as spare capacity. RR loss, actual latest-frame replacement,
 SDK send failures and the 16 KiB outbound queue limit provide congestion signals.
 Three bad windows lower one policy level; eight good windows spanning at least
 3 seconds admit one increase with 1.7 times the next target's capacity and a
 2 second dwell. Upward bitrate changes additionally require fresh loss-free RR.
-Profile replacement invalidates the old VT session before allocating another,
+SPS/PPS accompanies every IDR; tiny inter frames omit redundant parameters.
+Every lease, profile change or failed AU requests a fresh IDR. Profile
+replacement preserves cadence and invalidates the old VT session before allocating another,
 while the same shared encoder reservation remains held. Source timestamps and
 lease/privacy fences remain unchanged. An oversized high-profile access unit
 falls back to the low raster without relaxing the 64 KiB bound.
 
 Actual owned Chrome155 relay reports negotiated goog-remb and current-source
-RR. A 24 second probe obtained fresh receiver estimates around 90–120 kbps and
-lowered the real VT target to 64 kbps, retaining 320×180 without invented capacity.
+RR. A 24 second probe lowered the real VT target under measured capacity,
+retaining 320×180 without invented capacity. The exact static-image regression
+also stays active at a fresh 8,400 bps REMB and 4,000 bps codec target, decodes its
+late white update, and passes strict 29.37 ms rendered/18.80 ms element A/V cues.
 Actual partial-FU-A loss and next-IDR decode recovery use the existing bounded
 network fault seam. The standalone policy checks additionally exercise RR-loss
 and SDK-backpressure downsteps; actual VT high-to-low replacement proves
@@ -156,6 +168,8 @@ apple/scripts/run_native_interview_return_video_harness.zsh
 apple/scripts/run_native_interview_return_video_harness.zsh --video-fault-only
 # Focused actual authenticated RR/REMB and receiver-capacity constraints:
 apple/scripts/run_native_interview_return_video_harness.zsh --video-fault-only --video-feedback-probe
+# Video-only SDK delivery failure; public stereo audio and teardown stay real:
+apple/scripts/run_native_interview_return_video_harness.zsh --video-delivery-failure
 apple/scripts/run_native_guest_return_feedback_harness.zsh
 apple/scripts/run_native_guest_return_video_budget.zsh
 apple/scripts/run_native_guest_return_h264_harness.zsh

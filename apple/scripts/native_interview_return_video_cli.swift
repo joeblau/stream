@@ -397,6 +397,14 @@ private final class ReturnAVProbe: @unchecked Sendable {
                 case "video-fault":
                     guard await current.manager.fixtureFailReturnVideo(after: 4) else { throw NativeInterviewError.changed }
                     _ = output.emit(["type": "ack", "command": command])
+                case "video-block-delivery":
+                    let deadline = ContinuousClock.now + .seconds(5)
+                    while current.manager.state.snapshot.members.first?.returnVideo != .bandwidthLimited && ContinuousClock.now < deadline {
+                        _ = await current.manager.fixtureFailReturnVideo(after: 0)
+                        try await Task.sleep(for: .milliseconds(20))
+                    }
+                    guard current.manager.state.snapshot.members.first?.returnVideo == .bandwidthLimited else { throw NativeInterviewError.timeout }
+                    _ = output.emit(["type": "ack", "command": command])
                 case "video-av":
                     try await current.fireAVCue()
                     _ = output.emit(["type": "ack", "command": command])

@@ -128,7 +128,7 @@ struct NativeInterviewView: View {
                     commandButton(enabled ? "Stop Video Return" : "Start \(member.returnVideoSource.title) Video Return", .setProgramReturn(context, !enabled))
                     Text(member.returnVideo == .ready ? "Sending \(member.returnVideoSource.title) video, up to \(member.returnVideoProfile.width) × \(member.returnVideoProfile.height) at \(member.returnVideoProfile.framesPerSecond) fps / \(member.returnVideoProfile.maximumBitrate / 1000) kbps. Quality follows measured receiver feedback. Remote playback is not confirmed." :
                         member.returnVideo == .preparing ? "Preparing \(member.returnVideoSource.title) video return." :
-                        member.returnVideo == .bandwidthLimited ? "Video return stopped because measured video capacity fell below64kbps. Audio continues. Check the connection, then explicitly start video again." :
+                        member.returnVideo == .bandwidthLimited ? "Video return stopped because the measured connection could not fit fresh video frames. Audio continues. Check the connection, then explicitly start video again." :
                         member.returnVideo == .failed ? "Video return stopped or could not start. Check local preview and the studio encoder budget, then retry." :
                         "\(member.returnVideoSource.title) video return is off. It uses one encoder when enabled. Secondary requires a configured layout in Program. Clean omits project overlays and live annotations; scene layers remain. Additional compositions require qualified hardware.")
                         .font(.caption).foregroundStyle(.secondary)

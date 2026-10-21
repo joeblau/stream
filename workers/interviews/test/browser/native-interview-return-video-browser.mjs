@@ -11,9 +11,9 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {WebSocket} from 'ws';
 import {analyzeReturnAV} from './native-return-video-analysis.mjs';
 import {chromeFixtureExecutable, chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
-const isolatedMode=process.argv.includes('--video-flow-only')||process.argv.includes('--video-fault-only')||process.argv.some(value=>value.startsWith('--video-av-final='));
+const isolatedMode=process.argv.includes('--video-flow-only')||process.argv.includes('--video-fault-only')||process.argv.includes('--video-delivery-failure')||process.argv.some(value=>value.startsWith('--video-av-final='));
 if(!isolatedMode){
-  const plans=[['--video-flow-only','--video-feedback-probe'],...Array.from({length:2},()=>['program','secondary','clean'].map(source=>[`--video-av-final=${source}`])).flat()];
+  const plans=[['--video-flow-only','--video-feedback-probe'],['--video-delivery-failure'],...Array.from({length:2},()=>['program','secondary','clean'].map(source=>[`--video-av-final=${source}`])).flat()];
   for(const arguments_ of plans){
     const code=await new Promise((resolve,reject)=>{const run=spawn(process.execPath,[fileURLToPath(import.meta.url),...arguments_],{stdio:'inherit'});run.once('error',reject);run.once('exit',(code,signal)=>resolve(signal?1:code));});
     assert(code===0,`Owned native video qualification phase ${arguments_[0]} failed`);
@@ -209,6 +209,7 @@ try {
   await pause(600);command({type:'video-av'});await pause(1500);
   const actualPlayout=await browser.evaluate(g,`(()=>{const a=window.__returnAnalysis,stamp=a.context.getOutputTimestamp(),cue=a.last?.cueContextSeconds,audio=cue===undefined?undefined:stamp.performanceTime+(cue-stamp.contextTime)*1000;return{videoMilliseconds:window.__videoFlashPerf,audioMilliseconds:audio,deltaMilliseconds:window.__videoFlashPerf-audio};})()`);
   console.log(`Actual return element playout cue metadata: ${JSON.stringify(actualPlayout)}`);
+  console.log(`Actual AV return authority/feedback: ${JSON.stringify({members:state.members,profile:state.videoProfile,feedback:state.videoFeedback,decoded:await browser.evaluate(g,decodedVideoStats),visibility:await browser.evaluate(g,"window.__fixtureVideoVisibility")})}`);
   assert(Number.isFinite(actualPlayout.deltaMilliseconds)&&Math.abs(actualPlayout.deltaMilliseconds)<100,'Actual rendered element/worklet flash-tone must remain within100ms');
   const transportTiming=await browser.evaluate(g,String.raw`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats(),r=[];for(const s of stats.values())if(s.type==='inbound-rtp')r.push({kind:s.kind,jitterBufferDelay:s.jitterBufferDelay,jitterBufferEmittedCount:s.jitterBufferEmittedCount,estimatedPlayoutTimestamp:s.estimatedPlayoutTimestamp,lastPacketReceivedTimestamp:s.lastPacketReceivedTimestamp,codec:stats.get(s.codecId)?.mimeType});return{stats:r,mediaIdentity:pc.remoteDescription.sdp.split('\r\n').filter(l=>/^a=ssrc:\d+ (?:cname|msid):stream-return(?: |$)/.test(l))};})()`);
   console.log(`Actual return RTP timing and public stream identity: ${JSON.stringify(transportTiming)}`);
@@ -224,16 +225,29 @@ try {
   console.log(`PASS actual Chrome decoded ${sourceName} video/Opus AV cue: ${JSON.stringify(analyzeReturnAV(avPath))}`);
   }
   const finalAV=process.argv.find(value=>value.startsWith('--video-av-final='))?.split('=')[1];
-  if(finalAV){
-    assert(['program','secondary','clean'].includes(finalAV),'Bounded AV source selector');
-    command({type:`video-select-${finalAV}`});await wait('Fresh lease selected actual AV source',()=>{check();return state.members[0].returnSource===finalAV;});
-    const qualified=finalAV==='program'||(finalAV==='secondary'?state.secondaryQualified:state.cleanQualified);
-    if(finalAV==='clean')command({type:'video-overlay-on'});
+  if(finalAV||process.argv.includes('--video-delivery-failure')){
+    const finalSource=finalAV??'program';
+    assert(['program','secondary','clean'].includes(finalSource),'Bounded AV source selector');
+    command({type:`video-select-${finalSource}`});await wait('Fresh lease selected actual AV source',()=>{check();return state.members[0].returnSource===finalSource;});
+    const qualified=finalSource==='program'||(finalSource==='secondary'?state.secondaryQualified:state.cleanQualified);
+    if(finalSource==='clean')command({type:'video-overlay-on'});
     command({type:'video-on'});
     if(qualified){
       await wait('Actual selected-source H264 decode before final rendered AV capture',async()=>{check();const p=await browser.evaluate(g,videoPixels),r=await browser.evaluate(g,decodedVideoStats);return p&&p.width>1&&p.height>1&&p.width<=320&&p.height<=180&&r?.frames>=5&&r.codec==='video/H264';},20000);
-      await qualifyAV(finalAV);
-      console.log(`PASS fresh rendered AV final phase: ${finalAV}; strict native50ms and decoded/rendered100ms, no capture observer precedes later source switches`);
+      if(process.argv.includes('--video-delivery-failure')){
+        command({type:'video-block-delivery'});
+        await wait('Actual persistent video-only SDK delivery failure retires optional video',()=>{check();return state.members[0].returnVideo==='bandwidthLimited';},10000);
+        await browser.until(g,"document.getElementById('return').srcObject?.getVideoTracks().length===0",'Unavailable video is hidden');
+        ack=undefined;command({type:'video-budget-free'});await wait('Unavailable video actual VT releases shared reservation',()=>{check();return ack==='video-budget-free';});
+        await spectrum('video-delivery-failed-audio-continues',.4,.2);
+        command({type:'video-purple'});await pause(500);
+        assert(state.members[0].returnVideo==='bandwidthLimited'&&await browser.evaluate(g,"document.getElementById('return').srcObject?.getVideoTracks().length===0"),'Recovery cannot replay an old video Start');
+        console.log('PASS controlled persistent actual SDK video failure retires optional return and releases encoder; stereo public audio continues; no automatic restart');
+      }else{
+        await qualifyAV(finalAV);
+        assert(state.members[0].returnVideo==='ready','Application-limited static Program remains active through late actual flash/tone update');
+        console.log(`PASS fresh rendered AV final phase: ${finalAV}; strict native50ms and decoded/rendered100ms, no capture observer precedes later source switches`);
+      }
     }else{
       await wait('Actual additional-raster AV source refused on unqualified host',()=>{check();return state.members[0].returnVideo==='failed';});
       console.log(`Scope: ${finalAV} rendered AV remains unqualified on this host; actual start refusal verified.`);

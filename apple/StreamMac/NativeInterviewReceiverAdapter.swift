@@ -200,6 +200,8 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
     private let encoder: NativeGuestReturnVideoEncoder
     private var encoderToken: UUID? // Owned only by queue.
     private var budget = NativeGuestReturnVideoBudget()
+    private var byteBudget = NativeGuestReturnVideoByteBudget()
+    private var deliveryBlockedSince: UInt64?
     private var lastFeedback: UInt64 = 0, initialRR: UInt64 = 0, initialREMB: UInt64 = 0
     private var observedFrames = 0, replacedFrames = 0 // Protected by gate.
     private var blocked = false // Owned only by queue.
@@ -231,10 +233,11 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
         let bounded = budget.profile.maximumBitrate <= ceiling.maximumBitrate ? budget.profile : ceiling
         if capacityFresh {
             // A video-only REMB is a capacity ceiling, never spare capacity.
-            // Leave20% headroom; below the usable floor retire optional video.
-            guard let limited = NativeGuestReturnVideoProfile.high.constrained(capacityBitsPerSecond: report.remb_bits_per_second)
-            else { lastCapacityBitrate = 32_000; stop(ifCurrent: current, state: .bandwidthLimited); return }
-            lastCapacityBitrate = limited.maximumBitrate
+            // The codec floor never authorizes wire use: whole-AU byte
+            // admission below independently respects even a tiny estimate.
+            byteBudget.constrain(capacityBitsPerSecond: report.remb_bits_per_second, at: now)
+            lastCapacityBitrate = NativeGuestReturnVideoProfile.high.constrained(
+                capacityBitsPerSecond: report.remb_bits_per_second)?.maximumBitrate ?? 4_000
         }
         let target = NativeGuestReturnVideoProfile(width: bounded.width, height: bounded.height,
             framesPerSecond: bounded.framesPerSecond, maximumBitrate: min(bounded.maximumBitrate, lastCapacityBitrate))
@@ -247,6 +250,19 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
         encoder.setProfile(target); lastProfileChange = now
         gate.lock(); defer { gate.unlock() }
         if token == current { _ = events(.returnVideoProfile(target)) }
+    }
+    private func lowerRaster(_ current: UUID) {
+        budget = .init()
+        let fallback = NativeGuestReturnVideoProfile(width: 320, height: 180, framesPerSecond: 15,
+            maximumBitrate: min(250_000, lastCapacityBitrate))
+        encoder.setProfile(fallback); blocked = true
+        gate.lock(); if token == current { _ = events(.returnVideoProfile(fallback)) }; gate.unlock()
+    }
+    private func deliveryBlocked(_ current: UUID, at now: UInt64) {
+        if deliveryBlockedSince == nil { deliveryBlockedSince = now }
+        if let began = deliveryBlockedSince, now >= began, now - began >= 2_000 {
+            stop(ifCurrent: current, state: .bandwidthLimited)
+        }
     }
     private let events: @Sendable (NativeInterviewMediaEvent) -> Bool
     init(sink: NativeGuestMediaSink, receiver: NativeGuestReceiver,
@@ -320,24 +336,28 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
         guard age >= 0, age <= 0.25 else { return }
         if encoderToken != frame.token {
             encoder.close(); encoder.setProfile(.low); encoderToken = frame.token
-            budget = .init(); blocked = false; lastFeedback = 0; lastCapacityBitrate = min(lastCapacityBitrate, 250_000); lastProfileChange = 0
+            budget = .init(); deliveryBlockedSince = nil; blocked = false; lastFeedback = 0; lastCapacityBitrate = min(lastCapacityBitrate, 250_000); lastProfileChange = 0
             let report = native.returnVideoFeedback; initialRR = report.rr_reports; initialREMB = report.remb_reports
         }
         adapt(native, token: frame.token)
+        guard isActive(frame.token) else { return }
         let encoded: NativeGuestReturnH264Frame?
         do { encoded = try encoder.encode(frame) }
         catch NativeGuestReturnVideoError.accessUnitTooLarge {
             guard encoder.profile.width > NativeGuestReturnVideoProfile.low.width
                 || encoder.profile.height > NativeGuestReturnVideoProfile.low.height else { stop(ifCurrent: frame.token, state: .failed); return }
-            budget = .init()
-            let fallback = NativeGuestReturnVideoProfile(width: 320, height: 180, framesPerSecond: 15,
-                maximumBitrate: min(250_000, lastCapacityBitrate))
-            encoder.setProfile(fallback); blocked = true
-            gate.lock(); if token == frame.token { _ = events(.returnVideoProfile(fallback)) }; gate.unlock()
-            return
+            lowerRaster(frame.token); return
         }
         catch { stop(ifCurrent: frame.token, state: .failed); return }
-        guard let encoded, callbacks.permitsReturn(native) else { return }
+        guard let encoded, callbacks.permitsReturn(native), isActive(frame.token) else { return }
+        let now = DispatchTime.now().uptimeNanoseconds / 1_000_000
+        guard byteBudget.admit(rtpBytes: encoded.rtpBytes, at: now) else {
+            blocked = true; encoder.requestKeyframe()
+            if !byteBudget.canFit(rtpBytes: encoded.rtpBytes),
+               encoder.profile.width > 320 || encoder.profile.height > 180 { lowerRaster(frame.token) }
+            else { deliveryBlocked(frame.token, at: now) }
+            return
+        }
         gate.lock()
         guard token == frame.token else { gate.unlock(); return }
         let fresh = (CMClockGetTime(CMClockGetHostTimeClock()) - frame.pts).seconds <= 0.25
@@ -351,6 +371,8 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
             accepted = events(.returnVideo(.ready))
         }
         gate.unlock()
+        if sent { deliveryBlockedSince = nil }
+        else { deliveryBlocked(frame.token, at: now) }
         if !accepted { stop(ifCurrent: frame.token) }
     }
     @discardableResult func stop(ifCurrent expected: UUID? = nil, state: NativeInterviewReturnVideoState = .off) -> Bool {

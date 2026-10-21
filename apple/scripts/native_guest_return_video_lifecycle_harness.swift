@@ -52,7 +52,7 @@ private final class InstallEntryHold: @unchecked Sendable {
         require(await Task.detached { wait(self.resume, seconds: 5) }.value, "Pre-install suspension resumed")
     }
 }
-private func sample(width: Int = 64, height: Int = 36) -> CMSampleBuffer {
+private func sample(width: Int = 64, height: Int = 36, pts: CMTime? = nil) -> CMSampleBuffer {
     var pixels: CVPixelBuffer?
     require(CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA,
         [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pixels) == kCVReturnSuccess, "Owned pixels")
@@ -66,7 +66,7 @@ private func sample(width: Int = 64, height: Int = 36) -> CMSampleBuffer {
     CVPixelBufferUnlockBaseAddress(image, [])
     var format: CMVideoFormatDescription?, result: CMSampleBuffer?
     require(CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: image, formatDescriptionOut: &format) == noErr, "Owned video format")
-    var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30), presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+    var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30), presentationTimeStamp: pts ?? CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
     require(CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: image, formatDescription: format!, sampleTiming: &timing, sampleBufferOut: &result) == noErr, "Owned video sample")
     return result!
 }
@@ -94,7 +94,7 @@ private func sample(width: Int = 64, height: Int = 36) -> CMSampleBuffer {
             timescale: 90_000, method: .roundHalfAwayFromZero).value), "High profile keeps original source RTP PTS")
         reconfigured.setProfile(.low)
         require(!reconfigured.validationSessionActive, "Actual old VT session invalidated before lower replacement")
-        let lowFrame = sample(width: 640, height: 360)
+        let lowFrame = sample(width: 640, height: 360, pts: highFrame.presentationTimeStamp + CMTime(value: 1, timescale: 30))
         let lowEncoded = try reconfigured.encode(.init(lease: lease, token: UUID(), sample: lowFrame))
         require(lowEncoded != nil && reconfigured.validationSessionActive && reconfigured.validationDimensions == (320, 180),
             "Actual lower VT replacement enforces320x180 without simultaneous sessions")

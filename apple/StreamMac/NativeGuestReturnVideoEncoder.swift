@@ -20,6 +20,7 @@ private final class ReturnVideoResult: @unchecked Sendable {
 enum NativeGuestReturnVideoError: Error { case accessUnitTooLarge }
 struct NativeGuestReturnH264Frame: Sendable {
     let data: Data
+    let rtpBytes: UInt32
     let rtp: UInt32, ntp: UInt64
 }
 
@@ -32,7 +33,7 @@ final class NativeGuestReturnVideoEncoder {
     func setProfile(_ value: NativeGuestReturnVideoProfile) {
         guard profile != value else { return }
         // Same owner/reservation spans invalidation and the next allocation.
-        close(); profile = value
+        invalidate(resetCadence: false); profile = value
     }
     private var width = 0, height = 0
     private var nextPTS = CMTime.invalid
@@ -44,16 +45,17 @@ final class NativeGuestReturnVideoEncoder {
     #endif
     private let context = CIContext(options: [.cacheIntermediates: false])
     func requestKeyframe() { forceKeyframe = true }
-    func close() {
+    func close() { invalidate(resetCadence: true) }
+    private func invalidate(resetCadence: Bool) {
         if let session { VTCompressionSessionInvalidate(session) }
         #if STREAM_GUEST_VALIDATION
         validationSessionActive = false
         #endif
-        session = nil; nextPTS = .invalid; forceKeyframe = true
+        session = nil; if resetCadence { nextPTS = .invalid }; forceKeyframe = true
     }
     deinit { close() }
     private func prepare(width: Int, height: Int) throws {
-        close(); self.width = width; self.height = height; forceKeyframe = true
+        invalidate(resetCadence: false); self.width = width; self.height = height; forceKeyframe = true
         var created: VTCompressionSession?
         guard VTCompressionSessionCreate(allocator: nil, width: Int32(width), height: Int32(height),
             codecType: kCMVideoCodecType_H264, encoderSpecification: nil, imageBufferAttributes: nil,
@@ -114,9 +116,20 @@ final class NativeGuestReturnVideoEncoder {
         let seconds = pts.seconds + NativeGuestReturnClock.ntpHostOffset
         guard seconds > 0, seconds < Double(UInt32.max) else { throw NativeGuestReturnAudioError.malformed }
         let whole = UInt64(seconds.rounded(.down)), fraction = UInt64((seconds - Double(whole)) * 4_294_967_296)
-        return .init(data: data,
+        let projected = data.withUnsafeBytes { SGReturnH264RTPBytes($0.bindMemory(to: UInt8.self).baseAddress, $0.count) }
+        guard projected > 0 else { throw NativeGuestReturnAudioError.malformed }
+        return .init(data: data, rtpBytes: projected,
             rtp: UInt32(truncatingIfNeeded: CMTimeConvertScale(pts, timescale: 90_000, method: .roundHalfAwayFromZero).value),
             ntp: whole << 32 | fraction)
+    }
+    private static func containsIDR(_ bytes: [UInt8]) -> Bool {
+        var offset = 0
+        while offset + 4 < bytes.count {
+            let length = bytes[offset..<offset + 4].reduce(0) { $0 * 256 + Int($1) }; offset += 4
+            guard length > 0, length <= bytes.count - offset else { return false }
+            if bytes[offset] & 31 == 5 { return true }; offset += length
+        }
+        return false
     }
     private static func annexB(_ sample: CMSampleBuffer) throws -> Data {
         guard let block = sample.dataBuffer, let format = sample.formatDescription,
@@ -131,17 +144,20 @@ final class NativeGuestReturnVideoEncoder {
             nalUnitHeaderLengthOut: &nalLength) == noErr, nalLength == 4, count == 2 else {
             throw NativeGuestReturnAudioError.malformed
         }
-        // Parameter sets on every access unit make recovery independent of
-        // retained frames from a previous lease or an expired decoder buffer.
-        for index in 0..<2 {
-            guard CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, parameterSetIndex: index,
-                parameterSetPointerOut: &pointer, parameterSetSizeOut: &size, parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil) == noErr, let pointer, size > 0, size <= 4096 else { throw NativeGuestReturnAudioError.malformed }
-            data.append(contentsOf: [0, 0, 0, 1]); data.append(pointer, count: size)
-        }
         var bytes = [UInt8](repeating: 0, count: CMBlockBufferGetDataLength(block))
         let status = bytes.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: $0.count, destination: $0.baseAddress!) }
         guard status == noErr else { throw NativeGuestReturnAudioError.malformed }
+        let idr = containsIDR(bytes)
+        if idr {
+            // Every lease, profile change and failed AU requests a fresh IDR.
+            // Tiny inter frames do not repeat unnecessary parameter sets.
+            for index in 0..<2 {
+                guard CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, parameterSetIndex: index,
+                    parameterSetPointerOut: &pointer, parameterSetSizeOut: &size, parameterSetCountOut: nil,
+                    nalUnitHeaderLengthOut: nil) == noErr, let pointer, size > 0, size <= 4096 else { throw NativeGuestReturnAudioError.malformed }
+                data.append(contentsOf: [0, 0, 0, 1]); data.append(pointer, count: size)
+            }
+        }
         var offset = 0, nals = 0
         while offset < bytes.count {
             guard offset + 4 <= bytes.count, nals < 62 else { throw NativeGuestReturnAudioError.malformed }

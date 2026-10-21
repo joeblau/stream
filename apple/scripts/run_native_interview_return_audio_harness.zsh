@@ -65,7 +65,8 @@ extension NativeInterviewManager {
               let report = factory.validationReturnVideoFeedback else { return [:] }
         return ["rr": report.rr_reports, "remb": report.remb_reports, "rrAge": report.rr_age_milliseconds,
             "rembAge": report.remb_age_milliseconds, "loss": report.fraction_lost, "jitter": report.jitter_90khz,
-            "capacity": report.remb_bits_per_second, "queue": report.buffered_bytes, "negotiated": report.remb_negotiated != 0]
+            "capacity": report.remb_bits_per_second, "queue": report.buffered_bytes, "negotiated": report.remb_negotiated != 0,
+            "sentPackets": report.sent_packets, "sentPayloadBytes": report.sent_payload_bytes]
     }
     var fixtureReturnVideoFault: [String: Any] {
         guard let factory = binding?.factory as? NativeInterviewReceiverFactory,
