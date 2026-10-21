@@ -75,6 +75,28 @@ jobs:
           export STREAM_GUEST_RTC_INCLUDE="$STREAM_INTERVIEW_RETURN_BUILD_PATH/Build/Products/Debug/include/libdatachannel"
           export STREAM_INTERVIEW_TURN_SERVER="$PWD/apple/build/native-runtime-turn/build/bin/turnserver"
           apple/scripts/run_native_interview_return_audio_harness.zsh 2>&1 | tee apple/build/native-runtime-results/return-audio.log
+      - name: Qualify actual native Program video return
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          export STREAM_INTERVIEW_RETURN_BUILD_PATH="$PWD/apple/build/native-runtime-derived"
+          export STREAM_INTERVIEW_TURN_SERVER="$PWD/apple/build/native-runtime-turn/build/bin/turnserver"
+          apple/scripts/run_native_interview_return_video_harness.zsh 2>&1 | tee apple/build/native-runtime-results/return-video.log
+      - name: Qualify held return codec and subscription retirement
+        run: |
+          set -euo pipefail
+          export STREAM_GUEST_RTC_INCLUDE="$PWD/apple/build/native-runtime-derived/Build/Products/Debug/include/libdatachannel"
+          export STREAM_GUEST_RTC_LIBRARY="$PWD/apple/build/native-runtime-derived/SourcePackages/artifacts/haishinkit.swift/libdatachannel/libdatachannel.xcframework/macos-arm64_x86_64/libdatachannel.a"
+          export STREAM_INTERVIEW_RECEIVER_FRAMEWORKS="$PWD/apple/build/native-runtime-derived/Build/Products/Debug"
+          apple/scripts/run_native_guest_return_video_lifecycle_harness.zsh 2>&1 | tee apple/build/native-runtime-results/return-video-lifecycle.log
+      - name: Qualify actual compositor privacy snapshot fencing
+        run: |
+          set -euo pipefail
+          export STREAM_GUEST_VIDEO_PRIVACY_BUILD_PATH="$PWD/apple/build/native-runtime-derived"
+          apple/scripts/run_native_guest_return_video_privacy_harness.zsh 2>&1 | tee apple/build/native-runtime-results/return-video-privacy.log
+      - name: Qualify bounded native H264 packetization
+        run: apple/scripts/run_native_guest_return_h264_harness.zsh
       - name: Exercise bounded guest return video adaptation policy
         run: apple/scripts/run_native_guest_return_video_budget.zsh
       - name: Retain actual media and bounded qualification evidence
@@ -87,6 +109,8 @@ jobs:
             apple/build/native-interview-program-iso-validation/media-*
             apple/build/native-interview-program-iso-validation/run-*/worker.log
             apple/build/native-interview-return-audio-validation/run-*/worker.log
+            apple/build/native-interview-return-video-validation/run-*/worker.log
+            apple/build/native-interview-return-video-validation/decoded-return-*.webm
             apple/build/native-runtime-turn/build-provenance.json
             apple/build/native-runtime-turn/licenses
             apple/build/native-runtime-derived/TransportSourceBuild/*/sources.json

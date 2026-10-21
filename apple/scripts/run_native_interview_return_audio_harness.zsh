@@ -27,6 +27,11 @@ end
 target=spec['targets'].delete('StreamMac'); target['type']='tool'
 require File.join(root,'scripts/guest_fixture_boundaries')
 StreamGuestFixtureBoundaries.apply(spec['targets']['StreamCore'],target,root,folder)
+if ENV['STREAM_INTERVIEW_RETURN_VIDEO_VALIDATION'] == '1'
+  target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] += ' STREAM_GUEST_VALIDATION'
+  target['settings']['base']['GCC_PREPROCESSOR_DEFINITIONS'] = '$(inherited) STREAM_GUEST_VALIDATION'
+  target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
+end
 # Refuse the sole automatic local mic entry; source demand consists only of
 # owned PCM and actual admitted guest media. Routing remains shipping code.
 controller=File.read(File.join(root,'StreamMac/StreamController.swift')).gsub('UserDefaults.standard','GuestFixtureDefaults.value')
@@ -50,6 +55,18 @@ extension NativeInterviewManager {
               let factory = binding?.factory as? NativeInterviewReceiverFactory else { return nil }
         return factory.selectedICEPair
     }
+    #if STREAM_GUEST_VALIDATION
+    func fixtureFailReturnVideo(after packets: Int32) async -> Bool {
+        guard let factory = binding?.factory as? NativeInterviewReceiverFactory else { return false }
+        return await factory.validationFailReturnVideo(after: packets)
+    }
+    var fixtureReturnVideoFault: [String: Any] {
+        guard let factory = binding?.factory as? NativeInterviewReceiverFactory,
+              let receipt = factory.validationReturnVideoFault else { return [:] }
+        return ["forwarded": receipt.forwarded_packets, "fragmented": receipt.fragmented_prefix != 0, "failed": receipt.failed != 0,
+                "recoveryChecked": receipt.recovery_checked != 0, "recoveredIDR": receipt.recovered_idr != 0]
+    }
+    #endif
 
 }
 SWIFT
@@ -57,7 +74,7 @@ manager_path=File.join(folder,'fixtures/InterviewProgramManager.swift')
 File.write(manager_path,manager)
 target['sources'][0]['excludes'] << 'NativeInterviewManager.swift'
 target['sources'] << manager_path
-target['sources'] += ['native_interview_return_audio_cli.swift'].map{|file| File.join(root,'scripts',file)}
+target['sources'] += [ENV.fetch('STREAM_INTERVIEW_RETURN_CLI_SOURCE','native_interview_return_audio_cli.swift')].map{|file| File.join(root,'scripts',file)}
 spec['targets']['NativeInterviewReturnAudioCLI']=target
 spec['schemes']['NativeInterviewReturnAudioCLI']={'build'=>{'targets'=>{'NativeInterviewReturnAudioCLI'=>'all'}}}
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
@@ -72,10 +89,10 @@ if [[ -n "${STREAM_INTERVIEW_REFERENCE_ARTIFACTS:-}" ]]; then
 fi
 python3 scripts/repair_desktop_transport_archives.py "$INTERVIEW_RETURN_BUILD_PATH" --require-relay-policy
 xcodebuild -project "$INTERVIEW_RETURN_DIR/NativeInterviewReturnAudioValidation.xcodeproj" -scheme NativeInterviewReturnAudioCLI \
-  -destination 'platform=macOS' -derivedDataPath "$INTERVIEW_RETURN_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -jobs "${STREAM_NATIVE_BUILD_JOBS:-4}" -destination 'platform=macOS' -derivedDataPath "$INTERVIEW_RETURN_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 readonly INTERVIEW_RETURN_NODE="${STREAM_INTERVIEW_NODE:-node}"
 "$INTERVIEW_RETURN_NODE" -e 'const [major,minor]=process.versions.node.split(".").map(Number); if(major!==24||minor<15) throw Error("Node >=24.15 <25 required")'
 readonly INTERVIEW_RETURN_PRODUCTS="${INTERVIEW_RETURN_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="$INTERVIEW_RETURN_PRODUCTS" \
   NATIVE_INTERVIEW_RETURN_AUDIO_CLI="$INTERVIEW_RETURN_PRODUCTS/NativeInterviewReturnAudioCLI" \
-  "$INTERVIEW_RETURN_NODE" ../workers/interviews/test/browser/native-interview-return-audio-browser.mjs
+  "$INTERVIEW_RETURN_NODE" "../workers/interviews/test/browser/${STREAM_INTERVIEW_RETURN_BROWSER_SCRIPT:-native-interview-return-audio-browser.mjs}" "$@"
