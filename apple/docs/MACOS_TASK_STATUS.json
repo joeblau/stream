@@ -444,7 +444,7 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Sustained multiple guests beyond current one admitted peer; manual layout workflow acceptance."
+        "Original browser/validated-SDK reconnect and restricted-network validation, including return routing and A/V sync, remains unqualified. All three local slot/layout/metadata acceptance criteria have controlled native evidence; the published one-peer capacity is not an additional slot-template requirement."
       ]
     },
     {
@@ -565,9 +565,9 @@
       "title": "[macOS][R01] Expose source, compositor, encoder, network, audio, and storage diagnostics",
       "url": "https://github.com/joeblau/stream/issues/91",
       "githubState": "open",
-      "completion": "software verified locally; GitHub issue remains open",
+      "completion": "incomplete measurement and remaining acceptance",
       "remaining": [
-        "Human acceptance; physical-source and sustained performance requirements remain in dependent tasks. Current combined Core, diagnostics and app verification are recorded in validation."
+        "Measured clock/perceptual A/V drift remains unimplemented; the UI explicitly describes track endpoint difference as a different measurement. Existing telemetry and redacted export pass controlled fixtures. Validate recovery/resource policy while actual independent network outputs remain healthy before closing the original issue."
       ]
     },
     {
