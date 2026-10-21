@@ -2081,7 +2081,16 @@ final class StreamController: ObservableObject {
             .union(CaptureSourceKey.demandedAppAudio(sources: sceneStore.sources))
             .union(isolatedCaptureSubscriptions.values)
             .union(isolatedVideoCaptureSubscriptions.values)
-        capturePool.reconcile(demand: demand, settings: settings)
+        let programLayers = previewProgram.programScene.map { scene in
+            SceneGraph.flattenedVisibleLayers(of: scene, in: registry) +
+                (secondaryProgramOutputDemanded ? SceneGraph.flattenedVisibleLayers(of: scene.composition(for: .secondary), in: registry) : [])
+        } ?? []
+        let programOverlays = sceneStore.overlays.filter {
+            $0.isVisible && !(previewProgram.programScene?.hiddenOverlayIDs.contains($0.id) ?? false)
+        }
+        let programAudioKeys = privacySlateActive || previewProgram.programScene == nil ? [] : CaptureSourceKey.demanded(
+            layers: programLayers + programOverlays, sources: sceneStore.sources)
+        capturePool.reconcile(demand: demand, settings: settings, programAudioKeys: programAudioKeys)
         configureResilientFrames(demand: demand)
         // A01: the audio engine keeps exactly the channels its captures can
         // feed — the mic plus one per demanded capture key. Stopped captures
@@ -2102,6 +2111,7 @@ final class StreamController: ObservableObject {
             // A05: enabled additional mic channels survive pruning too — a
             // mic's capture lifetime is settings-driven, not scene demand.
             .union(additionalMicChannelIDs)
+            .union(capturePool.browserAudioChannels)
         let audioEngine = self.audioEngine
         Task { await audioEngine.pruneChannels(keeping: keep) }
     }
@@ -2186,6 +2196,7 @@ final class StreamController: ObservableObject {
     }
 
     private func enterPrivacySlate() {
+        capturePool.retireBrowserAudio()
         audioEngine.cancelGuestTalkback()
         guard !privacySlateActive else { return }
         fallbackOriginalScene = previewProgram.programScene

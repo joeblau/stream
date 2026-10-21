@@ -22,7 +22,12 @@ import WebKit
         var view: WKWebView; var window: NSWindow; var command: BrowserWidgetAudioCommand
         var generation: UUID; var ready = false; var navigationTimeout: Timer?
     }
+    private struct Retirement {
+        var generation: UUID
+        var completions: [@MainActor @Sendable () -> Void]
+    }
     private var widgets: [UUID: Widget] = [:]
+    private var retiring: [UUID: Retirement] = [:]
     private var nativeTone: AVAudioEngine?
     private var nativeWindow: NSWindow?
     private var commandHandle = FileHandle.standardInput
@@ -75,10 +80,16 @@ import WebKit
         guard let id = command.widgetID else { return }
         switch command.action {
         case .load:
-            guard widgets[id] != nil || widgets.count < BrowserWidgetAudioCommand.maximumWidgets else {
+            guard retiring[id] == nil else {
+                reply(.failed, id: id, failure: "widget_retiring", generation: command.generation); return
+            }
+            guard widgets[id] != nil || widgets.count + retiring.count < BrowserWidgetAudioCommand.maximumWidgets else {
                 reply(.failed, id: id, failure: "widget_limit"); return
             }
-            stop(id)
+            if widgets[id] != nil {
+                stop(id) { [weak self] in self?.receive(command) }
+                return
+            }
             let config = WKWebViewConfiguration()
             config.websiteDataStore = .nonPersistent()
             config.mediaTypesRequiringUserActionForPlayback = []
@@ -109,8 +120,15 @@ import WebKit
                 }
             }
             widgets[id] = Widget(view: view, window: window, command: command, generation: generation, navigationTimeout: timeout)
-            if let html = command.html { view.loadHTMLString(html, baseURL: nil) }
-            else if let url = command.url { view.load(URLRequest(url: url)) }
+            let load: @MainActor @Sendable () -> Void = { [weak self] in
+                guard self?.widgets[id]?.view === view, self?.widgets[id]?.generation == generation else { return }
+                if let html = command.html { view.loadHTMLString(html, baseURL: nil) }
+                else if let url = command.url { view.load(URLRequest(url: url)) }
+            }
+            // Establish the WebView media gate before page script can run.
+            // A later navigation/interaction cannot reopen a suspended view.
+            if options.mediaStartsSuspended { view.setAllMediaPlaybackSuspended(true, completionHandler: load) }
+            else { load() }
         case .reload:
             guard let widget = widgets[id] else { missing(id); return }
             var replacement = widget.command; replacement.generation = command.generation ?? widget.generation
@@ -134,7 +152,13 @@ import WebKit
                 self?.reply(.loaded, id: id, request: command.requestID, generation: widget.generation)
             }
         case .stop:
-            stop(id); reply(.stopped, id: id)
+            let current = widgets[id]?.generation ?? retiring[id]?.generation
+            guard current == nil || current == command.generation else {
+                reply(.failed, id: id, failure: "stale_generation", request: command.requestID, generation: command.generation); return
+            }
+            stop(id) { [weak self] in
+                self?.reply(.stopped, id: id, request: command.requestID, generation: command.generation)
+            }
         case .probe:
             guard let widget = widgets[id] else { missing(id); return }
             widget.view.evaluateJavaScript("String(window.__widgetAudioState || 'unknown')") { [weak self] value, _ in
@@ -163,12 +187,24 @@ import WebKit
         }
     }
     private func missing(_ id: UUID) { reply(.failed, id: id, failure: "widget_missing") }
-    private func stop(_ id: UUID) {
-        guard let widget = widgets.removeValue(forKey: id) else { return }
+    private func stop(_ id: UUID, completion: @escaping @MainActor @Sendable () -> Void = {}) {
+        if retiring[id] != nil {
+            guard retiring[id]!.completions.count < 16 else { NSApplication.shared.terminate(nil); return }
+            retiring[id]!.completions.append(completion)
+            return
+        }
+        guard let widget = widgets.removeValue(forKey: id) else { completion(); return }
         widget.navigationTimeout?.invalidate()
-        widget.view.setAllMediaPlaybackSuspended(true)
-        widget.view.stopLoading(); widget.view.loadHTMLString("", baseURL: nil)
-        widget.window.close()
+        retiring[id] = Retirement(generation: widget.generation, completions: [completion])
+        // The old view remains owned until the public playback-suspension
+        // completion. A Stop acknowledgment is an actual retirement barrier.
+        widget.view.setAllMediaPlaybackSuspended(true) { [weak self] in
+            widget.view.stopLoading(); widget.view.loadHTMLString("", baseURL: nil)
+            widget.window.close()
+            guard let self, self.retiring[id]?.generation == widget.generation else { return }
+            let completions = self.retiring.removeValue(forKey: id)!.completions
+            for completion in completions { completion() }
+        }
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if let id = widgets.first(where: { $0.value.view === webView })?.key {

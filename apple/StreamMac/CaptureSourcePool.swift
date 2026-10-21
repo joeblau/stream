@@ -461,6 +461,14 @@ final class CaptureSourcePool: ObservableObject {
     /// selection to preserve. A Take between scenes sharing a widget never
     /// drops the key from demand, so its page rides through untouched.
     private var webHosts: [CaptureSourceKey: BrowserOverlayHost] = [:]
+    private var programBrowserAudioKeys: Set<CaptureSourceKey> = []
+    private var browserAudioCaptureConflict: String?
+    var browserAudioChannels: Set<AudioChannelID> {
+        BrowserOverlayHelperBackend.qualificationSession?.demandedAudioChannels ?? []
+    }
+    var requiredBrowserAudioExclusions: Set<String> {
+        BrowserOverlayHelperBackend.qualificationSession?.requiredSystemAudioExclusions ?? []
+    }
     /// G08: per-key state-mirror subscriptions, torn down with the host.
     private var webHostCancellables: [CaptureSourceKey: AnyCancellable] = [:]
     /// G08: the per-widget load/error state for the inspector's web section
@@ -531,9 +539,13 @@ final class CaptureSourcePool: ObservableObject {
     /// Diffs the scene-derived demand against the running set: starts first
     /// references, stops last references, and leaves shared captures
     /// untouched.
-    func reconcile(demand rawDemand: Set<CaptureSourceKey>, settings: StreamSettings) {
+    func reconcile(demand rawDemand: Set<CaptureSourceKey>, settings: StreamSettings,
+                   programAudioKeys: Set<CaptureSourceKey> = []) {
+        let settings = settingsExcludingBrowserHelper(settings)
         lastReconcileSettings = settings
         let demand = Set(rawDemand.map(normalized(_:)))
+        programBrowserAudioKeys = Set(programAudioKeys.map(normalized(_:)))
+        updateBrowserAudioConflict(in: demand, settings: settings)
         for key in demand.subtracting(requested) {
             start(key, settings: settings)
         }
@@ -556,12 +568,41 @@ final class CaptureSourcePool: ObservableObject {
                 }
             }
         }
+        refreshBrowserAudioDemand()
+    }
+
+    private func updateBrowserAudioConflict(in demand: Set<CaptureSourceKey>, settings: StreamSettings) {
+        // The picker filter is opaque and SCK's broad app-audio attribution is not
+        // qualified here. Keep other captures running; the optional helper fails closed.
+        browserAudioCaptureConflict = demand.contains { key in
+            switch key {
+            case .screen(let payload): return payload.effectivePrivacy(defaults: settings).capturesAudio
+            case .appAudio(let payload):
+                return payload.mode == .system || requiredBrowserAudioExclusions.contains(payload.channelBundleID)
+            default: return false
+            }
+        } ? "Independent browser audio is unavailable while a screen-audio or overlapping application-audio route is active; helper exclusion is unqualified." : nil
+        refreshBrowserAudioDemand()
+    }
+    private func settingsExcludingBrowserHelper(_ settings: StreamSettings) -> StreamSettings {
+        var result = settings
+        result.captureExcludedBundleIDs = Array(Set(settings.captureExcludedBundleIDs).union(requiredBrowserAudioExclusions)).sorted()
+        return result
+    }
+    private func refreshBrowserAudioDemand() {
+        let leases = Set(programBrowserAudioKeys.compactMap { webHosts[$0]?.helperPageLease })
+        BrowserOverlayHelperBackend.qualificationSession?.setProgramAudioDemand(leases,
+            applyingExclusions: requiredBrowserAudioExclusions, unavailableReason: browserAudioCaptureConflict)
+    }
+    func retireBrowserAudio() {
+        programBrowserAudioKeys = []; refreshBrowserAudioDemand()
     }
 
     /// Stops every capture (pipeline demand hit 0). Instances and their
     /// remembered selections survive, so the next pipeline run restarts
     /// without re-prompting; the error surface resets for the fresh run.
     func stopAll() {
+        retireBrowserAudio()
         for key in requested { stop(key) }
         sourceErrors = [:]
         missingSources = []
@@ -576,7 +617,9 @@ final class CaptureSourcePool: ObservableObject {
     /// start (every start path reads the latest settings already).
     /// `StreamController.applySavedSettings` is the intended caller.
     func applyPrivacyDefaults(_ settings: StreamSettings) {
+        let settings = settingsExcludingBrowserHelper(settings)
         lastReconcileSettings = settings
+        updateBrowserAudioConflict(in: requested, settings: settings)
         for key in requested where activeSources.contains(key) {
             guard case .screen(let payload) = key,
                   let capture = screens[key] else { continue }
@@ -1339,7 +1382,7 @@ final class CaptureSourcePool: ObservableObject {
     /// The studio itself is excluded by `AppAudioCapture` on top.
     private func systemMixExclusions(in keys: Set<CaptureSourceKey>,
                                      settings: StreamSettings) -> Set<String> {
-        var exclusions = Set(settings.captureExcludedBundleIDs)
+        var exclusions = Set(settings.captureExcludedBundleIDs).union(requiredBrowserAudioExclusions)
         for key in keys {
             guard case .appAudio(let payload) = key,
                   payload.mode == .application,
@@ -1448,6 +1491,7 @@ final class CaptureSourcePool: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.webStates[key] = state
+                self.refreshBrowserAudioDemand()
                 switch state {
                 case .ready:
                     self.activeSources.insert(key)

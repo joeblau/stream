@@ -2,10 +2,19 @@ import AppKit
 import CoreMedia
 import ScreenCaptureKit
 
+@MainActor protocol BrowserWidgetAudioDriver: AnyObject {
+    var isCapturing: Bool { get }
+    var requiresScreenCaptureAccess: Bool { get }
+    var onFailure: (@MainActor (String) -> Void)? { get set }
+    func start(helperPID: Int32) async throws
+    func invalidateInput()
+    func stop() async
+}
+
 /// A12 qualification seam only. Production helper selection stays disabled. This capture is
 /// requests the helper's exact application + PID; media ownership still needs measured proof.
 /// Never connect these unqualified samples to a product mixer. There is no system/global branch.
-@MainActor final class BrowserWidgetAudioCapture {
+@MainActor final class BrowserWidgetAudioCapture: BrowserWidgetAudioDriver {
     enum CaptureError: Error { case permissionUnavailable, helperMissing, ambiguousHelper, displayMissing, windowMissing, holdbackUnavailable }
     enum FilterStyle: String, Codable, Sendable { case application, independentWindow }
     struct FilterIdentity: Codable, Sendable { var style: FilterStyle; var helperPID: Int32; var bundleID: String; var windowID: UInt32? }
@@ -13,6 +22,7 @@ import ScreenCaptureKit
     /// Any concurrent system-mix source MUST exclude this helper before a product route is enabled.
     let requiredSystemAudioExclusions: Set<String> = [BrowserWidgetAudioIdentity.helperBundleID]
     private(set) var isCapturing = false
+    let requiresScreenCaptureAccess = true
     private(set) var failure: String?
     var onFailure: (@MainActor (String) -> Void)?
     private(set) var requestedFilterIdentity: FilterIdentity?
@@ -109,6 +119,8 @@ import ScreenCaptureKit
         try? await old?.stopCapture()
         if let token = holdbackToken { holdbackToken = nil; await mixer?.releaseCaptureHoldback(token) }
     }
+    func start(helperPID: Int32) async throws { try await startForQualification(helperPID: helperPID) }
+    func invalidateInput() { inlet.invalidate() }
     func statistics() -> BrowserWidgetPCMInlet.Statistics { inlet.statistics() }
 }
 
@@ -174,12 +186,15 @@ final class BrowserWidgetPCMInlet: @unchecked Sendable {
         draining = true
         queue.async { [self] in drain() }
     }
-    func stop() async {
+    func invalidate() {
         lock.withLock {
             enabled = false; generation = UUID()
             stats.dropped += pending.count; stats.discardedOnStop += pending.count
             pending.removeAll(); pendingBytes = 0; stats.pendingFrames = 0
         }
+    }
+    func stop() async {
+        invalidate()
         await withCheckedContinuation { continuation in queue.async { continuation.resume() } }
     }
     func statistics() -> Statistics { lock.lock(); defer { lock.unlock() }; return stats }

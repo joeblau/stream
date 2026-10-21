@@ -423,6 +423,21 @@ actor AudioMixEngine {
         registry.enqueue(id, sampleBuffer)
     }
 
+    /// Source retirement is a routing authority change, independent of its
+    /// saved fader. Close synchronously before awaiting capture/inlet drain.
+    nonisolated func setCaptureRouteAllowed(_ id: AudioChannelID, allowed: Bool) {
+        registry.setCaptureRouteAllowed(id, allowed: allowed)
+    }
+    nonisolated func captureRouteIsAllowed(_ id: AudioChannelID) -> Bool {
+        registry.captureRouteIsAllowed(id)
+    }
+    /// Call only after the retired source's inlet has drained. Keep its
+    /// inserts/fader/solo/delay configuration, clearing their signal history.
+    func resetCaptureRouteHistory(_ id: AudioChannelID) {
+        registry.ensureChannel(id, gain: pendingGains[id])
+        registry.resetCaptureRouteHistory(id)
+    }
+
     // MARK: - Bus taps (bounded, drop-oldest fan-out)
 
     /// Registers a bus tap under a caller-chosen token (same race-safe
@@ -450,7 +465,12 @@ actor AudioMixEngine {
                 guard let allowed = registry.isolatedGuestPermission(lease) else { return nil }
                 return allowed ? sample : AudioTapMailbox.silence(like: sample)
             }
-        } else { deliveryFilter = nil }
+        } else {
+            let registry = self.registry
+            deliveryFilter = { sample in
+                registry.captureRouteAllowsSample(channel, at: sample.presentationTimeStamp) ? sample : AudioTapMailbox.silence(like: sample)
+            }
+        }
         if processing == .beforeEffects { registry.setPreEffectsEnabled(channel, enabled: true) }
         taps[token] = AudioTapMailbox(description: "iso.\(channel.label)",
                                       bus: nil, isolatedChannel: channel, processing: processing,
@@ -725,6 +745,33 @@ actor AudioMixEngine {
     }
 }
 
+/// Independent source authority. Its lock never nests around a channel/registry
+/// lookup or opaque insert: only the final bounded sample-add loop may hold it.
+private final class CaptureRouteGate: @unchecked Sendable {
+    private var lock = os_unfair_lock_s()
+    private var closed: Set<AudioChannelID> = []
+    private var minimumPTS: [AudioChannelID: CMTime] = [:]
+    func set(_ id: AudioChannelID, allowed: Bool) {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        if allowed { closed.remove(id) }
+        else { closed.insert(id); minimumPTS[id] = CMClockGetTime(CMClockGetHostTimeClock()) }
+    }
+    func allowed(_ id: AudioChannelID) -> Bool {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return !closed.contains(id)
+    }
+    func allowsSample(_ id: AudioChannelID, at pts: CMTime) -> Bool {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        guard !closed.contains(id) else { return false }
+        guard let minimum = minimumPTS[id] else { return true }
+        return pts.isNumeric && pts >= minimum
+    }
+    func commit<T>(_ id: AudioChannelID, _ body: (Bool) -> T) -> T {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return body(!closed.contains(id))
+    }
+}
+
 /// The lock-protected channel table the nonisolated `enqueue` writes through.
 /// Actor state (taps, buses) never crosses into it; channel state (rings,
 /// converters, ramps) never crosses into the actor except through the
@@ -732,6 +779,7 @@ actor AudioMixEngine {
 private final class AudioChannelRegistry: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
     private var channels: [AudioChannelID: ChannelIngest] = [:]
+    private let captureGate = CaptureRouteGate()
     private var anchor: CMTime = .invalid
     /// Capture callbacks can arrive before explicit channel registration.
     /// Retain declared local gains through ring resets so first-buffer
@@ -1074,16 +1122,18 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         return soloedIDs.contains { id in
             // Persisted local solo retains silence even while its source is
             // absent. An unregistered/backstage guest cannot silence monitor.
-            return !isGuest(id) || (guest?.channelID == id && guest?.monitorAllowed == true)
+            return captureGate.allowed(id) && (!isGuest(id) || (guest?.channelID == id && guest?.monitorAllowed == true))
         }
     }
 
     /// A04: the per-channel PRE-FADER meter readings for the mixer UI.
     func levelsSnapshot(excludingPrivate: Bool = false) -> [AudioChannelID: AudioLevels] {
         os_unfair_lock_lock(&lock)
-        let entries = channels.filter { !excludingPrivate || talkback?.source != $0.key }.map { ($0.key, $0.value.levels) }
+        let entries = channels.filter { captureGate.allowed($0.key) && (!excludingPrivate || talkback?.source != $0.key) }.map { ($0.key, $0.value.levels) }
         os_unfair_lock_unlock(&lock)
-        return Dictionary(uniqueKeysWithValues: entries)
+        // A source gate can close while a channel meter waits behind an
+        // opaque insert. Recheck after that wait before exposing sidechain RMS.
+        return Dictionary(uniqueKeysWithValues: entries.filter { captureGate.allowed($0.0) })
     }
 
     func removeChannel(_ id: AudioChannelID) {
@@ -1092,6 +1142,21 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         channels[id] = nil
         if guest?.channelID == id { guest = nil }
         os_unfair_lock_unlock(&lock)
+    }
+
+    func setCaptureRouteAllowed(_ id: AudioChannelID, allowed: Bool) {
+        guard !isGuest(id) else { return }
+        captureGate.set(id, allowed: allowed)
+    }
+    func captureRouteIsAllowed(_ id: AudioChannelID) -> Bool { captureGate.allowed(id) }
+    func captureRouteAllowsSample(_ id: AudioChannelID, at pts: CMTime) -> Bool { captureGate.allowsSample(id, at: pts) }
+    func resetCaptureRouteHistory(_ id: AudioChannelID) {
+        os_unfair_lock_lock(&lock)
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        captureFloors[id] = now
+        let channel = channels[id]
+        os_unfair_lock_unlock(&lock)
+        channel?.resetCaptureHistory(at: now)
     }
 
     func prune(keeping ids: Set<AudioChannelID>) {
@@ -1143,8 +1208,9 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     }
 
     func enqueue(_ id: AudioChannelID, _ sampleBuffer: CMSampleBuffer) {
+        guard captureGate.allowed(id) else { return }
         os_unfair_lock_lock(&lock)
-        guard !isGuest(id) else { os_unfair_lock_unlock(&lock); return }
+        guard !isGuest(id), captureGate.allowed(id) else { os_unfair_lock_unlock(&lock); return }
         let anchor = self.anchor
         let channel = channels[id] ?? {
             let created = ChannelIngest(insert: nil, captureFloor: captureFloors[id],
@@ -1175,13 +1241,14 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         expireTalkbackLocked()
         let isRegisteredGuest = isGuest(id)
         let privateRecipient = talkback?.source == id ? talkback?.lease : nil
-        let programAllowed = privateRecipient == nil && (!isRegisteredGuest || (guest?.channelID == id && guest?.programAllowed == true))
-        let monitorAllowed = privateRecipient == nil && (!isRegisteredGuest || (guest?.channelID == id && guest?.monitorAllowed == true))
+        let programAllowed = captureGate.allowed(id) && privateRecipient == nil && (!isRegisteredGuest || (guest?.channelID == id && guest?.programAllowed == true))
+        let monitorAllowed = captureGate.allowed(id) && privateRecipient == nil && (!isRegisteredGuest || (guest?.channelID == id && guest?.monitorAllowed == true))
         let result = channels[id]?.mix(at: position, frameCount: frameCount,
                      program: &program, aux: &aux, isolated: &isolated, preEffects: &preEffects,
                      monitor: &monitor, programAllowed: programAllowed,
                      contribution: &contribution, privateTalkback: privateRecipient != nil,
-                     monitorAllowed: monitorAllowed, soloActive: soloActive) ?? (pre: frameCount, post: frameCount)
+                     monitorAllowed: monitorAllowed, soloActive: soloActive,
+                     captureGate: captureGate, captureChannel: id) ?? (pre: frameCount, post: frameCount)
         return (result.pre, result.post, privateRecipient)
     }
 
@@ -1263,6 +1330,10 @@ private final class ChannelIngest: @unchecked Sendable {
     func endTalkback(at now: CMTime) {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
         privateTalkback = false; resetPrivateBoundary(at: now)
+    }
+    func resetCaptureHistory(at now: CMTime) {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        resetPrivateBoundary(at: now)
     }
     private func resetPrivateBoundary(at now: CMTime) {
         captureFloor = now
@@ -1375,7 +1446,8 @@ private final class ChannelIngest: @unchecked Sendable {
     func mix(at position: Int64, frameCount: Int,
              program: inout [Float], aux: inout [Float],
              isolated: inout [Float], preEffects: inout [Float], monitor: inout [Float],
-             programAllowed: Bool, contribution: inout [Float], privateTalkback: Bool, monitorAllowed: Bool, soloActive: Bool) -> (pre: Int, post: Int) {
+             programAllowed: Bool, contribution: inout [Float], privateTalkback: Bool, monitorAllowed: Bool, soloActive: Bool,
+             captureGate: CaptureRouteGate, captureChannel: AudioChannelID) -> (pre: Int, post: Int) {
         os_unfair_lock_lock(&lock)
         let postBefore = ring.underrunFrames
         let preBefore = preRing?.underrunFrames ?? 0
@@ -1399,27 +1471,32 @@ private final class ChannelIngest: @unchecked Sendable {
         }
         // Advance one shared fader/send trajectory, even when a hard routing
         // gate is closed. A mute ramp cannot authorize a backstage source.
-        let hearMonitor = monitorAllowed && (!soloActive || soloed)
-        for frame in 0..<frameCount {
-            let channelGain = gain.advance()
-            let sendGain = auxSend.advance()
-            for side in 0..<2 {
-                let index = frame * 2 + side
-                let value = source[index]
-                contribution[index] = programAllowed ? value * channelGain : 0
-                if privateTalkback { contribution[index] = chunk[index] }
-                if programAllowed {
-                    program[index] += contribution[index]
-                    aux[index] += value * sendGain
-                } else {
-                    isolated[index] = 0
-                    preEffects[index] = 0
+        let committed = captureGate.commit(captureChannel) { captureAllowed in
+            let programAllowed = programAllowed && captureAllowed
+            let monitorAllowed = monitorAllowed && captureAllowed
+            let hearMonitor = monitorAllowed && (!soloActive || soloed)
+            for frame in 0..<frameCount {
+                let channelGain = gain.advance()
+                let sendGain = auxSend.advance()
+                for side in 0..<2 {
+                    let index = frame * 2 + side
+                    let value = source[index]
+                    contribution[index] = programAllowed ? value * channelGain : 0
+                    if privateTalkback && captureAllowed { contribution[index] = chunk[index] }
+                    if programAllowed {
+                        program[index] += contribution[index]
+                        aux[index] += value * sendGain
+                    } else {
+                        isolated[index] = 0
+                        preEffects[index] = 0
+                    }
+                    if hearMonitor { monitor[index] += value * channelGain }
                 }
-                if hearMonitor { monitor[index] += value * channelGain }
             }
+            return programAllowed
         }
         os_unfair_lock_unlock(&lock)
-        return programAllowed ? (pre: preGaps, post: postGaps) : (pre: frameCount, post: frameCount)
+        return committed ? (pre: preGaps, post: postGaps) : (pre: frameCount, post: frameCount)
     }
 
     /// A04: the channel's current pre-fader meter reading.
