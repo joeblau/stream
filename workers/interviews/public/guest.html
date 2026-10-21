@@ -13,6 +13,10 @@
 <video id="return" autoplay playsinline controls aria-label="Host return feed"></video>
 <button id="share" disabled>Share screen with host</button><button id="stopshare" disabled>Stop screen sharing</button>
 <p id="share-status" role="status">Screen sharing requires admission and explicit host approval. Your camera and microphone continue while sharing.</p>
+<section aria-label="Public chat"><h2>Public chat</h2>
+<p id="public-chat-status" role="status">Public chat is not shared by the host.</p><p id="public-sources"></p>
+<div id="public-messages" role="log" aria-live="polite"></div>
+<p>Read-only public text shared by this host connection. New messages only; up to 32 recent messages remain here. Long text may be clipped and bursts omitted. Images, provider posting and unsupported features are unavailable. Stale feeds clear automatically; reconnect requires fresh host approval.</p></section>
 <section aria-label="Private messages"><h2>Private messages</h2>
 <p>Text is private to the current host connection. It is cleared on reconnect or leave and is not included in Program. Received means the other side accepted the text; missing receipts remain unknown.</p>
 <div id="messages" role="log" aria-live="polite"></div>

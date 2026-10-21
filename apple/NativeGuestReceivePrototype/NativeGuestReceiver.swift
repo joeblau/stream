@@ -171,6 +171,13 @@ final class NativeGuestReceiver: @unchecked Sendable {
         guard permitted, SGReceiverHostReady(handle) != 0 else { return false }
         return SGReceiverSendControl(handle, text) != 0
     }
+    func sendPublicChat(_ envelope: GuestPublicChatEnvelope, lowPriority: Bool) -> Bool {
+        guard let text = envelope.wire(negotiation: lease.negotiation) else { return false }
+        transportLock.lock(); defer { transportLock.unlock() }
+        lock.lock(); let permitted = active && !controlClosed; lock.unlock()
+        guard permitted, SGReceiverHostReady(handle) != 0 else { return false }
+        return lowPriority ? SGReceiverSendPublicChat(handle, text) != 0 : SGReceiverSendControl(handle, text) != 0
+    }
     func approveScreen(_ approved: Bool) -> Bool {
         approveScreen(approved) { [self] message in
             transportLock.lock(); defer { transportLock.unlock() }

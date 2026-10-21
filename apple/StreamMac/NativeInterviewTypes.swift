@@ -185,6 +185,8 @@ enum NativeInterviewMediaEvent: Sendable {
     func selectReturnVideoSource(_ source: NativeInterviewReturnVideoSource) -> Bool
     var supportsPrivateMessages: Bool { get }
     func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool
+    var supportsPublicChat: Bool { get }
+    func sendPublicChat(_ envelope: GuestPublicChatEnvelope, lowPriority: Bool) -> Bool
     /// Closes the full-lease sink synchronously before native callback teardown.
     func retire()
 }
@@ -195,6 +197,8 @@ extension NativeInterviewMediaHost {
     func selectReturnVideoSource(_ source: NativeInterviewReturnVideoSource) -> Bool { false }
     var supportsPrivateMessages: Bool { false }
     func sendPrivateControl(_ envelope: NativeInterviewPrivateEnvelope) -> Bool { false }
+    var supportsPublicChat: Bool { false }
+    func sendPublicChat(_ envelope: GuestPublicChatEnvelope, lowPriority: Bool) -> Bool { false }
 }
 
 @MainActor protocol NativeInterviewMediaHostFactory {
@@ -210,6 +214,7 @@ enum NativeInterviewReturnVideoSource: String, CaseIterable, Sendable {
     var title: String { switch self { case .program: return "Program"; case .secondary: return "Secondary"; case .clean: return "Clean" } }
 }
 enum NativeInterviewReturnVideoState: String, Sendable { case off, unavailable, preparing, ready, failed }
+enum NativeInterviewPublicChatState: String, Sendable { case off, sharing, unavailable, offUnconfirmed }
 enum NativeInterviewReturnAudioState: String, Sendable { case unavailable, preparing, ready, failed }
 struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     let id: UUID
@@ -219,6 +224,8 @@ struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     var returnAudio: NativeInterviewReturnAudioState = .unavailable
     var returnVideo: NativeInterviewReturnVideoState = .unavailable
     var returnVideoSource: NativeInterviewReturnVideoSource = .program
+    var publicChat: NativeInterviewPublicChatState = .unavailable
+    var publicChatDropped: UInt32 = 0
     var screenApproved = false
     var screenSharing = false
     /// Increments only on an actual admitted/stage/backstage receipt, so a

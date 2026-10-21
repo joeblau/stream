@@ -698,6 +698,17 @@ extern "C" int SGReceiverSendControl(SGReceiver *receiver, const char *message) 
         receiver->control->send(rtc::string(message)); return 1;
     } catch (...) { return 0; }
 }
+extern "C" int SGReceiverSendPublicChat(SGReceiver *receiver, const char *message) {
+    if (!receiver || !message || std::strlen(message) > 1024) return 0;
+    try { std::lock_guard lock(receiver->state->mutex);
+        // Public text is never queued behind media/private control work.
+        // One accepted frame adds at most 1 KiB; the caller also limits rate.
+        if (!receiver->state->active || !receiver->host || !receiver->configured ||
+            !receiver->control || !receiver->control->isOpen() || receiver->control->bufferedAmount() != 0 ||
+            receiver->peer->state() != rtc::PeerConnection::State::Connected) return 0;
+        receiver->control->send(rtc::string(message)); return 1;
+    } catch (...) { return 0; }
+}
 extern "C" int SGReceiverCandidate(SGReceiver *receiver, const char *candidate, const char *mid) {
     if (!receiver || !candidate || !mid || std::strlen(candidate) > 4096 || std::strlen(mid) > 64) return 0;
     try { std::lock_guard lock(receiver->state->mutex); if (!receiver->state->active) return 0;

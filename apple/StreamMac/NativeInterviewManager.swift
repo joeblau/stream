@@ -15,11 +15,12 @@ enum NativeInterviewCommand: Equatable, Sendable {
     case endTalkback(NativeInterviewPeerLease, UUID)
     case setProgramReturn(NativeInterviewPeerLease, Bool)
     case selectReturnVideoSource(NativeInterviewPeerLease, NativeInterviewReturnVideoSource)
+    case setPublicChatReturn(NativeInterviewPeerLease, Bool)
     case lock(Bool), disconnect, rejoin, end
 
     var capturesConnection: Bool {
         switch self {
-        case .setMuted, .setSolo, .rename, .sendPrivateMessage, .beginTalkback, .endTalkback, .setProgramReturn, .selectReturnVideoSource: return true
+        case .setMuted, .setSolo, .rename, .sendPrivateMessage, .beginTalkback, .endTalkback, .setProgramReturn, .selectReturnVideoSource, .setPublicChatReturn: return true
         default: return false
         }
     }
@@ -28,7 +29,7 @@ enum NativeInterviewCommand: Equatable, Sendable {
         switch self {
         case .admit(let id), .backstage(let id), .onair(let id), .remove(let id), .restartMedia(let id),
              .monitor(let id, _), .approveScreen(let id, _): return id
-        case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _), .sendPrivateMessage(let context, _), .setProgramReturn(let context, _), .selectReturnVideoSource(let context, _): return context.receive.peerID
+        case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _), .sendPrivateMessage(let context, _), .setProgramReturn(let context, _), .selectReturnVideoSource(let context, _), .setPublicChatReturn(let context, _): return context.receive.peerID
         case .beginTalkback(let context, _, _), .endTalkback(let context, _): return context.receive.peerID
         default: return nil
         }
@@ -50,6 +51,7 @@ enum NativeInterviewCommand: Equatable, Sendable {
         case .endTalkback: return "Release Private Guest Talkback"
         case .setProgramReturn(_, let enabled): return enabled ? "Start Guest Video Return" : "Stop Guest Video Return"
         case .selectReturnVideoSource(_, let source): return "Select \(source.title) Guest Return"
+        case .setPublicChatReturn(_, let enabled): return enabled ? "Share Future Public Chat with Guest" : "Stop Sharing Public Chat with Guest"
         case .lock(let locked): return locked ? "Lock Guest Room" : "Unlock Guest Room"
         case .disconnect: return "Disconnect Guest Room"
         case .rejoin: return "Rejoin Guest Room"
@@ -89,6 +91,10 @@ struct NativeInterviewControlState: Equatable, Sendable {
     @Published private(set) var talkback: Talkback?
     private var talkbackTask: Task<Void, Never>?
     private var talkbackObservers = Set<AnyCancellable>()
+    @Published private(set) var publicChatContext: NativeInterviewPeerLease?
+    private weak var publicChat: StudioChatCoordinator?
+    private var publicChatObservation: AnyCancellable?
+    private var publicChatTask: Task<Void, Never>?
     private let controller: StreamController
     private let serviceFactory: ServiceFactory
     private let hostFactory: HostFactory
@@ -236,6 +242,10 @@ struct NativeInterviewControlState: Equatable, Sendable {
         case .setProgramReturn(let context, _), .selectReturnVideoSource(let context, _):
             guard currentReadyLease == context else { return .invalidTarget("The guest connection changed.") }
             return session.canSetProgramReturn(context: context) ? nil : .unavailable("Program video return requires the current open native relay connection.")
+        case .setPublicChatReturn(let context, let enabled):
+            guard currentReadyLease == context || !enabled && publicChatContext == context else { return .invalidTarget("The guest connection changed.") }
+            if enabled, publicChat?.guestPublicAvailable != true { return .unavailable("The shared studio chat session is unavailable.") }
+            return session.canSetPublicChatReturn(enabled, context: context) ? nil : .unavailable("Public chat sharing requires the current open guest control channel. Repeated enables are bounded; try deliberately again later.")
         case .sendPrivateMessage(let context, let text):
             guard currentReadyLease == context else { return .invalidTarget("The guest connection changed.") }
             guard NativeInterviewPrivateEnvelope.validText(text) else { return .invalidValue("A private message requires 1–512 UTF-8 bytes of plain text.") }
@@ -374,6 +384,19 @@ struct NativeInterviewControlState: Equatable, Sendable {
         case .endTalkback: cancelTalkback(); result = true
         case .setProgramReturn(let context, let enabled): result = session.setProgramReturn(enabled, context: context)
         case .selectReturnVideoSource(let context, let source): result = session.selectReturnVideoSource(source, context: context)
+        case .setPublicChatReturn(let context, let enabled):
+            if enabled, let chat = publicChat, chat.guestPublicAvailable {
+                result = session.setPublicChatReturn(true, context: context, adapters: chat.guestPublicAdapters,
+                    sources: chat.guestPublicSources, sourcesTruncated: chat.guestPublicSourcesTruncated)
+                if result {
+                    let needsHeartbeat = publicChatContext != context || publicChatTask == nil
+                    publicChatContext = context
+                    if needsHeartbeat { startPublicChatHeartbeat(context) }
+                }
+            } else if !enabled {
+                result = session.setPublicChatReturn(false, context: context)
+                if publicChatContext == context { publicChatTask?.cancel(); publicChatTask = nil; publicChatContext = nil }
+            } else { result = false }
         case .rename(let context, let name):
             guard var slot = controller.sceneStore.guestSlots.first(where: { $0.id == context.receive.slot }) else { return false }
             slot.localName = name; controller.sceneStore.replaceGuestSlot(slot); result = true
@@ -407,6 +430,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
     func shutdown() {
         guard !closed else { return }
         closed = true; retireSession(); state = .init(snapshot: .init(phase: .closed))
+        publicChatObservation = nil; publicChat = nil
     }
     var currentReadyLease: NativeInterviewPeerLease? {
         guard let registered else { return nil }
@@ -426,6 +450,10 @@ struct NativeInterviewControlState: Equatable, Sendable {
     private func reconcile(epoch current: UUID) {
         guard !closed, epoch == current, let session else { return }
         let snapshot = session.snapshot
+        if let context = publicChatContext, currentReadyLease != context || publicChat?.guestPublicAvailable != true
+            || snapshot.members.first(where: { $0.id == context.receive.peerID })?.publicChat != .sharing {
+            stopPublicChat()
+        }
         if let talkback, currentReadyLease != talkback.context
             || snapshot.members.first(where: { $0.id == talkback.context.receive.peerID })?.returnAudio != .ready {
             cancelTalkback()
@@ -472,11 +500,13 @@ struct NativeInterviewControlState: Equatable, Sendable {
         clearRegistration(context)
     }
     private func clearRegistration(_ context: NativeInterviewPeerLease) {
+        if publicChatContext == context { stopPublicChat() }
         if talkback?.context == context { cancelTalkback() }
         controller.removeGuestMedia(context.receive)
         if registered == context { registered = nil; intent = nil; state.routes[context.receive.peerID] = nil }
     }
     private func retireSession() {
+        stopPublicChat()
         cancelTalkback()
         epoch = UUID(); observation = nil; reconciliation?.cancel(); reconciliation = nil; reconciliationID = nil
         operation?.cancel(); operation = nil; operationID = nil
@@ -488,6 +518,44 @@ struct NativeInterviewControlState: Equatable, Sendable {
         talkbackTask?.cancel(); talkbackTask = nil
         if let talkback { _ = controller.endGuestTalkback(talkback.context.receive, press: talkback.press) }
         talkback = nil
+    }
+    /// One subscription to the same authenticated queue used by sidebar,
+    /// recording and hardware controls. Enabling never walks its history.
+    func bindPublicChat(_ chat: StudioChatCoordinator) {
+        guard !closed, publicChat !== chat else { return }
+        stopPublicChat(); publicChatObservation = nil; publicChat = chat
+        publicChatObservation = chat.guestPublicUpdates.sink { [weak self, weak chat] update in
+            guard let self, let chat, self.publicChat === chat, !self.closed,
+                  let context = self.publicChatContext else { return }
+            switch update {
+            case .message(let message): self.session?.sendPublicChat(StudioChatCoordinator.guestPublicEntry(message), context: context)
+            case .removed:
+                self.session?.clearPublicChat(context: context)
+                self.session?.refreshPublicChat(context: context, adapters: chat.guestPublicAdapters,
+                    sources: chat.guestPublicSources, sourcesTruncated: chat.guestPublicSourcesTruncated)
+            case .closed: self.stopPublicChat()
+            }
+        }
+    }
+    private func startPublicChatHeartbeat(_ context: NativeInterviewPeerLease) {
+        publicChatTask?.cancel()
+        publicChatTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                // A cancelled heartbeat may already be queued on MainActor.
+                // It must never revoke a newer feed when it resumes late.
+                guard !Task.isCancelled, let self, !self.closed, self.publicChatContext == context else { return }
+                guard self.currentReadyLease == context,
+                      let chat = self.publicChat, chat.guestPublicAvailable else { self.stopPublicChat(); return }
+                self.session?.refreshPublicChat(context: context, adapters: chat.guestPublicAdapters,
+                    sources: chat.guestPublicSources, sourcesTruncated: chat.guestPublicSourcesTruncated)
+            }
+        }
+    }
+    private func stopPublicChat() {
+        publicChatTask?.cancel(); publicChatTask = nil
+        if let context = publicChatContext { _ = session?.setPublicChatReturn(false, context: context) }
+        publicChatContext = nil
     }
     private func publishBusy() { state.busy = !occupiedOperations.isEmpty }
     private func requireCurrent(_ current: UUID) throws {

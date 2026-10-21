@@ -1,9 +1,11 @@
 // Capability remains in memory; never put it into a URL, storage or diagnostic log.
+import {GuestPublicChatView} from './public-chat.js';
 const params = new URLSearchParams(location.search);
 const room = params.get('room'); let secret = location.hash.slice(1);
 history.replaceState(null, '', location.pathname + location.search);
 const $ = id => document.getElementById(id);
 const status = text => { $('status').textContent = text; };
+const publicChat = new GuestPublicChatView({messages:$('public-messages'),status:$('public-chat-status'),sources:$('public-sources'),document});
 let local, shared, socket, pc, audio, analyser, meterSource, meterFrame, generation, host, hostGeneration;
 let signalQueue = {pending:0};
 let candidateQueue = [], signalChain = Promise.resolve(), left = false, name = 'Guest';
@@ -75,7 +77,7 @@ if (!valid) { status('This invite is incomplete. Ask the host for a fresh link.'
 function controls(enabled) { for (const id of ['mute','hide','tone','join']) $(id).disabled = !enabled; }
 function resetPeer() {
   clearTimeout(relayTimer); relayTimer = undefined;
-  stopShare();control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();clearPrivateMessages();
+  stopShare();control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();clearPrivateMessages();publicChat.reset();
   admitted = false; host = hostGeneration = activeNegotiation = undefined; candidateQueue = [];
   pc?.close(); pc = undefined; $('return').srcObject = null;
   $('program').textContent='Program and recording status unavailable while disconnected.';
@@ -186,7 +188,7 @@ async function acceptSignal(data, epoch) {
     const identities=payload.media, mids=['audio','camera','screen'].map(kind=>identities?.[kind]);
     if(mids.some(mid=>typeof mid!=='string' || !/^[0-9A-Za-z_-]{1,16}$/.test(mid)) || new Set(mids).size!==3)throw new Error('The host must offer separate camera and screen sources.');
     const negotiation = payload.negotiation;
-    activeNegotiation = negotiation; clearTimeout(relayTimer); stopShare();clearPrivateMessages();
+    activeNegotiation = negotiation; clearTimeout(relayTimer); stopShare();clearPrivateMessages();publicChat.reset(negotiation);
     control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();
     pc?.close(); $('return').srcObject = null;
     const next = new RTCPeerConnection({iceServers:await iceServers()});
@@ -205,13 +207,14 @@ async function acceptSignal(data, epoch) {
       if(!current() || channel.label!==MEDIA_CONTROL || control){channel.close();return;}
       control=channel;
       channel.onopen=()=>{if(current()){updateShareControls();updatePrivateControls();}};
-      channel.onclose=()=>{if(current() && control===channel){screenApproved=false;stopShare();updateShareControls();clearPrivateMessages();}};
+      channel.onclose=()=>{if(current() && control===channel){screenApproved=false;stopShare();updateShareControls();clearPrivateMessages();publicChat.reset();}};
       channel.onmessage=event=>{
         if(!current() || control!==channel || typeof event.data!=='string' || new TextEncoder().encode(event.data).length>1024)return;
         let value;try{value=JSON.parse(event.data);}catch{return;}
         if(value?.type==='return-video'&&value.negotiation===negotiation&&typeof value.enabled==='boolean'){
           returnVideoAllowed=value.enabled;updateReturnVideo();return;
         }
+        if(publicChat.receive(value))return;
         if(receivePrivate(value))return;
         if(value?.type!=='screen-approval' || value.negotiation!==negotiation || typeof value.approved!=='boolean')return;
         screenApproved=value.approved;if(!screenApproved)stopShare();updateShareControls();

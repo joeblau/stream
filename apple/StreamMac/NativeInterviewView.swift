@@ -103,6 +103,14 @@ struct NativeInterviewView: View {
                         .id(context)
                     NativeGuestTalkbackView(manager: manager, dispatcher: dispatcher, context: context)
                         .id(context)
+                    if member.publicChat != .unavailable {
+                        let shared = member.publicChat == .sharing
+                        commandButton(shared ? "Stop Sharing Public Chat" : "Share Future Public Chat", .setPublicChatReturn(context, !shared))
+                        Text("Shares new public messages from the studio's shared chat only. Long text may be clipped and bursts omitted. Private messages stay separate; reconnect stops sharing. No public overlay changes.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if member.publicChatDropped > 0 { Text("\(member.publicChatDropped) public messages omitted by format, rate or connection limits.").font(.caption).foregroundStyle(.secondary) }
+                        if member.publicChat == .offUnconfirmed { Text("Stopped locally; guest display unconfirmed. Its feed expires without fresh host updates.").font(.caption).foregroundStyle(.orange) }
+                    }
                 }
                 Text(member.returnAudio == .ready ? "Public show audio return is active; your own audio is excluded." :
                     member.returnAudio == .preparing ? "Preparing public show audio return. Start local preview to supply the mix." :

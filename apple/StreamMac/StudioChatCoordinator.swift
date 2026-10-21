@@ -2,10 +2,15 @@ import Combine
 import Foundation
 import StreamCore
 
+enum StudioGuestPublicChatUpdate {
+    case message(StudioChatMessage), removed, closed
+}
+
 @MainActor final class StudioChatCoordinator: ObservableObject {
     let restream = RestreamChat()
     let recordingMessages = PassthroughSubject<RecordingChatMessage, Never>()
     let recordingBindings = PassthroughSubject<RecordingChatBinding, Never>()
+    let guestPublicUpdates = PassthroughSubject<StudioGuestPublicChatUpdate, Never>()
     private(set) var recentRecordingBindings: [RecordingChatBinding] = []
     @Published private(set) var directChat: StudioDirectChatManager?
     @Published private(set) var queue = StudioChatQueue()
@@ -81,11 +86,9 @@ import StreamCore
         guard !closed else { return }
         switch action {
         case .message(let message):
-            let before = queue.messages.count
-            let last = queue.messages.last?.id
-            queue.receive(message)
-            if queue.messages.count != before || queue.messages.last?.id != last {
+            if queue.receive(message) {
                 recordingMessages.send(Self.recordingMessage(message))
+                guestPublicUpdates.send(.message(message))
             }
         case .heartbeat: break
         case .connection(let id, let uuid, let platform, let state):
@@ -94,11 +97,55 @@ import StreamCore
         case .removed(let ids):
             if let featured = queue.featuredID, ids.contains(featured) { hide() }
             queue.discard(ids)
+            guestPublicUpdates.send(.removed)
             if availableAlertSlots.contains(where: { layer in
                 guard case .text(let text) = layer.payload, let id = text.recordingChatMessageID else { return false }
                 return ids.contains(id)
             }) { error = "An alert's source message was removed. Hide its staged card and Take to remove it from Program." }
         }
+    }
+    var guestPublicAvailable: Bool { !closed }
+    var guestPublicAdapters: [String: String] {
+        let restreamState: String
+        switch restream.status {
+        case .connected: restreamState = "connected"
+        case .connecting: restreamState = "connecting"
+        case .failed: restreamState = "failed"
+        default: restreamState = "offline"
+        }
+        var result = ["restream": restreamState]
+        for provider in [ManagedProvider.youtube, .twitch] {
+            if let directChat {
+                let value = directChat.snapshot(provider)
+                result[provider.rawValue] = value.failure != nil ? "failed" : value.isConnected ? "connected" : "offline"
+            } else { result[provider.rawValue] = "unavailable" }
+        }
+        return result
+    }
+    var guestPublicSources: [GuestPublicChatSource] {
+        connections.keys.sorted().prefix(4).compactMap { id in
+            guard let value = connections[id] else { return nil }
+            return .init(id: Self.guestSourceID(id), platform: GuestPublicChatEnvelope.prefix(value.platform, bytes: 32),
+                state: GuestPublicChatEnvelope.prefix(value.state, bytes: 64))
+        }
+    }
+    var guestPublicSourcesTruncated: Bool {
+        connections.count > 4 || connections.values.contains { $0.platform.utf8.count > 32 || $0.state.utf8.count > 64 }
+    }
+    static func guestSourceID(_ connection: String) -> String {
+        String(StudioChatMessageIdentity.make(provider: "guest-public-source", messageID: connection).prefix(12))
+    }
+    static func guestPublicEntry(_ message: StudioChatMessage) -> GuestPublicChatEntry? {
+        guard message.text.utf8.count <= 16_384, message.author.utf8.count <= 512,
+              let kind = message.audienceEvent else { return nil }
+        let body = GuestPublicChatEnvelope.prefix(message.text, bytes: 512)
+        let author = GuestPublicChatEnvelope.prefix(message.author, bytes: 64)
+        let platform = GuestPublicChatEnvelope.prefix(message.platform, bytes: 32)
+        let roles = Array(message.roles.filter { ["Owner", "Moderator", "Member", "Verified", "VIP", "Bot"].contains($0) }.prefix(6))
+        return .init(id: message.id, source: guestSourceID(message.connectionID), platform: platform, author: author,
+            roles: roles, text: body, timestamp: message.timestamp.timeIntervalSince1970,
+            receiptTime: message.timestampIsReceiptTime, kind: kind.rawValue,
+            truncated: body != message.text || author != message.author || platform != message.platform || roles != message.roles)
     }
     var availableSlots: [LayerNode] {
         previewProgram?.stagedScene?.layers.filter { slots.contains($0.id) && $0.payload.isText } ?? []
@@ -314,6 +361,7 @@ import StreamCore
     func shutdown() {
         guard !closed else { return }
         closed = true; alertPromotionEnabled = false
+        guestPublicUpdates.send(.closed)
         directChat?.shutdown(); avatarTasks.values.forEach { $0.cancel() }; avatarTasks.removeAll(); restream.disconnectStudioSession()
     }
     private func run(_ command: StudioCommand) -> Bool {

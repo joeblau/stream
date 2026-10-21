@@ -444,6 +444,11 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
         guard supportsPrivateMessages else { return false }
         return receiver.sendPrivateControl(envelope)
     }
+    var supportsPublicChat: Bool { !isRetired && callbacks.permitsReturn(receiver) }
+    func sendPublicChat(_ envelope: GuestPublicChatEnvelope, lowPriority: Bool) -> Bool {
+        guard supportsPublicChat else { return false }
+        return receiver.sendPublicChat(envelope, lowPriority: lowPriority)
+    }
     func approveScreen(_ approved: Bool) -> Bool {
         guard !isRetired, let intent = callbacks.beginApproval(approved) else { return false }
         // Never hold the sink lock across receiver/output callbacks.

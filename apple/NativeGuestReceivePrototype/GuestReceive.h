@@ -69,6 +69,7 @@ int SGReceiverSendReturnH264(SGReceiver *, uint64_t admitted_generation,
 int SGReceiverSendReturnOpus(SGReceiver *, uint64_t admitted_generation,
                             const uint8_t *, size_t, uint32_t rtp, uint64_t ntp);
 int SGReceiverSendControl(SGReceiver *, const char *message);
+int SGReceiverSendPublicChat(SGReceiver *, const char *message);
 int SGReceiverCandidate(SGReceiver *, const char *candidate, const char *mid);
 void SGReceiverExpire(SGReceiver *);
 int SGReceiverRequestKeyframe(SGReceiver *, int role);

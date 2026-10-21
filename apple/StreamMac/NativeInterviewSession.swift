@@ -51,14 +51,31 @@ import Foundation
         var candidateBytes = 0, outboundBytes = 0
         var offered = false, answered = false, controlOpen = true
         var media: NativeInterviewMediaMIDs?
+        var publicFeed: PublicFeed?
+        var publicEnableStart: ContinuousClock.Instant?
+        var publicEnables = 0
         init(context: NativeInterviewPeerLease, mailbox: NativeInterviewMediaMailbox) {
             self.context = context; self.mailbox = mailbox
         }
         func retire() {
+            publicFeed = nil
             mailbox.close(); preparation?.cancel(); expiry?.cancel(); deadline?.cancel()
             host?.retire(); host = nil
             incoming.removeAll(); candidates.removeAll(); outbound.removeAll()
         }
+    }
+    @MainActor private final class PublicFeed {
+        let id = UUID()
+        var sequence: UInt32 = 0, reset: UInt32 = 0, dropped: UInt32 = 0
+        var rateStart = ContinuousClock.now, rateCount = 0
+        func maySend(state: Bool = false) -> Bool {
+            let now = ContinuousClock.now
+            if rateStart.duration(to: now) >= .seconds(1) { rateStart = now; rateCount = 0 }
+            // Keep one of four low-priority slots available for freshness.
+            guard rateCount < (state ? 4 : 3) else { return false }
+            rateCount += 1; return true
+        }
+        func omit() { if dropped < UInt32.max { dropped += 1 } }
     }
 
     init(service: any NativeInterviewService, factory: (any NativeInterviewMediaHostFactory)? = nil,
@@ -227,6 +244,61 @@ import Foundation
     func canSetProgramReturn(context: NativeInterviewPeerLease) -> Bool {
         readyPeerLease(for: context.receive.peerID) == context && peers[context.receive.peerID]?.host?.supportsProgramReturn == true
     }
+    func canSetPublicChatReturn(_ enabled: Bool, context: NativeInterviewPeerLease) -> Bool {
+        guard let peer = peers[context.receive.peerID], peer.context == context else { return false }
+        if !enabled { return true }
+        guard readyPeerLease(for: context.receive.peerID) == context, peer.controlOpen,
+              peer.host?.supportsPublicChat == true else { return false }
+        if peer.publicFeed != nil { return true }
+        if let began = peer.publicEnableStart, began.duration(to: .now) < .seconds(1) { return peer.publicEnables < 2 }
+        return true
+    }
+    @discardableResult func setPublicChatReturn(_ enabled: Bool, context: NativeInterviewPeerLease,
+        adapters: [String: String] = [:], sources: [GuestPublicChatSource] = [], sourcesTruncated: Bool = false) -> Bool {
+        guard canSetPublicChatReturn(enabled, context: context), let peer = peers[context.receive.peerID] else { return false }
+        if !enabled {
+            guard let feed = peer.publicFeed else { return true }
+            peer.publicFeed = nil
+            let sent = peer.host?.sendPublicChat(.state(feed: feed.id, enabled: false, reset: feed.reset,
+                sequence: feed.sequence, dropped: feed.dropped, adapters: [:], sources: [], sourcesTruncated: false), lowPriority: false) == true
+            updateMember(context.receive.peerID) { $0.publicChat = sent ? .off : .offUnconfirmed }
+            return true
+        }
+        if peer.publicFeed != nil { return true }
+        let now = ContinuousClock.now
+        if peer.publicEnableStart.map({ $0.duration(to: now) >= .seconds(1) }) ?? true {
+            peer.publicEnableStart = now; peer.publicEnables = 0
+        }
+        guard peer.publicEnables < 2 else { return false }; peer.publicEnables += 1
+        let feed = PublicFeed()
+        guard peer.host?.sendPublicChat(.state(feed: feed.id, enabled: true, reset: 0, sequence: 0, dropped: 0,
+            adapters: adapters, sources: sources, sourcesTruncated: sourcesTruncated), lowPriority: false) == true else { return false }
+        peer.publicFeed = feed
+        updateMember(context.receive.peerID) { $0.publicChat = .sharing; $0.publicChatDropped = 0 }
+        return true
+    }
+    func sendPublicChat(_ entry: GuestPublicChatEntry?, context: NativeInterviewPeerLease) {
+        guard let peer = peers[context.receive.peerID], peer.context == context, let feed = peer.publicFeed else { return }
+        guard feed.sequence < UInt32.max else { _ = setPublicChatReturn(false, context: context); return }
+        feed.sequence += 1
+        if let entry, feed.maySend(), readyPeerLease(for: context.receive.peerID) == context, peer.controlOpen,
+           peer.host?.sendPublicChat(.message(feed: feed.id, reset: feed.reset, sequence: feed.sequence,
+                dropped: feed.dropped, entry: entry), lowPriority: true) == true {} else { feed.omit() }
+        updateMember(context.receive.peerID) { $0.publicChatDropped = feed.dropped }
+    }
+    func refreshPublicChat(context: NativeInterviewPeerLease, adapters: [String: String],
+        sources: [GuestPublicChatSource], sourcesTruncated: Bool) {
+        guard let peer = peers[context.receive.peerID], peer.context == context, peer.controlOpen,
+              let feed = peer.publicFeed, feed.maySend(state: true) else { return }
+        _ = peer.host?.sendPublicChat(.state(feed: feed.id, enabled: true, reset: feed.reset,
+            sequence: feed.sequence, dropped: feed.dropped, adapters: adapters, sources: sources,
+            sourcesTruncated: sourcesTruncated), lowPriority: true)
+    }
+    func clearPublicChat(context: NativeInterviewPeerLease) {
+        guard let peer = peers[context.receive.peerID], peer.context == context, let feed = peer.publicFeed else { return }
+        guard feed.reset < UInt32.max else { _ = setPublicChatReturn(false, context: context); return }
+        feed.reset += 1 // Carried by every later frame; content is never retried.
+    }
     @discardableResult func setProgramReturn(_ enabled: Bool, context: NativeInterviewPeerLease) -> Bool {
         guard canSetProgramReturn(context: context) else { return false }
         return peers[context.receive.peerID]?.host?.setProgramReturnEnabled(enabled) == true
@@ -356,10 +428,11 @@ import Foundation
                 if role == "guest" {
                     var member = snapshot.members.first { $0.id == id } ?? .init(id: id, name: name, membership: state)
                     member = .init(id: id, name: name, membership: state, media: member.media, returnAudio: member.returnAudio, returnVideo: member.returnVideo, returnVideoSource: member.returnVideoSource,
+                                   publicChat: member.publicChat, publicChatDropped: member.publicChatDropped,
                                    screenApproved: member.screenApproved, screenSharing: member.screenSharing,
                                    membershipRevision: member.membershipRevision)
                     if state == .waiting {
-                        member.media = .unavailable; member.returnAudio = .unavailable; member.returnVideo = .unavailable; member.returnVideoSource = .program; member.screenApproved = false; member.screenSharing = false
+                        member.media = .unavailable; member.returnAudio = .unavailable; member.returnVideo = .unavailable; member.returnVideoSource = .program; member.publicChat = .unavailable; member.publicChatDropped = 0; member.screenApproved = false; member.screenSharing = false
                     }
                     members.append(member)
                 }
@@ -511,7 +584,7 @@ import Foundation
         case .ready:
             guard peer.offered, peer.answered else { failPeer(id, .malformed); return }
             peer.deadline?.cancel(); peer.deadline = nil
-            updateMember(id) { $0.media = .ready }
+            updateMember(id) { $0.media = .ready; $0.publicChat = peer.publicFeed != nil ? .sharing : peer.host?.supportsPublicChat == true ? .off : .unavailable }
             if peer.host?.supportsPrivateMessages == true { _ = peer.host?.sendPrivateControl(.availability(true)) }
         case .returnAudio(let value): updateMember(id) { $0.returnAudio = value }
         case .returnVideo(let value): updateMember(id) { $0.returnVideo = value }
@@ -536,8 +609,8 @@ import Foundation
                 privateMessages[index].delivery = deadline > ContinuousClock.now ? .received : .unknown
             }
         case .controlClosed:
-            peer.controlOpen = false; clearPrivateMessages()
-            updateMember(id) { $0.screenApproved = false; $0.screenSharing = false; $0.returnAudio = .unavailable; $0.returnVideo = .unavailable }
+            peer.controlOpen = false; peer.publicFeed = nil; clearPrivateMessages()
+            updateMember(id) { $0.screenApproved = false; $0.screenSharing = false; $0.returnAudio = .unavailable; $0.returnVideo = .unavailable; $0.publicChat = .unavailable }
         case .failed(let failure): failPeer(id, failure)
         }
     }
@@ -645,7 +718,7 @@ import Foundation
     private func dropPeer(_ id: UUID) {
         clearPrivateMessages()
         peers.removeValue(forKey: id)?.retire()
-        updateMember(id) { $0.media = .unavailable; $0.returnAudio = .unavailable; $0.returnVideo = .unavailable; $0.returnVideoSource = .program; $0.screenApproved = false; $0.screenSharing = false }
+        updateMember(id) { $0.media = .unavailable; $0.returnAudio = .unavailable; $0.returnVideo = .unavailable; $0.returnVideoSource = .program; $0.publicChat = .unavailable; $0.publicChatDropped = 0; $0.screenApproved = false; $0.screenSharing = false }
     }
     private func failPeer(_ id: UUID, _ failure: NativeInterviewError) {
         dropPeer(id); updateMember(id) { $0.media = .failed }; snapshot.failure = failure
