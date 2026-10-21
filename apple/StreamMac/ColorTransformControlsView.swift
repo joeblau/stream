@@ -28,18 +28,30 @@ struct ColorTransformControlsView: View {
                     Button("Blue") { effects.chromaKey.keyColorHex = "#0000FF" }
                 }
                 Slider(value: $effects.chromaKey.tolerance, in: 0...1) { Text("Tolerance") }
+                    .accessibilityValue(percent(effects.chromaKey.tolerance))
                 Slider(value: $effects.chromaKey.softness, in: 0.001...1) { Text("Edge Softness") }
+                    .accessibilityValue(percent(effects.chromaKey.softness))
                 Slider(value: $effects.chromaKey.spill, in: 0...1) { Text("Spill Suppression") }
+                    .accessibilityValue(percent(effects.chromaKey.spill))
                 Toggle("Before / Bypass Key", isOn: $effects.chromaKey.isBypassed)
                 Text("Compare before and after in Preview. Layer edits reach Program on Take; source defaults affect both.")
                     .font(.caption).foregroundStyle(.secondary)
                 DisclosureGroup("Garbage Mask", isExpanded: $showMask) {
                     // Keep a positive source-space rectangle while dragging.
                     Slider(value: $effects.chromaKey.left, in: 0...max(0,0.99-effects.chromaKey.right)) { Text("Left") }
+                        .accessibilityLabel("Garbage mask left crop")
+                        .accessibilityValue(percent(effects.chromaKey.left))
                     Slider(value: $effects.chromaKey.right, in: 0...max(0,0.99-effects.chromaKey.left)) { Text("Right") }
+                        .accessibilityLabel("Garbage mask right crop")
+                        .accessibilityValue(percent(effects.chromaKey.right))
                     Slider(value: $effects.chromaKey.top, in: 0...max(0,0.99-effects.chromaKey.bottom)) { Text("Top") }
+                        .accessibilityLabel("Garbage mask top crop")
+                        .accessibilityValue(percent(effects.chromaKey.top))
                     Slider(value: $effects.chromaKey.bottom, in: 0...max(0,0.99-effects.chromaKey.top)) { Text("Bottom") }
+                        .accessibilityLabel("Garbage mask bottom crop")
+                        .accessibilityValue(percent(effects.chromaKey.bottom))
                     Slider(value: $effects.chromaKey.maskFeather, in: 0...32) { Text("Mask Feather") }
+                        .accessibilityValue(String(format: "%.1f pixels", effects.chromaKey.maskFeather))
                 }
                 Text("Keying preserves transparency for the image/video/background layers below this source.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -57,6 +69,7 @@ struct ColorTransformControlsView: View {
             if let importError { Text(importError).font(.caption).foregroundStyle(.red) }
             if effects.lut.assetID != nil {
                 Slider(value: $effects.lut.intensity, in: 0...1) { Text("LUT Intensity") }
+                    .accessibilityValue(percent(effects.lut.intensity))
                 Picker("LUT Color Space", selection: $effects.lut.colorSpace) {
                     Text("sRGB").tag(LUTColorSpace.sRGB)
                     Text("Linear sRGB").tag(LUTColorSpace.linearSRGB)
@@ -67,6 +80,8 @@ struct ColorTransformControlsView: View {
             }
         }
     }
+
+    private func percent(_ value: Double) -> String { String(format: "%.1f percent", value * 100) }
 
     private var keyColor: Binding<Color> {
         Binding(get: { Color(nsColor: NSColor(srgbRed: effects.chromaKey.color.x,

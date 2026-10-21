@@ -89,6 +89,30 @@ private struct NativePaletteSheet: View {
         shortcuts.onExecute = { action in
             if let command = action.command { receipts.append((action.id, dispatcher.execute(command))) }
         }
+        try check(catalog().first(where: { $0.id == "rundown.play" })?.unavailableReason != nil,
+            "Empty rundown must expose actual dispatcher unavailability")
+        let rundownCue = RundownCue(sceneID: beta.id.rawValue, durationSeconds: nil)
+        let rundownCueID = "rundown.cue.\(rundownCue.id.uuidString).run"
+        try check(dispatcher.execute(.setRundown(.init(entries: [.init(cue: rundownCue)]))).error == nil,
+            "Fixture rundown setup failed")
+        for id in ["rundown.play", "rundown.pause", "rundown.stop", "rundown.skip", rundownCueID] {
+            try check(catalog().contains { $0.id == id && $0.command != nil }, "Rundown command missing from shared native/controller catalog: \(id)")
+        }
+        let scheduledAlpha = RundownCue(sceneID: alpha.id.rawValue, durationSeconds: nil)
+        let scheduledGamma = RundownCue(sceneID: gamma.id.rawValue, durationSeconds: nil)
+        try check(dispatcher.execute(.setRundown(.init(entries: [.init(cue: scheduledAlpha), .init(cue: scheduledGamma)]))).error == nil,
+            "Scheduled rundown fixture setup failed")
+        try check(dispatcher.execute(.rundownPlay).error == nil && dispatcher.rundown.playback.phase == .running
+            && preview.programScene?.id == alpha.id, "Scheduled cue unexpectedly paused its own transport")
+        try check(dispatcher.execute(.rundownSkip).error == nil && dispatcher.rundown.playback.phase == .running
+            && preview.programScene?.id == gamma.id, "Scheduled advance unexpectedly paused its own transport")
+        shortcuts.execute(id: "rundown.cue.\(scheduledAlpha.id.uuidString).run")
+        dispatcher.rundown.tick()
+        try check(dispatcher.rundown.playback.phase == .paused && preview.programScene?.id == alpha.id,
+            "Manual cue left the previous rundown clock running over the new Program")
+        try check(dispatcher.execute(.rundownStop).error == nil
+            && dispatcher.execute(.setRundown(.init(entries: [.init(cue: rundownCue)]))).error == nil,
+            "Rundown fixture reset failed")
         shortcuts.seedScenes([alpha, beta, gamma].map { "scene.\($0.id.rawValue.uuidString).select" })
         try check(!shortcuts.document.globalEnabled && shortcuts.document.bindings.allSatisfy { !$0.global }, "Fixture attempted global hotkey registration")
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 640, height: 480), styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -125,11 +149,17 @@ private struct NativePaletteSheet: View {
         try check(preview.programScene?.id == beta.id, "Canvas Return did not route actual Take")
         try check(dispatcher.execute(.renameScene(beta.id, to: "Renamed Beta")).error == nil, "Actual rename failed")
         try check(dispatcher.execute(.moveScene(beta.id, toFolder: nil, before: alpha.id)).error == nil, "Actual reorder failed")
+        try check(catalog().first(where: { $0.id == rundownCueID })?.title.contains("Renamed Beta") == true,
+            "Rundown cue command must retain its ID and refresh renamed scene labels")
         try check(dispatcher.execute(.selectScene(gamma.id)).error == nil, "Actual scene selection failed")
         try send(19, "2", flags: .command, to: window)
         try check(dispatcher.state.stagedSceneID == beta.id && catalog().first(where: { $0.id == "scene.\(beta.id.rawValue.uuidString).select" })?.title == "Select Renamed Beta",
             "Rename/reorder silently retargeted an installed shortcut")
         try check(dispatcher.execute(.selectScene(gamma.id)).error == nil && dispatcher.execute(.deleteScene(beta.id)).error == nil, "Actual delete failed")
+        try check(catalog().first(where: { $0.id == rundownCueID })?.unavailableReason != nil,
+            "Deleted rundown scene must disable its stable cue command")
+        try check(dispatcher.execute(.setRundown(.init())).error == nil && !catalog().contains { $0.id == rundownCueID },
+            "Deleted rundown cue must leave the shared command catalog")
         let beforeDelete = receipts.count
         try send(19, "2", flags: .command, to: window)
         try check(receipts.count == beforeDelete && dispatcher.state.stagedSceneID == gamma.id && shortcuts.message?.contains("missing") == true,
@@ -233,6 +263,34 @@ private struct NativePaletteSheet: View {
         let beforeOther = receipts.count
         try send(18, "1", flags: .command, to: unrelated)
         try check(receipts.count == beforeOther && otherCanvas.received == 1, "Owned unrelated window leaked into studio monitor")
+        let automation = StudioAutomationEndpoint(defaults: ShortcutFixtureDefaults.value)
+        let automationPermissions = PermissionsManager()
+        automation.bind(dispatcher: dispatcher, permissions: automationPermissions,
+            stagedLayers: { preview.stagedScene?.layers ?? [] })
+        defer { automation.unbind() }
+        var studioReopens = 0
+        var reopenedShellSetup = false
+        automation.attachStudioWindow(window, reopen: {
+            studioReopens += 1; window.makeKeyAndOrderFront(nil)
+            Task { @MainActor in
+                // SwiftUI setup happens after the open-window request. The
+                // fixture never starts preview/capture to simulate that work.
+                await Task.yield()
+                reopenedShellSetup = true
+                automation.markStudioReady(true, for: dispatcher)
+            }
+        })
+        automation.markStudioReady(true, for: dispatcher)
+        try await automation.awaitFocusedStudio()
+        try await wait("Automation's studio focus request did not become key", until: { NSApp.keyWindow === window })
+        try check(NSApp.keyWindow === window && studioReopens == 0 && automation.isStudioReady,
+            "Automation focused an unrelated window instead of its attached studio")
+        window.close()
+        try await automation.awaitFocusedStudio()
+        try await wait("Reopened studio focus request did not become key", until: { NSApp.keyWindow === window })
+        try check(window.isVisible && NSApp.keyWindow === window && studioReopens == 1
+            && reopenedShellSetup && automation.isStudioReady,
+            "Automation did not await setup after reopening the same owned studio window")
         unrelated.close(); window.makeKeyAndOrderFront(nil); _ = window.makeFirstResponder(canvas)
         shortcuts.uninstall()
         let beforeUninstall = receipts.count
@@ -244,7 +302,7 @@ private struct NativePaletteSheet: View {
             "Local key qualification allocated capture or publication")
         try check(catalog().first(where: { $0.id == "unavailable.guests" })?.command == nil,
             "Guest controls were falsely presented as implemented")
-        print("PASS: unrelated owned window isolation, actual monitor uninstall, captured binding reload and guest/global gates")
+        print("PASS: unrelated owned window isolation, automation studio identity/closed-window reopen, actual monitor uninstall, captured binding reload and guest/global gates")
         print("Configuration: \(ProcessInfo.processInfo.operatingSystemVersionString); \(ProcessInfo.processInfo.processorCount) CPUs; actual AppKit window/events/first responders and shipping dispatcher, no CGEvent or other-app input")
         print("Qualification: global shortcuts/foreground apps, physical devices/guests and full accessibility/keyboard traversal remain open; fixture temp credentials/preferences and disabled capture consent")
     }

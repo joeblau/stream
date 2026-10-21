@@ -78,7 +78,7 @@
     },
     {
       "UUID": "com.joeblau.stream-studio.selector",
-      "Name": "Scene / Layer / Sound Dial",
+      "Name": "Scene / Layer / Overlay / Sound Dial",
       "Tooltip": "Rotate to browse stable resources; press or tap to activate the selected resource.",
       "Icon": "imgs/command",
       "Controllers": [

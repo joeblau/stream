@@ -82,6 +82,55 @@ private final class ProviderClock: @unchecked Sendable {
         await #expect(throws: ProviderFailure.self) { try await api.channels(.linkedinLive) }
         #expect(await fixture.allRequests().count == 2)
     }
+    @Test("Viewer metrics belong to the exact selected event or broadcaster")
+    func viewerIdentity() async throws {
+        let valid = ProviderFixture([
+            #"{"data":[{"user_id":"42","viewer_count":0}]}"#,
+            #"{"items":[{"id":"event","liveStreamingDetails":{"concurrentViewers":"17"}}]}"#,
+            #"{"items":[]}"#
+        ])
+        #expect(try await valid.api.twitchViewers(channelID: "42") == 0)
+        #expect(try await valid.api.youtubeViewers(eventID: "event") == 17)
+        #expect(try await valid.api.youtubeViewers(eventID: "event") == nil)
+        for response in [
+            #"{"data":[{"user_id":"other","viewer_count":99}]}"#,
+            #"{"data":[{"viewer_count":99}]}"#,
+            #"{"data":[{"user_id":"42","viewer_count":1},{"user_id":"42","viewer_count":2}]}"#
+        ] {
+            let fixture = ProviderFixture([response])
+            await #expect(throws: ProviderFailure.self) { try await fixture.api.twitchViewers(channelID: "42") }
+            #expect(await fixture.allRequests().count == 1)
+        }
+        for response in [
+            #"{"items":[{"id":"other","liveStreamingDetails":{"concurrentViewers":"99"}}]}"#,
+            #"{"items":[{"liveStreamingDetails":{"concurrentViewers":"99"}}]}"#,
+            #"{"items":[{"id":"event"},{"id":"event"}]}"#
+        ] {
+            let fixture = ProviderFixture([response])
+            await #expect(throws: ProviderFailure.self) { try await fixture.api.youtubeViewers(eventID: "event") }
+            #expect(await fixture.allRequests().count == 1)
+        }
+    }
+    @Test("Malformed viewer metrics remain unavailable instead of manufacturing a count")
+    func malformedViewerCounts() async throws {
+        for value in ["true", "false", "-1", "1.5", "null", "\"99\"", "1e40"] {
+            let fixture = ProviderFixture(["{\"data\":[{\"user_id\":\"42\",\"viewer_count\":\(value)}]}"])
+            #expect(try await fixture.api.twitchViewers(channelID: "42") == nil)
+        }
+        for value in ["-1", "9223372036854775808", "unknown"] {
+            let fixture = ProviderFixture(["{\"items\":[{\"id\":\"event\",\"liveStreamingDetails\":{\"concurrentViewers\":\"\(value)\"}}]}"])
+            #expect(try await fixture.api.youtubeViewers(eventID: "event") == nil)
+        }
+    }
+    @Test("Event state receipts expire and future timestamps cannot claim freshness")
+    func eventFreshness() {
+        let time = Date(timeIntervalSince1970: 1_000)
+        let event = ProviderEvent(id: "event", provider: .youtube, title: "Live", state: .live, verifiedAt: time)
+        #expect(event.isFresh(at: time))
+        #expect(event.isFresh(at: time.addingTimeInterval(60)))
+        #expect(!event.isFresh(at: time.addingTimeInterval(60.001)))
+        #expect(!event.isFresh(at: time.addingTimeInterval(-0.001)))
+    }
     @Test("Create returns actual event ID, safe defaults and absolute schedule without retries")
     func create() async throws {
         let fixture = ProviderFixture([#"{"id":"actual-ID","snippet":{"channelId":"UC1","title":"Created"},"status":{"lifeCycleStatus":"created","privacyStatus":"private"}}"#])

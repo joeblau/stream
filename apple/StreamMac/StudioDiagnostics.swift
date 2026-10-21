@@ -85,6 +85,80 @@ struct SourceDiagnosticSnapshot: Codable, Sendable {
     var deliveryFPS: Double?
 }
 
+/// Export has its own boundary even when a future collector accidentally adds
+/// endpoint text to a state or channel key. Runtime snapshots keep their IDs so
+/// the inspector can resolve names; a bundle uses fresh, correlated pseudonyms.
+extension StudioDiagnosticSnapshot {
+    static let maximumExportBytes = 1_048_576
+    enum ExportFailure: LocalizedError {
+        case tooLarge
+        var errorDescription: String? { "Diagnostics exceeded the 1 MiB export limit. Try again after the next health sample." }
+    }
+
+    func redactedExportData() throws -> Data {
+        var exported = self
+        let salt = UUID().uuidString
+        func identifier(_ value: String, kind: String) -> String {
+            let digest = SHA256.hash(data: Data((salt + kind + value).utf8))
+            return kind + "-" + digest.prefix(12).map { String(format: "%02x", $0) }.joined()
+        }
+        func state(_ value: String) -> String {
+            let allowed: Set<String> = ["idle", "connecting", "live", "reconnecting", "stopping", "failed",
+                "preparing", "recording", "paused", "finishing", "unavailable", "capturing", "ready", "inactive"]
+            return allowed.contains(value) ? value : "unknown"
+        }
+        exported.streamState = state(streamState)
+        exported.recordingState = state(recordingState)
+        exported.os = String(os.prefix(256))
+        exported.hardwareModel = String(hardwareModel.prefix(128))
+        exported.hardwareCanvasCeiling = String(hardwareCanvasCeiling.prefix(128))
+        exported.sources = sources.prefix(256).map { source in
+            var source = source
+            source.id = identifier(source.id, kind: "source")
+            // Source kinds are internal identifiers, never titles or paths.
+            let kinds: Set<String> = ["camera", "screen", "media", "syphon", "image", "text", "shape", "web",
+                "appAudio", "scene", "pdf", "guest"]
+            source.kind = kinds.contains(source.kind) ? source.kind : "other"
+            source.state = state(source.state)
+            return source
+        }
+        exported.outputs = outputs.prefix(64).map { output in
+            var output = output
+            output.id = identifier(output.id, kind: "output")
+            output.state = state(output.state)
+            return output
+        }
+        func channels(_ values: [String: Int64]) -> [String: Int64] {
+            Dictionary(uniqueKeysWithValues: values.keys.sorted().prefix(256).map {
+                (identifier($0, kind: "audio"), values[$0]!)
+            })
+        }
+        exported.audioUnderruns = channels(audioUnderruns)
+        exported.audioTapDrops = channels(audioTapDrops)
+        exported.events = events.suffix(256).map { event in
+            let components = event.state.split(separator: ".", omittingEmptySubsequences: false)
+            let label: String
+            if components.count == 3, components[0] == "output", UUID(uuidString: String(components[1])) != nil {
+                label = "output.\(identifier(String(components[1]), kind: "output")).\(state(String(components[2])))"
+            } else if components.count == 2, components[0] == "recording" {
+                label = "recording.\(state(String(components[1])))"
+            } else { label = "unknown" }
+            return Event(time: event.time, state: label)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        // An unavailable numeric probe must not prevent the rest of a bundle
+        // being saved. This also keeps invalid telemetry distinguishable from 0.
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "unavailable", negativeInfinity: "unavailable", nan: "unavailable")
+        let data = try encoder.encode(exported)
+        guard data.count <= Self.maximumExportBytes else {
+            throw ExportFailure.tooLarge
+        }
+        return data
+    }
+}
+
 /// The runtime owns timers, events, and delta baselines. Hiding a panel cannot
 /// restart a session clock or discard lifecycle evidence.
 @MainActor final class StudioDiagnosticsMonitor: ObservableObject {
@@ -190,6 +264,7 @@ private struct StudioDiagnosticsContent: View {
             Button("Health Details") { showDetail.toggle() }
                 .popover(isPresented: $showDetail) { details }
             Button("Export Diagnostics…") { export() }
+                .help("Save bounded performance and session metadata with anonymous source/output IDs; credentials, media and source titles are excluded.")
             if let exportError { Text(exportError).foregroundStyle(.orange) }
         }
         .font(.caption.monospacedDigit())
@@ -212,7 +287,7 @@ private struct StudioDiagnosticsContent: View {
                 ForEach(snapshot.outputs, id: \.id) { output in
                     let name = UUID(uuidString: output.id).flatMap { workspace.runtime.controller.destinationOutputs.names[$0] } ?? "Output"
                     Text("\(name): \(output.state) · \(output.achievedFPS.map(String.init) ?? "—") fps · \(output.bitrate.map { "\($0 / 1000) kbps" } ?? "—")")
-                    Text("Video queue \(output.videoQueueDepth), shed \(output.videoMailboxDrops) · Socket \(output.socketQueueBytes ?? 0) bytes · Congestion drops \(output.encoderCongestionDrops ?? 0)")
+                    Text("Video queue \(output.videoQueueDepth), shed \(output.videoMailboxDrops) · Socket \(output.socketQueueBytes.map(String.init) ?? "unavailable") bytes · Congestion drops \(output.encoderCongestionDrops.map(String.init) ?? "unavailable")")
                 }
                 ForEach(snapshot.sources, id: \.id) { source in
                     let name = workspace.runtime.sceneStore.sources.first { $0.id.description == source.id }?.name ?? source.kind
@@ -231,12 +306,12 @@ private struct StudioDiagnosticsContent: View {
         }.frame(width: 540, height: 440)
     }
     private func export() {
+        exportError = nil
         let panel = NSSavePanel(); panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "stream-diagnostics.json"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
-            try encoder.encode(snapshot).write(to: url, options: .atomic)
+            try snapshot.redactedExportData().write(to: url, options: .atomic)
         } catch { exportError = error.localizedDescription }
     }
 }

@@ -1,4 +1,5 @@
 import CryptoKit
+import CoreFoundation
 import Foundation
 import StreamCore
 
@@ -154,5 +155,63 @@ enum StudioDirectChatDecoder {
             timestampIsReceiptTime: time == nil, kind: hasEmote ? "Emotes" : "Text", avatarURL: nil)
         return envelope(delivery: .init(message: normalized, route: .init(provider: .twitch, channelID: channelID,
             chatID: channelID, providerMessageID: id, authorID: authorID, roles: roles, timestamp: time ?? receivedAt)))
+    }
+}
+
+/// Provider-reported concurrent viewers for one verified destination. Missing
+/// counts are unavailable, never zero; samples are never added across services.
+struct DirectChatAudience: Equatable, Sendable {
+    enum Availability: String, Sendable {
+        case notRequested = "Not requested"
+        case available = "Available"
+        case unavailable = "Provider did not expose a count"
+        case offline = "Broadcast offline"
+        case failed = "Refresh failed"
+    }
+    var target = ""
+    var count: UInt64?
+    var observedAt: Date?
+    var availability: Availability = .notRequested
+    var isRefreshing = false
+    var retryUntil: Date?
+    var failure: String?
+    func isFresh(at date: Date) -> Bool {
+        guard availability == .available, let observedAt else { return false }
+        return (0...60).contains(date.timeIntervalSince(observedAt))
+    }
+}
+
+enum StudioAudienceDecoder {
+    static func decode(_ data: Data, provider: ManagedProvider, target: DirectChatWriteTarget, observedAt: Date) throws -> DirectChatAudience {
+        guard provider == target.provider else { throw ProviderFailure(.invalidRequest) }
+        let object = try StudioDirectChatDecoder.object(data)
+        var result = DirectChatAudience(target: target.broadcastID, observedAt: observedAt)
+        if provider == .youtube {
+            guard let rows = object["items"] as? [[String: Any]], rows.count <= 1 else { throw ProviderFailure(.invalidResponse) }
+            guard let row = rows.first else { result.availability = .unavailable; return result }
+            guard row["id"] as? String == target.broadcastID,
+                  let snippet = row["snippet"] as? [String: Any], snippet["channelId"] as? String == target.channelID else {
+                throw ProviderFailure(.invalidResponse)
+            }
+            guard let details = row["liveStreamingDetails"] as? [String: Any] else { result.availability = .unavailable; return result }
+            if details["actualEndTime"] != nil { result.availability = .offline; return result }
+            guard details["activeLiveChatId"] as? String == target.chatID else { throw ProviderFailure(.invalidResponse) }
+            guard let raw = details["concurrentViewers"] else { result.availability = .unavailable; return result }
+            guard let text = raw as? String, let count = unsigned(text) else { throw ProviderFailure(.invalidResponse) }
+            result.count = count
+        } else if provider == .twitch {
+            guard let rows = object["data"] as? [[String: Any]], rows.count <= 1 else { throw ProviderFailure(.invalidResponse) }
+            guard let row = rows.first else { result.availability = .offline; return result }
+            guard row["user_id"] as? String == target.channelID, row["type"] as? String == "live",
+                  let raw = row["viewer_count"] as? NSNumber, CFGetTypeID(raw) != CFBooleanGetTypeID(),
+                  let count = unsigned(raw.stringValue) else { throw ProviderFailure(.invalidResponse) }
+            result.count = count
+        } else { throw ProviderFailure(.unavailable) }
+        result.availability = .available
+        return result
+    }
+    private static func unsigned(_ value: String) -> UInt64? {
+        guard !value.isEmpty, value.utf8.count <= 20, value.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
+        return UInt64(value)
     }
 }

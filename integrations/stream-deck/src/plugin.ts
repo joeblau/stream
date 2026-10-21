@@ -64,6 +64,7 @@ class StudioCommandAction extends SingletonAction<Settings> {
       if (payload.operation === "bind") {
         if (!payload.commandID || !client.snapshot || !client.capabilities.has(payload.commandID)) throw new Error("Select a command from the current studio catalog.");
         const command = client.capabilities.get(payload.commandID)!;
+        if (command.id.startsWith("unavailable.")) throw new Error(command.unavailableReason ?? "This capability is not supported by the studio.");
         if (command.kind === "value" && (payload.value === undefined || !Number.isFinite(payload.value) || payload.value < 0 || payload.value > 1)) throw new Error("Choose a normalized value from 0 to 1.");
         if (command.argument === "page" && (payload.page === undefined || !Number.isSafeInteger(payload.page) || payload.page < 0 || payload.page > 100000)) throw new Error("Choose a PDF page from 1 to 100001.");
         if (command.argument === "text" && payload.text && (!payload.text.trim() || Buffer.byteLength(payload.text) > 512)) throw new Error("Marker text needs 1–512 UTF-8 bytes.");
@@ -99,6 +100,7 @@ class StudioCommandAction extends SingletonAction<Settings> {
 type DialBinding = { action: DialAction<Settings>; settings: Settings; ticks: number; busy: boolean; timer?: NodeJS.Timeout; held: boolean; lastRender?: string };
 function selectorCommands(category: string | undefined) {
   return [...client.capabilities.values()].filter(command => category === "Layers" ? /^scene\.[^.]+\.layer\.[^.]+\.visibility$/.test(command.id)
+    : category === "Overlays" ? /^overlay\.[^.]+\.visibility$/.test(command.id)
     : category === "Sound" ? /^sound\.[^.]+\.trigger$/.test(command.id) : /^scene\.[^.]+\.select$/.test(command.id));
 }
 async function dialInspector(manifestID: string | undefined, mode: "level" | "selector") {
@@ -116,7 +118,7 @@ async function configureDial(ev: SendToPluginEvent<JsonValue, Settings>, mode: "
     if (payload.operation === "forget") { await forgetPairing(); client.forget(); }
     if (payload.operation === "refresh") await client.refreshCatalog();
     if (payload.operation === "selector-category" && mode === "selector") {
-      if (!["Scenes", "Layers", "Sound"].includes(payload.category ?? "")) throw new Error("Choose a supported selector category.");
+      if (!["Scenes", "Layers", "Overlays", "Sound"].includes(payload.category ?? "")) throw new Error("Choose a supported selector category.");
       const settings = await ev.action.getSettings();
       // Changing category clears the old binding; selecting a resource is
       // the explicit step that binds the active project.
@@ -125,8 +127,8 @@ async function configureDial(ev: SendToPluginEvent<JsonValue, Settings>, mode: "
     if (payload.operation === "bind") {
       const command = payload.commandID ? client.capabilities.get(payload.commandID) : undefined;
       if (!command || !client.snapshot || (mode === "level" && command.kind !== "value")) throw new Error("Choose a supported target from the current studio catalog.");
-      const category = ["Scenes", "Layers", "Sound"].includes(payload.category ?? "") ? payload.category : "Scenes";
-      if (mode === "selector" && !selectorCommands(category).some(candidate => candidate.id === command.id)) throw new Error("Choose a scene, layer, or sound from the selected category.");
+      const category = ["Scenes", "Layers", "Overlays", "Sound"].includes(payload.category ?? "") ? payload.category : "Scenes";
+      if (mode === "selector" && !selectorCommands(category).some(candidate => candidate.id === command.id)) throw new Error("Choose a scene, layer, overlay, or sound from the selected category.");
       const step = payload.step ?? 0.01;
       if (!Number.isFinite(step) || step < 0.001 || step > 0.25) throw new Error("Dial step must be normalized from 0.001 to 0.25.");
       await ev.action.setSettings({ commandID: command.id, projectID: client.snapshot.projectID, ...(mode === "level" ? { step } : { category }) });

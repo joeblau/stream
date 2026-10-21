@@ -38,6 +38,10 @@ struct StudioPaletteAction {
                      "Native text/undo shortcuts are reserved")
         precondition(document.assign(commandID: b, chord: StudioKeyChord(keyCode: 30, modifiers: 1, keyLabel: "]"), global: true) != nil,
                      "Global ordinary editor keys require stronger modifiers")
+        precondition(document.assign(commandID: b, chord: StudioKeyChord(keyCode: 128, modifiers: 1, keyLabel: "Unknown"), global: false) != nil,
+                     "Unsupported physical key codes cannot be recorded")
+        precondition(document.assign(commandID: b, chord: StudioKeyChord(keyCode: 30, modifiers: 16, keyLabel: "]"), global: false) != nil,
+                     "Unknown modifier flags cannot be recorded")
         precondition(document.binding(for: first.chord, textEntry: false, modalPresented: false, repeated: false, global: false)?.commandID == a)
         precondition(document.binding(for: first.chord, textEntry: true, modalPresented: false, repeated: false, global: false) == nil)
         precondition(document.binding(for: first.chord, textEntry: false, modalPresented: true, repeated: false, global: false) == nil)
@@ -74,6 +78,30 @@ struct StudioPaletteAction {
         future.seedScenes([a]); future.setGlobalEnabled(true)
         let unchanged = try Data(contentsOf: newer)
         precondition(unchanged == bytes, "Future-version files are never overwritten")
-        print("PASS: stable IDs, persistence, multiple bindings, conflicts, reserved keys, text/modal/repeat guards, double opt-in, deletion, availability, reconnect, project isolation, future versions")
+        // Decode the real project format, rather than assuming imported JSON
+        // came through the editor's conflict/reserved-key checks.
+        let validBinding = StudioShortcutBinding(commandID: a, chord: extra, global: true)
+        let invalidDocuments: [StudioShortcutDocument] = [
+            .init(bindings: [validBinding, .init(commandID: b, chord: extra)]),
+            .init(bindings: [validBinding, .init(id: validBinding.id, commandID: b, chord: first.chord)]),
+            .init(bindings: [.init(commandID: a, chord: .init(keyCode: 6, modifiers: 3, keyLabel: "Z"), global: true)]),
+            .init(bindings: [.init(commandID: a, chord: .init(keyCode: 30, modifiers: 1, keyLabel: "]"), global: true)]),
+            .init(bindings: [.init(commandID: a, chord: .init(keyCode: 128, modifiers: 1, keyLabel: "Unknown"))]),
+            .init(bindings: [.init(commandID: "", chord: first.chord)])
+        ]
+        for (index, invalid) in invalidDocuments.enumerated() {
+            precondition(invalid.validationError != nil, "Invalid imported shortcut document accepted")
+            let invalidURL = directory.appendingPathComponent("invalid-\(index).json")
+            let original = try JSONEncoder().encode(invalid)
+            try original.write(to: invalidURL)
+            let imported = StudioShortcutController(url: invalidURL, defaults: preferences)
+            precondition(imported.document.bindings.isEmpty && imported.message != nil,
+                         "Invalid imported shortcuts must never reach the event router")
+            imported.seedScenes([a])
+            let retainedBytes = try Data(contentsOf: invalidURL)
+            precondition(retainedBytes == original,
+                         "Invalid imported file must remain available for repair")
+        }
+        print("PASS: stable IDs, persistence, multiple bindings, conflicts, reserved keys, text/modal/repeat guards, double opt-in, deletion, availability, reconnect, project isolation, future versions, imported document validation")
     }
 }

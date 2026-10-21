@@ -32,11 +32,26 @@ final class StreamCameraSink: NSObject, CMIOExtensionStreamSource, @unchecked Se
     }
     func setStreamProperties(_ properties: CMIOExtensionStreamProperties) throws {
         lock.lock(); defer { lock.unlock() }
-        if let index = properties.activeFormatIndex {
-            guard formats.indices.contains(index) else { throw NSError(domain: "StreamCamera", code: 1) }
-            self.index = index
-        }
+        // Validate the entire request before publishing any negotiated state.
+        // A rejected duration must not leave a different format selected.
+        if let index = properties.activeFormatIndex, !formats.indices.contains(index) { throw NSError(domain: "StreamCamera", code: 1) }
         if let duration = properties.frameDuration, CMTimeCompare(duration, CMTime(value: 1, timescale: 30)) != 0 { throw NSError(domain: "StreamCamera", code: 2) }
+        if let index = properties.activeFormatIndex, index != self.index {
+            self.index = index
+            mailbox.clear()
+        }
+    }
+    /// Shared by the real framework completion and the native negotiation
+    /// fixture. Late buffers from a previous format cannot repopulate the
+    /// mailbox after renegotiation; readers get black until new input arrives.
+    @discardableResult
+    func receiveSample(_ sample: CMSampleBuffer, sequence: UInt64, now: UInt64 = VirtualCameraContract.hostNanoseconds) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let dimensions = CMVideoFormatDescriptionGetDimensions(formats[index].formatDescription)
+        guard let pixels = CMSampleBufferGetImageBuffer(sample),
+              CVPixelBufferGetWidth(pixels) == Int(dimensions.width),
+              CVPixelBufferGetHeight(pixels) == Int(dimensions.height) else { return false }
+        return mailbox.submit(sample, sequence: sequence, now: now)
     }
     func authorizedToStartStream(for client: CMIOExtensionClient) -> Bool {
         lock.lock(); defer { lock.unlock() }
@@ -83,7 +98,7 @@ final class StreamCameraSink: NSObject, CMIOExtensionStreamSource, @unchecked Se
             self.lock.lock(); defer { self.lock.unlock() }
             guard self.generation == generation else { return }
             self.consuming = false
-            if let sample { self.mailbox.submit(sample, sequence: sequence) }
+            if let sample { self.receiveSample(sample, sequence: sequence) }
             self.stream.notifyScheduledOutputChanged(CMIOExtensionScheduledOutput(sequenceNumber: sequence, hostTimeInNanoseconds: VirtualCameraContract.hostNanoseconds))
         }
     }

@@ -13,17 +13,27 @@ final class StudioAutomationEndpoint {
     private var name = "Current Show Profile"
     private var layers: () -> [LayerNode] = { [] }
     private let defaults: UserDefaults
+    private weak var studioWindow: NSWindow?
+    private var reopenStudio: (() -> Void)?
+    private var studioReady = false
     var interactionBlocked = false
+    var interactionIsBlocked: () -> Bool = { false }
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     func bind(dispatcher: StudioCommandDispatcher, permissions: PermissionsManager,
               profileName: String = "Current Show Profile", stagedLayers: @escaping () -> [LayerNode]) {
+        if self.dispatcher !== dispatcher { studioReady = false }
         self.dispatcher = dispatcher; self.permissions = permissions
         directory = DesktopStorage.projectDirectory; name = profileName; layers = stagedLayers
     }
-    func unbind() { dispatcher = nil; permissions = nil; directory = nil; layers = { [] } }
+    func unbind() { dispatcher = nil; permissions = nil; directory = nil; layers = { [] }; studioReady = false }
     var isBound: Bool { dispatcher != nil && directory == DesktopStorage.projectDirectory }
+    var isStudioReady: Bool { isBound && studioReady }
+    func markStudioReady(_ ready: Bool, for dispatcher: StudioCommandDispatcher) {
+        guard self.dispatcher === dispatcher else { return }
+        studioReady = ready
+    }
     var currentProfile: (id: String, name: String)? { isBound ? (directory!.lastPathComponent, name) : nil }
     var sceneChoices: [(resource: StudioAutomationResource, name: String)] {
         guard let currentProfile, let dispatcher else { return [] }
@@ -41,11 +51,35 @@ final class StudioAutomationEndpoint {
             try await Task.sleep(for: .milliseconds(100))
         }
     }
+    /// Window identity belongs to the studio shell, not to window ordering.
+    /// Keep this attachment across runtime/profile changes in that same shell.
+    func attachStudioWindow(_ window: NSWindow?, reopen: @escaping () -> Void) {
+        if let window, !window.isSheet { studioWindow = window }
+        reopenStudio = reopen
+    }
     func focusStudio() {
         NSApp.activate(ignoringOtherApps: true)
-        for window in NSApp.windows where window.canBecomeKey && !window.isSheet {
-            window.makeKeyAndOrderFront(nil); break
+        if studioWindow?.isVisible != true {
+            studioReady = false
+            reopenStudio?()
         }
+        studioWindow?.deminiaturize(nil)
+        studioWindow?.makeKeyAndOrderFront(nil)
+    }
+    /// Reopening SwiftUI schedules onAppear asynchronously. Its normal setup
+    /// (including preview startup) must finish before an intent changes outputs.
+    func awaitFocusedStudio() async throws {
+        try Task.checkCancellation()
+        focusStudio()
+        let deadline = Date().addingTimeInterval(5)
+        while !isStudioReady {
+            try Task.checkCancellation()
+            guard Date() < deadline else {
+                throw StudioAutomationFailure(code: "runtimeUnavailable", message: "The studio window has not finished opening. Open the studio, then run this action again.")
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        try Task.checkCancellation()
     }
     func snapshot(profileID: String) throws -> StudioAutomationSnapshot {
         let dispatcher = try activeDispatcher(profileID: profileID)
@@ -55,7 +89,7 @@ final class StudioAutomationEndpoint {
     func execute(_ request: StudioAutomationRequest) throws -> StudioAutomationSnapshot {
         if let error = request.validationError { throw error }
         let dispatcher = try activeDispatcher(profileID: request.profileID)
-        guard defaults.bool(forKey: "onboarding.hasCompletedFirstRun"), !interactionBlocked,
+        guard defaults.bool(forKey: "onboarding.hasCompletedFirstRun"), !interactionBlocked, !interactionIsBlocked(),
               NSApp.modalWindow == nil, !hasSheet else {
             throw StudioAutomationFailure(code: "interactionRequired", message: "Finish setup or the visible studio dialog before running automation.")
         }

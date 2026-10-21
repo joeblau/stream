@@ -306,25 +306,33 @@ struct ProviderBroadcastStatus: View {
     @ObservedObject var accounts: ProviderAccountSession
     let binding: ProviderDestinationBinding
     private var snapshot: ProviderAccountSnapshot { accounts.snapshot(binding.provider) }
-    private var event: ProviderEvent? { snapshot.verifiedAt == nil ? nil : accounts.event(binding) }
+    private var event: ProviderEvent? { accounts.eventReceipt(binding) }
     private var publicURL: URL? {
         if let url = event?.publicURL { return url }
         if binding.provider == .twitch { return snapshot.channels.first { $0.id == binding.channelID }?.publicURL }
         return nil
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Remote event: \(event?.state.rawValue ?? "unknown") · Viewers: \(accounts.viewerCount(binding).map(String.init) ?? "unavailable")")
-                .font(.caption2).foregroundStyle(.secondary)
-            HStack {
-                Button("Refresh Remote State") { accounts.refreshLive(binding) }.disabled(snapshot.isWorking || !accounts.canRequest(binding.provider))
-                if let url = publicURL {
-                    Link(binding.provider == .twitch ? "Open Channel" : "Open Broadcast", destination: url)
-                    Button("Copy Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string) }
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            VStack(alignment: .leading, spacing: 3) {
+                let now = Date()
+                let fresh = accounts.event(binding, at: now) != nil
+                let state = fresh ? event?.state.rawValue ?? "unknown" : "unknown"
+                Text("Remote event: \(state) · Viewers: \(accounts.viewerCount(binding, at: now).map(String.init) ?? "unavailable")")
+                    .font(.caption2).foregroundStyle(.secondary)
+                HStack {
+                    Button("Refresh Remote State") { accounts.refreshLive(binding) }.disabled(snapshot.isWorking || !accounts.canRequest(binding.provider))
+                    if let url = publicURL {
+                        Link(binding.provider == .twitch ? "Open Channel" : "Open Broadcast", destination: url)
+                        Button("Copy Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string) }
+                    }
+                }.font(.caption)
+                if let event {
+                    Text(fresh ? "Remote state read \(event.verifiedAt.formatted(date: .omitted, time: .standard))" : "Remote state read \(event.verifiedAt.formatted(date: .omitted, time: .standard)) · stale; refresh to verify.")
+                        .font(.caption2).foregroundStyle(fresh ? Color.secondary : Color.orange)
                 }
-            }.font(.caption)
-            if let event { Text("Remote state read \(event.verifiedAt.formatted(date: .omitted, time: .standard))").font(.caption2).foregroundStyle(.secondary) }
-            if let failure = snapshot.failure { Text(failure.localizedDescription).font(.caption2).foregroundStyle(.orange) }
+                if let failure = snapshot.failure { Text(failure.localizedDescription).font(.caption2).foregroundStyle(.orange) }
+            }
         }
     }
 }

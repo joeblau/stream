@@ -46,6 +46,14 @@ extension StudioCommandDispatcher {
         add("output.rehearsal.stop", "End Local Rehearsal", "Output", .stopRehearsal)
         add("output.preview.start", "Start Preview", "Output", .startPreview)
         add("output.preview.stop", "Stop Preview", "Output", .stopPreview)
+        add("rundown.play", "Play Rundown", "Rundown", .rundownPlay)
+        add("rundown.pause", "Pause Rundown", "Rundown", .rundownPause)
+        add("rundown.stop", "Stop Rundown", "Rundown", .rundownStop)
+        add("rundown.skip", "Skip Rundown Cue", "Rundown", .rundownSkip)
+        for (index, entry) in rundown.document.entries.enumerated() {
+            let name = scenes.first { $0.id.rawValue == entry.cue.sceneID }?.name ?? "Missing Scene"
+            add("rundown.cue.\(entry.id.uuidString).run", "Take Rundown Cue \(index + 1) — \(name)", "Rundown", .runRundownCue(entry.id))
+        }
         add("settings.open", "Open Settings", "Application", .openSettings(nil))
         add("audio.monitor.toggle", state.monitoringEnabled ? "Disable Monitoring" : "Enable Monitoring", "Audio", .setMonitoringEnabled(!state.monitoringEnabled))
         let mic = AudioChannelID.microphone(deviceUID: nil)
@@ -291,14 +299,20 @@ struct StudioShortcutEditor: View {
 /// window happens to be key when a global shortcut is pressed.
 struct StudioShortcutWindowAttachment: NSViewRepresentable {
     let shortcuts: StudioShortcutController
+    @Environment(\.openWindow) private var openWindow
     final class Attachment: NSView {
         var attach: ((NSWindow?) -> Void)?
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); attach?(window) }
     }
     func makeNSView(context: Context) -> Attachment {
-        let view = Attachment(); view.attach = { shortcuts.install(window: $0) }; return view
+        let view = Attachment(); view.attach = { attach($0) }; return view
     }
-    func updateNSView(_ nsView: Attachment, context: Context) { shortcuts.install(window: nsView.window) }
+    func updateNSView(_ nsView: Attachment, context: Context) { attach(nsView.window) }
+    private func attach(_ window: NSWindow?) {
+        shortcuts.install(window: window)
+        let open = openWindow
+        StudioAutomationEndpoint.shared.attachStudioWindow(window, reopen: { open(id: "studio") })
+    }
 }
 
 /// Keep pure sequence predicates outside SwiftUI's actor-isolated body. Older

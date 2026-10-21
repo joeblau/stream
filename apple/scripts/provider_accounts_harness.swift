@@ -16,6 +16,16 @@ actor ProviderHTTPFixture {
     var requests: [URLRequest] = []
     var eventLatency = "low"
     var eventThumbnail = "https://i.ytimg.com/vi/event1/high.jpg?sqp=public&rs=public"
+    var viewerEventID = "event1"
+    func setViewerEventID(_ id: String) { viewerEventID = id }
+    var chatEntered = false
+    var chatGate: CheckedContinuation<Void, Never>?
+    var heldChatStatus: Int?
+    var heldChatFailure: ProviderFailure?
+    func holdNextChat(status: Int = 401, failure: ProviderFailure? = nil) {
+        chatEntered = false; heldChatStatus = status; heldChatFailure = failure
+    }
+    func releaseChat() { chatGate?.resume(); chatGate = nil }
     func metadata(latency: String, thumbnail: String) { eventLatency = latency; eventThumbnail = thumbnail }
     var holdThumbnail = false
     var thumbnailEntered = false
@@ -35,6 +45,13 @@ actor ProviderHTTPFixture {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
         let host = request.url!.host!, path = request.url!.path
+        if path == "/youtube/v3/liveChat/messages", let status = heldChatStatus {
+            chatEntered = true
+            await withCheckedContinuation { chatGate = $0 }
+            heldChatStatus = nil
+            if let failure = heldChatFailure { throw failure }
+            return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        }
         var status = 200, body: String
         if host == "oauth2.googleapis.com" || (host == "id.twitch.tv" && path == "/oauth2/token") {
             if holdRefresh { refreshEntered = true; await withCheckedContinuation { refreshGate = $0 } }
@@ -57,6 +74,8 @@ actor ProviderHTTPFixture {
                 "status": ["lifeCycleStatus": "ready"], "contentDetails": ["latencyPreference": eventLatency,
                 "ingestionInfo": ["streamName": "PRIVATE_METADATA_FIXTURE"]]]
             body = String(decoding: try JSONSerialization.data(withJSONObject: ["items": [row]]), as: UTF8.self)
+        } else if path == "/youtube/v3/videos" {
+            body = "{\"items\":[{\"id\":\"\(viewerEventID)\",\"liveStreamingDetails\":{\"concurrentViewers\":\"23\"}}]}"
         } else if path == "/helix/users" {
             body = #"{"data":[{"id":"42","display_name":"Operator","login":"operator"}]}"#
         } else { body = #"{"data":[]}"# }
@@ -159,9 +178,98 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         try await loopback()
         try await httpBoundary()
         try await vaultLifecycle()
+        try await sameClientAuthorizationDuringRefresh()
         try await nativeSession()
+        try await nativeChatLateReplies()
+        try await nativeChatRevocation()
         try await nativeEnding()
-        print("Provider accounts: loopback/state/cancel, refresh coalescing/rotation/late response, safe GET retry, native OAuth/discovery/public metadata/portable exclusions/event receipt/shutdown PASS")
+        print("Provider accounts: loopback/state/cancel, refresh coalescing/rotation/late response, safe GET retry, exact viewer identity/receipt freshness, twelve stale chat-reply fences/current revocation repair, native OAuth/discovery/public metadata/portable exclusions/event receipt/shutdown PASS")
+    }
+    static func sameClientAuthorizationDuringRefresh() async throws {
+        for status in [200, 400] {
+            let http = ProviderHTTPFixture()
+            let vault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await http.send($0) })
+            let configuration = try await vault.configure(.youtube, clientID: "client")
+            try await vault.accept(.init(access: "expired", refresh: "old-refresh", expiresAt: .distantPast, scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: configuration)
+            let previous = await vault.generation(.youtube)
+            await http.configure(hold: true, tokenStatus: status)
+            let oldRead = Task { try await vault.send(.youtube, request: ProviderAPI.request(.youtube, path: "/youtube/v3/channels")) }
+            await settle { await http.refreshEntered }
+            let newAuthorization = try await vault.configure(.youtube, clientID: "client")
+            check(newAuthorization != previous)
+            await http.release()
+            do { _ = try await oldRead.value; preconditionFailure("A previous refresh survived same-client reauthorization") }
+            catch {}
+            check(await vault.hasToken(.youtube), "A previous invalid_grant deleted credentials during new consent")
+            check(await vault.generation(.youtube) == newAuthorization, "A previous refresh invalidated new consent's acceptance generation")
+            try await vault.accept(.init(access: "new-authorization", expiresAt: Date().addingTimeInterval(3_600), scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: newAuthorization)
+            _ = try await vault.send(.youtube, request: ProviderAPI.request(.youtube, path: "/youtube/v3/channels"))
+            let last = await http.allRequests().last!
+            precondition(last.value(forHTTPHeaderField: "Authorization") == "Bearer new-authorization")
+        }
+    }
+    @MainActor static func nativeChatRevocation() async throws {
+        let http = ProviderHTTPFixture()
+        let vault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await http.send($0) })
+        let configuration = try await vault.configure(.youtube, clientID: "fixture")
+        try await vault.accept(.init(access: "access", refresh: "revoked-refresh", expiresAt: Date().addingTimeInterval(3_600), scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: configuration)
+        let previous = await vault.generation(.youtube)
+        let session = ProviderAccountSession(restream: FixtureRestream(), vault: vault)
+        session.refresh(.youtube)
+        await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
+        await http.configure(once401: true, tokenStatus: 400)
+        do {
+            _ = try await session.chatRequest(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages"))
+            preconditionFailure("A revoked refresh grant remained authorized")
+        } catch let error as ProviderFailure { precondition(error.kind == .authorization) }
+        let failed = session.snapshot(.youtube)
+        precondition(!failed.hasCredential && failed.scopes.isEmpty && failed.verifiedAt == nil && failed.failure?.kind == .authorization)
+        check(await !vault.hasToken(.youtube))
+        check(await vault.revocationGeneration(.youtube, previous: previous) != nil)
+        let replacement = try await vault.configure(.youtube, clientID: "fixture")
+        try await vault.accept(.init(access: "replacement", expiresAt: Date().addingTimeInterval(3_600), scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: replacement)
+        check(await vault.revocationGeneration(.youtube, previous: previous) == nil)
+        session.shutdown()
+    }
+    @MainActor static func nativeChatLateReplies() async throws {
+        for failure in [nil, ProviderFailure(.authorization), ProviderFailure(.rateLimited)] {
+            for retirement in ["replacement", "cancellation", "shutdown", "authorization intent"] {
+                let http = ProviderHTTPFixture()
+                let vault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await http.send($0) })
+                let initial = try await vault.configure(.youtube, clientID: "fixture")
+                try await vault.accept(.init(access: "initial-access", refresh: "initial-refresh", expiresAt: Date().addingTimeInterval(3_600), scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: initial)
+                let authorizedCredential = await vault.generation(.youtube)
+                let session = ProviderAccountSession(restream: FixtureRestream(), vault: vault)
+                session.refresh(.youtube)
+                await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
+                precondition(session.snapshot(.youtube).hasCredential && session.snapshot(.youtube).failure == nil)
+                await http.holdNextChat(failure: failure)
+                let oldRead = Task { try await session.chatRequest(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages")) }
+                await settle { await http.chatEntered }
+                if retirement == "replacement" {
+                    let replacement = try await vault.configure(.youtube, clientID: "replacement")
+                    try await vault.accept(.init(access: "replacement-access", refresh: "replacement-refresh", expiresAt: Date().addingTimeInterval(3_600), scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: replacement)
+                    session.refresh(.youtube)
+                    await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
+                } else if retirement == "shutdown" { session.shutdown() }
+                else if retirement == "authorization intent" {
+                    // Invalid new configuration changes session intent without
+                    // replacing the actual machine credential generation.
+                    session.authorize(.youtube, clientID: "")
+                    await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
+                    check(await vault.generation(.youtube) == authorizedCredential)
+                } else { oldRead.cancel() }
+                let before = session.snapshot(.youtube), available = session.canRequest(.youtube)
+                await http.releaseChat()
+                do { _ = try await oldRead.value; preconditionFailure("A retired chat request produced a current receipt") }
+                catch is CancellationError {}
+                let after = session.snapshot(.youtube)
+                precondition(after.hasCredential == before.hasCredential && after.failure == before.failure)
+                precondition(after.scopes == before.scopes && after.retryUntil == before.retryUntil && session.canRequest(.youtube) == available)
+                check(await http.count(host: "oauth2.googleapis.com") == 0, "An old or cancelled 401 refreshed current credentials")
+                session.shutdown()
+            }
+        }
     }
     @MainActor static func nativeEnding() async throws {
         let http = ProviderEndingHTTPFixture()
@@ -350,6 +458,26 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
         let unsupported = session.snapshot(.youtube).events.first { $0.id == "event1" }!
         precondition(unsupported.latencyPreference == .unknown && unsupported.thumbnails == [] && unsupported.state == .upcoming && session.snapshot(.youtube).failure == nil)
+        let observedBinding = ProviderDestinationBinding(provider: .youtube, channelID: "UC1", eventID: "event1")
+        session.refreshLive(observedBinding)
+        await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
+        precondition(session.viewerCount(observedBinding) == 23)
+        let receipt = session.event(observedBinding)!
+        precondition(receipt.isFresh(at: receipt.verifiedAt))
+        precondition(session.event(observedBinding, at: receipt.verifiedAt.addingTimeInterval(61)) == nil)
+        precondition(session.event(observedBinding, at: receipt.verifiedAt.addingTimeInterval(-1)) == nil)
+        precondition(session.eventReceipt(observedBinding)?.publicURL == receipt.publicURL)
+        precondition(session.eventReceipt(.init(provider: .youtube, channelID: "foreign-channel", eventID: "event1")) == nil)
+        precondition(session.viewerCount(observedBinding, at: receipt.verifiedAt.addingTimeInterval(61)) == nil)
+        precondition(!receipt.isFresh(at: receipt.verifiedAt.addingTimeInterval(61)))
+        precondition(session.viewerCount(observedBinding, at: receipt.verifiedAt.addingTimeInterval(-1)) == nil)
+        // A count returned for another event must invalidate the native receipt.
+        await http.setViewerEventID("foreign-event")
+        session.refreshLive(observedBinding)
+        await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
+        precondition(session.viewerCount(observedBinding) == nil)
+        precondition(session.snapshot(.youtube).verifiedAt == nil && session.snapshot(.youtube).failure?.kind == .invalidResponse)
+        await http.setViewerEventID("event1")
         let image = Data([137,80,78,71,13,10,26,10,0])
         session.uploadYouTubeThumbnail(eventID: "event1", channelID: "UC1", image: image, mimeType: "image/png")
         await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }

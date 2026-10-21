@@ -47,6 +47,19 @@ import StreamCore
         guard let group = runtime.previewProgram.stagedScene?.groups.first else { throw NSError(domain: "DeckNativeHarness", code: 3) }
         try run("scene.\(scene.id.rawValue.uuidString).group.\(group.id.rawValue.uuidString).hide")
         try require(dispatcher.controllerGroupVisibility()[group.id.rawValue.uuidString] == false, "Authoritative group visibility")
+        let previousOverlayIDs = Set(dispatcher.controllerOverlays().map(\.id))
+        try require(dispatcher.execute(.addOverlay(.text(TextSourcePayload(text: "Global caption")))).error == nil, "Insert global overlay")
+        guard let overlay = dispatcher.controllerOverlays().first(where: { !previousOverlayIDs.contains($0.id) }) else { throw NSError(domain: "DeckNativeHarness", code: 7) }
+        let overlayPrefix = "overlay.\(overlay.id.rawValue.uuidString)"
+        try run("\(overlayPrefix).hide")
+        try require(dispatcher.controllerOverlays().first(where: { $0.id == overlay.id })?.isVisible == false, "Global overlay hide did not reach authoritative state")
+        try require(dispatcher.execute(.renameOverlay(overlay.id, to: "Controller Global Caption")).error == nil, "Rename global overlay")
+        try require(dispatcher.catalogueActions().first(where: { $0.id == "\(overlayPrefix).visibility" })?.title.contains("Controller Global Caption") == true, "Global overlay binding did not survive rename")
+        try run("\(overlayPrefix).visibility")
+        try require(dispatcher.controllerOverlays().first(where: { $0.id == overlay.id })?.isVisible == true, "Global overlay selector did not toggle authoritative state")
+        try require(dispatcher.execute(.removeOverlay(overlay.id)).error == nil, "Remove global overlay")
+        try require(!dispatcher.catalogueActions().contains(where: { $0.id == "\(overlayPrefix).visibility" }), "Deleted global overlay retained an executable binding")
+        try require(dispatcher.controllerRecordingCountdown() == 0, "Idle recorder reported a countdown")
         guard let gain = dispatcher.controllerTargets().first(where: { $0.id == "audio.microphone.gain" }) else { throw NSError(domain: "DeckNativeHarness", code: 4) }
         try require(gain.execute(0.75) == nil && dispatcher.state.micVolume == 1.5, "Typed controller gain did not reach native settings")
         try require(gain.execute(2) != nil && dispatcher.state.micVolume == 1.5, "Out-of-range gain mutated native settings")
@@ -70,6 +83,6 @@ import StreamCore
         try require(dispatcher.controllerChatSnapshot()?.stagedVisible == false && dispatcher.controllerChatSnapshot()?.programVisible == true, "Hide changed Program before Take")
         try require(dispatcher.availabilityError(for: .selectNextComment) != nil, "Queue boundary did not reject next")
         try require(!runtime.controller.outputSessionActive && !runtime.recorder.state.isActive, "Controller test started an output")
-        print("PASS: actual dispatcher stable layer/group catalogue, preview/program policy, numeric gain/mute, comment staging/Take/hide feedback, queue boundary; no output started")
+        print("PASS: actual dispatcher stable layer/group/global-overlay catalogue, overlay rename/delete/toggle, preview/program policy, numeric gain/mute, idle recording countdown, comment staging/Take/hide feedback, queue boundary; no output started")
     }
 }

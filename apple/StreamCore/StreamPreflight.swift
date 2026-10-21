@@ -58,15 +58,19 @@ public struct StreamPreflightFacts: Sendable {
         checks.append(.init(id: "storage", title: "Local recording storage", status: storageStatus,
                             detail: !storageWritable ? "The recording folder is unavailable or unwritable." :
                                 storageAvailableBytes.map { "\(String(format: "%.1f", Double($0) / 1_000_000_000)) GB free; local recording requires at least 1 GB." } ?? "Free capacity could not be read."))
+        let invalidReservations = encoderCount < 0 || recordingEncoderReservations < 0 ||
+            encoderCount > 4 || recordingEncoderReservations > 4 - encoderCount
         checks.append(.init(id: "encoders", title: "Encoder capacity",
-                            status: encoderCount + recordingEncoderReservations > 4 ? .failed : testedEncoderBudget.map { encoderCount > $0 ? .failed : .passed } ?? .unverified,
+                            status: invalidReservations ? .failed : testedEncoderBudget.map { $0 < 1 || encoderCount > $0 ? .failed : .passed } ?? .unverified,
                             detail: "\(encoderCount) planned or active publishing encoder owners, \(recordingEncoderReservations) reserved by current recording/ISO/finalization; four total allowed. " +
                                 (sharedH264AAC ? "Fixed-profile H.264/AAC sharing is enabled; WHIP/other codecs stay separate. " : "Adaptive separate encoding; sharing is off. ") +
                                 (testedEncoderBudget.map { "Your tested publishing budget is \($0)." } ?? "Set a tested session budget after rehearsing this Mac; capacity is not guaranteed by its hardware tier.")))
+        let measurement = measuredUplinkMbps.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let validRequirement = requiredUplinkMbps.isFinite && requiredUplinkMbps >= 0
         checks.append(.init(id: "uplink", title: "Uplink headroom",
-                            status: measuredUplinkMbps.map { $0 >= requiredUplinkMbps ? .passed : .failed } ?? .unverified,
+                            status: !validRequirement ? .failed : measurement.map { $0 >= requiredUplinkMbps ? .passed : .failed } ?? .unverified,
                             detail: "Estimated requirement including headroom: \(String(format: "%.1f", requiredUplinkMbps)) Mbps. " +
-                                (measuredUplinkMbps.map { "Latest measurement: \(String(format: "%.1f", $0)) Mbps; your ingest route may differ." } ?? "Run the explicit uplink test to measure this connection.")))
+                                (measurement.map { "Latest measurement: \(String(format: "%.1f", $0)) Mbps; your ingest route may differ." } ?? "Run the explicit uplink test or enter a finite positive measurement for this connection.")))
         return checks
     }
 }

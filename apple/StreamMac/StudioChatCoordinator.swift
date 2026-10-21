@@ -95,11 +95,18 @@ import StreamCore
         do { try JSONEncoder().encode(SlotPreferences(slots: slots.sorted { $0.description < $1.description })).write(to: slotsURL, options: .atomic) }
         catch { self.error = "The comment slot could not be saved." }
     }
-    func show(_ id: String) {
+    func promoteAlert(_ id: String) {
+        guard queue.message(id)?.activity.canPromoteAlert == true else {
+            error = "Alert promotion is unavailable for this message type."; return
+        }
+        show(id, asAlert: true)
+    }
+    func show(_ id: String, asAlert: Bool = false) {
         guard let message = queue.message(id), let scene = previewProgram?.stagedScene,
               let slotID = selectedSlot, let layer = availableSlots.first(where: { $0.id == slotID }),
               case .text(var payload) = layer.payload else { error = "Create or select a comment slot in the staged scene first."; return }
         var caption: [String] = []
+        if asAlert { caption.append(message.kind) }
         if includeAuthor { caption.append(message.author) }
         if includePlatform { caption.append(message.platform) }
         let header = caption.isEmpty ? "" : caption.joined(separator: " · ") + "\n"

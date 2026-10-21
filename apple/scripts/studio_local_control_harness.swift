@@ -44,6 +44,7 @@ struct StudioPaletteAction {
     var actions: [StudioPaletteAction] = []
     var emitted: [String] = []
     @Published var gain = 0.5
+    @Published var recordingCountdown = 0
     var valueTargetExists = true
     var marker = "", page = 0
     func controllerTargets() -> [StudioControllerTarget] {
@@ -57,6 +58,7 @@ struct StudioPaletteAction {
     func controllerGroupVisibility() -> [String: Bool] { [:] }
     func controllerOverlays() -> [HarnessLayer] { [] }
     func controllerChatSnapshot() -> StudioControlChatState? { nil }
+    func controllerRecordingCountdown() -> Int { recordingCountdown }
     func catalogueActions() -> [StudioPaletteAction] { actions }
     func execute(_ command: StudioCommand) -> StudioCommandResult {
         switch command {
@@ -365,6 +367,11 @@ private final class BoundedProcessText: @unchecked Sendable {
         let authenticated = try await client.request(handshake)
         let sessionID = authenticated.sessionID!
         precondition(authenticated.snapshot?.projectID == directory.lastPathComponent)
+        precondition(authenticated.snapshot?.recordingCountdown == 0)
+        dispatcher.recordingCountdown = 3
+        let countdown = try await client.request(.init(type: .snapshot, id: UUID(), sessionID: sessionID))
+        precondition(countdown.snapshot?.recordingCountdown == 3, "Native IPC must report the recorder's actual countdown")
+        dispatcher.recordingCountdown = 0
         let capabilityRequest = StudioControlRequest(type: .capabilities, id: UUID(), sessionID: sessionID)
         let discovery = try await client.request(capabilityRequest)
         precondition(discovery.commands?.contains { $0.id == stable && $0.title == "Intro" } == true)

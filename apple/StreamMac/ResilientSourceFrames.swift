@@ -21,10 +21,15 @@ final class ResilientSourceFrames: @unchecked Sendable {
     }
     func configure(active: Set<CaptureSourceKey>, modes: [CaptureSourceKey: SourceFailureMode],
                    failed: Set<CaptureSourceKey>, standbys: [CaptureSourceKey: CaptureSourceKey]) {
-        os_unfair_lock_lock(&lock); self.standbys = standbys; os_unfair_lock_unlock(&lock)
-        cache.configure(active: active, modes: modes, failed: failed)
+        os_unfair_lock_lock(&lock)
+        let standbysChanged = self.standbys != standbys
+        self.standbys = standbys
+        cache.configure(active: active, modes: modes, failed: failed, invalidateInFlight: standbysChanged)
+        os_unfair_lock_unlock(&lock)
     }
-    func clear() { cache.clear() }
+    func clear() {
+        os_unfair_lock_lock(&lock); standbys = [:]; cache.clear(); os_unfair_lock_unlock(&lock)
+    }
     var lookup: SourceFrameLookup {
         SourceFrameLookup(camera: { [self] key in
             frame(key).map { LatestCameraFrame.Frame(buffer: $0.buffer, position: $0.position) }
@@ -42,8 +47,10 @@ final class ResilientSourceFrames: @unchecked Sendable {
         }
     }
     private func frame(_ key: CaptureSourceKey) -> Frame? {
-        os_unfair_lock_lock(&lock); let standby = standbys[key]; os_unfair_lock_unlock(&lock)
-        return cache.frame(for: key, live: { rawFrame(key) }, standby: { standby.flatMap(rawFrame) },
+        return cache.frame(for: key, live: { rawFrame(key) }, standby: {
+            os_unfair_lock_lock(&lock); let standby = standbys[key]; os_unfair_lock_unlock(&lock)
+            return standby.flatMap(rawFrame)
+        },
                            offline: { offline.map { Frame(buffer: $0) } })
     }
     private static func makeOfflineCard() -> CVPixelBuffer? {

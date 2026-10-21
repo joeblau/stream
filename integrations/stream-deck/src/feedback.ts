@@ -19,6 +19,7 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
   }
   if (binding.commandID.startsWith("output.record.")) {
     badge = snapshot.recording.toUpperCase(); color = snapshot.recording === "recording" ? "#983c4a" : snapshot.recording === "paused" ? "#766021" : "#233b4a";
+    if (snapshot.recordingCountdown && snapshot.recordingCountdown > 0) { badge = `REC IN ${snapshot.recordingCountdown}`; color = "#766021"; }
   }
   const layer = /^scene\.[0-9a-f-]+\.layer\.([0-9a-f-]+)\.(visibility|show|hide)$/i.exec(binding.commandID)?.[1];
   if (layer) {
@@ -59,6 +60,7 @@ function escapeXML(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 export function keyImage(value: KeyFeedback): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144"><rect width="144" height="144" rx="16" fill="${value.color}"/><rect x="10" y="10" width="124" height="124" rx="10" fill="none" stroke="#e1edf4" stroke-width="3"/><text x="72" y="56" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="${value.badge.length > 10 ? 12 : 17}" font-weight="bold">${escapeXML(value.badge)}</text></svg>`;
+  const warning = value.unavailable ? '<text x="72" y="28" text-anchor="middle" fill="#ffcf8d" font-family="sans-serif" font-size="10" font-weight="bold">UNAVAILABLE</text>' : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144"><rect width="144" height="144" rx="16" fill="${value.color}"/><rect x="10" y="10" width="124" height="124" rx="10" fill="none" stroke="#e1edf4" stroke-width="3"/>${warning}<text x="72" y="56" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="${value.badge.length > 10 ? 12 : 17}" font-weight="bold">${escapeXML(value.badge)}</text></svg>`;
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }

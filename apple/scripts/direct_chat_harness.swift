@@ -82,9 +82,19 @@ private final class FixtureTime: @unchecked Sendable {
     var banDurationOverride: Double?
     var rateLimitedReads = 0
     var readItems: [[String: Any]]?
+    var audienceResponse: Data?
+    var audienceFailure: ProviderFailure?
+    var holdAudience = false
+    var lateAudience: CheckedContinuation<Data, Error>?
     func send(_ provider: ManagedProvider, _ call: URLRequest) async throws -> Data {
         calls.append((provider, call))
         let path = call.url!.path, method = call.httpMethod ?? "GET"
+        if path == "/youtube/v3/videos" || path == "/helix/streams" {
+            if holdAudience { return try await withCheckedThrowingContinuation { lateAudience = $0 } }
+            if let audienceFailure { throw audienceFailure }
+            if let audienceResponse { return audienceResponse }
+            return provider == .youtube ? audienceYouTube("123") : json(["data": [["user_id": "owner", "type": "live", "viewer_count": 37]]])
+        }
         if path == "/youtube/v3/liveBroadcasts" {
             if holdBroadcast { return try await withCheckedThrowingContinuation { lateBroadcast = $0 } }
             return broadcast()
@@ -131,6 +141,12 @@ private final class FixtureTime: @unchecked Sendable {
         throw ProviderFailure(.invalidRequest)
     }
     func broadcast() -> Data { json(["items": [["id": "owned-event", "snippet": ["channelId": "owner", "liveChatId": "live-chat"], "status": ["lifeCycleStatus": "live"]]]]) }
+}
+private func audienceYouTube(_ count: Any? = nil, chatID: String = "live-chat", ended: Bool = false) -> Data {
+    var details: [String: Any] = ["activeLiveChatId": chatID]
+    if let count { details["concurrentViewers"] = count }
+    if ended { details["actualEndTime"] = "2026-10-21T01:00:00Z" }
+    return json(["items": [["id": "owned-event", "snippet": ["channelId": "owner"], "liveStreamingDetails": details]]])
 }
 private func youtubeItem(_ id: String, kind: String = "textMessageEvent") -> [String: Any] {
     ["id": id, "snippet": ["type": kind, "liveChatId": "live-chat", "hasDisplayContent": true,
@@ -303,8 +319,105 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         let tombstone = try StudioDirectChatDecoder.youtube(youtubePage([["id": "deleted", "snippet": ["type": "tombstone", "liveChatId": "live-chat"]]]), channelID: "owner", chatID: "live-chat")
         precondition(tombstone.deliveries.isEmpty && tombstone.removedIDs.count == 1)
         precondition(StudioDirectChatDecoder.date("2026-10-02T19:30:00.123456789Z") != nil)
+        try await validateAudience()
         try await validateOutbox()
         print("PASS: actual direct chat manager HTTP/WebSocket fixtures; granted-scope readers, provider intervals/page tokens, Unicode/kinds/roles, relay dedup, targeted deletion/tombstones, explicit send acknowledgement/no retry/echo, migration without resubscription, disconnect resubscription, independent stop, cancellation and late HTTP/socket rejection")
+    }
+    @MainActor static func validateAudience() async throws {
+        let http = HTTPFixture(), gate = PollGate(), stream = StreamFixture(), clock = FixtureTime()
+        let socket = FixtureSocket(), pool = FixtureSockets([socket])
+        let manager = StudioDirectChatManager(request: http.send, identity: { provider in
+            .init(channelID: "owner", scopes: provider == .youtube ? ManagedProvider.youtube.scopes : TwitchDeviceAuthorization.optionalChatScopes)
+        }, socketFactory: pool.make, sleep: { try await gate.sleep($0) }, now: clock.now, emit: stream.receive)
+        manager.refreshAudience(.youtube)
+        precondition(http.calls.isEmpty && manager.audience(.youtube).availability == .notRequested)
+        manager.connect(.youtube, eventID: "owned-event")
+        manager.connect(.twitch)
+        await until { manager.snapshot(.youtube).isConnected && !pool.opened.isEmpty }
+        socket.push(twitchControl("session_welcome"))
+        await until { manager.snapshot(.twitch).isConnected }
+        precondition(http.calls.allSatisfy { !["/youtube/v3/videos", "/helix/streams"].contains($0.1.url!.path) })
+        manager.refreshAudience(.youtube); manager.refreshAudience(.youtube); manager.refreshAudience(.twitch)
+        await until { manager.audience(.youtube).count == 123 && manager.audience(.twitch).count == 37 }
+        precondition(http.calls.filter { $0.1.url!.path == "/youtube/v3/videos" }.count == 1)
+        precondition(!manager.canRefreshAudience(.youtube) && manager.audience(.youtube).isFresh(at: clock.now()))
+        let youtubeCall = http.calls.first { $0.1.url!.path == "/youtube/v3/videos" }!.1
+        let youtubeQuery = URLComponents(url: youtubeCall.url!, resolvingAgainstBaseURL: false)!.queryItems!
+        precondition(youtubeQuery.contains { $0.name == "id" && $0.value == "owned-event" })
+        precondition(youtubeQuery.contains { $0.name == "part" && $0.value == "snippet,liveStreamingDetails" })
+        let twitchQuery = URLComponents(url: http.calls.first { $0.1.url!.path == "/helix/streams" }!.1.url!, resolvingAgainstBaseURL: false)!.queryItems!
+        precondition(twitchQuery.contains { $0.name == "user_id" && $0.value == "owner" })
+        clock.advance(61)
+        precondition(!manager.audience(.youtube).isFresh(at: clock.now()) && manager.canRefreshAudience(.youtube))
+        http.audienceFailure = ProviderFailure(.permission)
+        manager.refreshAudience(.youtube)
+        await until { manager.audience(.youtube).availability == .failed }
+        precondition(manager.audience(.youtube).count == 123 && !manager.audience(.youtube).isFresh(at: clock.now()))
+        precondition(manager.snapshot(.youtube).isConnected && manager.snapshot(.twitch).isConnected)
+        let incomingID = "during-metrics-failure"
+        socket.push(twitchEvent(incomingID))
+        await until { stream.queue.messages.contains { $0.id == StudioDirectChatDecoder.identity(.twitch, "owner", incomingID) } }
+        clock.advance(31); http.audienceFailure = ProviderFailure(.rateLimited, retryAfter: 120)
+        manager.refreshAudience(.youtube)
+        await until { !manager.audience(.youtube).isRefreshing }
+        precondition(manager.audience(.youtube).retryUntil == clock.now().addingTimeInterval(120))
+        clock.advance(121); http.audienceFailure = nil; http.holdAudience = true
+        manager.refreshAudience(.youtube)
+        await until { http.lateAudience != nil }
+        manager.stop(.youtube)
+        http.lateAudience?.resume(returning: audienceYouTube("999")); http.lateAudience = nil
+        for _ in 0..<5 { await Task.yield() }
+        precondition(manager.audience(.youtube) == DirectChatAudience() && manager.audience(.twitch).count == 37)
+        manager.shutdown()
+
+        // Completion while the same account generation is reconnecting must
+        // release its pending refresh, for both success and failure outcomes.
+        for completionFails in [false, true] {
+            let transientHTTP = HTTPFixture(), transientGate = PollGate(), transientTime = FixtureTime()
+            let first = FixtureSocket(), second = FixtureSocket(), transientPool = FixtureSockets([first, second])
+            let transient = StudioDirectChatManager(request: transientHTTP.send,
+                identity: { _ in .init(channelID: "owner", scopes: TwitchDeviceAuthorization.optionalChatScopes) },
+                socketFactory: transientPool.make, sleep: { try await transientGate.sleep($0) }, now: transientTime.now, emit: { _ in })
+            transient.connect(.twitch); await until { transientPool.opened.count == 1 }
+            first.push(twitchControl("session_welcome")); await until { transient.snapshot(.twitch).isConnected }
+            transientHTTP.holdAudience = true; transient.refreshAudience(.twitch)
+            await until { transientHTTP.lateAudience != nil }
+            first.cancel(); await until { transient.snapshot(.twitch).state == "Reconnecting" }
+            if completionFails { transientHTTP.lateAudience?.resume(throwing: ProviderFailure(.permission)) }
+            else { transientHTTP.lateAudience?.resume(returning: json(["data": [["user_id": "owner", "type": "live", "viewer_count": 99]]])) }
+            transientHTTP.lateAudience = nil
+            await until { !transient.audience(.twitch).isRefreshing }
+            precondition(transient.audience(.twitch).count == nil) // disconnected result rejected
+            transientTime.advance(31); transientHTTP.holdAudience = false
+            await transientGate.resume(); await until { transientPool.opened.count == 2 }
+            second.push(twitchControl("session_welcome", session: "after-reconnect"))
+            await until { transient.snapshot(.twitch).isConnected }
+            precondition(transient.canRefreshAudience(.twitch))
+            transient.refreshAudience(.twitch); await until { transient.audience(.twitch).count == 37 }
+            transient.shutdown()
+        }
+
+        let target = DirectChatWriteTarget(provider: .youtube, channelID: "owner", chatID: "live-chat", broadcastID: "owned-event", generation: UUID())
+        let hidden = try StudioAudienceDecoder.decode(audienceYouTube(), provider: .youtube, target: target, observedAt: clock.now())
+        precondition(hidden.count == nil && hidden.availability == .unavailable)
+        let zero = try StudioAudienceDecoder.decode(audienceYouTube("0"), provider: .youtube, target: target, observedAt: clock.now())
+        precondition(zero.count == 0 && zero.availability == .available)
+        let offline = try StudioAudienceDecoder.decode(audienceYouTube("123", ended: true), provider: .youtube, target: target, observedAt: clock.now())
+        precondition(offline.count == nil && offline.availability == .offline)
+        for invalid: Any in ["-1", "1.5", "١٢", "18446744073709551616", true, 99] {
+            do { _ = try StudioAudienceDecoder.decode(audienceYouTube(invalid), provider: .youtube, target: target, observedAt: clock.now()); preconditionFailure("Invalid YouTube count accepted") } catch {}
+        }
+        do { _ = try StudioAudienceDecoder.decode(audienceYouTube("3", chatID: "another-chat"), provider: .youtube, target: target, observedAt: clock.now()); preconditionFailure("Wrong live target accepted") } catch {}
+        let twitchTarget = DirectChatWriteTarget(provider: .twitch, channelID: "owner", chatID: "owner", broadcastID: "owner", generation: UUID())
+        let absent = try StudioAudienceDecoder.decode(json(["data": []]), provider: .twitch, target: twitchTarget, observedAt: clock.now())
+        precondition(absent.availability == .offline && absent.count == nil)
+        for invalid: Any in [-1, 0.5, true, "37"] {
+            do { _ = try StudioAudienceDecoder.decode(json(["data": [["user_id": "owner", "type": "live", "viewer_count": invalid]]]), provider: .twitch, target: twitchTarget, observedAt: clock.now()); preconditionFailure("Invalid Twitch count accepted") } catch {}
+        }
+        precondition(StudioChatActivity(kind: "Super Sticker").canPromoteAlert)
+        precondition(StudioChatActivity(kind: "Gift").canPromoteAlert)
+        precondition(!StudioChatActivity(kind: "Text").canPromoteAlert && !StudioChatActivity(kind: "Unknown").canPromoteAlert)
+        print("PASS: native audience metrics; explicit owned-target reads, independent providers, bounded counts, absent/hidden/offline vs zero, freshness and throttling, permission/rate failure with incoming continuity, late response cancellation, transient reconnect success/error completion cleanup, typed event/alert eligibility")
     }
     @MainActor static func validateOutbox() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("stream-chat-presets-" + UUID().uuidString)

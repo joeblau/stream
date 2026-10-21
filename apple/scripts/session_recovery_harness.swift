@@ -64,6 +64,18 @@ private final class GrantOwner {
         corrupt.checkpoint(newSnapshot); await corrupt.flush()
         let preserved = try Data(contentsOf: corruptURL)
         precondition(preserved == corruptBytes && corrupt.error != nil)
+        let preservedPriorURL = corruptDirectory.appendingPathComponent("pending.v1.json")
+        try JSONEncoder().encode(current).write(to: preservedPriorURL)
+        let readablePrior = SessionRecoveryCoordinator(directory: corruptDirectory)
+        precondition(readablePrior.pending?.id == current.id && readablePrior.showReview && readablePrior.error != nil,
+                     "A damaged latest checkpoint must not hide a valid preserved interruption")
+        try corruptBytes.write(to: preservedPriorURL)
+        try JSONEncoder().encode(current).write(to: corruptURL)
+        let readableLatest = SessionRecoveryCoordinator(directory: corruptDirectory)
+        precondition(readableLatest.pending?.id == current.id && readableLatest.showReview && readableLatest.error != nil,
+                     "A damaged preserved checkpoint must not hide a valid latest interruption")
+        let preservedCorruptPrior = try Data(contentsOf: preservedPriorURL)
+        precondition(preservedCorruptPrior == corruptBytes)
 
         let recordings = directory.appendingPathComponent("Recordings")
         try FileManager.default.createDirectory(at: recordings, withIntermediateDirectories: true)
@@ -100,6 +112,41 @@ private final class GrantOwner {
         precondition(!missing.isVerified)
         let wrongProfile = try await SessionRecordingJournalReader.read(grant: .init(url: recordings), projectID: project, profileID: UUID())
         precondition(wrongProfile.segments.isEmpty)
-        print("PASS: shipping recovery coordinator/store and actual recording-journal reader; interrupted/second restart, explicit-only restoration, project-token isolation, bounded burst coalescing/atomic files, conservative recording shutdown, corrupt-byte preservation, actual segment/marker identity and timing, credential/title/path redaction, selected-profile inventory, directory grant lifetime; \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        let boundedDirectory = directory.appendingPathComponent("BoundedRecordings")
+        try FileManager.default.createDirectory(at: boundedDirectory, withIntermediateDirectories: true)
+        for index in 1...201 {
+            var bounded = fixture
+            bounded["file"] = "Segment\(index).mp4"; bounded["segmentIndex"] = index
+            try JSONSerialization.data(withJSONObject: bounded).write(to: boundedDirectory.appendingPathComponent("Segment\(index).mp4.recording.json"))
+        }
+        let bounded = try await SessionRecordingJournalReader.read(grant: .init(url: boundedDirectory), projectID: project, profileID: profile)
+        precondition(bounded.segments.count == 200 && !bounded.isVerified,
+                     "A truncated segment inventory must remain visibly unverified")
+        try FileManager.default.removeItem(at: boundedDirectory.appendingPathComponent("Segment201.mp4.recording.json"))
+        let exactSegments = try await SessionRecordingJournalReader.read(grant: .init(url: boundedDirectory), projectID: project, profileID: profile)
+        precondition(exactSegments.segments.count == 200 && exactSegments.isVerified,
+                     "A complete segment inventory exactly at its limit remains verified")
+        let markersDirectory = directory.appendingPathComponent("BoundedMarkers")
+        try FileManager.default.createDirectory(at: markersDirectory, withIntermediateDirectories: true)
+        var manyMarkers = fixture
+        manyMarkers["markers"] = (0..<2_001).map { ["id": UUID().uuidString, "seconds": Double($0)] as [String: Any] }
+        let markersURL = markersDirectory.appendingPathComponent("Segment2.mp4.recording.json")
+        try JSONSerialization.data(withJSONObject: manyMarkers).write(to: markersURL)
+        let cappedMarkers = try await SessionRecordingJournalReader.read(grant: .init(url: markersDirectory), projectID: project, profileID: profile)
+        precondition(cappedMarkers.segments.count == 1 && cappedMarkers.segments[0].markers.count == 2_000 && !cappedMarkers.isVerified,
+                     "Truncated marker timing is not a complete verified inventory")
+        manyMarkers["markers"] = (0..<2_000).map { ["id": UUID().uuidString, "seconds": Double($0)] as [String: Any] }
+        try JSONSerialization.data(withJSONObject: manyMarkers).write(to: markersURL)
+        let exactMarkers = try await SessionRecordingJournalReader.read(grant: .init(url: markersDirectory), projectID: project, profileID: profile)
+        precondition(exactMarkers.isVerified && exactMarkers.segments[0].markers.count == 2_000,
+                     "An inventory exactly at its limit remains verified")
+        for index in 3...4 {
+            manyMarkers["file"] = "Segment\(index).mp4"; manyMarkers["segmentIndex"] = index
+            try JSONSerialization.data(withJSONObject: manyMarkers).write(to: markersDirectory.appendingPathComponent("Segment\(index).mp4.recording.json"))
+        }
+        let globalMarkers = try await SessionRecordingJournalReader.read(grant: .init(url: markersDirectory), projectID: project, profileID: profile)
+        precondition(globalMarkers.segments.count == 3 && globalMarkers.segments.reduce(0) { $0 + $1.markers.count } == 4_000 && !globalMarkers.isVerified,
+                     "Exhausting the journal-wide marker budget must remain visibly unverified")
+        print("PASS: shipping recovery coordinator/store and actual recording-journal reader; interrupted/second restart, explicit-only restoration, project-token isolation, bounded burst coalescing/atomic files, conservative recording shutdown, corrupt-byte preservation, actual segment/marker identity and timing, credential/title/path redaction, selected-profile inventory, directory grant lifetime, verified exact limits and conservative segment/per-file/global marker truncation; \(ProcessInfo.processInfo.operatingSystemVersionString)")
     }
 }

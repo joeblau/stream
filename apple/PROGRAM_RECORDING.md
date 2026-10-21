@@ -27,6 +27,9 @@ recording below 100 MB, warns after three seconds without accepted media, and
 fails after ten seconds. Missing/unmounted storage becomes a visible local
 failure. Video and audio statuses, errors, counts, start offsets, source clock
 origin, and warnings are journaled separately in `<file>.recording.json`.
+The studio receives journal-write warnings in the same health update that
+attempts the write. Low-space, stalled-media, dropped-sample and journal-write
+warnings remain visible together when more than one condition applies.
 
 The MP4 writer creates two-second movie fragments. A normal stop drains for up
 to three seconds and finalizes the container. A normal Quit waits for
@@ -115,6 +118,18 @@ The injected storage probes make failures reproducible; they do not replace a
 physical external-drive unplug or a simultaneous network-stream workload test.
 Those, sudden process termination/container recovery, other Mac/OS encoders,
 and sustained high-resolution load remain release qualification work.
+
+The writer harness also passed on Mac15,8 / Apple M3 Max (16 CPUs), macOS 27.2
+(26B118), Xcode 27.2 (27B5038j), on 2026-10-21. An actual directory collision at
+the journal path blocks sidecar writes while the native writer records and
+decodes 1.4 seconds of H.264/AAC (84 frames). One progress event retains the
+journal error, an injected 500 MB low-space warning and an intentionally counted
+backward-frame drop together; the media still finalizes with a 0.0000417-second
+flash/tone difference. The same run passes the existing 60 fps zero-drop,
+pause/resume, delayed original-PTS PCM, source-boundary rotation, HEVC/MOV,
+low-space recoverable-file, bounded-overload and removed-volume-probe checks.
+This controlled writer evidence does not qualify a physical drive unplug or a
+simultaneously connected network publisher.
 
 ## Recording options and file changes
 

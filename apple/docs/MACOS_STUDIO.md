@@ -170,7 +170,32 @@ uses its declared temporary exception; hardened-runtime loading of third-party
 plugins needs separate distribution qualification. Local-control listeners
 must remain explicitly enabled and loopback-bound, with their own authenticated
 pairing/revocation. The distribution audit checks the built bundle and declared
-entitlements; it does not claim unsigned CI is a notarized release.
+entitlements. Release packaging additionally runs the audit with `--require-signed`,
+which checks the exported host, camera extension, and browser helper's actual
+signed entitlements, matching team, Developer ID authority, secure timestamp,
+and hardened runtime, plus the complete nested signature seal. Unsigned CI
+audits do not establish signed or notarized distribution qualification.
+
+Portable show export offers selected scenes (including referenced scenes) or
+the whole profile. Include media copies every asset in the library, recursively
+including folder-backed overlay resources; unavailable assets require repair
+before this mode succeeds. References-only export omits media, local paths and
+sandbox grants and requires relinking in Assets on the receiving Mac. Packages
+exclude connection credentials and machine device identities. Imports preview
+scene names, create a separate show rather than overwrite an existing one, and
+remap resource IDs consistently across documents, macros, styles and asset paths.
+Exports are atomic and reject symbolic links, nonregular files, empty asset
+folders and packages exceeding 2,000 files; use references-only transfer for
+unsupported folders or very large libraries.
+
+Focused local checks: `python3 scripts/test_desktop_distribution.py` exercises
+bundle/signature metadata fixtures, including missing sandbox claims, debug
+entitlements, mismatched teams, Development signing, absent runtime and absent
+timestamps. These fixtures do not sign or notarize anything. The workspace
+harness exercises folder/LUT byte transfer, ID remapping and rejection of linked
+files without leaving a partial destination. Finder opening/drag/drop, sandbox
+grant persistence after restart, and device repair still need native operator
+qualification on each supported release configuration.
 
 Measured locally: MacBook Pro Mac15,8, M3 Max, macOS 27.0.1, Xcode 27.2 beta.
 Native synthetic chroma/LUT alpha/channel ordering/color-space controls pass;
@@ -300,3 +325,9 @@ This explicitly produces a signed, unnotarized development qualification artifac
 For the current desktop entitlements, install a **macOS Developer ID** provisioning profile authorizing `com.joeblau.StreamMac`, `group.com.joeblau.Stream`, and the declared Keychain access group. Set `STREAM_PROVISIONING_PROFILE` to its exact name or UUID; the release script passes it to the app-only `STREAM_MAC_PROVISIONING_PROFILE` build setting and includes it in export options. An iOS development profile cannot satisfy this requirement. Keep these entitlements intact when provisioning; removing them would change access to existing credentials and legacy settings.
 
 On 2026-10-02 the local Developer ID certificate was present, but no matching macOS profile was installed and the Xcode developer-account session could not load valid credentials. Manual archive stopped at provisioning; automatic signing also rejected the explicit Developer ID identity. A signed/notarized artifact has therefore **not** been qualified. The unsigned app and native integration fixtures build and pass with Xcode 27.2 (27B5019j).
+
+A read-only recheck on 2026-10-21 (Mac15,8, macOS 27.2 build 26B118) found the
+Developer ID certificate for team K78G42H4U2 but no installed macOS profile for
+StreamMac, its camera extension or browser helper. Other apps' profiles cannot
+qualify this distribution. No signing, notarization, profile installation or
+system-extension activation was performed during that recheck.
