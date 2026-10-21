@@ -73,6 +73,16 @@ enum GuestRendererHarness {
             guard case .guest(let payload) = source.payload else { return false }
             return payload.slotID == lease.slot && payload.role == .camera
         }!
+        let admittedDiagnostics = await controller.diagnosticSnapshot()
+        let admittedCamera = admittedDiagnostics.sources.first { $0.id == camera.id.description }!
+        precondition(admittedCamera.state == "waiting" && admittedCamera.deliveredFrames == 0,
+                     "An admitted camera without media must report waiting rather than ready")
+        let admittedScreen = scenes.sources.first { source in
+            guard case .guest(let payload) = source.payload else { return false }
+            return payload.slotID == lease.slot && payload.role == .screen
+        }!
+        precondition(admittedDiagnostics.sources.first { $0.id == admittedScreen.id.description }?.state == "inactive",
+                     "An unapproved screen must report inactive independently of the guest camera")
         precondition(controller.addRecordingAudioTap(targetID: "channel.guest.\(UUID().uuidString)", processing: .beforeEffects, sink: { _ in }) == nil)
         let recording = controller.addRecordingVideoSource(targetID: "source.\(camera.id)")!
         let render = recording.1.makeRenderer()
@@ -133,6 +143,10 @@ enum GuestRendererHarness {
         precondition(scenes.sources.count == initialSources + 2)
         settingsSession.flushPendingWrites()
         controller.retireGuestMedia()
+        let retiredDiagnostics = await controller.diagnosticSnapshot()
+        precondition(retiredDiagnostics.sources.filter { $0.kind == camera.payload.kind }.allSatisfy {
+            $0.state == "unavailable" && $0.deliveredFrames == nil
+        }, "Retired saved guest sources must remain unavailable in exported diagnostics")
         let afterRetirement = await controller.registerGuestMedia(lease, name: "Retired Guest")
         precondition(!afterRetirement && mixer.registeredGuestChannelID(slot: lease.slot) == nil)
         await mixer.stop()
