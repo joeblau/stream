@@ -750,6 +750,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     private var preEffectsIDs: Set<AudioChannelID> = []
     private struct Talkback {
         let lease: GuestReceiveLease, source: AudioChannelID, press: UUID
+        let deadline: CMTime
     }
     private var talkback: Talkback?
     // A bounded runtime-only rejection floor survives capture/ring replacement.
@@ -757,13 +758,16 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func beginTalkback(_ lease: GuestReceiveLease, source: AudioChannelID, press: UUID) -> Bool {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        expireTalkbackLocked()
         guard case .microphone = source, !guestRetired, guest?.lease == lease, guest?.returnAllowed == true,
               guest!.returnRevision < UInt64.max, talkback == nil,
               captureFloors[source] != nil || captureFloors.count < 32,
               let channel = channels[source] else { return false }
         let now = CMClockGetTime(CMClockGetHostTimeClock())
         guard channel.beginTalkback(at: now) else { return false }
-        captureFloors[source] = now; talkback = Talkback(lease: lease, source: source, press: press)
+        captureFloors[source] = now
+        talkback = Talkback(lease: lease, source: source, press: press,
+            deadline: now + CMTime(value: 480_000, timescale: 48_000))
         guest!.returnRevision += 1
         return true
     }
@@ -786,8 +790,12 @@ private final class AudioChannelRegistry: @unchecked Sendable {
             else { guest!.returnAllowed = false }
         }
     }
+    private func expireTalkbackLocked() {
+        if let talkback, CMClockGetTime(CMClockGetHostTimeClock()) >= talkback.deadline { endTalkbackLocked() }
+    }
     func talkbackIsActive(_ lease: GuestReceiveLease, source: AudioChannelID, press: UUID) -> Bool {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        expireTalkbackLocked()
         return talkback?.lease == lease && talkback?.source == source && talkback?.press == press
     }
 
@@ -860,6 +868,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     }
     func guestReturnRevision(_ lease: GuestReceiveLease) -> UInt64? {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        expireTalkbackLocked()
         guard guest?.lease == lease, !guestRetired, guest!.returnAllowed else { return nil }
         return guest!.returnRevision
     }
@@ -1163,6 +1172,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
                     soloActive: Bool) -> (pre: Int, post: Int, privateRecipient: GuestReceiveLease?) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
+        expireTalkbackLocked()
         let isRegisteredGuest = isGuest(id)
         let privateRecipient = talkback?.source == id ? talkback?.lease : nil
         let programAllowed = privateRecipient == nil && (!isRegisteredGuest || (guest?.channelID == id && guest?.programAllowed == true))

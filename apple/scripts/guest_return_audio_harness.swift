@@ -84,7 +84,7 @@ private final class TalkbackReceipt: @unchecked Sendable {
         await engine.addIsolatedTap(channel: mic, token: UUID(), processing: .beforeEffects, sink: { pre.receive($0) })
         await engine.addIsolatedTap(channel: mic, token: UUID(), processing: .afterEffects, sink: { post.receive($0) })
         require(await engine.addGuestReturnTap(lease, token: UUID(), sink: { receipt.receive($0); returned.receive($0.sample, revision: $0.routingRevision) }), "Talkback return tap")
-        let producer = Task {
+        let producer = Task.detached {
             let origin = now() - CMTime(value: 512, timescale: 48_000)
             var index: Int64 = 0
             while !Task.isCancelled {
@@ -151,11 +151,22 @@ private final class TalkbackReceipt: @unchecked Sendable {
         require(engine.beginGuestTalkback(lease, source: mic, press: secondPress), "Explicit next hold refused")
         require(!engine.endGuestTalkback(lease, press: press) && engine.guestTalkbackIsActive(lease, source: mic, press: secondPress),
                 "Old release altered a new deliberate hold")
+        tone.set(0.25)
+        let deadline = now().seconds + 10
+        try await Task.sleep(for: .milliseconds(120))
+        let privateRevision = receipt.last()!.routingRevision
+        // The UI task cannot enforce this bound while blocked. Actual mixer
+        // and mailbox/final-send authority must retire the hold independently.
+        await MainActor.run { Thread.sleep(forTimeInterval: 10.4) }
+        let expiredPackets = returned.snapshot().filter { $0.pts.seconds > deadline + 0.12 }
+        require(expiredPackets.count >= 10 && expiredPackets.allSatisfy { $0.revision != privateRevision },
+                "Private return remained authorized beyond ten seconds while MainActor was blocked")
+        require(!engine.guestTalkbackIsActive(lease, source: mic, press: secondPress), "Off-main hold deadline did not restore normal routing")
         require(engine.removeGuest(lease), "Talkback removal failed")
         require(!engine.guestTalkbackIsActive(lease, source: mic, press: secondPress), "Removed guest retained private route")
         require(!engine.beginGuestTalkback(lease, source: mic, press: UUID()), "Retired context reactivated private capture")
         producer.cancel(); await producer.value; await engine.stop()
-        print("PASS: addressed private mic only in current recipient return; Program/Monitor/Aux/pre+post ISO silent for private voice, insert bypass+reset, unaffected music, late-buffer release, exact press and full-lease retirement")
+        print("PASS: addressed private mic only in current recipient return; Program/Monitor/Aux/pre+post ISO silent for private voice, insert bypass+reset, unaffected music, late-buffer release, exact press, off-main ten-second deadline and full-lease retirement")
     }
     private static func opusCodec() throws {
         let encoder: NativeGuestReturnAudioEncoder
