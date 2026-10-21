@@ -57,6 +57,18 @@ enum StudioAudienceEventStyle: String, CaseIterable, Codable, Sendable {
         }
     }
 }
+/// Exact provider fragment identity only; no URL or image capability is inferred.
+struct StudioChatStaticEmote: Equatable, Codable, Sendable {
+    let id: String, setID: String, label: String
+    static func validID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 128 && value.unicodeScalars.allSatisfy {
+            (48...57).contains($0.value) || (65...90).contains($0.value) || (97...122).contains($0.value) || $0 == "_" || $0 == "-"
+        }
+    }
+    var valid: Bool { Self.validID(id) && Self.validID(setID) && !label.isEmpty && label.utf8.count <= 256
+        && !label.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) } }
+}
+
 /// Public provider message IDs are independent of adapter/socket identity.
 struct StudioChatMessage: Identifiable, Equatable, Codable, Sendable {
     let id: String
@@ -69,6 +81,7 @@ struct StudioChatMessage: Identifiable, Equatable, Codable, Sendable {
     let timestampIsReceiptTime: Bool
     let kind: String
     let avatarURL: URL?
+    var staticEmote: StudioChatStaticEmote? = nil
     var audienceEvent: StudioAudienceEventKind? { .init(rawValue: kind) }
 }
 

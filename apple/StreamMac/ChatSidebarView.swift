@@ -85,7 +85,7 @@ struct ChatSidebarView: View {
                 }
             }
             if let error = coordinator.error { Text(error).font(.caption).foregroundStyle(.orange) }
-            Text("Public provider text preserves Unicode emoji and documented emote text. Image emotes/stickers, reactions and viewer metrics are unavailable; no remote event artwork is loaded.")
+            Text("Public text preserves Unicode emoji. Optional manual static Twitch emote tiles use the current authorized reader. Animated emotes, sticker artwork and reactions remain unavailable. Guest public chat stays text-only.")
 
                 .font(.caption2).foregroundStyle(.secondary)
         }
@@ -95,6 +95,11 @@ struct ChatSidebarView: View {
     private var audienceControls: some View {
         DisclosureGroup("Audience Events") {
             VStack(alignment: .leading, spacing: 6) {
+                Toggle("Enable Manual Static Twitch Emote Tiles", isOn: $coordinator.staticEmotesEnabled)
+                    .toggleStyle(.checkbox)
+                Text("Explicit tile buttons load the first supported static emote beside the complete caption, using the avatar area. Each result is staged; Take publishes it. Direct Live Editing must be off. Up to 32 identities stay in memory for this app run; existing taken tiles are never evicted.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                if coordinator.staticEmoteLoads > 0 { Text("Loading \(coordinator.staticEmoteLoads) artwork request(s)…").font(.caption) }
                 Toggle("Enable Manual Alert Promotion", isOn: $coordinator.alertPromotionEnabled)
                     .toggleStyle(.checkbox)
                 Picker("Style event", selection: $styledKind) {
@@ -125,7 +130,7 @@ struct ChatSidebarView: View {
                         }.controlSize(.small).disabled(coordinator.audienceStagingError != nil)
                     }
                 }
-                Text("Event arrival never promotes an alert. Use Stage Alert on a supported event, then Take. Hide also requires Take. Disable Direct Live Editing first. Palettes apply on the next deliberate promotion; cards use the provider's public text, without inferred amounts or artwork.")
+                Text("Event arrival never promotes an alert. Use Stage Alert on a supported event, then Take. Hide also requires Take. Disable Direct Live Editing first. Palettes apply on the next deliberate promotion; text-only Stage Alert preserves public text without inferred amounts. Static artwork needs its separate explicit tile button.")
                     .font(.caption2).foregroundStyle(.secondary)
                 if let reason = coordinator.audienceStagingError { Text(reason).font(.caption).foregroundStyle(.orange) }
                 else if let reason = coordinator.alertSlotCreationError { Text(reason).font(.caption).foregroundStyle(.secondary) }
@@ -224,6 +229,16 @@ struct ChatSidebarView: View {
                         .help(coordinator.audienceAlertError(for: message.id) ?? "Stage this event in the separate alert slot; Take publishes it.")
                 }
             }.controlSize(.small)
+            if message.staticEmote != nil {
+                HStack {
+                    Button("Stage Comment + Static Emote") { coordinator.stageStaticEmote(message.id, alert: false) }
+                        .disabled(coordinator.staticEmoteStagingError(for: message.id, alert: false) != nil)
+                        .help(coordinator.staticEmoteStagingError(for: message.id, alert: false) ?? "Load and stage the first static emote tile; Take publishes it.")
+                    Button("Stage Alert + Static Emote") { coordinator.stageStaticEmote(message.id, alert: true) }
+                        .disabled(coordinator.staticEmoteStagingError(for: message.id, alert: true) != nil)
+                        .help(coordinator.staticEmoteStagingError(for: message.id, alert: true) ?? "Load and stage the first static emote tile; Take publishes it.")
+                }.controlSize(.small)
+            }
             if let manager = coordinator.directChat { DirectChatMessageActions(manager: manager, message: message) }
         }
         .padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))

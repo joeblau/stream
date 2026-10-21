@@ -1075,6 +1075,7 @@ final class SceneRenderer {
                      wraps: text.wraps,
                      overflow: text.overflow,
                      avatar: avatar, avatarInset: avatarInset,
+                     staticEmote: text.commentAvatarKey?.hasPrefix("public-static-emote-") == true,
                      in: rect, context: context)
         }
         guard let content else { return nil }
@@ -1207,7 +1208,7 @@ final class SceneRenderer {
                           padding: CGFloat,
                           wraps: Bool,
                           overflow: TextOverflow,
-                          avatar: CGImage? = nil, avatarInset: CGFloat = 0,
+                          avatar: CGImage? = nil, avatarInset: CGFloat = 0, staticEmote: Bool = false,
                           in rect: CGRect,
                           context: CGContext) {
         if let backgroundColorHex {
@@ -1218,8 +1219,18 @@ final class SceneRenderer {
         if let avatar, avatarInset > 0 {
             let side = min(inset.height, max(1, avatarInset - padding))
             let avatarRect = CGRect(x: inset.minX, y: inset.maxY - side, width: side, height: side)
-            context.saveGState(); context.addEllipse(in: avatarRect); context.clip()
-            context.draw(avatar, in: avatarRect); context.restoreGState()
+            context.saveGState()
+            if staticEmote {
+                // Preserve the provider's complete alpha/shape and aspect;
+                // static emote tiles are not circular author portraits.
+                let factor = min(side / CGFloat(avatar.width), side / CGFloat(avatar.height))
+                let size = CGSize(width: CGFloat(avatar.width) * factor, height: CGFloat(avatar.height) * factor)
+                context.draw(avatar, in: CGRect(x: avatarRect.midX - size.width / 2,
+                    y: avatarRect.midY - size.height / 2, width: size.width, height: size.height))
+            } else {
+                context.addEllipse(in: avatarRect); context.clip(); context.draw(avatar, in: avatarRect)
+            }
+            context.restoreGState()
             inset.origin.x += avatarInset; inset.size.width -= avatarInset
         }
         guard inset.width > 0, inset.height > 0 else { return }
