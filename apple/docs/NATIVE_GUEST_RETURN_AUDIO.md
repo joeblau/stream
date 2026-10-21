@@ -142,6 +142,16 @@ without a relay or browser:
 zsh apple/scripts/run_native_guest_return_video_budget.zsh
 ```
 
+On 2026-10-21, the full native/browser return fixture passed again on an M3 Max,
+macOS 27.2 (26B118), Xcode 27.2 (27B5038j), Chrome 155.0.8059.85 and Node 24.15.0.
+Both endpoints selected actual local UDP relay candidates. Chrome decoded the
+stereo local tones, excluded positively measured own-guest tones, decoded zero
+PCM after mute, restored the nonunity fader, replaced the retired return track
+after rejoin, and cleared it after removal. A subsequent combined run also
+passed the shipping Dispatcher/Manager private conversation checks in both
+directions, delivered receipts, Backstage independence, rejoin history clearing,
+stale-command rejection and a deliberate new-lease message.
+
 ## Remaining acceptance
 
 Issue #127 stays open. This implementation has one native admitted guest, not a
