@@ -292,6 +292,8 @@ The secondary output is an independent composition. A missing layout produces bl
 
 ## Deliberate ending
 
+Destinations → Provider Accounts and Events → **Schedule Show** collects event details and destination selections, then reports independent acknowledged, existing-event, manual-action, blocked or unconfirmed results. One owned YouTube channel receives at most one creation per plan; conflicting existing event IDs block creation. Other providers require external scheduling. Scheduling does not change destination bindings or start outputs. Review uncertain requests at the provider before creating a new plan. See [provider capabilities and show scheduling](PROVIDER_ACCOUNTS.md).
+
 Destinations exposes **Stop Local / End Remote / End All**. Stop Local detaches captured publisher sessions and sends no provider completion request; the provider may still apply its own disconnect/auto-stop policy. End Remote freshly verifies and completes a supported permitted YouTube event while local publishing continues. End Both/All reports each remote/local result independently; unsupported connectors require their manual provider controls. Recording continues.
 
 A failed preliminary check or lost/sent/cancelled reply leaves remote state unknown. Receipts become visibly stale after 60 seconds; Review Remote reads state without retrying a mutation. An optional saved outro or black scene goes through Select Scene/Take and the normal transition. Program or output-session changes cancel delayed ending, and restart never replays a plan. Provider completion can extend the minimum hold. See [clean ending authority, receipts and validation](CLEAN_ENDING.md); no real public provider completion has been qualified.
