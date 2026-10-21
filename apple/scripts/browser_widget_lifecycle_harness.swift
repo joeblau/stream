@@ -178,6 +178,7 @@ private final class QueuedISO: @unchecked Sendable {
         app.run()
     }
     static func run() async throws {
+        try await BrowserHelperLifecycleChecks.run()
         precondition(!BrowserWidgetAudioIdentity.productionRouteQualified)
         let application = URL(fileURLWithPath: CommandLine.arguments[1])
         try await queuedISOChecks()

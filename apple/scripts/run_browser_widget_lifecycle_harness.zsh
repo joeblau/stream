@@ -57,6 +57,7 @@ File.write(pool_path,pool)
 target['sources'][0]['excludes'] << 'CaptureSourcePool.swift'
 target['sources'] << pool_path
 target['sources'] << File.join(root,'scripts/browser_widget_lifecycle_harness.swift')
+target['sources'] << File.join(root,'scripts/browser_helper_lifecycle_checks.swift')
 spec['targets']['BrowserWidgetLifecycleHarness']=target
 spec['schemes']['BrowserWidgetLifecycleHarness']={'build'=>{'targets'=>{'BrowserWidgetLifecycleHarness'=>'all'}}}
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))

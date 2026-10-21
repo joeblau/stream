@@ -25,7 +25,7 @@ RUBY
 xcodegen generate --spec "$PDF_DIR/project.json" --project "$PDF_DIR"
 xcodebuild -resolvePackageDependencies -project "$PDF_DIR/BrowserWidgetPDFProgramValidation.xcodeproj" -scheme BrowserWidgetPDFProgramHarness -derivedDataPath "$PDF_DERIVED"
 python3 scripts/repair_desktop_transport_archives.py "$PDF_DERIVED" --require-relay-policy
-xcodebuild -project "$PDF_DIR/BrowserWidgetPDFProgramValidation.xcodeproj" -scheme BrowserWidgetPDFProgramHarness -destination 'platform=macOS' -jobs 4 -derivedDataPath "$PDF_DERIVED" CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project "$PDF_DIR/BrowserWidgetPDFProgramValidation.xcodeproj" -scheme BrowserWidgetPDFProgramHarness -destination 'platform=macOS' -jobs "${STREAM_XCODE_JOBS:-4}" -derivedDataPath "$PDF_DERIVED" CODE_SIGNING_ALLOWED=NO build
 zsh scripts/build_browser_audio_helper.zsh
 readonly PDF_PRODUCTS="${PDF_DERIVED:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="$PDF_PRODUCTS" "$PDF_PRODUCTS/BrowserWidgetPDFProgramHarness" "${PDF_DIR:A}"
