@@ -97,7 +97,7 @@ headphone monitoring avoids acoustic feedback. Per-channel effects and delays
 remain separate from source capture. Program recording receives the mixed
 audio bus and compositor clock independently of live output. See
 [recording policy and measured evidence](../PROGRAM_RECORDING.md) and
-[keyboard/accessibility controls](STUDIO_CONTROLS.md).
+[keyboard/accessibility controls](STUDIO_CONTROLS.md). The [owned native accessibility qualification](MACOS_ACCESSIBILITY_QUALIFICATION.md) records actual AX labels/actions, compact/text/motion and keyboard focus evidence, plus the remaining native contrast and VoiceOver gates.
 
 RTMP/RTMPS and SRT use the existing publisher adapters. WHIP is experimental;
 unsupported bearer-only endpoint authentication and HEVC combinations are

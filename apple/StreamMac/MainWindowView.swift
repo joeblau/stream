@@ -326,7 +326,10 @@ struct MainWindowView: View {
     }
     private func restoreCommandFocus() {
         guard !shortcuts.palettePresented && !shortcuts.editorPresented else { return }
-        focusedPanel = panelBeforeCommands ?? .canvas
+        // A text field may own native focus without its containing panel's
+        // FocusState being selected. Preserve nil so the panel fallback does
+        // not compete with the native control restored below.
+        focusedPanel = panelBeforeCommands
         panelBeforeCommands = nil
         shortcuts.restoreCommandFocus()
     }
