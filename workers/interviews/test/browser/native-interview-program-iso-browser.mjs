@@ -154,11 +154,25 @@ try {
   const original={...state.lease};
   function phase(label){console.log(`Native recording phase: ${JSON.stringify({phase:label,service:state?.phase,membership:state?.members[0]?.membership,revision:state?.members[0]?.revision,media:state?.members[0]?.media,programAllowed:state?.programAllowed,generation:state?.lease?.generation,video:state?.acceptedVideo,audio:state?.audioAccepted,audioPTS:state?.audioPTS,audioRejected:state?.audioRejected,live:state?.live,receiver:state?.receiver})}`);}
   async function audioTransport(){return browser.evaluate(g,`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats();const packets=[];for(const value of stats.values())if(value.type==='outbound-rtp'&&value.kind==='audio')packets.push({packetsSent:value.packetsSent,bytesSent:value.bytesSent,totalSamplesSent:value.totalSamplesSent});const audio=window.__fixtureAudio.at(-1);return{connection:pc.connectionState,audioState:audio.context.state,audioTime:audio.context.currentTime,gains:audio.gains.map(g=>g.gain.value),packets};})()`);}
-  await wait('actual Chrome sparse Opus sender-report cadence exceeds3s',()=>{check();return state.receiver?.roles.find(value=>value.role===2)?.srAge>3.1;});
-  const sparseBefore={audio:state.audioAccepted,unsynchronized:state.receiver.unsynchronized};
-  await pause(350);check();phase('actual-sparse-opus-report');
-  assert(state.audioAccepted>=sparseBefore.audio+10&&state.receiver.unsynchronized===sparseBefore.unsynchronized,
-    'Real ordinary Chrome Opus must keep decoding past3s report age without discarding synchronized RTP');
+  // Browser RTCP cadence is randomized and can legitimately stay below three
+  // seconds. Measure it without requiring the browser to produce a sparse gap.
+  // The controlled native sparse-report harness independently forces that case.
+  const cadenceStart=state.audioAccepted,cadenceDeadline=Date.now()+15_000;
+  let maximumAudioReportAge=0,sparseObserved=false;
+  while(Date.now()<cadenceDeadline){
+    check();maximumAudioReportAge=Math.max(maximumAudioReportAge,state.receiver?.roles.find(value=>value.role===2)?.srAge??0);
+    if(maximumAudioReportAge>3.1){sparseObserved=true;break;}await pause(50);
+  }
+  if(sparseObserved){
+    const sparseBefore={audio:state.audioAccepted,unsynchronized:state.receiver.unsynchronized};
+    await pause(350);check();phase('actual-sparse-opus-report');
+    assert(state.audioAccepted>=sparseBefore.audio+10&&state.receiver.unsynchronized===sparseBefore.unsynchronized,
+      'Real ordinary Chrome Opus must keep decoding past3s report age without discarding synchronized RTP');
+  }else{
+    assert(state.audioAccepted>=cadenceStart+100,'Frequent actual browser sender reports must retain continuing decoded PCM');
+  }
+  console.log(`Observed actual browser Opus cadence: ${JSON.stringify({sparseObserved,maximumAudioReportAge,decodedPackets:state.audioAccepted-cadenceStart})}`);
+  if(!sparseObserved)console.log('Scope: no >3.1s Opus report gap observed in this bounded browser window; sparse-report qualification requires the controlled native receiver fixture.');
   async function segment(number){
     command({type:'begin'});await browser.evaluate(g,'window.__fixtureAudible()');
     await wait('actual Program and controller-resolved ISO taps',()=>{check();return state.live?.pictures>=6&&state.live.programPackets>=20&&state.live.isoPackets>=20;});

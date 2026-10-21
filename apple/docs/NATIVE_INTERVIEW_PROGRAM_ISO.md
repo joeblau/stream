@@ -71,6 +71,15 @@ own derived directory and still verifies the patch/source/archive receipt.
 The Chrome child uses the fixture-only mock-Keychain switch with its sandbox
 and ten-second CDP deadline preserved.
 
+The browser fixture records its actual audio sender-report cadence during a
+bounded fifteen-second window. When it observes a report age above 3.1 seconds,
+it requires uninterrupted decoded PCM across that gap. Browser RTCP timing may
+also legitimately remain below that age; that run checks continuing PCM and
+explicitly reports that sparse timing was not observed. The controlled native
+`run_native_guest_receive_harness.zsh --sparse-audio-reports` regression forces
+the sparse-report, stale-horizon denial and original-clock recovery cases
+independently of browser timing.
+
 Locally qualified with macOS 27.0.1 ARM64, Xcode 26.6/SDK 26.5, Node 24.15.0,
 Chrome for Testing 154.0.8037.92 and pinned Coturn 4.18.0. Two complete runs after
 the actual history correction each passed two recorded/rejoined segments. The
@@ -89,3 +98,13 @@ controller-issued guest slot through `SceneStore.replaceGuestSlot`. This keeps
 its original black-pixel privacy assertions meaningful after saved slots gained
 visible offline cards by default. Source identities, admission and routing stay
 on the shipping paths; the fixture changes ordinary persisted scene metadata.
+
+The corrected fixture passed on 2026-10-21 with an M3 Max, macOS 27.2 (26B118),
+Xcode 27.2 (27B5038j), Chrome 155.0.8059.85 and Node 24.15.0. Both endpoints
+selected actual local UDP relay candidates. Recorded segments before and after
+rejoin contained 158,473 and 147,195 decoded stereo PCM frames, with every
+316,946 and 294,390 Float32 value matching between Program and guest ISO. The
+rational audio cue difference and ISO history misses were zero in both
+segments; recorded flash/tone differences stayed within 6.1ms, and both outputs
+ended black and silent after Backstage. This run also observed a real 3.15s
+audio sender-report age with continuing decoded PCM.
