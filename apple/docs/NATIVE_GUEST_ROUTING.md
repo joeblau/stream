@@ -10,9 +10,9 @@ host. [Native session control](NATIVE_INTERVIEW_CONTROL.md),
 [manager-to-Program/ISO recording](NATIVE_INTERVIEW_PROGRAM_ISO.md) and
 [stereo mix-minus audio return](NATIVE_GUEST_RETURN_AUDIO.md) each document their
 actual software route and remaining acceptance gates. The explicitly enabled
-[selectable Program/Secondary video return](NATIVE_GUEST_RETURN_VIDEO.md) now uses actual
-native H264 transport with owned local synchronization evidence; additional
-source choices and deployed/device qualification remain acceptance gates.
+[selectable Program/Secondary/Clean video return](NATIVE_GUEST_RETURN_VIDEO.md) now uses actual
+native H264 transport with owned local synchronization evidence; feedback adaptation and
+deployed/device qualification remain acceptance gates.
 
 The application has explicit runtime-owned video and audio admission boundaries:
 

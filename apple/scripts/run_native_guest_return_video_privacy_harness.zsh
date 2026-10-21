@@ -41,3 +41,5 @@ GUEST_PRODUCTS="${STREAM_GUEST_VIDEO_PRIVACY_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="${GUEST_PRODUCTS}" "${GUEST_PRODUCTS}/GuestReturnVideoPrivacyHarness"
 
 env DYLD_FRAMEWORK_PATH="${GUEST_PRODUCTS}" "${GUEST_PRODUCTS}/GuestReturnVideoPrivacyHarness" --secondary
+
+env DYLD_FRAMEWORK_PATH="${GUEST_PRODUCTS}" "${GUEST_PRODUCTS}/GuestReturnVideoPrivacyHarness" --clean

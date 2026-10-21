@@ -167,6 +167,7 @@ private final class ReturnAVProbe: @unchecked Sendable {
     // The runner refuses physical microphone startup; only owned PCM enters.
     let local = AudioChannelID.microphone(deviceUID: nil)
     private var producer: Task<Void, Never>?
+    private var returnOverlay: LayerID?
     private var secondaryLayer = LayerNode(name: "Owned secondary blue", payload: .shape(.init(fillColorHex: "#0000FF")), transform: .fullscreen, isVisible: false)
     init(configuration: NativeInterviewConfiguration, relay: NativeInterviewRelayConfiguration, directory: URL) throws {
         try DesktopStorage.prepare(directory.appendingPathComponent("project"))
@@ -214,6 +215,17 @@ private final class ReturnAVProbe: @unchecked Sendable {
         if manager.state.snapshot.members.first?.returnVideoSource == .secondary { try secondaryPicture(color) }
         else { try picture(color) }
     }
+    func overlay(_ enabled: Bool) throws {
+        if enabled, returnOverlay == nil {
+            guard dispatcher.execute(.addOverlay(.shape(.init(fillColorHex: "#FF0000")))).error == nil,
+                  let overlay = scenes.overlays.last,
+                  dispatcher.execute(.setOverlayTransform(overlay.id, .fullscreen)).error == nil else { throw NativeInterviewError.changed }
+            returnOverlay = overlay.id
+        } else if !enabled, let current = returnOverlay {
+            guard dispatcher.execute(.removeOverlay(current)).error == nil else { throw NativeInterviewError.changed }
+            returnOverlay = nil
+        }
+    }
     func noise() throws {
         let payload = ImageSourcePayload(assetIdentifier: "owned-return-video-noise", pixelWidth: 320, pixelHeight: 180)
         let pixels = try ProgramRecordingFixtures.video(at: 0, noisy: true).imageBuffer!
@@ -225,7 +237,9 @@ private final class ReturnAVProbe: @unchecked Sendable {
     func fireAVCue() async throws {
         if let avVideo { controller.removeFrameSink(avVideo) }
         let canvas: OutputCanvas = manager.state.snapshot.members.first?.returnVideoSource == .secondary ? .secondary : .program
-        avVideo = controller.addFrameSink(capacity: 4, canvas: canvas, sink: av.video)
+        avVideo = manager.state.snapshot.members.first?.returnVideoSource == .clean
+            ? controller.addCleanFrameSink(capacity: 4, sink: av.video)
+            : controller.addFrameSink(capacity: 4, canvas: canvas, sink: av.video)
         let cue = CMClockGetTime(CMClockGetHostTimeClock()).seconds + 0.6
         toneCue.schedule(cue)
         // Existing future-authored PCM drains before reopening the fader.
@@ -317,7 +331,8 @@ private final class ReturnAVProbe: @unchecked Sendable {
                              "approved": $0.screenApproved, "sharing": $0.screenSharing] as [String: Any]
                         }, "audioAccepted": admission.acceptedPackets, "program": current.program.snapshot(),
                         "programAllowed": current.manager.state.routes.values.contains { $0.programAllowed },
-                        "secondaryQualified": IsolatedVideoBudget.current.qualified, "secondaryDemand": current.controller.secondaryCanvasDemanded]
+                        "secondaryQualified": IsolatedVideoBudget.current.qualified, "secondaryDemand": current.controller.secondaryCanvasDemanded,
+                        "cleanQualified": IsolatedVideoBudget.current.qualified, "cleanDemand": current.controller.cleanReturnDemanded]
                     if let context = current.manager.currentReadyLease {
                         state["lease"] = ["generation": context.receive.generation, "slot": context.receive.slot.uuidString.lowercased(),
                                           "peer": context.receive.peerID.uuidString.lowercased(), "negotiation": context.receive.negotiation.uuidString.lowercased()]
@@ -383,9 +398,11 @@ private final class ReturnAVProbe: @unchecked Sendable {
                 case "video-av":
                     try await current.fireAVCue()
                     _ = output.emit(["type": "ack", "command": command])
-                case "video-select-program", "video-select-secondary":
+                case "video-overlay-on", "video-overlay-off":
+                    try current.overlay(command == "video-overlay-on"); _ = output.emit(["type": "ack", "command": command])
+                case "video-select-program", "video-select-secondary", "video-select-clean":
                     guard let context = current.manager.currentReadyLease else { throw NativeInterviewError.changed }
-                    try current.command(.selectReturnVideoSource(context, command == "video-select-program" ? .program : .secondary))
+                    try current.command(.selectReturnVideoSource(context, command == "video-select-program" ? .program : command == "video-select-secondary" ? .secondary : .clean))
                     _ = output.emit(["type": "ack", "command": command])
                 case "video-secondary-remove", "video-secondary-restore":
                     try current.secondaryPicture("#0000FF", remove: command == "video-secondary-remove")

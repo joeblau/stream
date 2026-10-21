@@ -206,8 +206,8 @@ extension NativeInterviewMediaHost {
 enum NativeInterviewMembership: String, Sendable { case waiting, backstage, onair }
 enum NativeInterviewMediaState: String, Sendable { case unavailable, preparing, negotiating, ready, failed }
 enum NativeInterviewReturnVideoSource: String, CaseIterable, Sendable {
-    case program, secondary
-    var title: String { self == .program ? "Program" : "Secondary" }
+    case program, secondary, clean
+    var title: String { switch self { case .program: return "Program"; case .secondary: return "Secondary"; case .clean: return "Clean" } }
 }
 enum NativeInterviewReturnVideoState: String, Sendable { case off, unavailable, preparing, ready, failed }
 enum NativeInterviewReturnAudioState: String, Sendable { case unavailable, preparing, ready, failed }

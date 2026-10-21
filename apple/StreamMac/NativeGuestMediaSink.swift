@@ -89,6 +89,11 @@ final class NativeGuestMediaSink: @unchecked Sendable {
         guard active, programReturns[.secondary] == nil else { return }
         programReturns[.secondary] = source
     }
+    func bindCleanReturn(_ source: NativeGuestProgramReturnSource) {
+        gate.lock(); defer { gate.unlock() }
+        guard active, programReturns[.clean] == nil else { return }
+        programReturns[.clean] = source
+    }
     var returnVideoSource: NativeInterviewReturnVideoSource {
         gate.lock(); defer { gate.unlock() }; return selectedReturnVideoSource
     }
