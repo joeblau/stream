@@ -63,6 +63,14 @@ SGIcePair SGReceiverSelectedIcePair(SGReceiver *);
 void SGReceiverStop(SGReceiver *);
 void SGReceiverDestroy(SGReceiver *);
 #ifdef STREAM_GUEST_VALIDATION
+typedef struct {
+    uint32_t forwarded_packets;
+    int fragmented_prefix, failed;
+} SGReturnVideoFaultReceipt;
+// Fault injection for exactly the next admitted AU. Receipts prove whether
+// the owned peer actually accepted a fragmented prefix before the failure.
+int SGReceiverValidationFailReturnVideoAfter(SGReceiver *, int forwarded_packets);
+SGReturnVideoFaultReceipt SGReceiverValidationReturnVideoFault(SGReceiver *);
 // Native validation feeds the ACTUAL guard when SRTP's own header/replay
 // validation rejects a malformed datagram before it could reach that guard.
 int SGReceiverValidationPacket(SGReceiver *, int role, const uint8_t *, size_t);
