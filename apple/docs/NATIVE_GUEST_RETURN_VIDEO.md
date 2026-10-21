@@ -126,9 +126,20 @@ rebase or relaxed numerical bound follows from these observations.
 
 A fixture-only alternative tried a video-frame-callback canvas plus
 `AudioContext.createMediaElementSource(element)` through one passthrough
-AudioWorklet. Local H264/AAC file controls with authored zero and ±150 ms
-offsets passed the aligned 100 ms check and rejected both 150 ms offsets with
-the correct sign. The same graph on the actual WebRTC return produced silence:
+AudioWorklet. An initial local H264/AAC file-control run with authored zero and
+±150 ms offsets passed the aligned 100 ms check and rejected both 150 ms offsets.
+A repeat against the frozen shared fixture exposed a failed negative control:
+the audio-early 150 ms source became only 99.458 ms in the recorded file, which
+incorrectly passed that gate. Its independent output-clock check still rejected
+the authored offset. The canvas is sampled in a callback up to 33.4 ms before
+the expected video display time; the recording destination also precedes the
+measured 32 ms audio-device output latency. The recording and output-clock
+graphs therefore cannot be substituted for one another. The optional strict
+`file-element-oracle-calibration.mjs` retains this calibration failure and its
+artifacts; it is separate from the default live runner, and a file-only pass
+cannot qualify live playback.
+
+The same element-source graph on the actual WebRTC return produced silence:
 the independent remote-track control had 100,352 nonzero PCM frames and peak
 0.4202, while the element-source node had 100,352 zero frames and no cue.
 The file control cannot qualify this live graph. In exact Chrome 155,
@@ -150,6 +161,11 @@ A zero signal in the unrelated-tone control consequently proves no exclusion:
 the required selected-Chrome positive control failed. This OS-output observation
 path remains unqualified; it supplies no normal-element or physical-output A/V
 result. The original 105.104 ms raw-track failure remains unresolved by it.
+
+An independent native 1320 Hz app control subsequently proved the observer's
+PCM parser: 96,000 captured frames, 191,220 nonzero Float32 values, peak
+0.0250000022, RMS 0.01767817, original-PTS onset and 20–42 ms arrival age. This
+rules out a zero-filling parser but does not establish Chrome's output identity.
 
 `workers/interviews/test/browser/chrome-output-oracle-calibration.mjs` retains
 the optional controlled experiment. It requires an explicitly supplied owned
