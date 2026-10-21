@@ -204,9 +204,6 @@ final class SceneStore: ObservableObject {
     @Published private(set) var sources: [SourceDefinition] {
         didSet { scheduleSceneAutosave() }
     }
-    @Published private(set) var guestSlots: [GuestSlot] {
-        didSet { scheduleSceneAutosave() }
-    }
     /// S07: project-wide overlays (back-to-front), stored once at document
     /// level and composited above every scene's layers. Mutated only through
     /// the dispatcher's project-level overlay commands.

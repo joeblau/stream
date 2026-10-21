@@ -33,7 +33,7 @@ xcodebuild -resolvePackageDependencies -project "$SLOTS_DIR/GuestSlotsValidation
   -scheme GuestSlotsHarness -derivedDataPath "$GUEST_SLOTS_BUILD_PATH"
 python3 scripts/repair_desktop_transport_archives.py "$GUEST_SLOTS_BUILD_PATH"
 xcodebuild -project "$SLOTS_DIR/GuestSlotsValidation.xcodeproj" -scheme GuestSlotsHarness \
-  -destination 'platform=macOS' -derivedDataPath "$GUEST_SLOTS_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -destination 'platform=macOS' -jobs "${STREAM_XCODE_JOBS:-4}" -derivedDataPath "$GUEST_SLOTS_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 readonly SLOTS_PRODUCTS="${GUEST_SLOTS_BUILD_PATH:A}/Build/Products/Debug"
 readonly SLOTS_ARTIFACTS="$SLOTS_DIR/artifacts-$(uuidgen)"
 mkdir -p "$SLOTS_ARTIFACTS"
