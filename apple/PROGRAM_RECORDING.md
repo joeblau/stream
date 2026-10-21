@@ -111,10 +111,21 @@ Xcode 27.2 beta:
   existing file contents retained.
 - Full StreamMac unsigned native build passes.
 
+A journal-only write failure also reaches the live recording warning. The
+native regression places a real directory at the journal path while leaving the
+movie writable, observes the warning before stop, repairs that path and requires
+the next successful checkpoint to clear it. The resulting 2.4-second movie
+contains 144 decoded frames and synchronized AAC audio. The entire writer suite,
+including zero-drop 60 fps recording and rotation, passed again on Mac15,8 / M3
+Max, macOS 27.2 (26B118), Xcode 27.1 on 2026-10-21. This filesystem failure uses
+shipping atomic journal writes and media writers without an IO substitute.
+
 The injected storage probes make failures reproducible; they do not replace a
 physical external-drive unplug or a simultaneous network-stream workload test.
-Those, sudden process termination/container recovery, other Mac/OS encoders,
-and sustained high-resolution load remain release qualification work.
+The separate [abrupt process recovery fixture](docs/ABRUPT_RECORDING_RECOVERY.md)
+qualifies completed H.264/MP4 fragments after an owned recorder is killed.
+Physical-volume loss, arbitrary damaged containers, other Mac/OS encoders and
+sustained high-resolution load retain their separate qualification limits.
 
 ## Recording options and file changes
 

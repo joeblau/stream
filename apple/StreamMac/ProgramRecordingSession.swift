@@ -608,8 +608,11 @@ final class ProgramRecordingSession: @unchecked Sendable {
         if progress.droppedAudio > 0 || progress.droppedVideo > 0 {
             progress.warning = "Recording dropped \(progress.droppedVideo) video frames and \(progress.droppedAudio) audio chunks; check disk and encoder load."
         }
-        event(.progress(progress))
+        // The journal write can add a storage warning. Publish afterwards so
+        // the studio sees it while media continues, before the next health
+        // check clears transient warnings and retries the journal.
         writeManifest(status: failure == nil ? (paused ? "paused" : announcedRecording ? "recording" : "preparing") : "partial")
+        event(.progress(progress))
     }
 
     private func updateProgress() {
