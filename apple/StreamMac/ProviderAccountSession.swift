@@ -563,11 +563,26 @@ final class ProviderAccountSession: ObservableObject {
         guard canRequest(.youtube), !snapshot(.youtube).isWorking,
               snapshot(.youtube).scopes.contains("https://www.googleapis.com/auth/youtube") ||
               snapshot(.youtube).scopes.contains("https://www.googleapis.com/auth/youtube.force-ssl") else { return nil }
-        let generation = begin(.youtube, action: action), boundary = api()
+        let generation = begin(.youtube, action: action)
+        let lease = endingIntentLease(.youtube), vault = vault
         pendingScheduling = (generation, action, id, mutating)
         jobs[.youtube] = Task { [weak self] in
             do {
+                // Ownership reads and their following mutation must use one
+                // account, even when another workspace replaces the shared
+                // machine credential between requests. Scope checks occur in
+                // the vault again after a token refresh, before HTTP admission.
+                let credential = await vault.generation(.youtube)
+                let boundary = ProviderAPI { provider, request in
+                    guard provider == .youtube else { throw ProviderFailure(.invalidRequest) }
+                    var scopes: Set<String> = ["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.force-ssl"]
+                    if (request.httpMethod ?? "GET") == "GET" { scopes.insert("https://www.googleapis.com/auth/youtube.readonly") }
+                    return try await vault.send(provider, request: request, expectedGeneration: credential,
+                                                authorizationIsCurrent: lease.isCurrent, requiredAnyScope: scopes)
+                }
                 let result = try await operation(boundary)
+                let currentCredential = await vault.generation(.youtube)
+                guard lease.isCurrent(), currentCredential == credential else { throw CancellationError() }
                 guard let self, self.isCurrent(.youtube, generation) else { return }
                 var event: ProviderEvent?, stream: YouTubeLiveStream?, state = ProviderSchedulingReceipt.State.acknowledged
                 switch result {

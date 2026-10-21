@@ -7,6 +7,14 @@ private final class SchedulingCredentials: ProviderCredentialStore, @unchecked S
     func string(for item: KeychainStore.Item) -> String? { lock.withLock { values[String(reflecting: item)] } }
     func set(_ value: String, for item: KeychainStore.Item) -> Bool { lock.withLock { values[String(reflecting: item)] = value }; return true }
     func remove(_ item: KeychainStore.Item) { _ = lock.withLock { values.removeValue(forKey: String(reflecting: item)) } }
+    func expireYouTubeToken() {
+        lock.withLock {
+            let key = String(reflecting: KeychainStore.Item.provider(.youtube, field: .tokens))
+            var token = try! JSONDecoder().decode(ProviderOAuthToken.self, from: Data(values[key]!.utf8))
+            token.expiresAt = .distantPast
+            values[key] = String(decoding: try! JSONEncoder().encode(token), as: UTF8.self)
+        }
+    }
 }
 @MainActor private final class SchedulingRestream: ProviderRestreamBoundary {
     var hasProviderAuthorization = false
@@ -26,6 +34,8 @@ private actor SchedulingHTTP {
     var eventEntered = false
     var eventGate: CheckedContinuation<Void, Never>?
     var failEvent = false
+    var ownedReadHook: (@Sendable () -> Void)?
+    func afterOwnedRead(_ hook: @escaping @Sendable () -> Void) { ownedReadHook = hook }
     func configureEvent(hold: Bool = false, fail: Bool = false) { holdEvent = hold; failEvent = fail; eventEntered = false }
     func releaseEvent() { holdEvent = false; eventGate?.resume(); eventGate = nil }
     func configure(failBind: Bool = false, holdCreate: Bool = false, hideUpcoming: Bool = false) {
@@ -38,7 +48,13 @@ private actor SchedulingHTTP {
         let path = call.url!.path, method = call.httpMethod ?? "GET"
         let query = URLComponents(url: call.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         var object: [String: Any], status = 200
-        if path == "/youtube/v3/channels" { object = ["items": [["id": "owner", "snippet": ["title": "Owner"]]]] }
+        if call.url?.host == "oauth2.googleapis.com" {
+            object = ["access_token": "refreshed-readonly", "expires_in": 3600,
+                      "scope": "https://www.googleapis.com/auth/youtube.readonly"]
+        } else if path == "/youtube/v3/channels" {
+            object = ["items": [["id": "owner", "snippet": ["title": "Owner"]]]]
+            let hook = ownedReadHook; ownedReadHook = nil; hook?()
+        }
         else if path == "/youtube/v3/liveStreams" {
             if method == "POST", holdCreate { createEntered = true; await withCheckedContinuation { createGate = $0 } }
             if method == "POST" { createdStreamCount += 1 }
@@ -75,10 +91,11 @@ private actor SchedulingHTTP {
         for _ in 0..<1000 { if await predicate() { return }; try? await Task.sleep(for: .milliseconds(2)) }
         preconditionFailure("Native scheduling fixture did not settle", file: file, line: line)
     }
-    @MainActor private static func session(_ http: SchedulingHTTP, directory: URL, scopes: [String] = ManagedProvider.youtube.scopes) async throws -> (ProviderAccountSession, ProviderTokenVault) {
-        let vault = ProviderTokenVault(keychain: SchedulingCredentials(), transport: { try await http.send($0) })
+    @MainActor private static func session(_ http: SchedulingHTTP, directory: URL, scopes: [String] = ManagedProvider.youtube.scopes,
+                                         credentials: SchedulingCredentials = SchedulingCredentials()) async throws -> (ProviderAccountSession, ProviderTokenVault) {
+        let vault = ProviderTokenVault(keychain: credentials, transport: { try await http.send($0) })
         let generation = try await vault.configure(.youtube, clientID: "fixture-public")
-        try await vault.accept(.init(access: "SECRET_ACCESS", expiresAt: Date().addingTimeInterval(3600), scopes: scopes),
+        try await vault.accept(.init(access: "SECRET_ACCESS", refresh: "SECRET_REFRESH", expiresAt: Date().addingTimeInterval(3600), scopes: scopes),
                                provider: .youtube, generation: generation)
         let session = ProviderAccountSession(restream: SchedulingRestream(), vault: vault, pendingDirectory: directory)
         await until { session.snapshot(.youtube).hasCredential }
@@ -264,7 +281,22 @@ private actor SchedulingHTTP {
         precondition(readOnly.showScheduling.targets.map(\.state) == [.blocked, .manualRequired])
         check(await readHTTP.requests().allSatisfy { $0.httpMethod != "POST" })
         readOnly.shutdown()
-        print("PASS: actual show coordinator grouped one insert per channel, independent manual/blocked/acknowledged/existing-ID outcomes, stable IDs across refresh and repeated submission, no binding/output mutation, uncertainty/cancel/profile replacement/late HTTP fences and read-only grants")
+        let scopeHTTP = SchedulingHTTP(), credentials = SchedulingCredentials()
+        let (scopeChange, scopeVault) = try await session(scopeHTTP, directory: root.appendingPathComponent("show-refreshed-scope"), credentials: credentials)
+        scopeChange.refresh(.youtube); await until { !scopeChange.snapshot(.youtube).isWorking }
+        // The fresh ownership GET succeeds under the original grant. Expiry
+        // before POST then forces a real vault refresh whose write grant is
+        // absent; a stale UI scope must never authorize that mutation.
+        await scopeHTTP.afterOwnedRead { credentials.expireYouTubeToken() }
+        scopeChange.showScheduling.schedule(.init(title: "Lost write grant"), timezone: "UTC", destinations: [first, manual])
+        await until { !scopeChange.showScheduling.running }
+        precondition(scopeChange.showScheduling.targets.map(\.state) == [.blocked, .manualRequired])
+        check(await scopeHTTP.requests().filter { $0.url?.host == "oauth2.googleapis.com" }.count == 1)
+        check(await scopeHTTP.requests().allSatisfy { $0.url?.path != "/youtube/v3/liveBroadcasts" || $0.httpMethod != "POST" })
+        check(await scopeVault.scopes(.youtube) == ["https://www.googleapis.com/auth/youtube.readonly"])
+        precondition(scopeChange.pending.document.records.isEmpty)
+        scopeChange.shutdown()
+        print("PASS: actual show coordinator grouped one insert per channel, independent manual/blocked/acknowledged/existing-ID outcomes, stable IDs across refresh and repeated submission, no binding/output mutation, uncertainty/cancel/profile replacement/late HTTP fences, read-only grants and zero creation POST after refreshed write-scope loss")
     }
     @MainActor static func catalog(_ root: URL) throws {
         let directory = root.appendingPathComponent("catalog")
