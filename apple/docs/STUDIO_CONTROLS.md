@@ -28,8 +28,11 @@ availability, and never replays missed commands on reconnect.
 
 The catalog covers scene selection, Take/Revert, layer and camera/PIP visibility,
 audio mute/monitor/bus controls, media/playlist/sound transport, queued comments
-and output start/stop. Guest slots remain visibly unavailable until their actual
-controllers exist; the editor cannot bind those notices.
+and output start/stop. The native guest controller also supplies room actions and
+current guest admission, Program/Monitor, screen approval, reconnect and removal
+commands. Bindings target stable resource IDs; removed guests retain missing
+mappings, and commands resolve against the current admitted connection before
+execution.
 
 Settings > Application offers interface text size, native increased contrast,
 and reduced UI motion. System Reduce Motion also suppresses UI animations. These

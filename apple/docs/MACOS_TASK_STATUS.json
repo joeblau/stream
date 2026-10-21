@@ -587,9 +587,9 @@
       "title": "[macOS][D01] Add configurable shortcuts and a command palette for studio actions",
       "url": "https://github.com/joeblau/stream/issues/88",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "local original criteria verified; publication pending",
       "remaining": [
-        "Physical keyboard and arbitrary third-party foreground-app global shortcuts; full native accessibility acceptance. Owned foreground-app synthetic WindowServer/Carbon registration tests pass."
+        "Publish the reviewed combined implementation and reconcile the GitHub issue after merge. Controlled native local and owned-foreground global shortcut validation covers the original command, binding and feedback criteria; broader physical-key and accessibility qualification remains tracked separately."
       ]
     },
     {
@@ -698,9 +698,9 @@
       "title": "[macOS][EP05] Graphics, titles, presentations, and web overlays",
       "url": "https://github.com/joeblau/stream/issues/52",
       "githubState": "open",
-      "completion": "epic depends on open feature acceptance",
+      "completion": "combined production workflow validation pending",
       "remaining": [
-        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+        "Child implementation tasks are closed. The original simultaneous streaming, recording and staged editing/Take/Revert integration criterion still needs one combined actual-media proof; separate component fixtures do not close this epic."
       ]
     },
     {
@@ -731,9 +731,9 @@
       "title": "[macOS][EP01] One-window workspace and media foundations",
       "url": "https://github.com/joeblau/stream/issues/48",
       "githubState": "open",
-      "completion": "epic depends on open feature acceptance",
+      "completion": "combined production workflow validation pending",
       "remaining": [
-        "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
+        "Child implementation tasks are closed. The original simultaneous streaming, recording and staged editing/Take/Revert integration criterion still needs one combined actual-media proof; separate component fixtures do not close this epic."
       ]
     },
     {
