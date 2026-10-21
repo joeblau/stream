@@ -236,8 +236,8 @@ final class StreamController: ObservableObject {
     }
     func reserveRecordingEncoders(_ id: UUID, count: Int, canvas: OutputCanvas) -> String? {
         if canvas == .secondary {
-            guard secondaryCanvasAvailable else { return "Take a configured secondary layout to Program before recording it." }
-            guard IsolatedVideoBudget.current.qualified else { return "Additional canvas recording is not yet qualified on this Mac class. Run the native multi-encoder qualification first." }
+            guard secondaryCanvasAvailable else { return "Take a configured secondary layout to Program before starting this video output." }
+            guard IsolatedVideoBudget.current.qualified else { return "Additional canvas video output is not yet qualified on this Mac class. Run the native multi-encoder qualification first." }
             if let error = canvasStartError(destinations: [.init(name: "Secondary Recording", canvas: .secondary)]) { return error }
         }
         return recordingEncoderReservations.reserve(id, encoders: count, publishing: activePublishingEncoderCount)
