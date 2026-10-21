@@ -107,7 +107,7 @@ for suffix in ['', '.entered', '.release']:
     (folder/('retirement-gate'+suffix)).unlink(missing_ok=True)
 PYHELPER
 swiftc -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
-  StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift "$LIFECYCLE_DIR/BrowserLifecycleHelper.swift" \
+  StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift StreamMac/BrowserWidgetRasterizer.swift "$LIFECYCLE_DIR/BrowserLifecycleHelper.swift" \
   -o "$HELPER_APP/Contents/MacOS/StreamBrowserAudioHelper"
 # Owned LS app + exact-PID private IPC only. No capture, install or codesign
 # command; Swift's normal executable link behavior is unchanged.
