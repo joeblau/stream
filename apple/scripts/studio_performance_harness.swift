@@ -16,19 +16,38 @@ private final class ArrivalProbe: @unchecked Sendable {
     private var lastPTS: Double?
     private var lastArrival: Double?
     private var monotonic = true
-    func receive(_ frame: CompositedFrame, warmingFrames: Int) {
-        guard frame.sequence > warmingFrames else { return }
+    private var accepting = true
+    private var sourceEnd: CMTime = .invalid
+    func receive(_ frame: CompositedFrame, warmingFrames: Int, recording: ProgramRecordingSession) {
         let arrival = CMClockGetTime(CMClockGetHostTimeClock()).seconds
         lock.lock(); defer { lock.unlock() }
+        guard accepting else { return }
+        recording.appendVideo(frame.sampleBuffer)
+        sourceEnd = frame.presentationTime + frame.frameDuration
+        guard frame.sequence > warmingFrames else { return }
         if let lastPTS, frame.presentationTime.seconds <= lastPTS { monotonic = false }
         if firstPTS == nil { firstPTS = frame.presentationTime.seconds; firstArrival = arrival }
         lastPTS = frame.presentationTime.seconds; lastArrival = arrival; count += 1
+    }
+    // Closing admission under the same lock fences an in-flight sink callback;
+    // no frame can enter the recorder after this source frontier is returned.
+    func closeVideo() -> CMTime {
+        lock.lock(); defer { lock.unlock() }
+        accepting = false
+        return sourceEnd
     }
     func snapshot() -> (count: Int, error: Double, monotonic: Bool) {
         lock.lock(); defer { lock.unlock() }
         let error = abs(((lastPTS ?? 0) - (firstPTS ?? 0)) - ((lastArrival ?? 0) - (firstArrival ?? 0)))
         return (count, error, monotonic)
     }
+}
+
+private final class AudioFinishBoundary: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: CMTime?
+    func set(_ time: CMTime) { lock.lock(); value = time; lock.unlock() }
+    func snapshot() -> CMTime? { lock.lock(); defer { lock.unlock() }; return value }
 }
 
 private final class RecordingFailureFinalizer: @unchecked Sendable {
@@ -59,6 +78,8 @@ private struct WorkloadResult: Codable {
     var peakMemoryBytes: Int64
     var recording: ProgramRecordingSession.Progress
     var recordingComplete: Bool
+    var producedAudioFrames: Int64
+    var sourceAudioTailCoverageSeconds: Double
 }
 
 @main struct StudioPerformanceHarness {
@@ -93,19 +114,30 @@ private struct WorkloadResult: Codable {
             finalizer.install(recording)
             let token = UUID()
             await engine.addSink(token: token, capacity: 2) { frame in
-                probe.receive(frame, warmingFrames: fps)
-                recording.appendVideo(frame.sampleBuffer)
+                probe.receive(frame, warmingFrames: fps, recording: recording)
             }
             // A deliberately slow consumer exercises isolated drop-oldest fanout.
             await engine.addSink(token: UUID(), capacity: 1) { _ in Thread.sleep(forTimeInterval: 0.080) }
             var before = StudioDiagnosticSnapshot(); before.sampleProcess()
             let clock = ContinuousClock(); let started = clock.now
-            let sourceStart = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-            let audio = Task {
-                for index in 0..<1000 {
-                    if Task.isCancelled { break }
-                    recording.appendAudio(try ProgramRecordingFixtures.audio(at: sourceStart + Double(index) / 100 - 10_000))
-                    try await clock.sleep(until: started.advanced(by: .milliseconds((index + 1) * 10)))
+            let sourceStart = CMTimeConvertScale(CMClockGetTime(CMClockGetHostTimeClock()), timescale: 48_000, method: .roundTowardNegativeInfinity)
+            let audioBoundary = AudioFinishBoundary()
+            // Independent PCM follows its original 48 kHz source grid while
+            // the engine runs. A fixed 1000 chunks ended at 10 s, before the
+            // last actual frame's nominal endpoint (often 10.02–10.04 s).
+            let audio = Task { () throws -> Int64 in
+                var frames: Int64 = 0
+                while true {
+                    let pts = sourceStart + CMTime(value: frames, timescale: 48_000)
+                    if let boundary = audioBoundary.snapshot(), pts >= boundary { return frames }
+                    let sample = try ProgramRecordingFixtures.audio(at: Double(frames) / 48_000, timestampBase: 0, constantTone: true)
+                    var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 48_000), presentationTimeStamp: pts, decodeTimeStamp: .invalid)
+                    var timed: CMSampleBuffer?
+                    let status = CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sample, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &timed)
+                    guard status == noErr, let timed else { throw CocoaError(.fileReadUnknown) }
+                    recording.appendAudio(timed)
+                    frames += Int64(sample.numSamples)
+                    try await clock.sleep(until: started.advanced(by: .milliseconds(frames * 1000 / 48_000)))
                 }
             }
             await engine.run(scene: scene, canvasSize: CGSize(width: width, height: height), frameRate: fps)
@@ -117,9 +149,15 @@ private struct WorkloadResult: Codable {
                 let delta = deadline.duration(to: clock.now).components
                 maxDelay = max(maxDelay, Double(delta.seconds) * 1000 + Double(delta.attoseconds) / 1e15)
             }
-            try await audio.value
             await engine.stop()
             await engine.removeSink(token)
+            let finalVideoSourceEnd = probe.closeVideo()
+            precondition(finalVideoSourceEnd.isNumeric, "No actual video frontier was delivered")
+            recording.sealVideo()
+            audioBoundary.set(finalVideoSourceEnd)
+            let audioFrames = try await audio.value
+            let sourceAudioTailCoverage = (sourceStart + CMTime(value: audioFrames, timescale: 48_000) - finalVideoSourceEnd).seconds
+            precondition(sourceAudioTailCoverage >= 0, "Independent PCM must cover the final submitted video source endpoint")
             let metrics = await engine.metricsSnapshot()
             let result = await withCheckedContinuation { continuation in recording.finish { continuation.resume(returning: $0) } }
             var after = StudioDiagnosticSnapshot(); after.sampleProcess()
@@ -137,7 +175,9 @@ private struct WorkloadResult: Codable {
                 seconds: Double(measured.seconds) + Double(measured.attoseconds) / 1e18, compositor: metrics,
                 healthySinkFrames: arrival.count, hostClockDurationErrorSeconds: arrival.error,
                 maxMainActorSchedulingDelayMilliseconds: maxDelay, processCPUSeconds: after.processCPUSeconds - before.processCPUSeconds,
-                peakMemoryBytes: after.peakMemoryBytes, recording: result.progress, recordingComplete: result.completed))
+                peakMemoryBytes: after.peakMemoryBytes, recording: result.progress, recordingComplete: result.completed,
+                producedAudioFrames: audioFrames, sourceAudioTailCoverageSeconds: sourceAudioTailCoverage))
+            print("SOURCE GRID: \(width)x\(height) \(fps) fps, \(audioFrames) independent PCM frames, final video source end \(finalVideoSourceEnd.seconds), PCM tail coverage \(sourceAudioTailCoverage) seconds, recording complete \(result.completed)")
             print("MEASURED: \(width)x\(height) \(fps) fps, \(scene.layers.count) layers, achieved \(metrics.achievedFPS), mean render \(metrics.meanRenderMilliseconds) ms, host-clock error \(arrival.error), main actor max lag \(maxDelay) ms")
         }
         struct Report: Codable {
