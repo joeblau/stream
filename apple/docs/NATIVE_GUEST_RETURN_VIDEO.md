@@ -163,7 +163,9 @@ Actual owned Chrome155 relay reports negotiated goog-remb and current-source
 RR. A 24 second probe lowered the real VT target under measured capacity,
 retaining 320×180 without invented capacity. The exact static-image regression
 also stays active at a fresh 8,400 bps REMB and 4,000 bps codec target, decodes its
-late white update, and passes strict 29.37 ms rendered/18.80 ms element A/V cues.
+late white update, and measures 29.37 ms raw-track recorder / 18.80 ms
+independent element-video plus separate audio-worklet consumer cue differences.
+Those observations do not qualify element-rendered or hardware-output timing.
 Actual partial-FU-A loss and next-IDR decode recovery use the existing bounded
 network fault seam. The standalone policy checks additionally exercise RR-loss
 and SDK-backpressure downsteps; actual VT high-to-low replacement proves
