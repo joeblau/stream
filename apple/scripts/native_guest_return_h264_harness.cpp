@@ -43,6 +43,7 @@ static void roundTrip(const std::vector<size_t> &sizes) {
         }
     }
     assert(octets == payloadBytes && decoded == data);
+    assert(rtpBytes(data.data(), data.size()) == payloadBytes + 12 * captured.size());
 }
 int main() {
     const uint64_t sourceTime = 100ULL << 32;
@@ -53,7 +54,10 @@ int main() {
     assert(reportRtp(1234, 0, 1, 48000) == 1234);
     for (const auto &sizes : std::vector<std::vector<size_t>>{{2}, {1188}, {1189}, {2373}, {2374}, {65532}, {7, 6, 4000}, std::vector<size_t>(64, 2)}) roundTrip(sizes);
     AccessUnit au;
-    const auto reject = [&](const std::vector<uint8_t> &bytes) { assert(!parse(bytes.data(), bytes.size(), au)); };
+    const auto reject = [&](const std::vector<uint8_t> &bytes) {
+        assert(!parse(bytes.data(), bytes.size(), au));
+        assert(rtpBytes(bytes.data(), bytes.size()) == 0);
+    };
     reject({}); reject({0, 0, 0, 1}); reject({1, 0, 0, 0, 1, 0x65});
     reject({0, 0, 1, 0x65, 0x55});
     reject({0, 0, 0, 1, 0x65, 0x55, 0, 0, 1, 0x61, 0x55});
@@ -70,6 +74,9 @@ int main() {
     assert(!packetize(data.data(), au, 1, 2, sequence, packets, octets,
         [&](const uint8_t *, size_t) { return ++attempts < 2; }));
     assert(attempts == 2 && sequence == 102 && packets == 1 && octets == 1188);
+    assert(rtpBytes(data.data(), data.size()) > octets + 12 * packets);
+    assert(sequence == 102 && packets == 1 && octets == 1188); // Forecast reserves nothing.
     std::cout << "PASS: actual bounded H264 parser/packetizer, FU-A byte round trips, RTP marker/SSRC/PTS, sequence wrap, 64NAL/64KiB/1200byte caps, malformed rejection and failed-send sequence consumption\n";
     std::cout << "PASS: sender-report send-time clock extrapolation preserves original packet mapping across fractional, negative and NTP/RTP rollover cases\n";
+    std::cout << "PASS: exact next-AU RTP-byte admission charges match captured shipping packets without changing sequence or successful partial-send counters\n";
 }
