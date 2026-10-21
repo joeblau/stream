@@ -25,6 +25,19 @@ typedef struct {
 typedef struct {
     int selected, local_type, remote_type, udp;
 } SGIcePair;
+// Authenticated current outbound-video RTCP only. Ages are monotonic; -1
+// means absent/invalid. RR loss is fraction/256; jitter is in 90kHz ticks.
+// REMB is accepted only when negotiated and scoped to this one video SSRC.
+typedef struct {
+    uint64_t rr_reports, remb_reports;
+    int64_t rr_age_milliseconds, remb_age_milliseconds;
+    uint32_t extended_highest_sequence, jitter_90khz;
+    int32_t cumulative_lost;
+    uint8_t fraction_lost;
+    uint64_t remb_bits_per_second;
+    uint32_t buffered_bytes;
+    int remb_negotiated;
+} SGReturnVideoFeedback;
 // Prototype transport binds loopback only and uses no STUN/TURN service. Caller
 // must supply a current explicit admission generation before constructing it.
 SGReceiver *SGReceiverCreate(uint64_t admitted_generation, const char *camera_mid,
@@ -46,6 +59,7 @@ int SGReceiverHostReady(SGReceiver *);
 // Explicit host-offer capability only; receive-only prototype stays unchanged.
 int SGReceiverEnableReturnAudio(SGReceiver *, uint64_t admitted_generation);
 int SGReceiverEnableReturnVideo(SGReceiver *, uint64_t admitted_generation);
+SGReturnVideoFeedback SGReceiverReturnVideoFeedback(SGReceiver *, uint64_t admitted_generation);
 // One bounded four-byte Annex-B H264 access unit, original90kHz RTP/NTP map.
 // Partial transmission consumes its RTP timestamp; callers must not retry it.
 int SGReceiverSendReturnH264(SGReceiver *, uint64_t admitted_generation,

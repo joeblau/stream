@@ -1,6 +1,7 @@
 #include "GuestReceive.h"
 #include "GuestReturnH264.hpp"
 #include "GuestReturnClock.hpp"
+#include "GuestReturnFeedback.hpp"
 #include <rtc/rtc.hpp>
 #include <rtc/version.h>
 #include <algorithm>
@@ -45,6 +46,10 @@ struct State {
     SGMediaCallback media;
     SGSignalCallback signal;
     void *context;
+    uint32_t returnVideoSSRC = 0;
+    bool returnVideoRembNegotiated = false;
+    stream_guest_feedback::Update videoFeedback;
+    Clock::time_point videoRRTime{}, videoRembTime{};
 };
 struct ValidatedRTP {
     rtc::message_ptr packet;
@@ -146,6 +151,8 @@ class Guard final : public rtc::MediaHandler {
         const auto n = message->size();
         if (n < 4 || n > 4096) { ++stats.rejected; return; }
         const auto p = reinterpret_cast<const uint8_t *>(message->data());
+        stream_guest_feedback::Update feedback;
+        if (!stream_guest_feedback::parse(p, n, ssrc, state->returnVideoSSRC, feedback)) { ++stats.rejected; return; }
         size_t offset = 0, packets = 0;
         rtc::message_vector reports;
         while (offset < n) {
@@ -157,6 +164,21 @@ class Guard final : public rtc::MediaHandler {
                 reports.push_back(rtc::make_message(message->begin() + offset, message->begin() + offset + count, rtc::Message::Control));
             }
             offset += count;
+        }
+        const auto now = Clock::now();
+        auto &current = state->videoFeedback;
+        if (feedback.rr_reports && (!current.rr_reports || int32_t(feedback.extended_highest_sequence - current.extended_highest_sequence) >= 0)) {
+            current.rr_reports += std::min(feedback.rr_reports, UINT64_MAX - current.rr_reports);
+            current.fraction_lost = feedback.fraction_lost;
+            current.cumulative_lost = feedback.cumulative_lost;
+            current.extended_highest_sequence = feedback.extended_highest_sequence;
+            current.jitter_90khz = feedback.jitter_90khz;
+            state->videoRRTime = now;
+        }
+        if (feedback.remb_reports && state->returnVideoRembNegotiated) {
+            current.remb_reports += std::min(feedback.remb_reports, UINT64_MAX - current.remb_reports);
+            current.remb_bits_per_second = feedback.remb_bits_per_second;
+            state->videoRembTime = now;
         }
         for (auto &report : reports) {
             rtc::message_vector one{report}; receiving.incoming(one, send);
@@ -443,6 +465,7 @@ extern "C" int SGReceiverAnswer(SGReceiver *receiver, const char *sdp) {
         rtc::Description answer(sdp, "answer");
         if (answer.mediaCount() != 4 || !answer.hasApplication()) return 0;
         std::array<uint32_t, 3> ssrcs{};
+        bool rembNegotiated = false;
         for (int i = 0; i < answer.mediaCount(); ++i) {
             auto entry = answer.media(i);
             if (std::holds_alternative<rtc::Description::Application *>(entry)) continue;
@@ -458,6 +481,8 @@ extern "C" int SGReceiverAnswer(SGReceiver *receiver, const char *sdp) {
             // Every negotiated payload must be the primary codec we offered.
             if (media->payloadTypes().size() != 1 || media->payloadTypes()[0] != pt) return 0;
             if (role != SG_AUDIO && !qualifiedH264(*codec)) return 0;
+            if (role == SG_CAMERA && receiver->returnVideo)
+                rembNegotiated = std::find(codec->rtcpFbs.begin(), codec->rtcpFbs.end(), "goog-remb") != codec->rtcpFbs.end();
             ssrcs[role] = sources[0];
         }
         if (!ssrcs[0] || !ssrcs[1] || !ssrcs[2] || ssrcs[0] == ssrcs[1] || ssrcs[0] == ssrcs[2] || ssrcs[1] == ssrcs[2]) return 0;
@@ -469,6 +494,8 @@ extern "C" int SGReceiverAnswer(SGReceiver *receiver, const char *sdp) {
             std::lock_guard lock(receiver->state->mutex);
             if (!receiver->state->active || !receiver->host || receiver->configured) return 0;
             receiver->configured = true; receiver->ssrcs = ssrcs;
+            receiver->state->returnVideoSSRC = receiver->returnVideo ? receiver->returnVideoSSRC : 0;
+            receiver->state->returnVideoRembNegotiated = rembNegotiated;
             for (int role = 0; role < 3; ++role) {
                 auto guard = std::make_shared<Guard>(receiver->state, role, role == SG_AUDIO ? 111 : 96, ssrcs[role]);
                 receiver->guards[role] = guard; receiver->tracks[role]->setMediaHandler(guard);
@@ -493,6 +520,30 @@ extern "C" int SGReceiverEnableReturnVideo(SGReceiver *receiver, uint64_t genera
     std::lock_guard lock(receiver->state->mutex);
     if (!receiver->state->active || generation != receiver->state->generation || receiver->configured || receiver->host) return 0;
     receiver->returnVideo = true; return 1;
+}
+extern "C" SGReturnVideoFeedback SGReceiverReturnVideoFeedback(SGReceiver *receiver, uint64_t generation) {
+    SGReturnVideoFeedback result{};
+    result.rr_age_milliseconds = result.remb_age_milliseconds = -1;
+    if (!receiver) return result;
+    try {
+        std::lock_guard lock(receiver->state->mutex);
+        if (!receiver->state->active || generation != receiver->state->generation || !receiver->returnVideo ||
+            !receiver->host || !receiver->configured || !receiver->control || !receiver->control->isOpen() ||
+            receiver->peer->state() != rtc::PeerConnection::State::Connected) return result;
+        const auto &feedback = receiver->state->videoFeedback;
+        const auto now = Clock::now();
+        result.rr_reports = feedback.rr_reports; result.remb_reports = feedback.remb_reports;
+        if (feedback.rr_reports) result.rr_age_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now - receiver->state->videoRRTime).count();
+        if (feedback.remb_reports) result.remb_age_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now - receiver->state->videoRembTime).count();
+        result.fraction_lost = feedback.fraction_lost; result.cumulative_lost = feedback.cumulative_lost;
+        result.extended_highest_sequence = feedback.extended_highest_sequence; result.jitter_90khz = feedback.jitter_90khz;
+        result.remb_bits_per_second = feedback.remb_bits_per_second;
+        result.remb_negotiated = receiver->state->returnVideoRembNegotiated;
+        if (const auto track = receiver->tracks[SG_CAMERA]) result.buffered_bytes = uint32_t(std::min(uint64_t(track->bufferedAmount()), uint64_t(UINT32_MAX)));
+        return result;
+    } catch (...) {
+        result = {}; result.rr_age_milliseconds = result.remb_age_milliseconds = -1; return result;
+    }
 }
 extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generation,
                                         const uint8_t *data, size_t bytes, uint32_t timestamp, uint64_t ntp) {
