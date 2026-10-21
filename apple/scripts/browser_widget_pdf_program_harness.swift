@@ -68,7 +68,7 @@ private final class Frames: @unchecked Sendable {
         let initial = hosts.map { $0.metrics.succeeded }
         try await Task.sleep(for: .seconds(2))
         require(zip(hosts, initial).allSatisfy { $0.0.metrics.succeeded > $0.1 + 10 }, "A later actual host starved under sustained eight-host demand")
-        print("PASS eight actual legacy hosts sustain fresh alpha frames: \(hosts.map { $0.metrics.succeeded })")
+        print("PASS eight actual legacy hosts sustain fresh alpha frames: totals=\(hosts.map { $0.metrics.succeeded }), twoSecondDeltas=\(zip(hosts, initial).map { $0.0.metrics.succeeded - $0.1 })")
         let retained = hosts[0]
         for host in hosts.dropFirst() { host.stop() }
         hosts = [retained]; payloads = [payloads[0]]
