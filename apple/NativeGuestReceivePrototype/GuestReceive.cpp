@@ -1,4 +1,5 @@
 #include "GuestReceive.h"
+#include "GuestReturnH264.hpp"
 #include <rtc/rtc.hpp>
 #include <rtc/version.h>
 #include <algorithm>
@@ -231,7 +232,11 @@ struct SGReceiver {
     std::array<uint32_t, 3> ssrcs{};
     bool configured = false;
     bool host = false;
-    bool returnAudio = false, relayRequired = false, returnStarted = false;
+    bool returnAudio = false, returnVideo = false, relayRequired = false, returnStarted = false;
+    bool returnVideoStarted = false;
+    uint16_t returnVideoSequence = 0;
+    uint32_t returnVideoLastRTP = 0, returnVideoPackets = 0, returnVideoBytes = 0;
+    uint32_t returnVideoSSRC = 0;
     uint16_t returnSequence = 0;
     uint32_t returnSSRC = 0, returnLastRTP = 0, returnPackets = 0, returnBytes = 0;
     std::shared_ptr<rtc::DataChannel> control;
@@ -252,6 +257,8 @@ SGReceiver *createReceiver(uint64_t generation, const char *camera, const char *
         result->relayRequired = configuration.iceTransportPolicy == rtc::TransportPolicy::Relay;
         result->returnSSRC = 0x5354524dU ^ uint32_t(generation);
         if (!result->returnSSRC) result->returnSSRC = 1;
+        result->returnVideoSSRC = result->returnSSRC ^ 0x01000000U;
+        if (!result->returnVideoSSRC) result->returnVideoSSRC = 1;
         auto state = result->state;
         state->generation = generation; state->media = media; state->signal = signal; state->context = context;
         result->peer = std::make_shared<rtc::PeerConnection>(configuration);
@@ -398,9 +405,12 @@ extern "C" int SGReceiverStartHost(SGReceiver *receiver) {
                 if (receiver->returnAudio) audio.addSSRC(receiver->returnSSRC, "stream-return", "stream-return", "audio-return");
                 receiver->tracks[role] = receiver->peer->addTrack(audio);
             } else {
-                rtc::Description::Video video(receiver->mids[role], rtc::Description::Direction::RecvOnly);
+                rtc::Description::Video video(receiver->mids[role], role == SG_CAMERA && receiver->returnVideo ?
+                    rtc::Description::Direction::SendRecv : rtc::Description::Direction::RecvOnly);
                 video.addH264Codec(96, "profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1");
                 video.addExtMap(rtc::Description::Entry::ExtMap(1, "urn:ietf:params:rtp-hdrext:sdes:mid"));
+                if (role == SG_CAMERA && receiver->returnVideo)
+                    video.addSSRC(receiver->returnVideoSSRC, "stream-return", "stream-return", "video-return");
                 receiver->tracks[role] = receiver->peer->addTrack(video);
             }
         }
@@ -434,7 +444,8 @@ extern "C" int SGReceiverAnswer(SGReceiver *receiver, const char *sdp) {
             auto media = std::get<rtc::Description::Media *>(entry);
             int role = -1; for (int j = 0; j < 3; ++j) if (media->mid() == receiver->mids[j]) role = j;
             if (role < 0 || ssrcs[role] || media->direction() !=
-                (role == SG_AUDIO && receiver->returnAudio ? rtc::Description::Direction::SendRecv : rtc::Description::Direction::SendOnly) ||
+                ((role == SG_AUDIO && receiver->returnAudio) || (role == SG_CAMERA && receiver->returnVideo) ?
+                    rtc::Description::Direction::SendRecv : rtc::Description::Direction::SendOnly) ||
                 media->type() != (role == SG_AUDIO ? "audio" : "video")) return 0;
             const int pt = role == SG_AUDIO ? 111 : 96;
             const auto codec = media->rtpMap(pt); const auto sources = media->getSSRCs();
@@ -445,6 +456,10 @@ extern "C" int SGReceiverAnswer(SGReceiver *receiver, const char *sdp) {
             ssrcs[role] = sources[0];
         }
         if (!ssrcs[0] || !ssrcs[1] || !ssrcs[2] || ssrcs[0] == ssrcs[1] || ssrcs[0] == ssrcs[2] || ssrcs[1] == ssrcs[2]) return 0;
+        for (auto source : ssrcs) {
+            if ((receiver->returnAudio && source == receiver->returnSSRC) ||
+                (receiver->returnVideo && source == receiver->returnVideoSSRC)) return 0;
+        }
         {
             std::lock_guard lock(receiver->state->mutex);
             if (!receiver->state->active || !receiver->host || receiver->configured) return 0;
@@ -467,6 +482,53 @@ extern "C" int SGReceiverEnableReturnAudio(SGReceiver *receiver, uint64_t genera
     std::lock_guard lock(receiver->state->mutex);
     if (!receiver->state->active || generation != receiver->state->generation || receiver->configured || receiver->host) return 0;
     receiver->returnAudio = true; return 1;
+}
+extern "C" int SGReceiverEnableReturnVideo(SGReceiver *receiver, uint64_t generation) {
+    if (!receiver) return 0;
+    std::lock_guard lock(receiver->state->mutex);
+    if (!receiver->state->active || generation != receiver->state->generation || receiver->configured || receiver->host) return 0;
+    receiver->returnVideo = true; return 1;
+}
+extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generation,
+                                        const uint8_t *data, size_t bytes, uint32_t timestamp, uint64_t ntp) {
+    if (!receiver || !ntp) return 0;
+    stream_guest_return::AccessUnit unit;
+    if (!stream_guest_return::parse(data, bytes, unit)) return 0;
+    try {
+        std::lock_guard lock(receiver->state->mutex);
+        if (!receiver->state->active || generation != receiver->state->generation || !receiver->returnVideo ||
+            !receiver->host || !receiver->configured || !receiver->control || !receiver->control->isOpen() ||
+            receiver->peer->state() != rtc::PeerConnection::State::Connected) return 0;
+        auto track = receiver->tracks[SG_CAMERA];
+        if (!track || !track->isOpen() || track->bufferedAmount() > 16384) return 0;
+        if (receiver->relayRequired) {
+            rtc::Candidate local, remote;
+            if (!receiver->peer->getSelectedCandidatePair(&local, &remote) || local.type() != rtc::Candidate::Type::Relayed) return 0;
+        }
+        if (receiver->returnVideoStarted && int32_t(timestamp - receiver->returnVideoLastRTP) <= 0) return 0;
+        // A partial network failure consumes this source timestamp. Never
+        // replay a partially sent access unit; the Swift sender requests IDR.
+        receiver->returnVideoStarted = true; receiver->returnVideoLastRTP = timestamp;
+        const uint32_t ssrc = receiver->returnVideoSSRC;
+        const auto store32 = [](uint8_t *p, uint32_t value) { for (int i = 0; i < 4; ++i) p[i] = uint8_t(value >> (24 - 8 * i)); };
+        if (!stream_guest_return::packetize(data, unit, timestamp, ssrc,
+            receiver->returnVideoSequence, receiver->returnVideoPackets, receiver->returnVideoBytes,
+            [&](const uint8_t *packet, size_t count) {
+                if (track->bufferedAmount() > 16384) return false;
+                return track->send(rtc::binary(reinterpret_cast<const std::byte *>(packet),
+                                               reinterpret_cast<const std::byte *>(packet + count)));
+            })) return 0;
+        // Every frame publishes a compound source-clock SR/SDES. The shared
+        // CNAME aligns this camera return and the separate public Opus return.
+        rtc::binary sr(52); auto r = reinterpret_cast<uint8_t *>(sr.data());
+        std::memset(r, 0, sr.size()); r[0] = 128; r[1] = 200; r[3] = 6;
+        store32(r + 4, ssrc); store32(r + 8, uint32_t(ntp >> 32)); store32(r + 12, uint32_t(ntp));
+        store32(r + 16, timestamp); store32(r + 20, receiver->returnVideoPackets); store32(r + 24, receiver->returnVideoBytes);
+        r[28] = 129; r[29] = 202; r[31] = 5; store32(r + 32, ssrc);
+        r[36] = 1; r[37] = 13; std::memcpy(r + 38, "stream-return", 13);
+        (void)track->send(std::move(sr));
+        return 1;
+    } catch (...) { return 0; }
 }
 extern "C" int SGReceiverSendReturnOpus(SGReceiver *receiver, uint64_t generation,
                                          const uint8_t *data, size_t bytes, uint32_t timestamp, uint64_t ntp) {

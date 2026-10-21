@@ -45,6 +45,11 @@ int SGReceiverAnswer(SGReceiver *, const char *sdp);
 int SGReceiverHostReady(SGReceiver *);
 // Explicit host-offer capability only; receive-only prototype stays unchanged.
 int SGReceiverEnableReturnAudio(SGReceiver *, uint64_t admitted_generation);
+int SGReceiverEnableReturnVideo(SGReceiver *, uint64_t admitted_generation);
+// One bounded four-byte Annex-B H264 access unit, original90kHz RTP/NTP map.
+// Partial transmission consumes its RTP timestamp; callers must not retry it.
+int SGReceiverSendReturnH264(SGReceiver *, uint64_t admitted_generation,
+                            const uint8_t *, size_t, uint32_t rtp, uint64_t ntp);
 // One bounded already-encoded20ms Opus packet. Caller supplies its ORIGINAL
 // source-clock RTP/NTP mapping; the SDK owns SRTP/DTLS/ICE delivery.
 int SGReceiverSendReturnOpus(SGReceiver *, uint64_t admitted_generation,
