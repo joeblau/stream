@@ -25,7 +25,8 @@ CODE_SIGNING_ALLOWED=NO build`.
 The toolbar's show name opens the embedded project browser. Create, rename,
 duplicate, or archive shows; create independent or duplicated profiles. Selecting
 a show stages it. Apply stops local preview and reconstructs the studio only
-after streaming and recording stop. Creating or duplicating a show leaves the
+after publishing, recordings, guest video return and device outputs stop and
+release their resources. Creating or duplicating a show leaves the
 active output untouched. Local shows need no account.
 
 Desktop data lives in the app's Application Support `StreamStudio` folder:

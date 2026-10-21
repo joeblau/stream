@@ -63,7 +63,7 @@ struct ProjectBrowserView: View {
                 .font(.caption).foregroundStyle(.secondary)
             if workspace.pending != nil {
                 HStack {
-                    Text(workspace.canSwitch ? "Apply opens the staged show and stops local preview." : "Stop streaming and recording before applying the staged show.")
+                    Text(workspace.canSwitch ? "Apply opens the staged show and stops local preview." : "Stop publishing, guest video return and device outputs, and let recordings finish before applying the staged show.")
                         .font(.caption)
                     Spacer()
                     Button("Cancel") { workspace.pending = nil }
@@ -99,7 +99,7 @@ struct ProjectBrowserView: View {
         .sheet(isPresented: $showHistory) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Scene Backup History").font(.headline)
-                Text("Restoring replaces scenes and styles after stopping local preview. Stop streaming and recording first. Assets stay in the project.")
+                Text("Restoring replaces scenes and styles after stopping local preview. Stop publishing, guest video return and device outputs, and let recordings finish first. Assets stay in the project.")
                 List(workspace.sceneBackups) { backup in
                     HStack {
                         VStack(alignment: .leading) {
