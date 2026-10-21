@@ -530,6 +530,8 @@ extern "C" SGReturnVideoFeedback SGReceiverReturnVideoFeedback(SGReceiver *recei
         if (!receiver->state->active || generation != receiver->state->generation || !receiver->returnVideo ||
             !receiver->host || !receiver->configured || !receiver->control || !receiver->control->isOpen() ||
             receiver->peer->state() != rtc::PeerConnection::State::Connected) return result;
+        const auto track = receiver->tracks[SG_CAMERA];
+        if (!track || !track->isOpen()) return result;
         const auto &feedback = receiver->state->videoFeedback;
         const auto now = Clock::now();
         result.rr_reports = feedback.rr_reports; result.remb_reports = feedback.remb_reports;
@@ -539,7 +541,7 @@ extern "C" SGReturnVideoFeedback SGReceiverReturnVideoFeedback(SGReceiver *recei
         result.extended_highest_sequence = feedback.extended_highest_sequence; result.jitter_90khz = feedback.jitter_90khz;
         result.remb_bits_per_second = feedback.remb_bits_per_second;
         result.remb_negotiated = receiver->state->returnVideoRembNegotiated;
-        if (const auto track = receiver->tracks[SG_CAMERA]) result.buffered_bytes = uint32_t(std::min(uint64_t(track->bufferedAmount()), uint64_t(UINT32_MAX)));
+        result.buffered_bytes = uint32_t(std::min(uint64_t(track->bufferedAmount()), uint64_t(UINT32_MAX)));
         return result;
     } catch (...) {
         result = {}; result.rr_age_milliseconds = result.remb_age_milliseconds = -1; return result;
