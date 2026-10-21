@@ -280,7 +280,8 @@ A failed preliminary check or lost/sent/cancelled reply leaves remote state unkn
 | Native media | Mac15,8, Apple M3 Max, 16 CPUs, macOS 27.0.1; decoded H.264/AAC MP4, MOV/HEVC and WAV/M4A, static-source cadence, bounded failures and paired small canvas files | Specific local observations only. Other Macs, oldest deployment OS, physical capture/unplug, sustained thermal/network workloads remain unqualified. |
 | Platform builds | Unsigned StreamMac/shared suites on Apple Silicon and Intel CI; retained iOS simulator/shared checks | Build coverage does not qualify physical devices, signed sandbox installation or macOS 14 runtime behavior. |
 | Providers | Protocol validation and independent injected publishers; granted-scope YouTube/Twitch account/public-chat HTTP/WebSocket fixtures; Restream public-event fixtures | No live-provider account, ingest, public feed, remote completion or audience acceptance is qualified. Missing approvals/scopes stay gated. |
-| Optional adapters/outputs | Explicit prerequisites, native lifecycle and bounded-frame fixtures; native virtual-camera/microphone source builds | Installed/signed device consumers, NDI/DeckLink/Zoom/browser guest media and physical display/AirPlay behavior remain separate gates. |
+| Native interviews | One deliberately admitted camera/screen/audio peer, saved slots/layouts, stereo public-show mix-minus, and native Program/ISO files; see [native control](NATIVE_INTERVIEW_CONTROL.md), [recordings](NATIVE_INTERVIEW_PROGRAM_ISO.md) and [return audio](NATIVE_GUEST_RETURN_AUDIO.md) | Return video, addressed private talkback, deployed TURN/Internet/mobile, long calls, multiple simultaneous guests and signed installation remain open. Controlled local evidence does not qualify these workloads. |
+| Optional adapters/outputs | Explicit prerequisites, native lifecycle and bounded-frame fixtures; native virtual-camera/microphone source builds | Installed/signed device consumers, NDI/DeckLink/Zoom and physical display/AirPlay behavior remain separate gates. |
 | Controllers and transfer | Shared dispatcher, stable IDs, actual local sockets and profile/package/recovery fixtures; Stream Deck SDK simulation | Physical Stream Deck/Plus, signed helper pairing, native share/editor/picker and VoiceOver flows still need manual qualification. |
 
 The supported deployment floor is macOS 14; it is not a certification matrix for every Mac or provider. Reproduce the linked native harnesses and [performance baseline](PERFORMANCE_BASELINE.json) with Mac model, OS/toolchain, profile dimensions and diagnostic output. Export Diagnostics for bounded allowlisted counters/configuration and recent lifecycle events; inspect recording journals for actual track/gap/failure evidence. Do not include credentials or captured media in a support handoff unless deliberately chosen and redacted.
@@ -305,3 +306,19 @@ This explicitly produces a signed, unnotarized development qualification artifac
 For the current desktop entitlements, install a **macOS Developer ID** provisioning profile authorizing `com.joeblau.StreamMac`, `group.com.joeblau.Stream`, and the declared Keychain access group. Set `STREAM_PROVISIONING_PROFILE` to its exact name or UUID; the release script passes it to the app-only `STREAM_MAC_PROVISIONING_PROFILE` build setting and includes it in export options. An iOS development profile cannot satisfy this requirement. Keep these entitlements intact when provisioning; removing them would change access to existing credentials and legacy settings.
 
 On 2026-10-02 the local Developer ID certificate was present, but no matching macOS profile was installed and the Xcode developer-account session could not load valid credentials. Manual archive stopped at provisioning; automatic signing also rejected the explicit Developer ID identity. A signed/notarized artifact has therefore **not** been qualified. The unsigned app and native integration fixtures build and pass with Xcode 27.2 (27B5019j).
+
+On 2026-10-21 the combined unsigned app and embedded helper/camera bundle audit
+passed on Mac15,8, macOS 27.2 (26B118), Xcode 27.2 (27B5038j). All 562 shared
+tests in 80 suites passed. A read-only provisioning inventory found five macOS
+profiles but no unexpired profile matching this app, camera extension or browser
+helper; signed installation/notarization remains unqualified. The NDI/DeckLink
+probe still found neither SDK headers nor runtimes, with Screen Recording access
+available. No driver, extension or service was installed or deployed.
+
+Diagnostics sampling now belongs to the active runtime and continues with its
+panel hidden or window detached. Native workspace checks cover sampling before
+any view is created and stopping old samples after profile replacement, including
+failed replacement. Guest source health distinguishes unregistered, unapproved,
+waiting, future-buffered and stale camera frames; a static approved screen stays
+available until explicitly stopped. The frame-store fixture checks each state,
+exact per-role accepted counts, fresh-generation reset and permanent retirement.
