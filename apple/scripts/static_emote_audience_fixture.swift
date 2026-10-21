@@ -106,10 +106,10 @@ private actor EmoteFixtureLoader {
         return bytes as Data
     }
     private static func image() -> CGImage { try! StudioStaticEmoteLoader.decode(imageData()) }
-    private static func render(_ scene: Scene, renderer: SceneRenderer) -> CompositedFrame {
+    private static func render(_ scene: Scene, renderer: SceneRenderer, index: Int64 = 0) -> CompositedFrame {
         renderer.render(scene: scene, overlayContext: .empty, canvasSize: .init(width: 640, height: 360),
             frames: .init(camera: { _ in nil }, screen: { _ in nil }), sourcePayloads: [:], scenes: [:],
-            presentationTime: CMTime(value: 960_000, timescale: 48_000), frameDuration: CMTime(value: 1, timescale: 24), sequence: 1)!
+            presentationTime: CMTime(value: 960_000 + index * 2_000, timescale: 48_000), frameDuration: CMTime(value: 1, timescale: 24), sequence: index + 1)!
     }
     private static func pixels(_ frame: CompositedFrame) -> Data {
         let buffer = CMSampleBufferGetImageBuffer(frame.sampleBuffer)!
@@ -141,6 +141,18 @@ private actor EmoteFixtureLoader {
         precondition(value.staticEmote == .init(id: "25", setID: "0", label: "Kappa") && !chat.staticEmotesEnabled)
         precondition(!chat.stageStaticEmote(value.id, alert: false) && http.metadataReads == 0)
         chat.staticEmotesEnabled = true; chat.alertPromotionEnabled = true
+        // A Hide on an already-hidden slot is still new operator intent. The
+        // layer value may remain identical, so snapshot equality alone cannot
+        // authorize an earlier artwork download to make that slot visible.
+        for isAlert in [false, true] {
+            precondition(chat.stageStaticEmote(value.id, alert: isAlert)); await wait { await loader.count == 1 }
+            if isAlert { chat.hideAudienceAlert() } else { chat.hide() }
+            let hidden = preview.stagedScene
+            await loader.finish(image()); await wait { chat.staticEmoteLoads == 0 }
+            precondition(preview.stagedScene == hidden, "Late artwork overrode an explicit Hide on an already-hidden slot")
+            precondition(pixels(render(preview.programScene!, renderer: renderer)) == blank)
+            clock.advance()
+        }
         let beforeLoad = preview.stagedScene
         precondition(chat.stageStaticEmote(value.id, alert: false)); await wait { await loader.count == 1 }
         precondition(preview.stagedScene == beforeLoad && pixels(render(preview.programScene!, renderer: renderer)) == blank)
@@ -151,7 +163,37 @@ private actor EmoteFixtureLoader {
         precondition(pixels(render(preview.programScene!, renderer: renderer)) == blank)
         _ = runtime.dispatcher.execute(.take)
         let frame = render(preview.programScene!, renderer: renderer), shown = pixels(frame)
-        precondition(shown != blank && http.metadataReads == 1 && http.subscriptions == 4)
+        precondition(shown != blank && http.metadataReads == 3 && http.subscriptions == 4)
+        // Use accepted native movie frames and the production feed/archive,
+        // so emote classification cannot silently discard the literal caption.
+        let binding = chat.recentRecordingBindings.last(where: { $0.message.id == value.id })!
+        let timeline = RecordingTimeline(), feed = RecordingChatFeed()
+        var preferences = RecordingChatPreferences(); preferences.enabled = true
+        let movie = folder.appendingPathComponent("TakenStaticEmote.mp4")
+        let archive = RecordingChatArchive(programURL: movie, sessionID: UUID().uuidString, segmentIndex: 1,
+            context: .init(), timeline: timeline, preferences: preferences)
+        feed.bind(binding); feed.install(archive)
+        var configuration = ProgramRecordingSession.Configuration()
+        configuration.frameRate = 24; configuration.requiresAudio = false
+        configuration.onVideoAccepted = { frame in feed.frame(frame, into: archive) }
+        let writer = ProgramRecordingSession(outputURL: movie, configuration: configuration, timeline: timeline,
+            spaceProbe: { _ in 8_000_000_000 })
+        writer.appendVideo(frame.sampleBuffer)
+        await wait { timeline.snapshot().origin.isNumeric }
+        feed.receive(binding.message, at: CMTime(value: 960_000, timescale: 48_000))
+        for index in 1...2 { writer.appendVideo(render(preview.programScene!, renderer: renderer, index: Int64(index)).sampleBuffer) }
+        let result = await withCheckedContinuation { continuation in writer.finish { continuation.resume(returning: $0) } }
+        feed.install(nil)
+        await withCheckedContinuation { continuation in archive.finish(completed: result.completed) { continuation.resume() } }
+        precondition(result.completed && result.progress.videoSamples > 0)
+        var records: [RecordingChatRecord] = []
+        let inspection = try RecordingChatReader.scan(archive.url, record: { records.append($0) })
+        precondition(!inspection.recovered && records.contains { $0.type == "message" && $0.message?.text == value.text && $0.message?.kind == "Emotes" },
+                     "Emote classification dropped the literal public message from the recording archive")
+        precondition(records.contains { $0.type == "show" && $0.message?.text == value.text && $0.messageID == value.id },
+                     "Taken emote pixels lost their literal recorded-chat binding")
+        let archiveText = String(decoding: try Data(contentsOf: archive.url), as: UTF8.self)
+        precondition(!archiveText.contains("static-cdn") && !archiveText.contains("staticEmote") && !archiveText.contains("PRIVATE TOKEN"))
         let buffer = CMSampleBufferGetImageBuffer(frame.sampleBuffer)!
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self), stride = CVPixelBufferGetBytesPerRow(buffer)
@@ -198,12 +240,24 @@ private actor EmoteFixtureLoader {
         let entry = StudioChatCoordinator.guestPublicEntry(value)!
         let publicWire = GuestPublicChatEnvelope.message(feed: UUID(), reset: 0, sequence: 1, dropped: 0, entry: entry).wire(negotiation: UUID())!
         precondition(!publicWire.contains("staticEmote") && !publicWire.contains("static-cdn") && entry.text == value.text)
+        // Repeating a text-only Show also supersedes a scheduled cached tile,
+        // even when the caption/visibility are already exactly as requested.
+        chat.show(value.id); let plainComment = preview.stagedScene
+        precondition(chat.stageStaticEmote(value.id, alert: false))
+        chat.show(value.id)
+        for _ in 0..<3 { await Task.yield() }
+        precondition(chat.staticEmoteLoads == 0 && preview.stagedScene == plainComment)
         chat.hide(); precondition(chat.stageStaticEmote(value.id, alert: true)); await wait { chat.staticEmoteLoads == 0 }
         guard case .text(let alertText) = preview.stagedScene!.layers.first(where: { $0.id == alert })!.payload else { preconditionFailure() }
         precondition(alertText.commentAvatarKey == payload.commentAvatarKey && pixels(render(preview.programScene!, renderer: renderer)) == shown)
         precondition(chat.stageAudienceAlert(value.id)) // Text-only remains explicit and clears the optional tile.
         guard case .text(let plainAlert) = preview.stagedScene!.layers.first(where: { $0.id == alert })!.payload else { preconditionFailure() }
         precondition(plainAlert.commentAvatarKey == nil)
+        let plainAlertScene = preview.stagedScene
+        precondition(chat.stageStaticEmote(value.id, alert: true))
+        precondition(chat.stageAudienceAlert(value.id))
+        for _ in 0..<3 { await Task.yield() }
+        precondition(chat.staticEmoteLoads == 0 && preview.stagedScene == plainAlertScene)
         for (index, reason) in [(1, "direct-live"), (2, "tombstone"), (3, "source-close")] {
             clock.advance(); first.push(message(reason, emote: "owned-\(index)")); await wait { chat.queue.messages.last?.staticEmote?.id == "owned-\(index)" }
             let item = chat.queue.messages.last!; precondition(chat.stageStaticEmote(item.id, alert: false)); await wait { await loader.count == 1 }
@@ -249,6 +303,6 @@ private actor EmoteFixtureLoader {
             CGImageDestinationAddImage(destination, publicImage, nil); precondition(CGImageDestinationFinalize(destination))
             print("PASS: documented public Twitch CDN sample through shipping strict URL/no-redirect/ephemeral bounded PNG loader; not a live authorized chat-feed acceptance")
         }
-        print("PASS: actual Twitch decoder/shared reader metadata request→manual bounded static PNG tile→shipping staged text/dispatcher/Program pixels+Take; complete Unicode/literal text, aspect/alpha preserved, no private/public-feed media, defaultoff/DLE/tombstone/sourceclose/rejoin/retired fences and non-evicting32identity capacity")
+        print("PASS: actual Twitch decoder/shared reader metadata request→manual bounded static PNG tile→shipping staged text/dispatcher/Program pixels+Take; complete Unicode/literal text+actual native movie/archive message/show readback, no-op Hide/repeated plain-text intent fences, aspect/alpha preserved, no private/public-feed media, defaultoff/DLE/tombstone/sourceclose/rejoin/retired fences and non-evicting32identity capacity")
     }
 }

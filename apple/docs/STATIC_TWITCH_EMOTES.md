@@ -86,3 +86,16 @@ pixels inside the 21 × 10 non-square tile bounds. The earlier synthetic pattern
 was fully opaque, so its aspect-ratio check alone did not establish alpha
 preservation; this comparison supplies that missing evidence. The PNG remains
 an owned local pattern, not an authorized live-provider result.
+
+
+A completion review additionally reproduced and fixed two native defects.
+An explicit Hide (including an already-hidden slot) or text-only Show/Stage
+Alert now retires that slot's pending artwork operation. Exact layer equality
+alone cannot represent a newer no-op operator instruction. Artwork completion
+still uses the private guarded staging path, so it cannot cancel itself.
+The recording archive now accepts the existing `Emotes` event kind and retains
+its complete literal public caption. A real native movie writer plus the
+production recording feed/archive/reader verifies both received-message and
+visible-show records, including Unicode/braces, while excluding artwork URLs,
+metadata and private token expansion. This remains owned fixture evidence,
+not an authorized live Twitch chat-feed qualification.
