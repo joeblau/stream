@@ -22,7 +22,7 @@ struct RecordingChatMessage: Codable, Equatable, Sendable {
     var isValid: Bool {
         !id.isEmpty && id.utf8.count <= 128 && platform.utf8.count <= 128
             && (author?.utf8.count ?? 0) <= 512 && text.utf8.count <= 16_384
-            && ["Text", "Super Chat", "Super Sticker", "Milestone", "Membership", "Gift"].contains(kind)
+            && ["Text", "Emotes", "Super Chat", "Super Sticker", "Milestone", "Membership", "Gift"].contains(kind)
             && providerTimestamp.timeIntervalSince1970.isFinite
     }
 }

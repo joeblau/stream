@@ -237,7 +237,10 @@ enum StudioGuestPublicChatUpdate {
             alertSlots: alertSlots.sorted { $0.description < $1.description })).write(to: slotsURL, options: .atomic) }
         catch { self.error = "The comment slot could not be saved." }
     }
-    @discardableResult func stageAudienceAlert(_ id: String) -> Bool { stageAudienceAlert(id, staticEmoteKey: nil) }
+    @discardableResult func stageAudienceAlert(_ id: String) -> Bool {
+        if let slot = selectedAlertSlot { cancelStaticEmoteLoad(in: slot) }
+        return stageAudienceAlert(id, staticEmoteKey: nil)
+    }
     private func stageAudienceAlert(_ id: String, staticEmoteKey: String?) -> Bool {
         if let reason = audienceAlertError(for: id) { error = reason; return false }
         guard let message = queue.message(id), let kind = message.audienceEvent,
@@ -269,11 +272,15 @@ enum StudioGuestPublicChatUpdate {
         if let reason = audienceStagingError { error = reason; return }
         guard let scene = previewProgram?.stagedScene, let slot = selectedAlertSlot,
               availableAlertSlots.contains(where: { $0.id == slot }) else { return }
+        cancelStaticEmoteLoad(in: slot)
         _ = run(.setLayerVisibility(slot, visible: false, in: scene.id))
     }
     /// Compatibility entry point uses the same explicit, guarded staged alert route.
     func promoteAlert(_ id: String) { _ = stageAudienceAlert(id) }
-    func show(_ id: String) { show(id, staticEmoteKey: nil) }
+    func show(_ id: String) {
+        if let slot = selectedSlot { cancelStaticEmoteLoad(in: slot) }
+        show(id, staticEmoteKey: nil)
+    }
     private func show(_ id: String, staticEmoteKey: String?) {
         guard let message = queue.message(id), let scene = previewProgram?.stagedScene,
               let slotID = selectedSlot, let layer = availableSlots.first(where: { $0.id == slotID }),
@@ -321,6 +328,12 @@ enum StudioGuestPublicChatUpdate {
                 }
             }
         }
+    }
+    /// An explicit text-only Show/Hide supersedes pending artwork even when
+    /// the resulting layer value is identical to the captured snapshot.
+    private func cancelStaticEmoteLoad(in slot: LayerID) {
+        emoteTasks.removeValue(forKey: slot)?.task.cancel()
+        staticEmoteLoads = emoteTasks.count
     }
     private func cancelStaticEmoteLoads() {
         emoteTasks.values.forEach { $0.task.cancel() }; emoteTasks.removeAll(); staticEmoteLoads = 0
@@ -463,6 +476,7 @@ enum StudioGuestPublicChatUpdate {
     }
     func hide() {
         guard let scene = previewProgram?.stagedScene, let slot = selectedSlot else { return }
+        cancelStaticEmoteLoad(in: slot)
         avatarTasks[slot]?.cancel(); avatarTasks[slot] = nil
         if run(.setLayerVisibility(slot, visible: false, in: scene.id)) { queue.hide() }
     }
