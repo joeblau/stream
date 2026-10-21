@@ -4,7 +4,7 @@ For the desktop studio, build the **StreamMac** scheme. See the
 [macOS workflow, projects, transfer, and distribution guide](docs/MACOS_STUDIO.md).
 
 The [macOS task inventory](docs/MACOS_TASK_STATUS.json) records the remaining
-acceptance for all open desktop issues. Local fixture evidence and physical,
+acceptance and recorded GitHub state for the desktop issues. Local fixture evidence and physical,
 provider, signing, and unfinished software requirements remain explicit.
 
 **Stream** is an iOS 27+ app that captures the screen and publishes it to RTMP,

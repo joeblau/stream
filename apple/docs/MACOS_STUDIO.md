@@ -358,8 +358,14 @@ For the current desktop entitlements, install a **macOS Developer ID** provision
 On 2026-10-02 the local Developer ID certificate was present, but no matching macOS profile was installed and the Xcode developer-account session could not load valid credentials. Manual archive stopped at provisioning; automatic signing also rejected the explicit Developer ID identity. A signed/notarized artifact has therefore **not** been qualified. The unsigned app and native integration fixtures build and pass with Xcode 27.2 (27B5019j).
 
 On 2026-10-21 the combined unsigned app and embedded helper/camera bundle audit
-passed on Mac15,8, macOS 27.2 (26B118), Xcode 27.2 (27B5038j). The pre-merge shared run passed 562 tests in 80 suites; the task report records
-the current combined-tree validation. A read-only provisioning inventory found five macOS
+passed on Mac15,8, macOS 27.2 (26B118), Xcode 27.2 (27B5038j). After integrating
+`main` at `07d2fdb`, the universal arm64/x86_64 Release app, browser helper and
+camera extension build and pass the bundle audit. Both macOS and iOS shared
+suites pass 576 tests in 80 suites each. The [task report](MACOS_TASK_STATUS.json)
+records current native validation and remaining implementation. Guest normal-playback
+A/V remains unqualified: the latest repeated raw-track recording failed at
+105.104 ms against the unchanged 100 ms limit, and the optional element-audio
+probe is silent. A read-only provisioning inventory found five macOS
 profiles but no unexpired profile matching this app, camera extension or browser
 helper; signed installation/notarization remains unqualified. The NDI/DeckLink
 probe still found neither SDK headers nor runtimes, with Screen Recording access
