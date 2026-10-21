@@ -35,8 +35,10 @@ private enum StudioAXClient {
         }
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 1)
-        guard let windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement], let window = windows.first else {
-            throw NSError(domain: "StudioAccessibility", code: 77, userInfo: [NSLocalizedDescriptionKey: "Owned process does not expose its public AX window; trust=\(AXIsProcessTrusted())"])
+        let requestedTitle = ProcessInfo.processInfo.environment["STREAM_ACCESSIBILITY_WINDOW_TITLE"]
+        guard let windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement],
+              let window = requestedTitle.map({ title in windows.first { attribute($0, kAXTitleAttribute) as? String == title } }) ?? windows.first else {
+            throw NSError(domain: "StudioAccessibility", code: 77, userInfo: [NSLocalizedDescriptionKey: "Owned process does not expose its public AX window; requested=\(requestedTitle ?? "first") trust=\(AXIsProcessTrusted())"])
         }
         var queue = [window], result: [StudioAXNode] = []
         var seen: [CFHashCode: [AXUIElement]] = [:]

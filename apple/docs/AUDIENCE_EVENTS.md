@@ -62,6 +62,7 @@ YouTube event and Twitch emote normalization through the provider adapters.
 
 No authorized live provider feed, real OAuth grant or external audience event
 was used. Live ordering/rate/permission acceptance and actual presentation from
-authorized test feeds remain open, as do viewer counts and unsupported remote
-event media. The static Twitch tile document records its separate local proofs.
+authorized test feeds remain open, as do live viewer-reading acceptance and unsupported remote
+event media. The Destinations status child now owns cached-count expiry and shows
+read timestamps for both Twitch and YouTube; see [PROVIDER_ACCOUNTS.md](PROVIDER_ACCOUNTS.md). The static Twitch tile document records its separate local proofs.
 These local proofs do not close #143.

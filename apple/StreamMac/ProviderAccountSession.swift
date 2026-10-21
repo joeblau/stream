@@ -32,6 +32,13 @@ struct ProviderAccountSnapshot {
     var devicePrompt: TwitchDevicePrompt?
 }
 
+struct ProviderViewerReading: Equatable, Sendable {
+    enum Freshness: String, Sendable { case current, expired, clockChanged = "clock changed", unavailable }
+    let count: Int?
+    let readAt: Date?
+    let freshness: Freshness
+}
+
 /// Native account/session UI owns no portable credentials. The machine vault
 /// owns tokens; this workspace owns only verified metadata and cancellable work.
 @MainActor
@@ -68,6 +75,10 @@ final class ProviderAccountSession: ObservableObject {
         let epoch = UUID(); endingEpochs[provider] = epoch; return epoch
     }
     private func invalidateEndingEpoch(_ provider: ManagedProvider) {
+        // Authorization intent changes synchronously, before vault actor work.
+        // An old account's cached audience count must not remain current.
+        viewerDates = viewerDates.filter { !$0.key.hasPrefix(provider.rawValue + ":") }
+        viewers = viewers.filter { !$0.key.hasPrefix(provider.rawValue + ":") }
         endingIntentLeases.removeValue(forKey: provider)?.invalidate()
         endingEpochs[provider] = UUID()
     }
@@ -389,12 +400,32 @@ final class ProviderAccountSession: ObservableObject {
               managedReadGenerations[.youtube]?.session == endingEpoch(.youtube), !Task.isCancelled else { throw ProviderFailure(.authorization) }
         return receipt
     }
-    func viewerCount(_ binding: ProviderDestinationBinding) -> Int? {
-        let key = Self.viewerKey(binding)
-        guard accounts[binding.provider]?.failure == nil, let date = viewerDates[key], Date().timeIntervalSince(date) <= 60 else { return nil }
-        return viewers[key]
+    func viewerReading(_ binding: ProviderDestinationBinding, now: Date = Date()) -> ProviderViewerReading {
+        guard ProviderChannel.validID(binding.channelID),
+              binding.provider != .youtube || binding.eventID.map(ProviderChannel.validID) == true else {
+            return .init(count: nil, readAt: nil, freshness: .unavailable)
+        }
+        let key = Self.viewerKey(binding), date = viewerDates[key]
+        guard !closed, accounts[binding.provider]?.hasCredential == true,
+              accounts[binding.provider]?.failure == nil, let date else {
+            return .init(count: nil, readAt: date, freshness: .unavailable)
+        }
+        let age = now.timeIntervalSince(date)
+        guard age.isFinite, age >= 0 else { return .init(count: nil, readAt: date, freshness: .clockChanged) }
+        guard age <= 60 else { return .init(count: nil, readAt: date, freshness: .expired) }
+        guard let count = viewers[key], count >= 0 else { return .init(count: nil, readAt: date, freshness: .unavailable) }
+        return .init(count: count, readAt: date, freshness: .current)
     }
-    static func viewerKey(_ binding: ProviderDestinationBinding) -> String { "\(binding.provider.rawValue):\(binding.eventID ?? binding.channelID)" }
+    func viewerCount(_ binding: ProviderDestinationBinding) -> Int? { viewerReading(binding).count }
+    static func viewerKey(_ binding: ProviderDestinationBinding) -> String {
+        // Twitch reports public channel metrics; an imported stray event ID must
+        // not alias two broadcasters or split the same broadcaster's reading.
+        let resource: String
+        if binding.provider == .twitch { resource = binding.channelID }
+        else if binding.provider == .youtube { resource = "\(binding.channelID):\(binding.eventID ?? "")" }
+        else { resource = binding.eventID ?? binding.channelID }
+        return "\(binding.provider.rawValue):\(resource)"
+    }
     func refreshLive(_ binding: ProviderDestinationBinding) {
         guard canRequest(binding.provider) else { return }
         let provider = binding.provider, generation = begin(binding.provider, action: "Reading remote broadcast state")
