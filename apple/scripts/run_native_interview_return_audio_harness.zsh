@@ -3,7 +3,9 @@ set -euo pipefail
 cd "${0:A:h:h}"
 readonly INTERVIEW_RETURN_DIR="${STREAM_INTERVIEW_RETURN_DIR:-build/native-interview-return-audio-validation}"
 readonly INTERVIEW_RETURN_BUILD_PATH="${STREAM_INTERVIEW_RETURN_BUILD_PATH:-${INTERVIEW_RETURN_DIR}/derived}"
-: ${STREAM_GUEST_RTC_INCLUDE:?Set the pinned public libdatachannel0.24 include path}
+# Use this build's SDK module headers. An include directory from another
+# derived-data tree defines libdatachannel twice when Swift scans modules.
+export STREAM_GUEST_RTC_INCLUDE="${INTERVIEW_RETURN_BUILD_PATH:A}/Build/Products/Debug/include/libdatachannel"
 : ${STREAM_INTERVIEW_TURN_SERVER:?Set the owned pinned Coturn executable}
 mkdir -p "$INTERVIEW_RETURN_DIR"
 ruby -ryaml -rjson - "$INTERVIEW_RETURN_DIR" <<'RUBY'

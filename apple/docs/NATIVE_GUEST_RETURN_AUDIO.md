@@ -122,9 +122,10 @@ zsh apple/scripts/run_guest_return_audio_harness.zsh
 Run the full browser fixture after installing the pinned `workers/interviews`
 lockfile dependencies with Node >=24.15 <25. Set `STREAM_INTERVIEW_NODE` to that
 Node executable, `STREAM_INTERVIEW_TURN_SERVER` to the pinned owned Coturn
-executable and `STREAM_GUEST_RTC_INCLUDE` to the **same runner-derived** SDK
-include path (`.../Build/Products/Debug/include/libdatachannel`); it is populated
-by the real package build. The runner verifies/reconstructs transport artifacts
+executable. The runner derives `STREAM_GUEST_RTC_INCLUDE` from its own build's
+SDK include path (`.../Build/Products/Debug/include/libdatachannel`), populated
+by the real package build. It overrides inherited paths from other builds to
+avoid duplicate SDK module definitions. The runner verifies/reconstructs transport artifacts
 through `repair_desktop_transport_archives.py --require-relay-policy`. Optional
 `STREAM_VENDOR_ROOT` and `STREAM_INTERVIEW_REFERENCE_ARTIFACTS` supply read-only
 qualified dependencies; all generated/build files remain under
