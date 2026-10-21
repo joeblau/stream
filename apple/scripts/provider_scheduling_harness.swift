@@ -22,6 +22,12 @@ private actor SchedulingHTTP {
     var createGate: CheckedContinuation<Void, Never>?
     var hideUpcoming = false
     var createdStreamCount = 0
+    var holdEvent = false
+    var eventEntered = false
+    var eventGate: CheckedContinuation<Void, Never>?
+    var failEvent = false
+    func configureEvent(hold: Bool = false, fail: Bool = false) { holdEvent = hold; failEvent = fail; eventEntered = false }
+    func releaseEvent() { holdEvent = false; eventGate?.resume(); eventGate = nil }
     func configure(failBind: Bool = false, holdCreate: Bool = false, hideUpcoming: Bool = false) {
         bindingFails = failBind; self.holdCreate = holdCreate; self.hideUpcoming = hideUpcoming; createEntered = false
     }
@@ -47,6 +53,8 @@ private actor SchedulingHTTP {
             if bindingFails { status = 503; object = ["error": ["message": "SECRET_UNCERTAIN"]] }
             else { bound = query.first { $0.name == "streamId" }?.value; object = event() }
         } else if path == "/youtube/v3/liveBroadcasts" {
+            if method == "POST", holdEvent { eventEntered = true; await withCheckedContinuation { eventGate = $0 } }
+            if method == "POST", failEvent { status = 503 }
             object = method == "POST" ? event() : ["items": hideUpcoming && !query.contains(where: { $0.name == "id" }) ? [] : [event()]]
         } else if path == "/youtube/v3/videos" { object = ["items": []] }
         else { throw ProviderFailure(.invalidRequest) }
@@ -63,9 +71,9 @@ private actor SchedulingHTTP {
 
 @main struct ProviderSchedulingHarness {
     @MainActor static func check(_ value: Bool) { precondition(value) }
-    @MainActor static func until(_ predicate: () async -> Bool) async {
+    @MainActor static func until(file: StaticString = #file, line: UInt = #line, _ predicate: () async -> Bool) async {
         for _ in 0..<1000 { if await predicate() { return }; try? await Task.sleep(for: .milliseconds(2)) }
-        preconditionFailure("Native scheduling fixture did not settle")
+        preconditionFailure("Native scheduling fixture did not settle", file: file, line: line)
     }
     @MainActor private static func session(_ http: SchedulingHTTP, directory: URL, scopes: [String] = ManagedProvider.youtube.scopes) async throws -> (ProviderAccountSession, ProviderTokenVault) {
         let vault = ProviderTokenVault(keychain: SchedulingCredentials(), transport: { try await http.send($0) })
@@ -191,7 +199,72 @@ private actor SchedulingHTTP {
         failing.createYouTubeStream(.init(title: "Must not repeat"), channelID: "owner")
         check(await failingHTTP.requests().count == beforeBlocked)
         failing.shutdown()
+        try await showScheduling(root)
         print("PASS: production scheduling session/catalog; actual stream/event IDs before binding, partial bind failure + explicit repair without recreate, restart/project isolation + unknown states/no replay, account lifecycle/noncooperative late-result guards, exact per-resource receipts, bounded/versioned/public-only storage and real disk-failure retention")
+    }
+    @MainActor static func showScheduling(_ root: URL) async throws {
+        let http = SchedulingHTTP(), (account, vault) = try await session(http, directory: root.appendingPathComponent("show"))
+        account.refresh(.youtube); await until { !account.snapshot(.youtube).isWorking }
+        func destination(_ name: String, _ provider: ManagedProvider? = .youtube, channel: String = "owner", event: String? = nil) -> StreamDestination {
+            .init(name: name, isEnabled: false, providerBinding: provider.map { .init(provider: $0, channelID: channel, eventID: event) })
+        }
+        let first = destination("Main"), duplicate = destination("Backup"), manual = destination("Twitch", .twitch)
+        let denied = destination("Different account", channel: "not-owned"), custom = destination("Custom", nil)
+        let existing = destination("Selected event", channel: "selected-owner", event: "existing-id")
+        let selected = [first, duplicate, manual, denied, custom, existing]
+        let original = selected
+        let plan = account.showScheduling
+        plan.schedule(.init(title: "One show", description: "Shared metadata", privacy: .unlisted), timezone: "America/Los_Angeles", destinations: selected)
+        await until { !plan.running }
+        precondition(plan.targets.map(\.state) == [.acknowledged, .acknowledged, .manualRequired, .blocked, .manualRequired, .existingEvent])
+        precondition(plan.targets[0].eventID == "created-event" && plan.targets[1].eventID == "created-event" && plan.targets.last?.eventID == "existing-id")
+        precondition(selected == original && selected.allSatisfy { !$0.isEnabled })
+        precondition(account.pending.document.records.filter { $0.kind == .event }.count == 1)
+        let postCount = await http.requests().filter { $0.httpMethod == "POST" && $0.url?.path == "/youtube/v3/liveBroadcasts" }.count
+        precondition(postCount == 1)
+        plan.schedule(.init(title: "Accidental duplicate"), timezone: "UTC", destinations: [first])
+        account.refresh(.youtube); await until { !account.snapshot(.youtube).isWorking }
+        check(await http.requests().filter { $0.httpMethod == "POST" && $0.url?.path == "/youtube/v3/liveBroadcasts" }.count == postCount)
+        precondition(plan.targets.first?.eventID == "created-event")
+        plan.newPlan()
+        plan.schedule(.init(title: "Reuse selection"), timezone: "UTC", destinations: [first, destination("Selected same channel", event: "existing-one")])
+        precondition(plan.targets.map(\.state) == [.existingEvent, .existingEvent] && plan.targets.allSatisfy { $0.eventID == "existing-one" })
+        check(await http.requests().filter { $0.httpMethod == "POST" && $0.url?.path == "/youtube/v3/liveBroadcasts" }.count == postCount)
+        plan.newPlan()
+        plan.schedule(.init(title: "Conflicting selection"), timezone: "UTC", destinations: [first, destination("Existing A", event: "existing-one"), destination("Existing B", event: "existing-two")])
+        precondition(plan.targets.allSatisfy { $0.state == .blocked })
+        check(await http.requests().filter { $0.httpMethod == "POST" && $0.url?.path == "/youtube/v3/liveBroadcasts" }.count == postCount)
+        plan.newPlan(); await http.configureEvent(fail: true)
+        plan.schedule(.init(title: "Partial uncertainty"), timezone: "UTC", destinations: [first, manual])
+        await until { !plan.running }
+        precondition(plan.targets.map(\.state) == [.unconfirmed, .manualRequired])
+        let uncertainCount = await http.requests().count
+        plan.schedule(.init(title: "No retry"), timezone: "UTC", destinations: [first])
+        check(await http.requests().count == uncertainCount)
+        plan.newPlan(); await http.configureEvent(hold: true)
+        account.refresh(.youtube); await until { !account.snapshot(.youtube).isWorking }
+        plan.schedule(.init(title: "Cancelled"), timezone: "UTC", destinations: [first, manual])
+        await until { await http.eventEntered }
+        plan.cancel()
+        precondition(plan.targets.map(\.state) == [.unconfirmed, .manualRequired])
+        let records = account.pending.document.records
+        await http.releaseEvent(); try await Task.sleep(for: .milliseconds(30))
+        precondition(plan.targets.first?.state == .unconfirmed && account.pending.document.records == records)
+        plan.newPlan(); await http.configureEvent(hold: true)
+        plan.schedule(.init(title: "Old project"), timezone: "UTC", destinations: [first, manual])
+        await until { await http.eventEntered }
+        account.shutdown()
+        let replacement = ProviderAccountSession(restream: SchedulingRestream(), vault: vault, pendingDirectory: root.appendingPathComponent("replacement-show"))
+        await http.releaseEvent(); try await Task.sleep(for: .milliseconds(30))
+        precondition(!plan.running && plan.targets.first?.state == .unconfirmed && replacement.showScheduling.targets.isEmpty && replacement.pending.document.records.isEmpty)
+        replacement.shutdown()
+        let readHTTP = SchedulingHTTP(), (readOnly, _) = try await session(readHTTP, directory: root.appendingPathComponent("show-readonly"), scopes: ["https://www.googleapis.com/auth/youtube.readonly"])
+        readOnly.refresh(.youtube); await until { !readOnly.snapshot(.youtube).isWorking }
+        readOnly.showScheduling.schedule(.init(title: "No authority"), timezone: "UTC", destinations: [first, manual])
+        precondition(readOnly.showScheduling.targets.map(\.state) == [.blocked, .manualRequired])
+        check(await readHTTP.requests().allSatisfy { $0.httpMethod != "POST" })
+        readOnly.shutdown()
+        print("PASS: actual show coordinator grouped one insert per channel, independent manual/blocked/acknowledged/existing-ID outcomes, stable IDs across refresh and repeated submission, no binding/output mutation, uncertainty/cancel/profile replacement/late HTTP fences and read-only grants")
     }
     @MainActor static func catalog(_ root: URL) throws {
         let directory = root.appendingPathComponent("catalog")
