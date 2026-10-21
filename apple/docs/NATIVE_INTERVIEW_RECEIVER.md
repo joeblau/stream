@@ -52,6 +52,14 @@ The helper records the exact Coturn source and binary digest, preserves its upst
 
 The unpatched archive's controlled negative test uses `--expect-relay-policy-unavailable` and requires failure before readiness or any accepted pixels/PCM. It ends the actual room and checks terminal browser/native teardown. With the patched archive, the positive test requires Chrome and native **actual selected local relay** candidates, UDP byte flow, decoded red H264 camera and real stereo 48 kHz Opus PCM, then concurrent blue screen pixels through the independent MID. It checks default screen denial, approval/revocation, independent screen stop with healthy camera/audio, service rejoin with a fresh full lease/stable slot/reset grants, and actual room end with no late accepted receipt. Remote candidate kinds are reported as observed, without relabeling.
 
+The positive fixture also injects an owned `NotAllowedError` from the screen
+chooser after host approval. The shipping guest must keep the same connected
+peer and native lease, receive continuing decoded camera/audio, admit no screen,
+restore the Share control, and successfully share on retry without a new invite.
+That path passed with Chrome 155.0.8059.85 on macOS 27.2 ARM64 and Xcode 27.2 on
+2026-10-21. The injected browser API result exercises permission-denial handling;
+it does not qualify a physical operating-system screen chooser.
+
 Locally qualified on macOS 27.0.1 ARM64, Xcode 26.6/SDK 26.5, Chrome 154.0.8037.95 and exact hosted Chrome for Testing 154.0.8037.92. Disposable macOS Chrome children use the public mock-Keychain testing switch; the exact .92 positive relay fixture passes without changing sandboxing or media deadlines. The macOS 14 compile target does not qualify that runtime or Intel. Separate actual `All` loopback H264/Opus/clock/loss fixtures, Chrome loopback lifecycle, and decoded guest→Composer/mixer→Program/associated ISO regressions remain required when repairing the shared desktop archive.
 
 This proves local service/relay/registered-sink media. The separate [actual manager-to-Program/ISO fixture](NATIVE_INTERVIEW_PROGRAM_ISO.md) qualifies the default manager/controller media entry under controlled local conditions. Deployed TURN broker, Internet/mobile/restricted networks, physical devices, mix-minus/AEC and signed installation require their separate acceptance evidence.
