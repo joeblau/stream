@@ -42,6 +42,10 @@ python3 scripts/repair_desktop_transport_archives.py "$BROWSER_AUDIO_BUILD_PATH"
 xcodebuild -project "$BROWSER_AUDIO_DIR/BrowserAudioValidation.xcodeproj" \
   -scheme BrowserAudioHarness -destination 'platform=macOS' \
   -derivedDataPath "$BROWSER_AUDIO_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
-scripts/build_browser_audio_helper.zsh
+# Inventory/protocol/retained-media checks neither launch nor need a signed
+# helper artifact. Build the existing ad hoc apps only for explicit capture.
+if (( ${@[(Ie)--qualify]} )); then
+  scripts/build_browser_audio_helper.zsh
+fi
 env DYLD_FRAMEWORK_PATH="${BROWSER_AUDIO_BUILD_PATH:A}/Build/Products/Debug" \
   "${BROWSER_AUDIO_BUILD_PATH:A}/Build/Products/Debug/BrowserAudioHarness" "${PWD}/build/browser-audio-helper" "$@"
