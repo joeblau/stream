@@ -291,10 +291,14 @@ marked black frames; it never falls back to an unrelated default camera/screen.
 A static screen holder remains recordable. Source subscriptions retain capture
 demand through all segment finalization, then release only recorder demand.
 Physical source identity is snapshotted when recording starts; retargeting a
-registry source applies to the next recording. Guest video capture is not yet
-implemented: the UI disables it with that reason, and an existing guest
-selection fails visibly without substituting another source or stopping the
-program recording.
+registry source applies to the next recording. Registered native guest camera
+and screen selections now use the controller-issued full connection lease and
+the selected raw or processed video tap. The recorder never substitutes a
+replacement guest connection for a retired lease. Actual local guest camera
+Program/ISO recordings have decoded pixel, exact PCM-grid and disconnect/rejoin
+evidence in [NATIVE_INTERVIEW_PROGRAM_ISO.md](docs/NATIVE_INTERVIEW_PROGRAM_ISO.md).
+Per-Mac source-count/storage limits and sustained physical-source qualification
+remain open under #171.
 
 The app budgets program + active publisher + isolated encoder sessions before
 start and write-tests the selected folder using an exclusive 8 MB temporary
