@@ -320,6 +320,20 @@ actor AudioMixEngine {
                          rampFrames: Self.gainRampFrames)
     }
 
+    /// Qualification helper audio opens only after saved mixer intent is installed.
+    /// No ramp may carry an old unmuted value across this closed privacy boundary.
+    func prepareClosedApplicationMixer(_ id: AudioChannelID, mixer: MixerSettings) -> Bool {
+        guard case .application = id, !registry.captureRouteIsAllowed(id) else { return false }
+        let gain = ChannelGain(volume: Float(max(0, min(2, mixer.channelVolumes[id.label] ?? 1))),
+                               isMuted: mixer.channelMutes[id.label] ?? false)
+        pendingGains[id] = gain
+        registry.ensureChannel(id, gain: gain)
+        registry.setGain(id, effectiveGain: gain.effectiveGain, rampFrames: 0)
+        registry.setSoloed(id, soloed: mixer.soloedChannels.contains(id.label))
+        registry.setAuxSend(id, gain: Float(max(0, min(1, mixer.channelAuxSends[id.label] ?? 0))), rampFrames: 0)
+        return true
+    }
+
     /// The aux/guest-return send for a channel (0 = not heard on the aux bus;
     /// 1 = full). Ramped like the program gain.
     func setChannelAuxSend(_ id: AudioChannelID, gain: Float) {

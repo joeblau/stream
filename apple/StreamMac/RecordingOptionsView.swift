@@ -43,7 +43,9 @@ struct RecordingOptionsView: View {
                     RecordingChatPreferencesView(recorder: recorder)
                     Divider()
                     Text("Isolated audio (up to 8 tracks)").font(.subheadline.bold())
-                    Text("Widget audio follows its System Mix route. Independent widget audio taps are unavailable.")
+                    Text(controller.browserAudioChannels.isEmpty
+                         ? "Widget audio follows its System Mix route. Independent widget audio taps are unavailable."
+                         : "Qualification only: Browser Widgets records the shared helper channel for audible Program pages. Preview pages remain silent. Selecting this track does not start a page or capture.")
                         .font(.caption).foregroundStyle(.secondary)
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {

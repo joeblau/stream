@@ -29,6 +29,9 @@ controller=File.read(File.join(root,'StreamMac/StreamController.swift')).gsub('U
 needle='    func startPreview() {'
 abort 'Browser lifecycle preview boundary changed' unless controller.scan(needle).length==1
 controller.sub!(needle,"    func startPreview() {\n        isPipelineRunning = true; previewState = .active\n        reconcileSourceDemand()\n        return")
+needle='            let prepared = await audioEngine.prepareClosedApplicationMixer('
+abort 'Browser operator mixer preparation boundary changed' unless controller.scan(needle).length==1
+controller.sub!(needle,"            await BrowserOperatorSeedGate.pause()\n"+needle)
 controller_path=File.join(folder,'fixtures/BrowserLifecycleController.swift')
 File.write(controller_path,controller)
 target['sources'].reject!{|entry| entry.is_a?(String) && File.basename(entry)=='StreamController.swift'}
@@ -109,13 +112,21 @@ PYHELPER
 swiftc -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
   StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift "$LIFECYCLE_DIR/BrowserLifecycleHelper.swift" \
   -o "$HELPER_APP/Contents/MacOS/StreamBrowserAudioHelper"
+swiftc -swift-version 6 scripts/studio_accessibility_client.swift -o "$LIFECYCLE_DIR/BrowserOperatorAXClient"
+export STREAM_ACCESSIBILITY_CLIENT="${LIFECYCLE_DIR:A}/BrowserOperatorAXClient"
+export BROWSER_LIFECYCLE_COMPLETION="${LIFECYCLE_DIR:A}/completed"
+rm -f "$BROWSER_LIFECYCLE_COMPLETION"
 # Owned LS app + exact-PID private IPC only. No capture, install or codesign
 # command; Swift's normal executable link behavior is unchanged.
 env DYLD_FRAMEWORK_PATH="${LIFECYCLE_BUILD_PATH:A}/Build/Products/Debug" \
   python3 - "${LIFECYCLE_BUILD_PATH:A}/Build/Products/Debug/BrowserWidgetLifecycleHarness" "${HELPER_APP:A}" <<'PYRUN'
-import subprocess,sys
+import os,pathlib,subprocess,sys
 try:
-    raise SystemExit(subprocess.run(sys.argv[1:],timeout=90).returncode)
+    result=subprocess.run(sys.argv[1:],timeout=90)
+    if result.returncode==0 and not pathlib.Path(os.environ["BROWSER_LIFECYCLE_COMPLETION"]).exists():
+        print("FAIL: fixture exited before completing the operator proof",flush=True)
+        raise SystemExit(1)
+    raise SystemExit(result.returncode)
 except subprocess.TimeoutExpired:
     print('FAIL: owned browser lifecycle fixture exceeded90seconds',flush=True)
     raise SystemExit(1)

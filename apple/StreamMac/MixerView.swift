@@ -32,7 +32,9 @@ import StreamCore
 /// PRE-CLAMP so the master meter shows exactly the mixed signal and its clip
 /// latch means the engine's safety clamp engaged.
 ///
-/// **State honesty:** strips never vanish mid-stream. A channel the engine
+/// **State honesty:** normal strips never vanish mid-stream. The optional
+/// qualification helper strip exists only while its exact owning runtime has
+/// actual page demand; saved mixer values never advertise that capability. A channel the engine
 /// stops reporting (its capture left demand) stays in the strip order,
 /// dimmed and marked inactive, and resumes when the source returns.
 struct MixerPanelView: View {
@@ -51,13 +53,14 @@ struct MixerPanelView: View {
     @State private var fxRack: FXRackTarget?
 
     private static let micID = AudioChannelID.microphone(deviceUID: nil)
+    private static let browserID = AudioChannelID.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID)
     /// Vertical fader travel in points.
     private static let faderTravel: CGFloat = 120
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 8) {
-                ForEach(channelOrder, id: \.self) { id in
+                ForEach(channelOrder.filter { $0 != Self.browserID || controller.browserAudioChannels.contains($0) }, id: \.self) { id in
                     channelStrip(for: id)
                 }
                 Divider()
@@ -87,6 +90,7 @@ struct MixerPanelView: View {
             levels = snapshot
             mergeSeenChannels(snapshot.channels.keys)
             mergeExpectedMicChannels()
+            mergeSeenChannels(controller.browserAudioChannels)
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
     }
@@ -193,10 +197,12 @@ struct MixerPanelView: View {
                   volume: mixer.channelVolumes[id.label] ?? 1, range: 0...2,
                   isMuted: mixer.channelMutes[id.label] ?? false,
                   isSoloed: isSoloed, auxOn: auxOn, controlsEnabled: true,
+                  badge: id == Self.browserID ? "Qualification" : nil,
                   onVolume: { dispatcher.execute(.setChannelVolume(id, $0)) },
                   onMute: { dispatcher.execute(.setChannelMuted(id, $0)) },
                   onSolo: { dispatcher.execute(.setChannelSolo(id, $0)) },
                   onAux: { dispatcher.execute(.setChannelAuxSend(id, $0 ? 1 : 0)) })
+                .help(id == Self.browserID ? "Qualification only. All audible Program pages share this channel; Preview pages remain silent. Solo affects the Monitor bus only. An isolated track does not start a helper page." : "")
         }
     }
 
@@ -375,6 +381,7 @@ struct MixerPanelView: View {
             return "Screen"
         case .media: return "Media"
         case .application(let bundleID):
+            if bundleID == BrowserWidgetAudioIdentity.helperBundleID { return BrowserWidgetAudioIdentity.channelTitle }
             // A06 (issue #118): resolve the registry source's name so the
             // strip reads "Spotify"/"System Audio", not a bundle-ID fragment.
             for source in sceneStore.sources {
