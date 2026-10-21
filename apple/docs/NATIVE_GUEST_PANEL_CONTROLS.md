@@ -68,6 +68,8 @@ and a fresh press UUID; an old press cannot start or end a replacement hold.
 Mouse/Space release, focus loss, view removal, sleep/lock, source changes, guest
 replacement, room end and runtime shutdown end the hold. Ten seconds is the
 maximum; reconnect and wake never replay it.
+The mixer and final return-send gate enforce the same deadline independently
+of the UI task, including while the main actor is blocked.
 
 Only the selected recipient's return receives the microphone at unity while
 held. The microphone is hard-excluded from Program, Monitor, Aux and both
@@ -90,7 +92,9 @@ real mixer checks for private-positive return, public/Monitor/Aux/pre+post ISO
 exclusion, unaffected public music with an enabled mic sidechain, exact fader/
 Aux/140ms delay restoration, FX bypass/reset, late captured buffers across
 channel replacement, queued-return revision invalidation and stale press/lease
-refusal. `run_native_interview_return_audio_harness.zsh` passed with the shipping
+refusal. Actual return packets also retire the private revision at the ten-second
+deadline while the main actor is deliberately blocked for 10.4 seconds.
+`run_native_interview_return_audio_harness.zsh` passed with the shipping
 manager/dispatcher/default receiver/controller sink, owned local Worker/Coturn
 and Chrome 155.0.8059.85: native recipient PCM and actual decoded Opus carry the
 private tone while actual forbidden taps exclude it; explicit/focus/deadline
