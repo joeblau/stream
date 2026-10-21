@@ -66,7 +66,8 @@ final class NativeGuestReceiver: @unchecked Sendable {
          video: @escaping @Sendable (GuestVideoFrame) -> Void,
          audio: @escaping @Sendable (GuestAudioFrame) -> Void,
          signal: @escaping @Sendable (String, String, String) -> Void,
-         transport: NativeGuestTransport = .loopbackValidation, returnAudioEnabled: Bool = false) throws {
+         transport: NativeGuestTransport = .loopbackValidation, returnAudioEnabled: Bool = false,
+         returnVideoEnabled: Bool = false) throws {
         guard lease.generation > 0 else { throw GuestDecodeError.malformed }
         self.lease = lease; self.screenApproved = screenApproved; videoOutput = video; audioOutput = audio; signalOutput = signal
         let mediaCallback: SGMediaCallback = { context, generation, role, event, data, size, rtp, ntp in
@@ -115,6 +116,9 @@ final class NativeGuestReceiver: @unchecked Sendable {
         if returnAudioEnabled, SGReceiverEnableReturnAudio(handle, lease.generation) == 0 {
             SGReceiverDestroy(handle); handle = nil; throw GuestDecodeError.unsupported
         }
+        if returnVideoEnabled, SGReceiverEnableReturnVideo(handle, lease.generation) == 0 {
+            SGReceiverDestroy(handle); handle = nil; throw GuestDecodeError.unsupported
+        }
         expiry = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(50))
@@ -133,6 +137,30 @@ final class NativeGuestReceiver: @unchecked Sendable {
         transportLock.lock(); defer { transportLock.unlock() }
         return data.withUnsafeBytes {
             SGReceiverSendReturnOpus(handle, lease.generation, $0.bindMemory(to: UInt8.self).baseAddress,
+                                     $0.count, rtp, ntp) != 0
+        }
+    }
+    func sendReturnVideoState(_ enabled: Bool) -> Bool {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["type": "return-video", "enabled": enabled,
+            "negotiation": lease.negotiation.uuidString.lowercased()]), let value = String(data: data, encoding: .utf8) else { return false }
+        transportLock.lock(); defer { transportLock.unlock() }
+        return value.withCString { SGReceiverSendControl(handle, $0) != 0 }
+    }
+    #if STREAM_GUEST_VALIDATION
+    func validationFailReturnVideo(after packets: Int32) -> Bool {
+        transportLock.lock(); defer { transportLock.unlock() }
+        return SGReceiverValidationFailReturnVideoAfter(handle, packets) != 0
+    }
+    var validationReturnVideoFault: SGReturnVideoFaultReceipt {
+        transportLock.lock(); defer { transportLock.unlock() }
+        return SGReceiverValidationReturnVideoFault(handle)
+    }
+    #endif
+    func sendReturnH264(_ data: Data, lease: GuestReceiveLease, rtp: UInt32, ntp: UInt64) -> Bool {
+        guard lease == self.lease, !data.isEmpty, data.count <= 65_536 else { return false }
+        transportLock.lock(); defer { transportLock.unlock() }
+        return data.withUnsafeBytes {
+            SGReceiverSendReturnH264(handle, lease.generation, $0.bindMemory(to: UInt8.self).baseAddress,
                                      $0.count, rtp, ntp) != 0
         }
     }

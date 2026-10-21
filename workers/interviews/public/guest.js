@@ -192,6 +192,14 @@ async function acceptSignal(data, epoch) {
     const next = new RTCPeerConnection({iceServers:await iceServers()});
     if (epoch!==joinEpoch || !admitted || activeNegotiation!==negotiation || hostGeneration!==data.generation || host!==data.from) { next.close(); return; } pc = next;
     const current=()=>epoch===joinEpoch && admitted && pc===next && activeNegotiation===negotiation && hostGeneration===data.generation && host===data.from;
+    // Native Program return uses an explicit visibility control; reference
+    // hosts retain their existing immediately visible negotiated video path.
+    let returnVideoTrack, returnVideoAllowed=!/^a=ssrc:\d+ msid:stream-return video-return\r?$/m.test(payload.description.sdp);
+    const updateReturnVideo=()=>{
+      for(const track of returnStream.getVideoTracks())returnStream.removeTrack(track);
+      if(returnVideoAllowed&&returnVideoTrack?.readyState==='live')returnStream.addTrack(returnVideoTrack);
+      $('return').srcObject=returnStream.getTracks().length?returnStream:null;
+    };
     next.ondatachannel=event=>{
       const channel=event.channel;
       if(!current() || channel.label!==MEDIA_CONTROL || control){channel.close();return;}
@@ -201,6 +209,9 @@ async function acceptSignal(data, epoch) {
       channel.onmessage=event=>{
         if(!current() || control!==channel || typeof event.data!=='string' || new TextEncoder().encode(event.data).length>1024)return;
         let value;try{value=JSON.parse(event.data);}catch{return;}
+        if(value?.type==='return-video'&&value.negotiation===negotiation&&typeof value.enabled==='boolean'){
+          returnVideoAllowed=value.enabled;updateReturnVideo();return;
+        }
         if(receivePrivate(value))return;
         if(value?.type!=='screen-approval' || value.negotiation!==negotiation || typeof value.approved!=='boolean')return;
         screenApproved=value.approved;if(!screenApproved)stopShare();updateShareControls();
@@ -217,6 +228,11 @@ async function acceptSignal(data, epoch) {
       if(!current())return;
       const kind=event.transceiver.mid===identities.audio?'audio':event.transceiver.mid===identities.camera?'video':undefined;
       if(!kind || event.track.kind!==kind)return;
+      if(kind==='video'){
+        returnVideoTrack=event.track;updateReturnVideo();
+        event.track.addEventListener('ended',()=>{if(current()&&returnVideoTrack===event.track){returnVideoTrack=undefined;updateReturnVideo();}});
+        return;
+      }
       for(const previous of returnStream.getTracks().filter(track=>track.kind===kind)){returnStream.removeTrack(previous);previous.stop();}
       returnStream.addTrack(event.track);$('return').srcObject=returnStream;
       event.track.addEventListener('ended',()=>{if(current() && $('return').srcObject===returnStream){returnStream.removeTrack(event.track);if(!returnStream.getTracks().length)$('return').srcObject=null;}});

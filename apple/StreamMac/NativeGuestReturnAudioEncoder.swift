@@ -3,6 +3,12 @@ import CoreMedia
 import Foundation
 
 enum NativeGuestReturnAudioError: Error { case unavailable, malformed, codec }
+enum NativeGuestReturnClock {
+    static let ntpHostOffset: Double = {
+        let host = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        return Date().timeIntervalSince1970 + 2_208_988_800 - host
+    }()
+}
 struct NativeGuestReturnOpusPacket: Sendable {
     let data: Data
     /// Packet start on the original mixer grid, including declared codec
@@ -50,8 +56,7 @@ final class NativeGuestReturnAudioEncoder {
         pcmFormat = pcm; opusFormat = opus
         converter = try Self.makeConverter(pcm, opus)
         leading = Int64(converter.primeInfo.leadingFrames)
-        let host = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        ntpHostOffset = Date().timeIntervalSince1970 + 2_208_988_800 - host
+        ntpHostOffset = NativeGuestReturnClock.ntpHostOffset
         pending.reserveCapacity((Self.packetFrames + 512) * 2)
     }
     private static func makeConverter(_ pcm: AVAudioFormat, _ opus: AVAudioFormat) throws -> AVAudioConverter {

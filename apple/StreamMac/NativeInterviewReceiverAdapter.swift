@@ -32,7 +32,13 @@ final class NativeInterviewReceiverEvents: @unchecked Sendable {
         }
         return native
     }
+    #if STREAM_GUEST_VALIDATION
+    var validationReturnReady = false
+    #endif
     func permitsReturn(_ native: NativeGuestReceiver) -> Bool {
+        #if STREAM_GUEST_VALIDATION
+        if validationReturnReady { return true }
+        #endif
         guard native.hostReady else { return false }
         return permittedReceiver() === native
     }
@@ -177,6 +183,122 @@ private final class NativeGuestReturnSender: @unchecked Sendable {
     }
 }
 
+final class NativeGuestReturnVideoSender: @unchecked Sendable {
+    private let gate = NSLock()
+    private let queue = DispatchQueue(label: "stream.interview.return.video")
+    private let controls = DispatchQueue(label: "stream.interview.return.video.visibility")
+    private var visibility: [Bool] = [], visibilityWorking = false
+    private var token: UUID?, reportedReady = false
+    private var pending: GuestReturnVideoFrame?, working = false
+    private let sink: NativeGuestMediaSink, callbacks: NativeInterviewReceiverEvents
+    private weak var receiver: NativeGuestReceiver?
+    private let encoder: NativeGuestReturnVideoEncoder
+    private var encoderToken: UUID? // Owned only by queue.
+    private let events: @Sendable (NativeInterviewMediaEvent) -> Bool
+    init(sink: NativeGuestMediaSink, receiver: NativeGuestReceiver,
+         callbacks: NativeInterviewReceiverEvents, encoder: NativeGuestReturnVideoEncoder = .init(),
+         events: @escaping @Sendable (NativeInterviewMediaEvent) -> Bool) {
+        self.sink = sink; self.receiver = receiver; self.callbacks = callbacks; self.encoder = encoder; self.events = events
+    }
+    private func enqueueVisibilityLocked(_ enabled: Bool) {
+        if visibility.count == 2 { visibility.removeFirst() }; visibility.append(enabled)
+        if !visibilityWorking { visibilityWorking = true; controls.async { [self] in drainVisibility() } }
+    }
+    private func drainVisibility() {
+        while true {
+            gate.lock()
+            guard !visibility.isEmpty else { visibilityWorking = false; gate.unlock(); return }
+            let enabled = visibility.removeFirst(); gate.unlock()
+            _ = receiver?.sendReturnVideoState(enabled)
+        }
+    }
+    private func begin() -> UUID? {
+        gate.lock(); defer { gate.unlock() }
+        guard token == nil else { return nil }
+        let value = UUID(); token = value; reportedReady = false; return value
+    }
+    func prepare() async -> Bool {
+        guard !Task.isCancelled, let current = begin() else { return false }
+        guard await sink.installReturnVideo(token: current, sink: { [weak self] in self?.receive($0) }) else {
+            stop(ifCurrent: current); return false
+        }
+        return isActive(current)
+    }
+    private func isActive(_ current: UUID) -> Bool { gate.lock(); defer { gate.unlock() }; return token == current }
+    var isEnabled: Bool { gate.lock(); defer { gate.unlock() }; return token != nil }
+    private func receive(_ frame: GuestReturnVideoFrame) {
+        gate.lock()
+        guard token == frame.token else { gate.unlock(); return }
+        pending = frame // Latest only: at most one pending frame plus one encode.
+        let start = !working; working = true; gate.unlock()
+        if start { queue.async { [self] in drain() } }
+    }
+    private func take() -> GuestReturnVideoFrame? {
+        gate.lock(); defer { gate.unlock() }
+        guard let frame = pending else { working = false; return nil }
+        pending = nil; return frame
+    }
+    private func drain() {
+        while let frame = take() { encode(frame) }
+    }
+    private func encode(_ frame: GuestReturnVideoFrame) {
+        // Relay rejection can synchronously close this sink. No token gate or
+        // codec wait is held while that path invokes its retirement hook.
+        guard isActive(frame.token), let native = receiver, callbacks.permitsReturn(native) else { return }
+        let age = (CMClockGetTime(CMClockGetHostTimeClock()) - frame.pts).seconds
+        guard age >= 0, age <= 0.25 else { return }
+        if encoderToken != frame.token { encoder.close(); encoderToken = frame.token }
+        let encoded: NativeGuestReturnH264Frame?
+        do { encoded = try encoder.encode(frame) }
+        catch { if stop(ifCurrent: frame.token) { _ = events(.returnVideo(.failed)) }; return }
+        guard let encoded, callbacks.permitsReturn(native) else { return }
+        gate.lock()
+        guard token == frame.token else { gate.unlock(); return }
+        let fresh = (CMClockGetTime(CMClockGetHostTimeClock()) - frame.pts).seconds <= 0.25
+        let sent = fresh && sink.sendReturnVideoIfCurrent(frame) {
+            native.sendReturnH264(encoded.data, lease: frame.lease, rtp: encoded.rtp, ntp: encoded.ntp)
+        }
+        if !sent { encoder.requestKeyframe() }
+        var accepted = true
+        if sent && !reportedReady {
+            reportedReady = true; enqueueVisibilityLocked(true)
+            accepted = events(.returnVideo(.ready))
+        }
+        gate.unlock()
+        if !accepted { stop(ifCurrent: frame.token) }
+    }
+    @discardableResult func stop(ifCurrent expected: UUID? = nil) -> Bool {
+        gate.lock()
+        if let expected, token != expected { gate.unlock(); return false }
+        let previous = token; token = nil; pending = nil
+        if previous != nil { enqueueVisibilityLocked(false); _ = events(.returnVideo(.off)) }
+        gate.unlock()
+        guard let previous else { return false }
+        sink.revokeReturnVideo(token: previous)
+        // Only short authority revocation is synchronous. UI/other outputs
+        // never wait for a codec drain or a transport control send.
+        queue.async { [self] in
+            if encoderToken == previous { encoder.close(); encoderToken = nil }
+            // Actual invalidation precedes removing this reservation. A held
+            // encode keeps its budget while all later sends are already denied.
+            sink.removeReturnVideo(token: previous)
+        }
+        return true
+    }
+    deinit { encoder.close() }
+    #if STREAM_GUEST_VALIDATION
+    func validationFailNextAccessUnit(after packets: Int32) async -> Bool {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                guard isEnabled, let native = receiver else { continuation.resume(returning: false); return }
+                encoder.requestKeyframe()
+                continuation.resume(returning: native.validationFailReturnVideo(after: packets))
+            }
+        }
+    }
+    #endif
+}
+
 /// One fresh SDK peer per admitted full lease. A service relay configuration is
 /// mandatory here; the prototype's loopback transport is never a fallback.
 @MainActor final class NativeInterviewReceiverAdapter: NativeInterviewMediaHost {
@@ -184,7 +306,10 @@ private final class NativeGuestReturnSender: @unchecked Sendable {
     private let callbacks: NativeInterviewReceiverEvents
     private let receiver: NativeGuestReceiver
     private let returnSender: NativeGuestReturnSender?
+    private let returnVideoSender: NativeGuestReturnVideoSender?
     private var expiry: Task<Void, Never>?
+    private var videoPreparation: Task<Void, Never>?
+    private var videoPreparationID: UUID?
     private(set) var isRetired = false
     var selectedICEPair: NativeGuestReceiver.ICEPair? { isRetired ? nil : receiver.selectedICEPair }
 
@@ -201,7 +326,7 @@ private final class NativeGuestReturnSender: @unchecked Sendable {
                 servers.append(.init(url: url, username: server.username, credential: credential))
             }
         }
-        self.sink = sink
+        self.sink = sink; videoState = events
         callbacks = NativeInterviewReceiverEvents(sink: sink, media: media, events: events)
         let callbacks = callbacks
         let returnEncoder = try? NativeGuestReturnAudioEncoder()
@@ -209,14 +334,18 @@ private final class NativeGuestReturnSender: @unchecked Sendable {
             receiver = try NativeGuestReceiver(admitted: context.receive, cameraMID: media.camera,
                 screenMID: media.screen, audioMID: media.audio,
                 video: { callbacks.receive($0) }, audio: { callbacks.receive($0) },
-                signal: { callbacks.receive($0, $1, $2) }, transport: .relay(servers), returnAudioEnabled: returnEncoder != nil)
+                signal: { callbacks.receive($0, $1, $2) }, transport: .relay(servers), returnAudioEnabled: returnEncoder != nil,
+                returnVideoEnabled: sink.supportsProgramReturn)
         } catch { sink.close(); throw NativeInterviewError.unavailable }
         callbacks.bind(receiver)
         let returnNative = receiver
         returnSender = returnEncoder.map {
             NativeGuestReturnSender(sink: sink, receiver: returnNative, encoder: $0, callbacks: callbacks, events: events)
         }
+        returnVideoSender = sink.supportsProgramReturn ? NativeGuestReturnVideoSender(sink: sink, receiver: returnNative, callbacks: callbacks, events: events) : nil
         _ = events(.returnAudio(returnSender == nil ? .unavailable : .preparing))
+        if let sender = returnVideoSender { sink.bindVideoRetirement { [weak sender] in sender?.stop() } }
+        _ = events(.returnVideo(returnVideoSender == nil ? .unavailable : .off))
         let delay = max(0, relay.expires.timeIntervalSinceNow)
         expiry = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(delay)) }
@@ -228,8 +357,30 @@ private final class NativeGuestReturnSender: @unchecked Sendable {
     func prepareReturnAudio() async {
         if let returnSender, !isRetired, !(await returnSender.prepare()) { returnSender.close() }
     }
+    var supportsProgramReturn: Bool { !isRetired && returnVideoSender != nil && callbacks.permitsReturn(receiver) }
+    func setProgramReturnEnabled(_ enabled: Bool) -> Bool {
+        guard supportsProgramReturn, let sender = returnVideoSender else { return false }
+        if !enabled { videoPreparation?.cancel(); sender.stop(); return true }
+        if sender.isEnabled { return true }
+        guard videoPreparation == nil else { return false }
+        let ticket = UUID(); videoPreparationID = ticket
+        videoPreparation = Task { [weak self] in
+            let installed = await sender.prepare()
+            guard let self, self.videoPreparationID == ticket else { sender.stop(); return }
+            self.videoPreparation = nil; self.videoPreparationID = nil
+            if !installed && !self.isRetired && !Task.isCancelled { self.reportVideoFailure() }
+        }
+        reportVideoPreparing(); return true
+    }
+    private let videoState: @Sendable (NativeInterviewMediaEvent) -> Bool
+    private func reportVideoPreparing() { _ = videoState(.returnVideo(.preparing)) }
+    private func reportVideoFailure() { _ = videoState(.returnVideo(.failed)) }
     #if STREAM_GUEST_VALIDATION
     func validationCloseReturnAudio() { returnSender?.close() }
+    func validationFailReturnVideo(after packets: Int32) async -> Bool {
+        await returnVideoSender?.validationFailNextAccessUnit(after: packets) == true
+    }
+    var validationReturnVideoFault: SGReturnVideoFaultReceipt { receiver.validationReturnVideoFault }
     #endif
     func startHost() throws {
         guard !isRetired else { throw NativeInterviewError.closed }
@@ -263,9 +414,9 @@ private final class NativeGuestReturnSender: @unchecked Sendable {
     }
     func retire() {
         guard !isRetired else { return }
-        isRetired = true; expiry?.cancel(); expiry = nil; returnSender?.close(); callbacks.close()
+        isRetired = true; videoPreparation?.cancel(); expiry?.cancel(); expiry = nil; returnSender?.close(); returnVideoSender?.stop(); callbacks.close()
     }
-    deinit { expiry?.cancel(); returnSender?.close(); callbacks.close() }
+    deinit { videoPreparation?.cancel(); expiry?.cancel(); returnSender?.close(); returnVideoSender?.stop(); callbacks.close() }
 }
 
 /// The runtime supplies admission and its controller-issued sink. The factory
@@ -301,4 +452,10 @@ private final class NativeGuestReturnSender: @unchecked Sendable {
     func retire() {
         closed = true; pending = nil; current?.retire(); current = nil
     }
+    #if STREAM_GUEST_VALIDATION
+    func validationFailReturnVideo(after packets: Int32) async -> Bool {
+        await current?.validationFailReturnVideo(after: packets) == true
+    }
+    var validationReturnVideoFault: SGReturnVideoFaultReceipt? { current?.validationReturnVideoFault }
+    #endif
 }
