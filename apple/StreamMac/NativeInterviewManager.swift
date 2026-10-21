@@ -187,8 +187,10 @@ struct NativeInterviewControlState: Equatable, Sendable {
             return snapshot.phase == .connected ? nil : .unavailable("Rejoin the room before ending it.")
         case .admit(let id):
             guard snapshot.phase == .connected else { return .unavailable("Connect the room first.") }
-            return snapshot.members.first(where: { $0.id == id })?.membership == .waiting
-                ? nil : .unavailable("This guest has already been admitted.")
+            guard snapshot.members.first(where: { $0.id == id })?.membership == .waiting else {
+                return .unavailable("This guest has already been admitted.")
+            }
+            return session.canAdmit(id) ? nil : .unavailable("The one native media connection is occupied or admission is pending. Remove the current guest before admitting another.")
         case .remove, .lock:
             return snapshot.phase == .connected ? nil : .unavailable("Connect the room first.")
         case .restartMedia(let id):

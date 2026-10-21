@@ -63,6 +63,10 @@ struct NativeInterviewView: View {
                 Text(NativeInterviewViewValues.phase(manager.state.snapshot.phase)).font(.subheadline)
                 if manager.state.busy { ProgressView().controlSize(.small) }
             }
+            let members = manager.state.snapshot.members
+            Text("\(members.filter { $0.membership != .waiting }.count)/1 admitted · \(members.filter { $0.membership == .waiting }.count) waiting")
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("interview.capacity")
             Button("Copy Guest Invite Link") { share() }
                 .disabled(manager.state.busy || ![.connected, .disconnected].contains(manager.state.snapshot.phase))
                 .accessibilityIdentifier("interview.share")
@@ -94,9 +98,9 @@ struct NativeInterviewView: View {
                     NativeGuestLocalControls(dispatcher: dispatcher, context: context,
                         serviceName: member.name,
                         localName: sceneStore.guestSlots.first(where: { $0.id == context.receive.slot })?.localName ?? "")
-                        .id(context.receive.negotiation)
+                        .id(context)
                     NativeGuestPrivateMessages(manager: manager, dispatcher: dispatcher, context: context)
-                        .id(context.receive.negotiation)
+                        .id(context)
                 }
                 Text(member.returnAudio == .ready ? "Public show audio return is active; your own audio is excluded." :
                     member.returnAudio == .preparing ? "Preparing public show audio return. Start local preview to supply the mix." :

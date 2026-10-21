@@ -157,10 +157,13 @@ import Foundation
         Task { [service] in await service.shutdown() }
     }
 
+    func canAdmit(_ id: UUID) -> Bool {
+        snapshot.phase == .connected && !revoked.contains(id) && pendingAdmission == nil
+            && snapshot.members.contains(where: { $0.id == id && $0.membership == .waiting })
+            && peers.isEmpty
+    }
     @discardableResult func admit(_ id: UUID) -> Bool {
-        guard snapshot.phase == .connected, !revoked.contains(id), pendingAdmission == nil,
-              snapshot.members.contains(where: { $0.id == id }), peers[id] == nil,
-              peers.isEmpty else { return false }
+        guard canAdmit(id) else { return false }
         guard send(["type": "admit", "id": id.uuidString.lowercased()]) else { return false }
         pendingAdmission = id; return true
     }

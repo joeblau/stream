@@ -122,7 +122,7 @@ struct NativeInterviewRelayConfiguration: Sendable, CustomStringConvertible, Cus
 
 /// The service UUID generations and native full lease are both required.
 /// A reconnect retains the invite/slot identity but replaces every authority.
-struct NativeInterviewPeerLease: Sendable, Equatable {
+struct NativeInterviewPeerLease: Sendable, Hashable {
     let room: UUID
     let hostGeneration: UUID
     let guestGeneration: UUID
