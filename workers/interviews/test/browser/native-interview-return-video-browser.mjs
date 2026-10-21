@@ -269,10 +269,10 @@ try {
   if(process.argv.includes('--video-feedback-probe')){
     command({type:'video-noise'});
     const receipts=[];
-    let steadyStats;
+    let steadyStats,steadyFeedback,steadyTime;
     for(let sample=0;sample<24;sample++){
       await pause(1000);check();receipts.push({feedback:structuredClone(state.videoFeedback),profile:structuredClone(state.videoProfile)});
-      if(sample===10)steadyStats=await browser.evaluate(g,decodedVideoStats);
+      if(sample===10){steadyStats=await browser.evaluate(g,decodedVideoStats);steadyFeedback=structuredClone(state.videoFeedback);steadyTime=performance.now();}
       console.log(`MEASURED feedback ${sample}: ${JSON.stringify(state.videoFeedback)} profile=${JSON.stringify(state.videoProfile)}`);
     }
     assert(receipts.some(r=>r.feedback.negotiated&&r.feedback.remb>0&&r.feedback.rembAge>=0&&r.feedback.rembAge<=2000),'Actual Chrome negotiated single-SSRC REMB received through shipping SDK');
@@ -282,7 +282,10 @@ try {
     const receivedBitrate=(finalStats.bytes-steadyStats.bytes)*8000/(finalStats.timestamp-steadyStats.timestamp);
     const receiverCeiling=Math.min(...receipts.slice(11).map(r=>r.feedback.capacity));
     assert(Number.isFinite(receivedBitrate)&&receivedBitrate>0&&receivedBitrate<=receiverCeiling,'Actual Chrome received video bitrate stays within fresh receiver capacity after settling');
-    console.log(`PASS actual negotiated RR/REMB→bounded native VT bitrate; low raster retained without fresh higher-capacity evidence; received=${receivedBitrate.toFixed(0)}bps scopedREMBfloor=${receiverCeiling}bps`);
+    const accepted=state.videoFeedback,packetDelta=(accepted.sentPackets-steadyFeedback.sentPackets)>>>0,payloadDelta=(accepted.sentPayloadBytes-steadyFeedback.sentPayloadBytes)>>>0;
+    const acceptedRTPBitrate=(payloadDelta+12*packetDelta)*8000/(performance.now()-steadyTime);
+    assert(Number.isFinite(acceptedRTPBitrate)&&acceptedRTPBitrate>0&&acceptedRTPBitrate<=receiverCeiling,'Actual SDK-accepted payload plus RTP headers stays within fresh capacity');
+    console.log(`PASS actual negotiated RR/REMB→bounded native VT bitrate; low raster retained without fresh higher-capacity evidence; received=${receivedBitrate.toFixed(0)}bps acceptedRTP=${acceptedRTPBitrate.toFixed(0)}bps scopedREMBfloor=${receiverCeiling}bps`);
     command({type:'video-green'});
   }
   ack=undefined;command({type:'video-budget-held'});await wait('actual aggregate reservation includes active return encoder',()=>{check();return ack==='video-budget-held';});
