@@ -121,7 +121,7 @@ struct NativeInterviewView: View {
                     Text(member.returnVideo == .ready ? "Sending \(member.returnVideoSource.title) video, up to 320 × 180 at 15 fps / 250 kbps. Remote playback is not confirmed." :
                         member.returnVideo == .preparing ? "Preparing \(member.returnVideoSource.title) video return." :
                         member.returnVideo == .failed ? "Video return could not start. Start local preview and check the studio encoder budget, then retry." :
-                        "\(member.returnVideoSource.title) video return is off. It uses one encoder when enabled. Secondary requires a configured layout in Program.")
+                        "\(member.returnVideoSource.title) video return is off. It uses one encoder when enabled. Secondary requires a configured layout in Program. Clean omits project overlays and live annotations; scene layers remain. Additional compositions require qualified hardware.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 HStack {

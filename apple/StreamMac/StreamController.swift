@@ -180,6 +180,7 @@ final class StreamController: ObservableObject {
     private weak var guestReturnVideoSink: NativeGuestMediaSink?
     private var guestReturnVideoRemovals: Set<UUID> = []
     private var guestSecondaryReturnTokens: Set<UUID> = []
+    private var guestCleanReturnTokens: Set<UUID> = []
     private let engine: CompositionEngine
     /// The W03 preview engine: composites the STAGED scene for the PREVIEW
     /// monitor only. Same source providers, independent tick — preview work
@@ -678,6 +679,13 @@ final class StreamController: ObservableObject {
         return subscription
     }
 
+    @discardableResult
+    func addCleanFrameSink(capacity: Int = 1, sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
+        let subscription = FrameSubscription()
+        Task { await engine.addCleanSink(token: subscription.token, capacity: capacity, sink: sink) }
+        return subscription
+    }
+
     func removeFrameSink(_ subscription: FrameSubscription) {
         Task { await engine.removeSink(subscription.token) }
     }
@@ -1032,6 +1040,11 @@ final class StreamController: ObservableObject {
         reconcileSourceDemand()
     }
     private func refreshSecondaryMonitors() {
+        // New monitor demand takes priority over an optional guest raster.
+        // Revocation also disables Clean rendering before its VT drain ends.
+        if cleanReturnDemanded, cleanReturnStartError != nil, guestReturnVideoSink?.returnVideoSource == .clean {
+            guestReturnVideoSink?.stopProgramReturn()
+        }
         if secondaryMonitorsEnabled, previewState == .active {
             if secondaryPreviewSubscription == nil {
                 let converter = secondaryPreviewConverter
@@ -1129,12 +1142,14 @@ final class StreamController: ObservableObject {
         guestReturnVideoSink = sink
         let program = engine, authority = guestProgramReturnAuthority
         for source in NativeInterviewReturnVideoSource.allCases {
-            let canvas: OutputCanvas = source == .program ? .program : .secondary
+            let canvas: OutputCanvas = source == .secondary ? .secondary : .program
             let capability = NativeGuestProgramReturnSource(authority: authority, install: { [weak self, weak sink] token, consume in
                 let size = await MainActor.run { () -> CGSize? in
                     guard let self, let sink, sink.videoTokenIsCurrent(token), self.isPipelineRunning,
                           self.guestLease == lease,
+                          source != .clean || self.cleanReturnStartError == nil,
                           self.reserveRecordingEncoders(token, count: 1, canvas: canvas) == nil else { return nil }
+                    if source == .clean { self.guestCleanReturnTokens.insert(token) }
                     if canvas == .secondary {
                         self.guestSecondaryReturnTokens.insert(token)
                         self.reconcileSourceDemand()
@@ -1142,8 +1157,8 @@ final class StreamController: ObservableObject {
                     return canvas == .secondary ? self.activeSecondaryProfile.canvasSize : self.activeProfile.canvasSize
                 }
                 guard let size else { return false }
-                if canvas == .secondary { await program.setSecondaryOutput(canvasSize: size) }
-                await program.addSink(token: token, capacity: 1, canvas: canvas) { consume($0.sampleBuffer) }
+                if source == .clean { await program.addCleanSink(token: token, capacity: 1, authorized: { [weak sink] in sink?.videoTokenIsCurrent(token) == true }) { consume($0.sampleBuffer) } }
+                else { await program.addSink(token: token, capacity: 1, canvas: canvas, canvasSize: canvas == .secondary ? size : nil) { consume($0.sampleBuffer) } }
                 return true
             }, remove: { [weak self] token in
                 let reserved = await MainActor.run {
@@ -1154,13 +1169,14 @@ final class StreamController: ObservableObject {
                 await program.removeSink(token)
                 await MainActor.run {
                     guard let self else { return }
-                    self.guestSecondaryReturnTokens.remove(token)
+                    self.guestSecondaryReturnTokens.remove(token); self.guestCleanReturnTokens.remove(token)
                     self.releaseRecordingEncoders(token); self.guestReturnVideoRemovals.remove(token)
                     if canvas == .secondary { self.reconcileSourceDemand() }
                 }
             })
             if source == .program { sink.bindProgramReturn(capability) }
-            else { sink.bindSecondaryReturn(capability) }
+            else if source == .secondary { sink.bindSecondaryReturn(capability) }
+            else { sink.bindCleanReturn(capability) }
         }
         return sink
     }
@@ -1438,10 +1454,20 @@ final class StreamController: ObservableObject {
         var copy = destination; copy.followsProgramProfile = false; copy.outputProfile = activeSecondaryProfile
         return copy
     }
+    var cleanReturnDemanded: Bool { !guestCleanReturnTokens.isEmpty }
+    private var cleanReturnStartError: String? {
+        guard IsolatedVideoBudget.current.qualified else { return "Additional composition is not qualified on this Mac class." }
+        let programPixels = activeProfile.canvasWidth * activeProfile.canvasHeight * activeProfile.frameRate
+        let secondaryPixels = secondaryCanvasDemanded
+            ? activeSecondaryProfile.canvasWidth * activeSecondaryProfile.canvasHeight * activeSecondaryProfile.frameRate : 0
+        guard programPixels * 2 + secondaryPixels <= 3840 * 2160 * 30 else { return "Clean return exceeds the compositor budget (4K30 total pixels per second)." }
+        return nil
+    }
+
     private func canvasStartError(destinations selected: [StreamDestination]) -> String? {
         guard selected.contains(where: { $0.canvas == .secondary }) else { return nil }
         guard secondaryCanvasAvailable else { return "Take a configured secondary layout to Program before starting this output." }
-        let pixels = activeProfile.canvasWidth * activeProfile.canvasHeight * activeProfile.frameRate +
+        let pixels = activeProfile.canvasWidth * activeProfile.canvasHeight * activeProfile.frameRate * (guestCleanReturnTokens.isEmpty ? 1 : 2) +
             activeSecondaryProfile.canvasWidth * activeSecondaryProfile.canvasHeight * activeSecondaryProfile.frameRate
         guard pixels <= 3840 * 2160 * 30 else { return "Both canvases exceed the compositor budget (4K30 total pixels per second). Reduce their size or frame rate before starting outputs." }
         return nil

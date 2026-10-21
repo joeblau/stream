@@ -152,7 +152,7 @@ actor CompositionEngine {
     func metricsSnapshot() -> CompositionMetrics {
         var snapshot = metrics
         snapshot.sampledAt = ProcessInfo.processInfo.systemUptime
-        for mailbox in Array(subscribers.values) + Array(secondarySubscribers.values) {
+        for mailbox in Array(subscribers.values) + Array(secondarySubscribers.values) + Array(cleanSubscribers.values) {
             let health = mailbox.statistics()
             snapshot.subscriberQueueDepth += health.depth
             snapshot.subscriberDrops += health.drops
@@ -164,6 +164,7 @@ actor CompositionEngine {
 
     private let renderer = SceneRenderer()
     private let secondaryRenderer = SceneRenderer()
+    private lazy var cleanRenderer = SceneRenderer()
     private var secondaryCanvasSize = CGSize(width: 720, height: 1280)
     private let screenProvider: @Sendable () -> CVPixelBuffer?
     private let cameraProvider: @Sendable () -> LatestCameraFrame.Frame?
@@ -235,6 +236,8 @@ actor CompositionEngine {
 
     private var subscribers: [UUID: FrameMailbox] = [:]
     private var secondarySubscribers: [UUID: FrameMailbox] = [:]
+    private var cleanSubscribers: [UUID: FrameMailbox] = [:]
+    private var cleanRenderPermits: [UUID: @Sendable () -> Bool] = [:]
     /// Tokens cancelled before their (asynchronously delivered) registration
     /// arrived; the late `addSink` is dropped instead of leaking a sink.
     private var cancelledTokens: Set<UUID> = []
@@ -495,8 +498,8 @@ actor CompositionEngine {
                                        scenes: [SceneID: Scene],
                                        presentationTime pts: CMTime,
                                        frameDuration: CMTime,
-                                       canvas: OutputCanvas = .program) -> CompositedFrame? {
-        let renderer = canvas == .program ? self.renderer : secondaryRenderer
+                                       canvas: OutputCanvas = .program, clean: Bool = false) -> CompositedFrame? {
+        let renderer = clean ? cleanRenderer : canvas == .program ? self.renderer : secondaryRenderer
         let canvasSize = canvas == .program ? self.canvasSize : secondaryCanvasSize
         let from = active.from.composition(for: canvas)
         let to = active.to.composition(for: canvas)
@@ -620,22 +623,33 @@ actor CompositionEngine {
     /// the token so subscription and cancellation can be issued from any
     /// context (e.g. MainActor) without awaiting the engine; a cancel that
     /// lands before its register is still honored.
-    func addSink(token: UUID, capacity: Int = 2, canvas: OutputCanvas = .program, sink: @escaping FrameSink) {
+    func addSink(token: UUID, capacity: Int = 2, canvas: OutputCanvas = .program, canvasSize: CGSize? = nil, sink: @escaping FrameSink) {
         if cancelledTokens.remove(token) != nil { return }
+        if canvas == .secondary, let canvasSize { secondaryCanvasSize = canvasSize }
         let mailbox = FrameMailbox(capacity: capacity, token: token, sink: sink)
         if canvas == .program { subscribers[token] = mailbox }
         else { secondarySubscribers[token] = mailbox }
     }
 
+    /// Clean preserves the Program composition/background and strips only
+    /// project overlay nodes and live annotations. It is not a new canvas.
+    func addCleanSink(token: UUID, capacity: Int = 1, authorized: @escaping @Sendable () -> Bool = { true }, sink: @escaping FrameSink) {
+        if cancelledTokens.remove(token) != nil { return }
+        cleanSubscribers[token] = FrameMailbox(capacity: capacity, token: token, sink: sink)
+        cleanRenderPermits[token] = authorized
+    }
+
     func removeSink(_ token: UUID) {
         let primary = subscribers.removeValue(forKey: token)
         let secondary = secondarySubscribers.removeValue(forKey: token)
-        if primary == nil && secondary == nil {
+        let clean = cleanSubscribers.removeValue(forKey: token)
+        cleanRenderPermits.removeValue(forKey: token)
+        if primary == nil && secondary == nil && clean == nil {
             cancelledTokens.insert(token)
         }
     }
 
-    var subscriberCount: Int { subscribers.count + secondarySubscribers.count }
+    var subscriberCount: Int { subscribers.count + secondarySubscribers.count + cleanSubscribers.count }
 
     // MARK: - Tick loop
 
@@ -716,6 +730,8 @@ actor CompositionEngine {
         defer {
             renderSecondary(scene: scene, override: override != nil, overlayContext: overlayContext,
                 sourcePayloads: sourcePayloads, scenes: scenes, pts: pts, duration: duration, annotations: annotations)
+            renderClean(scene: scene, override: override != nil, overlayContext: overlayContext,
+                sourcePayloads: sourcePayloads, scenes: scenes, pts: pts, duration: duration)
         }
 
         if override == nil, let active = transition {
@@ -753,6 +769,26 @@ actor CompositionEngine {
         for mailbox in subscribers.values {
             mailbox.post(frame)
         }
+    }
+
+    private func renderClean(scene: Scene, override: Bool, overlayContext: OverlayContext,
+                             sourcePayloads: [SourceDefinitionID: LayerPayload], scenes: [SceneID: Scene],
+                             pts: CMTime, duration: CMTime) {
+        let consumers = cleanSubscribers.filter { cleanRenderPermits[$0.key]?() == true }.values
+        guard !consumers.isEmpty else { return }
+        var overlays = overlayContext; overlays.overlays = []
+        let frame: CompositedFrame?
+        if !override, let active = transition {
+            frame = renderTransitionFrame(active, overlayContext: overlays, sourcePayloads: sourcePayloads,
+                scenes: scenes, presentationTime: pts, frameDuration: duration, clean: true)
+        } else {
+            let fades = override ? (opacity: [LayerID: Double](), exiting: [LayerNode]()) : layerFadeOverrides(at: pts)
+            frame = cleanRenderer.render(scene: scene, overlayContext: overlays, canvasSize: canvasSize,
+                frames: delayedFrameLookup, sourcePayloads: sourcePayloads, scenes: scenes,
+                presentationTime: pts, frameDuration: duration, sequence: frameSequence,
+                layerOpacity: fades.opacity, exitingLayers: fades.exiting, annotations: .empty)
+        }
+        if let frame { for mailbox in consumers { mailbox.post(frame) } }
     }
 
     private func renderSecondary(scene: Scene, override: Bool, overlayContext: OverlayContext,
