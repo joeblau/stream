@@ -107,7 +107,7 @@ provider must be checked against that provider. NDI, DeckLink and Zoom inputs re
 Native browser interviews support one deliberately admitted camera/audio peer
 and independently approved screen share, with full connection identity fences.
 Public-show audio return excludes the recipient. Private text and microphone
-holds, plus explicitly enabled low-resolution Program video, use that current
+holds, plus explicitly enabled Program/Secondary/Clean video, use that current
 connection; see the native interview evidence below. Provider accounts and
 public readers have [documented granted-scope controls](PROVIDER_ACCOUNTS.md);
 authorization, real ingest and provider completion acceptance remain unqualified.
