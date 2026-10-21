@@ -757,6 +757,44 @@ struct WebSourcePayload: Hashable, Codable, Sendable {
     }
 }
 
+/// Project preparation identities. No capabilities, credentials or live
+/// connection generations belong in a saved show. A qualified receiver can
+/// resolve its public participant identity to these stable camera/screen IDs.
+struct GuestSlot: Identifiable, Hashable, Codable, Sendable {
+    var id: UUID = UUID()
+    var name: String
+    var title: String = ""
+    var offlineMessage: String = "Waiting for guest"
+    var placeholderColorHex: String = "#253858"
+    var participantIdentity: String? = nil
+    var cameraSourceID: SourceDefinitionID = SourceDefinitionID()
+    var screenSourceID: SourceDefinitionID = SourceDefinitionID()
+
+    var tokenPrefix: String { "guestslot_" + id.uuidString.replacingOccurrences(of: "-", with: "").lowercased() }
+    var nameTemplate: String { "{\(tokenPrefix)_name}" }
+    var titleTemplate: String { "{\(tokenPrefix)_title}" }
+    var tokens: [String: String] {
+        ["\(tokenPrefix)_name": name.isEmpty ? "Guest" : name,
+         "\(tokenPrefix)_title": title.isEmpty ? " " : title]
+    }
+    var sources: [SourceDefinition] {
+        [SourceDefinition(id: cameraSourceID, name: "\(name) · Camera", payload: .guest(GuestSourcePayload())),
+         SourceDefinition(id: screenSourceID, name: "\(name) · Screen", payload: .guest(GuestSourcePayload()))]
+    }
+
+    func isReferenced(by layer: LayerNode) -> Bool {
+        if layer.sourceID == cameraSourceID || layer.sourceID == screenSourceID { return true }
+        guard case .text(let text) = layer.payload, text.recordingChatMessageID == nil else { return false }
+        let pattern = "(?i)\\{\\s*" + tokenPrefix + "_(?:name|title)\\s*\\}"
+        return text.text.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    func isReferenced(by scene: Scene) -> Bool {
+        scene.layers.contains { isReferenced(by: $0) }
+    }
+
+}
+
 struct GuestSourcePayload: Hashable, Codable, Sendable {
     /// Invite/session link identifier for a remote guest feed.
     var sessionIdentifier: String? = nil
@@ -1787,6 +1825,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
     /// timing — everything but the string), stored once at project level
     /// and applied by writing their value onto a text layer's payload.
     var textStylePresets: [TextStylePreset]
+    /// Prepared guest identities and separate camera/screen source bindings.
+    var guestSlots: [GuestSlot]
 
     init(version: Int = SceneDocument.currentVersion,
          projectID: ProjectID = ProjectID(),
@@ -1799,7 +1839,8 @@ struct SceneDocument: Hashable, Codable, Sendable {
          defaultTransition: SceneTransition = .default,
          effectPresets: [SourceEffectPreset] = [],
          stylePresets: [LayerStylePreset] = [],
-         textStylePresets: [TextStylePreset] = []) {
+         textStylePresets: [TextStylePreset] = [],
+         guestSlots: [GuestSlot] = []) {
         self.version = version
         self.projectID = projectID
         self.projectName = projectName
@@ -1812,6 +1853,7 @@ struct SceneDocument: Hashable, Codable, Sendable {
         self.effectPresets = effectPresets
         self.stylePresets = stylePresets
         self.textStylePresets = textStylePresets
+        self.guestSlots = guestSlots
     }
 
     /// `overlays`/`defaultBackground` were added within v2; decode them with
@@ -1832,6 +1874,19 @@ struct SceneDocument: Hashable, Codable, Sendable {
         effectPresets = try container.decodeIfPresent([SourceEffectPreset].self, forKey: .effectPresets) ?? []
         stylePresets = try container.decodeIfPresent([LayerStylePreset].self, forKey: .stylePresets) ?? []
         textStylePresets = try container.decodeIfPresent([TextStylePreset].self, forKey: .textStylePresets) ?? []
+        guestSlots = try container.decodeIfPresent([GuestSlot].self, forKey: .guestSlots) ?? []
+        let slotIDs = Set(guestSlots.map(\.id))
+        let mediaIDs = guestSlots.flatMap { [$0.cameraSourceID, $0.screenSourceID] }
+        let validSources = mediaIDs.allSatisfy { id in
+            let matches = sources.filter { $0.id == id }
+            guard matches.count == 1, case .guest = matches[0].payload else { return false }
+            return true
+        }
+        guard guestSlots.count <= 10, slotIDs.count == guestSlots.count,
+              Set(mediaIDs).count == mediaIDs.count, validSources else {
+            throw DecodingError.dataCorruptedError(forKey: .guestSlots, in: container,
+                debugDescription: "Guest preparation requires at most ten unique slots with separate, unique camera/screen guest sources.")
+        }
     }
 
     /// The S07 render context the engine composites every scene inside.

@@ -70,6 +70,25 @@ import Testing
         facts.recordingEncoderReservations = 4
         #expect(facts.checks.first { $0.id == "encoders" }?.status == .failed)
     }
+
+    @Test("Malformed measurements and reservation counts never receive a passing readiness check")
+    func malformedReadiness() {
+        var facts = StreamPreflightFacts()
+        facts.requiredUplinkMbps = 8
+        for measurement in [Double.nan, .infinity, -.infinity, 0, -1] {
+            facts.measuredUplinkMbps = measurement
+            #expect(facts.checks.first { $0.id == "uplink" }?.status == .unverified)
+        }
+        facts.measuredUplinkMbps = 20
+        facts.requiredUplinkMbps = .nan
+        #expect(facts.checks.first { $0.id == "uplink" }?.status == .failed)
+        facts.testedEncoderBudget = 4
+        facts.encoderCount = Int.max
+        facts.recordingEncoderReservations = Int.max
+        #expect(facts.checks.first { $0.id == "encoders" }?.status == .failed)
+        facts.encoderCount = -1; facts.recordingEncoderReservations = 1
+        #expect(facts.checks.first { $0.id == "encoders" }?.status == .failed)
+    }
 }
 
 private actor FakeUplink {

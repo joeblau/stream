@@ -67,12 +67,35 @@ func check(_ value: @autoclosure () -> Bool, _ message: String) {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let endpoint = StudioAutomationEndpoint(defaults: defaults)
+        var reopenRequests = 0
+        endpoint.attachStudioWindow(nil, reopen: { reopenRequests += 1 })
+        endpoint.focusStudio()
+        check(reopenRequests == 1, "Automation must request the named studio when its window is closed")
         let scene = SceneID(), second = SceneID(), layer = LayerID()
         let dispatcher = StudioCommandDispatcher(), permissions = PermissionsManager()
         dispatcher.state.scenes = [.init(id: scene, name: "Intro"), .init(id: second, name: "Closing")]
         dispatcher.state.stagedSceneID = scene
         var layers = [LayerNode(id: layer, name: "Camera")]
         endpoint.bind(dispatcher: dispatcher, permissions: permissions, profileName: "Demo / Main", stagedLayers: { layers })
+        endpoint.markStudioReady(true, for: dispatcher)
+        check(endpoint.isStudioReady, "Current shell readiness was not accepted")
+        let retiredDispatcher = StudioCommandDispatcher()
+        endpoint.markStudioReady(false, for: retiredDispatcher)
+        check(endpoint.isStudioReady, "Retired shell cleared the current runtime's readiness")
+        endpoint.attachStudioWindow(nil, reopen: {
+            // Match a deferred SwiftUI onAppear that performs preview setup.
+            Task { @MainActor in
+                await Task.yield()
+                dispatcher.state.preview = .active
+                endpoint.markStudioReady(true, for: dispatcher)
+            }
+        })
+        try await endpoint.awaitFocusedStudio()
+        check(dispatcher.state.preview == .active, "Intent raced deferred reopened-shell setup")
+        dispatcher.state.preview = .idle
+        StudioAutomationEndpoint.shared.bind(dispatcher: dispatcher, permissions: permissions,
+            profileName: "Demo / Main", stagedLayers: { layers })
+        defer { StudioAutomationEndpoint.shared.unbind() }
         check(endpoint.currentProfile?.id == "profile-a", "Explicit profile scope missing")
         let target = StudioAutomationResource(profileID: "profile-a", sceneID: scene.rawValue, layerID: layer.rawValue)
         check(StudioAutomationResource(id: target.id) == target, "Resource scope round-trip failed")
@@ -87,15 +110,25 @@ func check(_ value: @autoclosure () -> Bool, _ message: String) {
         defaults.set(true, forKey: "onboarding.hasCompletedFirstRun")
         endpoint.interactionBlocked = true
         expectFailure("interactionRequired") { _ = try endpoint.execute(select) }; endpoint.interactionBlocked = false
+        var embeddedInteraction = true
+        endpoint.interactionIsBlocked = { embeddedInteraction }
+        expectFailure("interactionRequired") { _ = try endpoint.execute(select) }
+        check(dispatcher.executions == 0, "Live workspace interaction rejection dispatched work")
+        embeddedInteraction = false
         expectFailure("profileChanged") { _ = try endpoint.execute(.init(profileID: "profile-b", operation: .startRecording)) }
         expectFailure("invalidTarget") { _ = try endpoint.execute(.init(profileID: "profile-a", operation: .take, sceneID: second.rawValue)) }
         expectFailure("versionMismatch") { _ = try endpoint.execute(.init(version: 2, profileID: "profile-a", operation: .stopPreview)) }
         expectFailure("invalidValue") { _ = try endpoint.execute(.init(profileID: "profile-a", operation: .startRecording, sceneID: scene.rawValue)) }
         dispatcher.state.scenes[0].name = "Renamed Intro"
+        let savedSceneID = StudioAutomationResource(profileID: "profile-a", sceneID: scene.rawValue).id
+        let queriedScene = try await StudioAutomationSceneQuery().entities(for: [savedSceneID])
+        check(queriedScene.count == 1 && queriedScene.first?.name == "Renamed Intro", "Saved Shortcuts entities must follow rename")
         check(endpoint.sceneChoices.first?.name == "Renamed Intro", "Rename lost stable identity")
         check(endpoint.sceneChoices.first?.resource.sceneID == scene.rawValue, "Rename retargeted UUID")
         layers[0].name = "Renamed Camera"; check(endpoint.layerChoices.first?.name == "Renamed Camera", "Layer query is stale")
         dispatcher.state.scenes.removeFirst()
+        let deletedScenes = try await StudioAutomationSceneQuery().entities(for: [savedSceneID])
+        check(deletedScenes.isEmpty, "Deleted Shortcuts entities must not resolve by list position")
         expectFailure("invalidTarget") { _ = try endpoint.execute(select) }
         dispatcher.state.scenes.insert(.init(id: scene, name: "Renamed Intro"), at: 0)
         permissions.statuses[.microphone] = .denied
@@ -114,13 +147,22 @@ func check(_ value: @autoclosure () -> Bool, _ message: String) {
         check(json.contains("permissions") && !json.contains("token"), "Snapshot leaks credentials or loses permission context")
         let beforeSwitch = dispatcher.executions
         DesktopStorage.projectDirectory = URL(fileURLWithPath: "/tmp/automation/profile-b")
+        let staleScenes = try await StudioAutomationSceneQuery().entities(for: [savedSceneID])
+        check(staleScenes.isEmpty, "Shortcuts entity query must reject a profile-switch gap")
         expectFailure("runtimeUnavailable") { _ = try endpoint.execute(select) }
         check(endpoint.sceneChoices.isEmpty && dispatcher.executions == beforeSwitch, "Old runtime survived project gap")
         endpoint.unbind(); let next = StudioCommandDispatcher()
         endpoint.bind(dispatcher: next, permissions: permissions, stagedLayers: { [] })
+        check(!endpoint.isStudioReady, "New runtime inherited the retired shell's readiness")
+        endpoint.markStudioReady(true, for: dispatcher)
+        check(!endpoint.isStudioReady, "Retired runtime marked a replacement shell ready")
         expectFailure("profileChanged") { _ = try endpoint.execute(select) }
         endpoint.unbind(); check(!endpoint.isBound, "Unbind retained runtime")
+        let cancelledLaunch = Task { try await endpoint.awaitRuntime() }
+        cancelledLaunch.cancel()
+        do { try await cancelledLaunch.value; fatalError("Cancelled launch must stop waiting") }
+        catch is CancellationError { }
         check(StudioAutomationLocalOutput.allCases.count == 4, "Local-output intents advertise public output")
-        print("Studio automation harness passed: typed scope/targets, rename/delete, setup/permission gates, shared availability, authoritative preparing state, switch/rebind, no public start.")
+        print("Studio automation harness passed: named-window reopen, typed scope/targets, native entity rename/delete/profile-switch queries, setup/permission gates, shared availability, authoritative preparing state, switch/rebind, cancelled launch, no public start.")
     }
 }

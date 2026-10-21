@@ -62,13 +62,18 @@ actor SessionRecoveryDiskStore {
     private var context: (UUID, UUID)?
     init(directory: URL) {
         store = SessionRecoveryDiskStore(directory: directory)
-        do {
-            let prior = try SessionRecoveryDiskStore.read(directory.appendingPathComponent("pending.v1.json"))
-            let latest = try SessionRecoveryDiskStore.read(directory.appendingPathComponent("current.v1.json"))
-            pending = prior ?? latest.flatMap { $0.needsReview ? $0 : nil }
-            preserveNeeded = prior == nil && pending != nil
-            showReview = pending != nil
-        } catch { self.error = "Recovery metadata could not be read. Its original bytes are preserved; review project backups and recordings manually." }
+        var prior: SessionRecoverySnapshot?, latest: SessionRecoverySnapshot?
+        var unreadable = false
+        do { prior = try SessionRecoveryDiskStore.read(directory.appendingPathComponent("pending.v1.json")) }
+        catch { unreadable = true }
+        do { latest = try SessionRecoveryDiskStore.read(directory.appendingPathComponent("current.v1.json")) }
+        catch { unreadable = true }
+        // Each document is an independent recovery opportunity. A damaged live
+        // checkpoint must not hide the preserved, unresolved prior session.
+        pending = prior ?? latest.flatMap { $0.needsReview ? $0 : nil }
+        preserveNeeded = prior == nil && pending != nil
+        showReview = pending != nil
+        if unreadable { self.error = "Some recovery metadata could not be read. Its original bytes are preserved; review available recovery context, project backups and recordings manually." }
         remoteReview.load(pending, context: nil)
     }
     func beginContext(projectID: UUID, profileID: UUID, generation: UUID = UUID()) {

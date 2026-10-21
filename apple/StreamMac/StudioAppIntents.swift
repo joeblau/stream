@@ -84,7 +84,8 @@ struct OpenStreamStudioIntent: AppIntent {
     // is only available on newer OS versions.
     static let openAppWhenRun: Bool = true
     @MainActor func perform() async throws -> some IntentResult {
-        StudioAutomationEndpoint.shared.focusStudio()
+        try await StudioAutomationEndpoint.shared.awaitRuntime()
+        try await StudioAutomationEndpoint.shared.awaitFocusedStudio()
         return .result()
     }
 }
@@ -96,7 +97,7 @@ struct GetStreamStudioStateIntent: AppIntent {
     static var parameterSummary: some ParameterSummary { Summary("Get studio state for \(\.$profile)") }
     @MainActor func perform() async throws -> some IntentResult & ReturnsValue<String> {
         try await StudioAutomationEndpoint.shared.awaitRuntime()
-        StudioAutomationEndpoint.shared.focusStudio()
+        try await StudioAutomationEndpoint.shared.awaitFocusedStudio()
         return .result(value: try automationJSON(StudioAutomationEndpoint.shared.snapshot(profileID: profile.id)))
     }
 }
@@ -162,8 +163,7 @@ private func automationResource(_ id: String, expectsLayer: Bool) throws -> Stud
 }
 @MainActor private func runAutomation(_ request: StudioAutomationRequest) async throws -> String {
     try await StudioAutomationEndpoint.shared.awaitRuntime()
-    try Task.checkCancellation()
-    StudioAutomationEndpoint.shared.focusStudio()
+    try await StudioAutomationEndpoint.shared.awaitFocusedStudio()
     return try automationJSON(StudioAutomationEndpoint.shared.execute(request))
 }
 private func automationJSON(_ snapshot: StudioAutomationSnapshot) throws -> String {

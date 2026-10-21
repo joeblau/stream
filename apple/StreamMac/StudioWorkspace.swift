@@ -306,6 +306,10 @@ final class StudioWorkspace: ObservableObject {
             guard let self else { return true }
             return !UserDefaults.standard.bool(forKey: "onboarding.hasCompletedFirstRun") || self.permissionChoicePending || self.isSwitching || self.packageBusy
         }
+        StudioAutomationEndpoint.shared.interactionIsBlocked = { [weak self] in
+            guard let self else { return true }
+            return !UserDefaults.standard.bool(forKey: "onboarding.hasCompletedFirstRun") || self.permissionChoicePending || self.isSwitching || self.packageBusy
+        }
         let projectID = currentProject.id, profileID = currentProfile.id
         runtime.recoveryBinding = SessionRecoveryRuntimeBinding(coordinator: recovery,
             projectID: projectID, profileID: profileID, sceneStore: runtime.sceneStore,
@@ -388,7 +392,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func previewPackage(_ url: URL) {
-        guard url.isFileURL, url.pathExtension.lowercased() == "streamshow" else { return }
+        guard !packageBusy, url.isFileURL, url.pathExtension.lowercased() == "streamshow" else { return }
         showProjects = true
         packageBusy = true
         Task {
@@ -400,6 +404,7 @@ final class StudioWorkspace: ObservableObject {
 
     func importPreviewedPackage() async {
         guard let preview = importPreview, !packageBusy else { return }
+        guard catalog.projects.count < 200 else { error = "The catalog supports up to 200 shows. Import into a catalog with fewer shows."; return }
         packageBusy = true
         let project = StudioProject(name: preview.name)
         let target = Selection(project: project.id, profile: project.profiles[0].id)
@@ -416,6 +421,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func exportPackage(includeMedia: Bool, selectedSceneOnly: Bool) {
+        guard !packageBusy else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.streamShow]
         panel.nameFieldStringValue = currentProject.name + ".streamshow"
@@ -442,19 +448,11 @@ final class StudioWorkspace: ObservableObject {
             if let data = try? Data(contentsOf: directory.appendingPathComponent(name)) { documents[name] = data }
         }
         documents["stream.scenes.v2.json"] = try? JSONEncoder().encode(document)
-        var assets = runtime.dispatcher.assetLibrary.assets
-        var media: [ShowPackageIO.Media] = []
-        for i in assets.indices {
-            let path = "Assets/\(assets[i].id)/\(URL(fileURLWithPath: assets[i].fileName).lastPathComponent)"
-            if includeMedia, let access = runtime.dispatcher.assetLibrary.access(for: assets[i].id), access.isAccessible {
-                assets[i].storage = .projectCopy
-                assets[i].relativePath = path
-                media.append(.init(access: access, relativePath: path))
-            } else { assets[i].storage = .linked; assets[i].relativePath = nil }
-            assets[i].bookmarkData = nil; assets[i].lastKnownPath = ""
-        }
-        documents["stream.assets.v1.json"] = try? JSONEncoder().encode(AssetLibraryDocument(assets: assets, usage: [:]))
-        let packageDocuments = documents, packageMedia = media, name = currentProject.name
+        let packageAssets: (document: AssetLibraryDocument, media: [ShowPackageIO.Media])
+        do { packageAssets = try packageAssetContents(includeMedia: includeMedia) }
+        catch { self.error = String(describing: error); return }
+        documents["stream.assets.v1.json"] = try? JSONEncoder().encode(packageAssets.document)
+        let packageDocuments = documents, packageMedia = packageAssets.media, name = currentProject.name
         packageBusy = true
         Task {
             do {
@@ -463,6 +461,26 @@ final class StudioWorkspace: ObservableObject {
             } catch { self.error = String(describing: error) }
             packageBusy = false
         }
+    }
+
+    /// Capture retained security grants together with the registry that will be
+    /// exported, so Include Media cannot silently become references-only.
+    func packageAssetContents(includeMedia: Bool) throws -> (document: AssetLibraryDocument, media: [ShowPackageIO.Media]) {
+        var assets = runtime.dispatcher.assetLibrary.assets
+        var media: [ShowPackageIO.Media] = []
+        for i in assets.indices {
+            let path = "Assets/\(assets[i].id)/\(URL(fileURLWithPath: assets[i].fileName).lastPathComponent)"
+            if includeMedia {
+                guard let access = runtime.dispatcher.assetLibrary.access(for: assets[i].id), access.isAccessible else {
+                    throw PortableShow.Failure.invalid("Cannot include \(assets[i].name). Relink missing assets in Assets, or turn off Include media to transfer references only.")
+                }
+                assets[i].storage = .projectCopy
+                assets[i].relativePath = path
+                media.append(.init(access: access, relativePath: path))
+            } else { assets[i].storage = .linked; assets[i].relativePath = nil }
+            assets[i].bookmarkData = nil; assets[i].lastKnownPath = ""
+        }
+        return (AssetLibraryDocument(assets: assets, usage: [:]), media)
     }
 
     private static func copyCredentials(from source: URL, to target: URL) throws {

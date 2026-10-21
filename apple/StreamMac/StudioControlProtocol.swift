@@ -50,6 +50,7 @@ struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var overlayVisibility: [String: Bool]? = nil
     var directLiveEditing: Bool? = nil
     var chat: StudioControlChatState? = nil
+    var recordingCountdown: Int? = nil
 }
 struct StudioControlChatState: Codable, Equatable, Sendable {
     var queuedCount: Int

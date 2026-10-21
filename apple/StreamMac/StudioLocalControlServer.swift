@@ -74,7 +74,8 @@ import Network
                          playback: dispatcher.controllerPlaybackSnapshot(), programLayerVisibility: dispatcher.controllerProgramVisibility(),
                          groupVisibility: dispatcher.controllerGroupVisibility(),
                          overlayVisibility: Dictionary(uniqueKeysWithValues: dispatcher.controllerOverlays().map { ($0.id.rawValue.uuidString, $0.isVisible) }),
-                         directLiveEditing: state.directLiveEditing, chat: dispatcher.controllerChatSnapshot())
+                         directLiveEditing: state.directLiveEditing, chat: dispatcher.controllerChatSnapshot(),
+                         recordingCountdown: dispatcher.controllerRecordingCountdown())
         }
         execute = { [weak self, weak dispatcher] id, value, delta, page, text in
             guard let self, let dispatcher else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "The studio is unavailable.")) }

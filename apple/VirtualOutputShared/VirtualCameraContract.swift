@@ -7,6 +7,7 @@ enum VirtualCameraContract {
     static let deviceID = UUID(uuidString: "A27D88D1-BF58-4C73-A822-083D4E422EC4")!
     static let streamID = UUID(uuidString: "5A7ED550-630F-484C-9F21-536342C90587")!
     static let width = 1920, height = 1080, fps = 30
+    static let sizes = [(1280, 720), (1920, 1080)]
     static let sinkStreamID = UUID(uuidString: "BE8A742D-0FA2-4105-9398-D699772BEB93")!
     static let staleNanoseconds: UInt64 = 500_000_000
     static var hostNanoseconds: UInt64 {
@@ -28,9 +29,9 @@ final class VirtualCameraMailbox: @unchecked Sendable {
     func submit(_ buffer: CMSampleBuffer, sequence: UInt64, now: UInt64 = VirtualCameraContract.hostNanoseconds) -> Bool {
         lock.lock(); defer { lock.unlock() }
         let time = CMSampleBufferGetPresentationTimeStamp(buffer)
-        guard let pixels = CMSampleBufferGetImageBuffer(buffer), CVPixelBufferGetPixelFormatType(pixels) == kCVPixelFormatType_32BGRA,
-              CVPixelBufferGetWidth(pixels) > 0, CVPixelBufferGetWidth(pixels) <= 1920,
-              CVPixelBufferGetHeight(pixels) > 0, CVPixelBufferGetHeight(pixels) <= 1080,
+        guard CMSampleBufferDataIsReady(buffer),
+              let pixels = CMSampleBufferGetImageBuffer(buffer), CVPixelBufferGetPixelFormatType(pixels) == kCVPixelFormatType_32BGRA,
+              VirtualCameraContract.sizes.contains(where: { $0.0 == CVPixelBufferGetWidth(pixels) && $0.1 == CVPixelBufferGetHeight(pixels) }),
               time.isValid, !time.isIndefinite, time.seconds.isFinite, time.seconds >= 0 else { dropped += 1; return false }
         let pts = CMTimeConvertScale(time, timescale: 1_000_000_000, method: .roundTowardZero).value
         guard pts > 0, UInt64(pts) > lastPTS, UInt64(pts) <= now + 100_000_000,

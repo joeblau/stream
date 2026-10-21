@@ -82,6 +82,34 @@ import Testing
         #expect(DestinationValidator.startErrors(destination, credentials: credentials, program: .default, capabilities: weak).contains { $0.contains("hardware") })
     }
 
+    @Test("Malformed persisted bitrates cannot overflow or lower the aggregate preflight estimate")
+    func malformedBitrates() {
+        let healthy = StreamDestination(name: "Healthy")
+        let malformed = StreamDestination(name: "Malformed", videoBitrate: Int.max, audioBitrate: Int.max)
+        let plan = DestinationEncodingPlan(destinations: [healthy, malformed], program: .default, shareH264AAC: true)
+        #expect(plan.aggregateBitrate == Int.max)
+        #expect(plan.requiredUplinkMbps.isFinite && plan.requiredUplinkMbps > 0)
+        #expect(plan.issues.contains { $0.contains("invalid destination") })
+        #expect(plan.encoderSessions == 2)
+        let negative = StreamDestination(name: "Negative", videoBitrate: Int.min, audioBitrate: Int.min)
+        let reduced = DestinationEncodingPlan(destinations: [healthy, negative], program: .default)
+        #expect(reduced.aggregateBitrate == healthy.videoBitrate + healthy.audioBitrate)
+        #expect(!reduced.issues.isEmpty)
+    }
+
+    @Test("Nonfinite uplink and ingest overrides remain invalid before start")
+    func nonfiniteLimits() {
+        let destination = StreamDestination(name: "Output")
+        for measurement in [Double.nan, .infinity, -.infinity, 0, -1] {
+            let plan = DestinationEncodingPlan(destinations: [destination], program: .default, measuredUplinkMbps: measurement)
+            #expect(plan.issues.contains { $0.contains("finite positive uplink") })
+        }
+        for interval in [Double.nan, .infinity, -.infinity, 0] {
+            let limits = DestinationIngestLimits(maxKeyframeSeconds: interval)
+            #expect(!limits.errors(profile: .default, codec: .h264, keyframeSeconds: 2, audioBitrate: 128_000).isEmpty)
+        }
+    }
+
     @Test("Keyframe constraints reach the publisher adapter and old snapshots default safely")
     func keyframes() throws {
         var destination = StreamDestination(name: "One second")

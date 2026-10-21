@@ -96,6 +96,12 @@ public struct ProviderEvent: Codable, Equatable, Identifiable, Sendable {
     public var enableAutoStop: Bool?
     public var latencyPreference: LatencyPreference?
     public var thumbnails: [YouTubeThumbnail]?
+    /// A receipt is an observation, never a persistent live-state assertion.
+    /// Reject future timestamps too, for example after a wall-clock correction.
+    public func isFresh(at now: Date = Date()) -> Bool {
+        let age = now.timeIntervalSince(verifiedAt)
+        return age >= 0 && age <= 60
+    }
     public init(id: String, provider: ManagedProvider, channelID: String? = nil, title: String,
                 description: String = "", privacy: String? = nil, scheduledAt: Date? = nil,
                 state: State = .unknown, publicURL: URL? = nil, verifiedAt: Date = Date(),

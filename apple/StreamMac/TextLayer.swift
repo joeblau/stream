@@ -81,6 +81,17 @@ final class TitleTokenStore: @unchecked Sendable {
         publish(names)
     }
 
+    /// Update the current project's prepared slot namespace without replacing
+    /// host or externally supplied live guest tokens. Runtime reconstruction
+    /// on project/profile switch replaces the entire previous slot namespace.
+    func publishGuestSlots(_ slots: [GuestSlot]) {
+        let values = slots.reduce(into: [String: String]()) { $0.merge($1.tokens) { _, new in new } }
+        os_unfair_lock_lock(&lock)
+        names = names.filter { !$0.key.hasPrefix("guestslot_") }
+        names.merge(values) { _, new in new }
+        os_unfair_lock_unlock(&lock)
+    }
+
     func snapshot() -> [String: String] {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }

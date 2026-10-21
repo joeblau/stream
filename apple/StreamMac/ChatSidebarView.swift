@@ -83,7 +83,7 @@ struct ChatSidebarView: View {
                 }
             }
             if let error = coordinator.error { Text(error).font(.caption).foregroundStyle(.orange) }
-            Text("Public Restream and supported direct chats share this queue. Plain text includes documented emote text; image emotes and chat alert styling remain unavailable.")
+            Text("Public Restream and supported direct chats share this queue. Event badges preserve authorized emoji/emote and support text. Promote Alert stages supported events in the selected comment slot; image emotes, sticker media, and unsupported reaction feeds remain unavailable.")
 
                 .font(.caption2).foregroundStyle(.secondary)
         }
@@ -154,6 +154,15 @@ struct ChatSidebarView: View {
             }
         }
     }
+    private func activityColor(_ activity: StudioChatActivity) -> Color {
+        switch activity {
+        case .support: .orange
+        case .membership: .green
+        case .reaction: .pink
+        case .emotes: .purple
+        case .text: .secondary
+        }
+    }
     private func row(_ message: StudioChatMessage) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -166,15 +175,30 @@ struct ChatSidebarView: View {
                 if message.timestampIsReceiptTime { Text("received") }
                 Text(message.roles.joined(separator: ", "))
             }.font(.caption2).foregroundStyle(.secondary)
+            if message.activity != .text {
+                Label(message.kind, systemImage: message.activity.symbol)
+                    .font(.caption.weight(.semibold)).foregroundStyle(activityColor(message.activity))
+            }
             Text(message.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button(coordinator.queue.favorites.contains(message.id) ? "Unfavorite" : "Favorite") { coordinator.favorite(message.id) }
                 Button("Queue") { coordinator.enqueue(message.id) }
                 Button("Show") { coordinator.show(message.id) }
+                if message.activity.canPromoteAlert {
+                    Button("Promote Alert") { coordinator.promoteAlert(message.id) }
+                        .disabled(coordinator.selectedSlot == nil)
+                        .help("Stage this event with its event label in the selected comment slot. Take publishes it.")
+                }
             }.controlSize(.small)
             if let manager = coordinator.directChat { DirectChatMessageActions(manager: manager, message: message) }
         }
         .padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .leading) {
+            if message.activity != .text {
+                RoundedRectangle(cornerRadius: 2).fill(activityColor(message.activity)).frame(width: 3)
+                    .accessibilityHidden(true).allowsHitTesting(false)
+            }
+        }
         .draggable(message.id)
         .accessibilityElement(children: .contain)
     }

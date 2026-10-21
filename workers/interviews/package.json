@@ -11,7 +11,7 @@
     "typegen": "wrangler types --include-runtime false",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:client": "node --test test/browser/reference-host-client.mjs",
+    "test:client": "node --test test/browser/*-client.mjs",
     "test:browser": "node test/browser/reference-host-browser.mjs",
     "build": "wrangler deploy --dry-run"
   },

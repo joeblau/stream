@@ -1,7 +1,7 @@
 /* Pairing values only cross sendToPlugin, never setSettings/localStorage/logging. */
 let socket, context, actionUUID;
 let commands = [], settings = {}, currentProject = "", signature = "";
-let mode = "key";
+let mode = "key", currentStatus = "Disconnected", settingsSignature;
 const element = id => document.getElementById(id);
 function send(payload) {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ event: "sendToPlugin", context, action: actionUUID, payload }));
@@ -18,7 +18,9 @@ function updateOptions() {
   }
   if (selected && !matching.some(c => c.id === selected)) {
     const known = commands.find(c => c.id === selected);
-    options.push(new Option(known ? known.title : "Missing resource — binding retained", selected));
+    const retained = new Option(known ? known.title : "Missing resource — binding retained", selected);
+    retained.disabled = !known || known.id.startsWith("unavailable.");
+    options.push(retained);
   }
   element("command").replaceChildren(...options); element("command").value = selected;
   const command = commands.find(c => c.id === selected);
@@ -27,19 +29,31 @@ function updateOptions() {
   element("marker-options").hidden = mode !== "key" || command?.argument !== "text";
   element("level-options").hidden = mode !== "level";
   element("selector-options").hidden = mode !== "selector";
-  element("availability").textContent = command?.unavailableReason ?? (selected ? "Available" : "Choose a command to bind this key.");
+  element("availability").textContent = currentStatus !== "Connected" ? "Connect to Stream Studio to check the bound resource."
+    : settings.projectID && settings.projectID !== currentProject ? "This binding cannot run in the current project."
+    : selected && !command ? "Missing resource — select another resource to rebind explicitly."
+    : command?.unavailableReason ?? (command ? command.available ? "Available" : "Unavailable now" : "Choose a command to bind this control.");
   element("project").textContent = settings.projectID && settings.projectID !== currentProject ? "This key belongs to a different project. Select a command to rebind explicitly." : `Project: ${currentProject || "not connected"}`;
 }
-function update(payload) {
-  if (payload.error) { element("error").textContent = payload.error; return; }
-  element("error").textContent = "";
-  element("status").textContent = payload.status ?? "Disconnected";
-  currentProject = payload.projectID ?? ""; settings = payload.settings ?? settings; mode = payload.mode ?? mode;
+function hydrateSettings() {
+  const nextSignature = JSON.stringify(settings);
+  if (nextSignature === settingsSignature) return;
+  settingsSignature = nextSignature;
   element("value").value = String((settings.value ?? 0.5) * 200);
   element("step").value = String((settings.step ?? 0.01) * 200);
   element("page").value = String((settings.page ?? 0) + 1);
   element("marker").value = settings.text ?? "";
   element("selector-category").value = settings.category ?? "Scenes";
+}
+function update(payload) {
+  if (payload.error) { element("error").textContent = payload.error; return; }
+  element("error").textContent = "";
+  currentStatus = payload.status ?? "Disconnected";
+  element("status").textContent = currentStatus;
+  currentProject = payload.projectID ?? ""; settings = payload.settings ?? settings; mode = payload.mode ?? mode;
+  // Live snapshots can arrive while an operator types a page or marker.
+  // Only acknowledged binding changes replace those in-progress edits.
+  hydrateSettings();
   const nextCommands = payload.commands ?? [];
   const nextSignature = JSON.stringify(nextCommands);
   commands = nextCommands;
@@ -58,9 +72,9 @@ window.connectElgatoStreamDeckSocket = (port, uuid, registerEvent, _info, action
   socket.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.event === "sendToPropertyInspector") update(message.payload);
-    if (message.event === "didReceiveSettings") { settings = message.payload.settings ?? {}; updateOptions(); }
+    if (message.event === "didReceiveSettings") { settings = message.payload.settings ?? {}; hydrateSettings(); updateOptions(); }
   };
-  socket.onclose = () => { element("status").textContent = "Stream Deck disconnected"; };
+  socket.onclose = () => { currentStatus = "Stream Deck disconnected"; element("status").textContent = currentStatus; updateOptions(); };
 };
 element("pair").onclick = () => {
   try { const credentials = JSON.parse(element("credentials").value); element("credentials").value = ""; send({ operation: "pair", credentials }); }
@@ -73,6 +87,10 @@ function bindSelected() {
   const commandID = element("command").value;
   if (!commandID) return;
   const command = commands.find(c => c.id === commandID);
+  if (!command || command.id.startsWith("unavailable.")) {
+    element("error").textContent = "Choose a supported resource from the current studio catalog.";
+    return;
+  }
   send({ operation: "bind", commandID,
     ...(mode === "level" ? { step: Number(element("step").value) / 200 } : {}),
     ...(mode === "selector" ? { category: element("selector-category").value } : {}),

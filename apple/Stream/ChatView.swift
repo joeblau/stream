@@ -85,7 +85,8 @@ struct ChatFeedView: View {
                 }
             }
             // Subtle animated follow — gated so it only fires when already at the bottom.
-            .onChange(of: chat.messages.count) {
+            // The newest ID keeps changing after the bounded history reaches 500 rows.
+            .onChange(of: chat.messages.last?.id) {
                 guard isAtBottom, let last = chat.messages.last else { return }
                 withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
             }
@@ -104,7 +105,9 @@ private struct MessageBubble: View {
         VStack(alignment: .leading, spacing: 3) {
             // Sender caption above the bubble, like the name label over a group bubble.
             HStack(spacing: 4) {
-                Text(message.author).fontWeight(.semibold)
+                Text(message.author)
+                    .font(.footnote)
+                    .fontWeight(.semibold)
                 if let platform = message.platform, !platform.isEmpty {
                     Text(platform.capitalized)      // "youtube" -> "Youtube"
                 }

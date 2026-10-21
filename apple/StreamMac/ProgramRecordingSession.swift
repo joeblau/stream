@@ -590,7 +590,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 if bytes < configuration.minimumSpaceBytes {
                     fail("Recording stopped before exhausting storage (less than \(configuration.minimumSpaceBytes / 1_000_000) MB free).")
                 } else if bytes < configuration.lowSpaceWarningBytes {
-                    progress.warning = "Recording storage is low: \(bytes / 1_000_000) MB free."
+                    addWarning("Recording storage is low: \(bytes / 1_000_000) MB free.")
                 }
             }
             let sinceStart = Date().timeIntervalSince(createdAt)
@@ -599,17 +599,24 @@ final class ProgramRecordingSession: @unchecked Sendable {
                 else if configuration.requiresAudio, Date().timeIntervalSince(lastAudioWrite) > 10 { fail("No program audio was written for ten seconds.") }
             }
             if !finishRequested, !paused, sinceStart > 3 {
-                if !announcedRecording { progress.warning = configuration.requiresAudio ? "Waiting for program audio and video." : "Waiting for source video." }
+                if !announcedRecording { addWarning(configuration.requiresAudio ? "Waiting for program audio and video." : "Waiting for source video.") }
                 else if Date().timeIntervalSince(lastVideoWrite) > 3 || (configuration.requiresAudio && Date().timeIntervalSince(lastAudioWrite) > 3) {
-                    progress.warning = "Recording write progress has stalled; check disk and encoder load."
+                    addWarning("Recording write progress has stalled; check disk and encoder load.")
                 }
             }
         } catch { fail("Recording storage is unavailable: \(error.localizedDescription)") }
         if progress.droppedAudio > 0 || progress.droppedVideo > 0 {
-            progress.warning = "Recording dropped \(progress.droppedVideo) video frames and \(progress.droppedAudio) audio chunks; check disk and encoder load."
+            addWarning("Recording dropped \(progress.droppedVideo) video frames and \(progress.droppedAudio) audio chunks; check disk and encoder load.")
         }
-        event(.progress(progress))
         writeManifest(status: failure == nil ? (paused ? "paused" : announcedRecording ? "recording" : "preparing") : "partial")
+        // Publish after the sidecar attempt so its failure reaches the studio
+        // during this heartbeat, before the next check clears transient warnings.
+        event(.progress(progress))
+    }
+
+    private func addWarning(_ message: String) {
+        guard progress.warning?.contains(message) != true else { return }
+        progress.warning = [progress.warning, message].compactMap { $0 }.joined(separator: " ")
     }
 
     private func updateProgress() {
@@ -708,7 +715,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         } catch {
             // A removed/full volume often fails both writes. The in-memory
             // event still reaches the studio even when the journal cannot.
-            progress.warning = "Recording journal could not be saved: \(error.localizedDescription)"
+            addWarning("Recording journal could not be saved: \(error.localizedDescription)")
         }
     }
 }

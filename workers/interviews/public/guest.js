@@ -8,6 +8,8 @@ let local, shared, socket, pc, audio, analyser, meterSource, meterFrame, generat
 let signalQueue = {pending:0};
 let candidateQueue = [], signalChain = Promise.resolve(), left = false, name = 'Guest';
 let relayTimer, deviceEpoch = 0, activeNegotiation, cachedRelay;
+let deviceCommit = Promise.resolve();
+const deviceTracks = new Set();
 let control, mediaSenders = {}, screenApproved = false, shareEpoch = 0, pendingDisplay = false;
 const MEDIA_CONTROL = 'stream-interview-control-v1';
 let joinEpoch = 0, admitted = false, cameraEnabled = true, microphoneEnabled = true;
@@ -15,6 +17,7 @@ const valid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{
 if (!valid) { status('This invite is incomplete. Ask the host for a fresh link.'); $('prepare').disabled = true; }
 function controls(enabled) { for (const id of ['mute','hide','tone','join']) $(id).disabled = !enabled; }
 function resetPeer() {
+  ++deviceEpoch; deviceTracks.forEach(track => track.stop()); $('prepare').disabled = left || !valid;
   clearTimeout(relayTimer); relayTimer = undefined;
   stopShare();control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();
   admitted = false; host = hostGeneration = activeNegotiation = undefined; candidateQueue = [];
@@ -61,37 +64,90 @@ async function startMeter() {
   const samples = new Float32Array(analyser.fftSize);
   const tick = () => { analyser.getFloatTimeDomainData(samples); $('level').value = microphoneEnabled ? Math.min(1, Math.sqrt(samples.reduce((sum,v) => sum+v*v,0)/samples.length)*4) : 0; meterFrame = requestAnimationFrame(tick); }; tick();
 }
+// Capture permission dialogs may finish after Leave, a new check, or a media
+// restart. Serialize sender writes, then publish the complete local stream only
+// after every replacement succeeds. Failed changes retain the previous devices.
+async function installDevices(fresh, epoch, kind) {
+  if (left || epoch !== deviceEpoch) return false;
+  fresh.getTracks().forEach(track => deviceTracks.add(track));
+  const install = async () => {
+    const previous = local, senders = mediaSenders;
+    const current = () => !left && epoch === deviceEpoch && local === previous && mediaSenders === senders;
+    if (!current()) return false;
+    const replaced = [];
+    try {
+      for (const track of fresh.getTracks()) {
+        track.enabled = track.kind === 'audio' ? microphoneEnabled : cameraEnabled;
+        const sender = senders[track.kind === 'audio' ? 'audio' : 'camera'];
+        if (sender) {
+          const old = sender.track;
+          await sender.replaceTrack(track); replaced.push({sender, track, old});
+          if (!current()) throw new Error('Device change superseded');
+        }
+      }
+      if (!current()) throw new Error('Device change superseded');
+      fresh.getTracks().forEach(track => { track.enabled = track.kind === 'audio' ? microphoneEnabled : cameraEnabled; });
+      local = kind ? new MediaStream([...previous.getTracks().filter(track => track.kind !== kind), ...fresh.getTracks()]) : fresh;
+      watchTracks(fresh); $('preview').srcObject = local;
+      previous?.getTracks().filter(track => !kind || track.kind === kind).forEach(track => track.stop());
+      return true;
+    } catch (error) {
+      // Restore only this transaction's live senders; never touch a new peer.
+      let restoreFailed = false;
+      for (const {sender, track, old} of replaced.reverse()) {
+        if (!left && mediaSenders === senders && sender.track === track) {
+          try { await sender.replaceTrack(old ?? null); } catch { restoreFailed = true; }
+        }
+      }
+      if (restoreFailed && !left && mediaSenders === senders) {
+        resetPeer();
+        status('Device recovery could not restore host media. Reconnect with this invite and ask the host to admit you again.');
+      }
+      throw error;
+    }
+  };
+  const pending = deviceCommit.then(install);
+  deviceCommit = pending.catch(() => {});
+  try { return await pending; }
+  finally { fresh.getTracks().forEach(track => deviceTracks.delete(track)); }
+}
 async function prepare() {
+  const epoch = ++deviceEpoch;
   $('prepare').disabled = true;
+  let fresh, installed = false;
   try {
     // Resume during the explicit click, before a permission dialog or await.
     audio ??= new AudioContext(); audio.resume().catch(()=>{});
-    const fresh = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:{width:{ideal:1280},height:{ideal:720}}});
-    if (left) { fresh.getTracks().forEach(t=>t.stop()); return; }
-    const old = local;
-    for (const track of fresh.getTracks()) {
-      track.enabled = track.kind === 'audio' ? microphoneEnabled : cameraEnabled;
-      const sender = mediaSenders[track.kind==='audio'?'audio':'camera'];
-      if (sender) await sender.replaceTrack(track);
-    }
-    local = fresh; watchTracks(local); $('preview').srcObject = local;
-    old?.getTracks().forEach(t=>t.stop()); await enumerate(); await startMeter(); controls(true);
-    status('Device check ready. Join the waiting room when you are ready.');
-  } catch (error) { status(error.name === 'NotAllowedError' ? 'Camera or microphone permission was denied. Allow access in site settings, then check again.' : 'Devices are unavailable. Connect a camera and microphone, then check again.'); }
-  finally { $('prepare').disabled = false; }
+    fresh = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:{width:{ideal:1280},height:{ideal:720}}});
+    installed = await installDevices(fresh, epoch);
+    if (!installed || epoch !== deviceEpoch || left) return;
+    controls(true); $('join').disabled = socket?.readyState === WebSocket.OPEN;
+    await enumerate();
+    if (epoch !== deviceEpoch || left) return;
+    await startMeter();
+    if (epoch === deviceEpoch && !left) status(admitted ? 'Devices restored. Your host connection remains active.' : 'Device check ready. Join the waiting room when you are ready.');
+  } catch (error) {
+    if (epoch === deviceEpoch && !left) status(error.name === 'NotAllowedError' ? 'Camera or microphone permission was denied. Allow access in site settings, then check again.' : 'Device check failed. Any previous devices and your invite remain active. Check connections and try again.');
+  } finally {
+    if (!installed) fresh?.getTracks().forEach(track => track.stop());
+    if (epoch === deviceEpoch || left) $('prepare').disabled = left;
+  }
 }
 async function switchDevice(kind, id) {
+  if (!local || left) return;
   const epoch = ++deviceEpoch;
-  let fresh;
+  let fresh, installed = false;
   try {
     fresh = await navigator.mediaDevices.getUserMedia(kind==='video' ? {video:{deviceId:{exact:id}},audio:false} : {audio:{deviceId:{exact:id},echoCancellation:true},video:false});
-    if (epoch!==deviceEpoch || !local || left) { fresh.getTracks().forEach(t=>t.stop()); return; }
-    const track = fresh.getTracks()[0]; track.enabled = kind==='audio' ? microphoneEnabled : cameraEnabled;
-    const old = local.getTracks().find(t=>t.kind===kind);
-    const sender = mediaSenders[kind==='audio'?'audio':'camera']; if (sender) await sender.replaceTrack(track);
-    local.removeTrack(old); local.addTrack(track); old.stop(); watchTracks(fresh); $('preview').srcObject = local;
+    installed = await installDevices(fresh, epoch, kind);
+    if (!installed || epoch !== deviceEpoch || left) return;
     if (kind==='audio') await startMeter(); await enumerate();
-  } catch { fresh?.getTracks().forEach(t=>t.stop()); status('Device change failed. Your previous device and invite remain active.'); }
+  } catch {
+    if (epoch === deviceEpoch && !left) status('Device change failed. Your previous device and invite remain active.');
+  } finally {
+    if (!installed) fresh?.getTracks().forEach(track => track.stop());
+    if (epoch === deviceEpoch && !left) $('prepare').disabled = false;
+  }
 }
 async function iceServers() {
   if (cachedRelay && Date.now() < cachedRelay.expires) return cachedRelay.servers;
@@ -139,17 +195,25 @@ async function acceptSignal(data, epoch) {
     next.onconnectionstatechange = () => { if(pc===next) status(`Host media: ${next.connectionState}.`); };
     await next.setRemoteDescription(payload.description);
     if(!current())return;
-    for(const [kind,trackKind]of [['audio','audio'],['camera','video'],['screen','video']]) {
-      const transceiver=next.getTransceivers().find(value=>value.mid===identities[kind]);
-      if(!transceiver || transceiver.receiver.track.kind!==trackKind){next.close();throw new Error('Host media identities do not match the offered tracks.');}
-      mediaSenders[kind]=transceiver.sender;transceiver.direction=kind==='screen'?'sendonly':'sendrecv';
-      if(kind!=='screen') {
-        const track=local?.getTracks().find(value=>value.kind===trackKind);
-        if(!track){next.close();throw new Error('Check camera and microphone before joining.');}
-        transceiver.sender.setStreams(local);await transceiver.sender.replaceTrack(track);
-        if(!current())return;
+    // Initial negotiation and device changes share one sender-write queue.
+    // Otherwise a slow initial replacement can reinstall a stopped old track.
+    const attach = deviceCommit.then(async () => {
+      if (!current()) return;
+      for(const [kind,trackKind]of [['audio','audio'],['camera','video'],['screen','video']]) {
+        const transceiver=next.getTransceivers().find(value=>value.mid===identities[kind]);
+        if(!transceiver || transceiver.receiver.track.kind!==trackKind){next.close();throw new Error('Host media identities do not match the offered tracks.');}
+        mediaSenders[kind]=transceiver.sender;transceiver.direction=kind==='screen'?'sendonly':'sendrecv';
+        if(kind!=='screen') {
+          const track=local?.getTracks().find(value=>value.kind===trackKind);
+          if(!track){next.close();throw new Error('Check camera and microphone before joining.');}
+          transceiver.sender.setStreams(local);await transceiver.sender.replaceTrack(track);
+          if(!current())return;
+        }
       }
-    }
+    });
+    deviceCommit = attach.catch(() => {});
+    await attach;
+    if (!current()) return;
     for(const candidate of candidateQueue.filter(value=>value.negotiation===negotiation)) {
       try { await next.addIceCandidate(candidate.candidate); } catch { status('A relay candidate was rejected; checking remaining paths.'); }
       if(!current())return;
@@ -197,8 +261,8 @@ async function leave(message='You left. Camera and microphone are stopped. Open 
 }
 $('prepare').onclick=()=>{left=false;prepare();};$('join').onclick=join;$('rejoin').onclick=join;$('leave').onclick=()=>leave();
 $('camera').onchange=()=>switchDevice('video',$('camera').value);$('microphone').onchange=()=>switchDevice('audio',$('microphone').value);
-$('mute').onclick=()=>{microphoneEnabled=!microphoneEnabled;local?.getAudioTracks().forEach(t=>t.enabled=microphoneEnabled);$('mute').textContent=microphoneEnabled?'Mute microphone':'Unmute microphone';};
-$('hide').onclick=()=>{cameraEnabled=!cameraEnabled;local?.getVideoTracks().forEach(t=>t.enabled=cameraEnabled);$('hide').textContent=cameraEnabled?'Turn camera off':'Turn camera on';};
+$('mute').onclick=()=>{microphoneEnabled=!microphoneEnabled;local?.getAudioTracks().forEach(t=>t.enabled=microphoneEnabled);deviceTracks.forEach(t=>{if(t.kind==='audio')t.enabled=microphoneEnabled;});$('mute').textContent=microphoneEnabled?'Mute microphone':'Unmute microphone';};
+$('hide').onclick=()=>{cameraEnabled=!cameraEnabled;local?.getVideoTracks().forEach(t=>t.enabled=cameraEnabled);deviceTracks.forEach(t=>{if(t.kind==='video')t.enabled=cameraEnabled;});$('hide').textContent=cameraEnabled?'Turn camera off':'Turn camera on';};
 $('tone').onclick=async()=>{if(!audio)return;await audio.resume();const tone=audio.createOscillator(),gain=audio.createGain();tone.frequency.value=440;gain.gain.value=.03;tone.connect(gain).connect(audio.destination);tone.start();tone.stop(audio.currentTime+.3);};
 $('share').onclick=async()=>{
   if(!pc || !admitted || !screenApproved || control?.readyState!=='open' || !mediaSenders.screen || shared || pendingDisplay)return;

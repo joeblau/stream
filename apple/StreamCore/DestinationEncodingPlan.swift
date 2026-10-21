@@ -43,8 +43,9 @@ public struct DestinationIngestLimits: Codable, Equatable, Sendable {
     public func errors(profile: OutputProfile, codec: VideoCodec, keyframeSeconds: Double,
                        audioBitrate: Int) -> [String] {
         var errors: [String] = []
-        if maxWidth < 2 || maxHeight < 2 || maxFrameRate < 1 || maxKeyframeSeconds <= 0 || codecs.isEmpty {
-            errors.append("Ingest limits must contain positive geometry, frame rate, keyframe interval and a codec.")
+        if maxWidth < 2 || maxHeight < 2 || maxFrameRate < 1 ||
+            !maxKeyframeSeconds.isFinite || maxKeyframeSeconds <= 0 || maxAudioBitrate <= 0 || codecs.isEmpty {
+            errors.append("Ingest limits must contain positive geometry, frame rate, finite keyframe interval, audio bitrate and a codec.")
         }
         if max(profile.canvasWidth, profile.canvasHeight) > max(maxWidth, maxHeight) ||
             min(profile.canvasWidth, profile.canvasHeight) > min(maxWidth, maxHeight) {
@@ -91,7 +92,7 @@ public struct DestinationEncoderKey: Hashable, Sendable {
         [.rtmp, .rtmps, .srt].contains(transport) && codec == .h264 &&
         (2...4096).contains(width) && (2...4096).contains(height) && width % 2 == 0 && height % 2 == 0 &&
         (1...60).contains(frameRate) && (sourceFrameRate.map { (1...60).contains($0) && frameRate <= $0 } ?? true) &&
-        videoBitrate > 0 && (32_000...320_000).contains(audioBitrate) &&
+        (100_000...100_000_000).contains(videoBitrate) && (32_000...320_000).contains(audioBitrate) &&
         keyframeSeconds.isFinite && (1...10).contains(keyframeSeconds) && keyframeSeconds.rounded() == keyframeSeconds
     }
 }
@@ -128,16 +129,34 @@ public struct DestinationEncodingPlan: Equatable, Sendable {
             } else { separate += 1 }
         }
         encoderSessions = shareH264AAC ? sharedKeys.count + separate : destinations.count
-        aggregateBitrate = destinations.reduce(0) { $0 + $1.videoBitrate + $1.audioBitrate }
+        // A decoded/custom destination is evaluated before start validation.
+        // Invalid persisted values must not overflow (or subtract from) the
+        // preflight's estimate for otherwise healthy destinations.
+        var invalidBitrate = false
+        var total = 0
+        for destination in destinations {
+            if !(100_000...100_000_000).contains(destination.videoBitrate) ||
+                !(16_000...512_000).contains(destination.audioBitrate) { invalidBitrate = true }
+            for bitrate in [destination.videoBitrate, destination.audioBitrate] {
+                let sum = total.addingReportingOverflow(max(0, bitrate))
+                total = sum.overflow ? Int.max : sum.partialValue
+            }
+        }
+        aggregateBitrate = total
         // Protocol overhead + 25% spare capacity: an operator-visible estimate.
         requiredUplinkMbps = Double(aggregateBitrate) * 1.35 / 1_000_000
         issues = []
+        if invalidBitrate { issues.append("Correct invalid destination video/audio bitrates before starting.") }
         if destinations.count > 10 { issues.append("Enable up to ten simultaneous destinations.") }
         if let limit = measuredSessionLimit, encoderSessions > limit {
             issues.append("\(encoderSessions) encoders exceed your tested session budget of \(limit).")
         }
-        if let measuredUplinkMbps, measuredUplinkMbps < requiredUplinkMbps {
-            issues.append("Measured uplink \(String(format: "%.1f", measuredUplinkMbps)) Mbps is below the \(String(format: "%.1f", requiredUplinkMbps)) Mbps estimate with headroom.")
+        if let measuredUplinkMbps {
+            if !measuredUplinkMbps.isFinite || measuredUplinkMbps <= 0 {
+                issues.append("Enter a finite positive uplink measurement or run the explicit uplink test.")
+            } else if measuredUplinkMbps < requiredUplinkMbps {
+                issues.append("Measured uplink \(String(format: "%.1f", measuredUplinkMbps)) Mbps is below the \(String(format: "%.1f", requiredUplinkMbps)) Mbps estimate with headroom.")
+            }
         }
     }
 }

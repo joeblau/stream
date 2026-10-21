@@ -20,7 +20,7 @@ final class StreamCameraSource: NSObject, CMIOExtensionStreamSource, @unchecked 
     private var pools: [Int: CVPixelBufferPool] = [:]
     private let context = CIContext(options: [.cacheIntermediates: false])
     let formats: [CMIOExtensionStreamFormat]
-    static let sizes = [(1280, 720), (1920, 1080)]
+    static let sizes = VirtualCameraContract.sizes
 
     init(mailbox: VirtualCameraMailbox = VirtualCameraMailbox()) throws {
         self.mailbox = mailbox

@@ -18,7 +18,8 @@ struct StatsHUDView: View {
         HStack(spacing: 14) {
             healthPill
             metric("Bitrate", value: stats?.bitRateLabel ?? "—")
-            metric("FPS", value: stats.map { "\($0.displayFrameRate)" } ?? "—")
+            metric("FPS actual/target", value: stats.map { "\($0.achievedFrameRate) / \($0.frameRate)" } ?? "—")
+                .help("Measured encoder frames per second / current target. The first polling interval may report zero.")
             if let stats, stats.droppedFrames > 0 {
                 metric("Dropped", value: stats.droppedLabel, tint: .orange)
             }
@@ -60,7 +61,8 @@ struct StatsHUDView: View {
         case .reconnecting: return "Reconnecting…"
         case .stopping: return "Stopping…"
         case .failed: return "Failed"
-        case .idle, .live: return "Offline"
+        case .idle: return "Offline"
+        case .live: return "Live · awaiting telemetry"
         }
     }
 

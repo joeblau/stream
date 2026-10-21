@@ -65,3 +65,36 @@ These checks qualify the implemented software boundaries. A physical abrupt
 process/OS interruption, damaged media repair, accessibility and a real authorized
 provider's restart workflow still require separate acceptance evidence. Finalized
 copies of already-readable generated recordings are not abrupt-kill repair proof.
+
+## Bounded inventory and source retirement
+
+The recording reader retains at most 200 journals, 2,000 markers per segment and
+4,000 markers overall. Any truncation marks the inventory incomplete, including
+when every currently active filename is still present. Exact-limit inventories
+remain verified when nothing was discarded. Recovery Review therefore asks the
+operator to relink and inspect local files whenever checkpoint timing or segment
+history is incomplete; it never presents a truncated inventory as exhaustive.
+The preserved prior session and latest live checkpoint are read independently.
+If either document is damaged, the other readable interruption remains available
+for explicit review, alongside the error; damaged bytes remain untouched.
+
+Source failover also fences provider reads against configuration replacement and
+runtime retirement. A source removed during an in-flight read, or re-added with
+the same ID after retirement, cannot return or retain the old frame. A standby
+read overtaken by a blank/offline policy change cannot leak those pixels into
+program. The affected tick returns no frame; the next tick uses the current
+policy. Healthy sources retain their own independent cache entries.
+Repeated identical health refreshes preserve in-flight healthy frames; a changed
+native standby binding invalidates its in-flight lookup even if source health
+and failure modes stay unchanged.
+
+On 2026-10-21, seven focused `DesktopResilienceTests` passed from the shipping Core
+source on Mac15,8, macOS 27.2 (26B118), Xcode 27.2 (27B5038j).
+The compiled shipping `SessionRecoveryCoordinator`, disk store, remote-review
+coordinator and `SessionRecordingJournalReader` passed
+`scripts/session_recovery_harness.swift`, including exact-limit inventories,
+201-segment truncation, 2,001-marker truncation and aggregate marker exhaustion.
+It also checks that either corrupt checkpoint cannot hide the other valid one.
+These fixtures use owned temporary directories and controlled provider callbacks;
+they do not qualify physical display removal, TCC revocation, sleep/lock delivery,
+Internet routes or live-provider recovery.

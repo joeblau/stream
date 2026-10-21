@@ -62,6 +62,8 @@ struct SourceEffectsSectionView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Layer effects for \(layer.name)")
     }
 
     /// The override value the controls edit: the existing override, else the
@@ -71,11 +73,20 @@ struct SourceEffectsSectionView: View {
     private func layerOverrideBinding(for layer: LayerNode) -> Binding<SourceEffects> {
         Binding(
             get: {
-                layer.effectOverrides
-                    ?? boundSource(for: layer)?.effectDefaults
+                // Asynchronous LUT import and native color sampling retain this
+                // binding. Resolve current values so completion cannot restore
+                // picture settings captured before the panel opened.
+                let current = previewProgram.stagedScene?.layers.first { $0.id == layer.id } ?? layer
+                return current.effectOverrides
+                    ?? boundSource(for: current)?.effectDefaults
                     ?? .identity
             },
-            set: { dispatcher.execute(.setLayerSourceEffects(layer.id, $0.clamped(), in: nil)) })
+            set: {
+                // A retained native panel must not apply its result to a layer
+                // that has since left the staged scene.
+                guard previewProgram.stagedScene?.layers.contains(where: { $0.id == layer.id }) == true else { return }
+                dispatcher.execute(.setLayerSourceEffects(layer.id, $0.clamped(), in: nil))
+            })
     }
 
     // MARK: - Source defaults (project-level)
@@ -92,11 +103,13 @@ struct SourceEffectsSectionView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Source defaults for \(source.name)")
     }
 
     private func sourceDefaultsBinding(for source: SourceDefinition) -> Binding<SourceEffects> {
         Binding(
-            get: { source.effectDefaults ?? .identity },
+            get: { sceneStore.source(withID: source.id)?.effectDefaults ?? .identity },
             set: { dispatcher.execute(.setSourceEffectDefaults(source.id, $0.clamped())) })
     }
 
@@ -135,6 +148,7 @@ struct SourceEffectsSectionView: View {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel("Delete effect preset \(preset.name)")
                 }
             }
         }
@@ -154,9 +168,12 @@ struct SourceEffectsSectionView: View {
         } maximumValueLabel: {
             Text("4×")
         }
+        .accessibilityValue(String(format: "%.2f times", effects.wrappedValue.zoom))
         if effects.wrappedValue.zoom > 1 {
             Slider(value: effects.panX, in: -1...1) { Text("Pan X") }
+                .accessibilityValue(String(format: "%.0f percent", effects.wrappedValue.panX * 100))
             Slider(value: effects.panY, in: -1...1) { Text("Pan Y") }
+                .accessibilityValue(String(format: "%.0f percent", effects.wrappedValue.panY * 100))
         }
         Toggle("Mirror", isOn: effects.isMirrored)
         Picker("Rotation", selection: effects.rotationDegrees) {
@@ -166,13 +183,19 @@ struct SourceEffectsSectionView: View {
             Text("270°").tag(270.0)
         }
         Slider(value: effects.brightness, in: -0.5...0.5) { Text("Brightness") }
+            .accessibilityValue(String(format: "%.0f percent", effects.wrappedValue.brightness * 100))
         Slider(value: effects.contrast, in: 0.5...2) { Text("Contrast") }
+            .accessibilityValue(String(format: "%.0f percent", effects.wrappedValue.contrast * 100))
         Slider(value: effects.saturation, in: 0...2) { Text("Saturation") }
+            .accessibilityValue(String(format: "%.0f percent", effects.wrappedValue.saturation * 100))
         Slider(value: effects.temperature, in: 3000...9000, step: 100) {
             Text("Temperature")
         }
+        .accessibilityValue("\(Int(effects.wrappedValue.temperature)) kelvin")
         Slider(value: effects.tint, in: -100...100) { Text("Tint") }
+            .accessibilityValue(String(format: "%.0f", effects.wrappedValue.tint))
         Slider(value: effects.gamma, in: 0.5...2) { Text("Gamma") }
+            .accessibilityValue(String(format: "%.2f", effects.wrappedValue.gamma))
         ColorTransformControlsView(effects: effects)
     }
 }
