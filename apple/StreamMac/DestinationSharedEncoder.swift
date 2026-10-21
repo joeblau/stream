@@ -71,6 +71,30 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     init(key: DestinationSharedEncoderKey, id: UUID = UUID(), prefersHardwareEncoder: Bool = true, failure: @escaping @Sendable () -> Void) {
         self.key = key; self.id = id; self.prefersHardwareEncoder = prefersHardwareEncoder; self.failure = failure
     }
+    /// Finish cold codec/render setup before an output can acknowledge its
+    /// start. Otherwise that work occupies the bounded ingress queue and can
+    /// discard the opening frames while the publisher already reports LIVE.
+    func prepare() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async { [self] in
+                lock.lock(); let active = accepting; lock.unlock()
+                guard active else { continuation.resume(throwing: CancellationError()); return }
+                do {
+                    if videoSession == nil {
+                        try makeVideoSession()
+                        guard let pool else { throw CocoaError(.coderInvalidValue) }
+                        var image: CVPixelBuffer?
+                        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &image) == kCVReturnSuccess,
+                              let image else { throw CocoaError(.coderInvalidValue) }
+                        context.render(CIImage(color: .black), to: image,
+                            bounds: CGRect(x: 0, y: 0, width: key.width, height: key.height),
+                            colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+                    }
+                    continuation.resume()
+                } catch { fail(); continuation.resume(throwing: error) }
+            }
+        }
+    }
     func add(_ mailbox: DestinationEncodedMailbox, id: UUID) {
         lock.lock(); sinks[id] = mailbox; keyframeRequested = true; lock.unlock()
     }
