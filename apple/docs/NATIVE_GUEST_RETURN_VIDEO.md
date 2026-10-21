@@ -122,6 +122,42 @@ and 27.13 ms independent-consumer difference; this demonstrates variance, not a
 fix or qualification closure. No production timing change, packet timestamp
 rebase or relaxed numerical bound follows from these observations.
 
+### Normal element-output observation remains unqualified
+
+A fixture-only alternative tried a video-frame-callback canvas plus
+`AudioContext.createMediaElementSource(element)` through one passthrough
+AudioWorklet. Local H264/AAC file controls with authored zero and ±150 ms
+offsets passed the aligned 100 ms check and rejected both 150 ms offsets with
+the correct sign. The same graph on the actual WebRTC return produced silence:
+the independent remote-track control had 100,352 nonzero PCM frames and peak
+0.4202, while the element-source node had 100,352 zero frames and no cue.
+The file control cannot qualify this live graph. In exact Chrome 155,
+[`WebMediaPlayerMS`](https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/third_party/blink/public/web/modules/mediastream/web_media_player_ms.h)
+does not override the base
+[`GetAudioSourceProvider()`](https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/third_party/blink/public/platform/web_media_player.h),
+which returns null. Thus this public element tap cannot observe the normal
+remote audio renderer. It is retained as an explicitly unqualified probe,
+not substituted for a passed return test.
+
+A second bounded probe used existing Screen Recording access and an audio-only
+ScreenCaptureKit filter containing only the exact newly owned Chrome PID.
+It registered no screen output and used only owned local video/tone content.
+Headless, normal minimized direct-executable and a new LaunchServices instance
+(`activates=false`, private profile, exact returned PID) all returned zero PCM
+even for a known-positive 1000 Hz file. The LaunchServices run retained 118,911
+measurement frames, zero rejected packets, 71 video callbacks and no audio cue.
+A zero signal in the unrelated-tone control consequently proves no exclusion:
+the required selected-Chrome positive control failed. This OS-output observation
+path remains unqualified; it supplies no normal-element or physical-output A/V
+result. The original 105.104 ms raw-track failure remains unresolved by it.
+
+`workers/interviews/test/browser/chrome-output-oracle-calibration.mjs` retains
+the optional controlled experiment. It requires an explicitly supplied owned
+observer executable and native tone helper, validates zero/±150 ms authored
+sources before capture, and refuses missing positive PCM. It never changes a
+permission, selects another process or falls back to system mix. This probe is
+separate from the shipping native source/clock/privacy and decode evidence.
+
 ## Measured receiver feedback and remaining adaptation gates
 
 The native SDK observes authenticated RTCP SR/RR report blocks for the current
