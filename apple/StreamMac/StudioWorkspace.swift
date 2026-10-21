@@ -325,7 +325,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     private func observeRuntime() {
-        let interactionIsBlocked = { [weak self] in
+        let interactionIsBlocked: @MainActor @Sendable () -> Bool = { [weak self] in
             guard let self else { return true }
             return !UserDefaults.standard.bool(forKey: "onboarding.hasCompletedFirstRun") || self.permissionChoicePending || self.isSwitching || self.packageBusy
         }
