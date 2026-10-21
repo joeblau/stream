@@ -217,25 +217,26 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
             _ = receiver?.sendReturnVideoState(enabled)
         }
     }
-    private func begin() -> UUID? {
+    func claimPreparation() -> UUID? {
         gate.lock(); defer { gate.unlock() }
         guard token == nil else { return nil }
         let value = UUID()
         // Claim before publishing the sender token and before any suspension.
         // Stop can therefore always revoke even a not-yet-entered install.
         guard sink.claimReturnVideo(value) else { return nil }
-        token = value; reportedReady = false; return value
+        token = value; reportedReady = false
+        _ = events(.returnVideo(.preparing)); return value
     }
     #if STREAM_GUEST_VALIDATION
     var validationBeforeInstall: (@Sendable () async -> Void)?
     #endif
-    func prepare() async -> Bool {
-        guard !Task.isCancelled, let current = begin() else { return false }
+    func prepare(_ current: UUID) async -> Bool {
+        guard !Task.isCancelled, isActive(current) else { stop(ifCurrent: current); return false }
         #if STREAM_GUEST_VALIDATION
         await validationBeforeInstall?()
         #endif
         guard await sink.installReturnVideo(token: current, sink: { [weak self] in self?.receive($0) }) else {
-            stop(ifCurrent: current); return false
+            stop(ifCurrent: current, state: Task.isCancelled ? .off : .failed); return false
         }
         guard isActive(current) else {
             sink.revokeReturnVideo(token: current); sink.removeReturnVideo(token: current); return false
@@ -268,7 +269,7 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
         if encoderToken != frame.token { encoder.close(); encoderToken = frame.token }
         let encoded: NativeGuestReturnH264Frame?
         do { encoded = try encoder.encode(frame) }
-        catch { if stop(ifCurrent: frame.token) { _ = events(.returnVideo(.failed)) }; return }
+        catch { stop(ifCurrent: frame.token, state: .failed); return }
         guard let encoded, callbacks.permitsReturn(native) else { return }
         gate.lock()
         guard token == frame.token else { gate.unlock(); return }
@@ -285,11 +286,11 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
         gate.unlock()
         if !accepted { stop(ifCurrent: frame.token) }
     }
-    @discardableResult func stop(ifCurrent expected: UUID? = nil) -> Bool {
+    @discardableResult func stop(ifCurrent expected: UUID? = nil, state: NativeInterviewReturnVideoState = .off) -> Bool {
         gate.lock()
         if let expected, token != expected { gate.unlock(); return false }
         let previous = token; token = nil; pending = nil
-        if previous != nil { enqueueVisibilityLocked(false); _ = events(.returnVideo(.off)) }
+        if previous != nil { enqueueVisibilityLocked(false); _ = events(.returnVideo(state)) }
         gate.unlock()
         guard let previous else { return false }
         sink.revokeReturnVideo(token: previous)
@@ -328,6 +329,7 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
     private var expiry: Task<Void, Never>?
     private var videoPreparation: Task<Void, Never>?
     private var videoPreparationID: UUID?
+    private var videoPreparationJobs: Set<UUID> = []
     private(set) var isRetired = false
     var selectedICEPair: NativeGuestReceiver.ICEPair? { isRetired ? nil : receiver.selectedICEPair }
 
@@ -376,33 +378,43 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
         if let returnSender, !isRetired, !(await returnSender.prepare()) { returnSender.close() }
     }
     var supportsProgramReturn: Bool { !isRetired && returnVideoSender != nil && callbacks.permitsReturn(receiver) }
+    private func cancelVideoPreparation() {
+        videoPreparation?.cancel(); videoPreparation = nil; videoPreparationID = nil
+    }
     func setProgramReturnEnabled(_ enabled: Bool) -> Bool {
         guard supportsProgramReturn, let sender = returnVideoSender else { return false }
-        if !enabled { videoPreparation?.cancel(); sender.stop(); _ = videoState(.returnVideo(.off)); return true }
-        if sender.isEnabled { return true }
-        guard videoPreparation == nil else { return false }
-        let ticket = UUID(); videoPreparationID = ticket
-        videoPreparation = Task { [weak self] in
-            let installed = await sender.prepare()
-            guard let self, self.videoPreparationID == ticket else { sender.stop(); return }
-            self.videoPreparation = nil; self.videoPreparationID = nil
-            if !installed && !self.isRetired && !Task.isCancelled { self.reportVideoFailure() }
+        if !enabled {
+            cancelVideoPreparation(); sender.stop(); _ = videoState(.returnVideo(.off)); return true
         }
-        reportVideoPreparing(); return true
+        if sender.isEnabled { return true }
+        cancelVideoPreparation()
+        // At most one entered old install and one deliberate replacement.
+        // Stop can revoke this claim before the task gets its first turn.
+        guard videoPreparationJobs.count < 2, let claimed = sender.claimPreparation() else { return false }
+        let ticket = UUID(); videoPreparationID = ticket; videoPreparationJobs.insert(ticket)
+        videoPreparation = Task { [weak self] in
+            _ = await sender.prepare(claimed)
+            guard let self else { sender.stop(ifCurrent: claimed); return }
+            self.videoPreparationJobs.remove(ticket)
+            guard self.videoPreparationID == ticket else { sender.stop(ifCurrent: claimed); return }
+            self.videoPreparation = nil; self.videoPreparationID = nil
+        }
+        return true
     }
     func selectReturnVideoSource(_ source: NativeInterviewReturnVideoSource) -> Bool {
         guard supportsProgramReturn, let sender = returnVideoSender else { return false }
         if sink.returnVideoSource == source { return true }
         // Changing the source is an Off action. It never replays an earlier On.
-        videoPreparation?.cancel(); sender.stop()
+        cancelVideoPreparation(); sender.stop()
         guard sink.selectReturnVideoSource(source) else { return false }
         _ = videoState(.returnVideoSource(source)); return true
     }
     private let videoState: @Sendable (NativeInterviewMediaEvent) -> Bool
-    private func reportVideoPreparing() { _ = videoState(.returnVideo(.preparing)) }
-    private func reportVideoFailure() { _ = videoState(.returnVideo(.failed)) }
     #if STREAM_GUEST_VALIDATION
     func validationCloseReturnAudio() { returnSender?.close() }
+    func validationPermitReturn() { callbacks.validationReturnReady = true }
+    var validationPendingVideoPreparations: Int { videoPreparationJobs.count }
+    var validationVideoEnabled: Bool { returnVideoSender?.isEnabled == true }
     func validationFailReturnVideo(after packets: Int32) async -> Bool {
         await returnVideoSender?.validationFailNextAccessUnit(after: packets) == true
     }
