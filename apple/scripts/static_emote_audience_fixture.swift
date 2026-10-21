@@ -95,7 +95,12 @@ private actor EmoteFixtureLoader {
         let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        context.setFillColor(CGColor(red: 0, green: 1, blue: 0, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        // Actual non-square alpha evidence: a half-opaque green corner and
+        // an entirely transparent opposite corner, each with interior pixels.
+        context.clear(CGRect(x: 0, y: 0, width: width / 4, height: height / 2))
+        context.setFillColor(CGColor(red: 0, green: 1, blue: 0, alpha: 0.5))
+        context.fill(CGRect(x: 0, y: 0, width: width / 4, height: height / 2))
+        context.clear(CGRect(x: width * 3 / 4, y: height / 2, width: width / 4, height: height / 2))
         let bytes = NSMutableData(), destination = CGImageDestinationCreateWithData(bytes, format, 1, nil)!
         CGImageDestinationAddImage(destination, context.makeImage()!, nil); precondition(CGImageDestinationFinalize(destination))
         return bytes as Data
@@ -159,6 +164,34 @@ private actor EmoteFixtureLoader {
         precondition(points.count > 100)
         let w = points.map(\.0).max()! - points.map(\.0).min()! + 1, h = points.map(\.1).max()! - points.map(\.1).min()! + 1
         precondition(Double(w) / Double(h) > 1.7, "Static emote was stretched/cropped as an author portrait")
+        // An all-clear image retains the exact artwork inset, text layout and
+        // card background. Its rendered pixels give the actual alpha backdrop.
+        let clearContext = CGContext(data: nil, width: artwork.width, height: artwork.height, bitsPerComponent: 8,
+            bytesPerRow: artwork.width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let clearKey = CommentAvatarStore.shared.publishStaticEmote(clearContext.makeImage()!, identity: "owned-alpha-backdrop")!
+        var clearScene = preview.programScene!
+        let commentIndex = clearScene.layers.firstIndex { $0.id == comment }!
+        guard case .text(var clearText) = clearScene.layers[commentIndex].payload else { preconditionFailure() }
+        clearText.commentAvatarKey = clearKey; clearScene.layers[commentIndex].payload = .text(clearText)
+        let clearPixels = pixels(render(clearScene, renderer: renderer))
+        let left = points.map(\.0).min()!, right = points.map(\.0).max()!
+        let top = points.map(\.1).min()!, bottom = points.map(\.1).max()!
+        var transparentPixels = 0, partialGreenPixels = 0
+        shown.withUnsafeBytes { actualBytes in clearPixels.withUnsafeBytes { clearBytes in
+            let actual = actualBytes.bindMemory(to: UInt8.self), reference = clearBytes.bindMemory(to: UInt8.self)
+            for y in top...bottom { for x in left...right {
+                let offset = y * stride + x * 4
+                if (0..<4).allSatisfy({ actual[offset + $0] == reference[offset + $0] }) { transparentPixels += 1 }
+                if Int(actual[offset + 1]) > Int(reference[offset + 1]) + 30 && actual[offset + 1] < 230,
+                   Int(actual[offset]) <= Int(reference[offset]) + 2, Int(actual[offset + 2]) <= Int(reference[offset + 2]) + 2 {
+                    partialGreenPixels += 1
+                }
+            }}
+        }}
+        precondition(transparentPixels >= 8 && partialGreenPixels >= 4,
+                     "Static emote flattened transparent/partial-alpha pixels against the real card backdrop")
+        print("Native static-emote alpha: \(transparentPixels) exact-backdrop pixels, \(partialGreenPixels) partially composited green pixels inside \(w)×\(h) non-square tile bounds")
+
         try CIContext().writePNGRepresentation(of: CIImage(cvPixelBuffer: buffer), to: folder.appendingPathComponent("TakenStaticEmote.png"), format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
         let encodedScene = String(decoding: try JSONEncoder().encode(preview.programScene!), as: UTF8.self)
         precondition(!encodedScene.contains("static-cdn") && !encodedScene.contains("emote_set_id"))
