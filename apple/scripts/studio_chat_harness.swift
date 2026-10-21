@@ -22,6 +22,18 @@ import Foundation
         let oversizedEvent = try event("huge", text: String(repeating: "a", count: 16_385))
         precondition(StudioRestreamDecoder.decode(oversizedEvent) == nil)
         precondition(StudioRestreamDecoder.decode(Data(repeating: 32, count: 262_145)) == nil)
+        for (type, expected) in [(5, StudioAudienceEventKind.text), (7, .superChat), (8, .superSticker),
+                                  (23, .milestone), (28, .membership), (29, .gift)] {
+            let supported = message(try event("type-\(type)", type: type))
+            precondition(supported.audienceEvent == expected)
+            precondition(supported.text == first.text)
+            var isolated = StudioChatQueue(); isolated.receive(supported)
+            precondition(isolated.filtered(search: "世界", audienceEvent: expected).count == 1)
+            precondition(isolated.filtered(search: "", audienceEvent: .emotes).isEmpty)
+        }
+        precondition(!StudioAudienceEventKind.text.supportsAlert)
+        precondition(StudioAudienceEventKind(rawValue: "Reaction") == nil)
+        precondition(StudioAudienceEventKind(rawValue: "Paid donation") == nil)
         var queue = StudioChatQueue()
         queue.receive(first); queue.receive(message(try event("1")))
         precondition(queue.messages.count == 1)

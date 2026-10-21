@@ -184,6 +184,7 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         manager.connect(.youtube, eventID: "owned-event")
         await until { stream.queue.messages.count == 2 && manager.snapshot(.youtube).isConnected }
         precondition(stream.queue.messages.map(\.kind) == ["Text", "Super Chat"])
+        precondition(stream.queue.messages.map(\.audienceEvent) == [.text, .superChat])
         precondition(stream.queue.messages[0].roles == ["Member"] && !stream.queue.messages[0].timestampIsReceiptTime)
         precondition(stream.queue.messages[0].text.contains("👩🏽‍🚀 世界"))
         await until { http.pages == 1 }; let intervals = await gate.intervals; precondition(intervals == [2.5])
@@ -210,6 +211,7 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         let twitchID = StudioDirectChatDecoder.identity(.twitch, "owner", "twitch-one")
         precondition(stream.queue.messages.filter { $0.platform == "Twitch" }.count == 1)
         precondition(stream.queue.message(twitchID)?.kind == "Emotes" && manager.canReply(twitchID))
+        precondition(stream.queue.message(twitchID)?.audienceEvent == .emotes)
         // A relay carrying the same actual provider identity shares the dedup key.
         let relay = json(["action": "event", "payload": ["connectionIdentifier": "relay/twitch", "eventTypeId": 4,
             "eventPayload": ["twitchMessageId": "twitch-one", "text": "Hello", "author": ["displayName": "Viewer"]]]])

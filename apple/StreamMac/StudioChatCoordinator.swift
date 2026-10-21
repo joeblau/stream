@@ -15,22 +15,41 @@ import StreamCore
     @Published var includeAuthor = true
     @Published var includePlatform = true
     @Published var includeAvatar = false
+    @Published var alertPromotionEnabled = false
+    @Published var selectedAlertSlot: LayerID?
+    @Published private(set) var audienceStyles: [StudioAudienceEventKind: StudioAudienceEventStyle] = [:]
     private var avatarTasks: [LayerID: Task<Void, Never>] = [:]
     private var commentLayoutCache: [LayerNode: CommentTextLayout] = [:]
     private weak var dispatcher: StudioCommandDispatcher?
     private weak var previewProgram: PreviewProgramModel?
     private var slots: Set<LayerID> = []
+    private var alertSlots: Set<LayerID> = []
     private let slotsURL: URL
+    private let audienceStylesURL: URL
+    private var closed = false
 
     struct Connection { let uuid: String; let platform: String; let state: String }
-    struct SlotPreferences: Codable { var version = 1; var slots: [LayerID] }
+    struct SlotPreferences: Codable { var version = 1; var slots: [LayerID]; var alertSlots: [LayerID]? = nil }
+    private struct AudiencePreferences: Codable { var version = 1; var styles: [String: String] }
 
     init(dispatcher: StudioCommandDispatcher, previewProgram: PreviewProgramModel) {
         self.dispatcher = dispatcher; self.previewProgram = previewProgram
         slotsURL = DesktopStorage.projectDirectory.appendingPathComponent("comment-slots.json")
-        if let data = try? Data(contentsOf: slotsURL), data.count <= 65_536,
-           let saved = try? JSONDecoder().decode(SlotPreferences.self, from: data), saved.version == 1, saved.slots.count <= 16 {
+        audienceStylesURL = DesktopStorage.projectDirectory.appendingPathComponent("audience-styles.json")
+        if let data = Self.preferenceData(at: slotsURL, limit: 65_536),
+           let saved = try? JSONDecoder().decode(SlotPreferences.self, from: data), saved.version == 1,
+           saved.slots.count + (saved.alertSlots?.count ?? 0) <= 16 {
             slots = Set(saved.slots)
+            alertSlots = Set(saved.alertSlots ?? []).subtracting(slots)
+        }
+        if let data = Self.preferenceData(at: audienceStylesURL, limit: 4_096),
+           let saved = try? JSONDecoder().decode(AudiencePreferences.self, from: data), saved.version == 1,
+           saved.styles.count <= StudioAudienceEventKind.allCases.count {
+            for (kind, style) in saved.styles {
+                if let kind = StudioAudienceEventKind(rawValue: kind), let style = StudioAudienceEventStyle(rawValue: style) {
+                    audienceStyles[kind] = style
+                }
+            }
         }
         restream.onStudioEnvelope = { [weak self] data in self?.receive(data) }
         // Signing out of one adapter cannot clear another adapter's messages,
@@ -38,6 +57,12 @@ import StreamCore
         restream.onStudioReset = { [weak self] in
             self?.connections = self?.connections.filter { $0.key.hasPrefix("direct:") } ?? [:]
         }
+    }
+    private static func preferenceData(at url: URL, limit: Int) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: limit + 1), data.count <= limit else { return nil }
+        return data
     }
     func bindAccounts(_ accounts: ProviderAccountSession) {
         directChat?.shutdown()
@@ -53,6 +78,7 @@ import StreamCore
         receive(action)
     }
     func receive(_ action: StudioChatAction) {
+        guard !closed else { return }
         switch action {
         case .message(let message):
             let before = queue.messages.count
@@ -68,10 +94,40 @@ import StreamCore
         case .removed(let ids):
             if let featured = queue.featuredID, ids.contains(featured) { hide() }
             queue.discard(ids)
+            if availableAlertSlots.contains(where: { layer in
+                guard case .text(let text) = layer.payload, let id = text.recordingChatMessageID else { return false }
+                return ids.contains(id)
+            }) { error = "An alert's source message was removed. Hide its staged card and Take to remove it from Program." }
         }
     }
     var availableSlots: [LayerNode] {
         previewProgram?.stagedScene?.layers.filter { slots.contains($0.id) && $0.payload.isText } ?? []
+    }
+    var availableAlertSlots: [LayerNode] {
+        previewProgram?.stagedScene?.layers.filter { alertSlots.contains($0.id) && $0.payload.isText } ?? []
+    }
+    func audienceStyle(for kind: StudioAudienceEventKind) -> StudioAudienceEventStyle {
+        audienceStyles[kind] ?? kind.defaultStyle
+    }
+    func setAudienceStyle(_ style: StudioAudienceEventStyle, for kind: StudioAudienceEventKind) {
+        guard !closed else { return }
+        audienceStyles[kind] = style
+        do {
+            let values = Dictionary(uniqueKeysWithValues: audienceStyles.map { ($0.key.rawValue, $0.value.rawValue) })
+            try JSONEncoder().encode(AudiencePreferences(styles: values)).write(to: audienceStylesURL, options: .atomic)
+        } catch { self.error = "The audience event style could not be saved." }
+    }
+    var audienceStagingError: String? {
+        guard !closed else { return "This chat session has ended." }
+        guard previewProgram?.stagedScene != nil else { return "Choose a staged scene first." }
+        return previewProgram?.directLiveEditing == true ? "Turn off Direct Live Editing before staging an audience alert. Take publishes the card." : nil
+    }
+    func audienceAlertError(for id: String) -> String? {
+        guard alertPromotionEnabled else { return "Enable manual audience alerts first." }
+        guard queue.message(id)?.audienceEvent?.supportsAlert == true else { return "This message has no supported audience alert type." }
+        if let reason = audienceStagingError { return reason }
+        guard availableAlertSlots.contains(where: { $0.id == selectedAlertSlot }) else { return "Create or select a separate staged alert slot first." }
+        return nil
     }
     func retainReadingPosition(_ id: String?) { queue.retainReadingPosition(id) }
     func favorite(_ id: String) { queue.favorite(id) }
@@ -79,8 +135,13 @@ import StreamCore
     func dequeue(_ id: String) { queue.remove(id) }
     func select(_ id: String) { queue.select(id) }
     func advance(_ direction: Int) { queue.advance(direction) }
-    func createSlot() {
-        guard slots.count < 16, let scene = previewProgram?.stagedScene else { return }
+    func createSlot() { createSlot(alert: false) }
+    func createAlertSlot() {
+        if let reason = audienceStagingError { error = reason; return }
+        createSlot(alert: true)
+    }
+    private func createSlot(alert: Bool) {
+        guard slots.count + alertSlots.count < 16, let scene = previewProgram?.stagedScene else { return }
         let before = Set(scene.layers.map(\.id))
         var payload = TextSourcePayload(text: "")
         payload.fontSize = 42; payload.backgroundColorHex = "#171717E6"
@@ -88,12 +149,47 @@ import StreamCore
         guard run(.addLayer(.text(payload), in: scene.id)),
               let layer = previewProgram?.stagedScene?.layers.first(where: { !before.contains($0.id) }) else { return }
         let transform = LayerTransform(position: .init(x: 0.08, y: 0.65), size: .init(width: 0.84, height: 0.28), anchor: .topLeft)
-        guard run(.renameLayer(layer.id, to: "Comment Slot", in: scene.id)),
+        guard run(.renameLayer(layer.id, to: alert ? "Audience Alert Slot" : "Comment Slot", in: scene.id)),
               run(.setLayerTransform(layer.id, transform, in: scene.id)),
               run(.setLayerVisibility(layer.id, visible: false, in: scene.id)) else { return }
-        slots.insert(layer.id); selectedSlot = layer.id
-        do { try JSONEncoder().encode(SlotPreferences(slots: slots.sorted { $0.description < $1.description })).write(to: slotsURL, options: .atomic) }
+        if alert { alertSlots.insert(layer.id); selectedAlertSlot = layer.id }
+        else { slots.insert(layer.id); selectedSlot = layer.id }
+        do { try JSONEncoder().encode(SlotPreferences(slots: slots.sorted { $0.description < $1.description },
+            alertSlots: alertSlots.sorted { $0.description < $1.description })).write(to: slotsURL, options: .atomic) }
         catch { self.error = "The comment slot could not be saved." }
+    }
+    @discardableResult func stageAudienceAlert(_ id: String) -> Bool {
+        if let reason = audienceAlertError(for: id) { error = reason; return false }
+        guard let message = queue.message(id), let kind = message.audienceEvent,
+              let scene = previewProgram?.stagedScene, let slot = selectedAlertSlot,
+              let layer = availableAlertSlots.first(where: { $0.id == slot }), case .text(var text) = layer.payload else { return false }
+        let header = [kind.rawValue, includeAuthor ? message.author : nil, includePlatform ? message.platform : nil]
+            .compactMap { $0 }.joined(separator: " · ") + "\n"
+        let style = audienceStyle(for: kind)
+        text.text = header + message.text
+        text.colorHex = style.foreground; text.backgroundColorHex = style.background
+        text.commentHeaderUTF16Length = (header as NSString).length; text.commentPageIndex = 0
+        text.commentAvatarKey = nil; text.recordingChatMessageID = message.id
+        text.boxSizing = .fixed; text.wraps = true; text.overflow = .scaleDown
+        text.timer = nil; text.ticker = nil; text.timing = nil; text.guestBinding = nil
+        let commands: [StudioCommand] = [.setLayerText(slot, text, in: scene.id), .setLayerVisibility(slot, visible: true, in: scene.id)]
+        guard let dispatcher else { return false }
+        for command in commands {
+            if let reason = dispatcher.availabilityError(for: command) { error = reason.description; return false }
+        }
+        for command in commands { if !run(command) { return false } }
+        let binding = RecordingChatBinding(paint: .init(slotID: slot.description, messageID: id,
+            fingerprint: RecordingChatPaint.fingerprint(text.text)), message: Self.recordingMessage(message))
+        recentRecordingBindings.append(binding)
+        if recentRecordingBindings.count > 128 { recentRecordingBindings.removeFirst() }
+        recordingBindings.send(binding)
+        return true
+    }
+    func hideAudienceAlert() {
+        if let reason = audienceStagingError { error = reason; return }
+        guard let scene = previewProgram?.stagedScene, let slot = selectedAlertSlot,
+              availableAlertSlots.contains(where: { $0.id == slot }) else { return }
+        _ = run(.setLayerVisibility(slot, visible: false, in: scene.id))
     }
     func show(_ id: String) {
         guard let message = queue.message(id), let scene = previewProgram?.stagedScene,
@@ -144,7 +240,13 @@ import StreamCore
         }
     }
     var selectedCommentPresentation: CommentTextLayout? {
-        guard let layer = availableSlots.first(where: { $0.id == selectedSlot }), case .text(let text) = layer.payload,
+        commentPresentation(for: availableSlots.first(where: { $0.id == selectedSlot }))
+    }
+    var selectedAlertPresentation: CommentTextLayout? {
+        commentPresentation(for: availableAlertSlots.first(where: { $0.id == selectedAlertSlot }))
+    }
+    private func commentPresentation(for candidate: LayerNode?) -> CommentTextLayout? {
+        guard let layer = candidate, case .text(let text) = layer.payload,
               let header = text.commentHeaderUTF16Length else { return nil }
         let hasAvatar = CommentAvatarStore.shared.image(text.commentAvatarKey) != nil
         var key = layer
@@ -166,6 +268,18 @@ import StreamCore
     var selectedCommentPage: Int {
         guard let layer = availableSlots.first(where: { $0.id == selectedSlot }), case .text(let text) = layer.payload else { return 0 }
         return text.commentPageIndex
+    }
+    var selectedAlertPage: Int {
+        guard let layer = availableAlertSlots.first(where: { $0.id == selectedAlertSlot }), case .text(let text) = layer.payload else { return 0 }
+        return text.commentPageIndex
+    }
+    func advanceAudienceAlertPage(_ direction: Int) {
+        if let reason = audienceStagingError { error = reason; return }
+        guard let scene = previewProgram?.stagedScene,
+              let layer = availableAlertSlots.first(where: { $0.id == selectedAlertSlot }), case .text(var text) = layer.payload,
+              let layout = selectedAlertPresentation, !layout.pages.isEmpty else { return }
+        text.commentPageIndex = min(layout.pages.count - 1, max(0, text.commentPageIndex + direction))
+        _ = run(.setLayerText(layer.id, text, in: scene.id))
     }
     func advanceCommentPage(_ direction: Int) {
         guard let scene = previewProgram?.stagedScene,
@@ -193,9 +307,13 @@ import StreamCore
         .init(id: message.id, platform: message.platform, author: message.author, text: message.text,
             providerTimestamp: message.timestamp, timestampIsReceiptTime: message.timestampIsReceiptTime, kind: message.kind)
     }
-    func shutdown() { directChat?.shutdown(); avatarTasks.values.forEach { $0.cancel() }; avatarTasks.removeAll(); restream.disconnectStudioSession() }
+    func shutdown() {
+        guard !closed else { return }
+        closed = true; alertPromotionEnabled = false
+        directChat?.shutdown(); avatarTasks.values.forEach { $0.cancel() }; avatarTasks.removeAll(); restream.disconnectStudioSession()
+    }
     private func run(_ command: StudioCommand) -> Bool {
-        guard let dispatcher else { return false }
+        guard !closed, let dispatcher else { return false }
         if let reason = dispatcher.execute(command).error { error = reason.description; return false }
         error = nil; return true
     }

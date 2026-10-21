@@ -93,6 +93,8 @@ jobs:
           CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh --late-pause-burst
       - name: Qualify complete comment presentation and recorded pages
         run: COMMENT_BUILD_PATH=build/desktop zsh scripts/run_comment_presentation_harness.zsh
+      - name: Qualify explicit staged audience event cards
+        run: AUDIENCE_BUILD_PATH=build/desktop zsh scripts/run_audience_events_harness.zsh
 
       - name: Qualify generated program recordings
         run: |
@@ -110,6 +112,7 @@ jobs:
           path: |
             apple/build/desktop-tests.xcresult
             apple/build/recording-chat-validation/media-*
+            apple/build/audience-events-validation/artifacts-*
             apple/build/fractional-iso-audio-validation/media-*
             apple/build/abrupt-session-recovery-validation/artifacts-*
 

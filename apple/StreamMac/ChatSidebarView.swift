@@ -9,13 +9,14 @@ struct ChatSidebarView: View {
     @State private var author = "All"
     @State private var connection = "All"
     @State private var scrollAnchor: String?
-    @State private var kind = "All"
+    @State private var kind: StudioAudienceEventKind?
+    @State private var styledKind = StudioAudienceEventKind.superChat
     @State private var favoritesOnly = false
     private var chat: RestreamChat { coordinator.restream }
     private var messages: [StudioChatMessage] {
         coordinator.queue.filtered(search: search, platform: platform == "All" ? nil : platform,
             connectionID: connection == "All" ? nil : connection, author: author == "All" ? nil : author,
-            kind: kind == "All" ? nil : kind, favoritesOnly: favoritesOnly)
+            audienceEvent: kind, favoritesOnly: favoritesOnly)
     }
     var body: some View {
         VStack(spacing: 8) {
@@ -35,8 +36,8 @@ struct ChatSidebarView: View {
                     ForEach(Array(Set(coordinator.queue.messages.map(\.platform))).sorted(), id: \.self) { Text($0).tag($0) }
                 }
                 Picker("Type", selection: $kind) {
-                    Text("All types").tag("All")
-                    ForEach(Array(Set(coordinator.queue.messages.map(\.kind))).sorted(), id: \.self) { Text($0).tag($0) }
+                    Text("All types").tag(Optional<StudioAudienceEventKind>.none)
+                    ForEach(StudioAudienceEventKind.allCases, id: \.self) { Text($0.rawValue).tag(Optional($0)) }
                 }
             }
             HStack {
@@ -60,6 +61,7 @@ struct ChatSidebarView: View {
                     .help("Disable to keep your scroll position while messages arrive")
             }
             queueControls
+            audienceControls
             Divider()
             ScrollViewReader { proxy in
                 ScrollView {
@@ -83,12 +85,49 @@ struct ChatSidebarView: View {
                 }
             }
             if let error = coordinator.error { Text(error).font(.caption).foregroundStyle(.orange) }
-            Text("Public Restream and supported direct chats share this queue. Plain text includes documented emote text; image emotes and chat alert styling remain unavailable.")
+            Text("Public provider text preserves Unicode emoji and documented emote text. Image emotes/stickers, reactions and viewer metrics are unavailable; no remote event artwork is loaded.")
 
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(10).frame(minWidth: 260, idealWidth: 330)
         .onAppear { chat.autoConnect() }
+    }
+    private var audienceControls: some View {
+        DisclosureGroup("Audience Events") {
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Enable Manual Alert Promotion", isOn: $coordinator.alertPromotionEnabled)
+                    .toggleStyle(.checkbox)
+                Picker("Style event", selection: $styledKind) {
+                    ForEach(StudioAudienceEventKind.allCases.filter(\.supportsAlert), id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                Picker("Card palette", selection: Binding(get: { coordinator.audienceStyle(for: styledKind) },
+                    set: { coordinator.setAudienceStyle($0, for: styledKind) })) {
+                    ForEach(StudioAudienceEventStyle.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                Picker("Staged alert slot", selection: $coordinator.selectedAlertSlot) {
+                    Text("Choose a separate alert slot").tag(Optional<LayerID>.none)
+                    ForEach(coordinator.availableAlertSlots) { Text($0.name).tag(Optional($0.id)) }
+                }
+                HStack {
+                    Button("Create Alert Slot") { coordinator.createAlertSlot() }
+                    Button("Hide Alert") { coordinator.hideAudienceAlert() }
+                        .disabled(coordinator.selectedAlertSlot == nil)
+                }.controlSize(.small).disabled(coordinator.audienceStagingError != nil)
+                if let layout = coordinator.selectedAlertPresentation {
+                    if layout.needsLargerBox { Text("Enlarge this slot to show the alert.").font(.caption).foregroundStyle(.orange) }
+                    else if layout.pages.count > 1 {
+                        HStack {
+                            Button("Previous Alert Page") { coordinator.advanceAudienceAlertPage(-1) }
+                            Button("Next Alert Page") { coordinator.advanceAudienceAlertPage(1) }
+                            Text("\(coordinator.selectedAlertPage + 1) / \(layout.pages.count)").font(.caption)
+                        }.controlSize(.small).disabled(coordinator.audienceStagingError != nil)
+                    }
+                }
+                Text("Event arrival never promotes an alert. Use Stage Alert on a supported event, then Take. Hide also requires Take. Disable Direct Live Editing first. Palettes apply on the next deliberate promotion; cards use the provider's public text, without inferred amounts or artwork.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                if let reason = coordinator.audienceStagingError { Text(reason).font(.caption).foregroundStyle(.orange) }
+            }
+        }
     }
     private var status: String {
         switch chat.status {
@@ -166,16 +205,34 @@ struct ChatSidebarView: View {
                 if message.timestampIsReceiptTime { Text("received") }
                 Text(message.roles.joined(separator: ", "))
             }.font(.caption2).foregroundStyle(.secondary)
+            if let event = message.audienceEvent, event != .text {
+                Label(event.rawValue, systemImage: event.symbol)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(audienceColor(coordinator.audienceStyle(for: event)))
+            }
             Text(message.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button(coordinator.queue.favorites.contains(message.id) ? "Unfavorite" : "Favorite") { coordinator.favorite(message.id) }
                 Button("Queue") { coordinator.enqueue(message.id) }
                 Button("Show") { coordinator.show(message.id) }
+                if message.audienceEvent?.supportsAlert == true {
+                    Button("Stage Alert") { coordinator.stageAudienceAlert(message.id) }
+                        .disabled(coordinator.audienceAlertError(for: message.id) != nil)
+                        .help(coordinator.audienceAlertError(for: message.id) ?? "Stage this event in the separate alert slot; Take publishes it.")
+                }
             }.controlSize(.small)
             if let manager = coordinator.directChat { DirectChatMessageActions(manager: manager, message: message) }
         }
         .padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
         .draggable(message.id)
         .accessibilityElement(children: .contain)
+    }
+    private func audienceColor(_ style: StudioAudienceEventStyle) -> Color {
+        switch style {
+        case .neutral: .primary
+        case .gold: .yellow
+        case .violet: .purple
+        case .teal: .teal
+        }
     }
 }
