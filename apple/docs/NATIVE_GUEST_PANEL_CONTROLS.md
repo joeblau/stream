@@ -108,3 +108,22 @@ qualification gates.
 Cocoa control in an owned window: real mouse tracking until its posted mouse-up,
 Space down/repeat/up, modified-key refusal, responder loss and view removal.
 It initializes no runtime, capture, credential store or permission request.
+
+Assistive-technology activation has explicit start/stop semantics because an
+accessibility Press has no matching key or pointer release. The native control
+announces “Start private talkback (10 seconds maximum)” while inactive and
+“Stop private talkback” with its active microphone value during the interval.
+Activate again to stop early. The control releases automatically at ten seconds,
+in addition to the manager and media path's existing independent safety deadlines.
+It uses the same accepted press UUID and current guest lease as mouse/Space;
+rejected starts do not latch. Focus loss, removal, stale lease and manager
+revocation retain their cancellation paths, and reconnect never starts speech.
+After release, speech may return to the microphone's prior public routes.
+
+The small Cocoa fixture also invokes the actual public
+`accessibilityPerformPress()` implementation: accepted begin/early stop, disabled
+and rejected starts, native labels/values, the real ten-second automatic release,
+cancelled prior timers, focus/removal, manager revocation and a fresh deliberate
+start all pass. These are actual control/callback proofs; they do not claim a
+spoken VoiceOver session or qualify the studio's remaining contrast/traversal
+requirements in #90.

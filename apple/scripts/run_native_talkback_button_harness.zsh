@@ -17,6 +17,6 @@ xcrun swiftc -swift-version 6 -parse-as-library -target "$(uname -m)-apple-macos
   -framework AppKit -framework SwiftUI "$BUTTON_DIR/HoldValidation.swift" -o "$BUTTON_DIR/HoldValidation"
 python3 - "$BUTTON_DIR/HoldValidation" <<'PY'
 import subprocess,sys
-try: raise SystemExit(subprocess.run(sys.argv[1:],timeout=8).returncode)
-except subprocess.TimeoutExpired: raise SystemExit('FAIL: owned hold control exceeded its eight-second cleanup bound')
+try: raise SystemExit(subprocess.run(sys.argv[1:],timeout=20).returncode)
+except subprocess.TimeoutExpired: raise SystemExit('FAIL: owned hold control exceeded its twenty-second cleanup bound')
 PY
