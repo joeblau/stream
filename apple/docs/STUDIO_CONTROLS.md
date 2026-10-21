@@ -69,6 +69,18 @@ fixture fails within 45 seconds. These fixtures establish local event dispatch,
 not physical keyboard input, device reconnect, global foreground-app control or
 accessibility traversal. Build `StreamMac` separately for the complete app.
 
+Run `apple/scripts/run_global_shortcut_harness.zsh` for the shipping Carbon
+registration path with a separate owned application in front. It requires
+existing event-post access and never requests a permission grant. Temporary
+preferences and a temporary application isolate the test chord. Synthetic
+WindowServer events verify both opt-ins, repeated press/release, ordinary input
+in the foreground application, current command availability without replay,
+palette suppression, disabling the master switch and unregistering on teardown.
+The foreground helper restores the previous application and has a 20-second
+watchdog. Missing access or an occupied chord exits 77. The local native run on
+2026-10-21 passed; this does not qualify physical keys or arbitrary third-party
+applications.
+
 Manual acceptance still needs VoiceOver/Accessibility Inspector and Full
 Keyboard Access on a running studio: traverse panels and layer actions, adjust
 mixer sliders, restore focus after all native import/permission/settings sheets,
