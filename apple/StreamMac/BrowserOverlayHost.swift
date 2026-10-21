@@ -16,28 +16,9 @@ private let browserOverlayHostLog = Logger(subsystem: "com.joeblau.StreamMac", c
 
 /// G08 (issue #115): process-wide seam through which web widget hosts reach
 /// the P03 asset library (`AssetLibraryStore`) without the pool owning the
-/// store. WIRED exactly once, where the asset library is mounted.
-///
-/// ── ORCHESTRATOR HOOK: asset-library wiring ───────────────────────────────
-/// P03's store is not yet mounted in the app (see `AssetLibraryPanelView`'s
-/// header: "create one @StateObject AssetLibraryStore() in StreamMacApp").
-/// Wherever it lands (StreamMacApp / dispatcher), add:
-///
-/// ```swift
-/// BrowserOverlayAssetResolver.access = { rawID in
-///     guard let uuid = UUID(uuidString: rawID) else { return nil }
-///     return assetLibrary.access(for: AssetID(uuid))
-/// }
-/// BrowserOverlayAssetResolver.noteUsage = { rawID, site in
-///     guard let uuid = UUID(uuidString: rawID) else { return }
-///     assetLibrary.noteUsage(of: AssetID(uuid), from: site)
-/// }
-/// ```
-///
-/// Until wired, a local-HTML widget host reports a clear failure state
-/// (`assetLibraryUnavailable`) instead of silently rendering nothing — URL
-/// widgets and bundled fixtures are unaffected. MainActor-isolated: the host
-/// and the wiring site both run on the main actor.
+/// store. StreamMacApp wires this resolver to dispatcher.assetLibrary when the
+/// app mounts the shared asset store. Hosts retain each resolved security-scope
+/// grant through their page lifetime; unavailable grants fail explicitly.
 @MainActor
 enum BrowserOverlayAssetResolver {
     /// Maps a persisted asset identifier to a scoped, readable URL. The
@@ -132,7 +113,7 @@ private final class WebOverlayHostingWindow: NSWindow {
 /// Evolves the G07 prototype into the supported in-app path: the webview
 /// loads the widget (remote URL, bundled fixture, or a P03 local-HTML asset)
 /// with a transparent page background in a hidden-but-unoccluded window, and
-/// a bounded snapshot clock (`takeSnapshot`, in-flight cap 2, latest-wins
+/// a public transparent-PDF raster clock (in-flight cap 2, latest-wins
 /// `BrowserOverlayFrameStore`) feeds the renderer's `.web` branch. The
 /// composition tick is never gated on WebKit: a stalled widget keeps its
 /// last frame until the store's freshness window lapses, then paints the
@@ -239,8 +220,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
                                        height: CGFloat(configuration.pixelHeight))),
             configuration: webConfiguration)
         localWebView.underPageBackgroundColor = .clear
-        // The backing-store alpha switch (macOS 14 verified in G07).
-        localWebView.setValue(false, forKey: "drawsBackground")
+        // Alpha is supplied by the public PDF configuration at capture time.
         localWebView.allowsHitTesting = configuration.allowsInteraction
 
         webView = localWebView
@@ -541,17 +521,17 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         metrics.requested += 1
         inFlight += 1
         let generation = snapshotGeneration
-        webView.takeSnapshot(with: nil) { [weak self] image, error in
+        BrowserWidgetRasterizer.capture(webView, width: configuration.pixelWidth, height: configuration.pixelHeight,
+            isCurrent: { [weak self] in self?.isRunning == true && self?.snapshotGeneration == generation }) { [weak self] result in
             MainActor.assumeIsolated {
                 guard let self, self.isRunning, self.snapshotGeneration == generation else { return }
                 self.inFlight -= 1
                 self.signposter.endInterval("snapshot", state)
                 let latency = (CFAbsoluteTimeGetCurrent() - requestedAt) * 1000
-                guard let image,
-                      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+                guard case .success(let cgImage) = result,
                       let buffer = self.renderToPixelBuffer(cgImage) else {
                     self.metrics.failed += 1
-                    if let error { browserOverlayHostLog.warning("widget snapshot failed: \(error.localizedDescription, privacy: .public)") }
+                    browserOverlayHostLog.warning("widget PDF snapshot failed")
                     return
                 }
                 self.metrics.succeeded += 1

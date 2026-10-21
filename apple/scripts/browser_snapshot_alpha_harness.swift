@@ -80,8 +80,15 @@ private func composite(_ bytes: Data) -> CVPixelBuffer {
     let context = CGContext(data: CVPixelBufferGetBaseAddress(result), width: 480, height: 270, bitsPerComponent: 8,
         bytesPerRow: CVPixelBufferGetBytesPerRow(result), space: CGColorSpaceCreateDeviceRGB(),
         bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)!
-    context.setFillColor(CGColor(red: 1, green: 0, blue: 1, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 480, height: 270))
+    context.setFillColorSpace(CGColorSpaceCreateDeviceRGB()); context.setFillColor([1, 0, 1, 1]); context.fill(CGRect(x: 0, y: 0, width: 480, height: 270))
     context.draw(image(bytes), in: CGRect(x: 0, y: 0, width: 480, height: 270))
+    // Opaque reference patch shares the exact native codec/matrix conversion.
+    // Its source color is independent of the captured page's transparency.
+    let raw = CVPixelBufferGetBaseAddress(result)!.assumingMemoryBound(to: UInt8.self)
+    for y in 230..<270 { for x in 0..<40 {
+        let at = y * CVPixelBufferGetBytesPerRow(result) + x * 4
+        raw[at] = 255; raw[at + 1] = 0; raw[at + 2] = 255; raw[at + 3] = 255
+    }}
     return result
 }
 private func tone(frame: Int) throws -> CMSampleBuffer {
@@ -147,12 +154,14 @@ private func tone(frame: Int) throws -> CMSampleBuffer {
     let expectedPointer = CVPixelBufferGetBaseAddress(buffer)!.advanced(by: 260 * CVPixelBufferGetBytesPerRow(buffer) + 470 * 4).assumingMemoryBound(to: UInt8.self)
     let expectedCorner = Array(UnsafeBufferPointer(start: expectedPointer, count: 4))
     CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
-    var decodedFrames = 0, corner: [UInt8] = [], audioFrames = 0, square = 0.0
+    var decodedFrames = 0, corner: [UInt8] = [], referenceCorner: [UInt8] = [], audioFrames = 0, square = 0.0
     var toneReal = 0.0, toneImaginary = 0.0
     while let sample = visual.copyNextSampleBuffer() {
         let frame = sample.imageBuffer!; CVPixelBufferLockBaseAddress(frame, .readOnly)
         let pointer = CVPixelBufferGetBaseAddress(frame)!.advanced(by: 260 * CVPixelBufferGetBytesPerRow(frame) + 470 * 4).assumingMemoryBound(to: UInt8.self)
-        corner = Array(UnsafeBufferPointer(start: pointer, count: 4)); CVPixelBufferUnlockBaseAddress(frame, .readOnly); decodedFrames += 1
+        corner = Array(UnsafeBufferPointer(start: pointer, count: 4))
+        let reference = CVPixelBufferGetBaseAddress(frame)!.advanced(by: 260 * CVPixelBufferGetBytesPerRow(frame) + 10 * 4).assumingMemoryBound(to: UInt8.self)
+        referenceCorner = Array(UnsafeBufferPointer(start: reference, count: 4)); CVPixelBufferUnlockBaseAddress(frame, .readOnly); decodedFrames += 1
     }
     while let sample = sound.copyNextSampleBuffer(), let block = sample.dataBuffer {
         let count = CMBlockBufferGetDataLength(block) / 4
@@ -167,11 +176,12 @@ private func tone(frame: Int) throws -> CMSampleBuffer {
     }
     guard reader.status == .completed, decodedFrames == 30, audioFrames >= 95_000, corner.count == 4, square > 100 else { throw failure("Decoded AV fixture lost actual snapshot frames or synthetic PCM") }
     let amplitude = 2 * hypot(toneReal, toneImaginary) / Double(audioFrames)
-    guard zip(corner.prefix(3), expectedCorner.prefix(3)).allSatisfy({ abs(Int($0.0) - Int($0.1)) < 12 }), amplitude > 0.05 else {
+    print("Native alpha composite roundtrip: source=\(expectedCorner), decoded=\(corner), opaqueReference=\(referenceCorner), 1000HzAmplitude=\(amplitude)")
+    guard expectedCorner == [255, 0, 255, 255], zip(corner.prefix(3), referenceCorner.prefix(3)).allSatisfy({ abs(Int($0.0) - Int($0.1)) < 12 }), amplitude > 0.05 else {
         throw failure("Native decode changed the composited snapshot corner or lost its synthetic 1000Hz PCM")
     }
     return ["decodedVideoFrames": decodedFrames, "decodedAudioFrames": audioFrames, "decodedCornerBGRA": corner,
-        "sourceCompositedCornerBGRA": expectedCorner, "decoded1000HzAmplitude": amplitude,
+        "sourceCompositedCornerBGRA": expectedCorner, "decodedOpaqueReferenceBGRA": referenceCorner, "decoded1000HzAmplitude": amplitude,
         "audioSource": "fixture-generated 1000Hz PCM, never WebKit/system capture", "durationSeconds": try await asset.load(.duration).seconds]
 }
 
@@ -231,6 +241,6 @@ private func tone(frame: Int) throws -> CMSampleBuffer {
         guard !BrowserWidgetAudioIdentity.productionRouteQualified else { throw failure("Production helper route must remain disabled") }
         print("SCOPE: exact shipping helper and generated public-opacity candidate; synthetic page/pixels/PCM only; no audio playback, capture, permissions, app install or signing operation")
         if !transparent { print("UNQUALIFIED: public under-page color and NSView opacity retain an opaque white snapshot backdrop; alpha transport is not transparency qualification"); exit(77) }
-        print("PASS: public snapshot preserves transparent and half-transparent DOM pixels; production signing/IPC/audio exclusion/demand gates remain open")
+        print("PASS: public PDF raster preserves transparent and half-transparent DOM pixels; production signing/IPC/audio exclusion/demand gates remain open")
     }
 }

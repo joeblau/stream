@@ -3,8 +3,8 @@ set -euo pipefail
 cd "${0:A:h:h}"
 readonly ALPHA_DIR="${BROWSER_ALPHA_BUILD_PATH:-build/browser-snapshot-alpha-validation}"
 mkdir -p "$ALPHA_DIR"
-# The candidate changes only public NSView opacity/backing-layer behavior in a
-# generated copy. The shipping helper remains untouched when it is ineffective.
+# Compare the shipping public PDF renderer with an additional public NSView
+# opacity/backing-layer variant; both must preserve actual DOM alpha.
 python3 - "$ALPHA_DIR" <<'PY'
 from pathlib import Path
 import sys
@@ -18,7 +18,7 @@ source = source.replace(needle, needle + '\n            view.wantsLayer = true; 
 source += '\n@MainActor private final class BrowserAlphaPublicView: WKWebView { override var isOpaque: Bool { false } }\n'
 Path(sys.argv[1], 'PublicOpacityCandidate.swift').write_text(source)
 PY
-readonly SHARED=(StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift)
+readonly SHARED=(StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift StreamMac/BrowserWidgetRasterizer.swift)
 swiftc -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
   "${SHARED[@]}" BrowserAudioHelper/BrowserAudioHelperMain.swift -o "$ALPHA_DIR/helper-baseline"
 swiftc -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
