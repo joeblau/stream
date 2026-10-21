@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Inventory of every macOS issue returned by the open issue query. An open issue or passing fixture is not full product qualification; no GitHub issues are closed by this local report.",
+  "scope": "Tracks all61macOS issues open at the initial inventory. A refreshed GitHub query now returns51open;10were closed elsewhere during this work and their current state is recorded. Neither an issue state nor a passing fixture is full product qualification; this branch did not close GitHub issues.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -18,18 +18,41 @@
   },
   "validation": {
     "sharedCore": "562 tests in 80 suites passed",
-    "shippingApp": "Unsigned arm64 build and bundle/sandbox declaration audit passed",
+    "shippingApp": "Final unsigned universal Release at production source3d970a5 passes (x86_64+arm64 app, helper and camera extension), including public PDF renderer, browser operator wiring, show scheduling and viewer freshness. Actual bundle/sandbox/AppIntents/injection-hook audit passes: all 6 intents and 3 entities and no guest validation hooks. Exact pinned source transport rebuilds and compiled relay-policy slice receipts verify both architectures. Physical Intel qualification, DeveloperID/hardened-runtime/notarized signed installation remain separate.",
     "diagnosticLifecycle": "Shipping workspace fixture passed pre-view/hidden/detached sampling and retired-runtime sample fencing",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
     "colorTransforms": "Native Core Image key/alpha, LUT channel/intensity/color-space and bypass passed; 1011 fractional-alpha edge pixels",
-    "recoveryOutputs": "See MACOS_RECOVERY_OUTPUT_QUALIFICATION.md for16 successful native media, storage, sandbox and transport scenarios",
+    "recoveryOutputs": "See MACOS_RECOVERY_OUTPUT_QUALIFICATION.md for 16 successful native media, storage, sandbox and transport scenarios",
     "guestMedia": "Actual H264/Opus receive, mixer, Program/ISO decoded PCM identity, stereo return and private messages through local TURN/Chrome passed; see NATIVE_GUEST_ROUTING.md",
-    "controllers": "Native automation/shortcuts/MIDI/OSC/local-control/macros, saved slots and owned SwiftUI manager passed; Stream Deck8 tests, typecheck, universal helper, official packaging passed",
-    "nativeInterviewProgramISO": "Actual manager/default native receiver through local TURN/Chrome decoded Program and guest ISO:316946/294390 identical Float32 values, zero rational cue difference/history misses; separate screen approval/stop and Backstage privacy pass",
+    "controllers": "Native automation/shortcuts/MIDI/OSC/local-control/macros, saved slots and owned SwiftUI manager passed; Stream Deck 8 tests, typecheck, universal helper, official packaging passed",
+    "nativeInterviewProgramISO": "Actual manager/default native receiver through local TURN/Chrome decoded Program and guest ISO: 316946/294390 identical Float32 values, zero rational cue difference/history misses; separate screen approval/stop and Backstage privacy pass",
     "guestPrivateMessages": "Actual shipping dispatcher/manager/default receiver through local TURN/Chrome passes both directions/receipts, private Backstage routes, rejoin history wipe and stale-context refusal alongside unchanged stereo audio return",
     "review": "Independent subagent found no actionable lifecycle/cross-branch issue in runtime diagnostics; independently compiled exact integrated frame-store regression passed",
-    "performance": "Four ten-second12-layer H264/AAC workloads complete with valid decoded tracks and zero recorder drops; actual28.68/28.98/59.47/29.98fps. See PERFORMANCE_BASELINE_2026-10-21.json; physical/sustained/Intel qualification remains open."
+    "performance": "Four ten-second 12-layer H264/AAC workloads complete with valid decoded tracks and zero recorder drops; actual 28.68/28.98/59.47/29.98fps. See PERFORMANCE_BASELINE_2026-10-21.json; physical/sustained/Intel qualification remains open.",
+    "sharedCoreIOS": "All 562 tests in 80 suites passed on an owned iOS 26.5 simulator; owned simulator shut down and deleted afterward",
+    "appIntentsMetadata": "Actual unsigned bundle contains all six documented App Intents and three stable resource entities; an owned bundle with scene action removed is rejected",
+    "guestPrivateTalkback": "Actual shipping manager/default receiver through owned TURN/Chrome passes addressed microphone PCM and decoded Opus, public/Monitor/Aux/pre+post ISO exclusion, no private sidechain ducking, FX/ring/converter boundary resets, exact public settings restoration, queued revision invalidation and full-lease press/release/rejoin/deadline safety. Native AppKit mouse/Space/repeat/modifier/responder/removal checks pass. Mixer and send authority expire the hold after ten seconds while MainActor is deliberately blocked.",
+    "guestProgramVideo": "Actual default manager/controller/VT/H264 sender through owned TURN/Chrome decodes Program pixels, starting at <=320x180/15fps and constraining bitrate to real receiver feedback. Explicit source/stop/restart/rejoin, pre-BEGIN/held-install/control-close, encoder ownership and held-compositor privacy regressions pass. A real partial FU-A send recovers on the next successful IDR. Earlier repeated raw-track-recorder A/V67.94/76.19ms stayed below100ms, native cues below50ms; source timestamps and capture-disabled retained audio channel preserve the actual clock path.",
+    "distributionHooks": "Fresh production bundle audit inspects executable and debug dylibs; no guest transport validation hooks. An owned bundle containing a real exported injection hook is rejected.",
+    "accessibility": "External public AX client against the owned shipping window passes six named/selected annotation colors, actual color actions, Compact Layout at1024x640, text height16→24/accessibility1, ReduceMotion environment and actual SceneSearch→commandpalette→Escape native field/owner focus restoration. Normal workspace regression passes. Accessibility suite exits77 for reproduced macOS27.2 high-contrast appearance/environment gap; no VoiceOver closure. See MACOS_ACCESSIBILITY_QUALIFICATION.md.",
+    "combinedGuestMedia": "After merging main0e8a055 and browser Program-lease/operator mixer changes, the exact integrated manager/default receiver/controller owned TURN/Chrome suite exits0: public chat future-only opt-in/expiry/tombstones/rejoin/source-close, private text, stereo Opus/mix-minus, addressed private microphone, Program/Monitor/Aux/pre+post ISO exclusion, focus/deadline/rejoin safety and retained-command refusal. Earlier integrated H264 return passed0.0417ms WebM flash/tone delta,12.38ms independent playout and real partial-FU-A/nextIDR recovery; repeated Program/Secondary/Clean feedback matrix is recorded separately.",
+    "audienceEvents": "Actual shipping public decoders/coordinator/dispatcher/renderer produce accepted text-event alert pixels only after Take; native filter/palette, literal Unicode pagination, default-off/direct-live/stale-session/removed-event guards, bounded preferences and shared16-slot capacity pass. Existing HTTP/WebSocket provider model/mutation fixtures pass. No shared Core/iOS source changed.",
+    "guestSecondaryVideo": "Actual distinct Program landscape and100x180 portrait Secondary pixels pass through owned TURN/Chrome. Earlier repeated raw-track-recorder Secondary A/V37.06/64.58ms; native source cues below50ms and independent playout below100ms. Cross-source held installs, no-yield cancellation/replacement, late geometry, held compositor privacy, source removal/restore/default-Program-off rejoin and demand/budget teardown pass. Additional canvas remains gated to measured M3 Max class.",
+    "browserWidgetAlpha": "Public WKPDFConfiguration.allowTransparentBackground replaces the production legacy/helper snapshot raster path. Actual transparent/half-alpha/opaque DOM, current canvas/screen CSS, muted H264 video, preserved/default-buffer WebGL and CSS animation pass; actual helper IPC, Program composition and native H264/AAC decode preserve alpha composition. Malformed/oversized/multipage/wrong-box PDFs and stale callbacks are refused. Eight physical jobs, one per view, eight latest intents,16MiB accepted PDFs/job and29,260,800 reserved output pixels bound admission; oldest runnable intent prevents pixel head-of-line starvation. Held3840x3840 plus another max viewport queued cannot block7healthy HD peers. Eight actual HD hosts each deliver31 additional frames during a2s interval after warmup (assertion >10); this is short-run progress, not a frame-rate/endurance guarantee. Old takeSnapshot/public-opacity negative proof remains documented separately. Production independent audio remains disabled. See NATIVE_BROWSER_RASTER.md.",
+    "globalShortcuts": "Actual shipping Carbon registration with an owned foreground application passes master/per-binding opt-in, ordinary foreground input, repeat/release, live availability/no replay, palette suppression, disable and uninstall. Existing event-post access only; temporary preferences/application, watchdog and focus restoration. Synthetic WindowServer events do not qualify physical keys or arbitrary third-party foreground applications.",
+    "guestVideoStartIntent": "Independent pre-BEGIN reproducer now rejects retired queued starts: no installed tap, enabled sender or source token after direct sink stop before Task entry. Actual Host no-yield stop/restore, fresh Secondary B while Program A installation is held, late A completion and no-yield Off/On pass. Preparation is synchronously claimed, token-keyed and bounded to two outstanding jobs.",
+    "guestCleanVideo": "Separate same-PTS composition preserves scene layers/project background and omits project overlays/live annotations. Current-token raster fencing, actual Secondary monitor demand, atomic canceled-token/Secondary geometry registration, held-compositor privacy and teardown pass. Earlier repeated raw-track-recorder Clean A/V84.73/13.63ms, native below50ms and independent playout below100ms. The earlier raw-track recorder117.44ms versus simultaneous playout2.58ms differential remains documented as an observation-path limitation; no synchronization threshold was relaxed. See NATIVE_GUEST_RETURN_VIDEO.md. Chrome155 captureStream on a MediaStream source clones raw tracks; those records do not establish element-rendered synchronization. Latest raw-track105.104ms failure and pending true render-path qualification are retained in the same document.",
+    "guestPublicChat": "Actual single studio coordinator -> shipping Manager/default receiver -> owned TURN/Chrome155 passes opt-in future-only public feed, literal Unicode/roles/escaped-text clipping, bounded burst omission, tombstone reset, Off/lost-Off expiry, expired-on-input even with suspended timer, full-lease rejoin/stale commands, coordinator/profile retirement, private text and stereo Opus/PTT independence. Actual Manager fixture also passes 1005 accepted events at a1000-entry queue and canceled queued heartbeat preserving a replacement feed. Seventeen guest JS tests, native1KiB protocol, direct-provider HTTP/WS/outbox and bounded model suites pass. See NATIVE_GUEST_PUBLIC_CHAT.md.",
+    "globalShortcutModal": "Actual unattached application-modal session previously accepted a global production command. Fixed controller now checks NSApp.modalWindow. Installed shipping Carbon handler regression independently passes blocked press/release, no dismissal replay and fresh deliberate press. Latest full WindowServer helper activation is unavailable (exit77 before input); earlier background registration pass is retained separately.",
+    "guestAdaptiveVideo": "Authenticated current-SSRC RR and negotiated single-source REMB drive actual VT bitrate and whole-AU admission. Frozen native/defaultSDK/ownedTURN/Chrome matrix passes: receiver73196bps and SDK-accepted RTP75591bps <= fresh scoped REMB119451bps; exact packetizer charges include payload+12-byte RTP headers, exclude SRTP/UDP/IP/TURN/RTCP, and keep20% headroom with bounded2s/16KiB burst. Same-lease Off/On cannot refill the bucket. Static Clean remains ready at REMB6400bps/VT4000bps with100 decoded frames and a fresh update. Persistent video-only failure retires its reservation while actual stereo PCM continues. Actual RR loss/FU-A/nextIDR recovery and held-VT profile/cadence/source-PTS tests pass. Natural resolution upshift/bootstrap and real high-to-low impairment qualification remain open.",
+    "browserWidgetLifecycle": "Actual helper public suspend/resume/retirement acknowledgments, exact page generations and Program-only leases pass. Saved shared mixer intent survives gate closure; held opaque inserts revoke in 0.253ms without MainActor lock inversion; original-PTS floors reject retained ISO samples after reopen. Actual Controller Take/reload, simultaneous/latest and canceled loads, replacement shutdown fencing and latched overlapping-capture refusal pass. Production qualification session remains absent. See research/browser-widget-audio.md. Integrated PDF+operator sources pass the full native suite with exit0 with an explicit completion marker: held-insert revocation0.110ms, helper ACK/cancel/replacement, retained ISO, actual Take/exclusion refusal and owned AX operator paths all pass.",
+    "staticTwitchEmotes": "Actual authorized-reader metadata fixtures, exact static CDN/no-redirect bounded PNG path, stale source/message/scene/style/capacity fences and explicit Stage/Take pass. Independent actual renderer proof checks 12 transparent backdrop pixels and 16 partial-alpha composite pixels against an all-clear reference. A public documented CDN tile loads through the strict production loader; this is separate from live authorized feed acceptance. Guest public chat stays plain text. See STATIC_TWITCH_EMOTES.md.",
+    "interviewWorker": "Pinned Node24.15: TypeScript typecheck, all19 local Worker tests and all17 browser-client/public-chat tests pass after integration. Controlled local native/Chrome suites use owned test bindings; these do not qualify deployed secrets, TURN broker or Internet service.",
+    "browserWidgetOperatorControls": "Actual owned native Mixer and Recording Options public-AX controls dispatch saved gain/mute/monitor-only solo/Aux and bounded ISO selection. Synthetic PCM measured Program0.350032, Monitor0.150015, independent pre-fader Aux0.075007 and ISO0.300031. Held stale settings seeding cannot overwrite newer operator intent before admission; a synchronous final validator protects gate-open. Different mixer runtimes, retired held preparation and saved-track capture restart are refused. Last actual demand removes capability while saved settings remain. Production remains disabled; see research/browser-widget-operator-controls.md.",
+    "showScheduling": "Mac-only explicit destination selections and shared event metadata produce independent acknowledged/existing/manual-required/blocked/unconfirmed rows through existing account authority and repair catalog. One creation per owned YouTube channel; mixed existing/new selections reuse review-only IDs and conflicting existing IDs send no POST. Actual account/scheduling fixtures, real owned editor AX/AppKit submission and full workspace/profile lifecycle pass. Unsupported providers remain external/manual; thumbnail/bind/import/edit operations stay explicit. No live provider mutation was performed. See PROVIDER_ACCOUNTS.md. Independent exact-source account/coordinator and native editor review also passes with no actionable findings.",
+    "finalGuestVideo": "Final integrated repeated Program raw-track recorder failed105.104ms against unchanged100ms (contiguous PCM103.104ms); independent video-element/worklet path90.527ms, native source11.48ms. Exact Chrome155 source proves captureStream(MediaStream srcObject) clones raw tracks rather than rendered output, so earlier rendered labels are corrected. Failed artifact is retained; one unchanged observational repeat35.40ms demonstrates variability without proving a fix. A genuine canvas/element-audio observation graph is under qualification; normal physical output is separate. Exact owned native-app SCK audio-only positive validates PCM parser/original-PTS observation; headless/headed/LaunchServices Chrome normal-file positives remain silent. No normal Chrome output qualification or sender fix is claimed.",
+    "viewerFreshness": "Actual mounted ProviderBroadcastStatus with real owned AccountSession/Vault and controlled provider responses reproduces stale idle UI without a timeline, then passes current/expired/clock-rollback/unknown status and visible read timestamps after the fix. A bounded mounted timeline issues no provider requests. YouTube zero remains distinct from unavailable; provider/channel/event identity prevents cache borrowing; stray Twitch event IDs cannot alias channels. Forget/reauthorize/cancelled reauthorize/shutdown invalidate readings synchronously. Exact provider account and scheduling regressions pass. See AUDIENCE_EVENTS.md and PROVIDER_ACCOUNTS.md."
   },
   "issues": [
     {
@@ -37,22 +60,24 @@
       "code": "D12",
       "title": "[macOS][D12] Expose selected studio actions to Shortcuts and macOS automation",
       "url": "https://github.com/joeblau/stream/issues/180",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
         "Manual Shortcuts/App Intents launch and permission/UI acceptance."
-      ]
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 178,
       "code": "O12",
       "title": "[macOS][O12] Design and output horizontal and vertical canvases simultaneously",
       "url": "https://github.com/joeblau/stream/issues/178",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
         "Sustained full-resolution simultaneous outputs, physical consumers and portrait-provider ingest."
-      ]
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 177,
@@ -60,7 +85,7 @@
       "title": "[macOS][O11] Send program output to compatible DeckLink/UltraStudio devices",
       "url": "https://github.com/joeblau/stream/issues/177",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "incomplete implementation and acceptance",
       "remaining": [
         "DeckLink SDK/runtime/device missing; output bridge, supported modes and synchronized hardware audio/video not implemented or qualified."
       ]
@@ -71,7 +96,7 @@
       "title": "[macOS][O10] Send NDI program or clean feeds with audio and tally status",
       "url": "https://github.com/joeblau/stream/issues/176",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "incomplete implementation and acceptance",
       "remaining": [
         "NDI SDK/runtime missing; send adapter, receiver/tally handling and distributable runtime not implemented or qualified."
       ]
@@ -93,9 +118,9 @@
       "title": "[macOS][O08] Implement the validated virtual microphone output and routing controls",
       "url": "https://github.com/joeblau/stream/issues/174",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "incomplete implementation and acceptance",
       "remaining": [
-        "Installed-device/signing/distribution gate in #173; shipping microphone routing remains gated."
+        "O07 supported installed-driver/distribution path remains unqualified. Signed packaging and native main-window bus/format/state controls remain unimplemented behind that decision; shipping microphone routing stays gated."
       ]
     },
     {
@@ -136,11 +161,12 @@
       "code": "T07",
       "title": "[macOS][T07] Add guided custom destinations for Instagram, Amazon, X, TikTok, and relays",
       "url": "https://github.com/joeblau/stream/issues/170",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
         "Authorized provider test ingest and current account-specific encoder/key/eligibility verification."
-      ]
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 169,
@@ -148,7 +174,7 @@
       "title": "[macOS][T06] Integrate Facebook Pages and LinkedIn Live with capability gates",
       "url": "https://github.com/joeblau/stream/issues/169",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "incomplete implementation and acceptance",
       "remaining": [
         "Approved Meta and LinkedIn applications/scopes and actual capability-qualified connectors."
       ]
@@ -159,7 +185,7 @@
       "title": "[macOS][I08] Integrate Zoom participants, active speaker, and program return",
       "url": "https://github.com/joeblau/stream/issues/168",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "incomplete implementation and acceptance",
       "remaining": [
         "Zoom feasibility gate #167; participant capture, active speaker and native return integration."
       ]
@@ -170,7 +196,7 @@
       "title": "[macOS][I07] Validate Zoom SDK raw-media access and one-window integration",
       "url": "https://github.com/joeblau/stream/issues/167",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "incomplete implementation and acceptance",
       "remaining": [
         "Public SDK and licensed account/raw-media permissions, working prototype, native return and distribution qualification."
       ]
@@ -181,7 +207,7 @@
       "title": "[macOS][C07] Add Blackmagic DeckLink and UltraStudio capture adapters",
       "url": "https://github.com/joeblau/stream/issues/161",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "incomplete implementation and acceptance",
       "remaining": [
         "Actual DeckLink SDK/runtime and hardware missing; bridge/modes/signal loss/reconnect qualification."
       ]
@@ -192,7 +218,7 @@
       "title": "[macOS][C06] Integrate NDI input discovery, audio, and tally",
       "url": "https://github.com/joeblau/stream/issues/160",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "incomplete implementation and acceptance",
       "remaining": [
         "Actual NDI SDK/runtime and sender missing; capture/discovery/tally bridge and distribution qualification."
       ]
@@ -202,11 +228,12 @@
       "code": "R06",
       "title": "[macOS][R06] Persist live session recovery metadata and offer safe restart recovery",
       "url": "https://github.com/joeblau/stream/issues/159",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
         "External security-scoped recovery, incomplete tails and physical-volume failure; supported provider state review."
-      ]
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 158,
@@ -246,11 +273,12 @@
       "code": "D08",
       "title": "[macOS][D08] Support Stream Deck Plus dials and touch-strip feedback",
       "url": "https://github.com/joeblau/stream/issues/151",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
         "Physical Stream Deck Plus dial/touch-strip behavior."
-      ]
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 150,
@@ -301,11 +329,12 @@
       "code": "D03",
       "title": "[macOS][D03] Create the first-party Elgato Stream Deck plugin and app pairing",
       "url": "https://github.com/joeblau/stream/issues/146",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
         "Signed app/plugin pairing, real hardware install/update/reconnect qualification."
-      ]
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 143,
@@ -315,7 +344,7 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Authorized live events, emote/sticker media rendering, reaction/monetization filters and alert promotion."
+        "Authorized live events/viewer readings and provider permissions/rate acceptance remain. Supported static Twitch tiles, typed text-event cards, filters/styles and optional manual promotion are locally verified; animated/inline emotes, undocumented sticker graphics and unsupported reaction subscriptions stay unavailable."
       ]
     },
     {
@@ -337,7 +366,7 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Guest public-chat return integration and authorized live-provider chat acceptance."
+        "Authorized live-provider public chat acceptance and deployed/mobile/restricted-network guest feed qualification."
       ]
     },
     {
@@ -345,11 +374,12 @@
       "code": "T09",
       "title": "[macOS][T09] Add live destination health, broadcast links, and clean ending behavior",
       "url": "https://github.com/joeblau/stream/issues/135",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
         "Authorized provider start/end/partial-failure and ingest lifecycle acceptance."
-      ]
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 134,
@@ -359,7 +389,7 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Other-provider scheduling/CRUD, cross-provider partial coordination and authorized live events."
+        "Authorized live event/ingest and provider-side partial-failure/review acceptance remain. Local destination selection, exact per-operation receipts, one creation per owned YouTube channel, stable-ID repair and independent partial/manual outcomes are implemented and locally verified. Unsupported provider CRUD/scheduling stays explicitly external until approved capability-qualified connectors exist."
       ]
     },
     {
@@ -378,11 +408,12 @@
       "code": "T03",
       "title": "[macOS][T03] Negotiate destination video profiles and share compatible encoders",
       "url": "https://github.com/joeblau/stream/issues/132",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
-        "Automatic profile negotiation beyond explicit fixed-profile sharing; public TLS/provider ingest and sustained workload qualification."
-      ]
+        "Public TLS/provider ingest and sustained workload qualification. Existing explicit profile/ingest limits, custom overrides, exact canvas/codec/audio/cadence compatibility, shared/separate reservations and independent-output fixtures implement the local planning path."
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 130,
@@ -414,7 +445,7 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Addressed private audio talkback; real native UI/mobile/restricted-network/endurance qualification."
+        "Physical microphone/AEC and native operator/accessibility acceptance; mobile, deployed/restricted networks and endurance qualification."
       ]
     },
     {
@@ -425,7 +456,8 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Native return video encoder/SDP/RTP sender and canvas selection not implemented; adaptation policy alone supplies no video. Broader per-recipient mix-minus/capacity qualification."
+        "Latest repeated Program A/V qualification exceeded100ms (105.104ms rendered); timing/observation-path investigation remains open before final closure.",
+        "Program/Secondary/Clean selection, conservative feedback-driven bitrate and whole-AU admission, same-lease budget retention and optional-video failure isolation are implemented and locally verified. Multiple simultaneous recipients/capacity, physical AEC, desktop/mobile browsers, deployed/restricted-network and sustained A/V qualification remain. Natural higher-resolution upshift and actual high-to-low resolution impairment have not been qualified."
       ]
     },
     {
@@ -456,9 +488,9 @@
       "title": "[macOS][A12] Route browser-widget audio into dedicated mixer channels",
       "url": "https://github.com/joeblau/stream/issues/124",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "production enablement and acceptance remain gated",
       "remaining": [
-        "Production audio path remains disabled: transparent widget pixels, signed shared-container IPC, lifecycle/channel registration and all capture exclusions still need integration/qualification."
+        "Public transparent PDF pixels, Program-only page leases/retirement, shared-channel retention, native mixer/ISO controls and stale-seed/queued-PCM fencing are implemented and locally verified. Production selector/startup remains disabled. Signed/sandboxed shared-container IPC, actual WebKit audio attribution/retirement/tails, acknowledged every-route recapture exclusion, permission/device lifecycle, new live same-page A/V and sustained multi-widget qualification remain required before enablement."
       ]
     },
     {
@@ -488,11 +520,12 @@
       "code": "R05",
       "title": "[macOS][R05] Add macOS build, signing, sandbox, and distribution validation",
       "url": "https://github.com/joeblau/stream/issues/94",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
         "Unexpired matching app/helper/camera signing profiles and signed/notarized installation/update/uninstall qualification."
-      ]
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 93,
@@ -535,7 +568,7 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Actual VoiceOver, Full Keyboard Access, focus restoration, text/contrast and small-display manual acceptance."
+        "Reproduced macOS27.2 beta contrast gap: public high-contrast appearance aliases DarkAqua and root contrast remains standard. Spoken VoiceOver, full physical-keyboard/settings/inspector/canvas navigation, visual contrast and reduced-motion/manual display acceptance."
       ]
     },
     {
@@ -546,7 +579,7 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Opt-in global shortcuts with another foreground app, physical/native accessibility acceptance."
+        "Physical keyboard and arbitrary third-party foreground-app global shortcuts; full native accessibility acceptance. Owned foreground-app synthetic WindowServer/Carbon registration tests pass."
       ]
     },
     {
@@ -554,11 +587,12 @@
       "code": "T04",
       "title": "[macOS][T04] Add preflight checks, uplink measurement, and a local rehearsal mode",
       "url": "https://github.com/joeblau/stream/issues/87",
-      "githubState": "open",
+      "githubState": "closed",
       "completion": "remaining acceptance",
       "remaining": [
         "Real uplink/provider private test, constrained network and combined full-resolution rehearsal qualification."
-      ]
+      ],
+      "githubStateNote": "Confirmed closed by direct GitHub fetch during final reconciliation; closure occurred outside this branch. Listed qualification limits remain factual."
     },
     {
       "number": 60,
@@ -703,5 +737,16 @@
         "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
       ]
     }
-  ]
+  ],
+  "scopeCounts": {
+    "initialOpenFeatureTasks": 48,
+    "openFeatureTasks": 38,
+    "openEpicsAndRoadmap": 13,
+    "total": 61,
+    "currentlyOpen": 51,
+    "closedSinceInitialInventory": 10
+  },
+  "overallStatus": "Incomplete. Locally verified software is integrated on the named branch; remaining implementation, external SDK/service/device/signing and manual acceptance gates are listed per issue.",
+  "integratedMain": "0e8a055",
+  "githubStateRefreshedAt": "2026-10-21T21:17:00Z"
 }
