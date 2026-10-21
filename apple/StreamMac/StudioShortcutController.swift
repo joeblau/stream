@@ -211,7 +211,8 @@ final class StudioShortcutController: ObservableObject {
     }
     private func handleGlobal(_ id: UInt32) {
         guard let binding = hotKeyBindings[id], let window = studioWindow,
-              window.attachedSheet == nil, !palettePresented, !editorPresented else { return }
+              window.attachedSheet == nil, NSApp.modalWindow == nil,
+              !palettePresented, !editorPresented else { return }
         // Carbon owns this chord while registered, so the local monitor does
         // not also dispatch it. Never run production actions in a text field.
         if NSApp.isActive && ((window.firstResponder as? NSTextView)?.isEditable == true || window.firstResponder is NSTextField) { return }

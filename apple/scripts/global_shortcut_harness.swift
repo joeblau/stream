@@ -126,6 +126,7 @@ private struct Unqualified: Error { let message: String }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.arguments = ["--foreground-fixture", directory.path, String(previous?.processIdentifier ?? 0)]
         configuration.activates = true
+        configuration.createsNewApplicationInstance = true
         let helper: NSRunningApplication = try await withCheckedThrowingContinuation { continuation in
             NSWorkspace.shared.openApplication(at: bundle, configuration: configuration) { application, error in
                 if let application { continuation.resume(returning: application) }
@@ -138,10 +139,12 @@ private struct Unqualified: Error { let message: String }
             }
             helper.terminate()
         }
-        try await wait("Owned helper did not become foreground", until: {
-            !helper.isTerminated && FileManager.default.fileExists(atPath: directory.appendingPathComponent("ready").path)
-            && NSWorkspace.shared.frontmostApplication?.processIdentifier == helper.processIdentifier
-        })
+        do {
+            try await wait("Owned helper did not become foreground", until: {
+                !helper.isTerminated && FileManager.default.fileExists(atPath: directory.appendingPathComponent("ready").path)
+                && NSWorkspace.shared.frontmostApplication?.processIdentifier == helper.processIdentifier
+            })
+        } catch { throw Unqualified(message: "Owned helper activation unavailable; no input posted") }
         try await send(to: helper)
         try check(emitted.isEmpty, "Per-binding opt-in bypassed disabled global master")
         controller.setGlobalEnabled(true)
@@ -167,6 +170,24 @@ private struct Unqualified: Error { let message: String }
         try check(emitted.count == 2, "Availability recovery replayed a stale press")
         try await send(to: helper)
         try check(emitted.count == 3, "Fresh press after availability recovery failed")
+        do {
+            let modal = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 280, height: 100),
+                                 styleMask: [.titled], backing: .buffered, defer: false)
+            modal.isReleasedWhenClosed = false
+            let session = NSApp.beginModalSession(for: modal)
+            defer { NSApp.endModalSession(session); modal.close() }
+            _ = NSApp.runModalSession(session)
+            try check(NSApp.modalWindow === modal && window.attachedSheet == nil,
+                      "Fixture did not enter an unattached application-modal session")
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() {
+                NSApp.yieldActivation(to: helper); helper.activate(options: [])
+                try await wait("Owned foreground helper did not regain cooperative activation", until: {
+                    NSWorkspace.shared.frontmostApplication?.processIdentifier == helper.processIdentifier
+                })
+            }
+            try await send(to: helper)
+            try check(emitted.count == 3, "Application-modal session accepted a background production command")
+        }
         controller.palettePresented = true
         try await send(to: helper)
         try check(emitted.count == 3, "Presented palette accepted a background production command")
@@ -181,16 +202,71 @@ private struct Unqualified: Error { let message: String }
         print("PASS: actual background Carbon registration/double opt-in, repeated press/release, ordinary foreground input, live availability/no replay, palette guard, master disable and uninstall using only owned foreground process")
         print("Qualification: synthetic WindowServer events; physical keyboard, arbitrary third-party foreground apps and full studio accessibility remain open")
     }
+    static func modalOnly() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("stream-modal-shortcut-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let defaultsName = "stream.modal-shortcut.\(UUID())"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer { defaults.removePersistentDomain(forName: defaultsName); try? FileManager.default.removeItem(at: directory) }
+        var document = StudioShortcutDocument()
+        try check(document.assign(commandID: "owned.scene.select",
+            chord: StudioKeyChord(keyCode: 25, modifiers: 7, keyLabel: "9"), global: true) == nil, "Modal fixture chord rejected")
+        let url = directory.appendingPathComponent("shortcuts.json")
+        try JSONEncoder().encode(document).write(to: url)
+        let controller = StudioShortcutController(url: url, defaults: defaults)
+        let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        controller.actions = { [StudioPaletteAction(id: "owned.scene.select")] }
+        var emitted = 0
+        controller.onExecute = { _ in emitted += 1 }
+        controller.install(window: window); controller.setGlobalEnabled(true)
+        defer { controller.uninstall(); window.close() }
+        guard controller.globalErrors.isEmpty else { throw Unqualified(message: "Modal fixture chord is already registered") }
+        func hotkey(_ kind: Int) throws {
+            var event: EventRef?
+            try check(CreateEvent(nil, OSType(kEventClassKeyboard), UInt32(kind), GetCurrentEventTime(), 0, &event) == noErr,
+                      "Could not create an owned Carbon event")
+            guard let event else { throw Unqualified(message: "Missing owned Carbon event") }
+            defer { ReleaseEvent(event) }
+            var key = EventHotKeyID(signature: 0x5354524D, id: 1)
+            try check(SetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                       MemoryLayout<EventHotKeyID>.size, &key) == noErr, "Could not set Carbon hotkey identity")
+            try check(SendEventToEventTarget(event, GetApplicationEventTarget()) == noErr,
+                      "Installed shipping Carbon handler did not consume owned event")
+        }
+        try hotkey(kEventHotKeyPressed); try hotkey(kEventHotKeyReleased)
+        try check(emitted == 1, "Shipping Carbon registration handler unavailable")
+        let modal = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 280, height: 100),
+                             styleMask: [.titled], backing: .buffered, defer: false)
+        modal.isReleasedWhenClosed = false
+        do {
+            let session = NSApp.beginModalSession(for: modal)
+            defer { NSApp.endModalSession(session); modal.close() }
+            _ = NSApp.runModalSession(session)
+            try check(NSApp.modalWindow === modal && window.attachedSheet == nil,
+                      "Missing unattached application-modal session")
+            try hotkey(kEventHotKeyPressed); try hotkey(kEventHotKeyReleased)
+            try check(emitted == 1, "Application-modal session accepted a global production command")
+        }
+        try check(emitted == 1 && NSApp.modalWindow == nil, "Modal dismissal replayed a production action")
+        try hotkey(kEventHotKeyPressed); try hotkey(kEventHotKeyReleased)
+        try check(emitted == 2, "Fresh deliberate global press failed after modal dismissal")
+        print("PASS: actual unattached AppKit modal session suppresses installed shipping Carbon handler; direct owned Carbon events, no WindowServer input or foreground activation")
+    }
     static func main() {
         setbuf(stdout, nil)
         let application = NSApplication.shared
         application.setActivationPolicy(CommandLine.arguments.contains("--foreground-fixture") ? .regular : .accessory)
         application.finishLaunching()
-        if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--foreground-fixture" {
-            foreground(URL(fileURLWithPath: CommandLine.arguments[2]), previousPID: pid_t(CommandLine.arguments[3]) ?? 0); return
+        if let index = CommandLine.arguments.firstIndex(of: "--foreground-fixture"), index + 2 < CommandLine.arguments.count {
+            foreground(URL(fileURLWithPath: CommandLine.arguments[index + 1]), previousPID: pid_t(CommandLine.arguments[index + 2]) ?? 0); return
         }
         Task { @MainActor in
-            do { try await run(); exit(0) }
+            do {
+                if CommandLine.arguments.contains("--modal-only") { try modalOnly() }
+                else { try await run() }
+                exit(0)
+            }
             catch let error as Unqualified { print("UNQUALIFIED: \(error.message)"); exit(77) }
             catch { print("FAIL: \(error.localizedDescription)"); exit(1) }
         }

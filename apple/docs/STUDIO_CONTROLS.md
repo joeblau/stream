@@ -81,6 +81,16 @@ watchdog. Missing access or an occupied chord exits 77. The local native run on
 2026-10-21 passed; this does not qualify physical keys or arbitrary third-party
 applications.
 
+The `--modal-only` variant needs no event-post access or foreground application.
+It sends owned Carbon events through the installed shipping handler while an
+actual unattached AppKit application-modal session is open. This reproduced a
+global command escaping the modal guard; the controller now checks
+`NSApp.modalWindow` as well as its attached sheet. The regression passes
+suppression, no replay on dismissal and a fresh deliberate press afterward.
+A later full foreground run on this host could not activate its owned helper
+and correctly exited 77 before posting input; the earlier successful run and
+this environment limitation are separate evidence.
+
 Manual acceptance still needs VoiceOver/Accessibility Inspector and Full
 Keyboard Access on a running studio: traverse panels and layer actions, adjust
 mixer sliders, restore focus after all native import/permission/settings sheets,
