@@ -13,6 +13,10 @@ export type Snapshot = {
   playback?: Record<string, string>; programLayerVisibility?: Record<string, boolean>; groupVisibility?: Record<string, boolean>;
   overlayVisibility?: Record<string, boolean>; directLiveEditing?: boolean;
   chat?: { queuedCount: number; selectedID?: string; featuredID?: string; ready: boolean; stagedVisible: boolean; programVisible: boolean };
+  interview?: { phase: string; room?: string; locked: boolean; members: {
+    id: string; name: string; membership: string; media: string; slot?: string;
+    programAllowed: boolean; monitorAllowed: boolean; screenApproved: boolean; screenSharing: boolean;
+  }[] };
   macroProgress: { phase: string; macroID?: string; runID?: string; stepIndex: number; totalSteps: number; message: string };
 };
 export type Response = { version: 1; type: string; id?: string; sessionID?: string; snapshot?: Snapshot;
@@ -57,6 +61,20 @@ function validResponse(value: unknown): value is Response {
     if (state.chat !== undefined && (!object(state.chat) || !Number.isSafeInteger(state.chat.queuedCount) || (state.chat.queuedCount as number) < 0
         || typeof state.chat.ready !== "boolean" || typeof state.chat.stagedVisible !== "boolean" || typeof state.chat.programVisible !== "boolean"
         || [state.chat.selectedID, state.chat.featuredID].some(id => id !== undefined && typeof id !== "string"))) return false;
+    if (state.interview !== undefined) {
+      const interview = state.interview;
+      if (!object(interview) || typeof interview.phase !== "string" || typeof interview.locked !== "boolean"
+          || (interview.room !== undefined && (typeof interview.room !== "string" || !UUID.test(interview.room)))
+          || !Array.isArray(interview.members) || interview.members.length > 11) return false;
+      const members = new Set<string>();
+      for (const member of interview.members) {
+        if (!object(member) || typeof member.id !== "string" || !UUID.test(member.id) || members.has(member.id.toLowerCase())
+            || typeof member.name !== "string" || member.name.length > 80 || typeof member.membership !== "string" || typeof member.media !== "string"
+            || (member.slot !== undefined && (typeof member.slot !== "string" || !UUID.test(member.slot)))
+            || [member.programAllowed, member.monitorAllowed, member.screenApproved, member.screenSharing].some(value => typeof value !== "boolean")) return false;
+        members.add(member.id.toLowerCase());
+      }
+    }
   }
   return true;
 }
