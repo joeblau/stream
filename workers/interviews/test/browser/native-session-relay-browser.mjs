@@ -66,7 +66,7 @@ Object.defineProperty(navigator.mediaDevices,'getUserMedia',{value:async()=>{con
 const context=new AudioContext({sampleRate:48000});await context.resume();const destination=context.createMediaStreamDestination(),merge=context.createChannelMerger(2);
 for(const [channel,frequency]of [[0,440],[1,880]]){const oscillator=context.createOscillator(),gain=context.createGain();oscillator.frequency.value=frequency;gain.gain.value=channel===0?.14:.07;oscillator.connect(gain).connect(merge,0,channel);oscillator.start();}
 merge.connect(destination);window.__fixtureAudio.push({context,stream:destination.stream});destination.stream.getTracks()[0].addEventListener('ended',()=>context.close());return new MediaStream([...camera.getTracks(),...destination.stream.getTracks()]);}});
-Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{value:async()=>{const stream=canvasTrack('rgb(15,20,220)');window.__fixtureScreens.push(stream);return stream;}});
+Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{value:async()=>{if(window.__fixtureDenyDisplay)throw new DOMException('Owned fixture permission denial','NotAllowedError');const stream=canvasTrack('rgb(15,20,220)');window.__fixtureScreens.push(stream);return stream;}});
 `;
 
 try {
@@ -211,6 +211,14 @@ try {
     console.log('PASS private messages over actual relay SDK data channel: both directions, real receipt, literal Unicode/HTML, bounded pending/timeout, no replay, malformed/stale/flood isolation with healthy H264/Opus');
   }
   command({type:'approval',id:guest,approved:true});await browser.until(g,"!document.getElementById('share').disabled",'native actual approval channel');
+  const deniedGeneration=accepted.generation,deniedCamera=role('camera').count,deniedAudio=role('audio').samples;
+  await browser.evaluate(g,"window.__fixtureOriginalPeer=window.__fixturePeers.at(-1);window.__fixtureDenyDisplay=true;document.getElementById('share').click()");
+  await browser.until(g,"document.getElementById('status').textContent.includes('Screen sharing was cancelled or unavailable')&&!document.getElementById('share').disabled",'screen chooser denial recovers controls');
+  await wait('camera and audio continue after denied screen permission',()=>{check();return role('camera').count>deniedCamera&&role('audio').samples>deniedAudio;});
+  assert(accepted.generation===deniedGeneration&&role('screen').count===0&&!state.members[0].sharing,'Denied screen permission preserves the current lease without screen admission');
+  assert(await browser.evaluate(g,"window.__fixturePeers.at(-1)===window.__fixtureOriginalPeer&&window.__fixtureOriginalPeer.connectionState==='connected'&&window.__fixtureScreens.length===0"),'Denied screen permission preserves the existing live peer');
+  await browser.evaluate(g,"window.__fixtureDenyDisplay=false");
+  console.log('PASS actual shipping guest handles owned NotAllowedError from screen chooser: same connected native lease, healthy decoded camera/audio, no screen; retry requires no new invite');
   await browser.evaluate(g,"document.getElementById('share').click()");await wait('simultaneous native camera/screen/audio accepted',()=>{check();return role('screen')?.count>=3&&state?.members[0]?.sharing;},20_000);
   const blue=role('screen').rgb;assert(blue[2]>150&&blue[0]<80,'Actual native screen is blue');
   const cameraBefore=role('camera').count,audioBefore=role('audio').samples;
