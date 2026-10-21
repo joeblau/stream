@@ -179,13 +179,17 @@ private final class FailoverAudioProbe: @unchecked Sendable {
             targetIdentifier: "owned-gain-before-capture")))
         let media = AudioChannelID.media(SourceDefinitionID())
         func pulse(_ name: String, id: AudioChannelID, lower: Double, upper: Double) async throws {
+            let clock = ContinuousClock()
+            let start = clock.now
             let begin = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-            for _ in 0..<70 {
-                let host = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-                let sample = try ProgramRecordingFixtures.audio(at: 0, timestampBase: host + 0.02,
+            for index in 0..<70 {
+                // Capture PCM is a contiguous sample clock. Relative sleeps
+                // plus regeneration from arrival time insert artificial gaps
+                // under runner load and measure scheduler starvation as gain.
+                try await clock.sleep(until: start + .milliseconds(index * 10))
+                let sample = try ProgramRecordingFixtures.audio(at: 0, timestampBase: begin + Double(index) / 100 + 0.02,
                     constantTone: true, amplitude: 0.3)
                 mixer.enqueue(id, sample) // Actual nonisolated original-PTS capture ingestion.
-                try await Task.sleep(for: .milliseconds(10))
             }
             let end = CMClockGetTime(CMClockGetHostTimeClock()).seconds
             let (rms, count) = observed.rms(from: begin + 0.12, to: end - 0.04)

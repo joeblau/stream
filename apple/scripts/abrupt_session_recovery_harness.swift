@@ -158,6 +158,22 @@ private struct Ready: Codable {
             if marked && progress.durationSeconds >= 6.2 && progress.videoSamples > 200 && progress.audioSamples > 500 {
                 await runtime.recoveryBinding?.refreshRecordings()
                 await workspace.recovery.flush()
+                // Writer progress can lead its periodic sidecar checkpoint.
+                // Kill only after the actual durable recovery document meets
+                // the unchanged parent assertions, rather than racing a stale
+                // status/duration/marker inventory on a busy hosted runner.
+                let checkpointURL = GuestFixtureStorage.machineDirectory
+                    .appendingPathComponent("SessionRecovery/current.v1.json")
+                let checkpoint = try SessionRecoveryDiskStore.read(checkpointURL)
+                guard checkpoint?.recordingWasActive == true,
+                      checkpoint?.recordingInventoryVerified == true,
+                      checkpoint?.recordings.contains(where: {
+                          $0.sessionID == sessionID && $0.file == output.lastPathComponent
+                              && $0.status == .recording && $0.duration > 6 && $0.markers.count == 1
+                      }) == true else {
+                    try await Task.sleep(for: .milliseconds(10))
+                    continue
+                }
                 let ready = Ready(childPID: getpid(), project: workspace.selection.project, profile: workspace.selection.profile,
                     session: sessionID, scene: scene.id.rawValue, layer: layer.id.rawValue,
                     media: media.id.rawValue,
