@@ -241,7 +241,7 @@ struct NativeInterviewControlState: Equatable, Sendable {
             return registered?.receive.peerID == id ? nil : .unavailable("This guest has no local media connection.")
         case .setProgramReturn(let context, _), .selectReturnVideoSource(let context, _):
             guard currentReadyLease == context else { return .invalidTarget("The guest connection changed.") }
-            return session.canSetProgramReturn(context: context) ? nil : .unavailable("Program video return requires the current open native relay connection.")
+            return session.canSetProgramReturn(context: context) ? nil : .unavailable("Video return requires the current open native relay connection.")
         case .setPublicChatReturn(let context, let enabled):
             guard currentReadyLease == context || !enabled && publicChatContext == context else { return .invalidTarget("The guest connection changed.") }
             if enabled, publicChat?.guestPublicAvailable != true { return .unavailable("The shared studio chat session is unavailable.") }
