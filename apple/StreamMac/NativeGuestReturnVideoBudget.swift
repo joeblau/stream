@@ -17,7 +17,8 @@ struct NativeGuestReturnVideoProfile: Equatable, Sendable {
 
 /// Three bad observations lower quality one step. Eight good observations over
 /// three seconds raise it one step. A two-second dwell prevents rapid toggling.
-/// Each observation is bounded and must arrive on a monotonic 250ms–2s window.
+/// Observations are bounded and separated by at least 250ms. A statistics gap
+/// longer than two seconds starts new stability/congestion windows.
 struct NativeGuestReturnVideoBudget: Sendable {
     private(set) var profile: NativeGuestReturnVideoProfile = .low
     private var lastObservation: UInt64?
@@ -37,8 +38,14 @@ struct NativeGuestReturnVideoBudget: Sendable {
               bufferedBytes >= 0, bufferedBytes <= 1_048_576,
               sentFrames > 0, sentFrames <= 300,
               droppedFrames >= 0, droppedFrames <= sentFrames,
-              lastObservation.map({ monotonicMilliseconds > $0 && (250...2_000).contains(monotonicMilliseconds - $0) }) ?? true else {
+              lastObservation.map({ monotonicMilliseconds > $0 && monotonicMilliseconds - $0 >= 250 }) ?? true else {
             return false
+        }
+        // Sampling can pause during a disconnected transport or a suspended
+        // app. Advance the baseline after that gap; keeping the old baseline
+        // would reject every future sample and freeze adaptation permanently.
+        if let previous = lastObservation, monotonicMilliseconds - previous > 2_000 {
+            badWindows = 0; goodWindows = 0; goodBegan = nil
         }
         lastObservation = monotonicMilliseconds
         let loss = Double(droppedFrames) / Double(sentFrames)
@@ -48,7 +55,7 @@ struct NativeGuestReturnVideoBudget: Sendable {
         let congested = estimatedAvailableBitsPerSecond < profile.maximumBitrate
             || bufferedBytes >= 96 * 1_024 || loss >= 0.08
         if congested {
-            badWindows += 1; goodWindows = 0; goodBegan = nil
+            badWindows = min(badWindows + 1, 3); goodWindows = 0; goodBegan = nil
             guard canChange, badWindows >= 3, index > 0 else { return false }
             profile = profiles[index - 1]
             lastChange = monotonicMilliseconds; badWindows = 0
@@ -62,7 +69,7 @@ struct NativeGuestReturnVideoBudget: Sendable {
             && bufferedBytes <= 16 * 1_024 && loss <= 0.005
         guard headroom else { goodWindows = 0; goodBegan = nil; return false }
         if goodWindows == 0 { goodBegan = monotonicMilliseconds }
-        goodWindows += 1
+        goodWindows = min(goodWindows + 1, 8)
         guard canChange, goodWindows >= 8,
               let began = goodBegan, monotonicMilliseconds - began >= 3_000 else { return false }
         profile = next

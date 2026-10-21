@@ -41,6 +41,28 @@ struct NativeGuestReturnVideoBudgetHarness {
                                 bufferedBytes: 0, droppedFrames: 0, sentFrames: 30), "nonmonotonic sample is rejected")
         require(!budget.observe(monotonicMilliseconds: 22_000, estimatedAvailableBitsPerSecond: 100_000_001,
                                 bufferedBytes: 0, droppedFrames: 0, sentFrames: 30), "out-of-range estimate is rejected")
-        print("PASS guest return video budget transitions=3 max=1280x720@30/1500000 stable-up=8/3500ms down=3 dwell=2000ms invalidSamples=3")
+
+        // A transport statistics pause must not permanently lock the controller
+        // to its last observation, nor count earlier samples toward recovery.
+        var resumed = NativeGuestReturnVideoBudget()
+        for time in stride(from: 1_000, through: 4_000, by: 500) {
+            require(!resumed.observe(monotonicMilliseconds: UInt64(time), estimatedAvailableBitsPerSecond: 8_000_000,
+                                     bufferedBytes: 0, droppedFrames: 0, sentFrames: 30), "seven observations do not raise quality")
+        }
+        for time in stride(from: 10_000, through: 13_000, by: 500) {
+            require(!resumed.observe(monotonicMilliseconds: UInt64(time), estimatedAvailableBitsPerSecond: 8_000_000,
+                                     bufferedBytes: 0, droppedFrames: 0, sentFrames: 30), "a long gap starts a new stable window")
+        }
+        require(resumed.observe(monotonicMilliseconds: 13_500, estimatedAvailableBitsPerSecond: 8_000_000,
+                                bufferedBytes: 0, droppedFrames: 0, sentFrames: 30), "fresh observations recover after a long gap")
+        require(resumed.profile == .balanced, "a resumed sequence raises exactly one profile")
+        for time in [14_000, 14_500, 20_000, 20_500] {
+            require(!resumed.observe(monotonicMilliseconds: UInt64(time), estimatedAvailableBitsPerSecond: 50_000,
+                                     bufferedBytes: 128 * 1_024, droppedFrames: 5, sentFrames: 30), "a pause resets the congestion streak")
+        }
+        require(resumed.observe(monotonicMilliseconds: 21_000, estimatedAvailableBitsPerSecond: 50_000,
+                                bufferedBytes: 128 * 1_024, droppedFrames: 5, sentFrames: 30), "fresh congestion lowers quality after a pause")
+        require(resumed.profile == .low, "congestion after resumption respects the minimum profile")
+        print("PASS guest return video budget transitions=5 max=1280x720@30/1500000 stable-up=8/3500ms down=3 dwell=2000ms invalidSamples=3 resumedWindows=2")
     }
 }

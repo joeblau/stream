@@ -151,7 +151,9 @@ defines three profiles (320x180@15/250 kbps, 640x360@24/650 kbps and
 1280x720@30/1.5 Mbps), rejects out-of-range/stale observations, steps down
 after three congested windows and steps up after eight stable windows over at
 least three seconds. Its fixture validates those transitions and the profile
-ceiling. It consumes caller-supplied estimates and queue/drop observations; it
+ceiling. Sampling pauses longer than two seconds reset both stability streaks
+and accept a new baseline, so a suspended or disconnected caller can resume
+adaptation without carrying stale evidence forward. It consumes caller-supplied estimates and queue/drop observations; it
 does not measure network capacity, select a return source, encode video or send
 video. Thus bounded adaptive video bandwidth is not yet integrated into the
 guest connection. Browser AEC is requested by device
