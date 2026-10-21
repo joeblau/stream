@@ -10,15 +10,17 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {WebSocket} from 'ws';
 import {analyzeReturnAV} from './native-return-video-analysis.mjs';
+import {renderedReturnWorklet,installRenderedReturnOracle} from './rendered-return-oracle.mjs';
 import {chromeFixtureExecutable, chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
-const isolatedMode=process.argv.includes('--video-flow-only')||process.argv.includes('--video-fault-only')||process.argv.includes('--video-delivery-failure')||process.argv.some(value=>value.startsWith('--video-av-final='));
+const elementAudioProbe=process.argv.find(value=>value.startsWith('--video-element-audio-probe='))?.split('=')[1];
+const isolatedMode=Boolean(elementAudioProbe)||process.argv.includes('--video-flow-only')||process.argv.includes('--video-fault-only')||process.argv.includes('--video-delivery-failure')||process.argv.some(value=>value.startsWith('--video-av-final='));
 if(!isolatedMode){
   const plans=[['--video-flow-only','--video-feedback-probe'],['--video-delivery-failure'],...Array.from({length:2},()=>['program','secondary','clean'].map(source=>[`--video-av-final=${source}`])).flat()];
   for(const arguments_ of plans){
     const code=await new Promise((resolve,reject)=>{const run=spawn(process.execPath,[fileURLToPath(import.meta.url),...arguments_],{stdio:'inherit'});run.once('error',reject);run.once('exit',(code,signal)=>resolve(signal?1:code));});
     assert(code===0,`Owned native video qualification phase ${arguments_[0]} failed`);
   }
-  console.log('PASS actual source-control lifecycle plus repeated fresh final rendered AV captures; per-machine additional-raster refusal/qualification reported by each phase.');
+  console.log('PASS actual source-control lifecycle plus repeated fresh raw-track AV recordings (untouched/physical playback unqualified); per-machine additional-raster refusal/qualification reported by each phase.');
 }else{
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const startup=new ChromeFixtureDiagnostics();
@@ -107,6 +109,7 @@ try {
   const origin=`http://127.0.0.1:${servicePort}`;
   const assets=path.join(owned,'assets');await fs.cp(path.join(workerRoot,'public'),assets,{recursive:true});
   await fs.writeFile(path.join(assets,'fixture-return-meter.js'),returnMeterModule,{mode:0o600});
+  await fs.writeFile(path.join(assets,'fixture-rendered-return-cue.js'),renderedReturnWorklet,{mode:0o600});
   const operatorToken=randomBytes(32).toString('hex'),turnUsername=randomBytes(16).toString('hex'),turnCredential=randomBytes(32).toString('hex');
   const turnURL=`turn:127.0.0.1:${turnPort}?transport=udp`;
   const workerConfig={name:'native-session-relay-validation',main:path.join(workerRoot,'src/index.ts'),compatibility_date:'2026-10-02',compatibility_flags:['nodejs_compat'],durable_objects:{bindings:[{name:'ROOMS',class_name:'InterviewRoom'}]},migrations:[{tag:'v1',new_sqlite_classes:['InterviewRoom']}],assets:{directory:assets,binding:'ASSETS',run_worker_first:true},vars:{OPERATOR_TOKEN:operatorToken,ALLOWED_ORIGIN:origin,TURN_KEY_ID:''},observability:{enabled:false}};
@@ -198,23 +201,32 @@ try {
   const first=await spectrum('backstage-local-only',.4,.2);
   const videoPixels=`(()=>{const v=document.getElementById('return');if(!v.srcObject?.getVideoTracks().length||v.readyState<2)return null;const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);const pixel=[...c.getContext('2d').getImageData(c.width/2,c.height/2,1,1).data].slice(0,3);return{width:c.width,height:c.height,pixel,track:v.srcObject.getVideoTracks()[0].id};})()`;
   const decodedVideoStats=`(async()=>{const stats=await window.__fixturePeers.at(-1).getStats();for(const r of stats.values())if(r.type==='inbound-rtp'&&r.kind==='video')return{bytes:r.bytesReceived,packetsLost:r.packetsLost,timestamp:r.timestamp,frames:r.framesDecoded,width:r.frameWidth,height:r.frameHeight,fps:r.framesPerSecond,codec:stats.get(r.codecId)?.mimeType};return null;})()`;
-  async function qualifyAV(sourceName){
+  async function qualifyAV(sourceName,probeElementAudio=false){
   await pause(3500); // Require late cues after multiple shared-clock sender reports.
   command({type:'video-black'});ack=undefined;command({type:'mute'});await wait('mute before return AV recording',()=>{check();return ack==='mute';});
   await pause(400); // Drain the already accepted public return tail before measuring silence.
   await spectrum('video-av-silent-baseline',0,0);
   await wait('black before actual return AV recording',async()=>{const r=await browser.evaluate(g,videoPixels);return r&&r.pixel.every(v=>v<8);});
-  await browser.evaluate(g,`(()=>{const stream=document.getElementById('return').captureStream();window.__returnCaptured=stream;window.__returnParts=[];window.__returnRecorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8,opus',videoBitsPerSecond:400000,audioBitsPerSecond:128000});window.__returnRecorder.ondataavailable=e=>{if(e.data.size)window.__returnParts.push(e.data);};window.__returnRecorder.start();})()`);
+  if(probeElementAudio){
+    const identity=await browser.evaluate(g,`(()=>{const v=document.getElementById('return'),capture=v.captureStream();return{source:v.srcObject.getTracks().map(t=>({id:t.id,kind:t.kind})),captured:capture.getTracks().map(t=>({id:t.id,kind:t.kind}))};})()`);
+    console.log(`Chrome srcObject captureStream identities (raw-track bypass): ${JSON.stringify(identity)}`);
+    await browser.evaluate(g,`(async()=>{const prior=window.__returnAnalysis;prior.processor.disconnect();prior.source.disconnect();await prior.context.close();window.__renderedReturn=await (${installRenderedReturnOracle})(document.getElementById('return'));})()`);
+    await pause(1500);
+    await browser.evaluate(g,`(()=>{window.__renderedReturn.reset();window.__returnCaptured=window.__renderedReturn.stream;})()`);
+  }else{
+    await browser.evaluate(g,`(()=>{window.__returnCaptured=document.getElementById('return').captureStream();})()`);
+  }
+  await browser.evaluate(g,`(()=>{const stream=window.__returnCaptured;window.__returnParts=[];window.__returnRecorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8,opus',videoBitsPerSecond:400000,audioBitsPerSecond:128000});window.__returnRecorder.ondataavailable=e=>{if(e.data.size)window.__returnParts.push(e.data);};window.__returnRecorder.start();})()`);
   await browser.evaluate(g,`(()=>{window.__resetReturn();window.__videoFlashPerf=undefined;const v=document.getElementById('return'),c=document.createElement('canvas');c.width=1;c.height=1;const context=c.getContext('2d');const observe=(now,meta)=>{context.drawImage(v,0,0,1,1);const p=context.getImageData(0,0,1,1).data;if(p[0]>200&&p[1]>200&&p[2]>200)window.__videoFlashPerf??=meta.expectedDisplayTime;else v.requestVideoFrameCallback(observe);};v.requestVideoFrameCallback(observe);})()`);
   await pause(600);command({type:'video-av'});await pause(1500);
-  const actualPlayout=await browser.evaluate(g,`(()=>{const a=window.__returnAnalysis,stamp=a.context.getOutputTimestamp(),cue=a.last?.cueContextSeconds,audio=cue===undefined?undefined:stamp.performanceTime+(cue-stamp.contextTime)*1000;return{videoMilliseconds:window.__videoFlashPerf,audioMilliseconds:audio,deltaMilliseconds:window.__videoFlashPerf-audio};})()`);
-  console.log(`Actual return element playout cue metadata: ${JSON.stringify(actualPlayout)}`);
+  const actualPlayout=probeElementAudio?await browser.evaluate(g,'window.__renderedReturn.measure()'):await browser.evaluate(g,`(()=>{const a=window.__returnAnalysis,stamp=a.context.getOutputTimestamp(),cue=a.last?.cueContextSeconds,audio=cue===undefined?undefined:stamp.performanceTime+(cue-stamp.contextTime)*1000;return{videoMilliseconds:window.__videoFlashPerf,audioMilliseconds:audio,deltaMilliseconds:window.__videoFlashPerf-audio};})()`);
+  console.log(`Element video / independent raw-track WebAudio cue estimate: ${JSON.stringify(actualPlayout)}`);
   console.log(`Actual AV return authority/feedback: ${JSON.stringify({members:state.members,profile:state.videoProfile,feedback:state.videoFeedback,decoded:await browser.evaluate(g,decodedVideoStats),visibility:await browser.evaluate(g,"window.__fixtureVideoVisibility")})}`);
-  assert(Number.isFinite(actualPlayout.deltaMilliseconds)&&Math.abs(actualPlayout.deltaMilliseconds)<100,'Actual rendered element/worklet flash-tone must remain within100ms');
+  if(!probeElementAudio)assert(Number.isFinite(actualPlayout.deltaMilliseconds)&&Math.abs(actualPlayout.deltaMilliseconds)<100,'Element video / independent raw-track worklet estimate must remain within100ms');
   const transportTiming=await browser.evaluate(g,String.raw`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats(),r=[];for(const s of stats.values())if(s.type==='inbound-rtp')r.push({kind:s.kind,jitterBufferDelay:s.jitterBufferDelay,jitterBufferEmittedCount:s.jitterBufferEmittedCount,estimatedPlayoutTimestamp:s.estimatedPlayoutTimestamp,lastPacketReceivedTimestamp:s.lastPacketReceivedTimestamp,codec:stats.get(s.codecId)?.mimeType});return{stats:r,mediaIdentity:pc.remoteDescription.sdp.split('\r\n').filter(l=>/^a=ssrc:\d+ (?:cname|msid):stream-return(?: |$)/.test(l))};})()`);
   console.log(`Actual return RTP timing and public stream identity: ${JSON.stringify(transportTiming)}`);
   const encodedRecording=await browser.evaluate(g,`new Promise(resolve=>{window.__returnRecorder.onstop=async()=>{const bytes=new Uint8Array(await new Blob(window.__returnParts).arrayBuffer());let value='';for(let i=0;i<bytes.length;i+=8192)value+=String.fromCharCode(...bytes.subarray(i,i+8192));resolve(btoa(value));};window.__returnRecorder.stop();})`);
-  await browser.evaluate(g,`(()=>{window.__returnCaptured=undefined;window.__returnRecorder=undefined;})()`);
+  await browser.evaluate(g,`(async()=>{if(window.__renderedReturn){await window.__renderedReturn.stop();window.__renderedReturn=undefined;}window.__returnCaptured=undefined;window.__returnRecorder=undefined;})()`);
   assert(typeof encodedRecording==='string'&&encodedRecording.length<1048576,'Bounded owned return AV recording');
   const avPath=path.join(owned,'decoded-return-av.webm');await fs.writeFile(avPath,Buffer.from(encodedRecording,'base64'),{mode:0o600});
   const retained=path.resolve(workerRoot,'../../apple/build/native-interview-return-video-validation',`decoded-return-${Date.now()}.webm`);
@@ -222,11 +234,23 @@ try {
   console.log(`Owned decoded return AV artifact: ${retained}`);
   console.log(`Original native source AV cues: ${JSON.stringify({native:state.av??{},authored:state.authoredAV??{}})}`);
   assert(Number.isFinite(state.av?.delta)&&Math.abs(state.av.delta)<.05,'Owned native selected-canvas cue must be aligned within50ms before testing transport synchronization');
-  console.log(`PASS actual Chrome decoded ${sourceName} video/Opus AV cue: ${JSON.stringify(analyzeReturnAV(avPath))}`);
+  if(probeElementAudio){
+    console.log(`Optional element-audio provider probe: ${JSON.stringify(actualPlayout)}`);
+    if(!Number.isFinite(actualPlayout.audioMilliseconds)){
+      assert(Number.isFinite(actualPlayout.rawAudioMilliseconds)&&actualPlayout.rawPCM?.peak>.025,'Negative element-provider proof needs a positive raw-track PCM cue');
+      assert(actualPlayout.elementPCM?.frames>=48000&&actualPlayout.elementPCM.peak<.002,'Negative provider probe requires measured silent element PCM');
+      console.log('UNQUALIFIED: remote MediaStream element audio provider supplied no PCM cue while independent raw-track PCM was positive. No rendered/physical playback qualification.');
+      return false;
+    }
+    assert(actualPlayout.maxCallbackDisplayDifference<=1000/30,'Instrumented callback/presentation sampling bound');
+    assert(Math.abs(actualPlayout.deltaMilliseconds)<100,'Instrumented element/WebAudio graph100ms boundary');
+  }
+  console.log(`PASS ${probeElementAudio?'instrumented element/WebAudio+rVFC canvas':'raw-track recording'} ${sourceName} AV cue: ${JSON.stringify(analyzeReturnAV(avPath))}`);
+  return true;
   }
   const finalAV=process.argv.find(value=>value.startsWith('--video-av-final='))?.split('=')[1];
-  if(finalAV||process.argv.includes('--video-delivery-failure')){
-    const finalSource=finalAV??'program';
+  if(finalAV||elementAudioProbe||process.argv.includes('--video-delivery-failure')){
+    const finalSource=finalAV??elementAudioProbe??'program';
     assert(['program','secondary','clean'].includes(finalSource),'Bounded AV source selector');
     command({type:`video-select-${finalSource}`});await wait('Fresh lease selected actual AV source',()=>{check();return state.members[0].returnSource===finalSource;});
     const qualified=finalSource==='program'||(finalSource==='secondary'?state.secondaryQualified:state.cleanQualified);
@@ -244,9 +268,10 @@ try {
         assert(state.members[0].returnVideo==='bandwidthLimited'&&await browser.evaluate(g,"document.getElementById('return').srcObject?.getVideoTracks().length===0"),'Recovery cannot replay an old video Start');
         console.log('PASS controlled persistent actual SDK video failure retires optional return and releases encoder; stereo public audio continues; no automatic restart');
       }else{
-        await qualifyAV(finalAV);
+        const qualified=await qualifyAV(finalSource,Boolean(elementAudioProbe));
+        if(!qualified)process.exitCode=77;
         assert(state.members[0].returnVideo==='ready','Application-limited static Program remains active through late actual flash/tone update');
-        console.log(`PASS fresh rendered AV final phase: ${finalAV}; strict native50ms and decoded/rendered100ms, no capture observer precedes later source switches`);
+        if(qualified)console.log(`PASS fresh ${elementAudioProbe?'instrumented element/WebAudio':'raw-track'} AV phase: ${finalSource}; native50ms/captured100ms; untouched/physical playback unqualified`);
       }
     }else{
       await wait('Actual additional-raster AV source refused on unqualified host',()=>{check();return state.members[0].returnVideo==='failed';});
@@ -257,7 +282,7 @@ try {
     ack=undefined;command({type:'video-budget-free'});await wait('Final capture actual VT teardown released reservation',()=>{check();return ack==='video-budget-free';});
     command({type:'end'});await wait('Final capture room ended',()=>{check();return state.phase==='ended';});
     command({type:'stop'});await wait('Final capture native terminal cleanup',()=>{check();return stopped&&closed;},10000);
-    assert(browser.errors.length===0,'No actual shipping guest runtime error during rendered capture retirement');
+    assert(browser.errors.length===0,'No actual shipping guest runtime error during return capture retirement');
   }else{
   assert(await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0"),'Program video is opt-in, with no visible remote video before enable');
   command({type:'video-on'});
