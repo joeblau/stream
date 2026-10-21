@@ -4,8 +4,15 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {test} from 'node:test';
+import {GuestPublicChatView} from '../../public/public-chat.js';
+
 
 const source = await readFile(new URL('../../public/guest.js', import.meta.url), 'utf8');
+// vm.Script cannot parse module imports. Inject the unchanged actual module
+// export, retaining its production reset/lifecycle behavior in device cases.
+const publicChatImport = "import {GuestPublicChatView} from './public-chat.js';";
+assert(source.includes(publicChatImport), 'Guest public-chat module boundary changed');
+const executableSource = source.replace(publicChatImport, '');
 const deferred = () => {let resolve; const promise = new Promise(value => {resolve=value;}); return {promise, resolve};};
 const settle = () => new Promise(resolve => setImmediate(resolve));
 function fixture() {
@@ -30,20 +37,21 @@ function fixture() {
     createMediaStreamSource() {return {connect(){}, disconnect(){}};}
   }
   const element = id => {
-    if (!elements.has(id)) elements.set(id, {value:'', disabled:false, textContent:'',
+    if (!elements.has(id)) elements.set(id, {value:'', disabled:false, textContent:'', dataset:{},
       replaceChildren(){}, append(){}, get length(){return 0;}});
     return elements.get(id);
   };
-  const sandbox = {URLSearchParams, TextEncoder, AbortSignal, MediaStream:Stream,
+  const sandbox = {URLSearchParams, TextEncoder, AbortSignal, MediaStream:Stream, GuestPublicChatView, performance, crypto,
     location:{search:'?room=00000000-0000-4000-8000-000000000000', hash:'#'+'a'.repeat(64), pathname:'/guest.html'},
     history:{replaceState(){}}, document:{getElementById:element, createElement:()=>({})},
     navigator:{mediaDevices:{getUserMedia:constraints=>{
       const capture=deferred(); captures.push({...capture,constraints}); return capture.promise;
     }, enumerateDevices:async()=>[], addEventListener(){}}},
     AudioContext:Audio, requestAnimationFrame:()=>1, cancelAnimationFrame(){},
-    setTimeout, clearTimeout, window:{addEventListener(){}}, WebSocket:{OPEN:1}};
+    setTimeout:(callback,ms)=>{const timer=setTimeout(callback,ms);timer.unref();return timer;}, clearTimeout,
+    setInterval:(callback,ms)=>{const timer=setInterval(callback,ms);timer.unref();return timer;}, clearInterval, window:{addEventListener(){}}, WebSocket:{OPEN:1}};
   vm.createContext(sandbox);
-  vm.runInContext(source+`;globalThis.guest={prepare,switchDevice,leave,resetPeer,acceptSignal,
+  vm.runInContext(executableSource+`;globalThis.guest={prepare,switchDevice,leave,resetPeer,acceptSignal,
     setAdmission:()=>{admitted=true;generation="guest-generation";host="host-id";hostGeneration="host-generation";},
     setPeer:value=>{pc=value;},
     snapshot:()=>({local,senders:mediaSenders,left,secret}),setSenders:value=>{mediaSenders=value;},
@@ -163,7 +171,7 @@ test('initial negotiation cannot reinstall stopped devices after a concurrent de
     }
     getTransceivers(){return this.transceivers;}
     async setRemoteDescription(value){this.remoteDescription=value;}
-    async createAnswer(){return {type:'answer',sdp:'fixture'};}
+    async createAnswer(){return {type:'answer',sdp:'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=rtpmap:111 opus/48000/2\r\n'};}
     async setLocalDescription(value){this.localDescription=value;}
     close(){this.closed=true;}
   };
