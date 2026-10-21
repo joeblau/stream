@@ -165,10 +165,12 @@ struct ContentView: View {
     /// - Parameter phase: the incoming phase when called from `onChange`, whose
     ///   closure still sees the pre-change `scenePhase`.
     private func syncStatusMeter(phase: ScenePhase? = nil) {
+        let isActive = (phase ?? scenePhase) == .active
+        micLevel.setSceneActive(isActive)
         micLevel.setBroadcasting(capture.isLive)
         micLevel.setGain(settings.micVolume)
         micLevel.setPreferredInput(settings.preferredAudioInputUID)
-        if (phase ?? scenePhase) == .active {
+        if isActive {
             micLevel.start(for: .statusBar)
         } else {
             micLevel.stop(for: .statusBar)
@@ -213,34 +215,33 @@ struct ContentView: View {
                             }
                             .accessibilityLabel("Settings")
                         }
-                        // Takes the title's slot: "Stream" is redundant on the app's own
-                        // root screen, and the mic meter is the one thing worth a glance
-                        // every time you look up here.
-                        ToolbarItem(placement: .principal) {
-                            HStack(spacing: 10) {
-                                Button(action: toggleCameraVisibility) {
-                                    Image(systemName: settings.pipEnabled
-                                          ? "video.fill"
-                                          : "video.slash.fill")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .contentTransition(.symbolEffect(.replace))
-                                }
-                                .tint(settings.pipEnabled ? .green : .secondary)
-                                .accessibilityLabel(settings.pipEnabled
-                                                    ? "Hide camera"
-                                                    : "Show camera")
-
-                                Button(action: toggleMicMute) {
-                                    MicrophoneStatusMeter(monitor: micLevel,
-                                                          isMuted: isMicMuted)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(isMicMuted
-                                                    ? "Unmute microphone"
-                                                    : "Mute microphone")
+                        ToolbarSpacer(.fixed, placement: .topBarLeading)
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button(action: toggleCameraVisibility) {
+                                Image(systemName: settings.pipEnabled
+                                      ? "video.fill"
+                                      : "video.slash.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .contentTransition(.symbolEffect(.replace))
                             }
+                            .tint(settings.pipEnabled ? .green : .secondary)
+                            .accessibilityLabel(settings.pipEnabled
+                                                ? "Hide camera"
+                                                : "Show camera")
                             .animation(.easeInOut(duration: 0.2),
                                        value: settings.pipEnabled)
+                        }
+                        // Keep the volume control in the title's slot, separate
+                        // from the camera button and its toolbar background.
+                        ToolbarItem(placement: .principal) {
+                            Button(action: toggleMicMute) {
+                                MicrophoneStatusMeter(monitor: micLevel,
+                                                      isMuted: isMicMuted)
+                                    .frame(minWidth: 44, minHeight: 44)
+                            }
+                            .accessibilityLabel(isMicMuted
+                                                ? "Unmute microphone"
+                                                : "Mute microphone")
                         }
                         ToolbarItem(placement: .topBarTrailing) { broadcastButton }
                     }

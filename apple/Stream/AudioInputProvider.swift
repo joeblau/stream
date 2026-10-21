@@ -397,10 +397,24 @@ final class MicrophoneLevelMonitor {
     }
 
     @ObservationIgnored private var clients: Set<Client> = []
+    @ObservationIgnored private var isSceneActive = true
+
+    /// Backgrounding does not dismiss the Audio settings pane. Suspend every
+    /// meter client together so that pane cannot keep the local mic engine and
+    /// polling alive while the app is hidden; retain clients for foregrounding.
+    func setSceneActive(_ isActive: Bool) {
+        guard isSceneActive != isActive else { return }
+        isSceneActive = isActive
+        if isActive {
+            if !clients.isEmpty { startSampling() }
+        } else {
+            stopSampling()
+        }
+    }
 
     func start(for client: Client) {
         clients.insert(client)
-        startSampling()
+        if isSceneActive { startSampling() }
     }
 
     func stop(for client: Client) {

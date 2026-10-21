@@ -24,9 +24,7 @@ struct DraggableFacecamView: View {
     /// Regenerated on every reveal and every flip so the auto-hide `task` restarts
     /// instead of dismissing the controls a fixed interval after the first tap.
     @State private var controlsRevealID = UUID()
-    /// Accumulated flip rotation. Each flip adds a half turn rather than toggling
-    /// between two values, so repeated taps keep spinning the same direction
-    /// instead of rocking back and forth.
+    /// The return to the front camera reverses the turn to the back camera.
     @State private var flipAngle: Double = 0
     /// True for the length of the turn. Throttles the preview and rejects a second
     /// flip, so rapidly tapping back and forth cannot queue up capture-session
@@ -70,10 +68,10 @@ struct DraggableFacecamView: View {
                         showsControls.toggle()
                     }
                 }
+                .modifier(CameraFlipEffect(angle: flipAngle))
                 .overlay {
                     if showsControls { flipButton }
                 }
-                .modifier(CameraFlipEffect(angle: flipAngle))
                 .position(x: restingCenter.x + dragTranslation.width,
                           y: restingCenter.y + dragTranslation.height)
                 .gesture(
@@ -112,16 +110,21 @@ struct DraggableFacecamView: View {
         Button(action: flip) {
             Image(systemName: "camera.rotate.fill")
                 .font(.system(size: 16, weight: .semibold))
+                .scaleEffect(x: cameraPosition == .front ? 1 : -1, y: 1)
                 .foregroundStyle(.white)
-                .frame(width: 40, height: 40)
+                .frame(width: 44, height: 44)
                 .background(Circle().fill(.black.opacity(0.45)))
                 .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .contentShape(.circle)
+        .disabled(isFlipping)
         .accessibilityLabel(cameraPosition == .front
                             ? "Switch to back camera"
                             : "Switch to front camera")
+        .accessibilityValue(cameraPosition == .front
+                            ? "Front camera"
+                            : "Back camera")
         .transition(.scale(scale: 0.5).combined(with: .opacity))
     }
 
@@ -132,22 +135,23 @@ struct DraggableFacecamView: View {
     /// changeover. Until then the card keeps showing the outgoing camera's last
     /// frame — correctly mirrored, because the mirroring follows the pixels.
     ///
-    /// The turn also dismisses the control and throttles the preview: both take
-    /// per-frame compositing work off the rotating subtree for its duration.
+    /// The control stays outside the rotating card so it remains upright and
+    /// available for the return switch. The preview is throttled during the turn.
     private func flip() {
         guard !isFlipping else { return }
         Haptics.tap()
         isFlipping = true
         controlsRevealID = UUID()
-        withAnimation(.easeOut(duration: 0.12)) { showsControls = false }
+        let turn: Double = cameraPosition == .front ? 180 : -180
         onFlipCamera()
         // `.smooth` rather than a spring: a bouncing flip overshoots past the half
         // turn and settles back through it, which reads as a wobble on a card whose
         // content is changing at the same time.
         withAnimation(.smooth(duration: Self.flipDuration)) {
-            flipAngle += 180
+            flipAngle += turn
         } completion: {
             isFlipping = false
+            controlsRevealID = UUID()
         }
     }
 
