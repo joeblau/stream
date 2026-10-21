@@ -27,7 +27,7 @@ private actor ViewerFixtureHTTP {
         case "/oauth2/validate": body = #"{"client_id":"viewer-fixture","user_id":"42","scopes":[],"expires_in":3600}"#
         case "/helix/streams":
             let channel = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "user_id" }?.value
-            body = twitchAvailable ? "{\"data\":[{\"viewer_count\":\(channel == "43" ? 11 : 7)}]}" : #"{"data":[]}"#
+            body = twitchAvailable ? "{\"data\":[{\"user_id\":\"\(channel ?? "")\",\"viewer_count\":\(channel == "43" ? 11 : 7)}]}" : #"{"data":[]}"#
         case "/youtube/v3/liveBroadcasts": body = #"{"items":[{"id":"viewer-event","snippet":{"channelId":"viewer-owner","title":"Viewer fixture"},"status":{"lifeCycleStatus":"live"}}]}"#
         case "/youtube/v3/videos": body = #"{"items":[{"id":"viewer-event","liveStreamingDetails":{"concurrentViewers":"0"}}]}"#
         default: throw ProviderFailure(.invalidRequest)
