@@ -191,6 +191,10 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     private var completions: [CFAbsoluteTime] = []
     private var totalLatencyMs = 0.0
     private var inFlight = 0
+    var helperPageLease: BrowserWidgetPageLease? {
+        guard helperSession != nil, isRunning else { return nil }
+        return BrowserWidgetPageLease(widgetID: helperWidgetID, generation: snapshotGeneration)
+    }
     private var snapshotGeneration = UUID()
     private var isRunning = false
     private var isEmbedded = false
@@ -273,6 +277,9 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
 
     /// Loads the content and starts the bounded snapshot clock.
     func start() {
+        // Revoke the old helper page synchronously, including a queued reload
+        // whose replacement load Task has not entered yet.
+        helperSession?.release(helperWidgetID)
         stopCaptureClock()
         BrowserOverlayFrameStore.shared.clear(storeKey)
         metrics = BrowserOverlayMetrics(startedAt: Date())
@@ -450,7 +457,8 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
             loadState = .failed("The qualification helper supports viewports up to 1920 × 1080."); return
         }
         helperTask = Task { [weak self] in
-            guard let self else { return }
+            guard let self, self.isRunning, self.snapshotGeneration == generation,
+                  !Task.isCancelled else { return }
             do {
                 try await helperSession.loadForQualification(id: helperWidgetID, generation: generation,
                     html: helperHTML, url: helperHTML == nil ? configuration.widgetURL : nil, options: options,
@@ -475,6 +483,9 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
                         self.remoteInteractionView?.needsDisplay = true
                     }, snapshotFailed: { [weak self] in
                         guard let self, self.snapshotGeneration == generation else { return }; self.metrics.failed += 1
+                    }, audioState: { [weak self] reason in
+                        guard let self, self.isRunning, self.snapshotGeneration == generation else { return }
+                        self.routeWarning = reason ?? "Independent audio is running in a qualification helper. This route remains unavailable for normal use."
                     }))
             } catch {
                 guard self.isRunning, self.snapshotGeneration == generation else { return }

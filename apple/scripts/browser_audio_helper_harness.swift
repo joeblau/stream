@@ -161,8 +161,8 @@ final class AudioTrace: @unchecked Sendable {
         print("Fixture stage: waiting for helper/noise readiness"); fflush(nil)
         try await wait { helper.has(.ready) && noise.has(.ready) }
         let left = UUID(), right = UUID(), leftGeneration = UUID(), rightGeneration = UUID()
-        try helper.send(.init(action: .load, widgetID: left, html: toneHTML(frequency: 440, pan: -1), generation: leftGeneration))
-        try helper.send(.init(action: .load, widgetID: right, html: toneHTML(frequency: 880, pan: 1), generation: rightGeneration))
+        try helper.send(.init(action: .load, widgetID: left, html: toneHTML(frequency: 440, pan: -1), options: .init(mediaStartsSuspended: false), generation: leftGeneration))
+        try helper.send(.init(action: .load, widgetID: right, html: toneHTML(frequency: 880, pan: 1), options: .init(mediaStartsSuspended: false), generation: rightGeneration))
         print("Fixture stage: waiting for widget navigation"); fflush(nil)
         try await wait { helper.has(.loaded, id: left) && helper.has(.loaded, id: right) }
         try helper.send(.init(action: .probe, widgetID: left)); try helper.send(.init(action: .probe, widgetID: right))
@@ -283,10 +283,10 @@ final class AudioTrace: @unchecked Sendable {
         try helper.send(.init(action: .reload, widgetID: left))
         try await Task.sleep(for: .seconds(0.8))
         precondition(raw.amplitude(440, channel: 0) > leftBaseline * 0.8 && raw.amplitude(880, channel: 1) > rightBaseline * 0.8)
-        try helper.send(.init(action: .stop, widgetID: left))
+        try helper.send(.init(action: .stop, widgetID: left, generation: leftGeneration))
         try await Task.sleep(for: .seconds(0.8))
         precondition(raw.amplitude(440, channel: 0) < leftBaseline * 0.02 && raw.amplitude(880, channel: 1) > rightBaseline * 0.8 && unrelated.amplitude(1320, channel: 0) > noiseBaseline * 0.8)
-        try helper.send(.init(action: .stop, widgetID: right))
+        try helper.send(.init(action: .stop, widgetID: right, generation: rightGeneration))
         try await Task.sleep(for: .seconds(0.8))
         precondition(raw.amplitude(440, channel: 0) < leftBaseline * 0.02 && raw.amplitude(880, channel: 1) < rightBaseline * 0.02 && unrelated.amplitude(1320, channel: 0) > noiseBaseline * 0.8)
         await capture.stop(); await noiseCapture.stop(); monitorOutput.applyConfiguration(enabled: false, deviceUID: nil)
@@ -347,7 +347,7 @@ final class AudioTrace: @unchecked Sendable {
             preconditionFailure("Encoded IPC size must also be bounded")
         } catch {}
         let id = UUID()
-        for action in [BrowserWidgetAudioCommand.Action.suspend, .resume] {
+        for action in [BrowserWidgetAudioCommand.Action.suspend, .resume, .stop] {
             do {
                 try BrowserWidgetAudioCommand(action: action, widgetID: id).validate()
                 preconditionFailure("Media lifecycle commands must identify the page generation")
