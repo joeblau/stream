@@ -10,14 +10,14 @@ private actor EncodedPublisherProbe: Publisher {
     nonisolated let continuation: AsyncStream<PublisherEvent>.Continuation
     private(set) var video: [CMSampleBuffer] = []
     private(set) var audio: [SharedEncodedAudio] = []
-    private(set) var raw = 0, configured = false
+    private(set) var raw = 0, configured = false, starts = 0
     private var held = false
     private var gate: CheckedContinuation<Void, Never>?
     private var holdsStop = false
     private var stopGate: CheckedContinuation<Void, Never>?
     init(shared: Bool = true) { supportsSharedH264AAC = shared; (events, continuation) = AsyncStream.makeStream(of: PublisherEvent.self) }
     func configureEncodedInput() async -> Bool { configured = true; return true }
-    func start(_ settings: StreamSettings) async throws { continuation.yield(.published) }
+    func start(_ settings: StreamSettings) async throws { starts += 1; continuation.yield(.published) }
     func stop() async { release(); if holdsStop { await withCheckedContinuation { stopGate = $0 } } }
     func pause() async {}
     func resume() async {}
@@ -324,6 +324,18 @@ private actor EncodedPublisherProbe: Publisher {
         try await settle { outputs.encoderSessionCount == 0 && outputs.activeCount == 0 }
         report("PASS: unsupported adapter stays separate; failed stable-ID retry and deliberate stop retain every raw encoder reservation until actual teardown")
     }
+    static func cancelledSharedStart(settings: StreamSettings) async throws {
+        let publisher = EncodedPublisherProbe()
+        let outputs = DestinationOutputController(factory: { _ in publisher }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
+        outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
+        let target = StreamDestination(name: "Cancelled cold start", transport: .rtmp)
+        outputs.start(target, settings: settings)
+        outputs.stopAll()
+        try await settle { outputs.activeCount == 0 && outputs.encoderSessionCount == 0 }
+        try check(await publisher.starts == 0 && outputs.states[target.id] == .idle,
+                  "Cancelled shared encoder preparation started a publisher or revived its output")
+        report("PASS: cancelling cold shared encoder preparation retires its reservation without starting a publisher or reviving the output")
+    }
     static func canvasAndEncoderFailure(settings: StreamSettings) async throws {
         let primary = EncodedPublisherProbe(), secondary = EncodedPublisherProbe(), secondaryCopy = EncodedPublisherProbe()
         var pending = [primary, secondary, secondaryCopy]
@@ -513,6 +525,7 @@ private actor EncodedPublisherProbe: Publisher {
             "Existing unreadable policy path was overwritten or its failed setting remained enabled: mode=\(unreadable.sharesFixedH264AAC), error=\(String(describing: unreadable.errorMessage)), exists=\(exists), directory=\(isDirectory)")
         report("PASS: profile fixed-sharing opt-in defaults off, persists independently and preserves unsupported document bytes")
         try await rawFinalization(settings: settings)
+        try await cancelledSharedStart(settings: settings)
         try await canvasAndEncoderFailure(settings: settings)
         try await fixedCadence(directory: directory, settings: settings)
         try await higherRateFallback(settings: settings)

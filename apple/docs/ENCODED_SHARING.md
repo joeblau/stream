@@ -36,6 +36,8 @@ The pinned HaishinKit revision remains `407adcf411eab17070656f5917a78bace994d9d8
 
 Encoding uses Apple's [VTCompressionSession API](https://developer.apple.com/documentation/videotoolbox/vtcompressionsession-api-collection) and [AVAudioCompressedBuffer](https://developer.apple.com/documentation/avfaudio/avaudiocompressedbuffer). Group callbacks retain their owner safely until delivery; stopped generations cannot fail or release a later group with identical settings.
 
+Shared groups prepare their codec and initial render resources on the private encoder queue before starting the publisher. Cold setup therefore finishes before a destination can acknowledge LIVE, rather than occupying the bounded ingress queue while opening live frames arrive. Preparation does not encode or publish a placeholder frame; a cancelled start cannot continue into publisher startup.
+
 ## Native evidence
 
 Run from the repository root:

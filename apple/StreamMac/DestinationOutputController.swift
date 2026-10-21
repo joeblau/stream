@@ -133,8 +133,10 @@ final class DestinationOutputController: ObservableObject {
                 self.handle(event, id: id, generation: generation)
             }
         }
-        let startTask = Task { [weak self] in
+        let startTask = Task { [weak self, encoderGroup] in
             do {
+                if let encoderGroup { try await encoderGroup.prepare() }
+                guard !Task.isCancelled else { return }
                 if usesEncoded, !(await publisher.configureEncodedInput()) {
                     throw NSError(domain: "SharedEncoder", code: 1)
                 }
