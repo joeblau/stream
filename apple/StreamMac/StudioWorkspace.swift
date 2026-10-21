@@ -48,6 +48,7 @@ final class StudioRuntime {
         chat.bindAccounts(providerAccounts)
         controller.bindEnding(accounts: providerAccounts, dispatcher: dispatcher, previewProgram: previewProgram)
         interviews = NativeInterviewManager(controller: controller)
+        interviews.bindPublicChat(chat)
         dispatcher.bindInterviewManager(interviews)
         adapters = StudioAdapterManager()
         adapters.bind(to: localControl)

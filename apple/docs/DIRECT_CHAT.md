@@ -2,6 +2,10 @@
 
 Reviewed against official provider documentation on 2026-10-02. The native account panel and chat sidebar observe the same `StudioDirectChatManager`, bound once with `chat.bindAccounts(providerAccounts)`. Public messages flow into `StudioChatCoordinator.receive(StudioChatAction)`, its bounded queue, existing favorites/filter/reading-position controls, staged Program comment slots, and existing hardware/guest consumers. They do not create another OAuth session or socket per view. Direct connect/read/send/delete actions never start automatically after login, project load, wake or restart.
 
+Guests can receive an explicitly enabled, read-only stream of future public
+messages from this same coordinator. The full-lease opt-in, bounds, freshness
+and no-replay behavior are described in [NATIVE_GUEST_PUBLIC_CHAT.md](NATIVE_GUEST_PUBLIC_CHAT.md).
+
 | Provider | Implemented reader and verified target | Optional explicit actions | Limits |
 | --- | --- | --- | --- |
 | YouTube | Fresh owned broadcast ID lookup must return the OAuth-selected channel, live lifecycle and `snippet.liveChatId`; REST `liveChat/messages.list` follows its page token and `pollingIntervalMillis`. | Public text post, targeted delete, 10-minute timeout and permanent ban through the owned chat with granted `youtube` or `youtube.force-ssl`. | Initial history is limited to what the API returns. REST polling consumes quota; preferred streaming/gRPC `streamList` is not implemented. No threaded reply API is exposed. Composer conservatively caps text at 200 characters as an app limit. |

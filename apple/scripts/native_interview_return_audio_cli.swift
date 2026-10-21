@@ -133,6 +133,7 @@ private final class ReturnPrivateTone: @unchecked Sendable {
     let mixer = AudioMixEngine(), scenes: SceneStore, preview: PreviewProgramModel
     let controller: StreamController, settings: SettingsSession, recorder: RecordingController, dispatcher: StudioCommandDispatcher
     let manager: NativeInterviewManager
+    let chat: StudioChatCoordinator
     let program = ReturnProgramProbe(), programToken = UUID()
     let privacyProbes = (0..<4).map { _ in ReturnProgramProbe() }
     let privacyTokens = (0..<4).map { _ in UUID() }
@@ -155,11 +156,13 @@ private final class ReturnPrivateTone: @unchecked Sendable {
         settings = .init(store: DesktopSettingsStore(), controller: controller)
         recorder = .init(defaultDirectory: directory.appendingPathComponent("unused-default-recordings"))
         dispatcher = .init(controller: controller, sceneStore: scenes, session: settings, recorder: recorder, previewProgram: preview)
+        chat = .init(dispatcher: dispatcher, previewProgram: preview)
         manager = NativeInterviewManager(controller: controller, serviceFactory: { config, credential in
             let client = NativeInterviewServiceClient(configuration: config, credential: credential)
             return OwnedLocalRelayService(client: client, configuration: config, ownedRelay: relay)
         })
         dispatcher.bindInterviewManager(manager)
+        manager.bindPublicChat(chat)
         controller.noteRecordingStarted()
         controller.guestTalkbackFixtureCapture = { $0 == .microphone(deviceUID: nil) }
     }
@@ -215,10 +218,18 @@ private final class ReturnPrivateTone: @unchecked Sendable {
     }
     func volume(_ value: Float, muted: Bool) async { await mixer.setChannelGain(local, volume: value, isMuted: muted) }
     func privateTone(_ enabled: Bool) { privateMicTone.set(enabled) }
+    func publicMessage(_ id: String, text: String) throws {
+        guard id.utf8.count <= 128, text.utf8.count <= 16_384 else { throw NativeInterviewError.malformed }
+        let data = try JSONSerialization.data(withJSONObject: ["action": "event", "timestamp": 1_800_000_000,
+            "payload": ["connectionIdentifier": "owned-public-return-fixture", "eventTypeId": 7,
+                "eventPayload": ["liveChatMessageId": id, "text": text,
+                    "author": ["displayName": "Owned Public Viewer", "isChatModerator": true]]]])
+        chat.receive(data)
+    }
     func close() async {
         privateMicProducer?.cancel(); privateMicProducer = nil
         producer?.cancel(); producer = nil
-        manager.shutdown(); controller.retireGuestMedia(); controller.noteRecordingStopped(); await mixer.removeTap(programToken)
+        manager.shutdown(); chat.shutdown(); controller.retireGuestMedia(); controller.noteRecordingStopped(); await mixer.removeTap(programToken)
         for token in privacyTokens { await mixer.removeTap(token) }
         await mixer.removeTap(recipientProbeToken)
         await mixer.stop()
@@ -255,10 +266,12 @@ private final class ReturnPrivateTone: @unchecked Sendable {
                         "failure": value.failure.map { $0.rawValue } ?? "", "members": value.members.map {
                             ["id": $0.id.uuidString.lowercased(), "membership": $0.membership.rawValue,
                              "media": $0.media.rawValue, "returnAudio": $0.returnAudio.rawValue,
+                             "publicChat": $0.publicChat.rawValue, "publicChatDropped": $0.publicChatDropped,
                              "approved": $0.screenApproved, "sharing": $0.screenSharing] as [String: Any]
                         }, "audioAccepted": admission.acceptedPackets, "program": current.program.snapshot(),
                         "programAllowed": current.manager.state.routes.values.contains { $0.programAllowed },
                         "privateTalkback": current.manager.talkback != nil]
+                    state["publicChatEnabled"] = current.manager.publicChatContext != nil
                     state["privacyBuses"] = current.privacyProbes.map { $0.snapshot() }
                     state["recipientPCM"] = current.recipientProbe.snapshot()
                     if let context = current.manager.currentReadyLease {
@@ -284,11 +297,41 @@ private final class ReturnPrivateTone: @unchecked Sendable {
             }
             var retainedPrivateContext: NativeInterviewPeerLease?
             var retainedTalkback: (NativeInterviewPeerLease, UUID)?
+            var retainedPublicContext: NativeInterviewPeerLease?
             commandLoop: for await line in input.stream {
                 guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                       let command = object["type"] as? String else { throw NativeInterviewError.malformed }
                 let guest = (object["id"] as? String).flatMap(UUID.init(uuidString:))
                 switch command {
+                case "public-chat-on":
+                    guard let context = current.manager.currentReadyLease else { throw NativeInterviewError.changed }
+                    if retainedPublicContext == nil { retainedPublicContext = context }
+                    try current.command(.setPublicChatReturn(context, true)); _ = output.emit(["type": "ack", "command": command])
+                case "public-chat-off":
+                    guard let context = current.manager.currentReadyLease else { throw NativeInterviewError.changed }
+                    try current.command(.setPublicChatReturn(context, false)); _ = output.emit(["type": "ack", "command": command])
+                case "public-chat-message":
+                    guard let id = object["messageID"] as? String, let text = object["text"] as? String else { throw NativeInterviewError.malformed }
+                    try current.publicMessage(id, text: text); _ = output.emit(["type": "ack", "command": command])
+                case "public-chat-burst":
+                    for index in 0..<40 { try current.publicMessage("burst-\(index)", text: "Owned public burst \(index)") }
+                    _ = output.emit(["type": "ack", "command": command])
+                case "public-chat-remove":
+                    guard let id = object["messageID"] as? String else { throw NativeInterviewError.malformed }
+                    current.chat.receive(.removed(ids: [StudioChatMessageIdentity.make(provider: "YouTube", messageID: id)]))
+                    _ = output.emit(["type": "ack", "command": command])
+                case "public-chat-freeze":
+                    // Owned MainActor stall proves the shipping guest clears
+                    // a stale enabled feed even without receiving Off.
+                    await MainActor.run { Thread.sleep(forTimeInterval: 7.2) }
+                    _ = output.emit(["type": "ack", "command": command])
+                case "public-chat-close":
+                    current.chat.shutdown(); _ = output.emit(["type": "ack", "command": command])
+                case "stale-public-chat":
+                    guard let context = retainedPublicContext, current.manager.currentReadyLease != context,
+                          current.dispatcher.execute(.interview(.setPublicChatReturn(context, true))).error != nil,
+                          current.dispatcher.execute(.interview(.setPublicChatReturn(context, false))).error != nil else { throw NativeInterviewError.changed }
+                    _ = output.emit(["type": "ack", "command": "stale-public-chat-rejected"])
                 case "create":
                     try await current.manager.create(configuration: configuration, credential: try .init(owned.operatorToken))
                     let deadline = ContinuousClock.now + .seconds(6)

@@ -143,6 +143,8 @@ private actor ManagerGuest {
     private(set) var started = false, retired = false
     private var privateControlOpen = true
     private(set) var privateSent: [NativeInterviewPrivateEnvelope] = []
+    private(set) var publicSent: [String] = [], publicPriorities: [Bool] = []
+    var rejectPublic = false
     init(context: NativeInterviewPeerLease, sink: NativeGuestMediaSink,
          events: @escaping @Sendable (NativeInterviewMediaEvent) -> Bool) throws {
         self.context = context; self.sink = sink; self.events = events
@@ -164,6 +166,12 @@ private actor ManagerGuest {
         privateSent.append(envelope); return true
     }
     func privateReceived(_ envelope: NativeInterviewPrivateEnvelope) { _ = events(.privateControl(envelope)) }
+    var supportsPublicChat: Bool { supportsPrivateMessages }
+    func sendPublicChat(_ envelope: GuestPublicChatEnvelope, lowPriority: Bool) -> Bool {
+        guard supportsPublicChat, !rejectPublic, publicSent.count < 128,
+              let wire = envelope.wire(negotiation: context.receive.negotiation) else { return false }
+        publicSent.append(wire); publicPriorities.append(lowPriority); return true
+    }
     func screenSharing(_ sharing: Bool) throws {
         callbacks.receive("control", try json(["sharing": sharing]), "")
     }
@@ -238,6 +246,7 @@ private extension AudioMixEngine {
 @MainActor private final class ManagerStudio {
     let mixer = AudioMixEngine(), scenes: SceneStore, preview: PreviewProgramModel
     let controller: StreamController, settings: SettingsSession, recorder: RecordingController, dispatcher: StudioCommandDispatcher
+    let chat: StudioChatCoordinator
     var client: NativeInterviewServiceClient?, service: ManagerService?, factory: ManagerHostFactory?
     var capturedCredentialProvider: NativeInterviewManager.CredentialProvider?
     var manager: NativeInterviewManager!
@@ -250,6 +259,7 @@ private extension AudioMixEngine {
         defaults = UserDefaults(suiteName: suite)!
         recorder = .init(defaults: defaults, defaultDirectory: directory.appendingPathComponent("Recordings"))
         dispatcher = .init(controller: controller, sceneStore: scenes, session: settings, recorder: recorder, previewProgram: preview)
+        chat = .init(dispatcher: dispatcher, previewProgram: preview)
         manager = NativeInterviewManager(controller: controller, serviceFactory: { [weak self] configuration, credential in
             let client = NativeInterviewServiceClient(configuration: configuration, credential: credential)
             let value = ManagerService(client, configuration: configuration)
@@ -259,12 +269,13 @@ private extension AudioMixEngine {
             return .init(factory: value, shutdown: { value.shutdown() })
         })
         dispatcher.bindInterviewManager(manager)
+        manager.bindPublicChat(chat)
     }
     func command(_ value: NativeInterviewCommand) throws {
         try require(dispatcher.execute(.interview(value)).error == nil, "Actual dispatcher refused \(value.displayName)")
     }
     func close() async {
-        manager.shutdown(); controller.retireGuestMedia(); await mixer.stop()
+        manager.shutdown(); chat.shutdown(); controller.retireGuestMedia(); await mixer.stop()
         scenes.flushPendingWrites(); defaults.removePersistentDomain(forName: suite)
     }
     func measure(_ title: String, program expectedProgram: Double, monitor expectedMonitor: Double,
@@ -331,6 +342,76 @@ private extension AudioMixEngine {
         try await wait("Actual ready lease missing") { studio.manager.currentReadyLease?.receive.peerID == id }
         return studio.factory!.hosts.last!
     }
+    static func publicEvent(_ id: String, text: String = "Owned public chat 👩🏽‍🚀 世界 {host}") throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["action": "event", "timestamp": 1_800_000_000,
+            "payload": ["connectionIdentifier": "owned-public-provider", "eventTypeId": 7,
+                "eventPayload": ["liveChatMessageId": id, "text": text,
+                    "author": ["displayName": "Public Viewer", "isChatModerator": true]]]])
+    }
+    // Synchronous owned stall leaves an expired heartbeat queued on MainActor.
+    // No device capture or shared UI state is involved.
+    static func queueExpiredPublicHeartbeat() { Thread.sleep(forTimeInterval: 2.1) }
+    static func publicChatFlow(_ studio: ManagerStudio, host: ManagerHost) async throws -> NativeInterviewCommand {
+        var accepted = 0
+        let observation = studio.chat.guestPublicUpdates.sink { if case .message = $0 { accepted += 1 } }
+        defer { observation.cancel() }
+        let program = studio.preview.programScene, staged = studio.preview.stagedScene
+        let privateCount = host.privateSent.count
+        for index in 0..<1_005 { studio.chat.receive(try publicEvent("seed-\(index)")) }
+        try require(studio.chat.queue.messages.count == 1_000 && accepted == 1_005 && host.publicSent.isEmpty,
+            "At-cap accepted chat append was lost or history forwarded without opt-in")
+        let command = NativeInterviewCommand.setPublicChatReturn(host.context, true)
+        try studio.command(command)
+        try require(host.publicSent.count == 1 && studio.manager.publicChatContext == host.context,
+            "Public enable replayed history or failed to pin the full lease")
+        studio.chat.receive(try publicEvent("seed-1"))
+        try require(accepted == 1_005 && host.publicSent.count == 1, "Seen provider identity replayed after eviction")
+        studio.chat.receive(try publicEvent("new-at-cap"))
+        try require(accepted == 1_006 && studio.chat.queue.messages.count == 1_000 && host.publicSent.count == 2,
+            "Accepted append+eviction was not forwarded exactly once")
+        let delivered = try JSONSerialization.jsonObject(with: Data(host.publicSent.last!.utf8)) as! [String: Any]
+        try require(delivered["type"] as? String == "public-chat-message" && delivered["seq"] as? Int == 1
+            && delivered["author"] as? String == "Public Viewer" && delivered["roles"] as? [String] == ["Moderator"]
+            && host.publicPriorities.last == true, "Public normalized metadata or low-priority transport gate was lost")
+        let removed = StudioChatMessageIdentity.make(provider: "YouTube", messageID: "seed-900")
+        studio.chat.receive(.removed(ids: [removed]))
+        let beforeReplay = accepted
+        studio.chat.receive(try publicEvent("seed-900"))
+        try require(accepted == beforeReplay && studio.chat.queue.message(removed) == nil, "Tombstoned provider message replayed")
+        for index in 0..<30 { studio.chat.receive(try publicEvent("burst-\(index)")) }
+        try await wait("Public burst omission count missing") { studio.manager.state.snapshot.members.first?.publicChatDropped ?? 0 >= 27 }
+        try require(host.privateSent.count == privateCount && studio.preview.programScene == program && studio.preview.stagedScene == staged,
+            "Public return leaked into private transcript or changed a public overlay")
+        host.rejectPublic = true
+        try studio.command(.setPublicChatReturn(host.context, false))
+        try require(studio.manager.publicChatContext == nil && studio.manager.state.snapshot.members.first?.publicChat == .offUnconfirmed,
+            "Failed Off send retained local opt-in or falsely confirmed the guest display")
+        let stopped = host.publicSent.count
+        studio.chat.receive(try publicEvent("while-off"))
+        host.rejectPublic = false
+        try await Task.sleep(for: .milliseconds(1_100))
+        try require(host.publicSent.count == stopped, "Off feed queued/retried public content")
+        try studio.command(command)
+        try require(host.publicSent.count == stopped + 1, "Second enable replayed retained queue history")
+        let firstState = try JSONSerialization.jsonObject(with: Data(host.publicSent[0].utf8)) as! [String: Any]
+        let nextState = try JSONSerialization.jsonObject(with: Data(host.publicSent.last!.utf8)) as! [String: Any]
+        try require(firstState["feed"] as? String != nextState["feed"] as? String, "Re-enable reused old feed authority")
+        let heartbeatStart = host.publicSent.count
+        for _ in 0..<5 { try await Task.sleep(for: .milliseconds(450)); try studio.command(command) }
+        try require(host.publicSent.count > heartbeatStart, "Repeated idempotent enable starved public freshness heartbeat")
+        try studio.command(.setPublicChatReturn(host.context, false))
+        try studio.command(command)
+        try await Task.sleep(for: .milliseconds(50)) // Let its two-second sleep begin.
+        queueExpiredPublicHeartbeat()
+        try studio.command(.setPublicChatReturn(host.context, false))
+        try studio.command(command)
+        let replacedHeartbeatCount = host.publicSent.count
+        try await Task.sleep(for: .milliseconds(100))
+        try require(studio.manager.publicChatContext == host.context && host.publicSent.count == replacedHeartbeatCount,
+            "Queued cancelled heartbeat mutated or revoked a replacement public feed")
+        trace("actual queued cancelled heartbeat cannot refresh/revoke replacement feed; actual shared decoder/coordinator acceptance at1000cap; dedup+tombstone replay refusal, explicit no-history public feed, bounded low-priority burst omissions, unchanged Program/private transcript, failed-Off local revoke and fresh feed token")
+        return command
+    }
     static func producer(_ host: ManagerHost, localMixer: AudioMixEngine? = nil,
                          localChannel: AudioChannelID? = nil) -> Task<Void, Error> {
         let sink = host.sink, lease = host.context.receive, mapping = host.mapping
@@ -394,6 +475,7 @@ private extension AudioMixEngine {
         try require(studio.manager.assignSlot(prepared.id, to: id), "Actual waiting guest could not choose a prepared project slot")
         try require(!studio.dispatcher.canExecute(.interview(.onair(id))), "Waiting guest received a Program command")
         let host = try await admit(studio, guest: guest, id: id)
+        let oldPublicCommand = try await publicChatFlow(studio, host: host)
         let lease = host.context.receive
         let waitingInvite = try await studio.client!.createInvite(room: studio.manager.state.snapshot.room!)
         let waitingSocket = try await studio.client!.connect(room: studio.manager.state.snapshot.room!, host: waitingInvite)
@@ -678,7 +760,7 @@ private extension AudioMixEngine {
                     "Rejoin did not keep stable identity and replace authority privately")
         let beforeStaleMixer = studio.settings.activeSettings.mixer
         let beforeStaleSlots = studio.scenes.guestSlots
-        for stale in [oldMute, oldSolo, oldRename, privateCommand] {
+        for stale in [oldMute, oldSolo, oldRename, privateCommand, oldPublicCommand, .setPublicChatReturn(host.context, false)] {
             try require(!studio.dispatcher.canExecute(.interview(stale)) && studio.dispatcher.execute(.interview(stale)).error != nil,
                         "Retained full-context command edited the rejoined guest")
         }
@@ -691,6 +773,19 @@ private extension AudioMixEngine {
             && studio.scenes.guestSlots.first(where: { $0.id == lease.slot })?.localName == nil,
                     "Use Guest Name did not remove the alias")
         trace("retained mute/solo/rename refused after actual host rejoin; replacement state unchanged and alias reset uses current lease")
+        try require(studio.manager.publicChatContext == nil && rejoined.publicSent.isEmpty, "Rejoin replayed public chat opt-in or history")
+        try studio.command(.setPublicChatReturn(rejoined.context, true))
+        try require(rejoined.publicSent.count == 1, "Fresh public opt-in replayed old queue history")
+        let publicBeforeClose = rejoined.publicSent.count
+        studio.chat.shutdown()
+        try require(studio.manager.publicChatContext == nil && rejoined.publicSent.count == publicBeforeClose + 1,
+            "Closed shared coordinator left public feed authorized")
+        let publicAfterClose = rejoined.publicSent.count
+        studio.chat.receive(try publicEvent("closed-source"))
+        try require(rejoined.publicSent.count == publicAfterClose
+            && studio.dispatcher.execute(.interview(.setPublicChatReturn(rejoined.context, true))).error != nil,
+            "Closed coordinator/retained action emitted or rearmed public chat")
+        trace("actual shared coordinator close sends Off once; old full-lease On/Off rejected, rejoin never replays history and fresh source closure cannot rearm")
         let secondGeneration = rejoined.context.receive.generation
         try studio.command(.end)
         do { _ = try await studio.capturedCredentialProvider!(); throw ManagerFixtureError.failed("End retained future operator credential reads") }
@@ -758,6 +853,9 @@ private extension AudioMixEngine {
         let replacement = workspace.runtime
         try require(replacement !== original && original.interviews.state.snapshot.phase == .closed,
                     "Actual runtime replacement did not retire the old session")
+        try require(!original.chat.guestPublicAvailable && replacement.chat.guestPublicAvailable
+            && original.interviews.publicChatContext == nil && replacement.interviews.publicChatContext == nil,
+            "Profile replacement retained or replayed a public chat feed")
         try await replacement.interviews.create(configuration: configuration, credential: credential)
         try await wait("Replacement runtime interview welcome missing") { replacement.interviews.state.snapshot.phase == .connected }
         window.contentView = nil; window.close()

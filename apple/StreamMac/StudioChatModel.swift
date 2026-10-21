@@ -163,8 +163,8 @@ struct StudioChatQueue: Sendable {
         return message(queue[index + 1])
     }
     func message(_ id: String) -> StudioChatMessage? { messages.first { $0.id == id } }
-    mutating func receive(_ message: StudioChatMessage) {
-        guard self.message(message.id) == nil, seen.insert(message.id).inserted else { return }
+    @discardableResult mutating func receive(_ message: StudioChatMessage) -> Bool {
+        guard self.message(message.id) == nil, seen.insert(message.id).inserted else { return false }
         seenOrder.append(message.id)
         if seenOrder.count > 4_000 { seen.remove(seenOrder.removeFirst()) }
         messages.append(message)
@@ -173,6 +173,7 @@ struct StudioChatQueue: Sendable {
                 messages.remove(at: index)
             } else { break }
         }
+        return true
     }
     mutating func favorite(_ id: String) {
         guard message(id) != nil else { return }
