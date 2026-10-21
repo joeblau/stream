@@ -60,10 +60,29 @@ import Foundation
         let invalid = CMIOExtensionStreamProperties(dictionary: [:]); invalid.activeFormatIndex = 9
         do { try source.setStreamProperties(invalid); throw NSError(domain: "Harness", code: 5) }
         catch { try check(source.activeFormatIndex == 0, "Invalid format preserves negotiated state") }
+        // A rejected compound negotiation must not silently change the sink
+        // format, and a successful change must discard the old input image.
+        let negotiationMailbox = VirtualCameraMailbox()
+        let negotiationSink = StreamCameraSink(formats: source.formats, mailbox: negotiationMailbox)
+        try check(negotiationMailbox.submit(input, sequence: 1, now: now), "Seed negotiated input")
+        let compound = CMIOExtensionStreamProperties(dictionary: [:])
+        compound.activeFormatIndex = 1; compound.frameDuration = CMTime(value: 1, timescale: 60)
+        var rejected = false
+        do { try negotiationSink.setStreamProperties(compound) } catch { rejected = true }
+        let unchanged = try negotiationSink.streamProperties(forProperties: [.streamActiveFormatIndex])
+        try check(rejected && unchanged.activeFormatIndex == 0 && negotiationMailbox.latest(now: now) != nil,
+                  "Rejected compound sink negotiation preserves format and input")
+        try negotiationSink.setStreamProperties(settings)
+        try check(negotiationMailbox.latest(now: now) == nil, "Renegotiating the sink clears its previous-format frame")
+        try check(!negotiationSink.receiveSample(advanced, sequence: 2, now: now + 8_000_000), "Late old-format completion cannot refill the sink")
+        let negotiatedInput = try pixels(width: 1920, height: 1080, pts: now + 9_000_000)
+        try check(negotiationSink.receiveSample(negotiatedInput, sequence: 3, now: now + 9_000_000), "Accept newly negotiated input")
+        let unsupported = try pixels(width: 640, height: 480, pts: now + 10_000_000)
+        try check(!negotiationMailbox.submit(unsupported, sequence: 4, now: now + 10_000_000), "Reject unadvertised input dimensions")
         try check(!StreamCameraSink.trustedProducer(pid: getpid(), team: "K78G42H4U2"), "Unsigned fixture cannot inject a signed production sink")
         let restart = try pixels(pts: now + 700_000_000)
         try check(mailbox.submit(restart, sequence: 1, now: now + 700_000_000), "Explicit new producer session")
         try source.stopStream() // Unbalanced stop cannot underflow client count.
-        print("PASS: actual CMIO provider/device/source/sink, bounded queue and pool, graph timestamps/pixels, 720p/1080p negotiation, stale/disconnect black fallback, unsigned producer rejection; extension not installed")
+        print("PASS: actual CMIO provider/device/source/sink, bounded queue and pool, graph timestamps/pixels, atomic 720p/1080p negotiation, rejected unadvertised/late old-format input, stale/disconnect black fallback, unsigned producer rejection; extension not installed")
     }
 }

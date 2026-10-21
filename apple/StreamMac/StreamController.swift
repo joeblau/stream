@@ -1257,8 +1257,19 @@ final class StreamController: ObservableObject {
     func preflightFacts(programAudioPeak: Float?, assetAvailability: (AssetID) -> AssetAvailability = { _ in .unknown }) -> StreamPreflightFacts {
         var facts = StreamPreflightFacts()
         let scene = previewProgram.programScene
-        var layers = scene.map { SceneGraph.flattenedVisibleLayers(of: $0, in: SceneGraph.index(sceneStore.scenes)) } ?? []
+        let checksSecondary = destinations.enabled.contains { $0.canvas == .secondary } ||
+            secondaryProgramOutputDemanded || secondaryRecordingController?.state.isActive == true
+        let sceneIndex = SceneGraph.index(sceneStore.scenes)
+        var layers = scene.map { SceneGraph.flattenedVisibleLayers(of: $0, in: sceneIndex) } ?? []
+        if checksSecondary, let scene {
+            layers += SceneGraph.flattenedVisibleLayers(of: scene.composition(for: .secondary), in: sceneIndex)
+        }
         layers += sceneStore.overlays.filter { $0.isVisible && !(scene?.hiddenOverlayIDs.contains($0.id) ?? false) }
+        // A linked layer can be visible on both canvases while one physical
+        // source owns its capture/permission state. Independent secondary
+        // visibility must still participate when Program hides that layer.
+        var checkedLayers = Set<LayerID>()
+        layers = layers.filter { checkedLayers.insert($0.id).inserted }
         func checkAsset(_ identifier: String?, hasBookmark: Bool, description: String) {
             if let identifier, let uuid = UUID(uuidString: identifier) {
                 switch assetAvailability(AssetID(uuid)) {
@@ -1346,7 +1357,8 @@ final class StreamController: ObservableObject {
                 if destination.transport.requiresKey && credentials.streamKey.isEmpty { errors.append("Missing stream key.") }
             }
             facts.destinationErrors += errors.map { "\(destination.name): \($0)" }
-            let profile = destination.effectiveProfile(program: settings.outputProfile)
+            let canvasProfile = destination.canvas == .secondary ? activeSecondaryProfile : settings.outputProfile
+            let profile = destination.effectiveProfile(program: canvasProfile)
             facts.profileErrors += (destination.ingestLimits ?? .conservative(for: destination.transport))
                 .errors(profile: profile, codec: destination.videoCodec,
                         keyframeSeconds: destination.keyframeSeconds ?? 2, audioBitrate: destination.audioBitrate)
@@ -1361,6 +1373,15 @@ final class StreamController: ObservableObject {
         if !capabilities.hardwareTier.fits(width: activeProfile.canvasWidth, height: activeProfile.canvasHeight) ||
             activeProfile.frameRate > capabilities.hardwareMaxFrameRate {
             facts.profileErrors.append("Program canvas exceeds this Mac's estimated hardware limits.")
+        }
+        if checksSecondary {
+            if let error = canvasStartError(destinations: [.init(name: "Secondary preflight", canvas: .secondary)]) {
+                facts.profileErrors.append(error)
+            }
+            if !capabilities.hardwareTier.fits(width: activeSecondaryProfile.canvasWidth, height: activeSecondaryProfile.canvasHeight) ||
+                activeSecondaryProfile.frameRate > capabilities.hardwareMaxFrameRate {
+                facts.profileErrors.append("Secondary canvas exceeds this Mac's estimated hardware limits.")
+            }
         }
         let plan = outputEncodingPlan(program: settings.outputProfile)
         // Count active/finalizing encoder owners even when their destinations

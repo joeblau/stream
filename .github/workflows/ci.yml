@@ -62,6 +62,10 @@ jobs:
           CHAT_BUILD_PATH=build/tests zsh scripts/run_direct_chat_harness.zsh
           ENDING_BUILD_PATH=build/tests zsh scripts/run_studio_ending_harness.zsh
           OWNED_ENDING_BUILD_PATH=build/tests zsh scripts/run_owned_ending_harness.zsh
+      - name: Test saved guest preparation and native controller feedback
+        run: |
+          STREAM_CORE_FRAMEWORK_DIR="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_guest_preparation_harness.zsh
+          zsh scripts/run_studio_deck_native_harness.zsh
       - name: Test browser helper protocol and bounded PCM inlet
         run: BROWSER_AUDIO_BUILD_PATH=build/desktop zsh scripts/run_browser_audio_helper_harness.zsh
       - name: Test managed event review and shipping publisher gates
@@ -100,6 +104,12 @@ jobs:
           STREAM_FRACTIONAL_ISO_FRAMEWORKS="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_fractional_iso_audio_harness.zsh
       - name: Validate sandbox declaration
         run: python3 scripts/validate_desktop_distribution.py build/desktop/Build/Products/Debug/StreamMac.app
+      - name: Test diagnostic export and distribution audit boundaries
+        run: |
+          zsh scripts/run_studio_diagnostics_harness.zsh
+          python3 scripts/test_desktop_distribution.py
+      - name: Test optional media SDK prerequisite detection
+        run: zsh scripts/run_pro_input_prerequisites.zsh --test
       - name: Retain test results
         if: always()
         uses: actions/upload-artifact@v4

@@ -230,8 +230,10 @@ struct MainWindowView: View {
             // G01: attach the shared P03 asset library when the orchestrator
             // has injected it (idempotent; nil pre-wiring).
             if let assetLibrary { imageLayers.attach(assetLibrary: assetLibrary) }
+            StudioAutomationEndpoint.shared.markStudioReady(true, for: dispatcher)
         }
         .onDisappear {
+            StudioAutomationEndpoint.shared.markStudioReady(false, for: dispatcher)
             controller.managedStart?.cancelAll()
             controller.ending.shutdown()
             controller.stopVirtualCameraOutput()
@@ -704,8 +706,11 @@ struct MainWindowView: View {
                 // availability badges, and missing-asset repair.
                 AssetLibraryPanelView()
             case .guests:
-                placeholder("Guests", systemImage: "person.2",
-                            message: "Remote guest management lands here in a later workstream.")
+                GuestPreparationView(sceneStore: sceneStore, profile: controller.activeProfile, addToPreview: { scene in
+                    if let error = dispatcher.execute(.insertScene(scene)).error {
+                        shortcuts.message = error.description
+                    }
+                }, stagedScene: { previewProgram.stagedScene })
             case .destinations:
                 ScrollView {
                     DisclosureGroup("Virtual Camera Output") {

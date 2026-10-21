@@ -37,6 +37,11 @@ final class StudioShortcutController: ObservableObject {
                     message = "This shortcut file was written by a newer version of Stream. It has been left unchanged."
                     return
                 }
+                if let error = restored.validationError {
+                    persistenceBlocked = true
+                    message = "Could not use the shortcut file. It has been left unchanged: \(error)"
+                    return
+                }
                 document = restored
             } catch {
                 persistenceBlocked = true
@@ -203,10 +208,12 @@ final class StudioShortcutController: ObservableObject {
     }
     private func handleGlobal(_ id: UInt32) {
         guard let binding = hotKeyBindings[id], let window = studioWindow,
-              window.attachedSheet == nil, !palettePresented, !editorPresented else { return }
+              window.attachedSheet == nil, NSApp.modalWindow == nil,
+              !palettePresented, !editorPresented else { return }
         // Carbon owns this chord while registered, so the local monitor does
         // not also dispatch it. Never run production actions in a text field.
-        if NSApp.isActive && ((window.firstResponder as? NSTextView)?.isEditable == true || window.firstResponder is NSTextField) { return }
+        let responder = NSApp.keyWindow?.firstResponder ?? window.firstResponder
+        if NSApp.isActive && ((responder as? NSTextView)?.isEditable == true || responder is NSTextField) { return }
         execute(id: binding.commandID)
     }
 }

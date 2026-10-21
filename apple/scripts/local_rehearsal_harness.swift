@@ -94,6 +94,57 @@ private final class RehearsalMediaClock: @unchecked Sendable {
         try check(controller.isRehearsing && !controller.streamState.isActive,
             "Public Go Live escaped the rehearsal guard")
     }
+    static func secondaryPreflight(_ controller: StreamController, preview: PreviewProgramModel,
+                                   restoring scene: Scene, settings: StreamSettings) async throws {
+        let camera = LayerNode(name: "Secondary-only camera", payload: .camera(.init(deviceID: "missing-preflight-fixture-camera")),
+            transform: .fullscreen, isVisible: false)
+        let image = LayerNode(name: "Secondary-only missing image", payload: .image(.init(assetIdentifier: UUID().uuidString)),
+            transform: .fullscreen, isVisible: false)
+        let layout = SecondaryCanvasLayout(size: .init(width: 1080, height: 1920), placements: [
+            camera.id: .init(transform: .fullscreen, isVisible: true), image.id: .init(transform: .fullscreen, isVisible: true)])
+        var proposed = Scene(name: "Secondary preflight fixture", layers: [camera, image], secondaryCanvas: layout)
+        var destination = StreamDestination(name: "Secondary preflight", transport: .rtmp, canvas: .secondary,
+            ingestLimits: .init(maxWidth: 1280, maxHeight: 720))
+        controller.destinations.draft = [destination]
+        controller.destinations.credentials[destination.id] = .init(endpoint: "rtmp://fixture.invalid/live", streamKey: "fixture")
+        try check(controller.destinations.apply(), "Secondary preflight destination did not save")
+        preview.stage(proposed); preview.take()
+        try await wait("Taken secondary profile did not reconcile", until: { controller.activeSecondaryProfile.canvasWidth == 1080 })
+        let facts = controller.preflightFacts(programAudioPeak: nil, assetAvailability: { _ in .missing(.projectCopyMissing) })
+        try check(facts.sourceCount == 2 && facts.missingSources.contains { $0.contains("camera is disconnected") }
+            && facts.missingSources.contains { $0.contains("Image asset is missing") },
+            "Checklist omitted sources visible only on an enabled secondary canvas")
+        if PermissionsManager().status(for: .camera) != .granted {
+            try check(facts.permissionIssues.contains { $0.contains("Camera permission") },
+                "Checklist omitted camera permission demanded only by secondary visibility")
+        }
+        try check(facts.profileErrors.contains { $0.contains("canvas exceeds") },
+            "Checklist validated the small Program geometry instead of the actual secondary ingest geometry")
+
+        destination.isEnabled = false; controller.destinations.draft = [destination]
+        try check(controller.destinations.apply(), "Secondary preflight disable did not save")
+        let disabled = controller.preflightFacts(programAudioPeak: nil)
+        try check(disabled.sourceCount == 0 && disabled.missingSources.isEmpty,
+            "An inactive secondary layout demanded capture or source repair")
+        destination.isEnabled = true; controller.destinations.draft = [destination]
+        try check(controller.destinations.apply(), "Secondary preflight reenable did not save")
+        proposed.secondaryCanvas = nil; preview.stage(proposed); preview.take()
+        try check(controller.preflightFacts(programAudioPeak: nil).profileErrors.contains { $0.contains("Take a configured secondary") },
+            "Checklist passed an enabled secondary output with no configured taken layout")
+
+        var largeSettings = settings
+        largeSettings.outputProfile = .init(canvasWidth: 3840, canvasHeight: 2160, frameRate: 30)
+        controller.applySavedSettings(largeSettings)
+        try check(controller.activeProfile == largeSettings.outputProfile, "This native checklist fixture requires the existing 4K-capable machine class")
+        proposed.secondaryCanvas = layout; preview.stage(proposed); preview.take()
+        try await wait("Secondary layout did not return for aggregate budget check", until: { controller.activeSecondaryProfile.canvasWidth == 1080 })
+        try check(controller.preflightFacts(programAudioPeak: nil).profileErrors.contains { $0.contains("compositor budget") },
+            "Checklist passed two canvases exceeding the same resource budget enforced at output start")
+        controller.destinations.draft = []
+        try check(controller.destinations.apply(), "Secondary preflight fixture did not clear")
+        controller.applySavedSettings(settings); preview.stage(scene); preview.take()
+        print("PASS: shipping preflight checks secondary-only source/permission demand, inactive-layout exclusion, actual portrait ingest geometry, missing taken layout and aggregate compositor budget")
+    }
     static func main() async throws {
         setbuf(stdout, nil)
         let folder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
@@ -225,6 +276,7 @@ private final class RehearsalMediaClock: @unchecked Sendable {
         try check(controller.preflightFacts(programAudioPeak: nil).recordingEncoderReservations == 0, "Checklist retained final released reservation")
         print("PASS: failed starts restore owned state; existing live/recording/reserved preparation is rejected without mutation")
         print("PASS: checklist counts active/finalizing publishers outside the plan, two planned publishers plus four studio-wide reservations, rejects six against four, and releases 4→1→0 while primary recorder is idle")
+        try await secondaryPreflight(controller, preview: preview, restoring: scene, settings: settings)
 
         let clock = RehearsalMediaClock()
         let videoObservation = controller.addFrameSink { clock.observe($0.sampleBuffer, video: true) }

@@ -68,3 +68,31 @@ Remaining runtime work includes explicit program-versus-preview audio visibility
 A later repeat on this same machine reported an existing WindowServer session/grant/output but **zero `SCShareableContent` displays**. The runner now records the read-only display count and explicitly prints `GATED / UNQUALIFIED` before launching capture fixtures when that prerequisite is absent. This repeat is not a passed capture qualification. Successful earlier decoded artifacts remain the evidence for the limited local result; no permission, display or default-device repair was performed.
 
 Retained media can be checked without a live capture session using `--inspect-visual-recording /path/to/same-page-program.mp4`. This checks actual decoded H264/AAC color/tone timing and labels the result as artifact validation, not a new live browser/capture qualification.
+
+## Lifecycle command backpressure (2026-10-21)
+
+Stop and Suspend/Resume now fail closed when the helper's bounded command queue
+rejects the command. Previously those errors were discarded: a removed page
+could remain audible while another page's demand kept the shared helper alive.
+The session now reports a fixed failure category for its remaining pages and
+retires its owned shared helper/capture. Healthy unrelated app-audio sources are
+outside this session; no global mute or System Mix fallback is issued. Accepted
+commands still target the requested widget, and suspension keeps its page
+generation. Normal Stop preserves sibling demand.
+
+`scripts/browser_helper_lifecycle_checks.swift` exercises the shipping session
+with an injected command transport that rejects Stop, Suspend or Resume. It
+checks visible sibling failure, shared demand retirement and transport closure,
+plus successful exact-widget commands and sibling preservation. The existing
+browser audio harness invokes these checks. A focused compile of the actual
+session, PCM capture, socket and command/visual protocol sources passed on
+Mac15,8, macOS 27.2 (26B118), Xcode 27.2 (27B5038j), using mixer/visual-state
+fixtures that trap if capture or PCM delivery is attempted. This is command
+lifecycle evidence; it starts no helper, capture, monitor or device and proves
+no actual audio routing, exclusion, bus levels or A/V synchronization.
+
+The production selector remains disabled. Program/Preview/Hide audio demand,
+shared mixer registration/controls, all system/screen-audio exclusions and signed
+shared-container IPC still need integration and actual tone/speech bus
+qualification before #124 can close. Existing direct application capture and
+permission/availability checks are unchanged.

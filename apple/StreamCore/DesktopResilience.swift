@@ -43,33 +43,47 @@ public final class SourceFailoverCache<Key: Hashable & Sendable, Frame: Sendable
     private var active: Set<Key> = []
     private var modes: [Key: SourceFailureMode] = [:]
     private var failed: Set<Key> = []
+    private var generation: UInt64 = 0
     public init() {}
     public var retainedCount: Int { lock.lock(); defer { lock.unlock() }; return latest.count }
-    public func configure(active: Set<Key>, modes: [Key: SourceFailureMode], failed: Set<Key>) {
+    /// Native wrappers also invalidate when an external standby binding changes.
+    /// Repeated identical health observations leave healthy frame reads intact.
+    public func configure(active: Set<Key>, modes: [Key: SourceFailureMode], failed: Set<Key>, invalidateInFlight: Bool = false) {
         lock.lock(); defer { lock.unlock() }
+        guard invalidateInFlight || self.active != active || self.modes != modes || self.failed != failed else { return }
         self.active = active
         latest = latest.filter { active.contains($0.key) }
         self.modes = modes
         self.failed = failed
+        generation &+= 1
     }
     public func frame(for key: Key, live: () -> Frame?, standby: () -> Frame?, offline: () -> Frame?) -> Frame? {
         lock.lock()
+        guard active.contains(key) else { lock.unlock(); return nil }
+        let observedGeneration = generation
         let mode = modes[key] ?? .offline
         let isFailed = failed.contains(key)
         let held = latest[key]
         lock.unlock()
-        if !isFailed, let fresh = live() {
-            lock.lock(); if active.contains(key) { latest[key] = fresh }; lock.unlock()
-            return fresh
+        let fresh = isFailed ? nil : live()
+        let candidate: Frame?
+        if let fresh { candidate = fresh }
+        else {
+            switch mode {
+            case .freeze: candidate = held ?? offline()
+            case .blank: candidate = nil
+            case .offline: candidate = offline()
+            case .standby: candidate = standby() ?? offline()
+            }
         }
-        switch mode {
-        case .freeze: return held ?? offline()
-        case .blank: return nil
-        case .offline: return offline()
-        case .standby: return standby() ?? offline()
-        }
+        lock.lock(); defer { lock.unlock() }
+        // Providers run outside the lock. Retirement or a policy change while a
+        // provider is in flight invalidates both its pixels and any cache write.
+        guard generation == observedGeneration, active.contains(key) else { return nil }
+        if let fresh { latest[key] = fresh }
+        return candidate
     }
-    public func clear() { lock.lock(); latest = [:]; active = []; failed = []; modes = [:]; lock.unlock() }
+    public func clear() { lock.lock(); generation &+= 1; latest = [:]; active = []; failed = []; modes = [:]; lock.unlock() }
 }
 
 /// Monotonic health fold: reported errors fail immediately; an empty fresh-frame

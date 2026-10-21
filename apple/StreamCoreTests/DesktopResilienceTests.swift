@@ -50,4 +50,50 @@ import Testing
         #expect(cache.retainedCount == 1)
         cache.clear(); #expect(cache.retainedCount == 0)
     }
+    @Test("A provider completing after failure or retirement cannot return or retain its pixels")
+    func inFlightRetirement() {
+        let cache = SourceFailoverCache<String, Int>()
+        cache.configure(active: ["camera"], modes: [:], failed: [])
+        #expect(cache.frame(for: "camera", live: {
+            cache.configure(active: ["camera"], modes: ["camera": .blank], failed: ["camera"])
+            return 42
+        }, standby: { nil }, offline: { 9 }) == nil)
+        #expect(cache.retainedCount == 0)
+
+        cache.configure(active: ["camera"], modes: [:], failed: [])
+        #expect(cache.frame(for: "camera", live: {
+            cache.clear()
+            // Reusing the source ID does not revive a retired provider request.
+            cache.configure(active: ["camera"], modes: ["camera": .freeze], failed: ["camera"])
+            return 43
+        }, standby: { nil }, offline: { 9 }) == nil)
+        #expect(cache.retainedCount == 0)
+        #expect(cache.frame(for: "camera", live: { 43 }, standby: { nil }, offline: { 9 }) == 9)
+        #expect(cache.frame(for: "removed", live: { Issue.record("Removed providers must not be queried"); return 44 }, standby: { nil }, offline: { 9 }) == nil)
+    }
+    @Test("A standby completing after its policy changes cannot leak through blank mode")
+    func inFlightStandby() {
+        let cache = SourceFailoverCache<String, Int>()
+        cache.configure(active: ["camera"], modes: ["camera": .standby], failed: ["camera"])
+        #expect(cache.frame(for: "camera", live: { nil }, standby: {
+            cache.configure(active: ["camera"], modes: ["camera": .blank], failed: ["camera"])
+            return 7
+        }, offline: { 9 }) == nil)
+        #expect(cache.retainedCount == 0)
+    }
+    @Test("Identical health refreshes preserve frames while changed native standby bindings invalidate them")
+    func unchangedConfiguration() {
+        let cache = SourceFailoverCache<String, Int>()
+        cache.configure(active: ["camera"], modes: [:], failed: [])
+        #expect(cache.frame(for: "camera", live: {
+            cache.configure(active: ["camera"], modes: [:], failed: [])
+            return 42
+        }, standby: { nil }, offline: { 9 }) == 42)
+        #expect(cache.retainedCount == 1)
+        cache.configure(active: ["camera"], modes: ["camera": .standby], failed: ["camera"])
+        #expect(cache.frame(for: "camera", live: { nil }, standby: {
+            cache.configure(active: ["camera"], modes: ["camera": .standby], failed: ["camera"], invalidateInFlight: true)
+            return 7
+        }, offline: { 9 }) == nil)
+    }
 }

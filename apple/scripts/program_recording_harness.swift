@@ -20,6 +20,13 @@ final class EventLog: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return events.contains { if case .recording = $0 { return true }; return false }
     }
+    func hasWarning(containing messages: [String]) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return events.contains {
+            guard case .progress(let progress) = $0, let warning = progress.warning else { return false }
+            return messages.allSatisfy { warning.contains($0) }
+        }
+    }
 }
 
 private final class PausedWriterGate: @unchecked Sendable {
@@ -166,6 +173,28 @@ private final class PausedWriterGate: @unchecked Sendable {
         precondition(FileManager.default.fileExists(atPath: failureURL.appendingPathExtension("recording.json").path), "Failure journal must survive")
         try await ProgramRecordingFixtures.inspect(failureURL, expectedDuration: nil, checkSync: true)
         print("PASS: low-disk failure preserves playable partial audio/video and failure journal while independent source tasks continue")
+
+        let warningURL = folder.appendingPathComponent("journal-warning.mp4")
+        try? FileManager.default.removeItem(at: warningURL)
+        let blockedJournal = warningURL.appendingPathExtension("recording.json")
+        try? FileManager.default.removeItem(at: blockedJournal)
+        try FileManager.default.createDirectory(at: blockedJournal, withIntermediateDirectories: false)
+        let warningLog = EventLog()
+        let warningSession = ProgramRecordingSession(outputURL: warningURL, configuration: config,
+            spaceProbe: { _ in 500_000_000 }, event: warningLog.add)
+        try await feed(warningSession, seconds: 0.5)
+        try await waitForMediaEnd(warningSession, seconds: 0.5)
+        // A backward extra frame is predictably counted, without shedding any
+        // frame from the continuous media that will be decoded below.
+        warningSession.appendVideo(try ProgramRecordingFixtures.video(at: 0.1))
+        try await feed(warningSession, seconds: 0.9, offset: 0.5)
+        let warningResult = await finish(warningSession)
+        precondition(warningResult.completed && warningLog.failure() == nil, "Sidecar failure must preserve healthy media recording")
+        precondition(warningLog.hasWarning(containing: ["storage is low", "Recording dropped", "journal could not be saved"]),
+            "One authoritative progress event must retain simultaneous storage, media loss and journal warnings")
+        try await ProgramRecordingFixtures.inspect(warningURL, expectedDuration: 1.4, checkSync: true)
+        try FileManager.default.removeItem(at: blockedJournal)
+        print("PASS: actual blocked journal writes reach progress alongside low-space and dropped-frame warnings while synchronized media finalizes")
 
         let overloadURL = folder.appendingPathComponent("bounded-overload.mp4")
         try? FileManager.default.removeItem(at: overloadURL)

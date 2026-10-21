@@ -2,6 +2,15 @@ import AppKit
 import CoreMedia
 import CoreVideo
 
+/// Internal transport seam lets owned fixtures reject a command without launching
+/// a helper or touching capture permissions. Product sessions use the PID-checked
+/// connection below.
+protocol BrowserWidgetHelperTransport: AnyObject {
+    var pid: Int32 { get }
+    @MainActor func send(_ value: BrowserWidgetAudioCommand) throws
+    @MainActor func close()
+}
+
 /// Explicit qualification backend. No app startup or preference enables this session. One
 /// LaunchServices application owns each page's pixels, interaction, and shared audio identity.
 /// Callers must retain the session until `waitUntilStopped()` completes and apply its required
@@ -34,7 +43,7 @@ import CoreVideo
     private let applicationURL: URL
     private let audio: BrowserWidgetAudioCapture
     private let mixer: AudioMixEngine?
-    private var connection: BrowserWidgetHelperConnection?
+    private var connection: (any BrowserWidgetHelperTransport)?
     private var launchTask: Task<Void, Error>?
     private var shutdownTask: Task<Void, Never>?
     private var audioTask: Task<Void, Never>?
@@ -45,8 +54,10 @@ import CoreVideo
     private var evaluations: [UUID: CheckedContinuation<String?, Never>] = [:]
 
     init(applicationURL: URL, mixer: AudioMixEngine? = nil,
+         transportForQualification: (any BrowserWidgetHelperTransport)? = nil,
          audioSink: @escaping @Sendable (CMSampleBuffer) -> Void) {
         self.applicationURL = applicationURL; self.mixer = mixer
+        self.connection = transportForQualification
         audio = BrowserWidgetAudioCapture(mixer: mixer, sink: audioSink)
         audio.onFailure = { [weak self] category in self?.failSession(category) }
     }
@@ -88,7 +99,13 @@ import CoreVideo
     func release(_ id: UUID) {
         guard demands.removeValue(forKey: id) != nil else { return }
         pools[id] = nil; cancelSnapshot(for: id)
-        try? connection?.send(.init(action: .stop, widgetID: id))
+        do { try connection?.send(.init(action: .stop, widgetID: id)) }
+        catch {
+            // A full/closed command queue cannot leave this page audible while
+            // siblings keep the shared helper alive. Retire only this helper.
+            failSession("helper_stop_unconfirmed")
+            return
+        }
         if demands.isEmpty { beginShutdown() }
     }
     func waitUntilStopped() async { await shutdownTask?.value }
@@ -129,7 +146,8 @@ import CoreVideo
     }
     func setSuspended(id: UUID, suspended: Bool) {
         guard let demand = demands[id] else { return }
-        try? connection?.send(.init(action: suspended ? .suspend : .resume, widgetID: id, generation: demand.generation))
+        do { try connection?.send(.init(action: suspended ? .suspend : .resume, widgetID: id, generation: demand.generation)) }
+        catch { failSession("helper_suspension_unconfirmed") }
     }
 
     private func ensureLaunched() async throws {
@@ -247,7 +265,7 @@ import CoreVideo
 /// Separate bounded command and frame connections keep visual readback off audio queues. Both
 /// accepted peers must match the exact LaunchServices PID. Readers deliver at most one item to
 /// MainActor at a time; socket closure wakes them, and command writes have a 256 KiB / 64-item cap.
-private final class BrowserWidgetHelperConnection: @unchecked Sendable {
+private final class BrowserWidgetHelperConnection: BrowserWidgetHelperTransport, @unchecked Sendable {
     let pid: Int32
     private let application: NSRunningApplication
     private let command: FileHandle, frames: FileHandle

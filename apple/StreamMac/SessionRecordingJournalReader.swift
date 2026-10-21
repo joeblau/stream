@@ -37,7 +37,8 @@ enum SessionRecordingJournalReader {
                     let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
                     guard (values.fileSize ?? Int.max) <= 1_048_576 else { skipped = true; continue }
                     latest.append((url, values.contentModificationDate ?? .distantPast))
-                    latest.sort { $0.1 > $1.1 }; if latest.count > 200 { latest.removeLast() }
+                    latest.sort { $0.1 > $1.1 }
+                    if latest.count > 200 { latest.removeLast(); skipped = true }
                 }
                 var result = SessionRecoveryRecordingInventory(isVerified: seen < 5_000 && !skipped)
                 var recognized: Set<String> = [], markerBudget = 4_000
@@ -46,7 +47,9 @@ enum SessionRecordingJournalReader {
                     guard UUID(uuidString: journal.context.projectID ?? "") == projectID,
                           UUID(uuidString: journal.context.profileID ?? "") == profileID,
                           let id = UUID(uuidString: journal.sessionID) else { continue }
-                    let markers = (journal.markers ?? []).suffix(min(2_000, markerBudget)).map { SessionRecoveryMarker(id: $0.id, seconds: $0.seconds) }
+                    let markerLimit = min(2_000, markerBudget)
+                    if (journal.markers?.count ?? 0) > markerLimit { result.isVerified = false }
+                    let markers = (journal.markers ?? []).suffix(markerLimit).map { SessionRecoveryMarker(id: $0.id, seconds: $0.seconds) }
                     guard let file = journal.file ?? journal.progress?.file else { result.isVerified = false; continue }
                     if recognized.contains(file) { continue }
                     let segment = SessionRecoverySegment(sessionID: id, index: journal.segmentIndex, file: file,

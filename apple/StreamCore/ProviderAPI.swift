@@ -75,14 +75,21 @@ public struct ProviderAPI: Sendable {
         let object = try await object(.twitch, path: "/helix/streams", query: ["user_id": channelID])
         guard let rows = object["data"] as? [[String: Any]] else { throw ProviderFailure(.invalidResponse) }
         // Empty means no visible active stream; no fabricated zero or event end.
-        guard let value = rows.first?["viewer_count"] as? Int, value >= 0 else { return nil }
-        return value
+        guard !rows.isEmpty else { return nil }
+        guard rows.count == 1, rows[0]["user_id"] as? String == channelID else { throw ProviderFailure(.invalidResponse) }
+        guard let number = rows[0]["viewer_count"] as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite,
+              number.doubleValue >= 0, number.doubleValue < Double(Int.max),
+              number.doubleValue.rounded() == number.doubleValue else { return nil }
+        return number.intValue
     }
     public func youtubeViewers(eventID: String) async throws -> Int? {
         guard ProviderChannel.validID(eventID) else { throw ProviderFailure(.invalidRequest) }
         let object = try await object(.youtube, path: "/youtube/v3/videos", query: ["part": "liveStreamingDetails", "id": eventID])
         guard let rows = object["items"] as? [[String: Any]] else { throw ProviderFailure(.invalidResponse) }
-        let raw = (rows.first?["liveStreamingDetails"] as? [String: Any])?["concurrentViewers"] as? String
+        guard !rows.isEmpty else { return nil }
+        guard rows.count == 1, rows[0]["id"] as? String == eventID else { throw ProviderFailure(.invalidResponse) }
+        let raw = (rows[0]["liveStreamingDetails"] as? [String: Any])?["concurrentViewers"] as? String
         return raw.flatMap(Int.init).flatMap { $0 >= 0 ? $0 : nil }
     }
     public func twitchStreamKey(channelID: String) async throws -> String {

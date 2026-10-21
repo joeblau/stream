@@ -255,8 +255,24 @@ final class ProviderAccountSession: ObservableObject {
         if let until = accounts[provider]?.retryUntil, until > Date() {
             throw ProviderFailure(.rateLimited, retryAfter: until.timeIntervalSinceNow)
         }
-        do { return try await vault.send(provider, request: request) }
+        let epoch = endingEpoch(provider), lease = endingIntentLease(provider)
+        let credential = await vault.generation(provider)
+        guard !closed, endingEpoch(provider) == epoch, lease.isCurrent(), !Task.isCancelled else { throw CancellationError() }
+        do {
+            let data = try await vault.send(provider, request: request, expectedGeneration: credential,
+                                            authorizationIsCurrent: lease.isCurrent)
+            let currentCredential = await vault.generation(provider)
+            guard !closed, endingEpoch(provider) == epoch, lease.isCurrent(),
+                  currentCredential == credential, !Task.isCancelled else { throw CancellationError() }
+            return data
+        }
         catch {
+            let revokedGeneration = (error as? ProviderFailure)?.kind == .authorization
+                ? await vault.revocationGeneration(provider, previous: credential) : nil
+            let currentCredential = await vault.generation(provider)
+            guard !closed, endingEpoch(provider) == epoch, lease.isCurrent(),
+                  currentCredential == credential || currentCredential == revokedGeneration,
+                  !Task.isCancelled else { throw CancellationError() }
             if (error as? ProviderFailure)?.kind == .authorization {
                 accounts[provider]?.hasCredential = false; accounts[provider]?.scopes = []; accounts[provider]?.verifiedAt = nil
                 accounts[provider]?.failure = Self.failure(error)
@@ -315,10 +331,16 @@ final class ProviderAccountSession: ObservableObject {
         Dictionary(events.map { ($0.id, $0) }, uniquingKeysWith: { first, second in first.verifiedAt > second.verifiedAt ? first : second })
             .values.sorted { $0.verifiedAt > $1.verifiedAt }.prefix(2_000).sorted { ($0.scheduledAt ?? .distantFuture) < ($1.scheduledAt ?? .distantFuture) }
     }
-    func event(_ binding: ProviderDestinationBinding) -> ProviderEvent? {
-        guard accounts[binding.provider]?.verifiedAt != nil,
-              let event = accounts[binding.provider]?.events.first(where: { $0.id == binding.eventID }),
-              Date().timeIntervalSince(event.verifiedAt) <= 60 else { return nil }
+    /// A cached public receipt can supply a stale timestamp/link for display.
+    /// Call `event` before making a current-state or recovery assertion.
+    func eventReceipt(_ binding: ProviderDestinationBinding) -> ProviderEvent? {
+        guard !closed, let event = accounts[binding.provider]?.events.first(where: { $0.id == binding.eventID }),
+              event.provider == binding.provider, event.channelID == binding.channelID else { return nil }
+        return event
+    }
+    func event(_ binding: ProviderDestinationBinding, at now: Date = Date()) -> ProviderEvent? {
+        guard accounts[binding.provider]?.verifiedAt != nil, accounts[binding.provider]?.failure == nil,
+              let event = eventReceipt(binding), event.isFresh(at: now) else { return nil }
         return event
     }
     func recoveryEvents(activeIDs: [UUID], destinations: [StreamDestination]) -> [SessionRecoveryRemoteEvent] {
@@ -388,9 +410,10 @@ final class ProviderAccountSession: ObservableObject {
               managedReadGenerations[.youtube]?.session == endingEpoch(.youtube), !Task.isCancelled else { throw ProviderFailure(.authorization) }
         return receipt
     }
-    func viewerCount(_ binding: ProviderDestinationBinding) -> Int? {
+    func viewerCount(_ binding: ProviderDestinationBinding, at now: Date = Date()) -> Int? {
         let key = Self.viewerKey(binding)
-        guard accounts[binding.provider]?.failure == nil, let date = viewerDates[key], Date().timeIntervalSince(date) <= 60 else { return nil }
+        guard accounts[binding.provider]?.failure == nil, let date = viewerDates[key],
+              (0...60).contains(now.timeIntervalSince(date)) else { return nil }
         return viewers[key]
     }
     static func viewerKey(_ binding: ProviderDestinationBinding) -> String { "\(binding.provider.rawValue):\(binding.eventID ?? binding.channelID)" }

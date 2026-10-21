@@ -39,6 +39,11 @@ struct StudioKeyChord: Codable, Equatable, Hashable {
         }
         return keyCode == 53 || keyCode == 48 // Escape and Tab preserve navigation.
     }
+    var isValid: Bool {
+        keyCode <= 127 && modifiers >= 0 && modifiers <= 15
+            && !keyLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && keyLabel.count <= 64 && !keyLabel.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    }
 }
 
 struct StudioShortcutBinding: Codable, Equatable, Identifiable {
@@ -56,6 +61,21 @@ struct StudioShortcutDocument: Codable, Equatable {
     // Master global consent is machine-local and never travels in a project.
     enum CodingKeys: String, CodingKey { case version, seededDefaults, bindings }
 
+    /// Imported project preferences must obey the same constraints as recording
+    /// in the editor, before any local/global routing is installed.
+    var validationError: String? {
+        var ids: Set<UUID> = []
+        var chords: Set<StudioKeyChord> = []
+        for binding in bindings {
+            guard ids.insert(binding.id).inserted else { return "Duplicate shortcut identifier." }
+            guard !binding.commandID.isEmpty, binding.commandID.count <= 512 else { return "Invalid shortcut target." }
+            guard binding.chord.isValid, !binding.chord.isReserved else { return "Invalid or reserved shortcut key." }
+            guard !binding.global || binding.chord.supportsGlobal else { return "Global shortcuts require Command and Option or Control." }
+            guard chords.insert(binding.chord).inserted else { return "This shortcut is assigned more than once." }
+        }
+        return nil
+    }
+
     func conflict(for chord: StudioKeyChord, excluding id: UUID? = nil) -> StudioShortcutBinding? {
         bindings.first { $0.id != id && $0.chord == chord }
     }
@@ -67,6 +87,7 @@ struct StudioShortcutDocument: Codable, Equatable {
     }
     mutating func assign(commandID: String, chord: StudioKeyChord,
                          global: Bool, replacing id: UUID? = nil) -> String? {
+        guard chord.isValid, !commandID.isEmpty, commandID.count <= 512 else { return "Choose a valid key and shortcut target." }
         guard !chord.isReserved else { return "This shortcut is reserved for menus, text editing, or keyboard navigation." }
         guard !global || chord.supportsGlobal else { return "Global shortcuts require Command and Option or Control." }
         guard conflict(for: chord, excluding: id) == nil else { return "This shortcut is already assigned. Remove its existing binding first." }

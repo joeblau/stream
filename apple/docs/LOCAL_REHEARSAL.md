@@ -17,6 +17,13 @@ actual active/finalizing publishing owners, alongside studio-wide recording
 reservations. The total studio limit and the user-set publishing budget remain
 separate; the budget does not certify hardware capacity.
 
+The embedded uplink check accepts only finite positive measurements. Unknown,
+zero, negative and nonfinite values remain unverified rather than passing the
+headroom check. Invalid requirements and impossible encoder reservations fail
+readiness without overflowing integer accounting. The explicit test uses at
+most 32 MiB of synthetic HTTP upload over about ten seconds; it does not send
+studio media or qualify the route to a provider's ingest server.
+
 Run `apple/scripts/run_local_rehearsal_harness.zsh`. It compiles the actual
 StreamController, RecordingController, compositor, mixer and Apple writer;
 exercises the shipping rehearsal entry point; checks countdown/preparation

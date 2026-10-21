@@ -61,6 +61,10 @@ struct ProjectBrowserView: View {
             }.disabled(workspace.packageBusy)
             Text("Transfers exclude credentials, device identities, remote widget URLs, and sandbox bookmarks. Missing assets can be relinked in Assets.")
                 .font(.caption).foregroundStyle(.secondary)
+            Text(includeMedia
+                 ? "Include media copies every library asset, including folder contents. Relink unavailable assets before exporting."
+                 : "References only: media files, local paths, and access grants are omitted. Relink assets on the receiving Mac.")
+                .font(.caption).foregroundStyle(.secondary)
             if workspace.pending != nil {
                 HStack {
                     Text(workspace.canSwitch ? "Apply opens the staged show and stops local preview." : "Stop streaming and recording before applying the staged show.")
