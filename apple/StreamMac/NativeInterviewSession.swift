@@ -432,7 +432,7 @@ import Foundation
                                    screenApproved: member.screenApproved, screenSharing: member.screenSharing,
                                    membershipRevision: member.membershipRevision)
                     if state == .waiting {
-                        member.media = .unavailable; member.returnAudio = .unavailable; member.returnVideo = .unavailable; member.returnVideoSource = .program; member.publicChat = .unavailable; member.publicChatDropped = 0; member.screenApproved = false; member.screenSharing = false
+                        member.media = .unavailable; member.returnAudio = .unavailable; member.returnVideo = .unavailable; member.returnVideoSource = .program; member.returnVideoProfile = .low; member.publicChat = .unavailable; member.publicChatDropped = 0; member.screenApproved = false; member.screenSharing = false
                     }
                     members.append(member)
                 }
@@ -719,7 +719,7 @@ import Foundation
     private func dropPeer(_ id: UUID) {
         clearPrivateMessages()
         peers.removeValue(forKey: id)?.retire()
-        updateMember(id) { $0.media = .unavailable; $0.returnAudio = .unavailable; $0.returnVideo = .unavailable; $0.returnVideoSource = .program; $0.publicChat = .unavailable; $0.publicChatDropped = 0; $0.screenApproved = false; $0.screenSharing = false }
+        updateMember(id) { $0.media = .unavailable; $0.returnAudio = .unavailable; $0.returnVideo = .unavailable; $0.returnVideoSource = .program; $0.returnVideoProfile = .low; $0.publicChat = .unavailable; $0.publicChatDropped = 0; $0.screenApproved = false; $0.screenSharing = false }
     }
     private func failPeer(_ id: UUID, _ failure: NativeInterviewError) {
         dropPeer(id); updateMember(id) { $0.media = .failed }; snapshot.failure = failure
