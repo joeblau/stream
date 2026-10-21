@@ -24,6 +24,6 @@ export function analyzeReturnAV(file){
   const flash=Number(video[white].best_effort_timestamp_time);
   assert(tone!==undefined&&tone>.1&&flash>.1,'Recorded actual decoded return has distinct silent/black baseline and tone/flash cues');
   const delta=flash-tone;
-  assert(Math.abs(delta)<.1,`Actual 15fps decoded guest return flash/tone delta ${delta}s exceeds100ms`);
+  assert(Math.abs(delta)<.1,`Decoded captured-track flash/tone delta ${delta}s exceeds100ms`);
   return{videoFrames:video.length,audioFrames:samples,flashSeconds:flash,toneSeconds:tone,deltaSeconds:delta,maximumDeltaSeconds:.1};
 }
