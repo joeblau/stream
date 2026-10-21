@@ -23,6 +23,11 @@ for key in ["NSCameraUsageDescription", "NSMicrophoneUsageDescription"]:
     assert info.get(key), key
 executable = app / "Contents/MacOS" / info["CFBundleExecutable"]
 assert executable.is_file(), executable
+# Xcode's Debug executable can be a trampoline into a neighboring debug dylib.
+# Inspect both forms so transport fault injection cannot pass a bundle audit.
+for binary in {executable, *(app / "Contents/MacOS").glob("*.dylib")}:
+    symbols = subprocess.check_output(["nm", "-gj", str(binary)], text=True, stderr=subprocess.PIPE)
+    assert "SGReceiverValidation" not in symbols, "Guest transport fault injection in distribution payload"
 metadata = app / "Contents/Resources/Metadata.appintents/extract.actionsdata"
 with metadata.open("rb") as file:
     intents = json.load(file)
@@ -65,6 +70,7 @@ assert helper_entitlements.get("com.apple.security.application-groups") == ["gro
 assert not helper_entitlements.get("com.apple.security.get-task-allow")
 architectures = subprocess.check_output(["lipo", "-archs", str(executable)], text=True).strip()
 print("Desktop bundle and sandbox declarations validated:", architectures)
+print("Guest transport validation hooks are absent from the executable payload.")
 print("All six studio App Intents and three stable-target entities are present in extracted bundle metadata.")
 print("Embedded CMIO camera, matching team/App Group namespace and sandbox declarations validated.")
 print("Embedded browser helper and sandbox declarations validated; production audio route remains gated.")
