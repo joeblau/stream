@@ -541,11 +541,16 @@ extern "C" SGReturnVideoFeedback SGReceiverReturnVideoFeedback(SGReceiver *recei
         result.extended_highest_sequence = feedback.extended_highest_sequence; result.jitter_90khz = feedback.jitter_90khz;
         result.remb_bits_per_second = feedback.remb_bits_per_second;
         result.remb_negotiated = receiver->state->returnVideoRembNegotiated;
+        result.sent_packets = receiver->returnVideoPackets;
+        result.sent_payload_bytes = receiver->returnVideoBytes;
         result.buffered_bytes = uint32_t(std::min(uint64_t(track->bufferedAmount()), uint64_t(UINT32_MAX)));
         return result;
     } catch (...) {
         result = {}; result.rr_age_milliseconds = result.remb_age_milliseconds = -1; return result;
     }
+}
+extern "C" uint32_t SGReturnH264RTPBytes(const uint8_t *data, size_t bytes) {
+    return stream_guest_return::rtpBytes(data, bytes);
 }
 extern "C" int SGReceiverSendReturnH264(SGReceiver *receiver, uint64_t generation,
                                         const uint8_t *data, size_t bytes, uint32_t timestamp, uint64_t ntp) {

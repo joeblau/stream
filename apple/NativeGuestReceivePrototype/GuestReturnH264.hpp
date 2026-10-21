@@ -68,4 +68,15 @@ bool packetize(const uint8_t *data, const AccessUnit &unit, uint32_t timestamp, 
     }
     return true;
 }
+// Exact next-AU admission charge, using the shipping packetizer with local
+// counters only. No network callback, sequence reservation or sender mutation.
+inline uint32_t rtpBytes(const uint8_t *data, size_t bytes) {
+    AccessUnit unit;
+    if (!parse(data, bytes, unit)) return 0;
+    uint16_t sequence = 0;
+    uint32_t packets = 0, octets = 0;
+    if (!packetize(data, unit, 0, 1, sequence, packets, octets,
+                   [](const uint8_t *, size_t) { return true; })) return 0;
+    return octets + 12 * packets;
+}
 }
