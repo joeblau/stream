@@ -30,14 +30,18 @@ choices persist as allowlisted strings in the project-local `audience-styles.jso
 promotion do not exist. A retired coordinator cannot promote, edit styles or
 apply retained UI actions. Actual card
 colors/text travel in the ordinary scene document. The existing queue/message
-bounds and shared dispatcher/renderer resource limits still apply. Alert promotion
-does not load avatars, stickers, emote graphics, audio, HTML or any remote media.
+bounds and shared dispatcher/renderer resource limits still apply. Text-only Stage Alert
+does not load avatars, stickers, emote graphics, audio, HTML or remote media.
+Separate explicit static Twitch tile buttons are described in
+[STATIC_TWITCH_EMOTES.md](STATIC_TWITCH_EMOTES.md); they are off by default and
+also require Take.
 Provider removal invalidates future promotion of that message; a deliberately
 staged/taken card remains ordinary scene content. A warning directs the operator
 to Hide and Take, avoiding an unsolicited output change.
 
-Image emotes/stickers, reaction feeds and unsupported provider events are
-unavailable here. This sidebar does not refresh viewer metrics from chat
+Animated emotes, sticker artwork, reaction feeds and unsupported provider
+events are unavailable here. Only the separately enabled static Twitch tile
+slice supports provider artwork. This sidebar does not refresh viewer metrics from chat
 payloads. Existing authorized provider-account readings in Destinations have
 their own capability and freshness checks; no combined count or unique-person
 claim is made by these cards. Adaptive/animated event media and additional
@@ -58,5 +62,6 @@ YouTube event and Twitch emote normalization through the provider adapters.
 
 No authorized live provider feed, real OAuth grant or external audience event
 was used. Live ordering/rate/permission acceptance and actual presentation from
-authorized test feeds remain open, as do viewer counts and remote event media.
+authorized test feeds remain open, as do viewer counts and unsupported remote
+event media. The static Twitch tile document records its separate local proofs.
 These local proofs do not close #143.

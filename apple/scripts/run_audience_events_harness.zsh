@@ -25,7 +25,7 @@ require File.join(root, 'scripts/guest_fixture_boundaries')
 # Owned defaults/storage, nil credentials and refused desktop transports.
 # Shipping decoders/coordinator/dispatcher/renderer/persistence are unchanged.
 StreamGuestFixtureBoundaries.apply(spec['targets']['StreamCore'], target, root, folder)
-target['sources'] << File.join(root, 'scripts/audience_events_harness.swift')
+target['sources'] += ['audience_events_harness.swift', 'static_emote_audience_fixture.swift'].map { |file| File.join(root, 'scripts', file) }
 spec['targets']['AudienceEventsHarness'] = target
 spec['schemes']['AudienceEventsHarness'] = {'build' => {'targets' => {'AudienceEventsHarness' => 'all'}}}
 File.write(File.join(folder, 'project.json'), JSON.pretty_generate(spec))

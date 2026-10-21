@@ -41,6 +41,7 @@ struct DirectChatSnapshot {
     private var cycles: [UUID: Cycle] = [:]
     private var currentCycle: UUID?
     private var reconnectAttempts = 0
+    private var emoteReadPending = false, emoteReadAfter = Date.distantPast
     private final class Cycle {
         let id = UUID()
         let socket: any StudioChatSocket
@@ -148,6 +149,29 @@ struct DirectChatSnapshot {
             page = result.nextPage
             try await sleep(result.interval)
         }
+    }
+    /// Deliberate bounded metadata read through the same authenticated reader.
+    /// No extra OAuth flow, subscription, automatic fetch or retry is created.
+    func staticEmoteURL(for message: StudioChatMessage) async throws -> URL {
+        guard let metadata = message.staticEmote, metadata.valid, let generation = generations[.twitch],
+              current(.twitch, generation), let account = active[.twitch], snapshot(.twitch).isConnected,
+              snapshot(.twitch).state == "Connected", let route = routes[message.id], route.provider == .twitch,
+              route.chatID == account.1, message.connectionID == StudioDirectChatDecoder.connection(.twitch, route.chatID),
+              !emoteReadPending, now() >= emoteReadAfter,
+              (cooldowns[.twitch] ?? .distantPast) <= now() else { throw ProviderFailure(.unavailable) }
+        emoteReadPending = true; emoteReadAfter = now().addingTimeInterval(1)
+        defer { emoteReadPending = false }
+        let path = metadata.setID == "0" ? "/helix/chat/emotes/global" : "/helix/chat/emotes/set"
+        var query: [String: String] = [:]
+        if metadata.setID != "0" { query["emote_set_id"] = metadata.setID }
+        var read = try ProviderAPI.request(.twitch, path: path, query: query)
+        read.timeoutInterval = 5
+        let data = try await request(.twitch, read)
+        guard current(.twitch, generation), active[.twitch]?.1 == account.1,
+              snapshot(.twitch).isConnected, snapshot(.twitch).state == "Connected", routes[message.id] != nil else {
+            throw CancellationError()
+        }
+        return try StudioDirectChatDecoder.twitchStaticEmote(data, metadata: metadata)
     }
     private func receive(_ delivery: DirectChatDelivery) {
         let id = delivery.message.id

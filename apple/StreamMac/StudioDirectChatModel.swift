@@ -149,10 +149,44 @@ enum StudioDirectChatDecoder {
         let hasEmote = (message["fragments"] as? [[String: Any]])?.prefix(1_000).contains { fragment in
             fragment["type"] as? String == "emote" && (fragment["emote"] as? [String: Any]).flatMap { identifier($0["id"]) } != nil
         } ?? false
+        var staticEmote: StudioChatStaticEmote?
+        if let fragments = message["fragments"] as? [[String: Any]], fragments.count <= 256 {
+            let fragmentsText = fragments.compactMap { text($0["text"]) }
+            if fragmentsText.count == fragments.count && fragmentsText.joined() == content {
+                for fragment in fragments where fragment["type"] as? String == "emote" {
+                    guard let emote = fragment["emote"] as? [String: Any],
+                          let id = identifier(emote["id"]), let set = identifier(emote["emote_set_id"]),
+                          let label = text(fragment["text"], limit: 256), let formats = emote["format"] as? [String],
+                          formats.count <= 2, formats.contains("static"), Set(formats).isSubset(of: ["static", "animated"]) else { continue }
+                    let candidate = StudioChatStaticEmote(id: id, setID: set, label: label)
+                    if candidate.valid { staticEmote = candidate; break }
+                }
+            }
+        }
         let normalized = StudioChatMessage(id: identity(.twitch, channelID, id), connectionID: connection(.twitch, channelID),
             platform: "Twitch", author: name, roles: roles, text: content, timestamp: time ?? receivedAt,
-            timestampIsReceiptTime: time == nil, kind: hasEmote ? "Emotes" : "Text", avatarURL: nil)
+            timestampIsReceiptTime: time == nil, kind: hasEmote ? "Emotes" : "Text", avatarURL: nil, staticEmote: staticEmote)
         return envelope(delivery: .init(message: normalized, route: .init(provider: .twitch, channelID: channelID,
             chatID: channelID, providerMessageID: id, authorID: authorID, roles: roles, timestamp: time ?? receivedAt)))
     }
+    /// Capabilities and template come from the existing authorized Emote API,
+    /// never an event-supplied URL or a guessed format/theme/scale.
+    static func twitchStaticEmote(_ data: Data, metadata: StudioChatStaticEmote) throws -> URL {
+        let object = try object(data, limit: 524_288)
+        let template = "https://static-cdn.jtvnw.net/emoticons/v2/{{id}}/{{format}}/{{theme_mode}}/{{scale}}"
+        guard metadata.valid, object["template"] as? String == template,
+              let items = object["data"] as? [[String: Any]], items.count <= 1_024 else { throw ProviderFailure(.invalidResponse) }
+        let matching = items.filter { $0["id"] as? String == metadata.id }
+        guard matching.count == 1, let item = matching.first,
+              metadata.setID == "0" || item["emote_set_id"] as? String == metadata.setID,
+              let formats = item["format"] as? [String], formats.count <= 2, formats.contains("static"),
+              let themes = item["theme_mode"] as? [String], themes.count <= 2, themes.contains("light"),
+              let scales = item["scale"] as? [String], scales.count <= 3, scales.contains("3.0"),
+              let url = URL(string: template.replacingOccurrences(of: "{{id}}", with: metadata.id)
+                .replacingOccurrences(of: "{{format}}", with: "static")
+                .replacingOccurrences(of: "{{theme_mode}}", with: "light")
+                .replacingOccurrences(of: "{{scale}}", with: "3.0")) else { throw ProviderFailure(.unavailable) }
+        return url
+    }
+
 }

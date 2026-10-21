@@ -78,6 +78,12 @@ private final class FixtureTime: @unchecked Sendable {
     var writeFailures: [ManagedProvider: ProviderFailure] = [:]
     var holdWrites: Set<ManagedProvider> = []
     var heldWrites: [ManagedProvider: CheckedContinuation<Data, Error>] = [:]
+    var holdEmotes = false, emoteReads = 0
+    var lateEmote: CheckedContinuation<Data, Error>?
+    func emoteMetadata() -> Data {
+        json(["template": "https://static-cdn.jtvnw.net/emoticons/v2/{{id}}/{{format}}/{{theme_mode}}/{{scale}}",
+            "data": [["id": "25", "emote_set_id": "0", "format": ["static"], "theme_mode": ["light", "dark"], "scale": ["1.0", "2.0", "3.0"]]]])
+    }
     var malformedBan = false
     var banDurationOverride: Double?
     var rateLimitedReads = 0
@@ -85,6 +91,12 @@ private final class FixtureTime: @unchecked Sendable {
     func send(_ provider: ManagedProvider, _ call: URLRequest) async throws -> Data {
         calls.append((provider, call))
         let path = call.url!.path, method = call.httpMethod ?? "GET"
+        if path == "/helix/chat/emotes/global" || path == "/helix/chat/emotes/set" {
+            precondition(provider == .twitch && method == "GET" && call.httpBody == nil)
+            emoteReads += 1
+            if holdEmotes { return try await withCheckedThrowingContinuation { lateEmote = $0 } }
+            return emoteMetadata()
+        }
         if path == "/youtube/v3/liveBroadcasts" {
             if holdBroadcast { return try await withCheckedThrowingContinuation { lateBroadcast = $0 } }
             return broadcast()
@@ -149,7 +161,7 @@ private func twitchControl(_ type: String, session: String = "session-one", reco
 }
 private func twitchEvent(_ id: String, type: String = "channel.chat.message", author: String = "viewer", moderator: Bool = false) -> Data {
     var event: [String: Any] = ["broadcaster_user_id": "owner", "chatter_user_id": author, "chatter_user_name": "Viewer 世界",
-        "message_id": id, "message": ["text": "Hello 👩🏽‍🚀 世界 Kappa", "fragments": [["type": "emote", "text": "Kappa", "emote": ["id": "25"]]]],
+        "message_id": id, "message": ["text": "Hello 👩🏽‍🚀 世界 Kappa", "fragments": [["type": "text", "text": "Hello 👩🏽‍🚀 世界 "], ["type": "emote", "text": "Kappa", "emote": ["id": "25", "emote_set_id": "0", "format": ["static"]]]]],
         "badges": [["set_id": moderator ? "moderator" : "subscriber"]]]
     if type == "channel.chat.clear_user_messages" { event["target_user_id"] = author }
     return json(["metadata": ["message_type": "notification", "message_timestamp": ISO8601DateFormatter().string(from: Date())],
@@ -305,8 +317,40 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         let tombstone = try StudioDirectChatDecoder.youtube(youtubePage([["id": "deleted", "snippet": ["type": "tombstone", "liveChatId": "live-chat"]]]), channelID: "owner", chatID: "live-chat")
         precondition(tombstone.deliveries.isEmpty && tombstone.removedIDs.count == 1)
         precondition(StudioDirectChatDecoder.date("2026-10-02T19:30:00.123456789Z") != nil)
+        try await validateStaticEmotes()
         try await validateOutbox()
         print("PASS: actual direct chat manager HTTP/WebSocket fixtures; granted-scope readers, provider intervals/page tokens, Unicode/kinds/roles, relay dedup, targeted deletion/tombstones, explicit send acknowledgement/no retry/echo, migration without resubscription, disconnect resubscription, independent stop, cancellation and late HTTP/socket rejection")
+    }
+    @MainActor static func validateStaticEmotes() async throws {
+        let http = HTTPFixture(), socket = FixtureSocket(), stream = StreamFixture(), clock = FixtureTime()
+        let manager = StudioDirectChatManager(request: http.send, identity: { _ in .init(channelID: "owner", scopes: ["user:read:chat"]) },
+            socketFactory: { _ in socket }, now: clock.now, emit: stream.receive)
+        manager.connect(.twitch); await until { !manager.snapshot(.twitch).target.isEmpty }
+        socket.push(twitchControl("session_welcome")); await until { manager.snapshot(.twitch).isConnected }
+        socket.push(twitchEvent("static-emote")); await until { stream.queue.messages.count == 1 }
+        let message = stream.queue.messages[0]
+        precondition(message.staticEmote == .init(id: "25", setID: "0", label: "Kappa"))
+        let url = try await manager.staticEmoteURL(for: message)
+        precondition(url.absoluteString == "https://static-cdn.jtvnw.net/emoticons/v2/25/static/light/3.0" && http.emoteReads == 1)
+        do { _ = try await manager.staticEmoteURL(for: message); preconditionFailure("Metadata read rate guard missing") } catch {}
+        precondition(http.emoteReads == 1)
+        let metadata = message.staticEmote!
+        var object = try JSONSerialization.jsonObject(with: http.emoteMetadata()) as! [String: Any]
+        for template in ["https://evil.invalid/{{id}}", "https://static-cdn.jtvnw.net@evil.invalid/{{id}}"] {
+            object["template"] = template
+            do { _ = try StudioDirectChatDecoder.twitchStaticEmote(json(object), metadata: metadata); preconditionFailure() } catch {}
+        }
+        for (key, value) in [("format", ["animated"]), ("theme_mode", ["dark"]), ("scale", ["1.0"])] {
+            object = try JSONSerialization.jsonObject(with: http.emoteMetadata()) as! [String: Any]
+            var items = object["data"] as! [[String: Any]]; items[0][key] = value; object["data"] = items
+            do { _ = try StudioDirectChatDecoder.twitchStaticEmote(json(object), metadata: metadata); preconditionFailure() } catch {}
+        }
+        clock.advance(2); http.holdEmotes = true
+        let pending = Task { try await manager.staticEmoteURL(for: message) }
+        await until { http.lateEmote != nil }; manager.shutdown()
+        http.lateEmote?.resume(returning: http.emoteMetadata()); http.lateEmote = nil
+        do { _ = try await pending.value; preconditionFailure("Late metadata read survived reader retirement") } catch {}
+        print("PASS: authorized shared Twitch reader static emote identity/template/capability lookup; one-per-second metadata guard, no guessed artwork URL and retired-response refusal")
     }
     @MainActor static func validateOutbox() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("stream-chat-presets-" + UUID().uuidString)

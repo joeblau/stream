@@ -148,6 +148,7 @@ private func requireAudience(_ value: @autoclosure () -> Bool, _ reason: String)
         reloaded.createAlertSlot(); reloaded.hideAudienceAlert(); reloaded.advanceAudienceAlertPage(1)
         requireAudience(!reloaded.stageAudienceAlert(message.id) && preview.stagedScene == retired
             && (try? Data(contentsOf: preferences)) == persisted, "A retained old chat session mutated composition or style metadata")
+        try await StaticEmoteAudienceFixture.run(folder: folder)
         print("PASS: actual public event decoder/coordinator/dispatcher/native renderer; off-by-default manual promotion, separate bounded slots and per-event palettes, arrival/setting/direct-live/removed-event refusal, exact Unicode/literal braces, native pixels only after Take, staged Hide/pages, style reload without rearming; no credentials/device/media fetch. Artifact: \(output.path)")
     }
 }
