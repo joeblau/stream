@@ -1,12 +1,16 @@
 # Native guest routing progress
 
-The native receiver is an isolated public-SDK prototype. Its
+The production desktop target links the application-owned public-SDK receiver
+through the native interview manager, receiver adapter and controller-issued
+leased media sink. Its separate
 [transport and codec qualification](../NativeGuestReceivePrototype/README.md)
 uses real libdatachannel peers, H.264 video and public AudioToolbox Opus decoding.
 A separate Chrome fixture exercises the shipping guest page against that native
-host. The receiver is not linked into the production app target, and the guest
-manager remains unavailable while native session control and return routing are
-unfinished.
+host. [Native session control](NATIVE_INTERVIEW_CONTROL.md),
+[manager-to-Program/ISO recording](NATIVE_INTERVIEW_PROGRAM_ISO.md) and
+[stereo mix-minus audio return](NATIVE_GUEST_RETURN_AUDIO.md) each document their
+actual software route and remaining acceptance gates. Native video return is
+still unavailable.
 
 The application has explicit runtime-owned video and audio admission boundaries:
 
@@ -104,6 +108,16 @@ genuine whole-sample gaps. These local results do not establish hosted Intel
 qualification before its workflow finishes.
 
 Native interview UI, deployed TURN, real screen-picker/capture permissions,
-mobile and restricted networks, guest returns, recipient-specific mix-minus,
-private talkback, long calls, measured capacity and older supported systems
+mobile and restricted networks, native guest video return, physical acoustic
+AEC, private talkback, long calls, measured capacity and older supported systems
 remain unqualified. Passing these fixtures does not close those acceptance tasks.
+
+On 2026-10-21, the frame store, full-source renderer/controller, incoming native
+H.264/Opus receiver, guest mixer/audio ISO, native stereo Opus return/mix-minus,
+receiver approval/return-close races and actual native guest Program/ISO tools
+all passed on an M3 Max (ARM64), macOS 27.2 (26B118), Xcode 27.2 (27B5038j).
+The recorded Program flash/tone difference was 2.21ms and the associated guest
+ISO difference was 0.54ms. Both recordings shared their endpoints and all
+281,608 decoded Float32 values matched bit for bit. This rerun used owned media
+and isolated fixture storage; it does not add physical-device, Internet or
+other-architecture qualification.
