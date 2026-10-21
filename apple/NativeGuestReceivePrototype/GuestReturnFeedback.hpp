@@ -44,11 +44,16 @@ inline bool parse(const uint8_t *data, size_t size, uint32_t remoteSSRC,
                 pending.extended_highest_sequence = read32(block + 8);
                 pending.jitter_90khz = read32(block + 12);
             }
-        } else if (type == 206 && count == 15) {
-            // Other application feedback is ignored, but must have its common
-            // sender/media header. REMB itself has an exact bounded SSRC list.
+        } else if (type == 205 || type == 206) {
+            // RFC4585 feedback always includes sender and media SSRCs, even
+            // when its opaque FCI is ignored. A malformed trailing feedback
+            // member must not publish an earlier RR/REMB in this compound.
             if (length < 12) return false;
-            if (length >= 16 && std::memcmp(p + 12, "REMB", 4) == 0) {
+            if (type == 205 && count == 1 && length < 16) return false; // NACK: one or more 4-byte entries.
+            if (type == 206 && count == 1 && length != 12) return false; // PLI: no FCI.
+            if (type == 206 && count == 4 && (length < 20 || (length - 12) % 8)) return false; // FIR: 8-byte entries.
+            // Other FCI stays opaque. REMB has an exact bounded SSRC list.
+            if (type == 206 && count == 15 && length >= 16 && std::memcmp(p + 12, "REMB", 4) == 0) {
                 if (length < 20 || read32(p + 8) != 0) return false;
                 const size_t sources = p[16];
                 if (!sources || length != 20 + sources * 4) return false;

@@ -60,6 +60,36 @@ int main() {
     put32(sr, 4, remote + 1); assert(!parse(sr, value));
     auto compound = rr(); auto estimate = remb(); compound.insert(compound.end(), estimate.begin(), estimate.end());
     assert(parse(compound, value) && value.rr_reports == 1 && value.remb_reports == 1);
+    // Ignored RTPFB/PSFB still require the RFC4585 common sender/media
+    // header. Every malformed trailing member rejects the whole publication.
+    for (auto type : {205, 206}) for (auto format : {1, 4, 15, 31}) for (auto length : {4, 8}) {
+        auto tail = compound;
+        Bytes member(length); member[0] = uint8_t(128 | format); member[1] = uint8_t(type); member[3] = uint8_t(length / 4 - 1);
+        tail.insert(tail.end(), member.begin(), member.end());
+        value.rr_reports = 987; value.remb_reports = 654; value.remb_bits_per_second = 321;
+        assert(!parse(tail, value) && value.rr_reports == 987 && value.remb_reports == 654 && value.remb_bits_per_second == 321);
+    }
+    const auto feedback = [](uint8_t type, uint8_t format, size_t length) {
+        Bytes member(length); member[0] = uint8_t(128 | format); member[1] = type; member[3] = uint8_t(length / 4 - 1);
+        put32(member, 4, remote);
+        if (type == 206 && format == 4) {
+            // FIR identifies its target in each FCI entry, not the common media SSRC.
+            for (size_t offset = 12; offset + 8 <= length; offset += 8) put32(member, offset, video);
+        } else { put32(member, 8, video); }
+        return member;
+    };
+    for (const auto &valid : {feedback(206, 1, 12), feedback(205, 1, 16), feedback(205, 1, 20), feedback(206, 4, 20), feedback(206, 4, 28)}) {
+        // Reduced-size standalone feedback remains accepted and adds no
+        // measured capacity or receive statistics of its own.
+        assert(parse(valid, value) && value.rr_reports == 0 && value.remb_reports == 0);
+        auto joined = compound; joined.insert(joined.end(), valid.begin(), valid.end());
+        assert(parse(joined, value) && value.rr_reports == 1 && value.remb_reports == 1);
+    }
+    for (const auto &invalidMember : {feedback(205, 1, 12), feedback(206, 1, 16), feedback(206, 4, 12), feedback(206, 4, 16), feedback(206, 4, 24)}) {
+        auto tail = compound; tail.insert(tail.end(), invalidMember.begin(), invalidMember.end());
+        value.rr_reports = 987;
+        assert(!parse(tail, value) && value.rr_reports == 987);
+    }
     auto truncated = compound; truncated.pop_back(); value.rr_reports = 987;
     assert(!parse(truncated, value) && value.rr_reports == 987); // transactional
     compound.insert(compound.end(), {0, 0, 0, 0});
@@ -83,5 +113,5 @@ int main() {
         if (i & 1) mutation.resize(generator() % (seed.size() + 32));
         (void)parse(mutation, value);
     }
-    std::puts("PASS: bounded atomic RTCP RR/SR report blocks and scoped REMB, signed loss, generation-independent wire bounds, overflow/aggregate rejection, truncations and 100000 ASan/UBSan mutations");
+    std::puts("PASS: bounded atomic RTCP RR/SR report blocks and scoped REMB, signed loss, ignored feedback common/PLI/NACK/FIR bounds, generation-independent wire bounds, overflow/aggregate rejection, truncations and 100000 ASan/UBSan mutations");
 }
