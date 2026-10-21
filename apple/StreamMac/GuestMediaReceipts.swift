@@ -4,7 +4,7 @@ import Foundation
 
 /// Immutable, application-owned decoded media receipts. They do not register
 /// a source or authorize routing. Playout selects frames due at original host PTS.
-struct GuestReceiveLease: Sendable, Equatable {
+struct GuestReceiveLease: Sendable, Hashable {
     let slot: UUID
     let peerID: UUID
     let negotiation: UUID

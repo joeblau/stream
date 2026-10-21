@@ -53,7 +53,7 @@ structured `result.error`, and the authoritative state after the dispatcher
 attempt. Permission/setup choices still gate execution. An accepted Start Stream
 request can return `connecting`; only an acknowledged publisher produces `live`.
 Native capture/output availability remains the shared dispatcher's decision.
-Unsupported guest notices are unavailable and have no executable command. Comment commands use the actual queued public chat and selected staged comment slot; Show/Hide follow Preview/Program policy and do not implicitly Take.
+Guest commands expose the current room and participant catalogue, with fresh admission limits and full-connection validation for mute/solo. Interview snapshots include public roster metadata and actual local Program/Monitor permission, screen approval and sharing; they contain no private message text, invite or credentials. Comment commands use the actual queued public chat and selected staged comment slot; Show/Hide follow Preview/Program policy and do not implicitly Take.
 
 Version 1 now includes optional capability `kind` (`command` or `value`) and `argument` (`page` or `text`) fields. Numeric commands accept exactly one finite normalized `value` (0…1) or `delta` (−1…1). Relative deltas resolve against current dispatcher state and clamp there, making multiple encoders safe. Gain targets convert normalized values to linear gain 0…2. `pdf.<UUID>.goto` accepts a zero-based integer `page` from 0 to 100000; the native deck store clamps to the actual document. `output.record.marker` accepts optional `text` with 1–512 UTF-8 bytes. Other IDs reject these arguments; arguments are forbidden outside command requests. Per-client adapter grants still check the exact stable target ID. Old clients can omit all new fields.
 

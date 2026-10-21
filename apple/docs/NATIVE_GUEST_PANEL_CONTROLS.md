@@ -8,11 +8,18 @@ solo affects private Monitor after Monitor admission and leaves Program
 unchanged. A saved solo for a guest without Monitor permission grants no route
 and does not suppress unrelated private audio.
 
+The room panel displays admitted and waiting counts against the one native
+media connection limit. Admission availability uses the same pending-admission
+and occupied-peer gate as execution, including through the palette and local
+controllers; a second waiting guest cannot displace the current connection.
+
 Each panel/palette command captures the full room, host and guest generations,
 slot, negotiation and native receive generation. Retained commands and adapter
 callbacks reject a rejoined/replaced connection before changing settings. A new
 authorized stable catalogue request resolves its current action normally; saved
 slot Mixer configuration remains editable independently of room admission.
+Local-name and message composer view identities also use that complete context,
+so replacing any authority clears their transient editing state.
 
 Save Local Name changes the project's optional `GuestSlot.localName`, used by
 the panel and bound name overlays. Guest-reported `displayName` keeps its own
@@ -38,6 +45,15 @@ boundaries isolate defaults and credentials and refuse device capture. The
 manager media host is controlled; these tests do not qualify browser decoding,
 deployed TURN, Internet/mobile/restricted networks or operator devices.
 
-One native admitted media peer remains the measured limit. Private talkback,
-guest messages and combined return routing are separate work; this change does
-not close issue #128.
+One native admitted media peer remains the measured limit. Private text is
+implemented separately in `NATIVE_GUEST_PRIVATE_MESSAGES.md`. Private microphone
+talkback and external browser/network/operator qualification remain open; this
+change does not close issue #128.
+
+Local software qualification on 2026-10-21 passed with Xcode 27.2 on Apple
+silicon: the whole-source manager/Worker/SwiftUI fixture, standalone native
+service-control fixture and slot renderer/project/H.264 fixture. The manager
+also checks that pending admission immediately becomes unavailable, a second
+actual guest is refused by the configured one-guest Worker room, and the active
+full lease remains unchanged. This establishes the configured capacity guard;
+it does not qualify multiple simultaneous native media peers.

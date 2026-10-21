@@ -325,7 +325,9 @@ private extension AudioMixEngine {
         return (guest, studio.manager.state.snapshot.members.first!.id)
     }
     static func admit(_ studio: ManagerStudio, guest: ManagerGuest, id: UUID, since cursor: Int = 0) async throws -> ManagerHost {
-        try studio.command(.admit(id)); let offer = try await guest.nextOffer(since: cursor); try await guest.answer(offer)
+        try studio.command(.admit(id))
+        try require(!studio.dispatcher.canExecute(.interview(.admit(id))), "Pending admission remained advertised as executable")
+        let offer = try await guest.nextOffer(since: cursor); try await guest.answer(offer)
         try await wait("Actual ready lease missing") { studio.manager.currentReadyLease?.receive.peerID == id }
         return studio.factory!.hosts.last!
     }
@@ -393,6 +395,21 @@ private extension AudioMixEngine {
         try require(!studio.dispatcher.canExecute(.interview(.onair(id))), "Waiting guest received a Program command")
         let host = try await admit(studio, guest: guest, id: id)
         let lease = host.context.receive
+        let waitingInvite = try await studio.client!.createInvite(room: studio.manager.state.snapshot.room!)
+        let waitingSocket = try await studio.client!.connect(room: studio.manager.state.snapshot.room!, host: waitingInvite)
+        // The shipping client deliberately creates a one-guest Worker room.
+        // Establish the real service refusal before asserting host behavior.
+        var secondGuestRefused = false
+        do { _ = try await waitingSocket.receive() } catch { secondGuestRefused = true }
+        waitingSocket.close()
+        try require(secondGuestRefused, "Actual Worker admitted a guest beyond the configured room capacity")
+        try require(!studio.dispatcher.canExecute(.interview(.admit(waitingInvite.id)))
+            && studio.dispatcher.execute(.interview(.admit(waitingInvite.id))).error != nil,
+                    "Full native capacity advertised an executable admission command")
+        try require(studio.manager.currentReadyLease == host.context
+            && !studio.manager.state.snapshot.members.contains(where: { $0.id == waitingInvite.id }),
+                    "Refused admission disturbed the current peer or added a guest beyond room capacity")
+        trace("actual second Worker guest refused at configured service capacity; current full lease stays unchanged")
         try require(lease.slot == prepared.id && studio.scenes.guestSlots.first?.reconnectPeerID == id,
                     "Actual Worker admission ignored the saved public slot assignment")
         try require(studio.scenes.sources.filter { if case .guest(let p) = $0.payload { return p.slotID == prepared.id }; return false }.map(\.id) == preparedSourceIDs,
