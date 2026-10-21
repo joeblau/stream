@@ -7,6 +7,56 @@ enum StudioChatMessageIdentity {
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
+
+/// These labels come only from the existing allowlisted public decoders.
+/// Text preserves Unicode emoji; an emote label requires provider fragments.
+/// No remote artwork, price, reaction count or viewer metric is inferred.
+enum StudioAudienceEventKind: String, CaseIterable, Codable, Sendable {
+    case text = "Text", emotes = "Emotes", superChat = "Super Chat", superSticker = "Super Sticker"
+    case membership = "Membership", milestone = "Milestone", gift = "Gift"
+
+    var supportsAlert: Bool { self != .text }
+    var symbol: String {
+        switch self {
+        case .text: "text.bubble"
+        case .emotes: "face.smiling"
+        case .superChat: "bubble.left.and.text.bubble.right"
+        case .superSticker: "star.bubble"
+        case .membership: "person.badge.plus"
+        case .milestone: "flag"
+        case .gift: "gift"
+        }
+    }
+    var defaultStyle: StudioAudienceEventStyle {
+        switch self {
+        case .text: .neutral
+        case .emotes: .teal
+        case .superChat, .superSticker: .gold
+        case .membership, .milestone, .gift: .violet
+        }
+    }
+}
+
+/// Fixed local text-card palettes keep event styling bounded and portable.
+enum StudioAudienceEventStyle: String, CaseIterable, Codable, Sendable {
+    case neutral = "Neutral", gold = "Gold", violet = "Violet", teal = "Teal"
+    var foreground: String {
+        switch self {
+        case .neutral: "#FFFFFF"
+        case .gold: "#FFE29A"
+        case .violet: "#E7D5FF"
+        case .teal: "#B7F4E7"
+        }
+    }
+    var background: String {
+        switch self {
+        case .neutral: "#171717F2"
+        case .gold: "#392A10F2"
+        case .violet: "#2E1C48F2"
+        case .teal: "#103B34F2"
+        }
+    }
+}
 /// Public provider message IDs are independent of adapter/socket identity.
 struct StudioChatMessage: Identifiable, Equatable, Codable, Sendable {
     let id: String
@@ -19,6 +69,7 @@ struct StudioChatMessage: Identifiable, Equatable, Codable, Sendable {
     let timestampIsReceiptTime: Bool
     let kind: String
     let avatarURL: URL?
+    var audienceEvent: StudioAudienceEventKind? { .init(rawValue: kind) }
 }
 
 enum StudioChatAction: Sendable {
@@ -157,10 +208,11 @@ struct StudioChatQueue: Sendable {
         for id in removed where seen.insert(id).inserted { seenOrder.append(id) }
         while seenOrder.count > 4_000 { seen.remove(seenOrder.removeFirst()) }
     }
-    func filtered(search: String, platform: String? = nil, connectionID: String? = nil, author: String? = nil, kind: String? = nil, favoritesOnly: Bool = false) -> [StudioChatMessage] {
+    func filtered(search: String, platform: String? = nil, connectionID: String? = nil, author: String? = nil, kind: String? = nil, audienceEvent: StudioAudienceEventKind? = nil, favoritesOnly: Bool = false) -> [StudioChatMessage] {
         messages.filter {
             (!favoritesOnly || favorites.contains($0.id)) && (platform == nil || $0.platform == platform)
                 && (connectionID == nil || $0.connectionID == connectionID) && (author == nil || $0.author == author) && (kind == nil || $0.kind == kind)
+                && (audienceEvent == nil || $0.audienceEvent == audienceEvent)
                 && (search.isEmpty || "\($0.author) \($0.text)".localizedCaseInsensitiveContains(search))
         }
     }
