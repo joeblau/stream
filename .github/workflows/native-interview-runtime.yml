@@ -101,6 +101,17 @@ jobs:
         run: apple/scripts/run_native_guest_return_feedback_harness.zsh
       - name: Exercise bounded guest return video adaptation policy
         run: apple/scripts/run_native_guest_return_video_budget.zsh
+      - name: Qualify bounded public browser PDF alpha and callback ownership
+        run: |
+          set -euo pipefail
+          apple/scripts/run_browser_widget_pdf_raster_harness.zsh 2>&1 | tee apple/build/native-runtime-results/browser-pdf-raster.log
+          apple/scripts/run_browser_widget_pdf_media_harness.zsh 2>&1 | tee apple/build/native-runtime-results/browser-pdf-media.log
+          apple/scripts/run_browser_snapshot_alpha_harness.zsh 2>&1 | tee apple/build/native-runtime-results/browser-pdf-ipc.log
+      - name: Qualify actual browser hosts and Program recording pixels
+        run: |
+          set -euo pipefail
+          export BROWSER_PDF_PROGRAM_DERIVED="$PWD/apple/build/native-runtime-derived"
+          apple/scripts/run_browser_widget_pdf_program_harness.zsh 2>&1 | tee apple/build/native-runtime-results/browser-pdf-program.log
       - name: Retain actual media and bounded qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -108,6 +119,9 @@ jobs:
           name: native-runtime-${{ matrix.runner }}
           path: |
             apple/build/native-runtime-results
+            apple/build/browser-widget-pdf-media-validation
+            apple/build/browser-widget-pdf-program-validation/*.mp4
+            apple/build/browser-snapshot-alpha-validation/run-*
             apple/build/native-interview-program-iso-validation/media-*
             apple/build/native-interview-program-iso-validation/run-*/worker.log
             apple/build/native-interview-return-audio-validation/run-*/worker.log

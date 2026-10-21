@@ -261,11 +261,10 @@ import WebKit
             reply(.failed, id: id, failure: "snapshot_unavailable", request: command.requestID); return
         }
         let requested = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        let config = WKSnapshotConfiguration(); config.snapshotWidth = NSNumber(value: widget.view.bounds.width)
-        config.afterScreenUpdates = true
-        widget.view.takeSnapshot(with: config) { [weak self] image, _ in
+        BrowserWidgetRasterizer.capture(widget.view, width: Int(widget.view.bounds.width), height: Int(widget.view.bounds.height),
+            isCurrent: { [weak self] in self?.widgets[id]?.view === widget.view && self?.widgets[id]?.generation == command.generation }) { [weak self] result in
             guard let self, self.widgets[id]?.view === widget.view, self.widgets[id]?.generation == command.generation,
-                  let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                  case .success(let cgImage) = result else {
                 writer.release(); self?.reply(.failed, id: id, failure: "snapshot_failed", request: request); return
             }
             let width = Int(widget.view.bounds.width), height = Int(widget.view.bounds.height)

@@ -297,6 +297,7 @@ targets:
       - StreamMac/BrowserWidgetAudioProtocol.swift
       - StreamMac/BrowserWidgetAudioSocket.swift
       - StreamMac/BrowserWidgetVisualProtocol.swift
+      - StreamMac/BrowserWidgetRasterizer.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.StreamBrowserAudioHelper
