@@ -53,4 +53,10 @@ Bind `StudioAutomationEndpoint.shared` to the active dispatcher and permission m
 
 A full StreamMac build also verifies native App Intents compilation and Xcode metadata extraction. Before release, use the installed/signed app in Shortcuts to verify action discovery, selectors, cold launch and closed-window focus, denied/revoked permission repair, exact scene targets after rename/delete, profile switch rejection, and the `shortcuts run` path on macOS 14 and newer supported versions. Those system UI/permission checks are manual qualifications, not results of the deterministic harness.
 
+The distribution bundle audit also requires all six documented actions and the
+profile, scene and layer entities in the actual extracted App Intents metadata.
+The 2026-10-21 unsigned app passes this check on Xcode 27.2; an owned bundle
+fixture with the scene action removed is rejected. This checks packaging,
+independently of the remaining installed Shortcuts discovery and launch tests.
+
 Apple references: [App Intent foreground execution](https://developer.apple.com/documentation/appintents/appintent/openappwhenrun), [App entities and stable identifiers](https://developer.apple.com/documentation/appintents/defining-app-entities-for-your-custom-data-types), [Entity queries](https://developer.apple.com/documentation/appintents/entityquery).
