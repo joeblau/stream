@@ -158,7 +158,9 @@ actor SessionPublisher: Publisher {
     /// Re-sends the last frame if capture hasn't delivered one within the target
     /// interval — a steady fps + keyframe cadence on a static screen.
     private func repeatLastFrameIfIdle(interval: UInt64) async {
-        guard !encodedInput, outputSizeConfigured, isRunning, !isPaused, stream != nil,
+        // The studio composition clock already ticks static scenes. Its real
+        // frames must not race the raw-capture repeat loop onto a later PTS.
+        guard !encodedInput, !usesProgramAudio, outputSizeConfigured, isRunning, !isPaused, stream != nil,
               let last = lastVideoBuffer else { return }
         let now = DispatchTime.now().uptimeNanoseconds
         guard now &- lastVideoAppendAt >= interval else { return }
@@ -768,9 +770,15 @@ actor SessionPublisher: Publisher {
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastMicAppendAt = now
-        await mixer.append(timeline.normalize(sb, kind: .program,
-                                              fallbackDuration: CMTime(value: 512, timescale: 48_000)),
-                           track: 0)
+        let normalized = timeline.normalize(sb, kind: .program,
+                                             fallbackDuration: CMTime(value: 512, timescale: 48_000))
+        #if os(macOS)
+        if let planar = PublisherProgramAudio.planar(normalized) {
+            await mixer.append(planar.buffer, when: planar.when, track: 0)
+            return
+        }
+        #endif
+        await mixer.append(normalized, track: 0)
     }
 
     private func applyAudioMixerSettings() async {

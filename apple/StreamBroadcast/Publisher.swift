@@ -80,3 +80,42 @@ extension Publisher {
     func appendEncodedVideo(_ sample: CMSampleBuffer) async -> Bool { false }
     func appendEncodedAudio(_ audio: SharedEncodedAudio) async -> Bool { false }
 }
+
+#if os(macOS)
+/// The native multitrack AudioUnit mixer requires planar Float32 buses on
+/// macOS. The studio bus is packed stereo Float32; change only its memory
+/// layout before entering HaishinKit, preserving samples and source time.
+enum PublisherProgramAudio {
+    static func planar(_ sample: CMSampleBuffer) -> (buffer: AVAudioPCMBuffer, when: AVAudioTime)? {
+        guard let description = sample.formatDescription,
+              let pointer = CMAudioFormatDescriptionGetStreamBasicDescription(description) else { return nil }
+        let source = pointer.pointee
+        let count = sample.numSamples
+        guard source.mFormatID == kAudioFormatLinearPCM, source.mSampleRate == 48_000,
+              source.mChannelsPerFrame == 2, source.mBitsPerChannel == 32,
+              source.mBytesPerFrame == 8, source.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+              source.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0,
+              source.mFormatFlags & kAudioFormatFlagIsBigEndian == 0,
+              count > 0, count <= 48_000,
+              let data = sample.dataBuffer, CMBlockBufferGetDataLength(data) == count * 8,
+              sample.presentationTimeStamp.isNumeric,
+              let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)),
+              let channels = buffer.floatChannelData else { return nil }
+        var packed = [Float](repeating: 0, count: count * 2)
+        let status = packed.withUnsafeMutableBytes {
+            CMBlockBufferCopyDataBytes(data, atOffset: 0, dataLength: count * 8, destination: $0.baseAddress!)
+        }
+        guard status == noErr else { return nil }
+        for frame in 0..<count {
+            channels[0][frame] = packed[frame * 2]
+            channels[1][frame] = packed[frame * 2 + 1]
+        }
+        buffer.frameLength = AVAudioFrameCount(count)
+        let pts = sample.presentationTimeStamp
+        let when = AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: pts.seconds),
+            sampleTime: CMTimeConvertScale(pts, timescale: 48_000, method: .roundTowardZero).value, atRate: 48_000)
+        return (buffer, when)
+    }
+}
+#endif
