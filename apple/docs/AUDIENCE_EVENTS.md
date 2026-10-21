@@ -36,11 +36,13 @@ Provider removal invalidates future promotion of that message; a deliberately
 staged/taken card remains ordinary scene content. A warning directs the operator
 to Hide and Take, avoiding an unsolicited output change.
 
-Image emotes/stickers, reaction feeds, unsupported provider events and per-
-destination viewer metrics are unavailable. The currently subscribed payloads
-do not establish fresh viewer counts; no combined count or unique-person claim
-is shown. Adaptive/animated event media and additional provider permissions or
-subscriptions require separate implementation and qualification.
+Image emotes/stickers, reaction feeds and unsupported provider events are
+unavailable here. This sidebar does not refresh viewer metrics from chat
+payloads. Existing authorized provider-account readings in Destinations have
+their own capability and freshness checks; no combined count or unique-person
+claim is made by these cards. Adaptive/animated event media and additional
+provider permissions or subscriptions require separate implementation and
+qualification.
 
 Local software validation on 2026-10-21 uses
 `apple/scripts/run_audience_events_harness.zsh`: shipping public decoder,

@@ -110,6 +110,8 @@ struct ChatSidebarView: View {
                 }
                 HStack {
                     Button("Create Alert Slot") { coordinator.createAlertSlot() }
+                        .disabled(coordinator.alertSlotCreationError != nil)
+                        .help(coordinator.alertSlotCreationError ?? "Create a separate staged text card for audience alerts.")
                     Button("Hide Alert") { coordinator.hideAudienceAlert() }
                         .disabled(coordinator.selectedAlertSlot == nil)
                 }.controlSize(.small).disabled(coordinator.audienceStagingError != nil)
@@ -126,6 +128,7 @@ struct ChatSidebarView: View {
                 Text("Event arrival never promotes an alert. Use Stage Alert on a supported event, then Take. Hide also requires Take. Disable Direct Live Editing first. Palettes apply on the next deliberate promotion; cards use the provider's public text, without inferred amounts or artwork.")
                     .font(.caption2).foregroundStyle(.secondary)
                 if let reason = coordinator.audienceStagingError { Text(reason).font(.caption).foregroundStyle(.orange) }
+                else if let reason = coordinator.alertSlotCreationError { Text(reason).font(.caption).foregroundStyle(.secondary) }
             }
         }
     }

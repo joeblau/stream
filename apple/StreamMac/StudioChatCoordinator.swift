@@ -122,6 +122,10 @@ import StreamCore
         guard previewProgram?.stagedScene != nil else { return "Choose a staged scene first." }
         return previewProgram?.directLiveEditing == true ? "Turn off Direct Live Editing before staging an audience alert. Take publishes the card." : nil
     }
+    var alertSlotCreationError: String? {
+        if let reason = audienceStagingError { return reason }
+        return slots.count + alertSlots.count >= 16 ? "Comment and alert slots share a sixteen-slot limit." : nil
+    }
     func audienceAlertError(for id: String) -> String? {
         guard alertPromotionEnabled else { return "Enable manual audience alerts first." }
         guard queue.message(id)?.audienceEvent?.supportsAlert == true else { return "This message has no supported audience alert type." }
@@ -137,7 +141,7 @@ import StreamCore
     func advance(_ direction: Int) { queue.advance(direction) }
     func createSlot() { createSlot(alert: false) }
     func createAlertSlot() {
-        if let reason = audienceStagingError { error = reason; return }
+        if let reason = alertSlotCreationError { error = reason; return }
         createSlot(alert: true)
     }
     private func createSlot(alert: Bool) {

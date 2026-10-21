@@ -130,6 +130,8 @@ private func requireAudience(_ value: @autoclosure () -> Bool, _ reason: String)
         for _ in 0..<20 { reloaded.createAlertSlot() }
         requireAudience(reloaded.availableSlots.count + reloaded.availableAlertSlots.count == 16
             && reloaded.availableSlots.count == 1, "Comment and alert slots exceeded their shared sixteen-slot budget")
+        requireAudience(reloaded.alertSlotCreationError != nil && reloaded.audienceStagingError == nil,
+            "Capacity refusal hid its reason or disabled existing alert operations")
         requireAudience(preview.programScene == capacityProgram, "Capacity preparation bypassed Take")
         let preferences = DesktopStorage.projectDirectory.appendingPathComponent("audience-styles.json")
         let saved = try Data(contentsOf: preferences)
