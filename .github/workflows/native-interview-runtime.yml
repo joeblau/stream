@@ -97,6 +97,8 @@ jobs:
           apple/scripts/run_native_guest_return_video_privacy_harness.zsh 2>&1 | tee apple/build/native-runtime-results/return-video-privacy.log
       - name: Qualify bounded native H264 packetization
         run: apple/scripts/run_native_guest_return_h264_harness.zsh
+      - name: Validate bounded return RTCP feedback
+        run: apple/scripts/run_native_guest_return_feedback_harness.zsh
       - name: Exercise bounded guest return video adaptation policy
         run: apple/scripts/run_native_guest_return_video_budget.zsh
       - name: Retain actual media and bounded qualification evidence
