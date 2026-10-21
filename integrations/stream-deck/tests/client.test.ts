@@ -45,6 +45,35 @@ test("feedback uses authoritative preview/program, paused recording, and missing
   assert.ok(keyImage({ title: "Name", badge: "<unsafe>", color: "#000000", unavailable: false }).startsWith("data:image/svg+xml;base64,"));
 });
 
+test("guest feedback follows local routing receipts and stale guest removal", () => {
+  const state = snapshot(), guestID = randomUUID();
+  state.interview = { phase: "connected", locked: false, members: [{ id: guestID.toUpperCase(), name: "Guest", membership: "onair", media: "ready",
+    programAllowed: false, monitorAllowed: false, screenApproved: false, screenSharing: false }] };
+  const commands = new Map<string, Capability>();
+  const value = (suffix: string) => {
+    const id = `interview.guest.${guestID}.${suffix}`;
+    commands.set(id, { id, title: "Guest", category: "Guests", available: true });
+    return feedback({ commandID: id, projectID: state.projectID }, "Connected", state, commands);
+  };
+  assert.equal(value("onair").badge, "BACKSTAGE", "Roster onair must not invent local Program admission");
+  state.interview.members[0].programAllowed = true;
+  assert.equal(value("onair").badge, "PGM ALLOWED");
+  assert.equal(value("monitor.on").badge, "MONITOR OFF");
+  state.interview.members[0].monitorAllowed = true;
+  assert.equal(value("monitor.on").badge, "MONITOR ON");
+  assert.equal(value("screen.approve").badge, "NOT APPROVED");
+  state.interview.members[0].screenApproved = true;
+  assert.equal(value("screen.approve").badge, "APPROVED");
+  state.interview.members[0].screenSharing = true;
+  assert.equal(value("screen.approve").badge, "SHARING");
+  state.interview.members = [];
+  assert.equal(value("onair").unavailable, true, "A stale catalogue cannot present a removed guest as ready");
+  const id = "interview.lock";
+  commands.set(id, { id, title: "Lock Room", category: "Guests", available: true });
+  state.interview.phase = "disconnected";
+  assert.equal(feedback({ commandID: id, projectID: state.projectID }, "Connected", state, commands).badge, "DISCONNECTED");
+});
+
 test("native client authenticates/discovers stable IDs, follows state, and never replays on reconnect", async () => {
   const state = snapshot();
   const id = `scene.${randomUUID()}.select`;
@@ -84,9 +113,13 @@ test("native client authenticates/discovers stable IDs, follows state, and never
     await client.execute(id, state.projectID); assert.equal(commandCount, 1);
     commands[0].title = "Renamed Intro";
     await client.refreshCatalog(); assert.equal(client.capabilities.get(id)?.title, "Renamed Intro");
-    state.stream = "connecting"; ++state.revision;
+    state.stream = "connecting";
+    state.interview = { phase: "connected", locked: false, members: [{ id: randomUUID(), name: "Actual wire guest", membership: "onair", media: "ready",
+      programAllowed: false, monitorAllowed: true, screenApproved: false, screenSharing: false }] };
+    ++state.revision;
     for (const peer of peers) peer.write(JSON.stringify({ version: 1, type: "event", sessionID: sessions.get(peer), snapshot: state }) + "\n");
     await waitUntil(() => client.snapshot?.stream === "connecting");
+    assert.deepEqual(client.snapshot?.interview, state.interview, "Native routing metadata must survive actual TCP delivery");
     assert.notEqual(client.snapshot?.stream, "live", "Accepted commands cannot invent acknowledged LIVE");
     dropNextCommand = true;
     await assert.rejects(client.execute(id, state.projectID), /disconnected|retried/i);
@@ -119,7 +152,15 @@ test("version mismatch stays incompatible and does not spin or fake availability
 });
 
 test("malformed and unexpected native responses stop safely without throwing from socket callbacks", async () => {
-  for (const frame of [null, { version: 1, type: "capabilities", commands: {} }, { version: 1, type: "authenticated", snapshot: {} }]) {
+  const member = { id: randomUUID(), name: "Guest", membership: "waiting", media: "unavailable", programAllowed: false, monitorAllowed: false, screenApproved: false, screenSharing: false };
+  const malformedInterviews = [
+    { phase: "connected", locked: false, members: {} },
+    { phase: "connected", locked: false, members: [{ ...member, programAllowed: "true" }] },
+    { phase: "connected", locked: false, members: [member, { ...member, id: member.id.toUpperCase() }] },
+    { phase: "connected", locked: false, members: Array.from({ length: 12 }, () => ({ ...member, id: randomUUID() })) },
+  ];
+  for (const frame of [null, { version: 1, type: "capabilities", commands: {} }, { version: 1, type: "authenticated", snapshot: {} },
+    ...malformedInterviews.map(interview => ({ version: 1, type: "authenticated", snapshot: { ...snapshot(), interview } }))]) {
     const peers = new Set<net.Socket>();
     const server = net.createServer(socket => {
       peers.add(socket); socket.on("close", () => peers.delete(socket));

@@ -48,6 +48,22 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
     badge = snapshot.chat.programVisible ? "SLOT PGM" : snapshot.chat.stagedVisible ? "SLOT PVW" : snapshot.chat.ready ? "READY" : "QUEUE EMPTY";
     color = snapshot.chat.programVisible ? "#983c4a" : snapshot.chat.stagedVisible ? "#266848" : "#233b4a";
   }
+  if (binding.commandID.startsWith("interview.") && snapshot.interview) {
+    const interview = snapshot.interview;
+    const guestID = /^interview\.guest\.([0-9a-f-]+)\./i.exec(binding.commandID)?.[1];
+    if (guestID) {
+      const guest = interview.members.find(member => member.id.toLowerCase() === guestID.toLowerCase());
+      if (!guest) return unavailable("Missing\nGuest");
+      // Service roster membership alone never proves local Program routing.
+      badge = guest.programAllowed ? "PGM ALLOWED" : guest.membership === "waiting" ? "WAITING" : "BACKSTAGE";
+      color = guest.programAllowed ? "#983c4a" : guest.membership === "waiting" ? "#5a4828" : "#266848";
+      if (binding.commandID.includes(".monitor.")) badge = guest.monitorAllowed ? "MONITOR ON" : "MONITOR OFF";
+      if (binding.commandID.includes(".screen.")) badge = guest.screenSharing ? "SHARING" : guest.screenApproved ? "APPROVED" : "NOT APPROVED";
+      if (binding.commandID.endsWith(".media.reconnect")) badge = guest.media.toUpperCase();
+    } else {
+      badge = interview.phase === "connected" ? interview.locked ? "LOCKED" : "ROOM OPEN" : interview.phase.toUpperCase();
+    }
+  }
   const macro = /^macro\.([0-9a-f-]+)\.run$/i.exec(binding.commandID)?.[1];
   if (binding.commandID === "macro.cancel" || (macro && snapshot.macroProgress.macroID?.toLowerCase() === macro.toLowerCase())) {
     badge = snapshot.macroProgress.phase.toUpperCase();
