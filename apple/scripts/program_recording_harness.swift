@@ -12,6 +12,11 @@ final class EventLog: @unchecked Sendable {
         for event in events { if case .failed(let error) = event { return error } }
         return nil
     }
+    var latestProgress: ProgramRecordingSession.Progress? {
+        lock.lock(); defer { lock.unlock() }
+        for event in events.reversed() { if case .progress(let progress) = event { return progress } }
+        return nil
+    }
     var paused: Bool {
         lock.lock(); defer { lock.unlock() }
         return events.contains { if case .paused = $0 { return true }; return false }
@@ -39,6 +44,8 @@ private final class PausedWriterGate: @unchecked Sendable {
         setbuf(stdout, nil)
         let folder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try await journalWarningRecovery(folder)
+        if CommandLine.arguments.contains("--journal-warning-only") { return }
         let url = folder.appendingPathComponent("synchronized-60fps.mp4")
         try? FileManager.default.removeItem(at: url)
         let log = EventLog()
@@ -200,6 +207,32 @@ private final class PausedWriterGate: @unchecked Sendable {
         precondition(preserved == original, "Open failure must preserve the existing file")
         print("PASS: real AVAssetWriter open failure surfaces errors and does not delete existing media")
         print("Configuration: \(ProcessInfo.processInfo.operatingSystemVersionString); \(ProcessInfo.processInfo.processorCount) CPUs; files: \(folder.path)")
+    }
+
+    static func journalWarningRecovery(_ folder: URL) async throws {
+        let manager = FileManager.default
+        let url = folder.appendingPathComponent("journal-write-recovery.mp4")
+        let journal = url.appendingPathExtension("recording.json")
+        try? manager.removeItem(at: url)
+        try? manager.removeItem(at: journal)
+        // A directory at the journal's path makes its real atomic write fail
+        // while the media file remains writable. No writer/IO seam is replaced.
+        try manager.createDirectory(at: journal, withIntermediateDirectories: true)
+        let log = EventLog()
+        let session = ProgramRecordingSession(outputURL: url, event: log.add)
+        try await feed(session, seconds: 1.2)
+        precondition(log.recorded && log.failure() == nil, "Journal failure must not stop writable media")
+        precondition(log.latestProgress?.warning?.contains("Recording journal could not be saved:") == true,
+                     "An ongoing journal failure must reach the studio before recording finishes")
+        try manager.removeItem(at: journal)
+        try await feed(session, seconds: 1.2, offset: 1.2)
+        precondition(log.latestProgress?.warning == nil, "A successful journal retry must clear its warning")
+        let result = await finish(session)
+        precondition(result.completed, result.error ?? "Journal repair must preserve a healthy recording")
+        let document = try JSONSerialization.jsonObject(with: Data(contentsOf: journal)) as! [String: Any]
+        precondition(document["status"] as? String == "complete", "Repaired journal must finalize normally")
+        try await ProgramRecordingFixtures.inspect(url, expectedDuration: 2.4, checkSync: true)
+        print("PASS: actual journal write failure warns during healthy recording; path repair clears warning and preserves synchronized finalized media")
     }
 
     static func delayedBoundaries(_ folder: URL, config: ProgramRecordingSession.Configuration) async throws {
