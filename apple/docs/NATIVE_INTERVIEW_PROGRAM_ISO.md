@@ -55,7 +55,6 @@ within major version 24. Build owned Coturn using the existing pinned helper in
 ```sh
 DEVELOPER_DIR=/Applications/Xcode-26.6.0.app/Contents/Developer \
 STREAM_VENDOR_ROOT=/absolute/clean/external/Vendor \
-STREAM_GUEST_RTC_INCLUDE=/absolute/pinned-libdatachannel-source/include \
 STREAM_INTERVIEW_TURN_SERVER=/absolute/owned/turnserver \
 STREAM_INTERVIEW_NODE=/absolute/node24/bin/node \
 STREAM_INTERVIEW_PROGRAM_BUILD_PATH=/absolute/owned/derived-data \
@@ -63,7 +62,9 @@ CHROME_BIN='/absolute/Google Chrome for Testing.app/Contents/MacOS/Google Chrome
 apple/scripts/run_native_interview_program_iso_harness.zsh
 ```
 
-The runner resolves and verifies the required compiled relay-policy marker.
+The runner derives its SDK headers from the selected build's own package output,
+overriding inherited `STREAM_GUEST_RTC_INCLUDE` paths from other builds to avoid
+duplicate module definitions. It resolves and verifies the required compiled relay-policy marker.
 `STREAM_INTERVIEW_REFERENCE_ARTIFACTS` can name a read-only qualified
 `SourcePackages/artifacts/haishinkit.swift` tree; the runner copies it into its
 own derived directory and still verifies the patch/source/archive receipt.
