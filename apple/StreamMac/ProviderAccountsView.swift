@@ -164,6 +164,9 @@ struct ProviderAccountsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(target.name): \(target.state.label)")
                         Text(target.detail).font(.caption).foregroundStyle(.secondary)
+                        if target.state == .manualRequired, let provider = target.binding?.provider {
+                            Link("Open \(provider.name) account / access repair", destination: provider.repairURL).font(.caption)
+                        }
                         if let id = target.eventID {
                             HStack {
                                 Text("Event ID: \(id)").font(.caption.monospaced()).textSelection(.enabled)
