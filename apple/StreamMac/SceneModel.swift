@@ -241,6 +241,14 @@ final class SceneStore: ObservableObject {
     @Published private(set) var textStylePresets: [TextStylePreset] {
         didSet { scheduleSceneAutosave() }
     }
+    /// Preparation only; live admission/media remain a qualified adapter's job.
+    @Published private(set) var guestSlots: [GuestSlot] {
+        didSet {
+            TitleTokenStore.shared.publishGuestSlots(guestSlots)
+            GuestSlotRenderStore.shared.publish(guestSlots)
+            scheduleSceneAutosave()
+        }
+    }
     /// S02 browser metadata: folders, scene → folder membership, and scene
     /// locks. Immediate (never staged), persisted in the browser document.
     @Published private(set) var folders: [SceneFolder] = [] {
@@ -314,7 +322,9 @@ final class SceneStore: ObservableObject {
         // resolve a bound layer's inherited effects against (per-frame read
         // path, same hand-off pattern as SourcePayloadStore).
         SourceEffectsStore.shared.publish(document.sources)
+        for slot in guestSlots { ensureGuestSources(slotID: slot.id, name: slot.resolvedName) }
         GuestSlotRenderStore.shared.publish(guestSlots)
+        TitleTokenStore.shared.publishGuestSlots(guestSlots)
         writeSceneDocument()
         writeBrowserDocument()
         // Flush any pending debounced autosave on quit. willTerminate is
@@ -379,6 +389,37 @@ final class SceneStore: ObservableObject {
     // reaches every layer that uses the source. Capture lifetime follows from
     // demand — StreamController's pool resolves visible layers through this
     // registry and keys physical captures by the definition's payload.
+
+    @discardableResult
+    func addGuestSlot() -> GuestSlot? { createGuestSlot(name: "Guest \(guestSlots.count + 1)") }
+
+    func updateGuestSlot(_ value: GuestSlot) {
+        guard let index = guestSlots.firstIndex(where: { $0.id == value.id }) else { return }
+        // Display edits never replace stable camera/screen assignments.
+        var slot = guestSlots[index]
+        slot.name = String(value.name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        if slot.name.isEmpty { slot.name = "Guest" }
+        slot.title = String(value.title.prefix(160))
+        slot.offlineMessage = String(value.offlineMessage.prefix(160))
+        slot.placeholderColorHex = value.placeholderColorHex
+        replaceGuestSlot(slot)
+        renameSource(slot.cameraSourceID, to: "\(slot.name) · Camera")
+        renameSource(slot.screenSourceID, to: "\(slot.name) · Screen")
+    }
+
+    /// Referenced slots must be removed from editable scenes first; deleting
+    /// a guest must never silently detach an existing show's sources/titles.
+    @discardableResult
+    func removeGuestSlot(_ id: UUID) -> Bool {
+        guard let slot = guestSlots.first(where: { $0.id == id }),
+              !scenes.contains(where: { slot.isReferenced(by: $0) }),
+              !overlays.contains(where: { slot.isReferenced(by: $0) }) else { return false }
+        // Remove the owning slot first: every intermediate document remains
+        // structurally valid even if a source mutation is flushed immediately.
+        guestSlots.removeAll { $0.id == id }
+        removeSource(slot.cameraSourceID); removeSource(slot.screenSourceID)
+        return true
+    }
 
     /// Looks up a reusable source by ID.
     func source(withID id: SourceDefinitionID) -> SourceDefinition? {

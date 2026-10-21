@@ -325,10 +325,12 @@ final class StudioWorkspace: ObservableObject {
     }
 
     private func observeRuntime() {
-        runtime.controllers.interactionBlocked = { [weak self] in
+        let interactionIsBlocked = { [weak self] in
             guard let self else { return true }
             return !UserDefaults.standard.bool(forKey: "onboarding.hasCompletedFirstRun") || self.permissionChoicePending || self.isSwitching || self.packageBusy
         }
+        runtime.controllers.interactionBlocked = interactionIsBlocked
+        StudioAutomationEndpoint.shared.interactionIsBlocked = interactionIsBlocked
         let projectID = currentProject.id, profileID = currentProfile.id
         runtime.recoveryBinding = SessionRecoveryRuntimeBinding(coordinator: recovery,
             projectID: projectID, profileID: profileID, sceneStore: runtime.sceneStore,
@@ -447,7 +449,9 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func importPreviewedPackage() async {
-        guard let preview = importPreview, !packageBusy, let operation = beginPackageWrite() else { return }
+        guard let preview = importPreview, !packageBusy else { return }
+        guard catalog.projects.count < 200 else { error = "The catalog supports up to 200 shows. Import into a catalog with fewer shows."; return }
+        guard let operation = beginPackageWrite() else { return }
         defer { finishPackageWrite(operation) }
         let project = StudioProject(name: preview.name)
         let target = Selection(project: project.id, profile: project.profiles[0].id)
@@ -492,19 +496,11 @@ final class StudioWorkspace: ObservableObject {
             if let data = try? Data(contentsOf: directory.appendingPathComponent(name)) { documents[name] = data }
         }
         documents["stream.scenes.v2.json"] = try? JSONEncoder().encode(document)
-        var assets = runtime.dispatcher.assetLibrary.assets
-        var media: [ShowPackageIO.Media] = []
-        for i in assets.indices {
-            let path = "Assets/\(assets[i].id)/\(URL(fileURLWithPath: assets[i].fileName).lastPathComponent)"
-            if includeMedia, let access = runtime.dispatcher.assetLibrary.access(for: assets[i].id), access.isAccessible {
-                assets[i].storage = .projectCopy
-                assets[i].relativePath = path
-                media.append(.init(access: access, relativePath: path))
-            } else { assets[i].storage = .linked; assets[i].relativePath = nil }
-            assets[i].bookmarkData = nil; assets[i].lastKnownPath = ""
-        }
-        documents["stream.assets.v1.json"] = try? JSONEncoder().encode(AssetLibraryDocument(assets: assets, usage: [:]))
-        let packageDocuments = documents, packageMedia = media, name = currentProject.name
+        let packageAssets: (document: AssetLibraryDocument, media: [ShowPackageIO.Media])
+        do { packageAssets = try packageAssetContents(includeMedia: includeMedia) }
+        catch { self.error = String(describing: error); finishPackageWrite(operation); return }
+        documents["stream.assets.v1.json"] = try? JSONEncoder().encode(packageAssets.document)
+        let packageDocuments = documents, packageMedia = packageAssets.media, name = currentProject.name
         Task { [weak self] in
             defer { self?.finishPackageWrite(operation) }
             do {
@@ -534,6 +530,26 @@ final class StudioWorkspace: ObservableObject {
     private func refreshPackageBusy() {
         let busy = latestPackageRead != nil || packageWrite != nil
         if packageBusy != busy { packageBusy = busy }
+    }
+
+    /// Capture retained security grants together with the registry that will be
+    /// exported, so Include Media cannot silently become references-only.
+    func packageAssetContents(includeMedia: Bool) throws -> (document: AssetLibraryDocument, media: [ShowPackageIO.Media]) {
+        var assets = runtime.dispatcher.assetLibrary.assets
+        var media: [ShowPackageIO.Media] = []
+        for i in assets.indices {
+            let path = "Assets/\(assets[i].id)/\(URL(fileURLWithPath: assets[i].fileName).lastPathComponent)"
+            if includeMedia {
+                guard let access = runtime.dispatcher.assetLibrary.access(for: assets[i].id), access.isAccessible else {
+                    throw PortableShow.Failure.invalid("Cannot include \(assets[i].name). Relink missing assets in Assets, or turn off Include media to transfer references only.")
+                }
+                assets[i].storage = .projectCopy
+                assets[i].relativePath = path
+                media.append(.init(access: access, relativePath: path))
+            } else { assets[i].storage = .linked; assets[i].relativePath = nil }
+            assets[i].bookmarkData = nil; assets[i].lastKnownPath = ""
+        }
+        return (AssetLibraryDocument(assets: assets, usage: [:]), media)
     }
 
     private static func copyCredentials(from source: URL, to target: URL) throws {

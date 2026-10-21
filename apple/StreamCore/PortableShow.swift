@@ -28,6 +28,7 @@ public enum PortableShow {
         "stream.soundboard.v1.json", "stream.annotations.v1.json", "stream.presentations.v1.json", "studio-rundown.json",
         "stream.shortcuts.v1.json", "stream.macros.v1.json", "destinations.json", "desktop.settings.v1.json", "resilience.json", "recording-preferences.json", "secondary-recording-preferences.json", "comment-slots.json", "chat-presets.json"
     ]
+    public static let maximumDocumentBytes = 16 * 1024 * 1024
     private static let privateKeys: Set<String> = [
         "bookmarkdata", "lastknownpath", "rtmpurl", "streamkey", "token", "bearertoken", "passphrase", "password",
         "deviceuniqueid", "deviceuid", "deviceid", "targetidentifier", "displayid", "windowid", "preferredaudioinputuid", "monitoroutputdeviceuid",
@@ -37,10 +38,47 @@ public enum PortableShow {
     /// Explicit configuration redaction, applied again on import. Unknown prose
     /// remains editable content; connection credentials and machine grants do not.
     public static func redact(_ data: Data, remappingIDs: Bool = false, idMap: inout [String: String]) throws -> Data {
-        guard data.count <= 16 * 1024 * 1024 else { throw Failure.invalid("A show document exceeds 16 MiB.") }
+        guard data.count <= maximumDocumentBytes else { throw Failure.invalid("A show document exceeds 16 MiB.") }
+        let object = try JSONSerialization.jsonObject(with: data)
+        var guestTokens: [String: String] = [:]
+        if remappingIDs, let document = object as? [String: Any], let slots = document["guestSlots"] as? [[String: Any]] {
+            for slot in slots {
+                guard let raw = slot["id"] as? String, let id = UUID(uuidString: raw) else { continue }
+                let mapped = remapIDReferences(id.uuidString, idMap: &idMap)
+                let oldPrefix = "guestslot_" + id.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+                let newPrefix = "guestslot_" + mapped.replacingOccurrences(of: "-", with: "").lowercased()
+                for field in ["name", "title"] { guestTokens["\(oldPrefix)_\(field)"] = "\(newPrefix)_\(field)" }
+            }
+        }
+        func remapGuestTitle(_ template: String) -> String {
+            // Match TitleTemplate.resolve's brace scanning, whitespace trim
+            // and case folding. Unknown tokens and surrounding prose remain
+            // literal, including malformed/nested token-shaped strings.
+            var result = ""
+            var index = template.startIndex
+            while index < template.endIndex {
+                guard template[index] == "{", let close = template[index...].firstIndex(of: "}") else {
+                    result.append(template[index]); index = template.index(after: index); continue
+                }
+                let key = template[template.index(after: index)..<close]
+                    .trimmingCharacters(in: .whitespaces).lowercased()
+                if let mapped = guestTokens[key] { result.append("{\(mapped)}") }
+                else { result.append(contentsOf: template[index...close]) }
+                index = template.index(after: close)
+            }
+            return result
+        }
         let literalContentKeys: Set<String> = ["text", "name", "title", "description", "displayname", "localname", "html", "css", "javascript", "fontname", "fontfamily"]
         func visit(_ value: Any, key: String? = nil) -> Any {
-            if let dictionary = value as? [String: Any] {
+            if var dictionary = value as? [String: Any] {
+                // Guest title tokens are semantic references inside a typed
+                // text layer. Keep UUID prose and chat/preset text literal.
+                if dictionary["kind"] as? String == "text", var payload = dictionary["payload"] as? [String: Any],
+                   payload["recordingChatMessageID"] == nil || payload["recordingChatMessageID"] is NSNull,
+                   let text = payload["text"] as? String {
+                    payload["text"] = remapGuestTitle(text)
+                    dictionary["payload"] = payload
+                }
                 var result: [String: Any] = [:]
                 for (key, item) in dictionary where !privateKeys.contains(key.lowercased()) {
                     let mappedKey = remappingIDs ? remapIDReferences(key, idMap: &idMap) : key
@@ -58,7 +96,7 @@ public enum PortableShow {
             }
             return value
         }
-        return try JSONSerialization.data(withJSONObject: visit(JSONSerialization.jsonObject(with: data)), options: [.sortedKeys])
+        return try JSONSerialization.data(withJSONObject: visit(object), options: [.sortedKeys])
     }
 
     public static func remapIDReferences(_ value: String, idMap: inout [String: String]) -> String {
@@ -99,8 +137,29 @@ public enum PortableShow {
         return url
     }
 
+    /// Keep actual reads bounded even if a package file grows after manifest
+    /// validation. Declared lengths alone cannot bound Data(contentsOf:).
+    public static func readDocument(at url: URL) throws -> Data {
+        guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+            throw Failure.invalid("Show documents must be regular files.")
+        }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var data = Data()
+        while data.count <= maximumDocumentBytes {
+            let count = min(1024 * 1024, maximumDocumentBytes + 1 - data.count)
+            let chunk = try handle.read(upToCount: count) ?? Data()
+            if chunk.isEmpty { return data }
+            data.append(chunk)
+        }
+        throw Failure.invalid("A show document exceeds 16 MiB.")
+    }
+
     public static func fileDescription(path: String, root: URL) throws -> PortableShowManifest.File {
         let url = try safeURL(path, under: root)
+        guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+            throw Failure.invalid("Package entries must be regular files.")
+        }
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
         var hash = SHA256(); var bytes: Int64 = 0
         while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data); bytes += Int64(data.count) }
@@ -111,7 +170,12 @@ public enum PortableShow {
         let values = try root.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
         guard values.isDirectory == true, values.isSymbolicLink != true else { throw Failure.invalid("Choose a .streamshow package folder.") }
         let manifestURL = try safeURL("manifest.json", under: root)
-        let data = try Data(contentsOf: manifestURL)
+        guard try manifestURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+            throw Failure.invalid("The package manifest must be a regular file.")
+        }
+        let handle = try FileHandle(forReadingFrom: manifestURL)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: 1024 * 1024 + 1) ?? Data()
         guard data.count <= 1024 * 1024 else { throw Failure.invalid("The package manifest is too large.") }
         let manifest = try JSONDecoder().decode(PortableShowManifest.self, from: data)
         guard manifest.version == 1, StudioProjectCatalog.validName(manifest.name), manifest.files.count <= 2000,
@@ -119,6 +183,10 @@ public enum PortableShow {
               manifest.files.contains(where: { $0.path == "stream.scenes.v2.json" }) else { throw Failure.invalid("Unsupported or incomplete show manifest.") }
         for file in manifest.files {
             guard documentNames.contains(file.path) || file.path.hasPrefix("Assets/"), file.bytes >= 0 else { throw Failure.invalid("Unexpected show file.") }
+            guard manifest.includesMedia || !file.path.hasPrefix("Assets/") else { throw Failure.invalid("A relink-only package cannot contain media.") }
+            guard !documentNames.contains(file.path) || file.bytes <= Int64(maximumDocumentBytes) else {
+                throw Failure.invalid("A show document exceeds 16 MiB.")
+            }
             let actual = try fileDescription(path: file.path, root: root)
             guard actual.bytes == file.bytes, actual.sha256 == file.sha256 else { throw Failure.invalid("A package file is missing or has changed: \(file.path)") }
         }

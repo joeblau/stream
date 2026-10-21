@@ -83,6 +83,32 @@ struct StudioChatMessage: Identifiable, Equatable, Codable, Sendable {
     let avatarURL: URL?
     var staticEmote: StudioChatStaticEmote? = nil
     var audienceEvent: StudioAudienceEventKind? { .init(rawValue: kind) }
+    var activity: StudioChatActivity { StudioChatActivity(kind: kind) }
+}
+
+/// Styling is chosen only from decoded event kinds. Plain public text remains
+/// selectable and intact; no remote emote/sticker URL or amount is synthesized.
+enum StudioChatActivity: String, Sendable {
+    case text, emotes, support, membership, reaction
+    init(kind: String) {
+        switch kind {
+        case "Emotes": self = .emotes
+        case "Super Chat", "Super Sticker": self = .support
+        case "Membership", "Milestone", "Gift": self = .membership
+        case "Reaction": self = .reaction
+        default: self = .text
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .text: "text.bubble"
+        case .emotes: "face.smiling"
+        case .support: "star.circle.fill"
+        case .membership: "person.crop.circle.badge.checkmark"
+        case .reaction: "heart.fill"
+        }
+    }
+    var canPromoteAlert: Bool { self == .support || self == .membership || self == .reaction }
 }
 
 enum StudioChatAction: Sendable {

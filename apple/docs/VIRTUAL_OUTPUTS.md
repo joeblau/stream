@@ -46,6 +46,13 @@ frame; a producer crash or stalled feed ages to black within 500 ms. The camera
 is video only and makes no claim about a linked audio device or A/V sync in
 conferencing clients.
 
+Sink format changes validate the complete property request before changing
+state. A rejected frame duration leaves the selected format and its current
+frame intact. A successful input-format change clears the previous image;
+incoming samples must match the negotiated 720p/1080p dimensions and be ready
+before entering the mailbox. Late old-format buffers cannot restore the old
+image while the camera is waiting for its newly negotiated input.
+
 ### Signing, activation and distribution
 
 The host has `com.apple.developer.system-extension.install`; both bundles have
@@ -107,6 +114,17 @@ loss, CPU/memory and client disconnect/exhaustion behavior; qualify update,
 removal, sleep/wake and multiuser behavior on supported CPU architectures.
 #172 remains open until those gates pass.
 
+### Local acceptance follow-up (2026-10-21)
+
+The native fixture reproduced and fixes a rejected compound sink negotiation
+that previously changed the active format despite throwing. It also checks
+mailbox clearing on a valid format change, rejection of late previous-format
+samples and unadvertised dimensions, followed by acceptance of the newly
+negotiated format. These use the same receive method as the real CMIO completion.
+The updated camera fixture passes with Xcode 27.1 and 27.2. They add software
+evidence; activation, OS transport and receiving-app gates above remain
+outstanding.
+
 ## Microphone (#173 / #174)
 
 A CMIO camera extension does **not** create a virtual microphone. Apple's
@@ -125,6 +143,14 @@ timestamp-indexed stereo PCM, bounds, underrun/stop silence and clock/session
 lifecycle without installing it. #173 remains open for signed installation and
 real client measurements; #174 does not proceed as a shipping implementation
 until that route is validated.
+
+The 2026-10-21 local repeat built the universal arm64/x86_64 bundle and passed
+its actual dynamically loaded AudioServerPlugIn callback fixture: PCM energy
+48.25474, 512-frame delay, 44.1/48 kHz, malformed/NaN/underrun handling,
+independent stop, session reset and concurrent ring-wrap integrity. The
+read-only installed-device probe still reports the device unavailable. No HAL
+installation, Core Audio restart, default-device change or target-app capture
+was performed; #173 and #174 therefore retain their qualification gates.
 
 ## Primary sources
 

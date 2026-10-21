@@ -776,6 +776,43 @@ struct GuestSlot: Identifiable, Hashable, Codable, Sendable {
     var reconnectPeerID: UUID?
     var cameraPlaceholder = GuestOfflinePlaceholder()
     var screenPlaceholder = GuestOfflinePlaceholder(message: "Screen not shared")
+    var participantIdentity: String? = nil
+    var cameraSourceID = SourceDefinitionID()
+    var screenSourceID = SourceDefinitionID()
+    fileprivate var sourceIdentitiesWereDecoded = true
+    var offlineMessage: String { get { cameraPlaceholder.message } set { cameraPlaceholder.message = newValue } }
+    var placeholderColorHex: String { get { cameraPlaceholder.colorHex } set { cameraPlaceholder.colorHex = newValue } }
+    var tokenPrefix: String { "guestslot_" + id.uuidString.replacingOccurrences(of: "-", with: "").lowercased() }
+    var nameTemplate: String { "{\(tokenPrefix)_name}" }
+    var titleTemplate: String { "{\(tokenPrefix)_title}" }
+    var tokens: [String: String] { ["\(tokenPrefix)_name": resolvedName, "\(tokenPrefix)_title": title.isEmpty ? " " : title] }
+    var sources: [SourceDefinition] {
+        [.init(id: cameraSourceID, name: "\(resolvedName) · Camera", payload: .guest(.init(slotID: id, role: .camera))),
+         .init(id: screenSourceID, name: "\(resolvedName) · Screen", payload: .guest(.init(slotID: id, role: .screen)))]
+    }
+    func isReferenced(by layer: LayerNode) -> Bool {
+        if layer.sourceID == cameraSourceID || layer.sourceID == screenSourceID { return true }
+        if case .guest(let payload) = layer.payload, payload.slotID == id { return true }
+        guard case .text(let text) = layer.payload, text.recordingChatMessageID == nil else { return false }
+        if text.guestBinding?.slotID == id { return true }
+        return text.text.range(of: "(?i)\\{\\s*" + tokenPrefix + "_(?:name|title)\\s*\\}", options: .regularExpression) != nil
+    }
+    func isReferenced(by scene: Scene) -> Bool { scene.layers.contains { isReferenced(by: $0) } }
+    enum CodingKeys: String, CodingKey {
+        case id, name, displayName, localName, title, reconnectPeerID, cameraPlaceholder, screenPlaceholder
+        case participantIdentity, cameraSourceID, screenSourceID, offlineMessage, placeholderColorHex
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(name, forKey: .name)
+        try c.encode(displayName, forKey: .displayName); try c.encodeIfPresent(localName, forKey: .localName)
+        try c.encode(title, forKey: .title); try c.encodeIfPresent(reconnectPeerID, forKey: .reconnectPeerID)
+        try c.encode(cameraPlaceholder, forKey: .cameraPlaceholder); try c.encode(screenPlaceholder, forKey: .screenPlaceholder)
+        try c.encodeIfPresent(participantIdentity, forKey: .participantIdentity)
+        try c.encode(cameraSourceID, forKey: .cameraSourceID); try c.encode(screenSourceID, forKey: .screenSourceID)
+    }
+
+    init(id: UUID = UUID(), name: String) { self.id = id; self.name = name }
 
     var resolvedName: String { localName ?? (displayName.isEmpty ? name : displayName) }
     func normalized() -> GuestSlot {
@@ -791,6 +828,25 @@ struct GuestSlot: Identifiable, Hashable, Codable, Sendable {
     private static func bounded(_ value: String, fallback: String = "") -> String {
         let bounded = String(value.prefix(128))
         return bounded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : bounded
+    }
+}
+
+extension GuestSlot {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id); name = try c.decode(String.self, forKey: .name)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        localName = try c.decodeIfPresent(String.self, forKey: .localName)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        reconnectPeerID = try c.decodeIfPresent(UUID.self, forKey: .reconnectPeerID)
+        participantIdentity = try c.decodeIfPresent(String.self, forKey: .participantIdentity)
+        cameraPlaceholder = try c.decodeIfPresent(GuestOfflinePlaceholder.self, forKey: .cameraPlaceholder)
+            ?? GuestOfflinePlaceholder(colorHex: c.decodeIfPresent(String.self, forKey: .placeholderColorHex) ?? "#253858",
+                                       message: c.decodeIfPresent(String.self, forKey: .offlineMessage) ?? "Waiting for guest")
+        screenPlaceholder = try c.decodeIfPresent(GuestOfflinePlaceholder.self, forKey: .screenPlaceholder) ?? .init(message: "Screen not shared")
+        sourceIdentitiesWereDecoded = c.contains(.cameraSourceID) && c.contains(.screenSourceID)
+        cameraSourceID = try c.decodeIfPresent(SourceDefinitionID.self, forKey: .cameraSourceID) ?? SourceDefinitionID()
+        screenSourceID = try c.decodeIfPresent(SourceDefinitionID.self, forKey: .screenSourceID) ?? SourceDefinitionID()
     }
 }
 
@@ -1913,6 +1969,36 @@ struct SceneDocument: Hashable, Codable, Sendable {
         stylePresets = try container.decodeIfPresent([LayerStylePreset].self, forKey: .stylePresets) ?? []
         textStylePresets = try container.decodeIfPresent([TextStylePreset].self, forKey: .textStylePresets) ?? []
         guestSlots = try container.decodeIfPresent([GuestSlot].self, forKey: .guestSlots) ?? []
+        // Older native slots stored their stable identities in role-bound source payloads.
+        // Only migrate missing identity fields; explicit malformed identities still fail.
+        for index in guestSlots.indices where !guestSlots[index].sourceIdentitiesWereDecoded {
+            for role in [GuestSourceRole.camera, .screen] {
+                let matches = sources.filter { source in
+                    guard case .guest(let payload) = source.payload else { return false }
+                    return payload.slotID == guestSlots[index].id && payload.role == role
+                }
+                guard let matching = matches.sorted(by: { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }).first else {
+                    throw DecodingError.dataCorruptedError(forKey: .guestSlots, in: container,
+                        debugDescription: "Guest slot migration requires an existing source for the same slot and role.")
+                }
+                if role == .camera { guestSlots[index].cameraSourceID = matching.id }
+                else { guestSlots[index].screenSourceID = matching.id }
+            }
+            guestSlots[index].sourceIdentitiesWereDecoded = true
+        }
+        let mediaIDs = guestSlots.flatMap { [$0.cameraSourceID, $0.screenSourceID] }
+        guard guestSlots.count <= 16, Set(guestSlots.map(\.id)).count == guestSlots.count,
+              Set(mediaIDs).count == mediaIDs.count,
+              guestSlots.allSatisfy({ slot in
+                  [(slot.cameraSourceID, GuestSourceRole.camera), (slot.screenSourceID, .screen)].allSatisfy { id, role in
+                      let matching = sources.filter { $0.id == id }
+                      guard matching.count == 1, case .guest(let payload) = matching[0].payload else { return false }
+                      return payload.slotID == nil || (payload.slotID == slot.id && payload.role == role)
+                  }
+              }) else {
+            throw DecodingError.dataCorruptedError(forKey: .guestSlots, in: container,
+                debugDescription: "Guest preparation requires at most sixteen unique slots and separate unique guest source IDs.")
+        }
     }
 
     /// The S07 render context the engine composites every scene inside.

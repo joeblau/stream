@@ -23,6 +23,7 @@ actor ProviderTokenVault {
     private let transport: Transport
     private var refreshes: [ManagedProvider: Task<ProviderOAuthToken, Error>] = [:]
     private var generations: [ManagedProvider: UUID] = [:]
+    private var revokedCredentials: [ManagedProvider: (previous: UUID, empty: UUID)] = [:]
     init(keychain: any ProviderCredentialStore = KeychainStore(service: "com.joeblau.Stream.mac.providerAccounts"),
          transport: @escaping Transport = ProviderTokenVault.network) {
         self.keychain = keychain; self.transport = transport
@@ -42,6 +43,12 @@ actor ProviderTokenVault {
         if self.clientID(provider) != clientID {
             disconnect(provider)
             guard keychain.set(clientID, for: .provider(provider, field: .clientID)) else { throw ProviderFailure(.unavailable) }
+        } else {
+            // Reauthorization can choose another user under the same client.
+            // Fence existing refreshes before capturing the new OAuth grant's
+            // acceptance generation; retain the stored token until acceptance.
+            generations[provider] = UUID(); revokedCredentials[provider] = nil
+            refreshes[provider]?.cancel(); refreshes[provider] = nil
         }
         return generation(provider)
     }
@@ -50,11 +57,20 @@ actor ProviderTokenVault {
         try save(token, provider: provider)
         // Accepting new OAuth authorization may change the user behind an
         // unchanged client ID. Late requests from the old user must be ignored.
-        generations[provider] = UUID(); refreshes[provider]?.cancel(); refreshes[provider] = nil
+        generations[provider] = UUID(); revokedCredentials[provider] = nil
+        refreshes[provider]?.cancel(); refreshes[provider] = nil
     }
     func disconnect(_ provider: ManagedProvider) {
+        revokedCredentials[provider] = nil
         generations[provider] = UUID(); refreshes[provider]?.cancel(); refreshes[provider] = nil
         keychain.remove(.provider(provider, field: .tokens))
+    }
+    /// A refresh revocation can change generation without replacing the user.
+    /// This actor-local receipt identifies that exact empty successor only.
+    func revocationGeneration(_ provider: ManagedProvider, previous: UUID) -> UUID? {
+        guard let receipt = revokedCredentials[provider], receipt.previous == previous,
+              receipt.empty == generation(provider), !hasToken(provider) else { return nil }
+        return receipt.empty
     }
     private func load(_ provider: ManagedProvider) -> ProviderOAuthToken? {
         guard let raw = keychain.string(for: .provider(provider, field: .tokens)), raw.utf8.count <= 65_536 else { return nil }
@@ -96,7 +112,10 @@ actor ProviderTokenVault {
         } catch {
             if generation(provider) == expected {
                 refreshes[provider] = nil
-                if (error as? ProviderFailure)?.kind == .authorization { disconnect(provider) }
+                if (error as? ProviderFailure)?.kind == .authorization {
+                    disconnect(provider)
+                    revokedCredentials[provider] = (expected, generation(provider))
+                }
             }
             throw error
         }
@@ -141,6 +160,10 @@ actor ProviderTokenVault {
         guard authorizationIsCurrent() else { throw ProviderFailure(.authorization) }
         try Task.checkCancellation()
         var (data, response) = try await transport(authorized)
+        // A delayed 401 belongs to the captured credential. It cannot refresh
+        // a replacement account or revive work cancelled while HTTP was held.
+        guard authorizationIsCurrent(), generation(provider) == expected else { throw CancellationError() }
+        try Task.checkCancellation()
         // Read-only retries cannot duplicate an event mutation.
         if retryAuthorizedGET && response.statusCode == 401 && (request.httpMethod ?? "GET") == "GET" {
             token = try await current(provider, forceRefresh: true)

@@ -2,6 +2,8 @@
 
 Optional adapters cross an authenticated, versioned process boundary. A manifest is data: it contains identity, roles, capability grants, and resource descriptors. It contains no executable path and does not install callbacks into the compositor, mixer, encoder, or trusted app process.
 
+NDI input/output (#160/#176), DeckLink capture/output (#161/#177), and Zoom participant/program-return integration (#167/#168) remain unavailable. Installing a runtime, an ordinary Zoom desktop client, or a control-adapter manifest does not implement their media bridges. The read-only [professional media prerequisite diagnostic](research/pro-media-adapters.md) records the separate SDK/runtime, permissions, hardware/account and distribution gates without advertising media support.
+
 ## Manifest and engine resources
 
 `StudioAdapterManifest` declares `schemaVersion`, a stable reverse-domain `id`, display name/vendor/version, `minimumHostProtocol`, roles, resources, and exactly one contract for each declared role. Host/contract versions are checked before registration. Resource descriptors use UUIDs plus an explicit show-profile scope, resource kind/name, and optional parent UUID. Names may change; IDs are retained. Descriptors address the shared engine's scene/layer/source/output/audio-channel model without embedding a vendor into the composition graph.

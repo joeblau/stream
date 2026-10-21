@@ -1041,6 +1041,7 @@ final class StudioCommandDispatcher: ObservableObject {
     /// MainWindowView needs no new environment plumbing.
     let assetLibrary: AssetLibraryStore
     let rundown: ShowRundownController
+    private var scheduledRundownCueID: UUID?
     let macros: ShowMacroController
     private var executingMacroStep = false
     let lutLibrary = LUTLibraryController()
@@ -1121,6 +1122,9 @@ final class StudioCommandDispatcher: ObservableObject {
         }
         rundown.onCue = { [weak self] entry in
             guard let self else { return }
+            let previous = self.scheduledRundownCueID
+            self.scheduledRundownCueID = entry.id
+            defer { self.scheduledRundownCueID = previous }
             let result = self.execute(.runRundownCue(entry.id))
             if case .rejected(let error) = result.outcome { self.rundown.fail(error.description) }
         }
@@ -1275,6 +1279,7 @@ final class StudioCommandDispatcher: ObservableObject {
         for group in scene.groups { result[group.id.rawValue.uuidString] = scene.layers.contains { $0.groupID == group.id && $0.isVisible } }
         return result
     }
+    func controllerRecordingCountdown() -> Int { recorder.countdownRemaining }
     func controllerChatSnapshot() -> StudioControlChatState? {
         guard let chatCoordinator else { return nil }
         let slot = chatCoordinator.selectedSlot
@@ -2970,7 +2975,10 @@ final class StudioCommandDispatcher: ObservableObject {
                   let scene = sceneStore.scenes.first(where: { $0.id.rawValue == entry.cue.sceneID }) else { return }
             sceneStore.selectedID = scene.id
             previewProgram.stage(scene)
-            publishStaged(transitionOverride: entry.transition, automated: true)
+            // Only the scheduler's own callback keeps its clock running.
+            // A manually invoked stable cue pauses the prior clock, matching
+            // a manual Take; its old timer must not overwrite this Program.
+            publishStaged(transitionOverride: entry.transition, automated: scheduledRundownCueID == id)
         case .openSettings(let section): session.showSettings(section: section)
         case .closeSettings: session.isPresented = false
         case .applySettings: session.apply()

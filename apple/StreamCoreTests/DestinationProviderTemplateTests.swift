@@ -21,6 +21,24 @@ import Testing
         }
         #expect(DestinationProviderTemplate.x.makeDestination().id != DestinationProviderTemplate.x.makeDestination().id)
     }
+    @Test("Every guided starting profile validates once its issued credentials are supplied")
+    func usableProfiles() {
+        let capabilities = OutputCapabilities(hardwareTier: .uhd4K, hardwareMaxFrameRate: 60)
+        for template in DestinationProviderTemplate.allCases {
+            for transport in template.transports {
+                let destination = template.makeDestination(transport: transport)
+                let endpoint: String
+                switch transport {
+                case .rtmp: endpoint = "rtmp://test.invalid/live"
+                case .rtmps: endpoint = "rtmps://test.invalid/live"
+                case .srt: endpoint = "srt://test.invalid:9000?streamid=fixture"
+                case .whip: endpoint = "https://test.invalid/whip/fixture"
+                }
+                let credentials = DestinationCredentials(endpoint: endpoint, streamKey: transport.requiresKey ? "fixture" : "")
+                #expect(DestinationValidator.startErrors(destination, credentials: credentials, program: .default, capabilities: capabilities).isEmpty)
+            }
+        }
+    }
     @Test("Portable guidance round-trips, accepts older files and tolerates future guide IDs")
     func portableMetadata() throws {
         let source = DestinationProviderTemplate.instagram.makeDestination()

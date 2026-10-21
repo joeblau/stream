@@ -40,13 +40,31 @@ enum ShowPackageIO {
             paths.append(name)
         }
         if includeMedia {
+            func copyMedia(_ source: URL, path: String) throws {
+                let values = try source.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey])
+                guard values.isSymbolicLink != true else {
+                    throw PortableShow.Failure.invalid("Media contains a symbolic link. Replace it with a file copy before exporting.")
+                }
+                let target = try PortableShow.safeURL(path, under: staging)
+                if values.isDirectory == true {
+                    let children = try manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+                    guard !children.isEmpty else {
+                        throw PortableShow.Failure.invalid("Empty asset folders cannot be transferred. Use the relink-media policy instead.")
+                    }
+                    for child in children.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                        try copyMedia(child, path: path + "/" + child.lastPathComponent)
+                    }
+                } else {
+                    guard values.isRegularFile == true else { throw PortableShow.Failure.invalid("Media must contain regular files only.") }
+                    guard paths.count < 2000 else { throw PortableShow.Failure.invalid("A show package can contain at most 2,000 files.") }
+                    try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try manager.copyItem(at: source, to: target)
+                    paths.append(path)
+                }
+            }
             for item in media {
-                guard item.access.isAccessible else { continue }
-                let target = try PortableShow.safeURL(item.relativePath, under: staging)
-                try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-                guard (try item.access.url.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else { continue }
-                try manager.copyItem(at: item.access.url, to: target)
-                paths.append(item.relativePath)
+                guard item.access.isAccessible else { throw PortableShow.Failure.invalid("An included asset is no longer accessible. Relink it and export again.") }
+                try copyMedia(item.access.url, path: item.relativePath)
                 withExtendedLifetime(item.access) {}
             }
         }
@@ -61,7 +79,7 @@ enum ShowPackageIO {
         let granted = url.startAccessingSecurityScopedResource()
         defer { if granted { url.stopAccessingSecurityScopedResource() } }
         let manifest = try PortableShow.validate(at: url)
-        let sceneData = try Data(contentsOf: url.appendingPathComponent("stream.scenes.v2.json"))
+        let sceneData = try PortableShow.readDocument(at: PortableShow.safeURL("stream.scenes.v2.json", under: url))
         guard case .success(let migrated) = SceneDocumentMigration.migrateToCurrent(sceneData) else {
             throw PortableShow.Failure.invalid("The package scene version is not supported.")
         }
@@ -90,7 +108,7 @@ enum ShowPackageIO {
             let to = try PortableShow.safeURL(importedPath, under: staging)
             try manager.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
             if PortableShow.documentNames.contains(file.path) {
-                let data = try PortableShow.redact(Data(contentsOf: from), remappingIDs: true, idMap: &mapping)
+                let data = try PortableShow.redact(PortableShow.readDocument(at: from), remappingIDs: true, idMap: &mapping)
                 try data.write(to: to, options: .atomic)
             } else { try manager.copyItem(at: from, to: to) }
         }

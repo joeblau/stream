@@ -1,0 +1,17 @@
+# Interview preparation and browser recovery
+
+The Guests inspector prepares project-local slots; it does not establish a native call. A slot saves its stable identity, separate camera/screen source IDs, name/title and defaults for an offline placeholder. New and old project documents load with the additive `guestSlots` field; older documents default to no slots. Reconstructing the runtime for a project/profile replaces the slot title-token namespace, so names from another project cannot remain in prepared captions.
+
+Solo, side-by-side, grid, picture-in-picture and screen-plus-guests create ordinary editable layers through the existing Add to Preview command. Camera and screen retain independent source bindings and framing. Placeholder colors/messages are copied into new layouts; operators edit existing placeholder layers directly. Name/title captions resolve their slot metadata on each render, including a taken value copy. Removing an assigned slot is refused while a saved scene, overlay or pending staged scene references it. Sixteen is the saved preparation-slot ceiling, not qualified simultaneous call capacity.
+
+The browser device check now commits captured devices only after every active sender replacement succeeds. It releases stale permission results after leave/restart, serializes initial negotiation with device changes, restores previous tracks after a failed change and closes the media peer with explicit reconnect/readmission guidance if restoration fails. Mute/camera controls immediately affect in-flight tracks as well as the current preview. Leave and peer reset stop in-flight captures before pending sender replacements resolve. Invite credentials remain memory-only.
+
+## Validation
+
+`GUEST_PRODUCTS_PATH=<macOS StreamCore products directory> zsh apple/scripts/run_guest_preparation_harness.zsh` compiles the real preparation view, scene store, document models, template generator and lock-protected stores. It checks project reload/isolation, legacy documents, stable source identities, the slot ceiling, every template with 1–16 slots, bounded geometry/fitting captions, metadata updates and slot-reference guards. Its storage default and all explicit stores use temporary paths; it does not access operator secrets/devices.
+
+From `workers/interviews`, `npm run test:client` runs eleven guest device-lifecycle cases plus eleven existing reference-host cases. `npm run test:browser` uses actual headless Chrome, synthetic camera/microphone/display tracks and real loopback WebRTC. Both pass locally. The loopback host is a protocol fixture; it does not establish real TURN reachability, Safari/mobile or physical-device support.
+
+## Open acceptance gates
+
+Issues #125–130 stay open. The sixteen saved slots, editable layouts and automatic metadata coexist with the Connection tab's native single-peer admission, invitations, private messages/talkback, mix-minus and selectable Program/Secondary/Clean return. Saved slot count does not increase measured simultaneous call capacity. Camera and separately approved screen sources have controlled native/Chrome evidence; physical Safari/Chrome/mobile device workflows, deployed TURN/restricted networks, sustained workloads and multiple simultaneous guests remain unqualified. See [native control](NATIVE_INTERVIEW_CONTROL.md), [guest slots](NATIVE_GUEST_PANEL_CONTROLS.md) and [video return evidence and unresolved observation gates](NATIVE_GUEST_RETURN_VIDEO.md). No saved source or prepared layout grants guest media authority or starts an output.

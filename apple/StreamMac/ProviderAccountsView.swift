@@ -340,7 +340,7 @@ struct ProviderBroadcastStatus: View {
     /// Rendering clock injection keeps expiry tests independent of account publication.
     var now: (@MainActor () -> Date)? = nil
     private var snapshot: ProviderAccountSnapshot { accounts.snapshot(binding.provider) }
-    private var event: ProviderEvent? { snapshot.verifiedAt == nil ? nil : accounts.event(binding) }
+    private var event: ProviderEvent? { accounts.eventReceipt(binding) }
     private var publicURL: URL? {
         if let url = event?.publicURL { return url }
         if binding.provider == .twitch { return snapshot.channels.first { $0.id == binding.channelID }?.publicURL }
@@ -355,8 +355,10 @@ struct ProviderBroadcastStatus: View {
     }
     private func statusContent(at time: Date) -> some View {
         let reading = accounts.viewerReading(binding, now: time)
+        let fresh = accounts.event(binding, at: time) != nil
+        let state = fresh ? event?.state.rawValue ?? "unknown" : "unknown"
         return VStack(alignment: .leading, spacing: 3) {
-            Text("Remote event: \(event?.state.rawValue ?? "unknown") · Viewers: \(reading.count.map(String.init) ?? "unavailable")")
+            Text("Remote event: \(state) · Viewers: \(reading.count.map(String.init) ?? "unavailable")")
                 .font(.caption2).foregroundStyle(.secondary)
             if let date = reading.readAt {
                 Text("Viewer reading: \(date.formatted(date: .omitted, time: .standard)) · \(reading.freshness.rawValue)")
@@ -369,7 +371,10 @@ struct ProviderBroadcastStatus: View {
                     Button("Copy Link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string) }
                 }
             }.font(.caption)
-            if let event { Text("Remote state read \(event.verifiedAt.formatted(date: .omitted, time: .standard))").font(.caption2).foregroundStyle(.secondary) }
+            if let event {
+                Text(fresh ? "Remote state read \(event.verifiedAt.formatted(date: .omitted, time: .standard))" : "Remote state read \(event.verifiedAt.formatted(date: .omitted, time: .standard)) · stale; refresh to verify.")
+                    .font(.caption2).foregroundStyle(fresh ? Color.secondary : Color.orange)
+            }
             if let failure = snapshot.failure { Text(failure.localizedDescription).font(.caption2).foregroundStyle(.orange) }
         }
     }

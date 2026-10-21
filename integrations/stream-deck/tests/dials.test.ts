@@ -17,16 +17,19 @@ async function until(check: () => boolean) {
 }
 test("bundled Plus dials batch ticks, serialize authoritative deltas, handle mute/touch, selectors and reconnect without replay", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "stream-plus-test-"));
-  const projectID = randomUUID(), sceneA = randomUUID(), sceneB = randomUUID();
+  const projectID = randomUUID(), sceneA = randomUUID(), sceneB = randomUUID(), overlayA = randomUUID(), overlayB = randomUUID();
   const gainID = "audio.microphone.gain", muteID = "audio.microphone.mute";
   const selectA = `scene.${sceneA}.select`, selectB = `scene.${sceneB}.select`;
+  const overlaySelectA = `overlay.${overlayA}.visibility`, overlaySelectB = `overlay.${overlayB}.visibility`;
   const state: Snapshot = { projectID, revision: 1, stream: "idle", recording: "paused", preview: "active", pendingStagedEdits: false,
-    stagedSceneID: sceneA, layerVisibility: {}, values: { [gainID]: 0.5 }, mutes: { [gainID]: false }, macroProgress: { phase: "idle", stepIndex: 0, totalSteps: 0, message: "" } };
+    stagedSceneID: sceneA, layerVisibility: {}, overlayVisibility: { [overlayA]: false, [overlayB]: false }, values: { [gainID]: 0.5 }, mutes: { [gainID]: false }, macroProgress: { phase: "idle", stepIndex: 0, totalSteps: 0, message: "" } };
   const commands: Capability[] = [{ id: gainID, title: "Microphone Gain", category: "Audio Levels", available: true, kind: "value" },
     { id: muteID, title: "Mute Microphone", category: "Audio", available: true, kind: "command" },
-    { id: selectA, title: "Opening", category: "Scenes", available: true }, { id: selectB, title: "Interview", category: "Scenes", available: true }];
+    { id: selectA, title: "Opening", category: "Scenes", available: true }, { id: selectB, title: "Interview", category: "Scenes", available: true },
+    { id: overlaySelectA, title: "Show Global Overlay Logo", category: "Global Overlays", available: true },
+    { id: overlaySelectB, title: "Show Global Overlay Lower Third", category: "Global Overlays", available: true }];
   const peers = new Map<net.Socket, string>();
-  let valueRequests = 0, muteRequests = 0, selections = 0, dropNext = false;
+  let valueRequests = 0, muteRequests = 0, selections = 0, overlayRequests = 0, dropNext = false;
   const native = net.createServer(socket => {
     const sessionID = randomUUID(); peers.set(socket, sessionID); socket.on("close", () => peers.delete(socket));
     let buffer = "";
@@ -42,6 +45,7 @@ test("bundled Plus dials batch ticks, serialize authoritative deltas, handle mut
           if (request.commandID === gainID) { ++valueRequests; state.values![gainID] = request.value ?? Math.max(0, Math.min(1, state.values![gainID]! + request.delta)); }
           if (request.commandID === muteID) { ++muteRequests; state.mutes![gainID] = !state.mutes![gainID]; }
           if (request.commandID === selectA || request.commandID === selectB) { ++selections; state.stagedSceneID = request.commandID === selectA ? sceneA : sceneB; }
+          if (request.commandID === overlaySelectA || request.commandID === overlaySelectB) { ++overlayRequests; const id = request.commandID === overlaySelectA ? overlayA : overlayB; state.overlayVisibility![id] = !state.overlayVisibility![id]; }
           ++state.revision;
           if (dropNext) { dropNext = false; socket.destroy(); }
           else send("result", { result: { succeeded: true }, snapshot: state });
@@ -52,9 +56,9 @@ test("bundled Plus dials batch ticks, serialize authoritative deltas, handle mut
   native.listen(0, "127.0.0.1"); await once(native, "listening");
   const pairing = { version: 1, clientID: randomUUID(), token: "c".repeat(64), port: (native.address() as net.AddressInfo).port };
   const sd = new WebSocketServer({ port: 0, host: "127.0.0.1" }); await once(sd, "listening");
-  const received: any[] = [], settings = new Map<string, object>([["dial-a", { commandID: gainID, projectID, step: 0.01 }], ["dial-b", { commandID: gainID, projectID, step: 0.01 }], ["selector", { commandID: selectA, projectID, category: "Scenes" }]]);
+  const received: any[] = [], settings = new Map<string, object>([["dial-a", { commandID: gainID, projectID, step: 0.01 }], ["dial-b", { commandID: gainID, projectID, step: 0.01 }], ["selector", { commandID: selectA, projectID, category: "Scenes" }], ["selector-overlay", { commandID: overlaySelectA, projectID, category: "Overlays" }]]);
   let sdPeer: any, child: ReturnType<typeof spawn> | undefined, output = "";
-  const send = (event: string, context: string, payload: object = {}) => sdPeer.send(JSON.stringify({ event, context, action: `com.joeblau.stream-studio.${context === "selector" ? "selector" : "level"}`, device: context === "dial-b" ? "plus-b" : "plus-a",
+  const send = (event: string, context: string, payload: object = {}) => sdPeer.send(JSON.stringify({ event, context, action: `com.joeblau.stream-studio.${context.startsWith("selector") ? "selector" : "level"}`, device: context === "dial-b" ? "plus-b" : "plus-a",
     payload: { controller: "Encoder", coordinates: { column: context === "dial-b" ? 1 : 0, row: 0 }, settings: settings.get(context), ...payload } }));
   sd.on("connection", (peer: any) => {
     sdPeer = peer; peer.on("message", (data: Buffer) => {
@@ -69,11 +73,11 @@ test("bundled Plus dials batch ticks, serialize authoritative deltas, handle mut
     await writeFile(resolve(directory, "package.json"), '{"type":"module"}');
     await build({ entryPoints: ["src/plugin.ts"], bundle: true, platform: "node", format: "esm", target: "node24", outfile: resolve(directory, "bin/plugin.js"), banner: { js: 'import {createRequire} from "node:module"; const require = createRequire(import.meta.url);' } });
     await writeFile(resolve(directory, "bin/keychain-helper"), `#!/usr/bin/env node\nif (process.argv[2] === "read") process.stdout.write(${JSON.stringify(JSON.stringify(pairing))});\n`, { mode: 0o755 });
-    const info = { application: { version: "7.1.0", platform: "mac", platformVersion: "15.0", language: "en", font: "Arial" }, devices: ["plus-a", "plus-b"].map(id => ({ id, name: id, type: 5, size: { columns: 4, rows: 2 } })), plugin: { version: "0.1.0", uuid: "com.joeblau.stream-studio" } };
+    const info = { application: { version: "7.1.0", platform: "mac", platformVersion: "15.0", language: "en", font: "Arial" }, devices: ["plus-a", "plus-b"].map(id => ({ id, name: id, type: 7, size: { columns: 4, rows: 2 } })), plugin: { version: "0.1.0", uuid: "com.joeblau.stream-studio" } };
     child = spawn(process.execPath, [resolve(directory, "bin/plugin.js"), "-port", String(sd.address().port), "-pluginUUID", "fixture", "-registerEvent", "registerPlugin", "-info", JSON.stringify(info)], { cwd: directory, stdio: ["ignore", "pipe", "pipe"] });
     child.stdout?.on("data", data => { output += data.toString(); }); child.stderr?.on("data", data => { output += data.toString(); });
     await until(() => received.some(message => message.event === "registerPlugin"));
-    send("willAppear", "dial-a"); send("willAppear", "dial-b"); send("willAppear", "selector");
+    send("willAppear", "dial-a"); send("willAppear", "dial-b"); send("willAppear", "selector"); send("willAppear", "selector-overlay");
     await until(() => received.filter(message => message.event === "setFeedback" && message.payload.title === "Microphone Gain").length >= 2);
     send("dialRotate", "dial-a", { ticks: 3, pressed: false }); send("dialRotate", "dial-a", { ticks: 2, pressed: false }); send("dialRotate", "dial-b", { ticks: -2, pressed: false });
     await until(() => valueRequests === 2); assert.ok(Math.abs(state.values![gainID]! - 0.53) < 0.00001);
@@ -83,8 +87,14 @@ test("bundled Plus dials batch ticks, serialize authoritative deltas, handle mut
     send("touchTap", "dial-a", { hold: true, tapPos: [100, 50] }); await until(() => valueRequests === 3); assert.equal(state.values![gainID], 0.5);
     send("dialRotate", "selector", { ticks: 1, pressed: false }); await until(() => (settings.get("selector") as any).commandID === selectB); assert.equal(selections, 0);
     send("dialDown", "selector"); send("dialDown", "selector"); await until(() => selections === 1); assert.equal(state.stagedSceneID, sceneB);
+    send("dialRotate", "selector-overlay", { ticks: 1, pressed: false });
+    await until(() => (settings.get("selector-overlay") as any).commandID === overlaySelectB);
+    assert.equal(overlayRequests, 0, "Overlay browsing does not mutate global visibility");
+    send("touchTap", "selector-overlay", { hold: false, tapPos: [100, 50] });
+    await until(() => overlayRequests === 1); assert.equal(state.overlayVisibility![overlayB], true);
+    await until(() => received.some(message => message.context === "selector-overlay" && message.event === "setFeedback" && message.payload.value === "GLOBAL ON"));
     commands[3]!.title = "Renamed Interview"; publish(); await until(() => received.some(message => message.event === "setFeedback" && message.payload.title === "Renamed Interview"));
-    commands.pop(); publish(); await until(() => received.some(message => message.context === "selector" && message.event === "setFeedback" && message.payload.title === "Missing\nResource"));
+    commands.splice(3, 1); publish(); await until(() => received.some(message => message.context === "selector" && message.event === "setFeedback" && message.payload.title === "Missing\nResource"));
     send("dialUp", "selector"); send("dialDown", "selector"); await new Promise(resolve => setTimeout(resolve, 100)); assert.equal(selections, 1);
     dropNext = true; send("dialRotate", "dial-a", { ticks: 1, pressed: false }); await until(() => valueRequests === 4);
     await until(() => peers.size === 1); await new Promise(resolve => setTimeout(resolve, 300)); assert.equal(valueRequests, 4, "A lost acknowledgement never replays numeric deltas");

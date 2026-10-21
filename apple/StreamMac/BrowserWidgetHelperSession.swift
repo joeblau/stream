@@ -2,6 +2,15 @@ import AppKit
 import CoreMedia
 import CoreVideo
 
+/// Internal transport seam lets owned fixtures reject a command without launching
+/// a helper or touching capture permissions. Product sessions use the PID-checked
+/// connection below.
+protocol BrowserWidgetHelperTransport: AnyObject {
+    var pid: Int32 { get }
+    @MainActor func send(_ value: BrowserWidgetAudioCommand) throws
+    @MainActor func close()
+}
+
 /// Explicit qualification backend. No app startup or preference enables this session. One
 /// LaunchServices application owns each page's pixels, interaction, and shared audio identity.
 /// Callers must retain the session until `waitUntilStopped()` completes and apply its required
@@ -35,9 +44,10 @@ import CoreVideo
     var helperPID: Int32? { connection?.pid }
     var audioIsCapturing: Bool { audio.isCapturing }
     private let applicationURL: URL
+    private let acceptsInjectedReplies: Bool
     private let audio: any BrowserWidgetAudioDriver
     private let mixer: AudioMixEngine?
-    private var connection: BrowserWidgetHelperConnection?
+    private var connection: (any BrowserWidgetHelperTransport)?
     private var launchTask: Task<Void, Error>?
     private var shutdownTask: Task<Void, Never>?
     private var shutdownID = UUID()
@@ -66,17 +76,26 @@ import CoreVideo
     private var evaluations: [UUID: CheckedContinuation<String?, Never>] = [:]
 
     init(applicationURL: URL, mixer: AudioMixEngine? = nil,
+         transportForQualification: (any BrowserWidgetHelperTransport)? = nil,
          audioSink: @escaping @Sendable (CMSampleBuffer) -> Void) {
         self.applicationURL = applicationURL; self.mixer = mixer
+        self.connection = transportForQualification
+        acceptsInjectedReplies = transportForQualification != nil
         audio = BrowserWidgetAudioCapture(mixer: mixer, sink: audioSink)
         audio.onFailure = { [weak self] category in self?.failSession(category) }
         mixer?.setCaptureRouteAllowed(channel, allowed: false)
     }
     #if STREAM_NATIVE_VALIDATION
-    init(applicationURL: URL, mixer: AudioMixEngine, validationAudioDriver: any BrowserWidgetAudioDriver) {
+    init(applicationURL: URL, mixer: AudioMixEngine, validationAudioDriver: any BrowserWidgetAudioDriver,
+         transportForQualification: (any BrowserWidgetHelperTransport)? = nil) {
         self.applicationURL = applicationURL; self.mixer = mixer; audio = validationAudioDriver
+        connection = transportForQualification; acceptsInjectedReplies = transportForQualification != nil
         audio.onFailure = { [weak self] category in self?.failSession(category) }
         mixer.setCaptureRouteAllowed(channel, allowed: false)
+    }
+    func validationReceive(_ reply: BrowserWidgetAudioReply) {
+        guard acceptsInjectedReplies else { return }
+        receive(reply, epoch: epoch)
     }
     #endif
     convenience init(applicationURL: URL, mixer: AudioMixEngine) {
@@ -189,6 +208,10 @@ import CoreVideo
                 self?.evaluations.removeValue(forKey: request)?.resume(returning: nil)
             }
         }
+    }
+    func setSuspended(id: UUID, suspended: Bool) {
+        guard let generation = demands[id]?.generation else { return }
+        setSuspended(id: id, generation: generation, suspended: suspended)
     }
     func setSuspended(id: UUID, generation: UUID, suspended: Bool) {
         guard demands[id]?.generation == generation else { return }
@@ -449,7 +472,7 @@ import CoreVideo
 /// Separate bounded command and frame connections keep visual readback off audio queues. Both
 /// accepted peers must match the exact LaunchServices PID. Readers deliver at most one item to
 /// MainActor at a time; socket closure wakes them, and command writes have a 256 KiB / 64-item cap.
-private final class BrowserWidgetHelperConnection: @unchecked Sendable {
+private final class BrowserWidgetHelperConnection: BrowserWidgetHelperTransport, @unchecked Sendable {
     let pid: Int32
     private let application: NSRunningApplication
     private let command: FileHandle, frames: FileHandle

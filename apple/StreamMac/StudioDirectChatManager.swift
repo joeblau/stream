@@ -20,6 +20,9 @@ struct DirectChatSnapshot {
     typealias Identity = @MainActor (ManagedProvider) async throws -> DirectChatIdentity
     typealias Sleep = @Sendable (Double) async throws -> Void
     @Published private(set) var snapshots: [ManagedProvider: DirectChatSnapshot] = [.youtube: .init(), .twitch: .init()]
+    @Published private(set) var audiences: [ManagedProvider: DirectChatAudience] = [.youtube: .init(), .twitch: .init()]
+    private var audienceJobs: [ManagedProvider: Task<Void, Never>] = [:]
+    private var audienceJobIDs: [ManagedProvider: UUID] = [:]
     @Published private(set) var receipts: [DirectChatWriteReceipt] = []
     let presets: StudioChatPresetStore
     private let request: Request
@@ -68,6 +71,7 @@ struct DirectChatSnapshot {
         let old = generations[provider]
         generations[provider] = UUID(); jobs[provider]?.cancel(); jobs[provider] = nil
         cancelWrite(provider); active[provider] = nil
+        audienceJobs[provider]?.cancel(); audienceJobs[provider] = nil; audienceJobIDs[provider] = nil; audiences[provider] = .init()
         if provider == .twitch { cancelCycles(); reconnectAttempts = 0 }
         if let old { emit(.closed(uuid: old.uuidString)) }
         snapshots[provider] = .init(retryUntil: cooldowns[provider])
@@ -145,7 +149,12 @@ struct DirectChatSnapshot {
             for delivery in result.deliveries { receive(delivery) }
             remove(result.removedIDs)
             for author in result.bannedAuthors { clear(provider: .youtube, chatID: chatID, author: author) }
-            if result.ended { status(.youtube, generation, "Chat ended"); active[.youtube] = nil; return }
+            if result.ended {
+                status(.youtube, generation, "Chat ended"); active[.youtube] = nil
+                audienceJobs[.youtube]?.cancel(); audienceJobs[.youtube] = nil; audienceJobIDs[.youtube] = nil
+                audiences[.youtube]?.availability = .offline; audiences[.youtube]?.isRefreshing = false
+                return
+            }
             page = result.nextPage
             try await sleep(result.interval)
         }
@@ -193,6 +202,7 @@ struct DirectChatSnapshot {
     private func failed(_ provider: ManagedProvider, _ generation: UUID, _ error: Error) {
         guard current(provider, generation) else { return }
         status(provider, generation, "Failed")
+        audienceJobs[provider]?.cancel(); audienceJobs[provider] = nil; audienceJobIDs[provider] = nil; audiences[provider] = .init()
         snapshots[provider]?.failure = (error as? ProviderFailure ?? ProviderFailure(.unavailable)).localizedDescription
         active[provider] = nil
         if provider == .twitch { cancelCycles() }
@@ -288,6 +298,52 @@ struct DirectChatSnapshot {
         guard snapshot(provider).isConnected, let (account, chatID) = active[provider], let generation = generations[provider] else { return nil }
         return .init(provider: provider, channelID: account.channelID, chatID: chatID,
                      broadcastID: snapshot(provider).target, generation: generation)
+    }
+    func audience(_ provider: ManagedProvider) -> DirectChatAudience { audiences[provider] ?? .init() }
+    func canRefreshAudience(_ provider: ManagedProvider) -> Bool {
+        guard writeTarget(provider) != nil, !audience(provider).isRefreshing else { return false }
+        return audience(provider).retryUntil.map { $0 <= now() } ?? true
+    }
+    /// Explicit, bounded read. It shares authorization but never delays or
+    /// replaces the incoming reader, write receipts, or another destination.
+    func refreshAudience(_ provider: ManagedProvider) {
+        guard canRefreshAudience(provider), let target = writeTarget(provider) else { return }
+        audiences[provider]?.isRefreshing = true
+        audiences[provider]?.failure = nil
+        audiences[provider]?.retryUntil = now().addingTimeInterval(30)
+        let jobID = UUID(); audienceJobIDs[provider] = jobID
+        audienceJobs[provider] = Task { [weak self] in
+            guard let self else { return }
+            // Temporary reader reconnect/cooldown removes writeTarget without
+            // replacing the account generation. Every owned completion clears
+            // pending state, while a retired task cannot clear a newer job.
+            defer {
+                if audienceJobIDs[provider] == jobID {
+                    audiences[provider]?.isRefreshing = false
+                    audienceJobs[provider] = nil; audienceJobIDs[provider] = nil
+                }
+            }
+            do {
+                let call = try ProviderAPI.request(provider,
+                    path: provider == .youtube ? "/youtube/v3/videos" : "/helix/streams",
+                    query: provider == .youtube ? ["part": "snippet,liveStreamingDetails", "id": target.broadcastID]
+                        : ["user_id": target.channelID, "first": "1"])
+                let data = try await request(provider, call)
+                guard current(provider, target.generation), writeTarget(provider) == target else { return }
+                var result = try StudioAudienceDecoder.decode(data, provider: provider, target: target, observedAt: now())
+                result.retryUntil = audiences[provider]?.retryUntil
+                audiences[provider] = result
+            } catch {
+                guard current(provider, target.generation), writeTarget(provider) == target else { return }
+                let failure = error as? ProviderFailure ?? ProviderFailure(.unavailable)
+                audiences[provider]?.availability = .failed
+                audiences[provider]?.failure = failure.localizedDescription
+                if failure.kind == .rateLimited {
+                    let seconds = failure.retryAfter.flatMap { $0.isFinite ? min(86400, max(30, $0)) : nil } ?? 60
+                    audiences[provider]?.retryUntil = now().addingTimeInterval(seconds)
+                }
+            }
+        }
     }
     func sendAvailabilityError(_ provider: ManagedProvider) -> String? { writeAvailabilityError(provider, kind: .post) }
     private func writeAvailabilityError(_ provider: ManagedProvider, kind: DirectChatWriteKind) -> String? {

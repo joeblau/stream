@@ -128,6 +128,18 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try await waitForDiagnostics(workspace.runtime, after: Date())
         WorkspaceFixtureDefaults.value.set(true, forKey: "onboarding.hasCompletedFirstRun")
         WorkspaceFixtureDefaults.value.set(false, forKey: "studio.showDiagnostics")
+        try require(!StudioAutomationEndpoint.shared.interactionIsBlocked(), "Idle studio unexpectedly blocks automation")
+        workspace.permissionChoicePending = true
+        try require(StudioAutomationEndpoint.shared.interactionIsBlocked(), "Automation bypassed the workspace permission choice")
+        workspace.permissionChoicePending = false
+        let wasShowingProjects = workspace.showProjects
+        workspace.previewPackage(root.appendingPathComponent("AutomationGate.streamshow"))
+        try require(workspace.packageBusy && StudioAutomationEndpoint.shared.interactionIsBlocked(), "Automation bypassed an active package operation")
+        // Cancel the actual pending read through its public preview lifecycle.
+        // A late result cannot overwrite this cancelled intent or open a sheet.
+        workspace.importPreview = nil
+        workspace.showProjects = wasShowingProjects
+        try require(!StudioAutomationEndpoint.shared.interactionIsBlocked(), "Automation gate remained stale after package completion")
         let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1440, height: 900),
             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -310,10 +322,20 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         document.scenes[0].layers[0].effectOverrides = effects
         let asset = LibraryAsset(id: assetID, name: "Test LUT", kind: .other, storage: .projectCopy,
             relativePath: relativePath, fileName: "look.cube", lastKnownPath: "")
+        let folderID = AssetID()
+        let folderPath = "Assets/\(folderID)/Overlay"
+        let folderURL = root.appendingPathComponent("Overlay")
+        try FileManager.default.createDirectory(at: folderURL.appendingPathComponent("styles"), withIntermediateDirectories: true)
+        try Data("body { color: red }".utf8).write(to: folderURL.appendingPathComponent("styles/main.css"))
+        let folder = LibraryAsset(id: folderID, name: "Overlay folder", kind: .folder, storage: .projectCopy,
+            relativePath: folderPath, fileName: "Overlay", lastKnownPath: "")
         var documents = ["stream.scenes.v2.json": try JSONEncoder().encode(document),
-            "stream.assets.v1.json": try JSONEncoder().encode(AssetLibraryDocument(assets: [asset]))]
+            "stream.assets.v1.json": try JSONEncoder().encode(AssetLibraryDocument(assets: [asset, folder]))]
         documents["comment-slots.json"] = try Data(contentsOf: workspace.directory(for: workspace.selection).appendingPathComponent("comment-slots.json"))
-        try ShowPackageIO.export(documents: documents, media: [.init(access: ResolvedAssetAccess(url: fixtureURL, needsSecurityScope: false), relativePath: relativePath)],
+        let packageMedia: [ShowPackageIO.Media] = [
+            .init(access: ResolvedAssetAccess(url: fixtureURL, needsSecurityScope: false), relativePath: relativePath),
+            .init(access: ResolvedAssetAccess(url: folderURL, needsSecurityScope: false), relativePath: folderPath)]
+        try ShowPackageIO.export(documents: documents, media: packageMedia,
             name: "Transferred Show", includeMedia: true, to: package)
         let preview = try ShowPackageIO.preview(package)
         try require(preview.sceneNames.count == document.scenes.count, "Package preview lost scenes")
@@ -329,6 +351,27 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         let importedLUT = imported.appendingPathComponent(importedAssets.assets[0].relativePath!)
         try require(try Data(contentsOf: importedLUT) == fixture, "Imported LUT bytes are missing")
         _ = try CubeLUT.parse(Data(contentsOf: importedLUT))
+        let importedFolder = imported.appendingPathComponent(importedAssets.assets[1].relativePath!)
+        try require(try Data(contentsOf: importedFolder.appendingPathComponent("styles/main.css")) == Data("body { color: red }".utf8),
+            "Folder-backed asset bytes did not transfer with consistent IDs")
+        // A folder symlink must fail the entire atomic export, preserving the
+        // destination and exposing a repairable error rather than omitting it.
+        try FileManager.default.createSymbolicLink(at: folderURL.appendingPathComponent("linked.css"), withDestinationURL: folderURL.appendingPathComponent("styles/main.css"))
+        let rejectedPackage = root.appendingPathComponent("Rejected.streamshow")
+        var rejected = false
+        do { try ShowPackageIO.export(documents: documents, media: packageMedia, name: "Rejected", includeMedia: true, to: rejectedPackage) }
+        catch { rejected = true }
+        try require(rejected && !FileManager.default.fileExists(atPath: rejectedPackage.path), "Symlinked media was exported or left a partial show")
+        let missing = await workspace.runtime.dispatcher.assetLibrary.importFile(at: root.appendingPathComponent("Unavailable.mov"), mode: .link)
+        try require(missing != nil, "Missing linked fixture did not register for repair")
+        var rejectedMissing = false
+        do { _ = try workspace.packageAssetContents(includeMedia: true) }
+        catch { rejectedMissing = String(describing: error).contains("Relink missing assets") }
+        try require(rejectedMissing, "Include Media silently downgraded an unavailable asset to linked")
+        let references = try workspace.packageAssetContents(includeMedia: false)
+        try require(references.media.isEmpty && references.document.assets.allSatisfy {
+            $0.storage == .linked && $0.bookmarkData == nil && $0.relativePath == nil && $0.lastKnownPath.isEmpty
+        }, "References-only transfer retained bytes, paths or sandbox grants")
         try require(importedDocument.scenes[0].id != document.scenes[0].id, "Imported scene IDs were not remapped")
         // A truncated current scene file must offer explicit recovery, retain
         // the unreadable original, and never start an output after relaunch.

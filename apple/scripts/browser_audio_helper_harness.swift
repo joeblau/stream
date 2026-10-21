@@ -126,6 +126,7 @@ final class AudioTrace: @unchecked Sendable {
         precondition(!BrowserWidgetAudioIdentity.productionRouteQualified)
         try protocolChecks()
         try await inletChecks()
+        try await BrowserHelperLifecycleChecks.run()
         if let index = CommandLine.arguments.firstIndex(of: "--inspect-visual-recording"),
            CommandLine.arguments.indices.contains(index + 1) {
             try await inspectVisualRecording(URL(fileURLWithPath: CommandLine.arguments[index + 1]))

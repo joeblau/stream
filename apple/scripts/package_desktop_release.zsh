@@ -36,7 +36,7 @@ PY
 xcodebuild -exportArchive -archivePath "$RELEASE_DIR/StreamMac.xcarchive" \
   -exportOptionsPlist "$RELEASE_DIR/ExportOptions.plist" -exportPath "$RELEASE_DIR/export"
 readonly RELEASE_APP="$RELEASE_DIR/export/StreamMac.app"
-python3 scripts/validate_desktop_distribution.py "$RELEASE_APP"
+python3 scripts/validate_desktop_distribution.py "$RELEASE_APP" --require-signed
 codesign --verify --deep --strict --verbose=2 "$RELEASE_APP"
 ditto -c -k --keepParent "$RELEASE_APP" "$RELEASE_DIR/StreamMac.zip"
 if [[ "$RELEASE_NOTARIZE" == 0 ]]; then

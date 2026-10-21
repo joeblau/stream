@@ -7,6 +7,7 @@ export type Capability = { id: string; title: string; category: string; availabl
 export type CommandArgument = { value: number } | { delta: number } | { page: number } | { text: string };
 export type Snapshot = {
   projectID: string; revision: number; stream: string; recording: string; preview: string;
+  recordingCountdown?: number;
   stagedSceneID?: string; programSceneID?: string; pendingStagedEdits: boolean;
   layerVisibility: Record<string, boolean>;
   values?: Record<string, number>; mutes?: Record<string, boolean>;
@@ -58,6 +59,7 @@ function validResponse(value: unknown): value is Response {
     }
     if (state.playback !== undefined && (!object(state.playback) || !Object.values(state.playback).every(value => typeof value === "string"))) return false;
     if (state.directLiveEditing !== undefined && typeof state.directLiveEditing !== "boolean") return false;
+    if (state.recordingCountdown !== undefined && (!Number.isSafeInteger(state.recordingCountdown) || (state.recordingCountdown as number) < 0 || (state.recordingCountdown as number) > 60)) return false;
     if (state.chat !== undefined && (!object(state.chat) || !Number.isSafeInteger(state.chat.queuedCount) || (state.chat.queuedCount as number) < 0
         || typeof state.chat.ready !== "boolean" || typeof state.chat.stagedVisible !== "boolean" || typeof state.chat.programVisible !== "boolean"
         || [state.chat.selectedID, state.chat.featuredID].some(id => id !== undefined && typeof id !== "string"))) return false;

@@ -271,6 +271,8 @@ enum StudioGuestPublicChatUpdate {
               availableAlertSlots.contains(where: { $0.id == slot }) else { return }
         _ = run(.setLayerVisibility(slot, visible: false, in: scene.id))
     }
+    /// Compatibility entry point uses the same explicit, guarded staged alert route.
+    func promoteAlert(_ id: String) { _ = stageAudienceAlert(id) }
     func show(_ id: String) { show(id, staticEmoteKey: nil) }
     private func show(_ id: String, staticEmoteKey: String?) {
         guard let message = queue.message(id), let scene = previewProgram?.stagedScene,

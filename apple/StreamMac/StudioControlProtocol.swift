@@ -51,6 +51,7 @@ struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var directLiveEditing: Bool? = nil
     var chat: StudioControlChatState? = nil
     var interview: StudioControlInterviewState? = nil
+    var recordingCountdown: Int? = nil
 }
 struct StudioControlInterviewState: Codable, Equatable, Sendable {
     struct Member: Codable, Equatable, Sendable {

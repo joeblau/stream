@@ -6,13 +6,19 @@ Default publishing retains a separate adaptive encoder per destination. Opt-in g
 
 ## Identity and resource ownership
 
-A group belongs to one studio output controller and one taken Program or Secondary composition. It matches canvas, width/height, frame rate, H.264 codec/profile, video/audio bitrates, whole-second keyframe interval, canonical post-mix Program audio pipeline and real-time/no-reordering latency policy. Equal geometry across different canvases cannot share pixels. Current supported fixed settings are even dimensions 2–4096, 1–60 fps up to the taken canvas's rendering cadence, positive video bitrate, AAC 32–320 kbps and keyframes 1–10 seconds apart; destination/hardware/ingest validation still applies before start. A custom override outside this fixed backend's range uses separate publishing and receives no budget discount. Higher-than-source frame rates retain the existing separate publisher/repeat path; the sharing path does not claim to generate extra source frames. Lower, non-divisor rates preserve sampling phase (for example, 60 fps input to 24 fps output) while retaining source timestamps.
+A group belongs to one studio output controller and one taken Program or Secondary composition. It matches canvas, width/height, frame rate, H.264 codec/profile, video/audio bitrates, whole-second keyframe interval, canonical post-mix Program audio pipeline and real-time/no-reordering latency policy. Equal geometry across different canvases cannot share pixels. Current supported fixed settings are even dimensions 2–4096, 1–60 fps up to the taken canvas's rendering cadence, video 0.1–100 Mbps, AAC 32–320 kbps and keyframes 1–10 seconds apart; destination/hardware/ingest validation still applies before start. A custom override outside this fixed backend's range uses separate publishing and receives no budget discount. Higher-than-source frame rates retain the existing separate publisher/repeat path; the sharing path does not claim to generate extra source frames. Lower, non-divisor rates preserve sampling phase (for example, 60 fps input to 24 fps output) while retaining source timestamps.
 
 Changing a destination profile takes effect on its next explicit start and creates or joins the matching group. It never reconfigures another group's encoder. Each group's own VideoToolbox session controls bitrate, fps and keyframes. Individual network adaptive or thermal callbacks cannot lower shared profile settings. A strained route sheds its own media or reconnects; operators can stop it or use separate adaptive encoding after all outputs stop.
 
 The output controller counts real active and finalizing groups, separate publishing reservations, and old failed raw sessions still tearing down during a stable-ID retry. A group's last member releases its reservation only after VideoToolbox completion/invalidation and converter teardown. A transport can remain Stopping while waiting for its own close receipt after that encoder is gone. The studio's four-video-encoder limit also counts Program/Secondary/ISO recording and writer finalization. The destination estimate displays the selected backend mode and current publishing count. Hardware tier and an operator's tested budget remain estimates/qualification boundaries rather than a guarantee that every supported profile runs concurrently.
 
 Sharing saves encoding work, not network traffic: every destination still sends its own payload. Uplink estimates retain all outputs, protocol overhead and spare capacity.
+
+Planning also handles malformed persisted settings before start validation runs.
+Negative bitrates cannot subtract from healthy destinations' uplink requirements;
+integer overflow saturates the aggregate estimate and presents an invalid-bitrate
+issue. Invalid bitrates receive no fixed-sharing discount. Ingest overrides must
+include a finite positive keyframe limit and positive audio bitrate limit.
 
 ## Bounded transport independence and IDR recovery
 

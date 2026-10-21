@@ -125,3 +125,28 @@ The production selector remains disabled (`productionRouteQualified == false`, n
 The existing helper prototype now requires a page generation on Suspend/Resume. The host passes its own current generation; the session rejects callers holding an older lease, and the helper independently rejects a command whose generation differs from the installed page. Rejection is a fixed `stale_generation` category tagged with the attempted generation. Valid asynchronous acknowledgments remain fenced to the same WKWebView identity and carry an optional request ID for correlation.
 
 The capture-free alpha fixture also replaces a real helper page with a blue DOM page, sends both old-generation lifecycle commands and requires explicit stale rejection, then checks current-generation acknowledgments and actual blue-page snapshots. Both shipping and public-opacity candidate pass these checks. The same regression against the pre-fix helper fails because the stale Suspend is accepted instead of rejected. Protocol/inlet regression additionally rejects generationless lifecycle commands; explicit audio-qualification fixtures now supply their page generations. This establishes page-command ownership, not Program-only audio, shared-PCM retirement, FX-tail silence or capture exclusion. No new policy abstraction or production audio route was introduced.
+
+## Lifecycle command backpressure (2026-10-21)
+
+Stop and Suspend/Resume now fail closed when the helper's bounded command queue
+rejects the command. Previously those errors were discarded: a removed page
+could remain audible while another page's demand kept the shared helper alive.
+The session now reports a fixed failure category for its remaining pages and
+retires its owned shared helper/capture. Healthy unrelated app-audio sources are
+outside this session; no global mute or System Mix fallback is issued. Accepted
+commands still target the requested widget, and suspension keeps its page
+generation. Normal Stop preserves sibling demand.
+
+`scripts/browser_helper_lifecycle_checks.swift` exercises the shipping session
+with an injected command transport that rejects Stop, Suspend or Resume. It
+checks visible sibling failure, shared demand retirement and transport closure,
+plus successful exact-widget commands and sibling preservation. The existing
+browser audio harness invokes these checks. A focused compile of the actual
+session, PCM capture, socket and command/visual protocol sources passed on
+Mac15,8, macOS 27.2 (26B118), Xcode 27.2 (27B5038j), using mixer/visual-state
+fixtures that trap if capture or PCM delivery is attempted. This is command
+lifecycle evidence; it starts no helper, capture, monitor or device and proves
+no actual audio routing, exclusion, bus levels or A/V synchronization.
+
+The production selector remains disabled. Program-only leases and shared mixer/ISO controls are integrated for explicit qualification; see [operator controls](browser-widget-operator-controls.md). Acknowledged every-route exclusions, signed shared-container IPC and actual tone/speech bus qualification remain required before #124 can close. Existing direct application capture and
+permission/availability checks are unchanged.

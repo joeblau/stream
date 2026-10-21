@@ -20,6 +20,7 @@ struct DirectChatControls: View {
                 Button("Disconnect") { manager.stop(provider) }
                 Button("Post…") { compose = true }
             }.controlSize(.small)
+            DirectChatAudienceView(manager: manager)
             if let failure = manager.snapshot(provider).failure { Text(failure).font(.caption).foregroundStyle(.orange) }
             if let notice = manager.snapshot(provider).notice { Text(notice).font(.caption2).foregroundStyle(.secondary) }
             if let date = manager.snapshot(provider).retryUntil, date > Date() {
@@ -177,6 +178,43 @@ private struct DirectChatReceipts: View {
                     }
                     Button("Clear Completed Receipts") { manager.clearReceipts() }.controlSize(.small)
                     Text("Stopping locally cannot undo a provider action. Inspect the provider before retrying an unknown outcome. Receipts remain in memory and are not restored or exported.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+
+private struct DirectChatAudienceView: View {
+    @ObservedObject var manager: StudioDirectChatManager
+    var body: some View {
+        DisclosureGroup("Destination audience") {
+            TimelineView(.periodic(from: .now, by: 5)) { context in
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach([ManagedProvider.youtube, .twitch], id: \.self) { provider in
+                        let sample = manager.audience(provider)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text("\(provider.name) · \(sample.target.isEmpty ? manager.snapshot(provider).target : sample.target)").font(.caption.weight(.semibold))
+                                Spacer()
+                                Button(sample.isRefreshing ? "Refreshing…" : "Refresh") { manager.refreshAudience(provider) }
+                                    .disabled(!manager.canRefreshAudience(provider)).controlSize(.small)
+                            }
+                            if let count = sample.count {
+                                Text("\(count.formatted()) concurrent viewers · \(sample.isFresh(at: context.date) ? "fresh" : "last known / stale")").font(.caption)
+                            }
+                            Text(sample.availability.rawValue).font(.caption2).foregroundStyle(.secondary)
+                            if let date = sample.observedAt {
+                                Text("Observed \(date.formatted(date: .omitted, time: .standard))").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if let failure = sample.failure { Text(failure).font(.caption2).foregroundStyle(.orange) }
+                            if let until = sample.retryUntil, until > context.date {
+                                Text("Refresh available at \(until.formatted(date: .omitted, time: .standard))").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Text("Provider-reported concurrent viewers, per destination. Counts may include the same person on several platforms. No unique-person total is computed. Refresh is manual; samples become stale after 60 seconds. Restream and other provider metrics are unavailable.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }

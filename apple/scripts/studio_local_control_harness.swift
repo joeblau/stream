@@ -63,6 +63,7 @@ struct StudioPaletteAction {
     var actions: [StudioPaletteAction] = []
     var emitted: [String] = []
     @Published var gain = 0.5
+    @Published var recordingCountdown = 0
     var valueTargetExists = true
     var marker = "", page = 0
     func controllerTargets() -> [StudioControllerTarget] {
@@ -76,6 +77,7 @@ struct StudioPaletteAction {
     func controllerGroupVisibility() -> [String: Bool] { [:] }
     func controllerOverlays() -> [HarnessLayer] { [] }
     func controllerChatSnapshot() -> StudioControlChatState? { nil }
+    func controllerRecordingCountdown() -> Int { recordingCountdown }
     func catalogueActions() -> [StudioPaletteAction] { actions }
     func execute(_ command: StudioCommand) -> StudioCommandResult {
         switch command {
@@ -390,6 +392,11 @@ private final class BoundedProcessText: @unchecked Sendable {
             membership: "backstage", media: "ready", slot: UUID(uuidString: "3D31F54C-9820-45E8-B88D-1DA15B6C5537")!,
             programAllowed: false, monitorAllowed: true, screenApproved: false, screenSharing: false)],
             "Interview snapshot JSON lost member routing or approval fields")
+        precondition(authenticated.snapshot?.recordingCountdown == 0)
+        dispatcher.recordingCountdown = 3
+        let countdown = try await client.request(.init(type: .snapshot, id: UUID(), sessionID: sessionID))
+        precondition(countdown.snapshot?.recordingCountdown == 3, "Native IPC must report the recorder's actual countdown")
+        dispatcher.recordingCountdown = 0
         let capabilityRequest = StudioControlRequest(type: .capabilities, id: UUID(), sessionID: sessionID)
         let discovery = try await client.request(capabilityRequest)
         precondition(discovery.commands?.contains { $0.id == stable && $0.title == "Intro" } == true)

@@ -35,6 +35,10 @@ test("feedback uses authoritative preview/program, paused recording, and missing
   assert.equal(feedback(binding, "Connected", state, commands).title, "Missing\nResource");
   state.recording = "paused"; commands.set("output.record.stop", { id: "output.record.stop", title: "Stop Recording", category: "Output", available: true });
   assert.equal(feedback({ commandID: "output.record.stop", projectID: state.projectID }, "Connected", state, commands).badge, "PAUSED");
+  state.recording = "preparing"; state.recordingCountdown = 3;
+  assert.equal(feedback({ commandID: "output.record.stop", projectID: state.projectID }, "Connected", state, commands).badge, "REC IN 3");
+  state.recordingCountdown = 0;
+  assert.equal(feedback({ commandID: "output.record.stop", projectID: state.projectID }, "Connected", state, commands).badge, "PREPARING");
   state.stream = "connecting"; commands.set("output.stream.stop", { id: "output.stream.stop", title: "Cancel", category: "Output", available: true });
   assert.equal(feedback({ commandID: "output.stream.stop", projectID: state.projectID }, "Connected", state, commands).badge, "CONNECTING");
   const runningMacro = randomUUID(), otherMacro = randomUUID();
@@ -42,6 +46,9 @@ test("feedback uses authoritative preview/program, paused recording, and missing
   for (const macroID of [runningMacro, otherMacro]) commands.set(`macro.${macroID}.run`, { id: `macro.${macroID}.run`, title: "Show Macro", category: "Macros", available: false });
   assert.equal(feedback({ commandID: `macro.${runningMacro}.run`, projectID: state.projectID }, "Connected", state, commands).badge, "1/2");
   assert.equal(feedback({ commandID: `macro.${otherMacro}.run`, projectID: state.projectID }, "Connected", state, commands).badge, "WAIT", "Other macros must not claim the running macro's progress");
+  const disabledTally = Buffer.from(keyImage({ title: "End Stream", badge: "PGM", color: "#983c4a", unavailable: true }).split(",")[1]!, "base64").toString("utf8");
+  assert.match(disabledTally, />PGM</, "Unavailable actions retain authoritative tally");
+  assert.match(disabledTally, />UNAVAILABLE</, "Unavailable actions visibly distinguish availability from tally");
   assert.ok(keyImage({ title: "Name", badge: "<unsafe>", color: "#000000", unavailable: false }).startsWith("data:image/svg+xml;base64,"));
 });
 
@@ -160,6 +167,8 @@ test("malformed and unexpected native responses stop safely without throwing fro
     { phase: "connected", locked: false, members: Array.from({ length: 12 }, () => ({ ...member, id: randomUUID() })) },
   ];
   for (const frame of [null, { version: 1, type: "capabilities", commands: {} }, { version: 1, type: "authenticated", snapshot: {} },
+    { version: 1, type: "authenticated", snapshot: { ...snapshot(), recordingCountdown: -1 } },
+    { version: 1, type: "authenticated", snapshot: { ...snapshot(), recordingCountdown: 1.5 } },
     ...malformedInterviews.map(interview => ({ version: 1, type: "authenticated", snapshot: { ...snapshot(), interview } }))]) {
     const peers = new Set<net.Socket>();
     const server = net.createServer(socket => {

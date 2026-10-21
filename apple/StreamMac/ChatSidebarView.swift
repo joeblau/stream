@@ -201,6 +201,15 @@ struct ChatSidebarView: View {
             }
         }
     }
+    private func activityColor(_ activity: StudioChatActivity) -> Color {
+        switch activity {
+        case .support: .orange
+        case .membership: .green
+        case .reaction: .pink
+        case .emotes: .purple
+        case .text: .secondary
+        }
+    }
     private func row(_ message: StudioChatMessage) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -242,6 +251,12 @@ struct ChatSidebarView: View {
             if let manager = coordinator.directChat { DirectChatMessageActions(manager: manager, message: message) }
         }
         .padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .leading) {
+            if message.activity != .text {
+                RoundedRectangle(cornerRadius: 2).fill(activityColor(message.activity)).frame(width: 3)
+                    .accessibilityHidden(true).allowsHitTesting(false)
+            }
+        }
         .draggable(message.id)
         .accessibilityElement(children: .contain)
     }

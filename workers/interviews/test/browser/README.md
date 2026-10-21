@@ -12,7 +12,7 @@ npm run test:client
 npm run test:browser
 ```
 
-`test:client` needs no browser. `test:browser` requires Chrome/Chromium. It finds Google Chrome in the standard macOS location or Chrome/Chromium on Linux `PATH`; set `CHROME_BIN` to an explicit executable when needed:
+`test:client` needs no browser. It includes deterministic guest-device transactions: failed replacement rollback, late permission results, leave during sender replacement, overlapping checks, restart cancellation, mute preservation and connected Join gating. These fixtures exercise shipping guest code with controlled media objects; they do not establish physical-device or browser compatibility. `test:browser` requires Chrome/Chromium. It finds Google Chrome in the standard macOS location or Chrome/Chromium on Linux `PATH`; set `CHROME_BIN` to an explicit executable when needed:
 
 ```sh
 CHROME_BIN='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npm run test:browser

@@ -1,5 +1,7 @@
 # NDI and DeckLink capture prerequisites
 
+This records the 2026-10-01 investigation. The [2026-10-21 professional media adapter qualification](pro-media-adapters.md) documents the current expanded NDI/DeckLink input/output and Zoom diagnostic, current OS/permission observations, and reproducible regression checks. The older local observations below are historical.
+
 C06 #160 and C07 #161 remain open. No working SDK capture bridge or hardware qualification is claimed.
 
 `apple/scripts/run_pro_input_prerequisites.zsh` compiles a read-only Swift diagnostic. It checks vendor headers/runtime paths, loader/symbol availability, NDI's runtime version when available, and the current process's Screen Recording access. Optional environment variables select SDK/runtime locations: `STREAM_NDI_SDK_ROOT`, `STREAM_NDI_RUNTIME`, `STREAM_DECKLINK_SDK_ROOT`, and `STREAM_DECKLINK_RUNTIME`.
