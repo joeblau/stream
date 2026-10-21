@@ -367,7 +367,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     private func setMediaSuspended(_ value: Bool) {
         guard value != mediaIsSuspended else { return }
         mediaIsSuspended = value
-        if let helperSession { helperSession.setSuspended(id: helperWidgetID, suspended: value); return }
+        if let helperSession { helperSession.setSuspended(id: helperWidgetID, generation: snapshotGeneration, suspended: value); return }
         webView?.setAllMediaPlaybackSuspended(value, completionHandler: nil)
     }
 

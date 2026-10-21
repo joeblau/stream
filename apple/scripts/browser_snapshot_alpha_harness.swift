@@ -35,12 +35,16 @@ private final class SnapshotHelper: @unchecked Sendable {
     }
     func connect() async throws { frames = try await listener.accept(expectedPID: process.processIdentifier) }
     func send(_ command: BrowserWidgetAudioCommand) throws { try input.fileHandleForWriting.write(contentsOf: command.encodedLine()) }
-    func wait(_ state: BrowserWidgetAudioReply.State, id: UUID? = nil) async throws {
+    func wait(_ state: BrowserWidgetAudioReply.State, id: UUID? = nil, generation: UUID? = nil,
+              request: UUID? = nil, category: String? = nil) async throws {
         for _ in 0..<200 {
-            if lock.withLock({ replies.contains { $0.state == state && (id == nil || $0.widgetID == id) } }) { return }
+            if lock.withLock({ replies.contains { $0.state == state && (id == nil || $0.widgetID == id)
+                && (generation == nil || $0.generation == generation) && (request == nil || $0.requestID == request)
+                && (category == nil || $0.failure == category) } }) { return }
             try await Task.sleep(for: .milliseconds(25))
         }
-        throw failure("Helper did not acknowledge \(state)")
+        let observed = lock.withLock { replies.suffix(6).map { "\($0.state.rawValue):\($0.failure ?? "none")" }.joined(separator: ",") }
+        throw failure("Helper did not acknowledge \(state)/\(category ?? "none"); observed \(observed)")
     }
     func snapshot(id: UUID, generation: UUID) async throws -> (BrowserWidgetVisualHeader, Data) {
         let request = UUID()
@@ -199,6 +203,21 @@ private func tone(frame: Int) throws -> CMSampleBuffer {
                 "snapshotMilliseconds": (header.completedHostSeconds - header.requestedHostSeconds) * 1_000]
             report["recording"] = try await recordAndDecode(bytes, at: artifacts.appendingPathComponent(variant + ".mp4"))
             reports.append(report)
+            let nextGeneration = UUID()
+            try helper.send(.init(action: .load, widgetID: id, html: html.replacingOccurrences(of: "background:red", with: "background:blue"),
+                options: .init(hidden: true), generation: nextGeneration))
+            try await helper.wait(.loaded, id: id, generation: nextGeneration)
+            for action in [BrowserWidgetAudioCommand.Action.suspend, .resume] {
+                let staleRequest = UUID()
+                try helper.send(.init(action: action, widgetID: id, requestID: staleRequest, generation: generation))
+                try await helper.wait(.failed, id: id, generation: generation, request: staleRequest, category: "stale_generation")
+                let currentRequest = UUID()
+                try helper.send(.init(action: action, widgetID: id, requestID: currentRequest, generation: nextGeneration))
+                try await helper.wait(action == .suspend ? .suspended : .loaded, id: id, generation: nextGeneration, request: currentRequest)
+                let (_, currentPixels) = try await helper.snapshot(id: id, generation: nextGeneration)
+                guard pixel(currentPixels, 40, 40)[0] > 240 else { throw failure("Current page snapshots failed after media lifecycle acknowledgments") }
+            }
+            print("PASS \(variant): replaced page rejects old-generation Suspend and Resume; current-generation acknowledgments and actual blue-page snapshots survive")
             try helper.send(.init(action: .stop, widgetID: id)); try await helper.wait(.stopped, id: id)
             print("MEASURED \(variant): clear=\(clear), halfGreen=\(green), opaqueWhite=\(white); actual helper IPC→snapshot→composited H264/AAC→native decode complete")
         }

@@ -117,15 +117,21 @@ import WebKit
             receive(replacement)
         case .suspend:
             guard let widget = widgets[id] else { missing(id); return }
+            guard command.generation == widget.generation else {
+                reply(.failed, id: id, failure: "stale_generation", request: command.requestID, generation: command.generation); return
+            }
             widget.view.setAllMediaPlaybackSuspended(true) { [weak self] in
                 guard self?.widgets[id]?.view === widget.view else { return }
-                self?.reply(.suspended, id: id, generation: widget.generation)
+                self?.reply(.suspended, id: id, request: command.requestID, generation: widget.generation)
             }
         case .resume:
             guard let widget = widgets[id] else { missing(id); return }
+            guard command.generation == widget.generation else {
+                reply(.failed, id: id, failure: "stale_generation", request: command.requestID, generation: command.generation); return
+            }
             widget.view.setAllMediaPlaybackSuspended(false) { [weak self] in
                 guard self?.widgets[id]?.view === widget.view else { return }
-                self?.reply(.loaded, id: id, generation: widget.generation)
+                self?.reply(.loaded, id: id, request: command.requestID, generation: widget.generation)
             }
         case .stop:
             stop(id); reply(.stopped, id: id)
