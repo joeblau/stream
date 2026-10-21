@@ -9,11 +9,19 @@ struct BrowserWidgetPageOptions: Codable, Sendable {
     var allowsInteraction = false
     var hidden = false
     var css = ""
+    /// Qualification-only direct tone fixtures opt out explicitly. The
+    /// session always loads a page suspended until its Program lease opens.
+    var mediaStartsSuspended = true
     static let maximumWidth = 1_920, maximumHeight = 1_080
     func validate() throws {
         guard (16...Self.maximumWidth).contains(width), (16...Self.maximumHeight).contains(height),
               css.utf8.count <= 16_384 else { throw BrowserWidgetAudioCommand.CommandError.invalidContent }
     }
+}
+
+struct BrowserWidgetPageLease: Hashable, Sendable {
+    let widgetID: UUID
+    let generation: UUID
 }
 
 struct BrowserWidgetInteraction: Codable, Sendable {
