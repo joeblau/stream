@@ -51,3 +51,26 @@ Internet route changes, physical unplug/display removal, macOS sleep/lock,
 permission revocation, source fallback pixels, or automatic resumption policies.
 Issue #158 remains open for those separate requirements. No account keys,
 operator files, devices, global permissions or system services are used.
+
+## Current receiver prerequisites and local requalification
+
+The harness checks the selected FFmpeg's real advertised RTMP/SRT protocols
+before starting any receiver. `STREAM_FFMPEG_BIN` selects an exact executable;
+otherwise the standard `ffmpeg-full` keg paths precede minimal FFmpeg. Missing
+required protocols exit **77 / UNQUALIFIED** without spawning listeners.
+`--receiver-check-only` checks that prerequisite alone. Readiness/encoder waits
+use monotonic deadlines so socket-inspection time counts toward the timeout.
+
+On 2026-10-21, Mac15,8 / M3 Max, macOS 27.2 (26B118), Xcode 27.1, both actual
+hardware-preference and forced-software recovery runs passed. Each survivor
+contained 392 continuous decoded frames over 15.67999 seconds, with the
+original 11.48-second early/late flash spacing and unchanged SRT session/start
+identity. Both complete shared-encoder suites also passed actual compressed
+identity, isolation, reservations, 60→24 fps cadence, and simultaneous RTMP/SRT
+receiver decode. The minimal installed FFmpeg 9.0.2 was separately required to
+exit 77 before any receiver file/log was created. The complete receiver was
+FFmpeg-full 9.0.2 in its own keg; no default executable was relinked.
+
+[The cross-task evidence table](MACOS_RECOVERY_OUTPUT_QUALIFICATION.md) records
+the associated storage, process recovery, source routing, ISO, dual-canvas and
+external-display checks, together with their physical/service limits.
