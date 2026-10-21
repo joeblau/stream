@@ -39,3 +39,5 @@ xcodebuild -project "${GUEST_DIR}/GuestReturnVideoPrivacyValidation.xcodeproj" -
   -jobs "${STREAM_NATIVE_BUILD_JOBS:-4}" -destination 'platform=macOS' -derivedDataPath "${STREAM_GUEST_VIDEO_PRIVACY_BUILD_PATH}" CODE_SIGNING_ALLOWED=NO build
 GUEST_PRODUCTS="${STREAM_GUEST_VIDEO_PRIVACY_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="${GUEST_PRODUCTS}" "${GUEST_PRODUCTS}/GuestReturnVideoPrivacyHarness"
+
+env DYLD_FRAMEWORK_PATH="${GUEST_PRODUCTS}" "${GUEST_PRODUCTS}/GuestReturnVideoPrivacyHarness" --secondary

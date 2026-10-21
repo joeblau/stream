@@ -167,6 +167,7 @@ private final class ReturnAVProbe: @unchecked Sendable {
     // The runner refuses physical microphone startup; only owned PCM enters.
     let local = AudioChannelID.microphone(deviceUID: nil)
     private var producer: Task<Void, Never>?
+    private var secondaryLayer = LayerNode(name: "Owned secondary blue", payload: .shape(.init(fillColorHex: "#0000FF")), transform: .fullscreen, isVisible: false)
     init(configuration: NativeInterviewConfiguration, relay: NativeInterviewRelayConfiguration, directory: URL) throws {
         try DesktopStorage.prepare(directory.appendingPathComponent("project"))
         var saved = StreamSettings.default
@@ -174,7 +175,11 @@ private final class ReturnAVProbe: @unchecked Sendable {
         saved.monitoringEnabled = false; saved.audioInputs = []; saved.voicePolishEnabled = false
         DesktopSettingsStore().saveNonSecret(saved)
         scenes = SceneStore(directory: DesktopStorage.projectDirectory)
-        let blank = scenes.addScene(Scene(name: "Owned Guest Return", layers: [], background: .solid(colorHex: "#00CC44")))
+        let secondary = LayerNode(name: "Owned secondary blue", payload: .shape(.init(fillColorHex: "#0000FF")), transform: .fullscreen, isVisible: false)
+        secondaryLayer = secondary
+        let layout = SecondaryCanvasLayout(size: .init(width: 180, height: 320), placements:
+            [secondary.id: .init(transform: .fullscreen, isVisible: true)])
+        let blank = scenes.addScene(Scene(name: "Owned Guest Return", layers: [secondary], background: .solid(colorHex: "#00CC44"), secondaryCanvas: layout))
         preview = .init(selected: blank)
         controller = .init(sceneStore: scenes, previewProgram: preview, permissions: PermissionsManager(), audioEngine: mixer)
         settings = .init(store: DesktopSettingsStore(), controller: controller)
@@ -186,23 +191,41 @@ private final class ReturnAVProbe: @unchecked Sendable {
         })
         dispatcher.bindInterviewManager(manager)
         controller.noteRecordingStarted()
-        avVideo = controller.addFrameSink(capacity: 4, sink: av.video)
     }
     func picture(_ color: String) throws {
         guard var scene = preview.stagedScene else { throw NativeInterviewError.changed }
-        scene.layers = []; scene.background = .solid(colorHex: color)
+        scene.layers = scene.secondaryCanvas == nil ? [] : [secondaryLayer]; scene.background = .solid(colorHex: color)
         guard dispatcher.execute(.updateScene(scene)).error == nil,
               dispatcher.execute(.take).error == nil else { throw NativeInterviewError.changed }
+    }
+    func secondaryPicture(_ color: String?, remove: Bool = false) throws {
+        guard var scene = preview.stagedScene else { throw NativeInterviewError.changed }
+        if let color { secondaryLayer.payload = .shape(.init(fillColorHex: color)) }
+        scene.layers.removeAll { $0.id == secondaryLayer.id }
+        if remove { scene.secondaryCanvas = nil }
+        else {
+            scene.layers.append(secondaryLayer)
+            scene.secondaryCanvas = .init(size: .init(width: 180, height: 320), placements:
+                [secondaryLayer.id: .init(transform: .fullscreen, isVisible: true)])
+        }
+        guard dispatcher.execute(.updateScene(scene)).error == nil, dispatcher.execute(.take).error == nil else { throw NativeInterviewError.changed }
+    }
+    func returnPicture(_ color: String) throws {
+        if manager.state.snapshot.members.first?.returnVideoSource == .secondary { try secondaryPicture(color) }
+        else { try picture(color) }
     }
     func noise() throws {
         let payload = ImageSourcePayload(assetIdentifier: "owned-return-video-noise", pixelWidth: 320, pixelHeight: 180)
         let pixels = try ProgramRecordingFixtures.video(at: 0, noisy: true).imageBuffer!
         ImageLayerImageStore.shared.publish(CIImage(cvPixelBuffer: pixels), forKey: payload.cacheKey)
         guard var scene = preview.stagedScene else { throw NativeInterviewError.changed }
-        scene.layers = [.init(name: "Owned detailed return fixture", payload: .image(payload), transform: .fullscreen)]
+        scene.layers = [.init(name: "Owned detailed return fixture", payload: .image(payload), transform: .fullscreen)] + (scene.secondaryCanvas == nil ? [] : [secondaryLayer])
         guard dispatcher.execute(.updateScene(scene)).error == nil, dispatcher.execute(.take).error == nil else { throw NativeInterviewError.changed }
     }
     func fireAVCue() async throws {
+        if let avVideo { controller.removeFrameSink(avVideo) }
+        let canvas: OutputCanvas = manager.state.snapshot.members.first?.returnVideoSource == .secondary ? .secondary : .program
+        avVideo = controller.addFrameSink(capacity: 4, canvas: canvas, sink: av.video)
         let cue = CMClockGetTime(CMClockGetHostTimeClock()).seconds + 0.6
         toneCue.schedule(cue)
         // Existing future-authored PCM drains before reopening the fader.
@@ -210,7 +233,7 @@ private final class ReturnAVProbe: @unchecked Sendable {
         av.arm(); await volume(1, muted: false)
         let delay = cue - CMClockGetTime(CMClockGetHostTimeClock()).seconds
         if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
-        toneCue.noteTaken(); try picture("#FFFFFF")
+        toneCue.noteTaken(); try returnPicture("#FFFFFF")
     }
     func probeBudget(available: Bool) async throws {
         let id = UUID(), deadline = ContinuousClock.now + .seconds(2)
@@ -290,10 +313,11 @@ private final class ReturnAVProbe: @unchecked Sendable {
                     var state: [String: Any] = ["type": "state", "phase": value.phase.rawValue,
                         "failure": value.failure.map { $0.rawValue } ?? "", "members": value.members.map {
                             ["id": $0.id.uuidString.lowercased(), "membership": $0.membership.rawValue,
-                             "media": $0.media.rawValue, "returnAudio": $0.returnAudio.rawValue, "returnVideo": $0.returnVideo.rawValue,
+                             "media": $0.media.rawValue, "returnAudio": $0.returnAudio.rawValue, "returnVideo": $0.returnVideo.rawValue, "returnSource": $0.returnVideoSource.rawValue,
                              "approved": $0.screenApproved, "sharing": $0.screenSharing] as [String: Any]
                         }, "audioAccepted": admission.acceptedPackets, "program": current.program.snapshot(),
-                        "programAllowed": current.manager.state.routes.values.contains { $0.programAllowed }]
+                        "programAllowed": current.manager.state.routes.values.contains { $0.programAllowed },
+                        "secondaryQualified": IsolatedVideoBudget.current.qualified, "secondaryDemand": current.controller.secondaryCanvasDemanded]
                     if let context = current.manager.currentReadyLease {
                         state["lease"] = ["generation": context.receive.generation, "slot": context.receive.slot.uuidString.lowercased(),
                                           "peer": context.receive.peerID.uuidString.lowercased(), "negotiation": context.receive.negotiation.uuidString.lowercased()]
@@ -341,6 +365,11 @@ private final class ReturnAVProbe: @unchecked Sendable {
                         throw NativeInterviewError.changed
                     }
                     _ = output.emit(["type": "ack", "command": "stale-message-rejected"])
+                case "stale-video-selection":
+                    guard let context = retainedPrivateContext,
+                          current.dispatcher.execute(.interview(.selectReturnVideoSource(context, .secondary))).error != nil,
+                          current.dispatcher.execute(.interview(.setProgramReturn(context, true))).error != nil else { throw NativeInterviewError.changed }
+                    _ = output.emit(["type": "ack", "command": "stale-video-selection-rejected"])
                 case "onair": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.onair(guest))
                 case "backstage": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.backstage(guest))
                 case "video-budget-held", "video-budget-free":
@@ -354,12 +383,19 @@ private final class ReturnAVProbe: @unchecked Sendable {
                 case "video-av":
                     try await current.fireAVCue()
                     _ = output.emit(["type": "ack", "command": command])
+                case "video-select-program", "video-select-secondary":
+                    guard let context = current.manager.currentReadyLease else { throw NativeInterviewError.changed }
+                    try current.command(.selectReturnVideoSource(context, command == "video-select-program" ? .program : .secondary))
+                    _ = output.emit(["type": "ack", "command": command])
+                case "video-secondary-remove", "video-secondary-restore":
+                    try current.secondaryPicture("#0000FF", remove: command == "video-secondary-remove")
+                    _ = output.emit(["type": "ack", "command": command])
                 case "video-on", "video-off":
                     guard let context = current.manager.currentReadyLease else { throw NativeInterviewError.changed }
                     try current.command(.setProgramReturn(context, command == "video-on"))
                     _ = output.emit(["type": "ack", "command": command])
                 case "video-green", "video-black", "video-purple", "video-white":
-                    try current.picture(["video-green": "#00CC44", "video-black": "#000000", "video-purple": "#A020D0", "video-white": "#FFFFFF"][command]!)
+                    try current.returnPicture(["video-green": "#00CC44", "video-black": "#000000", "video-purple": "#A020D0", "video-white": "#FFFFFF"][command]!)
                     _ = output.emit(["type": "ack", "command": command])
                 case "mute": await current.volume(1, muted: true); _ = output.emit(["type": "ack", "command": "mute"])
                 case "restore": await current.volume(0.4, muted: false); _ = output.emit(["type": "ack", "command": "restore"])

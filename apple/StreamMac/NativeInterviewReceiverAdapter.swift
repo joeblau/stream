@@ -378,7 +378,7 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
     var supportsProgramReturn: Bool { !isRetired && returnVideoSender != nil && callbacks.permitsReturn(receiver) }
     func setProgramReturnEnabled(_ enabled: Bool) -> Bool {
         guard supportsProgramReturn, let sender = returnVideoSender else { return false }
-        if !enabled { videoPreparation?.cancel(); sender.stop(); return true }
+        if !enabled { videoPreparation?.cancel(); sender.stop(); _ = videoState(.returnVideo(.off)); return true }
         if sender.isEnabled { return true }
         guard videoPreparation == nil else { return false }
         let ticket = UUID(); videoPreparationID = ticket
@@ -389,6 +389,14 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
             if !installed && !self.isRetired && !Task.isCancelled { self.reportVideoFailure() }
         }
         reportVideoPreparing(); return true
+    }
+    func selectReturnVideoSource(_ source: NativeInterviewReturnVideoSource) -> Bool {
+        guard supportsProgramReturn, let sender = returnVideoSender else { return false }
+        if sink.returnVideoSource == source { return true }
+        // Changing the source is an Off action. It never replays an earlier On.
+        videoPreparation?.cancel(); sender.stop()
+        guard sink.selectReturnVideoSource(source) else { return false }
+        _ = videoState(.returnVideoSource(source)); return true
     }
     private let videoState: @Sendable (NativeInterviewMediaEvent) -> Bool
     private func reportVideoPreparing() { _ = videoState(.returnVideo(.preparing)) }

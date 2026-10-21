@@ -53,8 +53,8 @@ class CDP {
 }
 
 const syntheticMedia = `
-window.__fixturePeers=[];window.__fixtureCamera=[];window.__fixtureScreens=[];window.__fixtureAudio=[];
-const Peer=window.RTCPeerConnection;window.RTCPeerConnection=class extends Peer{constructor(configuration){super({...configuration,iceTransportPolicy:"relay"});window.__fixturePeers.push(this);}};
+window.__fixturePeers=[];window.__fixtureVideoVisibility=[];window.__fixtureCamera=[];window.__fixtureScreens=[];window.__fixtureAudio=[];
+const Peer=window.RTCPeerConnection;window.RTCPeerConnection=class extends Peer{constructor(configuration){super({...configuration,iceTransportPolicy:"relay"});window.__fixturePeers.push(this);this.addEventListener('datachannel',e=>e.channel.addEventListener('message',e=>{let v;try{v=JSON.parse(e.data);}catch{return;}if(v.type==='return-video'){window.__fixtureVideoVisibility.push({enabled:v.enabled,at:performance.now()});if(window.__fixtureVideoVisibility.length>32)window.__fixtureVideoVisibility.shift();}}));}};
 const canvasTrack=color=>{const canvas=document.createElement('canvas');canvas.width=320;canvas.height=180;const context=canvas.getContext('2d');let counter=0;
 const paint=()=>{context.fillStyle=color;context.fillRect(0,0,320,180);context.fillStyle='white';context.fillRect((counter++%80)*4,0,4,4);};paint();
 const stream=canvas.captureStream(15),track=stream.getVideoTracks()[0];const timer=setInterval(()=>{if(track.readyState==='ended'){clearInterval(timer);return;}paint();},60);return stream;};
@@ -205,13 +205,13 @@ try {
   command({type:'video-on'});
   await wait('fresh opt-in decodes current purple Program',async()=>{check();const r=await browser.evaluate(g,videoPixels);return r?.pixel[0]>100&&r.pixel[1]<80&&r.pixel[2]>140;},20000);
   console.log(`PASS actual native fixed Program H264 return: current pixels, <=320x180 bounds, deliberate start/stop/restart and hidden stopped video; ${JSON.stringify(await browser.evaluate(g,videoPixels))}`);
-  if(!process.argv.includes('--video-fault-only')){
+  async function qualifyAV(sourceName){
   await pause(3500); // Require late cues after multiple shared-clock sender reports.
   command({type:'video-black'});ack=undefined;command({type:'mute'});await wait('mute before return AV recording',()=>{check();return ack==='mute';});
   await pause(400); // Drain the already accepted public return tail before measuring silence.
   await spectrum('video-av-silent-baseline',0,0);
   await wait('black before actual return AV recording',async()=>{const r=await browser.evaluate(g,videoPixels);return r&&r.pixel.every(v=>v<8);});
-  await browser.evaluate(g,`(()=>{const stream=document.getElementById('return').captureStream();window.__returnParts=[];window.__returnRecorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8,opus',videoBitsPerSecond:400000,audioBitsPerSecond:128000});window.__returnRecorder.ondataavailable=e=>{if(e.data.size)window.__returnParts.push(e.data);};window.__returnRecorder.start();})()`);
+  await browser.evaluate(g,`(()=>{const stream=document.getElementById('return').srcObject;window.__returnCaptured=stream;window.__returnParts=[];window.__returnRecorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8,opus',videoBitsPerSecond:400000,audioBitsPerSecond:128000});window.__returnRecorder.ondataavailable=e=>{if(e.data.size)window.__returnParts.push(e.data);};window.__returnRecorder.start();})()`);
   await browser.evaluate(g,`(()=>{window.__resetReturn();window.__videoFlashPerf=undefined;const v=document.getElementById('return'),c=document.createElement('canvas');c.width=1;c.height=1;const context=c.getContext('2d');const observe=(now,meta)=>{context.drawImage(v,0,0,1,1);const p=context.getImageData(0,0,1,1).data;if(p[0]>200&&p[1]>200&&p[2]>200)window.__videoFlashPerf??=meta.expectedDisplayTime;else v.requestVideoFrameCallback(observe);};v.requestVideoFrameCallback(observe);})()`);
   await pause(600);command({type:'video-av'});await pause(1500);
   const actualPlayout=await browser.evaluate(g,`(()=>{const a=window.__returnAnalysis,stamp=a.context.getOutputTimestamp(),cue=a.last?.cueContextSeconds,audio=cue===undefined?undefined:stamp.performanceTime+(cue-stamp.contextTime)*1000;return{videoMilliseconds:window.__videoFlashPerf,audioMilliseconds:audio,deltaMilliseconds:window.__videoFlashPerf-audio};})()`);
@@ -219,15 +219,18 @@ try {
   const transportTiming=await browser.evaluate(g,String.raw`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats(),r=[];for(const s of stats.values())if(s.type==='inbound-rtp')r.push({kind:s.kind,jitterBufferDelay:s.jitterBufferDelay,jitterBufferEmittedCount:s.jitterBufferEmittedCount,estimatedPlayoutTimestamp:s.estimatedPlayoutTimestamp,lastPacketReceivedTimestamp:s.lastPacketReceivedTimestamp,codec:stats.get(s.codecId)?.mimeType});return{stats:r,mediaIdentity:pc.remoteDescription.sdp.split('\r\n').filter(l=>/^a=ssrc:\d+ (?:cname|msid):stream-return(?: |$)/.test(l))};})()`);
   console.log(`Actual return RTP timing and public stream identity: ${JSON.stringify(transportTiming)}`);
   const encodedRecording=await browser.evaluate(g,`new Promise(resolve=>{window.__returnRecorder.onstop=async()=>{const bytes=new Uint8Array(await new Blob(window.__returnParts).arrayBuffer());let value='';for(let i=0;i<bytes.length;i+=8192)value+=String.fromCharCode(...bytes.subarray(i,i+8192));resolve(btoa(value));};window.__returnRecorder.stop();})`);
+  await browser.evaluate(g,`(()=>{window.__returnCaptured=undefined;window.__returnRecorder=undefined;})()`);
   assert(typeof encodedRecording==='string'&&encodedRecording.length<1048576,'Bounded owned return AV recording');
   const avPath=path.join(owned,'decoded-return-av.webm');await fs.writeFile(avPath,Buffer.from(encodedRecording,'base64'),{mode:0o600});
   const retained=path.resolve(workerRoot,'../../apple/build/native-interview-return-video-validation',`decoded-return-${Date.now()}.webm`);
   await fs.mkdir(path.dirname(retained),{recursive:true});await fs.copyFile(avPath,retained);
   console.log(`Owned decoded return AV artifact: ${retained}`);
   console.log(`Original native source AV cues: ${JSON.stringify({native:state.av??{},authored:state.authoredAV??{}})}`);
-  assert(Number.isFinite(state.av?.delta)&&Math.abs(state.av.delta)<.05,'Owned native Program cue must be aligned within50ms before testing transport synchronization');
-  console.log(`PASS actual Chrome decoded Program video/Opus AV cue: ${JSON.stringify(analyzeReturnAV(avPath))}`);
-  }else{console.log('Scope: focused partial-AU invocation; decoded AV cue qualification is separate.');}
+  assert(Number.isFinite(state.av?.delta)&&Math.abs(state.av.delta)<.05,'Owned native selected-canvas cue must be aligned within50ms before testing transport synchronization');
+  console.log(`PASS actual Chrome decoded ${sourceName} video/Opus AV cue: ${JSON.stringify(analyzeReturnAV(avPath))}`);
+  }
+  if(!process.argv.includes('--video-fault-only')) await qualifyAV('Program');
+  else console.log('Scope: focused partial-AU invocation; decoded AV cue qualification is separate.');
   command({type:'video-noise'});await pause(500);
   const beforeFault=await browser.evaluate(g,decodedVideoStats);command({type:'video-fault'});
   await wait('actual SDK fragmented AU prefix then controlled failed send',()=>{check();return state.videoFault?.failed&&state.videoFault.fragmented&&state.videoFault.forwarded===4;});
@@ -237,6 +240,36 @@ try {
   console.log(`PASS actual SDK fragmented partial AU failure and next-IDR Chrome decode recovery: ${JSON.stringify(state.videoFault)}`);
   command({type:'video-purple'});
   await wait('current purple Program restored after recovery',async()=>{const r=await browser.evaluate(g,videoPixels);return r?.pixel[0]>100&&r.pixel[1]<80&&r.pixel[2]>140;});
+  const blue=async()=>{check();const r=await browser.evaluate(g,videoPixels);return r?.pixel[0]<40&&r.pixel[1]<60&&r.pixel[2]>180&&r.width<r.height&&r.height<=180;};
+  command({type:'video-select-secondary'});await pause(500);
+  console.log(`Source selection metadata: ${JSON.stringify({members:state.members,video:await browser.evaluate(g,videoPixels),visibility:await browser.evaluate(g,"window.__fixtureVideoVisibility"),errors:browser.errors})}`);
+  await wait('current lease explicitly selects Secondary and stops prior return',async()=>{check();return state.members[0].returnSource==='secondary'&&await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0");});
+  ack=undefined;command({type:'video-budget-free'});await wait('source selection tears down old encoder before release',()=>{check();return ack==='video-budget-free';});
+  assert(typeof state.secondaryQualified==='boolean','Actual measured machine qualification receipt');
+  if(state.secondaryQualified){
+  command({type:'video-on'});
+  await wait('actual distinct blue portrait Secondary return',blue,20000);
+  await wait('Secondary return owns canvas source demand',()=>state.secondaryDemand===true);
+  console.log(`PASS actual distinct Program-purple/Secondary-blue pixels and bounded portrait H264: ${JSON.stringify(await browser.evaluate(g,videoPixels))}`);
+  ack=undefined;command({type:'video-budget-held'});await wait('Secondary owns actual shared encoder budget',()=>{check();return ack==='video-budget-held';});
+  command({type:'video-secondary-remove'});
+  await browser.until(g,"document.getElementById('return').srcObject.getVideoTracks().length===0",'Secondary layout removal fences visible return');
+  ack=undefined;command({type:'video-budget-free'});await wait('Secondary loss tears down encoder and releases budget',()=>{check();return ack==='video-budget-free'&&state.secondaryDemand===false;});
+  command({type:'video-secondary-restore'});await pause(350);
+  assert(await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0"),'Restoring Secondary does not replay earlier On');
+  command({type:'video-on'});await wait('fresh explicit Secondary enable after source restoration',blue,20000);
+  if(!process.argv.includes('--video-fault-only')) await qualifyAV('Secondary');
+  command({type:'video-secondary-restore'});await wait('Secondary blue restored after AV cue',blue);
+  }else{
+    command({type:'video-on'});await wait('Unqualified Secondary allocation is refused',()=>{check();return state.members[0].returnVideo==='failed';});
+    assert(await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0"),'Unqualified Secondary cannot deliver video');
+    assert(state.secondaryDemand===false,'Unqualified Secondary cannot retain canvas demand');
+    console.log('PASS actual Secondary start refusal on unqualified machine; Secondary decode/capacity remains unqualified on this host.');
+  }
+  command({type:'video-select-program'});
+  await browser.until(g,"document.getElementById('return').srcObject.getVideoTracks().length===0",'Selecting Program requires a fresh explicit On');
+  command({type:'video-on'});
+  await wait('Program remains purple independently of blue/white Secondary changes',async()=>{const r=await browser.evaluate(g,videoPixels);return r?.pixel[0]>100&&r.pixel[1]<80&&r.pixel[2]>140&&r.width>r.height;},20000);
   const pair=await browser.evaluate(g,`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats();let result={};for(const s of stats.values()){if(s.type==='inbound-rtp'&&s.kind==='audio'){result={...result,packets:s.packetsReceived,samples:s.totalSamplesReceived,codec:stats.get(s.codecId)?.mimeType,channels:stats.get(s.codecId)?.channels};}if(s.type==='transport'&&s.selectedCandidatePairId){const pair=stats.get(s.selectedCandidatePairId);result={...result,local:stats.get(pair.localCandidateId)?.candidateType,remote:stats.get(pair.remoteCandidateId)?.candidateType};}}return result;})()`);
   assert(pair.local==='relay'&&pair.packets>10&&pair.samples>24000&&pair.codec==='audio/opus'&&state.transport.local==='relay'&&state.transport.udp);
   console.log(`Actual decoded Opus and both-local relay metadata: ${JSON.stringify(pair)}`);
@@ -257,6 +290,10 @@ try {
   ack=undefined;command({type:'mute'});await wait('actual local mixer mute acknowledged',()=>{check();return ack==='mute';});await pause(400);await spectrum('local-muted',0,0);
   ack=undefined;command({type:'restore'});await wait('actual local mixer nonunity restore acknowledged',()=>{check();return ack==='restore';});await pause(300);await spectrum('local-nonunity-restore',.16,.08);
   const oldGeneration=state.lease.generation;
+  if(state.secondaryQualified){
+    command({type:'video-select-secondary'});await wait('Select Secondary before actual rejoin',()=>state.members[0].returnSource==='secondary');
+    command({type:'video-on'});await wait('Secondary active before actual rejoin',blue,20000);
+  }
   await browser.evaluate(g,'window.__priorReturnTrack=window.__returnAnalysis.track');command({type:'rejoin'});
   await browser.until(g,"document.getElementById('return').srcObject===null",'shipping guest reset clears return after host disconnect');
   assert(await browser.evaluate(g,"window.__returnAnalysis.track.readyState==='ended'")===true,'Actual previous remote return track retires');
@@ -265,6 +302,9 @@ try {
   await browser.until(g,"document.getElementById('return').srcObject?.getAudioTracks().length===1",'new shipping return stream');
   await browser.evaluate(g,returnAnalyzer);await spectrum('rejoined-new-fulllease',.16,.08);
   assert(await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0"),'A new full lease cannot inherit Program video opt-in');
+  assert(state.members[0].returnSource==='program','A new full lease resets ephemeral Secondary selection to Program');
+  ack=undefined;command({type:'stale-video-selection'});await wait('Old fulllease video selection/start rejected',()=>{check();return ack==='stale-video-selection-rejected';});
+  assert(state.members[0].returnSource==='program','Stale source command cannot change replacement source');
   command({type:'video-on'});
   await wait('fresh lease Program video decoded after explicit enable',async()=>{check();const r=await browser.evaluate(g,videoPixels);return r?.pixel[0]>100&&r.pixel[1]<80&&r.pixel[2]>140;},20000);
   console.log('PASS actual native Program return fresh-lease opt-in and decoded current purple pixels after rejoin');
@@ -282,7 +322,7 @@ try {
   command({type:'stop'});await wait('native permanent cleanup receipt',()=>{check();return stopped&&closed;},10000);assert(linesAfterStop===0);
   assert(browser.errors.length===0,'Actual shipping guest page no runtime errors');
   console.log(`PASS ${version.product}: actual shipping NativeInterviewManager/default receiver/controller-issued sink→preclamp fulllease return→public native stereo Opus→SDK RTP/RTCP→owned TURN→shipping guest audio track/Chrome decoded48k PCM; own440/880 excluded, local1000/1700 preserved, mute/nonunity restore, new-generation rejoin and remove fence`);
-  console.log('Scope: owned local Worker/Coturn/synthetic captures only. Fixed Program video and public stereo audio only; clean/secondary video, adaptive transport feedback, addressed talkback, physical/browser AEC, mobile/restricted-network/deployed broker remain unqualified.');
+  console.log('Scope: owned local Worker/Coturn/synthetic captures only. Program/Secondary video and public stereo audio only; clean video, adaptive transport feedback, addressed talkback, physical/browser AEC, mobile/restricted-network/deployed broker remain unqualified.');
 } finally {
   browserSocket?.close();for(const value of children.reverse())await terminate(value);
   await fs.rm(owned,{recursive:true,force:true,maxRetries:5,retryDelay:100});
