@@ -15,10 +15,15 @@ enum GuestFrameStoreHarness {
                                    pts: now + CMTime(value: 5_760, timescale: 48_000), duration: .invalid,
                                    mappingGeneration: clock, clockQuality: .senderReportAligned)
         precondition(!store.receive(frame, arrival: now), "Unregistered media must not admit itself")
+        precondition(store.sourceHealth(slot: lease.slot, role: .camera, at: now).state == "unavailable")
         precondition(store.register(lease))
+        precondition(store.sourceHealth(slot: lease.slot, role: .camera, at: now).state == "waiting")
         precondition(!store.register(.init(slot: UUID(), peerID: UUID(), negotiation: UUID(), generation: 1)),
                      "A second slot must not silently evict the admitted peer")
         precondition(store.receive(frame, arrival: now))
+        precondition(store.sourceHealth(slot: lease.slot, role: .camera, at: now).state == "buffering")
+        let health = store.sourceHealth(slot: lease.slot, role: .camera, at: frame.pts)
+        precondition(health.state == "capturing" && health.deliveredFrames == 1)
         precondition(store.pixels(slot: lease.slot, role: .camera, at: now, program: false) == nil,
                      "Preview must not show future decoded pixels")
         precondition(store.pixels(slot: lease.slot, role: .camera, at: frame.pts, program: false) === pixels)
@@ -28,14 +33,20 @@ enum GuestFrameStoreHarness {
         precondition(store.pixels(slot: lease.slot, role: .camera, at: frame.pts, program: true) === pixels)
         precondition(store.pixels(slot: UUID(), role: .camera, at: frame.pts, program: true) == nil)
         precondition(store.pixels(slot: lease.slot, role: .camera, at: frame.pts + CMTime(value: 12_001, timescale: 48_000), program: false) == nil)
+        precondition(store.sourceHealth(slot: lease.slot, role: .camera,
+            at: frame.pts + CMTime(value: 12_001, timescale: 48_000)).state == "stale")
 
         let screen = GuestVideoFrame(lease: lease, role: .screen, pixels: pixels!, pts: frame.pts,
                                     duration: .invalid, mappingGeneration: clock, clockQuality: .senderReportAligned)
         precondition(!store.receive(screen, arrival: now))
+        precondition(store.sourceHealth(slot: lease.slot, role: .screen, at: now).state == "inactive")
         store.enable(.screen, lease: lease)
         precondition(store.receive(screen, arrival: now))
         precondition(store.pixels(slot: lease.slot, role: .screen, at: frame.pts + CMTime(seconds: 20, preferredTimescale: 48_000), program: false) === pixels)
+        precondition(store.sourceHealth(slot: lease.slot, role: .screen,
+            at: frame.pts + CMTime(seconds: 20, preferredTimescale: 48_000)).state == "capturing")
         store.disable(.screen, lease: lease)
+        precondition(store.sourceHealth(slot: lease.slot, role: .screen, at: screen.pts).state == "inactive")
         precondition(store.pixels(slot: lease.slot, role: .screen, at: screen.pts, program: true) == nil)
         precondition(!store.receive(screen, arrival: now), "Ended screen callbacks must remain rejected")
 
@@ -49,10 +60,12 @@ enum GuestFrameStoreHarness {
         precondition(!store.acceptClock(lease: lease, mapping: UUID()), "One peer must retain one common clock")
         let replacement = GuestReceiveLease(slot: lease.slot, peerID: lease.peerID, negotiation: UUID(), generation: 2)
         precondition(store.register(replacement))
+        precondition(store.sourceHealth(slot: lease.slot, role: .camera, at: now).deliveredFrames == 0)
         precondition(!store.receive(frame, arrival: now), "Old peer generations must not repopulate a stable slot")
         store.allowProgram(true, lease: lease)
         precondition(store.pixels(slot: replacement.slot, role: .camera, at: frame.pts, program: true) == nil)
         store.retire()
+        precondition(store.sourceHealth(slot: lease.slot, role: .camera, at: now).state == "unavailable")
         precondition(!store.register(replacement))
         precondition(store.statistics().retainedFrames == 0)
         history()

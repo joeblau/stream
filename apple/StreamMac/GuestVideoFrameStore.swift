@@ -16,6 +16,7 @@ final class GuestVideoFrameStore: @unchecked Sendable {
         var frames: [GuestVideoFrame] = []
         var bytes = 0
         var enabled = false
+        var deliveredFrames = 0
     }
     private let lock = NSLock()
     private var lease: GuestReceiveLease?
@@ -98,7 +99,7 @@ final class GuestVideoFrameStore: @unchecked Sendable {
             state.bytes -= CVPixelBufferGetBytesPerRow(removed.pixels) * CVPixelBufferGetHeight(removed.pixels)
             stats.overflow += 1
         }
-        state.frames.append(frame); state.bytes += bytes; roles[frame.role] = state
+        state.frames.append(frame); state.bytes += bytes; state.deliveredFrames += 1; roles[frame.role] = state
         stats.accepted += 1; return true
     }
 
@@ -134,5 +135,18 @@ final class GuestVideoFrameStore: @unchecked Sendable {
         value.retainedFrames = roles.values.reduce(0) { $0 + $1.frames.count }
         value.retainedBytes = roles.values.reduce(0) { $0 + $1.bytes }
         return value
+    }
+
+    /// Availability is independent for the camera and explicitly approved
+    /// screen. Counts include accepted receipts, never retained stale callbacks.
+    func sourceHealth(slot: UUID?, role: GuestReceiveRole, at time: CMTime) -> (state: String, deliveredFrames: Int?) {
+        lock.lock(); defer { lock.unlock() }
+        guard !closed, let slot, lease?.slot == slot else { return ("unavailable", nil) }
+        guard let state = roles[role], state.enabled else { return ("inactive", nil) }
+        guard !state.frames.isEmpty else { return ("waiting", state.deliveredFrames) }
+        guard time.isNumeric, let due = state.frames.last(where: { $0.pts <= time }) else {
+            return ("buffering", state.deliveredFrames)
+        }
+        return (role == .camera && (time - due.pts).seconds > 0.25 ? "stale" : "capturing", state.deliveredFrames)
     }
 }

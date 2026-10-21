@@ -79,7 +79,19 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         let retired = workspace.runtime
         let oldDisappearance = WorkspaceViewReceipts.disappeared[ObjectIdentifier(retired), default: 0]
         await workspace.applyPending()
+        let retiredSampleTime = retired.diagnostics.snapshot.time
         try await waitForView(workspace, retired: retired, afterDisappearance: oldDisappearance)
+        try await waitForDiagnostics(workspace.runtime, after: Date())
+        try require(retired.diagnostics.snapshot.time == retiredSampleTime,
+            "Retired runtime continued publishing diagnostic samples after switching profiles")
+    }
+    static func waitForDiagnostics(_ runtime: StudioRuntime, after time: Date) async throws {
+        for _ in 0..<300 {
+            if runtime.diagnostics.snapshot.time > time && runtime.diagnostics.snapshot.targetFPS > 0 { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw NSError(domain: "WorkspaceHarness", code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "Runtime diagnostics did not sample within three seconds"])
     }
     static func run() async throws {
         let root = WorkspaceFixtureStorage.root
@@ -95,7 +107,11 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try FileManager.default.createDirectory(at: seededDirectory, withIntermediateDirectories: true)
         try JSONEncoder().encode(seededCatalog).write(to: root.appendingPathComponent("projects.v1.json"))
         let workspace = StudioWorkspace(root: root)
+        // No view has ever been attached: counters still belong to the live
+        // runtime rather than depending on the diagnostics panel's visibility.
+        try await waitForDiagnostics(workspace.runtime, after: Date())
         WorkspaceFixtureDefaults.value.set(true, forKey: "onboarding.hasCompletedFirstRun")
+        WorkspaceFixtureDefaults.value.set(false, forKey: "studio.showDiagnostics")
         let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1440, height: 900),
             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -115,6 +131,7 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try require(WorkspaceViewReceipts.disappeared[ObjectIdentifier(initialRuntime), default: 0] > firstDisappear,
             "Owned window detachment did not trigger actual MainWindow disappearance")
         try require(initialRuntime.providerAccounts.canRequest(.youtube), "Window detach closed current accounts")
+        try await waitForDiagnostics(initialRuntime, after: Date())
         window.contentView = host
         window.makeKeyAndOrderFront(nil)
         for _ in 0..<600 {
@@ -125,6 +142,7 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
             "Window reattachment did not reopen the actual same-runtime MainWindow")
         try await waitForView(workspace)
         print("PASS: actual shipping MainWindow owned window detach/reattach retains accounts, rebinds ending and keeps managed-start/recovery gates open; capture explicitly suppressed")
+        print("PASS: runtime diagnostics update before any view exists and while diagnostics are hidden or the window is detached")
         for starter in StudioStarter.allCases {
             let scene = starter.scene(camera: nil, screen: nil, profile: .default)
             let decoded = try JSONDecoder().decode(Scene.self, from: JSONEncoder().encode(scene))

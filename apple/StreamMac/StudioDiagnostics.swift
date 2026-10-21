@@ -96,6 +96,8 @@ struct SourceDiagnosticSnapshot: Codable, Sendable {
     private var previousCounts: [String: Int] = [:]
     private var previousUptime: Double?
     private var previousCPU: Double?
+    private var samplingTask: Task<Void, Never>?
+    private var isRunning = true
 
     init(controller: StreamController, recorder: RecordingController) {
         controller.destinationOutputs.$states.sink { [weak self] states in
@@ -119,12 +121,33 @@ struct SourceDiagnosticSnapshot: Codable, Sendable {
             }
             if label != self.recordingLabel { self.recordingLabel = label; self.note("recording.\(label)") }
         }.store(in: &observations)
+        samplingTask = Task { @MainActor [weak self, weak controller, weak recorder] in
+            while !Task.isCancelled {
+                // Do not retain the runtime or monitor across the sleep. The
+                // sampler belongs to the runtime, including while its UI is hidden.
+                if let self, let controller, let recorder {
+                    await self.sample(controller: controller, recorder: recorder)
+                } else { return }
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+        }
+    }
+    deinit { samplingTask?.cancel() }
+
+    func shutdown() {
+        isRunning = false
+        samplingTask?.cancel()
+        samplingTask = nil
+        observations.removeAll()
     }
     private func note(_ label: String) {
         events.append(.init(time: Date(), state: label)); events = Array(events.suffix(256))
     }
     func sample(controller: StreamController, recorder: RecordingController) async {
         var current = await controller.diagnosticSnapshot()
+        // A project switch can retire this runtime while actor snapshots are
+        // in flight. Keep its last snapshot rather than publishing late results.
+        guard isRunning, !Task.isCancelled else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if let previousUptime {
             let elapsed = max(0.001, now - previousUptime)
@@ -194,12 +217,6 @@ private struct StudioDiagnosticsContent: View {
         }
         .font(.caption.monospacedDigit())
         .padding(.horizontal, 12).padding(.vertical, 6)
-        .task(id: workspace.currentProfile.id) {
-            while !Task.isCancelled {
-                await monitor.sample(controller: workspace.runtime.controller, recorder: workspace.runtime.recorder)
-                do { try await Task.sleep(for: .seconds(1)) } catch { return }
-            }
-        }
     }
     private var details: some View {
         ScrollView {

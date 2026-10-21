@@ -615,6 +615,14 @@ final class StreamController: ObservableObject {
         case .failed: "failed"
         }
         for source in sceneStore.sources.prefix(256) {
+            if case .guest(let payload) = source.payload {
+                let health = guestVideoFrames.sourceHealth(slot: payload.slotID,
+                    role: payload.role == .camera ? .camera : .screen,
+                    at: CMClockGetTime(CMClockGetHostTimeClock()))
+                snapshot.sources.append(.init(id: source.id.description, kind: source.payload.kind,
+                    state: health.state, deliveredFrames: health.deliveredFrames))
+                continue
+            }
             var keys = CaptureSourceKey.demanded(layers: [LayerNode(name: "", sourceID: source.id, payload: source.payload, transform: .fullscreen)], sources: sceneStore.sources)
             if case .appAudio(let payload) = source.payload { keys.insert(.appAudio(payload)) }
             let state: String
