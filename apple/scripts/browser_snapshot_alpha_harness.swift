@@ -217,8 +217,13 @@ private func tone(frame: Int) throws -> CMSampleBuffer {
                 let (_, currentPixels) = try await helper.snapshot(id: id, generation: nextGeneration)
                 guard pixel(currentPixels, 40, 40)[0] > 240 else { throw failure("Current page snapshots failed after media lifecycle acknowledgments") }
             }
-            print("PASS \(variant): replaced page rejects old-generation Suspend and Resume; current-generation acknowledgments and actual blue-page snapshots survive")
-            try helper.send(.init(action: .stop, widgetID: id)); try await helper.wait(.stopped, id: id)
+            let staleStop = UUID()
+            try helper.send(.init(action: .stop, widgetID: id, requestID: staleStop, generation: generation))
+            try await helper.wait(.failed, id: id, generation: generation, request: staleStop, category: "stale_generation")
+            let (_, afterStaleStop) = try await helper.snapshot(id: id, generation: nextGeneration)
+            guard pixel(afterStaleStop, 40, 40)[0] > 240 else { throw failure("Stale Stop retired the replacement page") }
+            print("PASS \(variant): replaced page rejects old-generation Suspend, Resume and Stop; current-generation acknowledgments and actual blue-page snapshots survive")
+            try helper.send(.init(action: .stop, widgetID: id, generation: nextGeneration)); try await helper.wait(.stopped, id: id)
             print("MEASURED \(variant): clear=\(clear), halfGreen=\(green), opaqueWhite=\(white); actual helper IPC→snapshot→composited H264/AAC→native decode complete")
         }
         try JSONSerialization.data(withJSONObject: reports, options: [.prettyPrinted, .sortedKeys]).write(to: artifacts.appendingPathComponent("report.json"))

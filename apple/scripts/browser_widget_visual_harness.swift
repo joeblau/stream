@@ -51,7 +51,13 @@ extension BrowserAudioHelperHarness {
         config.allowsInteraction = false
         let sibling = BrowserOverlayHost(configuration: config, storeKey: siblingKey, helperSessionForQualification: session,
             helperHTMLForQualification: toneHTML(frequency: 1_100, pan: 1))
-        host.start(); sibling.start()
+        func updateQualificationProgramPages() {
+            // This fixture deliberately places both pages in Program. A normal
+            // Controller derives these leases from its visible Program graph.
+            session.setProgramAudioDemand(Set([host.helperPageLease, sibling.helperPageLease].compactMap { $0 }),
+                applyingExclusions: session.requiredSystemAudioExclusions)
+        }
+        host.start(); sibling.start(); updateQualificationProgramPages()
         try await wait { host.loadState == .ready && sibling.loadState == .ready && host.helperFrameHeader != nil && sibling.helperFrameHeader != nil && session.audioIsCapturing }
         precondition(session.demandCount == 2 && session.helperPID != nil)
         let recording = Task { @MainActor in
@@ -126,7 +132,7 @@ extension BrowserAudioHelperHarness {
         }
         precondition(reserved && !session.requestSnapshot(id: oldHeader.widgetID, generation: oldHeader.generation),
             "The shared helper frame pull must shed additional requests while one is active")
-        host.reload()
+        host.reload(); updateQualificationProgramPages()
         precondition(BrowserOverlayFrameStore.shared.latest(for: mainKey) == nil && host.helperFrameHeader == nil)
         try await wait { host.helperFrameHeader?.generation != nil && host.helperFrameHeader?.generation != beforeReload && visualColor(mainKey) == "red" }
         let replacedToken = await host.evaluateTrigger("window.__token")
@@ -150,7 +156,7 @@ extension BrowserAudioHelperHarness {
         precondition(timing.holdbackMilliseconds == 5 && timing.leaseCount == 0)
         // Re-demand uses a new LaunchServices instance; its unexpected exit must clear frames,
         // fail visibly and release only the helper capture, without touching the independent app.
-        host.start()
+        host.start(); updateQualificationProgramPages()
         try await wait { host.loadState == .ready && host.helperFrameHeader != nil && session.audioIsCapturing }
         let ownedPID = session.helperPID!
         NSRunningApplication(processIdentifier: ownedPID)?.terminate()
