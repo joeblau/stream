@@ -86,8 +86,9 @@ import StreamCore
     }
 
     /// Processes a 2 s tone through a fresh processor running `chain` and
-    /// returns its output RMS (long enough for the compressor's envelope to
-    /// settle into steady state).
+    /// returns RMS of its final second after the graph/filters/dynamics settle.
+    /// Cold offline-render startup varies across native Audio Unit backends;
+    /// including it measures startup as well as the intended steady-state gain.
     private func processedRMS(frequency: Double, amplitude: Float,
                               chain: ChannelFXChain,
                               processor: ChannelFXProcessor = ChannelFXProcessor()) -> Double {
@@ -97,7 +98,12 @@ import StreamCore
             Issue.record("failed to synthesize tone buffer")
             return 0
         }
-        return rms(floatSamples(processor.process(sb, chain: chain)))
+        let output = floatSamples(processor.process(sb, chain: chain))
+        guard output.count == 96_000 else {
+            Issue.record("FX output did not preserve the complete two-second tone")
+            return 0
+        }
+        return rms(Array(output.suffix(48_000)))
     }
 
     // MARK: - Model (presets, validation, bypass semantics)
@@ -155,9 +161,8 @@ import StreamCore
         // response shift the measured whole-chain result slightly. Keep a
         // narrow tolerance that still rejects bypass or the wrong gain.
         let boost = 20 * log10(chest / reference)
-        // Platform math implementations differ by less than 0.001 dB at
-        // this boundary (hosted ARM measured 3.500069 dB). Preserve the
-        // gain assertion with 0.01 dB numerical headroom.
+        // Measure only settled output; cold graph startup is not part of the
+        // preset's frequency-response contract. Keep the original gain bounds.
         #expect((2.49...3.51).contains(boost))
     }
 

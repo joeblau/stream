@@ -86,3 +86,29 @@ zsh apple/scripts/run_source_failover_native_harness.zsh
 zsh apple/scripts/run_shared_encoder_harness.zsh --transport-recovery-only
 zsh apple/scripts/run_shared_encoder_harness.zsh --transport-recovery-only --software
 ```
+
+## ChannelFX steady-state measurement
+
+The frequency-response helper now measures the final second of the complete
+two-second rendered tone and requires all 96,000 mono samples to be present.
+This excludes initial graph/filter/dynamics settling from a measurement intended
+to describe steady-state response. The original low-band acceptance interval
+of 2.49–3.51 dB remains intact; production DSP, preset parameters and processing
+order are unchanged.
+
+Both native arm64 and an x86_64 executable under Rosetta pass all fifteen
+`ChannelFXProcessorTests`, including low/mid/high response, gate, limiter,
+silence, format/timing, live edits, legacy mapping and decoding. Standalone
+probes compiled from the shipping processor/model/hosted-unit sources measured
+the same settled 100 Hz / 2.5 kHz response of 3.1393379 dB on both architectures.
+The same-frequency shelf contribution is 2.9237541 dB, consistent with the
+configured 3 dB low shelf and its finite transition at 100 Hz. This supplies a
+transfer-response check without expanding the old bound to the historical
+3.9271 dB whole-buffer result.
+
+The focused package builds the actual StreamCore sources and exact test file.
+The native suite runs through SwiftPM. The installed SwiftPM test helper is
+arm64-only, so the successfully built x86_64 Core library and exact test file
+are linked into a small x86_64 executable calling Swift Testing's standard
+`__swiftPMEntryPoint`, then run through Rosetta. This is translated x86_64
+evidence on the named M3 Max, not a hosted or physical Intel qualification.
