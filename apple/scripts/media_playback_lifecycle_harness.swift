@@ -86,6 +86,14 @@ final class FixtureState: @unchecked Sendable {
     }
 }
 
+final class FixtureAudioPullTiming: @unchecked Sendable {
+    static let shared = FixtureAudioPullTiming()
+    private let lock = NSLock()
+    private var interval: (Double, Double)?
+    func note(start: CMTime, ready: CMTime) { lock.withLock { interval = (start.seconds, ready.seconds) } }
+    var snapshot: (Double, Double)? { lock.withLock { interval } }
+}
+
 private final class FixtureAudioEvents: @unchecked Sendable {
     private let lock = NSLock()
     private var status = MediaSourceStatus()
@@ -94,6 +102,7 @@ private final class FixtureAudioEvents: @unchecked Sendable {
     private var ends = 0
     private var first: Float?
     private var malformed = false
+    private var malformedEvidence: String?
     private var rate: Double = 0
     private var channels: UInt32 = 0
     private let usesFixtureClock: Bool
@@ -102,6 +111,7 @@ private final class FixtureAudioEvents: @unchecked Sendable {
     func end() { lock.withLock { ends += 1 } }
     func resetFirst() { lock.withLock { first = nil } }
     func sample(_ sample: CMSampleBuffer) {
+        let entered = (usesFixtureClock ? FixtureClock.shared.now() : CMClockGetTime(CMClockGetHostTimeClock())).seconds
         guard let data = sample.dataBuffer else { preconditionFailure("Actual decoder PCM has no bytes") }
         var value: Float = 0
         precondition(CMBlockBufferCopyDataBytes(data, atOffset: 0, dataLength: 4, destination: &value) == noErr)
@@ -113,8 +123,19 @@ private final class FixtureAudioEvents: @unchecked Sendable {
         let actualRate = asbd.pointee.mSampleRate, actualChannels = asbd.pointee.mChannelsPerFrame
         let valid = frames > 0 && frames <= 4096 && abs(sample.duration.seconds - Double(frames) / actualRate) < 0.000001
             && sample.presentationTimeStamp.seconds > now - 0.03 && sample.presentationTimeStamp.seconds < now + 0.16
-        lock.withLock { count += 1; rate = actualRate; channels = actualChannels; if first == nil { first = value }; if !valid { malformed = true } }
+        let evidence = "frames=\(frames), rate=\(actualRate), duration=\(sample.duration.seconds), expectedDuration=\(Double(frames) / actualRate), pts=\(sample.presentationTimeStamp.seconds), callbackEntry=\(entered), checkHost=\(now), ptsMinusCheck=\(sample.presentationTimeStamp.seconds - now), pullStartReady=\(String(describing: FixtureAudioPullTiming.shared.snapshot))"
+        let firstFailure = lock.withLock {
+            count += 1; rate = actualRate; channels = actualChannels
+            if first == nil { first = value }
+            guard !valid else { return false }
+            malformed = true
+            guard malformedEvidence == nil else { return false }
+            malformedEvidence = evidence
+            return true
+        }
+        if firstFailure { FileHandle.standardError.write(Data(("PCM FIRST MALFORMED: " + evidence + "\n").utf8)) }
     }
+    var failureEvidence: String? { lock.withLock { malformedEvidence } }
     var snapshot: (status: MediaSourceStatus, count: Int, ends: Int, first: Float?, malformed: Bool, rate: Double, channels: UInt32, updates: Int) {
         lock.withLock { (status, count, ends, first, malformed, rate, channels, statusUpdates) }
     }
@@ -347,7 +368,7 @@ private final class FixtureAudioEvents: @unchecked Sendable {
             let sourceFrame = Double(lateEvents.snapshot.first ?? -1) * 384_000
             precondition(sourceFrame >= (before - 0.0201) * 48_000 && sourceFrame <= (after - 0.019) * 48_000 + 2,
                 "Delayed pull/catch-up dropped a whole valid PCM chunk at the20ms admission boundary: frame\(sourceFrame), clock\(before)...\(after)")
-            precondition(!lateEvents.snapshot.malformed)
+            precondition(!lateEvents.snapshot.malformed, lateEvents.failureEvidence ?? "No PCM failure evidence")
         }
         late.shutdown(); precondition(fixture.scopes == 0)
         fixture.configure(loops: true, end: .hold, trimIn: nil, trimOut: nil)
