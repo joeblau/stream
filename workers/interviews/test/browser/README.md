@@ -12,7 +12,9 @@ npm run test:client
 npm run test:browser
 ```
 
-`test:client` needs no browser. It includes deterministic guest-device transactions: failed replacement rollback, late permission results, leave during sender replacement, overlapping checks, restart cancellation, mute preservation and connected Join gating. These fixtures exercise shipping guest code with controlled media objects; they do not establish physical-device or browser compatibility. `test:browser` requires Chrome/Chromium. It finds Google Chrome in the standard macOS location or Chrome/Chromium on Linux `PATH`; set `CHROME_BIN` to an explicit executable when needed:
+`test:client` needs no browser. It includes deterministic guest-device transactions: failed replacement rollback, late permission results, leave during sender replacement, overlapping checks, restart cancellation, mute preservation and connected Join gating. These fixtures exercise shipping guest code with controlled media objects; they do not establish physical-device or browser compatibility.
+
+Device recovery also requires live camera/microphone tracks before a new Join or host offer. An ended track disables Join; explicit preparation or a device switch can restore readiness with the same invite, preserving the healthy other device and intentional mute. Controlled cases cover ended permission results, loss during held replacement, stale offers and disconnect/Reconnect gating. The [frozen original/fixed receipt](../../../../apple/docs/GUEST_JOIN_DEVICE_RECOVERY_2026-10-22.json) records six failures in the original client and 52 passing fixed/existing client cases. It does not qualify current Safari or mobile-browser device behavior. `test:browser` requires Chrome/Chromium. It finds Google Chrome in the standard macOS location or Chrome/Chromium on Linux `PATH`; set `CHROME_BIN` to an explicit executable when needed:
 
 ```sh
 CHROME_BIN='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npm run test:browser

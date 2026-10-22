@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "1ba73513a5d5f29f34a6467ea9ddc07410ff810f",
+  "issue": 126,
+  "scope": "Shipping guest JavaScript executed in existing Node VM fixtures with controlled tracks, promises, audio objects and signaling. No actual browser, RTC, media/device capture, native app, audio output or network run.",
+  "node": {
+    "version": "24.15.0",
+    "path": "/private/tmp/stream-macos-tools-20261021/node_modules/node/bin/node",
+    "sha256": "3200fbd9f7fd4410426dd541e10d1ab829d3472f270d743c7fabd1696c03fe32"
+  },
+  "sourceAndFixtureSHA256": {
+    "workers/interviews/test/browser/guest-device-client.mjs": "f8cee517d347bb6c46e9eb1c4973885ed75d17bce7dd9c97086bbdd36b3b21d9",
+    "workers/interviews/test/browser/owned-loopback-failure-snapshot-client.mjs": "0cab759aff8a90100c1424baaacfc722a6ed2b57850abbf01e5bc4aeeb959358",
+    "workers/interviews/test/browser/owned-loopback-lifecycle-client.mjs": "87c8649876c292870337064954ae37057844372ceac97c440c49bed1d4da9476",
+    "workers/interviews/test/browser/owned-loopback-signal-journal-client.mjs": "2e7392ac31a426e43b62e104cc8262e6dc5ab02cb08da4826f8aefc528d36292",
+    "workers/interviews/test/browser/reference-host-client.mjs": "bab2d7126c32769ace748ceda7239c8f48f7493d2b006202dfba414e87b30cc7",
+    "workers/interviews/test/browser/guest-public-chat.mjs": "f075215c47d3424af0f0429d86c83cdd323ef1379ee1fc51a21d7fd56672b467",
+    "workers/interviews/test/browser/owned-loopback-failure-snapshot.mjs": "6a8a484a5ad93128849ef3bb77c8f13e326b7171b0dd311cd81af0a43a3ba01b",
+    "workers/interviews/test/browser/owned-loopback-lifecycle.mjs": "dfc33a2327108c7129fe2b9a73ddab4712ee1bde07e94d909d3a196e6f0bd78c",
+    "workers/interviews/test/browser/owned-loopback-signal-journal.mjs": "39af822bee14046a916754ee6a1320e01ddc4ec5cd85216e488318fd4963a5aa",
+    "workers/interviews/test/browser/owned-null-audio-loopback.mjs": "1f21527a66493c17836356ad54e8d1e26f4c958cf45aec7c5c50712937fd23b0",
+    "workers/interviews/public/guest.js": "93b98ec7071dd52b25b61950e02a11ae5e88bb0f2c93ca9e7d057fb90f224fc4",
+    "workers/interviews/public/host.js": "05ad3e6d7da7d41a0b1bc20c2b6829f79ea5a1f9b4028bc0e44c3eb84850822a",
+    "workers/interviews/public/public-chat.js": "f9e008950d9e706e8f3a30b3a1523d2338b5ef95cc1ecb922d1b3a1ac9ab3d05"
+  },
+  "originalSource": {
+    "gitPath": "1ba73513a5d5f29f34a6467ea9ddc07410ff810f:workers/interviews/public/guest.js",
+    "path": "/tmp/stream-wave18-guest-1ba7351-original.js",
+    "sha256": "b5f8985caa9ba1412d6c2bf07784713d79be3a67387b8292586c4d4865782e33"
+  },
+  "logs": {
+    "original": {
+      "path": "/tmp/stream-wave18-guest-devices-original-20261022.log",
+      "sha256": "5d4b8baecf4b1c3895bbe69034641c10b542cff483125a0dbd3aa7fea497c032"
+    },
+    "fixed": {
+      "path": "/tmp/stream-wave18-guest-devices-fixed-20261022.log",
+      "sha256": "1f2472a64fd96dac4a9a1567532f664eb49d7f11d894bc52bed042823b1887d1"
+    },
+    "existingClients": {
+      "path": "/tmp/stream-wave18-guest-existing-clients-20261022.log",
+      "sha256": "05fec83d9c7f3cef80813ceaadcfdb41e23203b47d635038e43e8c2dddef17ca"
+    }
+  },
+  "results": {
+    "original": {
+      "exit": 1,
+      "pass": 11,
+      "fail": 6
+    },
+    "fixedGuest": {
+      "exit": 0,
+      "pass": 17,
+      "fail": 0
+    },
+    "remainingExistingClients": {
+      "exit": 0,
+      "pass": 35,
+      "fail": 0
+    },
+    "fixedTotalPass": 52
+  },
+  "commands": {
+    "cwd": "workers/interviews",
+    "original": [
+      "/private/tmp/stream-macos-tools-20261021/node_modules/node/bin/node",
+      "--test",
+      "test/browser/guest-device-client.mjs"
+    ],
+    "originalEnvironment": {
+      "GUEST_DEVICE_CLIENT_SOURCE": "/tmp/stream-wave18-guest-1ba7351-original.js"
+    },
+    "fixed": [
+      "/private/tmp/stream-macos-tools-20261021/node_modules/node/bin/node",
+      "--test",
+      "test/browser/guest-device-client.mjs"
+    ],
+    "existingFiles": [
+      "test/browser/owned-loopback-failure-snapshot-client.mjs",
+      "test/browser/owned-loopback-lifecycle-client.mjs",
+      "test/browser/owned-loopback-signal-journal-client.mjs",
+      "test/browser/reference-host-client.mjs",
+      "test/browser/guest-public-chat.mjs"
+    ]
+  },
+  "cases": [
+    "Ended track disables Join without stopping healthy device or clearing invite",
+    "Single-device permission recovery preserves muted healthy microphone and same invite",
+    "New offer refuses ended devices before replacing current healthy peer",
+    "Permission ending during held replacement restores previous devices",
+    "Already-ended permission result cannot become prepared capture",
+    "Disconnect and Reconnect cannot make ended microphone joinable"
+  ],
+  "independentSourceReview": "recovery CLEAR; no reviewer test/browser/native execution",
+  "remainingOriginalAcceptance": "Current stable Safari and mobile-browser device preparation/permission/device-switch/reconnect support is not qualified by these controlled tests. Existing scoped Chrome/native/validated-SDK routing and incoming A/V receipts remain separate. Issue126 remains open; no universal browser/device certification requirement added."
+}

@@ -76,7 +76,12 @@ $('sendmessage').onclick=()=>{
 let joinEpoch = 0, admitted = false, cameraEnabled = true, microphoneEnabled = true;
 const valid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(room ?? '') && /^[0-9a-f]{64}$/.test(secret);
 if (!valid) { status('This invite is incomplete. Ask the host for a fresh link.'); $('prepare').disabled = true; }
-function controls(enabled) { for (const id of ['mute','hide','tone','join']) $(id).disabled = !enabled; }
+function devicesReady(stream=local, kind) {
+  return !!stream && (kind ? [kind] : ['audio','video']).every(required =>
+    stream.getTracks().some(track => track.kind===required && track.readyState==='live'));
+}
+function updateJoinReadiness() { $('join').disabled=left || !valid || !devicesReady() || socket?.readyState===WebSocket.OPEN; }
+function controls(enabled) { for (const id of ['mute','hide','tone']) $(id).disabled = !enabled; updateJoinReadiness(); }
 function resetPeer() {
   ++deviceEpoch; deviceTracks.forEach(track => track.stop()); $('prepare').disabled = left || !valid;
   clearTimeout(relayTimer); relayTimer = undefined;
@@ -114,7 +119,11 @@ async function enumerate() {
 }
 function watchTracks(stream) {
   for (const track of stream.getTracks()) track.addEventListener('ended', () => {
-    if (local?.getTracks().includes(track)) status(`${track.kind === 'audio' ? 'Microphone' : 'Camera'} access ended. Restore site permission and check devices again.`);
+    if (local?.getTracks().includes(track)) {
+      updateJoinReadiness();
+      if(track.kind==='audio')$('level').value=0;
+      status(`${track.kind === 'audio' ? 'Microphone' : 'Camera'} access ended. Restore site permission and check devices again with this invite.`);
+    }
   });
 }
 async function startMeter() {
@@ -135,6 +144,7 @@ async function installDevices(fresh, epoch, kind) {
     const previous = local, senders = mediaSenders;
     const current = () => !left && epoch === deviceEpoch && local === previous && mediaSenders === senders;
     if (!current()) return false;
+    if (!devicesReady(fresh, kind)) throw new Error('Device access ended before installation');
     const replaced = [];
     try {
       for (const track of fresh.getTracks()) {
@@ -143,10 +153,10 @@ async function installDevices(fresh, epoch, kind) {
         if (sender) {
           const old = sender.track;
           await sender.replaceTrack(track); replaced.push({sender, track, old});
-          if (!current()) throw new Error('Device change superseded');
+          if (!current() || !devicesReady(fresh, kind)) throw new Error('Device change superseded or access ended');
         }
       }
-      if (!current()) throw new Error('Device change superseded');
+      if (!current() || !devicesReady(fresh, kind)) throw new Error('Device change superseded or access ended');
       fresh.getTracks().forEach(track => { track.enabled = track.kind === 'audio' ? microphoneEnabled : cameraEnabled; });
       local = kind ? new MediaStream([...previous.getTracks().filter(track => track.kind !== kind), ...fresh.getTracks()]) : fresh;
       watchTracks(fresh); $('preview').srcObject = local;
@@ -182,15 +192,16 @@ async function prepare() {
     fresh = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:{width:{ideal:1280},height:{ideal:720}}});
     installed = await installDevices(fresh, epoch);
     if (!installed || epoch !== deviceEpoch || left) return;
-    controls(true); $('join').disabled = socket?.readyState === WebSocket.OPEN;
+    controls(true);
     await enumerate();
     if (epoch !== deviceEpoch || left) return;
     await startMeter();
     if (epoch === deviceEpoch && !left) status(admitted ? 'Devices restored. Your host connection remains active.' : 'Device check ready. Join the waiting room when you are ready.');
   } catch (error) {
-    if (epoch === deviceEpoch && !left) status(error.name === 'NotAllowedError' ? 'Camera or microphone permission was denied. Allow access in site settings, then check again.' : 'Device check failed. Any previous devices and your invite remain active. Check connections and try again.');
+    if (epoch === deviceEpoch && !left) status(error.name === 'NotAllowedError' ? 'Camera or microphone permission was denied. Allow access in site settings, then check again.' : devicesReady() ? 'Device check failed. Any previous devices and your invite remain active. Check connections and try again.' : 'Device check failed. Restore camera and microphone access, then check again with this invite.');
   } finally {
     if (!installed) fresh?.getTracks().forEach(track => track.stop());
+    updateJoinReadiness();
     if (epoch === deviceEpoch || left) $('prepare').disabled = left;
   }
 }
@@ -202,11 +213,13 @@ async function switchDevice(kind, id) {
     fresh = await navigator.mediaDevices.getUserMedia(kind==='video' ? {video:{deviceId:{exact:id}},audio:false} : {audio:{deviceId:{exact:id},echoCancellation:true},video:false});
     installed = await installDevices(fresh, epoch, kind);
     if (!installed || epoch !== deviceEpoch || left) return;
+    updateJoinReadiness();
     if (kind==='audio') await startMeter(); await enumerate();
   } catch {
-    if (epoch === deviceEpoch && !left) status('Device change failed. Your previous device and invite remain active.');
+    if (epoch === deviceEpoch && !left) status(devicesReady() ? 'Device change failed. Your previous device and invite remain active.' : 'Device change failed. Restore the missing device and check again with this invite.');
   } finally {
     if (!installed) fresh?.getTracks().forEach(track => track.stop());
+    updateJoinReadiness();
     if (epoch === deviceEpoch && !left) $('prepare').disabled = false;
   }
 }
@@ -243,6 +256,10 @@ async function acceptSignal(data, epoch) {
     if (!payload || !/^[0-9a-f-]{36}$/.test(payload.negotiation ?? '') || payload.description?.type!=='offer') return;
     const identities=payload.media, mids=['audio','camera','screen'].map(kind=>identities?.[kind]);
     if(mids.some(mid=>typeof mid!=='string' || !/^[0-9A-Za-z_-]{1,16}$/.test(mid)) || new Set(mids).size!==3)throw new Error('The host must offer separate camera and screen sources.');
+    // An ended permission/device track is not a prepared source. Preserve the
+    // existing peer/invite until deliberate recovery instead of answering with
+    // an already-dead capture or closing a healthy remaining source.
+    if (!devicesReady()) { updateJoinReadiness(); throw new Error('Restore camera and microphone access and check devices again, then reconnect with this invite.'); }
     const negotiation = payload.negotiation;
     activeNegotiation = negotiation; clearTimeout(relayTimer); stopShare();clearPrivateMessages();publicChat.reset(negotiation);
     control?.close();control=undefined;mediaSenders={};screenApproved=false;updateShareControls();
@@ -312,15 +329,17 @@ async function acceptSignal(data, epoch) {
     // Otherwise a slow initial replacement can reinstall a stopped old track.
     const attach = deviceCommit.then(async () => {
       if (!current()) return;
+      if (!devicesReady()) { next.close(); throw new Error('Device access ended. Check camera and microphone again before reconnecting with this invite.'); }
       for(const [kind,trackKind]of [['audio','audio'],['camera','video'],['screen','video']]) {
         const transceiver=next.getTransceivers().find(value=>value.mid===identities[kind]);
         if(!transceiver || transceiver.receiver.track.kind!==trackKind){next.close();throw new Error('Host media identities do not match the offered tracks.');}
         mediaSenders[kind]=transceiver.sender;transceiver.direction=kind==='screen'?'sendonly':'sendrecv';
         if(kind!=='screen') {
-          const track=local?.getTracks().find(value=>value.kind===trackKind);
-          if(!track){next.close();throw new Error('Check camera and microphone before joining.');}
+          const track=local?.getTracks().find(value=>value.kind===trackKind && value.readyState==='live');
+          if(!track || track.readyState!=='live'){next.close();throw new Error('Check camera and microphone before joining.');}
           transceiver.sender.setStreams(local);await transceiver.sender.replaceTrack(track);
           if(!current())return;
+          if(!devicesReady()){next.close();throw new Error('Device access ended. Check camera and microphone again before reconnecting with this invite.');}
         }
       }
     });
@@ -343,7 +362,8 @@ async function acceptSignal(data, epoch) {
   }
 }
 function join() {
-  if (!local || left) return;
+  if (left || !valid) return;
+  if (!devicesReady()) { updateJoinReadiness(); status('Restore camera and microphone access and check devices again before joining with this invite.'); return; }
   const epoch = ++joinEpoch; signalQueue={pending:0}; signalChain=Promise.resolve(); resetPeer(); socket?.close(); name=$('name').value.trim()||'Guest';
   socket = new WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/v1/rooms/${room}/socket`,['stream-interview-v1',`cap.${secret}`]);
   socket.onopen=()=>{if(epoch!==joinEpoch)return;send({type:'hello',name});status('Waiting for the host to admit you.');$('join').disabled=true;$('rejoin').disabled=false;$('leave').disabled=false;};
@@ -363,7 +383,7 @@ function join() {
       signalChain=signalChain.then(()=>acceptSignal(data,epoch)).catch(error=>{if(epoch===joinEpoch)status(error.message);}).finally(()=>{queue.pending--;});
     }
   };
-  socket.onclose=event=>{if(epoch!==joinEpoch)return;if(event.code===4003){leave('This invite was revoked. Open a new invite from the host.');return;}resetPeer();status('Disconnected. Reconnect with this invite while it remains valid.');$('join').disabled=false;};
+  socket.onclose=event=>{if(epoch!==joinEpoch)return;if(event.code===4003){leave('This invite was revoked. Open a new invite from the host.');return;}resetPeer();status(devicesReady() ? 'Disconnected. Reconnect with this invite while it remains valid.' : 'Disconnected. Restore camera and microphone access and check devices again with this invite.');updateJoinReadiness();};
   socket.onerror=()=>{if(epoch===joinEpoch)status('Connection failed. Check your network and invite.');};
 }
 async function leave(message='You left. Camera and microphone are stopped. Open the invite again to return.') {

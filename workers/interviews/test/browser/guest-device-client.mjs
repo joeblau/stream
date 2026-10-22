@@ -7,7 +7,7 @@ import {test} from 'node:test';
 import {GuestPublicChatView} from '../../public/public-chat.js';
 
 
-const source = await readFile(new URL('../../public/guest.js', import.meta.url), 'utf8');
+const source = await readFile(process.env.GUEST_DEVICE_CLIENT_SOURCE ?? new URL('../../public/guest.js', import.meta.url), 'utf8');
 // vm.Script cannot parse module imports. Inject the unchanged actual module
 // export, retaining its production reset/lifecycle behavior in device cases.
 const publicChatImport = "import {GuestPublicChatView} from './public-chat.js';";
@@ -20,6 +20,7 @@ function fixture() {
   class Track {
     constructor(kind) {this.kind=kind; this.enabled=true; this.readyState='live'; this.listeners={};}
     stop() {this.readyState='ended';}
+    endExternally() {this.readyState='ended';this.listeners.ended?.();}
     getSettings() {return {deviceId:`fixture-${this.kind}`};}
     addEventListener(type, callback) {this.listeners[type]=callback;}
   }
@@ -51,7 +52,7 @@ function fixture() {
     setTimeout:(callback,ms)=>{const timer=setTimeout(callback,ms);timer.unref();return timer;}, clearTimeout,
     setInterval:(callback,ms)=>{const timer=setInterval(callback,ms);timer.unref();return timer;}, clearInterval, window:{addEventListener(){}}, WebSocket:{OPEN:1}};
   vm.createContext(sandbox);
-  vm.runInContext(executableSource+`;globalThis.guest={prepare,switchDevice,leave,resetPeer,acceptSignal,
+  vm.runInContext(executableSource+`;globalThis.guest={prepare,switchDevice,join,leave,resetPeer,acceptSignal,
     setAdmission:()=>{admitted=true;generation="guest-generation";host="host-id";hostGeneration="host-generation";},
     setPeer:value=>{pc=value;},
     snapshot:()=>({local,senders:mediaSenders,left,secret}),setSenders:value=>{mediaSenders=value;},
@@ -186,4 +187,75 @@ test('initial negotiation cannot reinstall stopped devices after a concurrent de
   assert.equal(peer.transceivers[1].sender.track,fresh.getVideoTracks()[0]);
   assert(old.getTracks().every(track=>track.readyState==='ended'));
   await f.leave();
+});
+
+
+test('permission loss blocks new Join while preserving the healthy device and invite',async()=>{
+  const f=fixture(),old=await f.prepareDevices(),audio=old.getAudioTracks()[0],camera=old.getVideoTracks()[0];
+  camera.endExternally();
+  assert.equal(f.element('join').disabled,true,'An ended camera must invalidate prepared-device readiness');
+  assert.doesNotThrow(()=>f.join(),'Join with ended devices must stop before creating a signaling socket');
+  assert.equal(audio.readyState,'live');assert.equal(f.snapshot().local,old);
+  assert.equal(f.snapshot().secret,'a'.repeat(64));
+  assert.match(f.element('status').textContent,/check devices again.*invite/);
+});
+
+test('permission recovery by one device switch preserves the healthy muted microphone and same invite',async()=>{
+  const f=fixture(),old=await f.prepareDevices(),audio=old.getAudioTracks()[0];
+  f.element('mute').onclick();old.getVideoTracks()[0].endExternally();
+  assert.equal(f.element('join').disabled,true);
+  const pending=f.switchDevice('video','restored-camera'),fresh=f.stream('video');
+  f.captures.at(-1).resolve(fresh);await pending;
+  assert.equal(f.element('join').disabled,false,'Fresh live devices restore Join without a new invite');
+  assert.equal(f.snapshot().local.getAudioTracks()[0],audio);assert.equal(audio.enabled,false);
+  assert.equal(audio.readyState,'live');assert.equal(f.snapshot().secret,'a'.repeat(64));
+  assert.equal(fresh.getVideoTracks()[0].readyState,'live');
+});
+
+test('an offer cannot attach ended prepared devices or retire an existing healthy peer',async()=>{
+  const f=fixture(),old=await f.prepareDevices(),existing={closed:false,close(){this.closed=true;}};
+  f.setAdmission();f.setPeer(existing);old.getVideoTracks()[0].endExternally();
+  let constructed=0;
+  f.sandbox.RTCPeerConnection=class{constructor(){constructed++;throw new Error('Must not create a peer for ended capture');}};
+  f.sandbox.fetch=async()=>{throw new Error('Must not request relay credentials for ended capture');};
+  await assert.rejects(f.acceptSignal({targetGeneration:'guest-generation',from:'host-id',generation:'host-generation',kind:'offer',
+    payload:JSON.stringify({negotiation:'00000000-0000-4000-8000-000000000001',description:{type:'offer',sdp:'fixture'},media:{audio:'0',camera:'1',screen:'2'}})},0),/Restore camera and microphone/);
+  assert.equal(constructed,0);assert.equal(existing.closed,false);
+  assert.equal(old.getAudioTracks()[0].readyState,'live');assert.equal(f.snapshot().secret,'a'.repeat(64));
+});
+
+test('device permission ending during held replacement rolls back before publishing the new capture',async()=>{
+  const f=fixture(),old=await f.prepareDevices(),wait=deferred(),audio=f.sender(old.getAudioTracks()[0]);
+  audio.replaceTrack=async track=>{audio.track=track;if(track!==old.getAudioTracks()[0])await wait.promise;};
+  f.setSenders({audio});
+  const pending=f.prepare(),fresh=f.stream('audio','video');f.captures.at(-1).resolve(fresh);await settle();
+  fresh.getAudioTracks()[0].endExternally();wait.resolve();await pending;
+  assert.equal(f.snapshot().local,old,'Ended permission result must not become the ready capture');
+  assert.equal(audio.track,old.getAudioTracks()[0]);assert(old.getTracks().every(track=>track.readyState==='live'));
+  assert(fresh.getTracks().every(track=>track.readyState==='ended'));
+});
+
+test('an already-ended permission result is never presented as prepared or joinable',async()=>{
+  const f=fixture(),pending=f.prepare(),fresh=f.stream('audio','video');
+  fresh.getVideoTracks()[0].endExternally();f.captures.at(-1).resolve(fresh);await pending;
+  assert.equal(f.snapshot().local,undefined);assert.equal(f.element('join').disabled,true);
+  assert(fresh.getTracks().every(track=>track.readyState==='ended'));
+  assert.match(f.element('status').textContent,/Restore camera and microphone/);
+});
+
+test('signaling disconnect cannot re-enable Join or Reconnect with an ended microphone',async()=>{
+  const f=fixture(),old=await f.prepareDevices(),sockets=[];
+  f.sandbox.location.protocol='https:';f.sandbox.location.host='owned.invalid';
+  f.sandbox.WebSocket=class {
+    static OPEN=1;
+    constructor(){this.readyState=0;sockets.push(this);}
+    send(){}
+    close(){this.readyState=3;}
+  };
+  f.join();const socket=sockets[0];socket.readyState=1;socket.onopen();
+  old.getAudioTracks()[0].endExternally();socket.readyState=3;socket.onclose({code:1006});
+  assert.equal(f.element('join').disabled,true,'Socket closure cannot turn an ended capture into a prepared one');
+  f.element('rejoin').onclick();assert.equal(sockets.length,1,'Reconnect must check the same live-device readiness');
+  assert.equal(old.getVideoTracks()[0].readyState,'live');assert.equal(f.snapshot().secret,'a'.repeat(64));
+  assert.match(f.element('status').textContent,/check devices again.*invite/);
 });
