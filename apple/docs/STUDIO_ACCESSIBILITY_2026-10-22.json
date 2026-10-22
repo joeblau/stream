@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "issue": 90,
+  "fullyQualified": false,
+  "closureDecision": "Keep open",
+  "sourceCommit": "8d991c25ed3085042d6812990b7542b495280e4a",
+  "sourceBase": "40d0737",
+  "dateUTC": "2026-10-22",
+  "host": {
+    "model": "Mac15,8",
+    "architecture": "arm64",
+    "macOS": "27.2",
+    "build": "26B118",
+    "sessionLocked": true,
+    "existingAXTrust": true
+  },
+  "nativeRun": {
+    "mode": "--accessibility-native-controls",
+    "exitCode": 0,
+    "wholeNativeSourceBuild": "PASS",
+    "log": "/tmp/stream-wave2-accessibility-software-native-proof-20261022.log",
+    "sha256": "578fac96adcecea18c08dcbc57650a56025f139bafb1b4afff29c0621c817a1b",
+    "derivedData": "/tmp/stream-wave2-accessibility-20261022/apple/build/studio-workspace-validation/derived",
+    "observations": [
+      "SCOPE: actual mounted production MainWindow AppKit descendants, public native control actions, process-local NSEvents and rendered production styles. SwiftUI virtual semantic label/action/order walk remains UNQUALIFIED on this locked host.",
+      "PASS: actual mounted scene-search field \u2192 process-local Shift-Command-P \u2192 production command sheet \u2192 Escape preserves field editor/owner; actual Tab reaches a live native target; native settings dismissal and attached AppKit sheet notifications restore search",
+      "UNQUALIFIED: Compact Layout is a SwiftUI virtual button without a native NSButton descendant on this host. Rendering checks below set isolated fixture layout preferences; they do not qualify its action/focus fallback.",
+      "PASS: actual 1024\u00d7640 root receives20pt/contrast/reduced-motion and its native search font is 18.461538461538463pt",
+      "UNQUALIFIED: actual production contrast capture: Native bitmap red reference mismatched before a qualified contrast comparison. No contrast pixel qualification is claimed.",
+      "PASS: actual production caption rendering grows (121.0, 14.0) \u2192 (175.0, 20.0) with13\u219220pt preference",
+      "SCOPE: owned meter runtime explicitly disables legacy Voice Polish, hosted Audio Units and monitoring; real software mixer/rings/PCM/meters retained",
+      "UNQUALIFIED: production fader is a SwiftUI virtual slider without a native NSSlider descendant; its accessibility action and own-focus checks need the virtual semantic tree.",
+      "PASS: real bounded PCM peak 0.79999995 drives production mixer polling while native scene-search focus remains stable; this does not qualify virtual fader focus",
+      "PASS:24actual accepted incoming chat queue updates retain native chat-search field editor owner",
+      "PASS: scoped native checks listed above completed; rendering qualifications are reported separately. UNQUALIFIED: full SwiftUI virtual accessibility labels/actions/order and external AX IPC; no permissions, unlock, global input or VoiceOver changes."
+    ]
+  },
+  "measured": {
+    "searchFontPoints": {
+      "regularPreference": 13,
+      "largePreference": 20,
+      "largeCallout": 18.461538461538463,
+      "nominalRegularCallout": 12,
+      "assertedGrowth": "actual large native font exceeds the actual regular native font by more than40%; exact regular font was not printed"
+    },
+    "captionFittingPoints": {
+      "regular": [
+        121,
+        14
+      ],
+      "large": [
+        175,
+        20
+      ]
+    },
+    "smallContentPoints": [
+      1024,
+      640
+    ],
+    "acceptedChatUpdates": 24,
+    "softwarePCMPreFaderPeak": 0.79999995
+  },
+  "softwareOnlyMeterScope": "Actual AudioMixEngine rings, generated original PCM and production MixerPanelView polling. Owned controller settings explicitly disable legacy Voice Polish, channel Audio Unit chains and monitoring; explicit channel registration has insert:nil. No DSP qualification.",
+  "implemented": [
+    "App-owned contrast surfaces, borders and secondary text supplement native accessible appearance, without media filtering.",
+    "Relative semantic text styles honor machine-local text size in main panels, settings and command palette; mixer strips scale with text.",
+    "Weak owned-window native focus bookmarks preserve field-editor owners across settings and attached native/controller/permission sheets; panel toggles preserve surviving controls or request canvas fallback.",
+    "Named scene/layer tables, scene browser modes, clear-search and channel-specific effect actions supplement existing VoiceOver labels/actions."
+  ],
+  "remainingOriginalAcceptanceVerification": [
+    "Current production SwiftUI virtual labels/actions/navigation order, layer/table actions and slider semantics need an available semantic tree; external AX exposes no owned window under the locked session and direct public selectors expose native chrome/controls only.",
+    "The virtual fader own-focus and panel-toggle/Compact Layout accessibility actions remain unqualified. Real native scene-search focus during meter updates is a narrower passed observation.",
+    "Visual contrast comparison remains unqualified: the normal-mode native bitmap red reference failed before the contrast comparison. No replacement renderer or swatch is counted as contrast proof.",
+    "Small-display native root and preference/font geometry passed; full primary-control semantic-frame bounds at each setting remain pending with the semantic tree."
+  ],
+  "complementaryProjectEvidence": {
+    "commit": "67aea55",
+    "log": "/tmp/stream-wave2-projects-native-content-20261022.log",
+    "scope": "Separate signed-sandbox content proof: copied-video decode after originals removed, copied/repaired WAV PCM through AVAudioFile, missing linked access/same-ID repair, portable content/remap/redaction. Does not qualify chooser keyboard selection or full AVAssetReader soundpad path."
+  },
+  "preservedLimitations": {
+    "externalAXLog": "/tmp/stream-wave2-accessibility-owned-20261022.log",
+    "externalAXExit": 77,
+    "nativeSemanticWalkLog": "/tmp/stream-wave2-accessibility-owned-actions-20261022.log",
+    "nativeSemanticElements": 10,
+    "minimalOwnedSwiftUIProbeLog": "/tmp/stream-owned-ax-probe-legacy.log"
+  },
+  "environmentChanges": "No TCC grants, unlock, system VoiceOver/Full Keyboard Access/preference changes, global input, capture permissions, provider writes or DSP/system resets. Temporary fixture settings and generated media only."
+}
