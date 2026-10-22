@@ -64,7 +64,7 @@ The development package is installable and passes the official manifest validato
 
 For signing, build first, apply the release's Developer ID signature to the universal helper, then use `npx streamdeck validate com.joeblau.stream-studio.sdPlugin` and `npx streamdeck pack com.joeblau.stream-studio.sdPlugin --output dist --force`. Exported profiles carry stable bindings only; importing into another project requires explicit rebinding.
 
-Remaining issue criteria: audio/media controls (#149) and exported profiles plus package/device release qualification (#152).
+Remaining issue criteria: exported sample profiles and the remaining package/device release qualification in #152.
 
 Scene and destination/event transport behavior, explicit multi-actions, native ending confirmation, and receipt meanings are described in [Transport actions](docs/transport-actions.md).
 ## Guest, comment, profile and audience controls (D07)

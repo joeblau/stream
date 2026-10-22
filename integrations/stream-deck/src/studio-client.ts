@@ -23,6 +23,8 @@ export type Snapshot = {
   stagedSceneID?: string; programSceneID?: string; pendingStagedEdits: boolean;
   layerVisibility: Record<string, boolean>;
   values?: Record<string, number>; mutes?: Record<string, boolean>;
+  loops?: Record<string, boolean>; effectsBypassed?: Record<string, boolean>;
+  pdfPages?: Record<string, { currentPage: number; pageCount: number }>;
   playback?: Record<string, string>; programLayerVisibility?: Record<string, boolean>; groupVisibility?: Record<string, boolean>;
   overlayVisibility?: Record<string, boolean>; directLiveEditing?: boolean;
   chat?: { queuedCount: number; selectedID?: string; featuredID?: string; ready: boolean; stagedVisible: boolean; programVisible: boolean };
@@ -77,12 +79,16 @@ function validResponse(value: unknown): value is Response {
     if ([state.programSceneID, state.stagedSceneID].some(id => id !== undefined && typeof id !== "string")) return false;
     if (state.values !== undefined && (!object(state.values) || !Object.values(state.values).every(value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1))) return false;
     if (state.mutes !== undefined && (!object(state.mutes) || !Object.values(state.mutes).every(value => typeof value === "boolean"))) return false;
-    for (const key of ["programLayerVisibility", "groupVisibility", "overlayVisibility"]) {
+    for (const key of ["programLayerVisibility", "groupVisibility", "overlayVisibility", "loops", "effectsBypassed"]) {
       if (state[key] !== undefined && (!object(state[key]) || !Object.values(state[key]).every(value => typeof value === "boolean"))) return false;
     }
     if (state.visuals !== undefined && (!object(state.visuals) || !Object.values(state.visuals).every(value =>
       object(value) && [value.previewVisible, value.programVisible, value.bypassed, value.programBypassed].every(flag => flag === undefined || typeof flag === "boolean")
       && [value.sourceID, value.programSourceID].every(id => id === undefined || (typeof id === "string" && UUID.test(id)))))) return false;
+    if (state.pdfPages !== undefined && (!object(state.pdfPages) || !Object.values(state.pdfPages).every(page =>
+      object(page) && Number.isSafeInteger(page.currentPage) && Number.isSafeInteger(page.pageCount)
+      && (page.currentPage as number) >= 0 && (page.pageCount as number) >= 0
+      && ((page.pageCount as number) === 0 ? page.currentPage === 0 : (page.currentPage as number) < (page.pageCount as number))))) return false;
     if (state.playback !== undefined && (!object(state.playback) || !Object.values(state.playback).every(value => typeof value === "string"))) return false;
     if (state.directLiveEditing !== undefined && typeof state.directLiveEditing !== "boolean") return false;
     if (state.recordingCountdown !== undefined && (!Number.isSafeInteger(state.recordingCountdown) || (state.recordingCountdown as number) < 0 || (state.recordingCountdown as number) > 60)) return false;

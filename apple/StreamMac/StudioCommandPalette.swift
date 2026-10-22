@@ -70,10 +70,35 @@ extension StudioCommandDispatcher {
         add("audio.microphone.mute.off", "Unmute Microphone", "Audio", .setChannelMuted(mic, false))
         func addAudioUnitActions(prefix: String, channel: AudioChannelID, name: String) {
             let current = state.fxChain(forLabel: channel.label)
+            let sections: [(String, String, WritableKeyPath<ChannelFXChain, Bool>)] = [
+                ("highPass", "High-Pass", \.highPass.isEnabled), ("noiseGate", "Noise Gate", \.noiseGate.isEnabled),
+                ("equalizer", "Equalizer", \.equalizer.isEnabled), ("compressor", "Compressor", \.compressor.isEnabled),
+                ("limiter", "Limiter", \.limiter.isEnabled)]
+            for (id, title, key) in sections {
+                var toggled = current; toggled[keyPath: key].toggle()
+                var bypassed = current; bypassed[keyPath: key] = false
+                var enabled = current; enabled[keyPath: key] = true
+                let base = "\(prefix).effects.\(id).bypass"
+                add(base, "\(current[keyPath: key] ? "Bypass" : "Enable") \(title) — \(name)", "Audio Effects", .setChannelFXChain(channel, toggled))
+                add(base + ".on", "Bypass \(title) — \(name)", "Audio Effects", .setChannelFXChain(channel, bypassed))
+                add(base + ".off", "Enable \(title) — \(name)", "Audio Effects", .setChannelFXChain(channel, enabled))
+            }
             for (index, slot) in current.audioUnits.enumerated() {
                 var chain = current; chain.audioUnits[index].isEnabled.toggle()
-                add("\(prefix).au.\(slot.id.uuidString).bypass", "\(slot.isEnabled ? "Bypass" : "Enable") \(slot.component.displayName) — \(name)", "Audio Effects", .setChannelFXChain(channel, chain))
+                let base = "\(prefix).au.\(slot.id.uuidString).bypass"
+                add(base, "\(slot.isEnabled ? "Bypass" : "Enable") \(slot.component.displayName) — \(name)", "Audio Effects", .setChannelFXChain(channel, chain))
+                chain.audioUnits[index].isEnabled = false
+                add(base + ".on", "Bypass \(slot.component.displayName) — \(name)", "Audio Effects", .setChannelFXChain(channel, chain))
+                chain.audioUnits[index].isEnabled = true
+                add(base + ".off", "Enable \(slot.component.displayName) — \(name)", "Audio Effects", .setChannelFXChain(channel, chain))
             }
+        }
+        func addSoundAudio(prefix: String, id: SourceDefinitionID, name: String) {
+            let channel = AudioChannelID.media(id)
+            add(prefix + ".mute", "Toggle Mute \(name)", "Audio", .setChannelMuted(channel, state.mixer.channelMutes[channel.label] != true))
+            add(prefix + ".mute.on", "Mute \(name)", "Audio", .setChannelMuted(channel, true))
+            add(prefix + ".mute.off", "Unmute \(name)", "Audio", .setChannelMuted(channel, false))
+            addAudioUnitActions(prefix: prefix, channel: channel, name: name)
         }
         addAudioUnitActions(prefix: "audio.microphone", channel: mic, name: "Microphone")
         for overlay in controllerOverlays() {
@@ -173,6 +198,13 @@ extension StudioCommandDispatcher {
             let id = pad.id.rawValue.uuidString
             add("sound.\(id).trigger", "Trigger \(pad.name)", "Sound", .triggerSoundPad(pad.id))
             add("sound.\(id).stop", "Stop \(pad.name)", "Sound", .stopSoundPad(pad.id))
+            add("sound.\(id).play", "Play \(pad.name)", "Sound", .playSoundPad(pad.id))
+            add("sound.\(id).pause", "Pause \(pad.name)", "Sound", .pauseSoundPad(pad.id))
+            add("sound.\(id).restart", "Restart \(pad.name)", "Sound", .restartSoundPad(pad.id))
+            add("sound.\(id).loop", "Toggle Loop \(pad.name)", "Sound", .setSoundPadLoop(pad.id, !pad.loops))
+            add("sound.\(id).loop.on", "Loop \(pad.name)", "Sound", .setSoundPadLoop(pad.id, true))
+            add("sound.\(id).loop.off", "Disable Loop \(pad.name)", "Sound", .setSoundPadLoop(pad.id, false))
+            addSoundAudio(prefix: "sound.\(id)", id: pad.id, name: pad.name)
         }
         for playlist in soundboardStore.playlists {
             let id = playlist.id.rawValue.uuidString
@@ -181,6 +213,7 @@ extension StudioCommandDispatcher {
             add("playlist.\(id).stop", "Stop \(playlist.name)", "Sound", .playlistStop(playlist.id))
             add("playlist.\(id).next", "Next Track — \(playlist.name)", "Sound", .playlistNext(playlist.id))
             add("playlist.\(id).previous", "Previous Track — \(playlist.name)", "Sound", .playlistPrevious(playlist.id))
+            addSoundAudio(prefix: "playlist.\(id)", id: playlist.id, name: playlist.name)
         }
         if includeMacros {
         for macro in macros.document.macros {

@@ -98,6 +98,9 @@ struct StudioPaletteAction {
     func controllerValueSnapshot() -> [String: Double] { valueTargetExists ? ["audio.microphone.gain": gain] : [:] }
     func controllerMuteSnapshot() -> [String: Bool] { ["audio.microphone.gain": false] }
     func controllerPlaybackSnapshot() -> [String: String] { [:] }
+    func controllerLoopSnapshot() -> [String: Bool] { [:] }
+    func controllerEffectsBypassedSnapshot() -> [String: Bool] { [:] }
+    func controllerPDFPagesSnapshot() -> [String: StudioControlPDFPageState] { [:] }
     func controllerProgramVisibility() -> [String: Bool] { [:] }
     func controllerGroupVisibility() -> [String: Bool] { [:] }
     func controllerOverlays() -> [HarnessLayer] { [] }

@@ -163,6 +163,35 @@ final class SoundboardController: ObservableObject {
         }
     }
 
+    /// Play is idempotent while playing and resumes the existing paused
+    /// instances. Trigger retains its separate restart/overlap semantics.
+    func playPad(_ pad: SoundPad) {
+        let existing = padEngines[pad.id] ?? []
+        let paused = existing.filter { $0.phase == .paused }
+        if !paused.isEmpty {
+            for entry in paused { entry.engine.play() }
+        } else if !existing.contains(where: { $0.phase == .playing || $0.phase == .loading }) {
+            let primary = existing.first ?? makePadEngine(pad)
+            if existing.isEmpty { padEngines[pad.id] = [primary] }
+            primary.box.payload = payload(for: pad)
+            primary.engine.load(); primary.engine.play()
+        }
+    }
+
+    func pausePad(_ pad: SoundPad) {
+        for entry in padEngines[pad.id] ?? [] { entry.engine.pause() }
+    }
+
+    /// Restart always rewinds one retained voice, including overlap pads.
+    func restartPad(_ pad: SoundPad) {
+        let existing = padEngines[pad.id] ?? []
+        for extra in existing.dropFirst() { retire(extra.engine, instanceID: extra.instanceID) }
+        let primary = existing.first ?? makePadEngine(pad)
+        padEngines[pad.id] = [primary]
+        primary.box.payload = payload(for: pad)
+        primary.engine.load(); primary.engine.restart()
+    }
+
     /// Project/runtime retirement closes every decoder and its mixer demand.
     /// Late status callbacks cannot resurrect a removed instance.
     func shutdown() {
@@ -515,6 +544,7 @@ final class SoundboardController: ObservableObject {
 
     private func makeEngine(channelID: SourceDefinitionID, instanceID: UUID,
                             box: SoundPayloadBox) -> MediaSourcePlayback {
+        controller.retainSoundboardAudioChannel(channelID)
         let engine = MediaSourcePlayback(sourceID: channelID) { box.payload }
         let ingest = audioIngest
         engine.onAudioSample = { sample in
@@ -537,6 +567,7 @@ final class SoundboardController: ObservableObject {
     private func retire(_ engine: MediaSourcePlayback, instanceID: UUID) {
         engine.pause()
         engineList.remove(instanceID)
+        controller.releaseSoundboardAudioChannel(engine.sourceID)
         playingEngines.remove(instanceID)
         syncPump()
     }
@@ -562,8 +593,7 @@ final class SoundboardController: ObservableObject {
     }
 
     private func pushGain(_ id: AudioChannelID, volume: Double) {
-        controller.applyMixerChannelGain(id, volume: Float(max(0, min(volume, 2))),
-                                         isMuted: false)
+        controller.applySoundboardChannelGain(id, volume: Float(max(0, min(volume, 2))))
     }
 
     private func payload(for pad: SoundPad) -> MediaSourcePayload {

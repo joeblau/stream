@@ -930,11 +930,52 @@ final class StreamController: ObservableObject {
     /// registered on the audio engine, so settings applies can diff and
     /// sync them without tearing down channels that keep running.
     private var additionalMicChannelIDs: Set<AudioChannelID> = []
-    /// A08 (issue #120): each mic channel's FX insert box, keyed by channel
+    /// A08 (issue #120): each mic/media channel's FX insert box, keyed by channel
     /// ID. Boxes outlive settings applies so a chain edit lands as a
     /// parameter update on the RUNNING processor (no capture restart);
     /// they rebuild only when the engine (re)starts or the channel leaves.
     private var channelFXBoxes: [AudioChannelID: ChannelFXInsertBox] = [:]
+    private var soundboardAudioReferences: [AudioChannelID: Int] = [:]
+    private var mediaAudioChannelIDs: Set<AudioChannelID> = []
+
+    func retainSoundboardAudioChannel(_ id: SourceDefinitionID) {
+        let channel = AudioChannelID.media(id)
+        soundboardAudioReferences[channel, default: 0] += 1
+        if isPipelineRunning { reconcileSourceDemand() }
+    }
+    func releaseSoundboardAudioChannel(_ id: SourceDefinitionID) {
+        let channel = AudioChannelID.media(id)
+        if let count = soundboardAudioReferences[channel], count > 1 { soundboardAudioReferences[channel] = count - 1 }
+        else { soundboardAudioReferences[channel] = nil }
+        if isPipelineRunning { reconcileSourceDemand() }
+        else if soundboardAudioReferences[channel] == nil {
+            channelFXBoxes[channel] = nil; mediaAudioChannelIDs.remove(channel)
+            Task { await audioEngine.removeChannel(channel) }
+        }
+    }
+    func applySoundboardChannelGain(_ id: AudioChannelID, volume: Float) {
+        applyMixerChannelGain(id, volume: volume,
+            isMuted: mixerGains[id]?.isMuted ?? settings.mixer.channelMutes[id.label] ?? false)
+    }
+
+    /// Media and soundboard inserts use the same pre-fader mixer seam as the
+    /// microphone. Repeated demand/metadata refreshes never reset a live ring.
+    private func syncMediaAudioChannels(_ wanted: Set<AudioChannelID>) {
+        let added = wanted.subtracting(mediaAudioChannelIDs)
+        let removed = mediaAudioChannelIDs.subtracting(wanted)
+        guard !added.isEmpty || !removed.isEmpty else { return }
+        mediaAudioChannelIDs = wanted
+        for id in removed { channelFXBoxes[id] = nil }
+        for id in added { channelFXBoxes[id] = ChannelFXInsertBox(chain: settings.channelFX[id.label] ?? .preset(.off)) }
+        let boxes = channelFXBoxes, audioEngine = self.audioEngine
+        Task {
+            for id in removed { await audioEngine.removeChannel(id) }
+            for id in added {
+                guard let box = boxes[id] else { continue }
+                await audioEngine.addChannel(id, resetInsert: { box.reset() }, insert: { box.process($0) })
+            }
+        }
+    }
 
     /// Live mixer channel gain (ramped). The dispatcher owns mixer state;
     /// this is its write path for non-scene-bound channels (the mic today,
@@ -943,6 +984,13 @@ final class StreamController: ObservableObject {
     /// and intentionally have no write path here.
     func applyMixerChannelGain(_ id: AudioChannelID, volume: Float, isMuted: Bool) {
         mixerGains[id] = (volume, isMuted)
+        // Registry media also carries Program scene ownership. Its fader
+        // multiplies that binding; touching a staged source cannot open it.
+        if case .media(let sourceID) = id, soundboardAudioReferences[id] == nil,
+           sceneStore.source(withID: sourceID)?.payload.isMedia == true {
+            applyProgramAudioBindings()
+            return
+        }
         Task { await audioEngine.setChannelGain(id, volume: volume, isMuted: isMuted) }
     }
 
@@ -1955,6 +2003,7 @@ final class StreamController: ObservableObject {
         // A08: the engine (re)start wiped every channel, so all insert boxes
         // are rebuilt fresh from settings.
         channelFXBoxes = [micID: ChannelFXInsertBox(chain: settings.fxChain(forChannelLabel: micID.label))]
+        mediaAudioChannelIDs = []
         let micBox = channelFXBoxes[micID]!
         Task {
             await audioEngine.run()
@@ -2039,7 +2088,8 @@ final class StreamController: ObservableObject {
     /// `channelFX` or the legacy `voicePolishEnabled` toggle changed.
     private func syncChannelFXChains() {
         for (id, box) in channelFXBoxes {
-            box.update(settings.fxChain(forChannelLabel: id.label))
+            if case .media = id { box.update(settings.channelFX[id.label] ?? .preset(.off)) }
+            else { box.update(settings.fxChain(forChannelLabel: id.label)) }
         }
     }
 
@@ -2206,6 +2256,10 @@ final class StreamController: ObservableObject {
             browserSession.prepareMixerForAudio = { [weak self] in await self?.prepareBrowserAudioMixer() }
         }
         capturePool.reconcile(demand: demand, settings: settings, programAudioKeys: programAudioKeys)
+        let mediaChannels = Set(demand.compactMap { key -> AudioChannelID? in
+            if case .media(let id) = key { return .media(id) }; return nil
+        }).union(soundboardAudioReferences.keys)
+        syncMediaAudioChannels(mediaChannels)
         configureResilientFrames(demand: demand)
         // A01: the audio engine keeps exactly the channels its captures can
         // feed — the mic plus one per demanded capture key. Stopped captures
@@ -2227,6 +2281,7 @@ final class StreamController: ObservableObject {
             // mic's capture lifetime is settings-driven, not scene demand.
             .union(additionalMicChannelIDs)
             .union(capturePool.browserAudioChannels)
+            .union(mediaAudioChannelIDs)
         let audioEngine = self.audioEngine
         Task { await audioEngine.pruneChannels(keeping: keep) }
     }
@@ -2412,12 +2467,14 @@ final class StreamController: ObservableObject {
             guard payload.isMedia else { continue }
             mediaBindings[sourceID] = (Float(layer.audio.volume), layer.audio.isMuted)
         }
+        let mixer = mixerGains
         Task {
             for id in demandedMedia {
                 let binding = mediaBindings[id] ?? (volume: 0, isMuted: false)
+                let gain = mixer[.media(id)] ?? (volume: 1, isMuted: false)
                 await audioEngine.setChannelGain(.media(id),
-                                                 volume: binding.volume,
-                                                 isMuted: binding.isMuted)
+                                                 volume: binding.volume * gain.volume,
+                                                 isMuted: binding.isMuted || gain.isMuted)
             }
         }
     }

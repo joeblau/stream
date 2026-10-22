@@ -93,10 +93,21 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
   const level = snapshot.values?.[binding.commandID];
   if (level !== undefined) badge = `${Math.round(level * 200)}%`;
   const resource = /^(media|sound|playlist)\.[0-9a-f-]+/i.exec(binding.commandID)?.[0];
-  if (resource && !binding.commandID.includes(".mute") && !binding.commandID.endsWith(".gain")) {
+  if (resource && !binding.commandID.includes(".mute") && !binding.commandID.endsWith(".gain")
+      && !binding.commandID.includes(".bypass") && !binding.commandID.includes(".loop")) {
     const phase = snapshot.playback?.[resource];
-    if (phase) { badge = phase.toUpperCase(); color = phase === "playing" ? "#266848" : phase === "failed" ? "#5b3340" : "#233b4a"; }
+    if (phase) { badge = phase.toUpperCase(); color = phase === "playing" ? "#266848" : (phase === "failed" || phase === "error") ? "#5b3340" : "#233b4a"; }
   }
+  const bypassID = binding.commandID.replace(/\.bypass(?:\.(?:on|off))?$/, ".bypass");
+  const bypassed = snapshot.effectsBypassed?.[bypassID];
+  if (bypassed !== undefined) { badge = bypassed ? "BYPASSED" : "ACTIVE"; color = bypassed ? "#5a4828" : "#266848"; }
+  const looping = resource ? snapshot.loops?.[resource] : undefined;
+  if (looping !== undefined && /\.loop(?:\.(?:on|off))?$/.test(binding.commandID)) {
+    badge = looping ? "LOOP ON" : "LOOP OFF"; color = looping ? "#266848" : "#233b4a";
+  }
+  const pdf = /^(pdf\.[0-9a-f-]+)\./i.exec(binding.commandID)?.[1];
+  const page = pdf ? snapshot.pdfPages?.[pdf] : undefined;
+  if (page) badge = page.pageCount ? `${page.currentPage + 1}/${page.pageCount}` : "LOADING";
   if (binding.commandID.startsWith("studio.directLive.") && snapshot.directLiveEditing !== undefined) badge = snapshot.directLiveEditing ? "DIRECT LIVE" : "PVW / PGM";
   if (binding.commandID.startsWith("comments.") && snapshot.chat) {
     badge = snapshot.chat.programVisible ? "SLOT PGM" : snapshot.chat.stagedVisible ? "SLOT PVW" : snapshot.chat.ready ? "READY" : "QUEUE EMPTY";

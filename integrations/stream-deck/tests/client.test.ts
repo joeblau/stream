@@ -81,6 +81,31 @@ test("guest feedback follows local routing receipts and stale guest removal", ()
   assert.equal(feedback({ commandID: id, projectID: state.projectID }, "Connected", state, commands).badge, "DISCONNECTED");
 });
 
+test("media feedback keeps playback, mute, loop, native/AU bypass and PDF page states independent", () => {
+  const state = snapshot(), id = randomUUID();
+  const base = `sound.${id}`, effect = `${base}.effects.highPass.bypass`, au = `${base}.au.${randomUUID()}.bypass`, pdf = `pdf.${randomUUID()}`;
+  state.playback = { [base]: "playing" }; state.mutes = { [`${base}.gain`]: true };
+  state.loops = { [base]: true }; state.effectsBypassed = { [effect]: true, [au]: false };
+  state.pdfPages = { [pdf]: { currentPage: 2, pageCount: 8 } };
+  const commands = new Map<string, Capability>();
+  const badge = (commandID: string) => {
+    commands.set(commandID, { id: commandID, title: "Media", category: "Audio", available: true });
+    return feedback({ commandID, projectID: state.projectID }, "Connected", state, commands).badge;
+  };
+  assert.equal(badge(`${base}.pause`), "PLAYING");
+  assert.equal(badge(`${base}.mute.off`), "MUTED");
+  assert.equal(badge(`${base}.loop.off`), "LOOP ON");
+  assert.equal(badge(`${effect}.off`), "BYPASSED");
+  assert.equal(badge(au), "ACTIVE");
+  assert.equal(badge(`${pdf}.goto`), "3/8");
+  state.playback[base] = "paused"; assert.equal(badge(`${base}.play`), "PAUSED");
+  state.loops[base] = false; assert.equal(badge(`${base}.loop`), "LOOP OFF");
+  state.effectsBypassed[au] = true; assert.equal(badge(`${au}.on`), "BYPASSED");
+  state.pdfPages[pdf] = { currentPage: 0, pageCount: 0 }; assert.equal(badge(`${pdf}.next`), "LOADING");
+  commands.delete(`${base}.play`);
+  assert.equal(feedback({ commandID: `${base}.play`, projectID: state.projectID }, "Connected", state, commands).unavailable, true);
+});
+
 test("native client authenticates/discovers stable IDs, follows state, and never replays on reconnect", async () => {
   const state = snapshot();
   const id = `scene.${randomUUID()}.select`;
@@ -123,10 +148,15 @@ test("native client authenticates/discovers stable IDs, follows state, and never
     state.stream = "connecting";
     state.interview = { phase: "connected", locked: false, members: [{ id: randomUUID(), name: "Actual wire guest", membership: "onair", media: "ready",
       programAllowed: false, monitorAllowed: true, screenApproved: false, screenSharing: false }] };
+    state.loops = { "sound.stable": true }; state.effectsBypassed = { "sound.stable.effects.highPass.bypass": true };
+    state.pdfPages = { "pdf.stable": { currentPage: 1, pageCount: 3 } };
     ++state.revision;
     for (const peer of peers) peer.write(JSON.stringify({ version: 1, type: "event", sessionID: sessions.get(peer), snapshot: state }) + "\n");
     await waitUntil(() => client.snapshot?.stream === "connecting");
     assert.deepEqual(client.snapshot?.interview, state.interview, "Native routing metadata must survive actual TCP delivery");
+    assert.deepEqual(client.snapshot?.loops, state.loops);
+    assert.deepEqual(client.snapshot?.effectsBypassed, state.effectsBypassed);
+    assert.deepEqual(client.snapshot?.pdfPages, state.pdfPages);
     assert.notEqual(client.snapshot?.stream, "live", "Accepted commands cannot invent acknowledged LIVE");
     dropNextCommand = true;
     await assert.rejects(client.execute(id, state.projectID), /disconnected|retried/i);
@@ -169,6 +199,10 @@ test("malformed and unexpected native responses stop safely without throwing fro
   for (const frame of [null, { version: 1, type: "capabilities", commands: {} }, { version: 1, type: "authenticated", snapshot: {} },
     { version: 1, type: "authenticated", snapshot: { ...snapshot(), recordingCountdown: -1 } },
     { version: 1, type: "authenticated", snapshot: { ...snapshot(), recordingCountdown: 1.5 } },
+    { version: 1, type: "authenticated", snapshot: { ...snapshot(), loops: { sound: "true" } } },
+    { version: 1, type: "authenticated", snapshot: { ...snapshot(), effectsBypassed: { effect: 1 } } },
+    ...[{ currentPage: -1, pageCount: 3 }, { currentPage: 3, pageCount: 3 }, { currentPage: 1, pageCount: 0 }, { currentPage: 0.5, pageCount: 3 }]
+      .map(page => ({ version: 1, type: "authenticated", snapshot: { ...snapshot(), pdfPages: { pdf: page } } })),
     ...malformedInterviews.map(interview => ({ version: 1, type: "authenticated", snapshot: { ...snapshot(), interview } }))]) {
     const peers = new Set<net.Socket>();
     const server = net.createServer(socket => {

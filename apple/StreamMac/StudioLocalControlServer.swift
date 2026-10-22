@@ -95,7 +95,8 @@ import Network
                                     media: member.media.rawValue, slot: route?.slot, programAllowed: route?.programAllowed ?? false,
                                     monitorAllowed: route?.monitorAllowed ?? false, screenApproved: member.screenApproved, screenSharing: member.screenSharing)
                             }),
-                         recordingCountdown: dispatcher.controllerRecordingCountdown(), transport: dispatcher.controllerTransportSnapshot(), visuals: dispatcher.controllerVisualSnapshot(), guestSlots: dispatcher.interactions.guestSlotsSnapshot(),
+                         recordingCountdown: dispatcher.controllerRecordingCountdown(), loops: dispatcher.controllerLoopSnapshot(),
+                         effectsBypassed: dispatcher.controllerEffectsBypassedSnapshot(), pdfPages: dispatcher.controllerPDFPagesSnapshot(), transport: dispatcher.controllerTransportSnapshot(), visuals: dispatcher.controllerVisualSnapshot(), guestSlots: dispatcher.interactions.guestSlotsSnapshot(),
                          audience: dispatcher.interactions.audienceSnapshot(), showProfiles: dispatcher.interactions.showProfilesSnapshot())
         }
         execute = { [weak self, weak dispatcher] id, value, delta, page, text, authority in

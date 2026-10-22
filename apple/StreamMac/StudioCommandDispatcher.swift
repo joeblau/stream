@@ -493,6 +493,10 @@ enum StudioCommand: Equatable, Sendable {
     /// Fire the pad (its trigger policy decides restart vs overlap).
     case triggerSoundPad(SourceDefinitionID)
     case stopSoundPad(SourceDefinitionID)
+    case playSoundPad(SourceDefinitionID)
+    case pauseSoundPad(SourceDefinitionID)
+    case restartSoundPad(SourceDefinitionID)
+    case setSoundPadLoop(SourceDefinitionID, Bool)
     /// The panic button: stop every pad and in-flight scene stinger.
     case stopAllSoundEffects
     case addMusicPlaylist(MusicPlaylist)
@@ -766,6 +770,10 @@ enum StudioCommand: Equatable, Sendable {
         case .removeSoundPad: return "Remove Sound Pad"
         case .triggerSoundPad: return "Trigger Sound Pad"
         case .stopSoundPad: return "Stop Sound Pad"
+        case .playSoundPad: return "Play Sound Pad"
+        case .pauseSoundPad: return "Pause Sound Pad"
+        case .restartSoundPad: return "Restart Sound Pad"
+        case .setSoundPadLoop: return "Set Sound Pad Loop"
         case .stopAllSoundEffects: return "Stop All Sound Effects"
         case .addMusicPlaylist: return "Add Playlist"
         case .updateMusicPlaylist: return "Edit Playlist"
@@ -921,10 +929,10 @@ struct StudioState: Equatable, Sendable {
     var voicePolishEnabled: Bool = true
 
     /// A08: the EFFECTIVE chain a channel runs — its persisted chain when
-    /// present, else the legacy voice-polish mapping (same back-compat rule
-    /// as `StreamSettings.fxChain(forChannelLabel:)`).
+    /// present. Media/sounds default to Off, matching their inserts; the
+    /// microphone retains the legacy voice-polish fallback.
     func fxChain(forLabel label: String) -> ChannelFXChain {
-        channelFX[label] ?? (voicePolishEnabled ? .preset(.voice) : .preset(.off))
+        channelFX[label] ?? (label.hasPrefix("media.") ? .preset(.off) : voicePolishEnabled ? .preset(.voice) : .preset(.off))
     }
     /// A07 (issue #119): headphone-monitoring state for the command
     /// interface — on/off, the selected output (nil = system default),
@@ -1299,6 +1307,14 @@ final class StudioCommandDispatcher: ObservableObject {
             let channel = AudioChannelID.media(source.id)
             gain("media.\(source.id.rawValue.uuidString).gain", "\(source.name) Gain (0–2)", state.mixer.channelVolumes[channel.label] ?? 1) { .setChannelVolume(channel, $0) }
         }
+        for pad in soundboardStore.pads {
+            let channel = AudioChannelID.media(pad.id)
+            gain("sound.\(pad.id.rawValue.uuidString).gain", "\(pad.name) Gain (0–2)", state.mixer.channelVolumes[channel.label] ?? pad.volume) { .setChannelVolume(channel, $0) }
+        }
+        for playlist in soundboardStore.playlists {
+            let channel = AudioChannelID.media(playlist.id)
+            gain("playlist.\(playlist.id.rawValue.uuidString).gain", "\(playlist.name) Gain (0–2)", state.mixer.channelVolumes[channel.label] ?? playlist.volume) { .setChannelVolume(channel, $0) }
+        }
         return result
     }
     func controllerValueSnapshot() -> [String: Double] {
@@ -1312,6 +1328,8 @@ final class StudioCommandDispatcher: ObservableObject {
         for source in sceneStore.sources where source.payload.isMedia {
             result["media.\(source.id.rawValue.uuidString).gain"] = state.mixer.channelMutes[AudioChannelID.media(source.id).label] == true
         }
+        for pad in soundboardStore.pads { result["sound.\(pad.id.rawValue.uuidString).gain"] = state.mixer.channelMutes[AudioChannelID.media(pad.id).label] == true }
+        for playlist in soundboardStore.playlists { result["playlist.\(playlist.id.rawValue.uuidString).gain"] = state.mixer.channelMutes[AudioChannelID.media(playlist.id).label] == true }
         return result
     }
     func controllerPlaybackSnapshot() -> [String: String] {
@@ -1319,8 +1337,35 @@ final class StudioCommandDispatcher: ObservableObject {
         for source in sceneStore.sources where source.payload.isMedia {
             result["media.\(source.id.rawValue.uuidString)"] = controller.capturePool.mediaStatus(for: source.id).phase.rawValue
         }
-        for pad in soundboardStore.pads { result["sound.\(pad.id.rawValue.uuidString)"] = soundboard.padStatuses[pad.id]?.phase.rawValue ?? "idle" }
+        for pad in soundboardStore.pads { result["sound.\(pad.id.rawValue.uuidString)"] = soundboard.playingPadIDs.contains(pad.id) ? "playing" : soundboard.padStatuses[pad.id]?.phase.rawValue ?? "idle" }
         for playlist in soundboardStore.playlists { result["playlist.\(playlist.id.rawValue.uuidString)"] = soundboard.playlistStates[playlist.id]?.phase.rawValue ?? "idle" }
+        return result
+    }
+    func controllerLoopSnapshot() -> [String: Bool] {
+        Dictionary(uniqueKeysWithValues: soundboardStore.pads.map { ("sound.\($0.id.rawValue.uuidString)", $0.loops) })
+    }
+    func controllerEffectsBypassedSnapshot() -> [String: Bool] {
+        var result: [String: Bool] = [:]
+        for action in catalogueActions() where action.id.hasSuffix(".bypass") {
+            guard case .setChannelFXChain(let channel, let next) = action.command else { continue }
+            let current = state.fxChain(forLabel: channel.label)
+            // A toggle has exactly one changed section/slot; its next enabled
+            // flag is the current bypass state, including hosted Audio Units.
+            if current.highPass.isEnabled != next.highPass.isEnabled { result[action.id] = !current.highPass.isEnabled }
+            else if current.noiseGate.isEnabled != next.noiseGate.isEnabled { result[action.id] = !current.noiseGate.isEnabled }
+            else if current.equalizer.isEnabled != next.equalizer.isEnabled { result[action.id] = !current.equalizer.isEnabled }
+            else if current.compressor.isEnabled != next.compressor.isEnabled { result[action.id] = !current.compressor.isEnabled }
+            else if current.limiter.isEnabled != next.limiter.isEnabled { result[action.id] = !current.limiter.isEnabled }
+            else if let slot = current.audioUnits.first(where: { old in next.audioUnits.contains { $0.id == old.id && $0.isEnabled != old.isEnabled } }) { result[action.id] = !slot.isEnabled }
+        }
+        return result
+    }
+    func controllerPDFPagesSnapshot() -> [String: StudioControlPDFPageState] {
+        var result: [String: StudioControlPDFPageState] = [:]
+        for source in sceneStore.sources where source.payload.isPDF {
+            let status = controller.capturePool.pdfStates[source.id] ?? PDFSourceStatus()
+            result["pdf.\(source.id.rawValue.uuidString)"] = .init(currentPage: status.currentPage, pageCount: status.pageCount)
+        }
         return result
     }
     func controllerProgramVisibility() -> [String: Bool] {
@@ -2379,7 +2424,8 @@ final class StudioCommandDispatcher: ObservableObject {
                 ? .invalidValue("A pad name can't be empty.") : nil
         case .removeSoundPad(let id),
              .triggerSoundPad(let id),
-             .stopSoundPad(let id):
+             .stopSoundPad(let id), .playSoundPad(let id), .pauseSoundPad(let id),
+             .restartSoundPad(let id), .setSoundPadLoop(let id, _):
             return soundboardStore.pad(withID: id) != nil
                 ? nil : .invalidTarget("Sound pad \(id) does not exist.")
         case .stopAllSoundEffects:
@@ -2968,6 +3014,10 @@ final class StudioCommandDispatcher: ObservableObject {
                 var mixer = session.activeSettings.mixer
                 mixer.channelVolumes[id.label] = volume
                 session.persistMixer(mixer)
+                if case .media(let sourceID) = id {
+                    if var pad = soundboardStore.pad(withID: sourceID) { pad.volume = volume; soundboardStore.updatePad(pad) }
+                    if var playlist = soundboardStore.playlist(withID: sourceID) { playlist.volume = volume; soundboardStore.updatePlaylist(playlist) }
+                }
             }
         case .setChannelMuted(let id, let muted):
             channelIDsByLabel[id.label] = id
@@ -3094,6 +3144,10 @@ final class StudioCommandDispatcher: ObservableObject {
         case .addSoundPad(let pad):
             soundboardStore.addPad(pad)
         case .updateSoundPad(let pad):
+            if soundboardStore.pad(withID: pad.id)?.volume != pad.volume {
+                var mixer = session.activeSettings.mixer; mixer.channelVolumes[AudioChannelID.media(pad.id).label] = pad.volume
+                session.persistMixer(mixer)
+            }
             soundboardStore.updatePad(pad)
         case .removeSoundPad(let id):
             soundboardStore.removePad(id)
@@ -3105,11 +3159,23 @@ final class StudioCommandDispatcher: ObservableObject {
             if let pad = soundboardStore.pad(withID: id) {
                 soundboard.stopPad(pad)
             }
+        case .playSoundPad(let id):
+            if let pad = soundboardStore.pad(withID: id) { soundboard.playPad(pad) }
+        case .pauseSoundPad(let id):
+            if let pad = soundboardStore.pad(withID: id) { soundboard.pausePad(pad) }
+        case .restartSoundPad(let id):
+            if let pad = soundboardStore.pad(withID: id) { soundboard.restartPad(pad) }
+        case .setSoundPadLoop(let id, let loop):
+            if var pad = soundboardStore.pad(withID: id) { pad.loops = loop; soundboardStore.updatePad(pad) }
         case .stopAllSoundEffects:
             soundboard.stopAllSoundEffects()
         case .addMusicPlaylist(let playlist):
             soundboardStore.addPlaylist(playlist)
         case .updateMusicPlaylist(let playlist):
+            if soundboardStore.playlist(withID: playlist.id)?.volume != playlist.volume {
+                var mixer = session.activeSettings.mixer; mixer.channelVolumes[AudioChannelID.media(playlist.id).label] = playlist.volume
+                session.persistMixer(mixer)
+            }
             soundboardStore.updatePlaylist(playlist)
         case .removeMusicPlaylist(let id):
             soundboardStore.removePlaylist(id)
@@ -3961,10 +4027,21 @@ final class StudioCommandDispatcher: ObservableObject {
             redoLabel: undoStack.redoLabel,
             annotations: annotations.uiState(stagedSceneID: staged?.id),
             interview: interviewManager?.state ?? .init())
+        registerMediaMixerChannels()
         registerAppAudioMixerChannels()
         registerBrowserAudioMixerChannel()
         registerGuestMixerChannels()
         pushMixerStateToEngine()
+    }
+
+    /// Register stable media/sound IDs before the first buffer, including
+    /// persisted mutes and levels after project/pipeline reload.
+    private func registerMediaMixerChannels() {
+        let ids = sceneStore.sources.filter { $0.payload.isMedia }.map(\.id) + soundboardStore.pads.map(\.id) + soundboardStore.playlists.map(\.id)
+        for sourceID in ids {
+            let channel = AudioChannelID.media(sourceID)
+            if channelIDsByLabel[channel.label] != channel { channelIDsByLabel[channel.label] = channel; lastPushedMixer = nil }
+        }
     }
 
     /// A06 (issue #118): app-audio sources are mixer-owned, never scene-bound
@@ -4044,7 +4121,10 @@ final class StudioCommandDispatcher: ObservableObject {
             if id == .microphone(deviceUID: nil) {
                 volume = Float(max(0, min(desired.micVolume, 2)))
             } else {
-                volume = Float(max(0, min(mixer.channelVolumes[label] ?? 1, 2)))
+                let sourceVolume: Double
+                if case .media(let sourceID) = id { sourceVolume = soundboardStore.pad(withID: sourceID)?.volume ?? soundboardStore.playlist(withID: sourceID)?.volume ?? 1 }
+                else { sourceVolume = 1 }
+                volume = Float(max(0, min(mixer.channelVolumes[label] ?? sourceVolume, 2)))
             }
             controller.applyMixerChannelGain(id, volume: volume,
                                              isMuted: mixer.channelMutes[label] ?? false)
@@ -4174,7 +4254,7 @@ private extension StudioCommand {
              .selectPreviousComment, .selectNextComment, .showSelectedComment, .hideComment,
              .pdfNextPage, .pdfPreviousPage, .pdfGoToPage, .pdfSetFraming,
              .addSoundPad, .updateSoundPad, .removeSoundPad,
-             .triggerSoundPad, .stopSoundPad, .stopAllSoundEffects,
+             .triggerSoundPad, .stopSoundPad, .playSoundPad, .pauseSoundPad, .restartSoundPad, .setSoundPadLoop, .stopAllSoundEffects,
              .addMusicPlaylist, .updateMusicPlaylist, .removeMusicPlaylist,
              .playlistPlay, .playlistPause, .playlistStop,
              .playlistNext, .playlistPrevious,
