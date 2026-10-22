@@ -81,6 +81,8 @@ jobs:
           BROKER_BUILD_PATH=build/restream-broker-ci zsh scripts/run_restream_broker_harness.zsh
           SCHEDULING_BUILD_PATH=build/tests zsh scripts/run_provider_scheduling_harness.zsh
           CHAT_BUILD_PATH=build/tests zsh scripts/run_direct_chat_harness.zsh
+          CHAT_PRODUCTS_PATH="$PWD/build/tests/Build/Products/Debug" NOTICE_BUILD_PATH=build/twitch-chat-notifications-validation zsh scripts/run_twitch_chat_notifications_harness.zsh
+          CHAT_PRODUCTS_PATH="$PWD/build/tests/Build/Products/Debug" GIFT_BUILD_PATH=build/youtube-gift-events-validation zsh scripts/run_youtube_gift_events_harness.zsh
           ENDING_BUILD_PATH=build/tests zsh scripts/run_studio_ending_harness.zsh
           OWNED_ENDING_BUILD_PATH=build/tests zsh scripts/run_owned_ending_harness.zsh
       - name: Test saved guest preparation and native controller feedback
@@ -95,6 +97,7 @@ jobs:
         run: |
           BROWSER_SOCKET_HELPER_MODE_PROBES=1 zsh scripts/run_browser_socket_authority_harness.zsh
           BROWSER_AUDIO_BUILD_PATH=build/desktop zsh scripts/run_browser_audio_helper_harness.zsh
+          BROWSER_STOP_CORE_FRAMEWORK="$PWD/build/desktop/Build/Products/Debug/StreamCore.framework" BROWSER_STOP_BUILD_DIR="$RUNNER_TEMP/browser-stop-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" zsh scripts/run_browser_stop_confirmation_harness.zsh
           BROWSER_EXCLUSION_CORE_PRODUCTS="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_browser_exclusion_harness.zsh
           zsh scripts/run_browser_local_content_harness.zsh
           BROWSER_CAPTURE_AUTHORITY_DERIVED="$PWD/build/desktop" zsh scripts/run_browser_capture_authority_harness.zsh
