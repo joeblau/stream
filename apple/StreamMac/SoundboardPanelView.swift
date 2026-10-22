@@ -52,6 +52,7 @@ struct SoundboardPanelView: View {
             var pad = relinkPad
             // Hot-swap: only the file identity changes — pad ID, channel,
             // color, policy, and volume all survive.
+            pad.assetIdentifier = nil
             pad.bookmarkData = payload.bookmarkData
             pad.fileName = payload.fileName
             dispatcher.execute(.updateSoundPad(pad))
@@ -80,6 +81,7 @@ struct SoundboardPanelView: View {
             updateSceneBindings { bindings in
                 guard let index = bindings.firstIndex(where: { $0.id == relinkBinding.id })
                 else { return }
+                bindings[index].assetIdentifier = nil
                 bindings[index].bookmarkData = payload.bookmarkData
                 bindings[index].fileName = payload.fileName
             }
@@ -520,6 +522,7 @@ private struct PlaylistRowView: View {
               let replacement = MusicTrack.make(pickedFile: url) else { return }
         updatePlaylist { playlist in
             guard let index = playlist.tracks.firstIndex(where: { $0.id == track.id }) else { return }
+            playlist.tracks[index].assetIdentifier = nil
             playlist.tracks[index].bookmarkData = replacement.bookmarkData
             playlist.tracks[index].fileName = replacement.fileName
         }

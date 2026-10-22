@@ -119,27 +119,13 @@ end
 # for asynchronous seek/load or paused recovery behavior. Private storage is
 # exposed only by same-file extensions in these generated tool copies.
 fixture_replace(target, root, folder, 'MediaSourcePlayback.swift') do |source|
-  boundary = <<'SWIFT'
-            var isStale = false
-            let url = try URL(resolvingBookmarkData: bookmark,
-                              options: [.withSecurityScope],
-                              relativeTo: nil,
-                              bookmarkDataIsStale: &isStale)
-            guard url.startAccessingSecurityScopedResource() else {
-                fail("macOS denied access to \"\(url.lastPathComponent)\". Relink the file to restore access.", generation: generation)
-                return
-            }
-            // One successful scope acquisition has exactly one owner. A stale
-            // or failed load releases locally; accepted playback holds it until
-            // relink, terminal retirement, or deinitialization.
-            let access = MediaFileAccess(url: url)
-SWIFT
-  abort 'Owned internal-media fixture boundary changed' unless source.include?(boundary)
+  boundary = /    \/\/ BEGIN bookmark-only file access.*?    \/\/ END bookmark-only file access/m
+  abort 'Owned internal-media fixture boundary changed' unless source.match?(boundary)
   source.sub!(boundary, <<'SWIFT')
-            // Generated validation only: exact owned internal media, no scope
-            // grant claimed. Real asset load and player stay below.
-            let url = try DeckFixtureOwnedMedia.resolve(bookmark)
-            let access: MediaFileAccess? = nil
+    private static func bookmarkAccess(_ bookmark: Data) throws -> MediaPlaybackAccess {
+        // Exact owned internal media only; no external sandbox grant claimed.
+        MediaPlaybackAccess(library: ResolvedAssetAccess(url: try DeckFixtureOwnedMedia.resolve(bookmark), needsSecurityScope: false))
+    }
 SWIFT
   source + <<'SWIFT'
 

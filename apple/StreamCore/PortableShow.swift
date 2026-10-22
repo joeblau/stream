@@ -30,7 +30,7 @@ public enum PortableShow {
     ]
     public static let maximumDocumentBytes = 16 * 1024 * 1024
     private static let privateKeys: Set<String> = [
-        "bookmarkdata", "lastknownpath", "rtmpurl", "streamkey", "token", "bearertoken", "passphrase", "password",
+        "bookmarkdata", "stingerbookmarkdata", "lastknownpath", "rtmpurl", "streamkey", "token", "bearertoken", "passphrase", "password",
         "deviceuniqueid", "deviceuid", "deviceid", "targetidentifier", "displayid", "windowid", "preferredaudioinputuid", "monitoroutputdeviceuid",
         "cameracontrols", "audioinputs", "url", "urlstring", "endpoint", "hostname", "host", "address", "applicationbundleidentifier"
     ]

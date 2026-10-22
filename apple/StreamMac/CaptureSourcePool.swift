@@ -453,7 +453,15 @@ final class CaptureSourcePool: ObservableObject {
     private var pdfPlaybacks: [CaptureSourceKey: PDFSourcePlayback] = [:]
     /// G06: the P03 asset library PDF engines resolve documents through. Set
     /// once by the dispatcher at startup (`dispatcher.assetLibrary`).
-    var assetLibrary: AssetLibraryStore?
+    var assetLibrary: AssetLibraryStore? {
+        didSet {
+            assetFileObservation = assetLibrary?.fileChanges.sink { [weak self] identifiers in
+                guard let self else { return }
+                for playback in self.mediaPlaybacks.values { playback.reloadAsset(identifiers) }
+            }
+        }
+    }
+    private var assetFileObservation: AnyCancellable?
     /// G06: PDF engine status mirror — the dispatcher sets this to re-clamp
     /// persisted deck state (`PDFDeckStore.notePageCount`) on document load.
     var onPDFStatus: (@MainActor (SourceDefinitionID, PDFSourceStatus) -> Void)?
@@ -1240,7 +1248,10 @@ final class CaptureSourcePool: ObservableObject {
     private func mediaPlayback(for key: CaptureSourceKey,
                                id: SourceDefinitionID) -> MediaSourcePlayback? {
         if let existing = mediaPlaybacks[key] { return existing }
-        let playback = MediaSourcePlayback(sourceID: id) {
+        let playback = MediaSourcePlayback(sourceID: id, assetAccessProvider: { [weak self] identifier in
+            guard let uuid = UUID(uuidString: identifier) else { return nil }
+            return self?.assetLibrary?.access(for: AssetID(uuid))
+        }) {
             guard case .media(let payload) = SourcePayloadStore.shared.snapshot()[id]
             else { return nil }
             return payload

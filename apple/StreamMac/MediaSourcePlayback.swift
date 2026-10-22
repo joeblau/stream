@@ -82,6 +82,16 @@ private final class MediaFileAccess: @unchecked Sendable {
     deinit { url.stopAccessingSecurityScopedResource() }
 }
 
+/// Preserve the owner of either an external bookmark grant or a library
+/// reference. Project copies need no external sandbox scope.
+private final class MediaPlaybackAccess: @unchecked Sendable {
+    let url: URL
+    private let bookmark: MediaFileAccess?
+    private let library: ResolvedAssetAccess?
+    init(bookmark: MediaFileAccess) { self.url = bookmark.url; self.bookmark = bookmark; self.library = nil }
+    init(library: ResolvedAssetAccess) { self.url = library.url; self.bookmark = nil; self.library = library }
+}
+
 /// A02 (issue #97): the playback engine for ONE registry media source.
 ///
 /// G09 (issue #116): image files (GIF/APNG/animated HEIC) dispatch at load
@@ -129,6 +139,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// the pool-published `SourcePayloadStore` — the registry is the
     /// identity authority, exactly like capture demand resolution.
     private let payloadProvider: @Sendable () -> MediaSourcePayload?
+    private let assetAccessProvider: (@MainActor @Sendable (String) -> ResolvedAssetAccess?)?
     /// Pool-wired: retimed audio buffers for the mix engine's
     /// `.media(sourceID)` channel. Fired off the engine tick, never under
     /// the lock.
@@ -166,6 +177,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     private var recovery = PausedMediaRecovery()
     private var didLoad = false
     private var loadedBookmark: Data?
+    private var loadedAssetIdentifier: String?
     /// G09 (issue #116): animated-image files (GIF/APNG/animated HEIC) have
     /// no AVAsset representation — they play through this CGImageSource
     /// frame-stepping engine instead of the AVPlayer path. Same pull cadence,
@@ -176,7 +188,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     private var loadTask: Task<Void, Never>?
     private var loadGeneration: UInt64 = 0
     private var retired = false
-    private var fileAccess: MediaFileAccess?
+    private var fileAccess: MediaPlaybackAccess?
     private let audioDelivery = MediaAudioDeliveryGate()
     private var periodicObserver: Any?
     private var boundaryObserver: Any?
@@ -184,9 +196,32 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     private var itemStatusObservation: NSKeyValueObservation?
 
     init(sourceID: SourceDefinitionID,
+         assetAccessProvider: (@MainActor @Sendable (String) -> ResolvedAssetAccess?)? = nil,
          payloadProvider: @escaping @Sendable () -> MediaSourcePayload?) {
         self.sourceID = sourceID
         self.payloadProvider = payloadProvider
+        self.assetAccessProvider = assetAccessProvider
+    }
+
+    // BEGIN bookmark-only file access
+    private static func bookmarkAccess(_ bookmark: Data) throws -> MediaPlaybackAccess {
+        var stale = false
+        let url = try URL(resolvingBookmarkData: bookmark, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale)
+        guard url.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }
+        return MediaPlaybackAccess(bookmark: MediaFileAccess(url: url))
+    }
+    // END bookmark-only file access
+
+    /// A same-ID library relink/replacement retires its old decoder and grant;
+    /// load-generation checks prevent the earlier file from publishing later.
+    func reloadAsset(_ identifiers: Set<AssetID>) {
+        os_unfair_lock_lock(&lock)
+        guard !retired, let raw = payloadProvider()?.assetIdentifier, let uuid = UUID(uuidString: raw), identifiers.contains(AssetID(uuid)) else {
+            os_unfair_lock_unlock(&lock); return
+        }
+        teardownLocked()
+        os_unfair_lock_unlock(&lock)
+        load()
     }
 
     // MARK: - Loading
@@ -215,24 +250,22 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             fail("The media source has no registered payload — relink it to a video file.", generation: generation)
             return
         }
-        guard let bookmark = payload.bookmarkData else {
-            fail("No video file is linked — relink the source to an MP4/MOV file.", generation: generation)
-            return
-        }
+        let bookmark = payload.bookmarkData
         do {
-            var isStale = false
-            let url = try URL(resolvingBookmarkData: bookmark,
-                              options: [.withSecurityScope],
-                              relativeTo: nil,
-                              bookmarkDataIsStale: &isStale)
-            guard url.startAccessingSecurityScopedResource() else {
-                fail("macOS denied access to \"\(url.lastPathComponent)\". Relink the file to restore access.", generation: generation)
+            let access: MediaPlaybackAccess
+            if let identifier = payload.assetIdentifier {
+                guard let assetAccessProvider, let resolved = await assetAccessProvider(identifier), resolved.isAccessible else {
+                    fail("The video asset is missing. Relink it in Assets before playing this source.", generation: generation)
+                    return
+                }
+                access = MediaPlaybackAccess(library: resolved)
+            } else if let bookmark {
+                access = try Self.bookmarkAccess(bookmark)
+            } else {
+                fail("No video file is linked — relink the source to an MP4/MOV file.", generation: generation)
                 return
             }
-            // One successful scope acquisition has exactly one owner. A stale
-            // or failed load releases locally; accepted playback holds it until
-            // relink, terminal retirement, or deinitialization.
-            let access = MediaFileAccess(url: url)
+            let url = access.url
             try Task.checkCancellation()
             // G09 (issue #116): animated-image files dispatch to the
             // CGImageSource engine — the probe doubles as the load-time
@@ -243,7 +276,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
                 case .failure(let error):
                     fail(error.message, generation: generation)
                 case .success(let contents):
-                    configureAnimated(contents: contents, bookmark: bookmark, access: access, generation: generation)
+                    configureAnimated(contents: contents, bookmark: bookmark, assetIdentifier: payload.assetIdentifier, access: access, generation: generation)
                 }
                 return
             }
@@ -264,7 +297,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             // player build hops to the main actor (transport and observer
             // callbacks live there anyway; only frame/audio pulls run on
             // the engine actors, through the nonisolated output APIs).
-            await configure(asset: asset, bookmark: bookmark, access: access, generation: generation,
+            await configure(asset: asset, bookmark: bookmark, assetIdentifier: payload.assetIdentifier, access: access, generation: generation,
                             duration: duration,
                             audioTrack: tracks.first(where: { $0.mediaType == .audio }))
         } catch {
@@ -273,10 +306,10 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     }
 
     @MainActor
-    private func configure(asset: AVAsset, bookmark: Data, access: MediaFileAccess?, generation: UInt64,
+    private func configure(asset: AVAsset, bookmark: Data?, assetIdentifier: String?, access: MediaPlaybackAccess?, generation: UInt64,
                            duration: CMTime, audioTrack: AVAssetTrack?) {
         os_unfair_lock_lock(&lock)
-        guard acceptsLoadLocked(bookmark: bookmark, generation: generation) else {
+        guard acceptsLoadLocked(bookmark: bookmark, assetIdentifier: assetIdentifier, generation: generation) else {
             os_unfair_lock_unlock(&lock); return
         }
         fileAccess = access
@@ -284,6 +317,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         assetDuration = duration
         self.audioTrack = audioTrack
         loadedBookmark = bookmark
+        loadedAssetIdentifier = assetIdentifier
         let payload = payloadProvider()
         trimIn = CMTime(seconds: max(0, payload?.trimInSeconds ?? 0),
                         preferredTimescale: 600)
@@ -361,8 +395,8 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// engine. Transport/status plumbing is identical to the video path —
     /// the engine reports through the same `onStatus` mirror and honors the
     /// payload's loops/autoplay/end action live.
-    private func configureAnimated(contents: AnimatedImageContents, bookmark: Data,
-                                   access: MediaFileAccess?, generation: UInt64) {
+    private func configureAnimated(contents: AnimatedImageContents, bookmark: Data?, assetIdentifier: String?,
+                                   access: MediaPlaybackAccess?, generation: UInt64) {
         let engine = AnimatedImagePlayback(sourceID: sourceID,
                                            payloadProvider: payloadProvider)
         engine.onReachedEnd = { [weak self] id, time in
@@ -372,12 +406,13 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             self?.forwardAnimatedStatus(id, status: status, generation: generation)
         }
         os_unfair_lock_lock(&lock)
-        guard acceptsLoadLocked(bookmark: bookmark, generation: generation) else {
+        guard acceptsLoadLocked(bookmark: bookmark, assetIdentifier: assetIdentifier, generation: generation) else {
             os_unfair_lock_unlock(&lock); return
         }
         fileAccess = access
         animated = engine
         loadedBookmark = bookmark
+        loadedAssetIdentifier = assetIdentifier
         didLoad = true
         status.phase = .ready
         status.positionSeconds = 0
@@ -407,9 +442,10 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         onReachedEnd?(id, time)
     }
 
-    private func acceptsLoadLocked(bookmark: Data, generation: UInt64) -> Bool {
+    private func acceptsLoadLocked(bookmark: Data?, assetIdentifier: String?, generation: UInt64) -> Bool {
         guard !retired, loadGeneration == generation, !Task.isCancelled else { return false }
-        guard payloadProvider()?.bookmarkData == bookmark else {
+        let current = payloadProvider()
+        guard current?.assetIdentifier == assetIdentifier, assetIdentifier != nil || current?.bookmarkData == bookmark else {
             teardownLocked()
             return false
         }
@@ -442,9 +478,11 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         guard !retired else { os_unfair_lock_unlock(&lock); return nil }
         // A relink (the registry payload's bookmark changed) reloads the
         // file in place; no other source is disturbed.
-        if didLoad, let bookmark = payloadProvider()?.bookmarkData,
-           bookmark != loadedBookmark {
-            teardownLocked()
+        if didLoad {
+            let current = payloadProvider()
+            if current?.assetIdentifier != loadedAssetIdentifier || (loadedAssetIdentifier == nil && current?.bookmarkData != loadedBookmark) {
+                teardownLocked()
+            }
         }
         if !didLoad, loadTask == nil, status.phase != .loading {
             // Reload after a teardown (relink) — load() manages its own lock,
@@ -866,6 +904,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         isEnding = false
         didLoad = false
         loadedBookmark = nil
+        loadedAssetIdentifier = nil
         status.phase = .idle
         status.positionSeconds = 0
         status.durationSeconds = 0

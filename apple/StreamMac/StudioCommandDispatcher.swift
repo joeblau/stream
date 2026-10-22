@@ -1138,6 +1138,8 @@ final class StudioCommandDispatcher: ObservableObject {
         self.macros = ShowMacroController()
         // G06: the pool's PDF engines resolve documents through the library.
         controller.capturePool.assetLibrary = assetLibrary
+        soundboard.bindAssetLibrary(assetLibrary)
+        transitions.bindAssetLibrary(assetLibrary)
         // G08 (issue #115): web widget hosts reach the asset library through
         // this process-wide seam (local-HTML widgets only; URL widgets and
         // bundled fixtures never touch it).

@@ -12,14 +12,22 @@ folder = Path(sys.argv[1])
 graph = Path('StreamMac/LayerGraph.swift').read_text()
 values = graph[graph.index('struct GraphID<Tag>'):graph.index('// MARK: - Geometry')]
 values += graph[graph.index('enum MediaEndAction:'):graph.index('struct PDFSourcePayload:')]
+values += '''
+final class ResolvedAssetAccess: @unchecked Sendable {
+    let url: URL
+    init(url: URL) { self.url = url }
+    var isAccessible: Bool { true }
+}
+'''
 (folder / 'MediaValues.swift').write_text('import Foundation\nimport StreamCore\n' + values)
 source = Path('StreamMac/MediaSourcePlayback.swift').read_text()
-start = source.index('            var isStale = false', source.index('private func performLoad('))
-end = source.index('            try Task.checkCancellation()', start)
+start = source.index('    // BEGIN bookmark-only file access')
+end = source.index('    // END bookmark-only file access', start)
 # Only the external bookmark/grant boundary changes in this generated tool.
-# Its counted ownership tokens are not claims of actual sandbox authorization.
-source = source[:start] + '''            let url = try FixtureState.shared.resolve(bookmark)
-            let access = MediaFileAccess(url: url)
+# Counted ownership tokens do not establish real sandbox authorization.
+source = source[:start] + '''    private static func bookmarkAccess(_ bookmark: Data) throws -> MediaPlaybackAccess {
+        MediaPlaybackAccess(bookmark: MediaFileAccess(url: try FixtureState.shared.resolve(bookmark)))
+    }
 ''' + source[end:]
 source = source.replace('init(url: URL) { self.url = url }', 'init(url: URL) { self.url = url; FixtureState.shared.acquire() }')
 source = source.replace('deinit { url.stopAccessingSecurityScopedResource() }', 'deinit { FixtureState.shared.release() }')

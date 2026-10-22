@@ -26,6 +26,7 @@ require File.join(root, 'scripts/guest_fixture_boundaries')
 StreamGuestFixtureBoundaries.apply(spec['targets']['StreamCore'], target, root, folder)
 target['sources'].reject! { |source| source == File.join(folder, 'fixtures/GuestFixtureEnvironment.swift') }
 target['sources'] << File.join(root, 'scripts/portable_show_native_fixture.swift')
+target['sources'] << File.join(root, 'scripts/portable_show_media_fixture.swift')
 def generated_replace(target, root, folder, name)
   source = File.read(File.join(root, 'StreamMac', name))
   source.gsub!('UserDefaults.standard', 'GuestFixtureDefaults.value')
@@ -133,6 +134,10 @@ actual=plistlib.loads((root/'actual-entitlements.plist').read_bytes())
 assert actual==expected,'Actual fixture app has unexpected/missing entitlements'
 print('Verified ad hoc signature and exact sandbox/user-selected/bookmark entitlements; no get-task-allow, device, network, App Group or Keychain claims',flush=True)
 PY
+if [[ "${PORTABLE_NATIVE_BUILD_ONLY:-0}" == 1 ]]; then
+  print "Built and signed the owned portable fixture; native UI qualification has not run."
+  exit 0
+fi
 env DYLD_FRAMEWORK_PATH="$PORTABLE_PRODUCTS" python3 - "$PORTABLE_PRODUCTS/PortableShowNativeDriver" "$PORTABLE_APP" "${PORTABLE_NATIVE_DIR:A}" <<'PY'
 import pathlib,plistlib,shutil,subprocess,sys,uuid
 root=pathlib.Path(sys.argv[3])/('artifacts-'+str(uuid.uuid4()));root.mkdir()
@@ -149,7 +154,7 @@ finally:
  # Only bounded metadata from this unique generated app is retained. The
  # persisted runtime and bookmark bytes remain in its owned app container.
  receipts=root/'native-receipts';receipts.mkdir()
- for name in ['report.json','open-receipt.json','termination-trace.json','window-close-trace.json','lifecycle-trace.json']:
+ for name in ['report.json','open-receipt.json','termination-trace.json','window-close-trace.json','lifecycle-trace.json','media-progress.json']:
   source=container/name
   if not source.is_symlink() and source.is_file() and source.stat().st_size<=1024*1024:shutil.copyfile(source,receipts/name)
  print('Owned native qualification artifacts:',root,flush=True)

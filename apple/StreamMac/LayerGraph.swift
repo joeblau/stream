@@ -1561,6 +1561,7 @@ struct SceneSoundBinding: Identifiable, Hashable, Codable, Sendable {
     var rule: SceneSoundRule
     var name: String
     /// Security-scoped bookmark for the picked audio file (the access grant).
+    var assetIdentifier: String?
     var bookmarkData: Data?
     /// The picked file's display name (bookmarks don't round-trip one).
     var fileName: String?
@@ -1570,12 +1571,14 @@ struct SceneSoundBinding: Identifiable, Hashable, Codable, Sendable {
     init(id: SourceDefinitionID = SourceDefinitionID(),
          rule: SceneSoundRule = .enter,
          name: String,
+         assetIdentifier: String? = nil,
          bookmarkData: Data? = nil,
          fileName: String? = nil,
          volume: Double = 1) {
         self.id = id
         self.rule = rule
         self.name = name
+        self.assetIdentifier = assetIdentifier
         self.bookmarkData = bookmarkData
         self.fileName = fileName
         self.volume = volume
@@ -1588,6 +1591,7 @@ struct SceneSoundBinding: Identifiable, Hashable, Codable, Sendable {
         id = try container.decodeIfPresent(SourceDefinitionID.self, forKey: .id) ?? SourceDefinitionID()
         rule = try container.decodeIfPresent(SceneSoundRule.self, forKey: .rule) ?? .enter
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Sound"
+        assetIdentifier = try container.decodeIfPresent(String.self, forKey: .assetIdentifier)
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
         fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
         volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 1

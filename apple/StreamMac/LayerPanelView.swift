@@ -798,6 +798,7 @@ struct LayerPanelView: View {
             guard let existing = sceneStore.source(withID: sourceID),
                   case .media(var existingPayload) = existing.payload else { return }
             existingPayload.bookmarkData = payload.bookmarkData
+            existingPayload.assetIdentifier = nil
             existingPayload.fileName = payload.fileName
             sceneStore.relinkSource(sourceID, to: .media(existingPayload))
         }

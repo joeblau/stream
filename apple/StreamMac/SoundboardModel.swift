@@ -50,6 +50,7 @@ struct SoundPad: Identifiable, Hashable, Codable, Sendable {
     /// Linear program gain, 0...2 (1 = unity).
     var volume: Double
     /// Security-scoped bookmark for the picked audio file (the access grant).
+    var assetIdentifier: String?
     var bookmarkData: Data?
     /// The picked file's display name (bookmarks don't round-trip one).
     var fileName: String?
@@ -61,6 +62,7 @@ struct SoundPad: Identifiable, Hashable, Codable, Sendable {
          triggerPolicy: PadTriggerPolicy = .restart,
          loops: Bool = false,
          volume: Double = 1,
+         assetIdentifier: String? = nil,
          bookmarkData: Data? = nil,
          fileName: String? = nil) {
         self.id = id
@@ -70,6 +72,7 @@ struct SoundPad: Identifiable, Hashable, Codable, Sendable {
         self.triggerPolicy = triggerPolicy
         self.loops = loops
         self.volume = volume
+        self.assetIdentifier = assetIdentifier
         self.bookmarkData = bookmarkData
         self.fileName = fileName
     }
@@ -85,6 +88,7 @@ struct SoundPad: Identifiable, Hashable, Codable, Sendable {
         triggerPolicy = try container.decodeIfPresent(PadTriggerPolicy.self, forKey: .triggerPolicy) ?? .restart
         loops = try container.decodeIfPresent(Bool.self, forKey: .loops) ?? false
         volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 1
+        assetIdentifier = try container.decodeIfPresent(String.self, forKey: .assetIdentifier)
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
         fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
     }
@@ -121,12 +125,14 @@ enum PlaylistRepeatMode: String, Codable, CaseIterable, Sendable {
 struct MusicTrack: Identifiable, Hashable, Codable, Sendable {
     var id: UUID
     var name: String
+    var assetIdentifier: String?
     var bookmarkData: Data?
     var fileName: String?
 
-    init(id: UUID = UUID(), name: String, bookmarkData: Data? = nil, fileName: String? = nil) {
+    init(id: UUID = UUID(), name: String, assetIdentifier: String? = nil, bookmarkData: Data? = nil, fileName: String? = nil) {
         self.id = id
         self.name = name
+        self.assetIdentifier = assetIdentifier
         self.bookmarkData = bookmarkData
         self.fileName = fileName
     }
@@ -135,6 +141,7 @@ struct MusicTrack: Identifiable, Hashable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Track"
+        assetIdentifier = try container.decodeIfPresent(String.self, forKey: .assetIdentifier)
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
         fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
     }

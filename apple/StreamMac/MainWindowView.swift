@@ -1197,11 +1197,10 @@ private struct TransitionSettingsSectionView: View {
                                  ? .secondary : .primary)
             Spacer()
             Button("Choose…") { pickStingerFile(transition) }
-            if transition.wrappedValue.stingerBookmarkData != nil {
+            if transition.wrappedValue.hasStingerMedia {
                 Button("Clear") {
                     var updated = transition.wrappedValue
-                    updated.stingerBookmarkData = nil
-                    updated.stingerFileName = nil
+                    updated.clearStingerMedia()
                     transition.wrappedValue = updated
                 }
             }
@@ -1222,7 +1221,7 @@ private struct TransitionSettingsSectionView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        if transition.wrappedValue.stingerBookmarkData == nil {
+        if !transition.wrappedValue.hasStingerMedia {
             Text("Without a stinger file the Take falls back to a plain dissolve.")
                 .font(.caption)
                 .foregroundStyle(.orange)
@@ -1240,6 +1239,7 @@ private struct TransitionSettingsSectionView: View {
               let payload = MediaSourceFactory.payload(forPickedFile: url) else { return }
         var updated = transition.wrappedValue
         updated.stingerBookmarkData = payload.bookmarkData
+        updated.stingerAssetIdentifier = nil
         updated.stingerFileName = payload.fileName
         transition.wrappedValue = updated
     }
