@@ -180,26 +180,58 @@ def main():
     with tempfile.TemporaryDirectory(prefix="stream-annotation-layout-") as temporary:
         folder = Path(temporary)
         fixture = folder / "OwnedAnnotationToolbar.swift"
-        fixture.write_text(HEADER + definitions + "\n" + toolbar + MAIN)
         executable = folder / "AnnotationToolbarLayout"
-        subprocess.run(["xcrun", "swiftc", "-swift-version", "6", "-strict-concurrency=complete", "-j2", "-parse-as-library",
-            str(apple / "StreamCore/Annotations.swift"), str(apple / "StreamMac/StudioAccessibility.swift"),
-            str(apple / "StreamMac/StudioControlRow.swift"),
-            str(fixture), "-o", str(executable)], check=True, timeout=90)
-        subprocess.run([str(executable), str(args.report)], check=True, timeout=90)
         sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
-        report = json.loads(args.report.read_text())
         inputs = [apple / "StreamCore/Annotations.swift", apple / "StreamMac/StudioAccessibility.swift",
             apple / "StreamMac/StudioControlRow.swift", apple / "StreamMac/AnnotationModel.swift",
             apple / "StreamMac/LayerGraph.swift", Path(__file__).resolve()]
-        report["sourceHashes"] = {str(path.relative_to(apple)): sha(path) for path in inputs}
-        report["toolbarSourceSHA256"] = sha(args.toolbar_source or apple / "StreamMac/AnnotationToolbarView.swift")
-        report["generatedFixtureSHA256"] = sha(fixture)
-        report["executableSHA256"] = sha(executable)
-        if args.artifacts:
-            args.artifacts.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(fixture, args.artifacts / fixture.name)
-            shutil.copy2(executable, args.artifacts / executable.name)
-        args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+
+        def provenance():
+            report = {"sourceHashes": {str(path.relative_to(apple)): sha(path) for path in inputs},
+                "toolbarSourceSHA256": sha(args.toolbar_source or apple / "StreamMac/AnnotationToolbarView.swift")}
+            if fixture.exists():
+                report["generatedFixtureSHA256"] = sha(fixture)
+            if executable.exists():
+                report["executableSHA256"] = sha(executable)
+            return report
+
+        def write_report(report):
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+
+        phase = "generate-fixture"
+        try:
+            fixture.write_text(HEADER + definitions + "\n" + toolbar + MAIN)
+            phase = "compile"
+            subprocess.run(["xcrun", "swiftc", "-swift-version", "6", "-strict-concurrency=complete", "-j2", "-parse-as-library",
+                str(apple / "StreamCore/Annotations.swift"), str(apple / "StreamMac/StudioAccessibility.swift"),
+                str(apple / "StreamMac/StudioControlRow.swift"),
+                str(fixture), "-o", str(executable)], check=True, timeout=90)
+            phase = "runtime"
+            subprocess.run([str(executable), str(args.report)], check=True, timeout=90)
+            phase = "collect-report"
+            report = json.loads(args.report.read_text())
+            report.update(provenance())
+            report["result"] = "PASS"
+            write_report(report)
+        except Exception as error:
+            # Keep the original exception/nonzero exit and inherited stdout/stderr.
+            # The bounded receipt remains useful even when Swift never emits JSON.
+            failure = {"result": "FAIL", "phase": phase, "failureType": type(error).__name__}
+            if isinstance(error, subprocess.CalledProcessError):
+                failure["processReturnCode"] = error.returncode
+            elif isinstance(error, subprocess.TimeoutExpired):
+                failure["timeoutSeconds"] = error.timeout
+            failure.update(provenance())
+            write_report(failure)
+            raise
+        finally:
+            # This must run before TemporaryDirectory removes the generated inputs,
+            # including compilation failures/timeouts and failed Swift assertions.
+            if args.artifacts:
+                args.artifacts.mkdir(parents=True, exist_ok=True)
+                for artifact in (fixture, executable):
+                    if artifact.exists():
+                        shutil.copy2(artifact, args.artifacts / artifact.name)
 
 if __name__ == "__main__": main()
