@@ -11,6 +11,13 @@ struct DirectChatSnapshot {
     var notice: String?
     var isMutating = false
     var retryUntil: Date?
+    /// Public guest returns report the reader, not an unrelated refused write.
+    /// Incoming chat can remain connected after post/moderation permission loss.
+    var publicReaderState: String {
+        if isConnected { return "connected" }
+        if state == "Verifying authorization" || state == "Reconnecting" || state.hasPrefix("Rate limited;") { return "connecting" }
+        return state == "Failed" ? "failed" : "offline"
+    }
 }
 
 /// One authenticated reader per provider feeds every workspace consumer. No
@@ -35,6 +42,7 @@ struct DirectChatSnapshot {
     private var jobs: [ManagedProvider: Task<Void, Never>] = [:]
     private var writes: [ManagedProvider: Task<Void, Never>] = [:]
     private var writeIDs: [ManagedProvider: UUID] = [:]
+    private var startedWrites: Set<UUID> = []
     private var writeDenials: [ManagedProvider: Set<DirectChatWriteKind>] = [:]
     private var cooldowns: [ManagedProvider: Date] = [:]
     private let now: @Sendable () -> Date
@@ -369,7 +377,8 @@ struct DirectChatSnapshot {
         guard [.delete, .timeout, .ban].contains(kind) else { return "Choose a supported moderation action." }
         guard let route = routes[id] else { return "This message has no current authorized direct-provider route; this feed is read-only." }
         if let error = writeAvailabilityError(route.provider, kind: kind) { return error }
-        guard let (account, chatID) = active[route.provider], chatID == route.chatID else { return "This message belongs to a different chat session." }
+        guard let (account, chatID) = active[route.provider], chatID == route.chatID,
+              account.channelID == route.channelID else { return "This message belongs to a different chat session." }
         guard account.channelID != route.authorID, !route.roles.contains("Owner"), !route.roles.contains("Moderator") else {
             return "Owner and moderator messages are protected. Manage their roles in the provider's controls."
         }
@@ -380,10 +389,14 @@ struct DirectChatSnapshot {
     }
     func canDelete(_ id: String) -> Bool { moderationAvailabilityError(id, kind: .delete) == nil }
     func canReply(_ id: String) -> Bool {
-        guard let route = routes[id], route.provider == .twitch, let (_, chatID) = active[.twitch], chatID == route.chatID else { return false }
+        guard let route = routes[id], route.provider == .twitch, targetForMessage(id) != nil else { return false }
         return writeAvailabilityError(.twitch, kind: .reply) == nil
     }
-    func targetForMessage(_ id: String) -> DirectChatWriteTarget? { routes[id].flatMap { writeTarget($0.provider) } }
+    func targetForMessage(_ id: String) -> DirectChatWriteTarget? {
+        guard let route = routes[id], let target = writeTarget(route.provider),
+              target.channelID == route.channelID, target.chatID == route.chatID else { return nil }
+        return target
+    }
     /// A reviewed batch contains at most the two supported direct providers.
     /// Each target executes once; a failure cannot cancel another provider.
     @discardableResult func send(_ text: String, to targets: [DirectChatWriteTarget]) -> [UUID] {
@@ -504,7 +517,10 @@ struct DirectChatSnapshot {
         cancelWrite(provider)
     }
     private func cancelWrite(_ provider: ManagedProvider) {
-        if let id = writeIDs.removeValue(forKey: provider) { finishReceipt(id, .stopped) }
+        if let id = writeIDs.removeValue(forKey: provider) {
+            let started = startedWrites.remove(id) != nil
+            finishReceipt(id, started ? .stopped : .notSent("Canceled before provider dispatch."))
+        }
         writes[provider]?.cancel(); writes[provider] = nil; snapshots[provider]?.isMutating = false
     }
     private struct WriteRefusal: Error {}
@@ -514,6 +530,10 @@ struct DirectChatSnapshot {
         snapshots[provider]?.isMutating = true; snapshots[provider]?.failure = nil
         writeIDs[provider] = receipt
         writes[provider] = Task { [weak self] in
+            // Unstructured tasks still start when already canceled. Recheck
+            // this write's ownership before constructing/sending any mutation.
+            guard self?.current(provider, target.generation) == true, self?.writeIDs[provider] == receipt else { return }
+            _ = self?.startedWrites.insert(receipt)
             do {
                 try await operation()
                 guard let self, self.current(provider, target.generation), self.writeIDs[provider] == receipt else { return }
@@ -544,6 +564,7 @@ struct DirectChatSnapshot {
                 self.snapshots[provider]?.notice = "No action is replayed automatically. Verify the provider before a deliberate manual retry."
             }
             guard let self, self.writeIDs[provider] == receipt else { return }
+            self.startedWrites.remove(receipt)
             self.snapshots[provider]?.isMutating = false; self.writeIDs[provider] = nil; self.writes[provider] = nil
         }
     }

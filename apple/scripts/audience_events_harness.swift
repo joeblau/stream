@@ -40,6 +40,21 @@ private func requireAudience(_ value: @autoclosure () -> Bool, _ reason: String)
         let runtime = workspace.runtime, chat = runtime.chat, preview = runtime.previewProgram
         preview.setDirectLiveEditing(false)
         defer { chat.shutdown(); runtime.interviews.shutdown(); runtime.controller.retireGuestMedia() }
+        // Exercise the same retained manager bound to native settings/sidebar
+        // and the actual guest status encoder, with nil validation credentials.
+        // No provider grant or network feed is created by this projection test.
+        let reader = chat.directChat!
+        reader.connect(.youtube, eventID: "owned-status-fixture")
+        requireAudience(chat.guestPublicAdapters["youtube"] == "connecting",
+                        "Guest public status hid the native reader authorization transition")
+        let statusWire = GuestPublicChatEnvelope.state(feed: UUID(), enabled: true, reset: 0, sequence: 0, dropped: 0,
+            adapters: chat.guestPublicAdapters, sources: chat.guestPublicSources,
+            sourcesTruncated: chat.guestPublicSourcesTruncated).wire(negotiation: UUID())!
+        let statusObject = try JSONSerialization.jsonObject(with: Data(statusWire.utf8)) as! [String: Any]
+        requireAudience((statusObject["adapters"] as? [String: String])?["youtube"] == "connecting",
+                        "Guest public encoder lost the shared native reader state")
+        reader.stop(.youtube)
+        requireAudience(chat.guestPublicAdapters["youtube"] == "offline", "Stopped native reader remained active in guest status")
         var scene = preview.stagedScene!
         scene.layers = []; scene.background = .solid(colorHex: "#000000")
         preview.applyStagedEdit(scene); _ = runtime.dispatcher.execute(.take)

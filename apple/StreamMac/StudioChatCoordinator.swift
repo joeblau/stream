@@ -145,7 +145,7 @@ enum StudioGuestPublicChatUpdate {
         for provider in [ManagedProvider.youtube, .twitch] {
             if let directChat {
                 let value = directChat.snapshot(provider)
-                result[provider.rawValue] = value.failure != nil ? "failed" : value.isConnected ? "connected" : "offline"
+                result[provider.rawValue] = value.publicReaderState
             } else { result[provider.rawValue] = "unavailable" }
         }
         return result
