@@ -19,7 +19,7 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
 /// Callers must retain the session until `waitUntilStopped()` completes and apply its required
 /// system-audio exclusions before any future production opt-in.
 @MainActor final class BrowserWidgetHelperSession {
-    enum SessionError: Error { case widgetLimit, unavailable }
+    enum SessionError: Error { case widgetLimit, unavailable, captureRetirementPending }
     struct Callbacks {
         var state: @MainActor (BrowserOverlayLoadState) -> Void
         var frame: @MainActor (CVPixelBuffer, BrowserWidgetVisualHeader) -> Void
@@ -55,12 +55,36 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
     private var launchTask: Task<Void, Error>?
     private var shutdownTask: Task<Void, Never>?
     private var shutdownID = UUID()
+    private var shutdownRunning = false
+    private struct ShutdownResources {
+        let connection: (any BrowserWidgetHelperTransport)?
+        let pages: [BrowserWidgetLocalContent.Snapshot]
+    }
+    private var shutdownResources: ShutdownResources?
+    private(set) var captureRetirementPending = false
+    private let helperOwnerID = UUID()
+    private var helperAdmission = false
+    private static var admittedHelpers: Set<UUID> = []
+    private static var retainedShutdowns: [UUID: BrowserWidgetHelperSession] = [:]
+    static let maximumAdmittedHelpers = BrowserWidgetAudioCommand.maximumWidgets * 2
+    static var admittedHelperCount: Int { admittedHelpers.count }
+    static var retainedShutdownCount: Int { retainedShutdowns.count }
+    /// Retained owners keep an explicit retry handle after external references go away.
+    @discardableResult static func retryRetainedShutdowns() async -> BrowserWidgetAudioStopResult {
+        let pending = retainedShutdowns
+        var confirmed = true
+        for (_, owner) in pending {
+            if await owner.retryPendingShutdown() == .unconfirmed { confirmed = false }
+        }
+        return confirmed ? .confirmed : .unconfirmed
+    }
     private var loadClaims: [UUID: UUID] = [:]
     private let localSession = UUID()
     private var localPages: [BrowserWidgetPageLease: BrowserWidgetLocalContent.Snapshot] = [:]
     private var localStaging = 0
     #if STREAM_NATIVE_VALIDATION
     var validationLocalContainer: URL?
+    var validationAfterLocalStaging: (@MainActor (BrowserWidgetLocalContent.Snapshot) async -> Void)?
     #endif
     private var audioTask: Task<Void, Never>?
     private var audioRevision = UUID()
@@ -152,6 +176,7 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
             let retiringShutdown = shutdownID
             await shutdownTask.value
             guard loadClaims[id] == claim else { throw CancellationError() }
+            guard !captureRetirementPending else { throw SessionError.captureRetirementPending }
             if shutdownID == retiringShutdown { self.shutdownTask = nil }
         }
         try Task.checkCancellation()
@@ -179,6 +204,9 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
             guard loadClaims[id] == claim, !Task.isCancelled else { try? staged?.retire(); throw CancellationError() }
             command.localPage = staged?.page
             do { try command.validate() } catch { try? staged?.retire(); throw error }
+            #if STREAM_NATIVE_VALIDATION
+            if let staged { await validationAfterLocalStaging?(staged) }
+            #endif
         }
         // A sibling can start shutdown while the off-main copy is running.
         // Re-enter the same serialized shutdown barrier before installing it.
@@ -186,6 +214,7 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
             let retiringShutdown = shutdownID
             await shutdownTask.value
             guard loadClaims[id] == claim, !Task.isCancelled else { try? staged?.retire(); throw CancellationError() }
+            guard !captureRetirementPending else { try? staged?.retire(); throw SessionError.captureRetirementPending }
             if shutdownID == retiringShutdown { self.shutdownTask = nil }
         }
         guard demands.count < BrowserWidgetAudioCommand.maximumWidgets else { try? staged?.retire(); throw SessionError.widgetLimit }
@@ -318,7 +347,9 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
             var staleMixerPreparations = 0
             while !Task.isCancelled, !demands.isEmpty || !retiredLeases.isEmpty {
                 let revision = audioRevision
-                await audio.stop()
+                guard await audio.stop() == .confirmed else {
+                    failSession("helper_audio_retirement_unconfirmed"); break
+                }
                 await mixer?.resetCaptureRouteHistory(channel)
                 guard !Task.isCancelled else { break }
                 if revision != audioRevision { continue }
@@ -421,11 +452,12 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
     }
 
     private func ensureLaunched() async throws {
-        if connection != nil { return }
+        if connection != nil { try reserveHelperAdmission(); return }
         if let launchTask { try await launchTask.value; return }
         // Fail before loading an audible page; preflight never requests or modifies permission.
         guard CGSessionCopyCurrentDictionary() != nil,
               !audio.requiresScreenCaptureAccess || CGPreflightScreenCaptureAccess() else { throw SessionError.unavailable }
+        try reserveHelperAdmission()
         let expected = epoch
         let task = Task {
             let connection = try await BrowserWidgetHelperConnection.launch(applicationURL: applicationURL, policy: ipcPolicy,
@@ -437,7 +469,16 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
         }
         launchTask = task
         do { try await task.value; launchTask = nil }
-        catch { launchTask = nil; throw error }
+        catch { launchTask = nil; if connection == nil { releaseHelperAdmission() }; throw error }
+    }
+    private func reserveHelperAdmission() throws {
+        guard !helperAdmission else { return }
+        guard Self.admittedHelpers.count < Self.maximumAdmittedHelpers else { throw SessionError.widgetLimit }
+        Self.admittedHelpers.insert(helperOwnerID); helperAdmission = true
+    }
+    private func releaseHelperAdmission() {
+        guard helperAdmission else { return }
+        Self.admittedHelpers.remove(helperOwnerID); helperAdmission = false
     }
     private func receive(_ reply: BrowserWidgetAudioReply, epoch expected: UUID) {
         guard expected == epoch, reply.helperPID == connection?.pid else { return }
@@ -532,20 +573,51 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
         loadedLeases = []; suspendedLeases = []; requestedProgramLeases = []
         pendingFrame?.timeout.invalidate(); pendingFrame = nil
         for continuation in evaluations.values { continuation.resume(returning: nil) }; evaluations.removeAll()
-        shutdownTask = Task { [self] in
-            launchTask?.cancel(); try? await launchTask?.value; launchTask = nil
-            let retiringConnection = connection
-            let pages = Array(localPages.values); localPages.removeAll()
-            // Authority is already revoked above, but the capture driver owns
-            // work against this exact helper PID until its stop completes.
-            // Join pending start/retirement before terminating the producer.
-            audioTask?.cancel(); await audioTask?.value; audioTask = nil
-            await audio.stop(); await mixer?.resetCaptureRouteHistory(channel)
-            await mixer?.removeChannel(channel)
-            try? retiringConnection?.send(.init(action: .close)); retiringConnection?.close()
-            if let retiringConnection, connection === retiringConnection { connection = nil }
-            BrowserWidgetLocalRetirement.retain(pages, until: { retiringConnection == nil || retiringConnection?.hasTerminated == true })
+        shutdownRunning = true
+        let expected = shutdownID
+        shutdownTask = Task { [self] in await finishShutdown(expected: expected) }
+    }
+    /// One explicit retry, coalesced with an already running attempt. A pending
+    /// native owner is not a completed shutdown and cannot admit a new load.
+    @discardableResult func retryPendingShutdown() async -> BrowserWidgetAudioStopResult {
+        if shutdownRunning { await shutdownTask?.value }
+        else if captureRetirementPending {
+            shutdownRunning = true
+            let expected = shutdownID
+            shutdownTask = Task { [self] in await finishShutdown(expected: expected) }
+            await shutdownTask?.value
         }
+        return captureRetirementPending ? .unconfirmed : .confirmed
+    }
+    private func finishShutdown(expected: UUID) async {
+        defer { if shutdownID == expected { shutdownRunning = false } }
+        guard shutdownID == expected else { return }
+        if shutdownResources == nil {
+            launchTask?.cancel(); try? await launchTask?.value; launchTask = nil
+            shutdownResources = .init(connection: connection, pages: Array(localPages.values))
+            localPages.removeAll()
+        }
+        guard let resources = shutdownResources else { return }
+        // Input/page authority was synchronously revoked before these awaits.
+        // The exact old helper remains owned until native stop is confirmed.
+        audioTask?.cancel(); await audioTask?.value; audioTask = nil
+        let stopped = await audio.stop()
+        guard shutdownID == expected else { return }
+        guard stopped == .confirmed else {
+            captureRetirementPending = true
+            audioUnavailableReason = "Independent browser audio is unavailable while capture retirement is unconfirmed. Retry cleanup before reloading."
+            Self.retainedShutdowns[expected] = self
+            return
+        }
+        await mixer?.resetCaptureRouteHistory(channel)
+        await mixer?.removeChannel(channel)
+        guard shutdownID == expected else { return }
+        let retiringConnection = resources.connection
+        try? retiringConnection?.send(.init(action: .close)); retiringConnection?.close()
+        if let retiringConnection, connection === retiringConnection { connection = nil }
+        BrowserWidgetLocalRetirement.retain(resources.pages, until: { retiringConnection == nil || retiringConnection?.hasTerminated == true })
+        shutdownResources = nil; captureRetirementPending = false
+        Self.retainedShutdowns[expected] = nil; releaseHelperAdmission()
     }
 }
 

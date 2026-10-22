@@ -146,10 +146,11 @@ private final class QueuedISO: @unchecked Sendable {
     }
     func releaseStart() { startContinuation?.resume(); startContinuation = nil }
     func invalidateInput() { inlet.invalidate() }
-    func stop() async {
+    func stop() async -> BrowserWidgetAudioStopResult {
         isCapturing = false; stops += 1
         generatedTask?.cancel(); await generatedTask?.value; generatedTask = nil
         await inlet.stop()
+        return .confirmed
     }
     func post(_ sample: CMSampleBuffer, generation: UUID? = nil) { inlet.post(sample, generation: generation ?? self.generation) }
 }
