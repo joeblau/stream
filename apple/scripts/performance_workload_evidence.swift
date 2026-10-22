@@ -26,8 +26,11 @@ struct PerformanceWorkloadCheck: Codable, Sendable {
         var checks: [Self] = [.check("nominalCompositorCapacity", rendered >= minimum,
             "Rendered \(rendered); required at least \(minimum) for \(fps) fps over \(seconds)s with the existing 5s allowance.")]
         if let source {
-            checks.append(.check("nominalReplayInputAvailability", source.framesDueBeforeGraceEnd >= minimum,
-                "Source has \(source.availableFrames) total frames, \(source.framesDueBeforeGraceEnd) due before the existing allowance; nominal requirement \(minimum)."))
+            // Availability uses the whole workload's input inventory. The
+            // five-second decoder grace below is not a second source-rate
+            // requirement (for example, a perfect 30fps rate through 595 seconds).
+            checks.append(.check("nominalReplayInputAvailability", source.availableFrames >= minimum,
+                "Source has \(source.availableFrames) total frames for the \(seconds)s workload; nominal requirement \(minimum). \(source.framesDueBeforeGraceEnd) frames are due before decoder grace ends."))
             checks.append(.check("actualSourceDecodeCadence", source.availableFrames > 0 && source.monotonic && decoded >= source.framesDueBeforeGraceEnd,
                 "Decoded \(decoded) actual frames; required \(source.framesDueBeforeGraceEnd) from compressed source timestamps. This does not qualify nominal \(fps) fps capacity."))
             checks.append(.check("nominalReplayDecodeCapacity", decoded >= minimum,
