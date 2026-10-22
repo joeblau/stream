@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Original 61 macOS issues:27 closed / 34 open (23 features / 11 trackers). Fresh complete paginated read-only inventory at 21:07:34 UTC accounts for all 135 macOS issues:101 closed / 34 open; all 74 outside the original inventory are closed, zero open PRs or other open issues. All 61 original bodies/states unchanged. No new closure.",
+  "scope": "Original 61 macOS issues: 27 closed / 34 open (23 features / 11 trackers). Fresh complete read-only inventory at 2026-10-22T21:41:26Z accounts for all 135 macOS issues: 101 closed / 34 open. All original bodies/states are unchanged; no outside-inventory open issue or open PR. No new closure.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -18,7 +18,7 @@
   },
   "validation": {
     "sharedCore": "Earlier fresh local full609 tests/83 suites PASS remains named evidence. New Twitch title suite separately compiles all 76 actual Core sources and passes 4 focused tests with an exact-test original CJK-only negative; full combined suite not rerun locally. Exact published e41 iOS609/83 PASS 190.578 s. Both Mac CI jobs remain active; no full run success asserted.",
-    "shippingApp": "Exact 4e17084 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS. All838 expanded source/recipe path/hash bindings and vendor independently match the exact built Git tree. Component fixture results remain bound to their named frozen sources; final app compilation does not relabel them as full combined runtime or provisioned acceptance.",
+    "shippingApp": "Shipping app/Core/vendor source at c0fae63 is unchanged from actual 4e17084 unsigned universal Release and bundle PASS. No new app build. The current 838-path manifest matches c0fae63; exactly three recipe hashes differ from the earlier build: CI, shared-encoder launcher and Swift fixture. The changed actual fixture was independently compiled/executed by its owner; not all 838 inputs are claimed identical to the old build.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -333,7 +333,9 @@
     },
     "wave17Isolation": "Reviewed actual owned resource/broker/publisher/converter/recording/optional-image/guest component proofs integrate into final universal App. Exact runtime boundaries, earlier failed controls, compiled-only Factory/ISO paths and no physical/network/sustained qualification are recorded in wave17Review.",
     "wave18PortableDurability": "Actual copied Workspace methods+ShowPackageIO pass catalog-read/recovery/precommit rollback/postcommit pruning/concurrent edit/cancellation/ambiguity/restart controls and all5read-race phases. Original-method recovery-refusal control fails as expected;4 generation tests pass. Independent109 bindings clear22 sources+32 artifacts. No full runtime/Finder/chooser/sandbox qualification.",
-    "wave19PortableSoundPad": "Historical actual imported/repaired pad AVAudioFile PCM2 chunks and nonzero Program 1 chunk each passed after original deletion. Former audio-only AVAssetReader/HAL blocker is resolved, not a current remaining requirement. Later playback delivery-clock changes have exact separate PCM/lifecycle evidence; old full graph is not relabelled current. Successful native keyboard chooser selection remains unqualified, no established lock/TCC cause."
+    "wave19PortableSoundPad": "Historical actual imported/repaired pad AVAudioFile PCM2 chunks and nonzero Program 1 chunk each passed after original deletion. Former audio-only AVAssetReader/HAL blocker is resolved, not a current remaining requirement. Later playback delivery-clock changes have exact separate PCM/lifecycle evidence; old full graph is not relabelled current. Successful native keyboard chooser selection remains unqualified, no established lock/TCC cause.",
+    "wave20SharedEncoderDiagnostics": "The original e41 ARM normal fixture passes; second software fixture exceeds its unchanged 90-second aggregate budget. Missing phase/receiver artifacts leave the wait and cause unresolved. Diagnostic-only instrumentation retains every old Swift line in order, original awaits/gates/feed pacing/deadline, adds durable phase/raw stdout/receiver-media capture and CI always-upload. One local actual software run passes in 20.83 seconds; 282 independent source/artifact checks clear. This is instrumentation smoke, not a CI reproduction, timeout-cleanup runtime test, throughput comparison or production fix.",
+    "wave20SupplementalInspection": "One unchanged original ProgramRecordingFixtures.inspect(url, expectedDuration: nil, checkSync: false) call on the exact retained Intel case-1 movie passes on local M3 Max in 31.905 seconds: 15,247 frames, duration about 600.049833 seconds. Original AVAssetReader path/no alternate decoder. Original Intel 1380-second failure and pending inspection remain historical failed/incomplete outcomes; no waveform, nominal-capacity, Intel completion or timeout-cause inference."
   },
   "issues": [
     {
@@ -1039,7 +1041,8 @@
         "Actual Program failed/attempt pressure is now separate from scheduler misses, with absent-versus-measured-zero intervals and fresh recovery windows. Twelve Core tests, exact coordinator/report-block probe and combined universal build pass. This optional preview policy correction does not repair render allocation, identify failure cause, qualify active-output isolation or complete original representative sustained/resource measurements.",
         "Process-wide measured raw-bank admission and independently backed broker/publisher/recorder/camera/optional/guest domains now have reviewed owned component proofs and combined d28 universal compile. Exposed banks remain charged; intentional footprint-plus-ceilings admission is conservative software policy, not hard memory/hardware capacity. Full representative sustained A/V/resource qualification and original 600 s failures remain open; component copies have costs not yet qualified.",
         "One named M3 Max/macOS 27.2 ARM original2 \u00d7 600 s workload now passes all 7+11unchangedchecks. This positive does not change any historical failure, qualify supported Intel/representative mixes or establish complete UI/A/V/resource ceilings; original issue remains open.",
-        "Exact e41 hosted original two 600 s ARM/Intel jobs both fail original capacity gates. ARM17148/17020, Intel16988/15248; actual-source replay decoding passes but nominal replay requirements are dependent on sparse static recordings. Intel second inspection was incomplete at original1380 s teardown, not running or eventually passed. Endpoint alignment does not prove sustained80 ms or waveform sync; causal mechanism unknown."
+        "Exact e41 hosted original two 600 s ARM/Intel jobs both fail original capacity gates. ARM17148/17020, Intel16988/15248; actual-source replay decoding passes but nominal replay requirements are dependent on sparse static recordings. Intel second inspection was incomplete at original1380 s teardown, not running or eventually passed. Endpoint alignment does not prove sustained80 ms or waveform sync; causal mechanism unknown.",
+        "A one-time supplemental M3 Max inspection of the exact retained Intel case-1 movie passes the unchanged original inspect(nil,false) boundary in 31.905 seconds. It does not change original Intel deadline failure, incomplete inspection, nominal capacity deficit or waveform/UI/resource scope."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -1078,7 +1081,8 @@
         "PERFORMANCE_OWNED_ARM_1BA7351.md",
         "PERFORMANCE_OWNED_ARM_1BA7351_2026-10-22.json",
         "/tmp/stream-performance-e41fa06-terminal-report-20261022.json",
-        "/tmp/stream-performance-e41fa06-arm-analysis-20261022/analysis.json"
+        "/tmp/stream-performance-e41fa06-arm-analysis-20261022/analysis.json",
+        "/tmp/stream-performance-intel-case1-supplemental-receipt-20261022.json"
       ]
     },
     {
@@ -1332,11 +1336,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap:27 of 61 original issues closed / 34 open. Exact 4e17084 generation, unsigned universal arm64+x86_64 Release and bundle PASS with838-path expanded source/recipe set and vendor verified. Scoped Twitch title/public notices, YouTube gift events, guest device choices and unconfirmed camera/browser retirement proofs pass at named sources; no original feature closes. Genuine scene AX/key baselines and Elgato importer remain unqualified without inferred lock/TCC cause. Historical full imported/repaired pad AVAudioFile PCM+Program proof is valid; current playback-source drift is explicit, successful keyboard chooser remains open. Exact e41 hosted sustained ARM/Intel bothFAIL:nominal capacity missed and Intel second inspection incomplete at original1380 s teardown. Native e41 CI remains active with iOS609/83 PASS; no whole-run success. Historical wave objects, all 61states and failed receipts preserved.",
-  "integratedMain": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
-  "githubStateRefreshedAt": "2026-10-22T21:07:34Z",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open. Diagnostic-only c0fae63 changes exactly three validation recipes; shipping app/Core/vendor remain identical to the exact 4e17084 universal/bundle PASS. Current 838-path manifest verified, with three changed recipes explicitly distinguished from the old build. One local full software fixture passes after sparse phase/artifact instrumentation, not a hosted-timeout reproduction or cure. Original e41 ARM native CI fails step 14 at its original 90-second aggregate deadline; full Core 609/83 and controller/PCM step 10 pass. Intel remains active in step 11. f05 browser foundation passes; native f05 is pending. Supplemental exact original Intel movie inspection on M3 Max passes separately; original hosted 1380-second failure, incomplete inspection and capacity deficits remain unchanged. No closure or new original feature qualification; historical wave objects/states preserved.",
+  "integratedMain": "c0fae6383e24ab4d571126e4701bd27bbecab264",
+  "githubStateRefreshedAt": "2026-10-22T21:41:26Z",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "e41fa06bae39ba14f3767a7bf3f92537f66b6313",
+  "publishedIntegration": "f05bc046bd9902ec58a7532d03426535f8671ecf",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1356,7 +1360,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+  "currentReviewBase": "c0fae6383e24ab4d571126e4701bd27bbecab264",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -5480,5 +5484,143 @@
       "intelInspectionStatus": "13 PASS / 4 FAIL / 1 PENDING retained. Both writers complete; second inspection terminally incomplete at original deadline. Native child final exit not separately observed; launcher exit 1."
     },
     "limits": "No newclosure. All historical wave objects,61states and failed receipts unchanged. Componentproofs scoped to named snapshots, final combined build not a full runtime repeat. No remote write/native run by ledger agent."
+  },
+  "wave20Review": {
+    "currentLocalHead": "c0fae6383e24ab4d571126e4701bd27bbecab264",
+    "publishedMainAtSnapshot": "f05bc046bd9902ec58a7532d03426535f8671ecf",
+    "githubAudit": {
+      "recordedAt": "2026-10-22T21:41:26Z",
+      "inventory": {
+        "path": "/tmp/stream-wave20-macos-inventory-20261022.json",
+        "bytes": 4105571,
+        "sha256": "fd5777076b14cd349ac0096fd7999df4170338047851eb417d6aa84497e11408"
+      },
+      "originalCriteriaReview": {
+        "path": "/tmp/stream-wave20-closure-audit-20261022.json",
+        "bytes": 27623,
+        "sha256": "f2087ab3ccb85ae53840e460f1693b717b65bca2670993eea073979b67a08dd5"
+      },
+      "counts": {
+        "original61": {
+          "closed": 27,
+          "open": 34
+        },
+        "allMacOS": {
+          "closed": 101,
+          "open": 34
+        },
+        "openPRs": 0
+      },
+      "all61BodiesAndStatesEqualPrior": true,
+      "outsideOriginal61Open": [],
+      "openPRs": [],
+      "additionalClosures": [],
+      "all11OpenTrackersHaveIncompleteChildren": true
+    },
+    "productionIdentity": {
+      "manifest": {
+        "path": "/tmp/stream-wave20-diagnostic-production-manifest-20261022.json",
+        "bytes": 103028,
+        "sha256": "3da9871c3d6141ce2c8d529140bb3382d670063e9f15c231b6ccd7248d577f97"
+      },
+      "verification": {
+        "path": "/tmp/stream-wave20-ledger-source-verification-20261022.json",
+        "bytes": 565,
+        "sha256": "8c17b898e52ed1284f388bc7e90c38f8b2cc5d9fc341f6b9f42e251ee5bf9b13"
+      },
+      "paths": 838,
+      "shippingAppBuildSource": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+      "shippingAppCoreVendorUnchanged": true,
+      "newAppBuild": false,
+      "changedValidationRecipes": [
+        ".github/workflows/ci.yml",
+        "apple/scripts/run_shared_encoder_harness.zsh",
+        "apple/scripts/shared_encoder_harness.swift"
+      ],
+      "all838EqualToOldBuild": false,
+      "scope": "Current manifest verifies every selected c0fae63 path/hash. The prior app build is reused only for unchanged shipping inputs. Changed actual fixture owner compile/runtime is independently bound below."
+    },
+    "diagnosticFixture": {
+      "ownerCommit": "f0267e28cb94e343059f6bc0411b21f4928ca427",
+      "receipt": {
+        "path": "/tmp/stream-shared-encoder-timeout-diagnostics-receipt-20261022.json",
+        "bytes": 31357,
+        "sha256": "14b719f70860adc88920050b0fbcc9c8e5cc59d94ca5a11da4a1f2c1490976ed"
+      },
+      "report": {
+        "path": "/tmp/stream-shared-encoder-timeout-diagnostics-report-20261022.md",
+        "bytes": 4935,
+        "sha256": "59179488588f2ad92eda152d0a0b11aa3d9c1d2b7155047339ee9ec22d0af32a"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-shared-encoder-diagnostic-final-independent-review-20261022.json",
+        "bytes": 20081,
+        "sha256": "d3339c6bf93d7c9c5dec7b12c700bf46ca218145eb78419ec34e56bbfd91134a"
+      },
+      "readableReview": {
+        "path": "/tmp/stream-shared-encoder-diagnostic-final-independent-review-20261022-readable.md",
+        "bytes": 1904,
+        "sha256": "fe49eff54796cf6c810fce12973ba246a32ed1ffb0ed07f3abd0cecc675d0eac"
+      },
+      "proof": "282 read-only checks bind 27 source/artifact/log files, 16 native/fixture inputs, 76 Core inputs, 121 copied vendor inputs, actual binaries and exact extracted launcher. Every original Swift line remains ordered; 89 diagnostic lines add sparse monotonic phases without new awaits or workload/gate changes. Direct unbuffered native stdout and raw-FD echo avoid CI backpressure; receiver/media custody and always-upload added. Absolute 90-second budget and existing TERM/5-second/KILL remain.",
+      "localRuntime": "One actual full --software invocation, no codec-only/alternate decoder: exit 0, not timed out; native-main 20.829456 seconds, launcher 21.42 seconds, localhost 6.799297 seconds. Original actual RTMP/SRT 100-frame decoded media/stop assertions pass; 58 phase records and all seven critical BEGIN/END pairs retained, child PIDs absent.",
+      "limits": "M3/local instrumentation smoke only; not hosted CI reproduction, resolution or throughput comparison. Dynamic timeout cleanup was not triggered. No production change, additional benchmark or fixture rerun by reviewer/ledger agent."
+    },
+    "originalE41NativeCI": {
+      "source": "e41fa06bae39ba14f3767a7bf3f92537f66b6313",
+      "run": 39849105419,
+      "armFailure": {
+        "path": "/tmp/stream-ci-e41fa06-arm-failure-report-20261022.json",
+        "bytes": 11234,
+        "sha256": "d57cab7f19d9811d0484eb12d34b882c584de39b43ddf1acd0d3a59c0e1d5d30"
+      },
+      "snapshot": {
+        "path": "/tmp/stream-wave20-original-e41-ci-snapshot-20261022.json",
+        "bytes": 34243,
+        "sha256": "6705524b500e0d652d91fc1505e2738c3623d90c525048a38a7dca6f17eecae3"
+      },
+      "recordedAt": "2026-10-22T21:43:13.648236+00:00",
+      "state": "ARM terminal FAILURE in step 14; Intel remains active in step 11; iOS success. Not whole-run success.",
+      "armFacts": "Full Core: 609 tests across 83 suites PASS in 114.954 seconds. Controller/PCM step 10 passes; annotation step 17 not reached. Normal fixture passes before software invocation exceeds original 90-second total. Prior packet/codec/lifecycle checks pass and final observed RTMP handshake does not identify an exact await or cause. Original uploaded artifact contains no receiver logs/media.",
+      "intelFacts": "Controller step 10 completion is confirmed by original job status; original detailed stdout/report was pending at the parent observation. No unobserved per-constituent result inferred."
+    },
+    "f05BrowserFoundation": {
+      "receipt": {
+        "path": "/tmp/stream-browser-f05bc04-original-receipt-20261022.json",
+        "bytes": 739,
+        "sha256": "16dec4c1984443af16aae66e4c8559790d283d53b616e0e3a1622cacbacee7ce"
+      },
+      "run": 39855898355,
+      "result": "SUCCESS: 21 Worker tests, 58 browser-client tests and actual synthetic headless Chrome. This source differs from old e41 foundation counts; no real device, native guest media or A/V qualification."
+    },
+    "queuedF05Native": {
+      "run": 39855898463,
+      "snapshot": {
+        "path": "/tmp/stream-wave20-queued-f05-ci-snapshot-20261022.json",
+        "bytes": 13386,
+        "sha256": "42f454d9a4f9d17488bca09216155adefa9d99b87614e6a66accbb7fc1392fed"
+      },
+      "recordedAt": "2026-10-22T21:43:36.855980+00:00",
+      "state": "pending",
+      "scope": "Pending behind the active main concurrency group at retained snapshot; latest pending main may be replaced automatically by publication. No manual cancellation/retry or every-commit/FIFO promise."
+    },
+    "supplementalIntelMovie": {
+      "receipt": {
+        "path": "/tmp/stream-performance-intel-case1-supplemental-receipt-20261022.json",
+        "bytes": 6165,
+        "sha256": "d99f716ae1e2eeebd6dfb5729b26d41c5aeb40ff822ca52b862812df90286210"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-performance-intel-case1-supplemental-independent-review-20261022/review.json",
+        "bytes": 2075,
+        "sha256": "67269d80311fc31a173663d97a2d550029b407d76e7da07644d6018699a8fc18"
+      },
+      "inputMovieSHA256": "0d9e3e726d9f38060c8483adb1db8b9206efbef065bdd8146c1709accea9a044",
+      "inspectorCall": "ProgramRecordingFixtures.inspect(url, expectedDuration: nil, checkSync: false)",
+      "result": "One exact original-file extraction and unchanged inspector compilation/runtime. Local M3 Max PASS in 31.905076 seconds; 15,247 frames and duration 600.049833 seconds. No waveform check, nominal frame-capacity or absolute 600-second requirement added.",
+      "review": "41 independent checks and 13 output-file bindings. Entire original fixture exact-e41; original AVAssetReader video/PCM path and no override retained.",
+      "limits": "Original Intel 1380-second deadline failure and incomplete case-1 inspection remain unchanged. Supplemental local readability/EOF result does not prove later Intel completion, timeout cause, capacity or waveform synchronization."
+    },
+    "limits": "No issue closure/new original feature acceptance. All prior wave objects, 61 issue states and original failed receipts preserved. Ledger work is read-only evidence analysis plus two documentation edits; no native execution, API mutation or publication."
   }
 }
