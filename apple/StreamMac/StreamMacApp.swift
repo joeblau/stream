@@ -64,6 +64,9 @@ struct StreamMacApp: App {
         .defaultSize(width: 1440, height: 900)
         .windowResizability(.contentMinSize)
         .commands {
+            let commandRuntime = workspace.runtime
+            SceneBrowserReorderingCommands(store: commandRuntime.sceneStore, dispatcher: commandRuntime.dispatcher,
+                                           isCurrentRuntime: { workspace.runtime === commandRuntime })
             // S12 (issue #75): undo/redo for scene edits, routed through the
             // dispatcher like every studio action. The labels name the edit
             // ⌘Z / ⇧⌘Z would apply ("Undo Move Layer").

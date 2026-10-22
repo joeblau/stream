@@ -263,6 +263,7 @@ struct SceneBrowserView: View {
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         .tag(scene.id)
+        .accessibilityActions { sceneReorderingActions(scene) }
         .onDrag {
             NSItemProvider(object: scene.id.rawValue.uuidString as NSString)
         }
@@ -385,6 +386,7 @@ struct SceneBrowserView: View {
             }
             .contentShape(Rectangle())
         }
+        .accessibilityActions { sceneReorderingActions(scene) }
         .onDrag {
             NSItemProvider(object: scene.id.rawValue.uuidString as NSString)
         }
@@ -488,6 +490,11 @@ struct SceneBrowserView: View {
             dispatcher.execute(.setSceneLocked(scene.id, locked: !locked))
         }
         Divider()
+        Button("Move Earlier") { moveScene(scene.id, direction: .earlier) }
+            .disabled(!canMoveScene(scene.id, direction: .earlier))
+        Button("Move Later") { moveScene(scene.id, direction: .later) }
+            .disabled(!canMoveScene(scene.id, direction: .later))
+        Divider()
         Menu("Move to Folder") {
             ForEach(sceneStore.folders) { folder in
                 Button(folder.name) {
@@ -535,6 +542,24 @@ struct SceneBrowserView: View {
     }
 
     // MARK: - Helpers
+
+    @ViewBuilder
+    private func sceneReorderingActions(_ scene: Scene) -> some View {
+        if canMoveScene(scene.id, direction: .earlier) {
+            Button("Move scene \(scene.name) earlier") { moveScene(scene.id, direction: .earlier) }
+        }
+        if canMoveScene(scene.id, direction: .later) {
+            Button("Move scene \(scene.name) later") { moveScene(scene.id, direction: .later) }
+        }
+    }
+
+    private func canMoveScene(_ id: SceneID, direction: SceneBrowserReordering.Direction) -> Bool {
+        SceneBrowserReordering.canMove(id, direction: direction, in: sceneStore, dispatcher: dispatcher)
+    }
+
+    private func moveScene(_ id: SceneID, direction: SceneBrowserReordering.Direction) {
+        SceneBrowserReordering.move(id, direction: direction, in: sceneStore, dispatcher: dispatcher)
+    }
 
     private var filteredScenes: [Scene] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
