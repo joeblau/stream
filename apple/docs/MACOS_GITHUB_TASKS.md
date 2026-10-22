@@ -1098,3 +1098,88 @@ or overlooked open tasks. Each open tracker still has incomplete children.
 No additional closure is justified. Earlier source-scoped receipts, failed
 qualification gates and issue states are preserved; this update adds no new
 acceptance requirement and performs no issue write or publication.
+
+## Independently backed raw delivery and controlled CI repairs — 2026-10-22 UTC
+
+Exact local `d28e726` passes generation, unsigned universal arm64/x86_64 Release
+and the actual bundle audit. All **775 source/recipe paths**, vendor and three
+check-log bindings match the final source. The expanded scope now includes every
+workflow; its count differs from earlier manifests. `wave17Review` in
+[the ledger](MACOS_TASK_STATUS.json) binds the final component reviews and proof
+receipts. Published main is still `30f2209` at this snapshot.
+
+The owned pool oracle falsifies generic all-buffer-checkout refunds when bare
+IOSurface/Metal aliases survive. Process-wide admission therefore measures actual
+backing and conservatively charges fresh footprint plus every committed bank
+ceiling plus proposed storage. Exposed generations stay charged after retirement;
+never-exposed rollback waits for actual pool detachment. This is an explicit
+software policy, with intentional resident double-counting, not free RAM, a
+process hard cap or hardware capacity. Eleven pure tests and owned native pool,
+claim, rollback and healthy-lock controls pass. See [resource admission](RAW_VIDEO_RESOURCE_ADMISSION.md).
+
+The [broker](FRAME_DELIVERY_BROKER.md) keeps source capacity four while independent
+raw recipients receive completed private copies/conversions. Queued work carries
+publication identity, not original samples. Actual retained-holder tests keep
+healthy delivery through all 12 renders; changing only detached output back to
+original storage causes four renders/eight failures. A separate publication-ID
+negative catches restart sequence reuse. Lifecycle, fractional geometry and six
+clock checks pass; historical control artifacts keep their original scopes.
+
+- [Publishers](PUBLISHER_PRIVATE_FRAME_INGRESS.md) admit one private domain per raw
+  destination or actual shared encoder group, before factories and installation
+  ACK. Actual inert-controller tests cover retained private samples, healthy
+  sibling delivery, cancellation, managed authority and claim cleanup. Separate
+  actual codec-only VT/AAC/file-decode evidence excludes transports and names its
+  explicit offline PCM mode; it is not provider/network qualification.
+- Camera conversion passes owned source/private-bank, queue-full cadence, drain
+  and old-ACK controls with selected CMIO effects inert. Its retained component
+  broker predates the publication-ID fix; it is not the final source-isolation
+  matrix or an installed-extension/device proof. The actual controller/UI routes
+  are source-reviewed and compiled in the final app.
+- [Recording](RECORDING_PRIVATE_VIDEO_INGRESS.md) retains its decimal-byte queue
+  policy, with Program Q+5 and direct ISO Q+2 private storage. Actual writer/router
+  media preserves pixels, paint receipts and timing through mutation, drops,
+  rotation and Stop. The raw-enqueue negative decodes 24 mutated frames and traps;
+  its classifier lacks assertion text and exits 1, so it remains incompletely
+  classified. The actual controller passes Program/isolated-audio and held-install
+  Pause/Stop/retry cases with an inert generated inlet. **SourceFactory and selected
+  ISO-video worker runtime are not exercised by these proofs.** Final compilation
+  does not substitute for that pending runtime evidence.
+- [Optional images](OPTIONAL_FRAME_IMAGE_DELIVERY.md) use admitted private banks
+  and one-pending UI handoff. In the actual synthetic Engine proof, five retained
+  images fill the private bank while all 18 renders succeed at source cap four;
+  old pixels survive retirement and replacement receives a fresh bank. Primitive
+  external-controller tests use injected surfaces; real windows/displays and full
+  StreamController runtime are not qualified.
+- [Guest returns](GUEST_RETURN_FRAME_DELIVERY.md) pass five owned BGRA/VT resource
+  cases and three actual Sink late-ACK/owner-cleanup cases, with an effective
+  old-guard negative. Serial Sender codec-close ordering is source-reviewed,
+  not executed Sender/RTC drain. No normal return PCM/AEC/A/V acceptance follows;
+  **#127 stays open**.
+
+The [offline PCM repair](PCM_DELIVERY_TIMING_DIAGNOSIS.md) uses a fresh serialized
+delivery clock to remove only expired leading native frames, preserving surviving
+bytes, format, duration and source PTS offset. An owned postdecode stall makes the
+old code fail its unchanged PTS bound; the first fixed full fixture passes, with
+exact ramp-byte checks. The annotation fixture now requires exactly one real
+segmented control and two switches; 192 cases and a missing-picker negative pass.
+Original hosted PCM constituent and annotation types/count/case remain unknown.
+No local fix is claimed to establish either original hosted cause.
+
+Both earlier native runs are now terminal **FAILURE**. C90 `39764965913` fails
+both Mac recovery-account fixtures; all Core suites separately pass 588 / 82.
+Published `30f2209` run `39776430822` fails ARM annotation step 17 and Intel PCM
+step 10; Core separately passes **596 / 82** on ARM (96.186 s), Intel (313.463 s)
+and iOS (287.452 s), with the iOS job successful. Original logs/artifacts and
+unreached later steps remain bound. No new unpublished-head CI result is claimed;
+a future queue/run can exist only after publication.
+
+The fresh **14:05:53 UTC** audit confirms **27 closed / 34 open** in the original
+61, all body/state hashes unchanged. All 135 macOS issues are accounted for:
+101 closed / 34 open; no outside-inventory open task or open PR. No closure is
+justified. These bounded isolation and lifecycle proofs do not qualify complete
+operator/AX/contrast flows, live capture/devices/providers or original
+representative sustained A/V/resource targets. **#90 and #92 remain open**, with
+all historical failed gates preserved. Source-only performance-fixture capacity
+migration and a new actual Factory/ISO-worker runtime proof are pending and are
+not credited here. This documentation performs no API write, runtime or publication.
