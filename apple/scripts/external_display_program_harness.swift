@@ -56,6 +56,9 @@ import UniformTypeIdentifiers
         let controller = StreamController(sceneStore: store, previewProgram: preview, permissions: PermissionsManager(), externalDisplayScreens: { [target] }, externalDisplaySurface: { display in
             let value = NativeExternalDisplaySurface(display: display); surface = value; return value
         })
+        try require(!controller.resilience.isLocked && !controller.resilience.requiresManualRestart,
+            "Owned external-display workload must explicitly start unlocked without host lifecycle observation")
+        print("Owned fixture lifecycle: explicit unlocked initial state; generated coordinator has no system observers")
         let output = controller.externalDisplayOutput; output.selectedDisplayID = target.id; output.feed = .clean
         defer { output.stop(); controller.stopPreview(); controller.stopStream() }
         let windows = NSApplication.shared.windows.count
