@@ -98,7 +98,7 @@ private final class FractionProbe: @unchecked Sendable {
         let programURL = path.appendingPathComponent("program.mp4"), isoURL = path.appendingPathComponent("associated.mp4")
         let program = ProgramRecordingSession(outputURL: programURL, configuration: config, timeline: timeline)
         let source = IsolatedVideoSource(makeRenderer: {
-            { size, pts, duration, _, _ in .init(sample: try? video(pts: pts, duration: duration, size: size), sourceAvailable: true) }
+            .init { size, pts, duration, _, _, _ in .init(sample: try? video(pts: pts, duration: duration, size: size), sourceAvailable: true) }
         })
         let isolated = IsolatedVideoRecorder(outputURL: isoURL,
             selection: .init(targetID: "fractional", name: "Owned Fractional PCM", frameRate: 15, audioTargetID: "bus.program"),
