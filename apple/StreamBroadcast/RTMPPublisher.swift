@@ -188,6 +188,11 @@ actor RTMPPublisher: Publisher {
     private var pathSupervisorTask: Task<Void, Never>?
     private var handoffDebounceTask: Task<Void, Never>?
     private var pathLossDebounceTask: Task<Void, Never>?
+    /// Path observation and debounce tasks must stay free to consume the next
+    /// route update while recovery parks or retries. Only stop cancels this
+    /// owner; replacing a debounce must not cancel a live reconnect loop.
+    private var recoveryTask: Task<Void, Never>?
+    private var recoveryTaskID: UUID?
     private var currentPath: NetworkPathSnapshot?
     private var lastPathChangeAt: UInt64 = 0
     private var lastPathLostAt: UInt64 = 0
@@ -548,6 +553,23 @@ actor RTMPPublisher: Publisher {
         return waited
     }
 
+    private func launchRecovery(reason: String, immediately: Bool = false) {
+        guard !recoveryInProgress, recoveryTask == nil else { return }
+        let owner = UUID()
+        recoveryTaskID = owner
+        recoveryTask = Task { [weak self] in
+            await self?.performPathRecovery(owner: owner, reason: reason, immediately: immediately)
+        }
+    }
+
+    private func performPathRecovery(owner: UUID, reason: String, immediately: Bool) async {
+        defer {
+            if recoveryTaskID == owner { recoveryTask = nil; recoveryTaskID = nil }
+        }
+        guard recoveryTaskID == owner else { return }
+        await requestRecovery(reason: reason, immediately: immediately)
+    }
+
     /// Reacts to every NWPathMonitor emission. Supervisor discipline: this never
     /// touches the single-continuation status streams; all recovery funnels
     /// through the existing requestRecovery/reconnect machinery, so proactive
@@ -622,8 +644,8 @@ actor RTMPPublisher: Publisher {
                 // happens after the 1.5s confirmPathLost debounce, so a survived
                 // blip keeps streamAttached==true here.
                 if !streamAttached || !connected {
-                    await requestRecovery(reason: "network path restored (\(snapshot.linkIdentity))",
-                                          immediately: true)
+                    launchRecovery(reason: "network path restored (\(snapshot.linkIdentity))",
+                                   immediately: true)
                 }
             }
             return
@@ -676,8 +698,8 @@ actor RTMPPublisher: Publisher {
             _ = try? await connection.close()
             return
         }
-        await requestRecovery(reason: "network path changed (\(expectedIdentity))",
-                              immediately: true)
+        launchRecovery(reason: "network path changed (\(expectedIdentity))",
+                       immediately: true)
     }
 
     private func wakeBackoff(resetDelay: Bool) {
@@ -1035,6 +1057,9 @@ actor RTMPPublisher: Publisher {
         handoffDebounceTask = nil
         pathLossDebounceTask?.cancel()
         pathLossDebounceTask = nil
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        recoveryTaskID = nil
         // The reconnect loop's backoff sleep and path parking are unstructured;
         // wake both explicitly so the loop observes userInitiatedStop and exits.
         backoffSleepTask?.cancel()
