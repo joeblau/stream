@@ -689,7 +689,6 @@
               "wallMeanMilliseconds": 28.35826232129327,
               "observedReturnLatenessMeanMilliseconds": 14.553971787810381,
               "observedReturnLatenessMaxMilliseconds": 66.909403,
-              "returnLatenessAbove33ms": 46,
               "returnToNextDispatch": {
                 "count": 443,
                 "maximum": 2.527541666665911,
@@ -705,6 +704,10 @@
                 "minimum": 0.002166666661196359,
                 "over33ms": 0,
                 "over50ms": 0
+              },
+              "returnLatenessAboveFrameInterval": {
+                "thresholdMilliseconds": 33.333333333333336,
+                "count": 46
               }
             },
             "skipBodyDurationClassification": {
@@ -845,7 +848,6 @@
               "wallMeanMilliseconds": 33.994584555827906,
               "observedReturnLatenessMeanMilliseconds": 18.143688823960876,
               "observedReturnLatenessMaxMilliseconds": 82.769426,
-              "returnLatenessAbove33ms": 83,
               "returnToNextDispatch": {
                 "count": 409,
                 "maximum": 3.1831666666448655,
@@ -861,6 +863,10 @@
                 "minimum": 0.0013333333299669903,
                 "over33ms": 0,
                 "over50ms": 0
+              },
+              "returnLatenessAboveFrameInterval": {
+                "thresholdMilliseconds": 33.333333333333336,
+                "count": 83
               }
             },
             "skipBodyDurationClassification": {
@@ -1513,7 +1519,6 @@
               "wallMeanMilliseconds": 20.419482589046336,
               "observedReturnLatenessMeanMilliseconds": 11.877155449315067,
               "observedReturnLatenessMaxMilliseconds": 66.904417,
-              "returnLatenessAbove33ms": 37,
               "returnToNextDispatch": {
                 "count": 365,
                 "maximum": 5.529483000145774,
@@ -1529,6 +1534,10 @@
                 "minimum": 0.0019199999314878369,
                 "over33ms": 0,
                 "over50ms": 0
+              },
+              "returnLatenessAboveFrameInterval": {
+                "thresholdMilliseconds": 33.333333333333336,
+                "count": 37
               }
             },
             "skipBodyDurationClassification": {
@@ -1679,7 +1688,6 @@
               "wallMeanMilliseconds": 15.480264799361093,
               "observedReturnLatenessMeanMilliseconds": 8.406258980582521,
               "observedReturnLatenessMaxMilliseconds": 71.360801,
-              "returnLatenessAbove33ms": 15,
               "returnToNextDispatch": {
                 "count": 309,
                 "maximum": 8.659289999968678,
@@ -1695,6 +1703,10 @@
                 "minimum": 0.0018390001059742644,
                 "over33ms": 0,
                 "over50ms": 0
+              },
+              "returnLatenessAboveFrameInterval": {
+                "thresholdMilliseconds": 33.333333333333336,
+                "count": 15
               }
             },
             "skipBodyDurationClassification": {
