@@ -172,6 +172,40 @@ actor PrivateIngressInstallGate {
         outputs.stopAll(); await settle { outputs.activeCount == 0 }
         print("PASS: delayed installation cannot start before ACK; synchronous ticket cancellation and exact old lease cleanup preserve replacement session")
     }
+    @MainActor static func revokedStartupAuthorization() async throws {
+        let healthy = PrivateIngressPublisher(), revoked = PrivateIngressPublisher()
+        var publishers = [healthy, revoked]
+        let outputs = DestinationOutputController(factory: { _ in publishers.removeFirst() })
+        let live = StreamDestination(name: "Already started peer"), waiting = StreamDestination(name: "Revoked preparing output")
+        var liveAuthority = true, waitingAuthority = true
+        require(outputs.start(live, settings: settings, sourceSize: CGSize(width: 16, height: 16),
+            authorization: { _ in liveAuthority }), "Live peer not admitted")
+        await settle { outputs.states[live.id] == .live }
+        liveAuthority = false // changing startup authority must not stop LIVE
+        let base = outputs.frameDelivery, gate = PrivateIngressInstallGate()
+        outputs.frameDelivery.install = { token, domain, generation, bank, sourceBank, sourceReceipt, transfer, canvas, cancellation, authorized, sink in
+            await gate.waitOnce()
+            return try await base.install(token, domain, generation, bank, sourceBank, sourceReceipt, transfer, canvas, cancellation, authorized, sink)
+        }
+        require(outputs.start(waiting, settings: settings, sourceSize: CGSize(width: 16, height: 16),
+            authorization: { [weak outputs] generation in
+                waitingAuthority && outputs?.sessionToken(waiting.id) == generation
+            }), "Preparing peer not admitted")
+        await settle { await gate.entered }
+        waitingAuthority = false
+        await gate.release()
+        await settle { outputs.states[waiting.id] == .idle }
+        let deniedStarts = await revoked.starts
+        require(deniedStarts == 0, "Revoked startup authority crossed publisher.start after held install")
+        outputs.fanout.enqueueVideo(try sample(42))
+        await settle { await healthy.snapshot().times.last == 42 }
+        let liveStarts = await healthy.starts
+        require(outputs.states[live.id] == .live && liveStarts == 1,
+                "A later startup-authority change stopped or restarted an already-started peer")
+        outputs.stopAll(); await settle { outputs.activeCount == 0 }
+        print("PASS: held-install startup-authority revocation makes zero publisher starts; captured generation cleanup preserves healthy already-started output despite later authority change")
+    }
+
     @MainActor static func distinctTimingRepresentations() async throws {
         let publisher = PrivateIngressPublisher()
         let outputs = DestinationOutputController(factory: { _ in publisher })
@@ -211,6 +245,8 @@ actor PrivateIngressInstallGate {
         try await retentionIsolation()
         FileHandle.standardError.write(Data("BEGIN cancellationBeforeAcknowledgement\n".utf8))
         await cancellationBeforeAcknowledgement()
+        FileHandle.standardError.write(Data("BEGIN revokedStartupAuthorization\n".utf8))
+        try await revokedStartupAuthorization()
         FileHandle.standardError.write(Data("BEGIN distinctTimingRepresentations\n".utf8))
         try await distinctTimingRepresentations()
         FileHandle.standardError.write(Data("BEGIN atomicBatchAndCapability\n".utf8))
