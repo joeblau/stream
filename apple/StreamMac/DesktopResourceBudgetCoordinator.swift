@@ -12,6 +12,8 @@ struct DesktopResourceSnapshot: Codable, Sendable {
     var thermalState: Int
     var mainActorDelayMilliseconds: Double
     var metalAllocatedBytes: Int?
+    /// Optional for compatibility with reports written before render health.
+    var programHealth: DesktopProgramHealth?
 }
 
 struct DesktopMetalCapabilities: Codable, Sendable {
@@ -109,7 +111,7 @@ private actor DesktopResourceReportStore {
     private let store: DesktopResourceReportStore?
     private let metrics: @MainActor () async -> CompositionMetrics
     private let apply: @MainActor (DesktopResourceBudget.PreviewLevel) -> Void
-    private var previous: CompositionMetrics?
+    private var previous: DesktopProgramHealth.Counters?
     private var samples: [DesktopResourceSnapshot] = []
     private var task: Task<Void, Never>?
     init(reportURL: URL?, metrics: @escaping @MainActor () async -> CompositionMetrics,
@@ -129,14 +131,20 @@ private actor DesktopResourceReportStore {
                     guard let self else { return }
                     let current = await self.metrics()
                     guard !Task.isCancelled else { return }
-                    let sample = self.sampler.sample(mainActorDelayMilliseconds: max(0, ProcessInfo.processInfo.systemUptime - expected) * 1_000)
-                    let attempts = max(0, current.attempts - (self.previous?.attempts ?? current.attempts))
-                    let missed = max(0, current.missedDeadlines - (self.previous?.missedDeadlines ?? current.missedDeadlines))
-                    self.previous = current
+                    var sample = self.sampler.sample(mainActorDelayMilliseconds: max(0, ProcessInfo.processInfo.systemUptime - expected) * 1_000)
+                    let counters = DesktopProgramHealth.Counters(startedAt: current.startedAt,
+                        attempts: current.attempts, failed: current.failed, missedDeadlines: current.missedDeadlines)
+                    let health = DesktopProgramHealth.measure(counters, since: self.previous)
+                    self.previous = counters
+                    sample.programHealth = health
+                    // A counter lifecycle boundary cannot extend either a
+                    // pressure or recovery window across unrelated epochs.
+                    if health.isDiscontinuous { self.policy.resetObservations() }
                     let old = self.policy.level
                     let level = self.policy.update(.init(time: sample.uptime, cpuFraction: sample.cpuFraction,
                         physicalFootprintBytes: sample.physicalFootprintBytes ?? 0,
-                        programMissFraction: min(1, Double(missed) / Double(max(1, attempts + missed))), thermalState: sample.thermalState))
+                        programMissFraction: health.programMissFraction ?? 0, thermalState: sample.thermalState,
+                        programRenderFailureFraction: health.programRenderFailureFraction))
                     self.samples.append(sample); self.samples = Array(self.samples.suffix(120))
                     if level != old { self.apply(level) }
                     if let store = self.store, self.samples.count == 1 || Int(sample.uptime) % 30 == 0 || level != old {
