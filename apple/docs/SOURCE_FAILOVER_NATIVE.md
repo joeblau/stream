@@ -128,12 +128,17 @@ It checks decoded frame/sample counts against FFprobe timestamps and writes
 file. The default AVAssetReader path remains available. This mode changes no
 audio device or system audio service.
 
+The owned lifecycle fixture explicitly injects an initially unlocked session
+with system observers disabled at the generated controller's coordinator
+constructor. Production uses its additive initializer's normal real-session
+observation; the fixture cannot inherit the host's current lock state.
+
 The 2026-10-22 permission run on the named Mac15,8/M3 Max host passes all
-22 actual decoded windows, 469 frames over 15.635 seconds. Video/audio
-starts are both zero; durations are 15.635/15.63425 seconds. The blocked
-microphone-reset phase retains healthy audio at RMS 0.37116; microphone
-grant/regrant RMS is 0.09463/0.08943. Screen denial retains the independently
-healthy microphone at RMS 0.09847, while microphone denial and both-denied
+22 actual decoded windows, 468 frames over 15.633438 seconds. Video/audio
+starts are both zero; durations are 15.633333/15.633437 seconds. The blocked
+microphone-reset phase retains healthy audio at RMS 0.38164; microphone
+grant/regrant RMS is 0.09701/0.08839. Screen denial retains the independently
+healthy microphone at RMS 0.09895, while microphone denial and both-denied
 windows decode to exact zero despite continuing callbacks. All original
 fourteen source/privacy windows and thresholds also pass. The sanitized
 [measured receipt](PERMISSION_RESILIENCE_2026-10-22.json) records every phase.
