@@ -18,7 +18,7 @@
   },
   "validation": {
     "sharedCore": "Exact a1bb23d hosted full Core 588/82 PASS: ARM 105.135 s, Intel 162.553 s, iOS 200.147 s. Both paragraph probes and 40 offscreen row cases also pass. Every native CI step succeeds on both architectures at that named source; newer a9 native CI is separate and active. Physical/operator/sustained/distribution acceptance is not implied.",
-    "shippingApp": "Exact7419966 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS. This source includes explicit clock sleep tolerance:.zero; no new timing comparison or throughput qualification follows. Exact a1bb earlier native CI passes both architectures/iOS; newer a9 CI is separate. Shared Core source is unchanged by this clock-only production change.",
+    "shippingApp": "Exact 46153b1 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS. Current a428d23 changes one CI line only and preserves 317 production paths/vendor. Fixture 06b separately changes no production code; capture 461 changes actual production coordination with controlled-boundary proofs. No live SCK/helper/recapture/provider or whole new-source hosted qualification is inferred.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -280,7 +280,9 @@
     "wave11Settings": "Four Settings slider construction sites now use native operation names and unit-bearing accessibility values, with unavailable/nonfinite safety and an explicit Close settings label. Existing bindings/ranges/steps/dispatch/identity are unchanged. Actual source parse and parent exact77 universal build pass; parent reports independent pro_adapters source approval. No mounted semantic tree, keyboard/VoiceOver or visual contrast qualification follows.",
     "wave11OwnedRTC": "One repaired-wrapper owned EA null-output RTC diagnostic completes exit 77/UNQUALIFIED in 11.429 s at connection-wait; both ICE/connection states remain new. Both running 48 kHz null contexts and positive sender PCM do not establish networking: sender outbound Opus 0 packets / 0 bytes, receiver inbound/transport rows absent, receiver PCM zero. Original 12 s measurement is unreached. Retained trace counts are capped lowerbounds, bytecounter includes discarded batches; drained cleanup is independently verified. No retry, cause/native interop/normal output/AEC/timing qualification or relabel of prior failures.",
     "wave12NativeCI": "Exact a1bb23d run 39748453209 terminal SUCCESS, all 3 jobs. Actual Intel software low-latency -12902\u2192ordinary 0, 10 BGRA \u2192 10 H.264 \u2192 10 decoded red frames and actual Deck localhost H264/AAC+two independent recording segments pass. Shared RTMP/SRT and later native gates pass; explicit software second pass is not hardware throughput qualification. Earlier failed runs keep original conclusions.",
-    "wave12Attribution": "Exact a9 diagnostic 39757372776 terminal SUCCESS on ARM/Intel, one fixed 2x20 s invocation per job, source identity verified, qualification=false. All raw short checks pass 450-frame minimum, not original 17,850 / 600 s capacity. ARM 553/574 rendered vs Intel 528/565; writer samples match each rendered count while postwarm counters 531/544 and 517/535 are separate. Replay decoded 553/553 available ARM and 528/528 Intel. Intel static drops 16audio chunks; other writer drop counters zero. Original sustained failures remain unchanged; independent Intel event interpretation and new clock candidate proofs are pending."
+    "wave12Attribution": "Exact a9 diagnostic 39757372776 terminal SUCCESS on ARM/Intel, one fixed 2x20 s invocation per job, source identity verified, qualification=false. All raw short checks pass 450-frame minimum, not original 17,850 / 600 s capacity. ARM 553/574 rendered vs Intel 528/565; writer samples match each rendered count while postwarm counters 531/544 and 517/535 are separate. Replay decoded 553/553 available ARM and 528/528 Intel. Intel static drops 16audio chunks; other writer drop counters zero. Original sustained failures remain unchanged; independent Intel event interpretation and new clock candidate proofs are pending.",
+    "wave13EndingFixture": "Fixture-only 06b895a uses fresh same-client configure acceptance receipts in both replacement setups. Exact original behavior reproduces consumed-receipt CancellationError before stale-response/media phases; full corrected actual vault/account/ending/independent-media harness passes once with unchanged behavioral assertions. The source production gate is not weakened and fixture-only publication changes no production/Core/vendor code. No new issue closure or hosted retry success is inferred.",
+    "wave13CaptureExclusions": "Limited supported system-mix/pinned-display exclusions now await capture-owner filter installation, serial callback drain and own mixer-history reset, with runtime/helper PID/Program-demand/revision permits. Actual capture classes+mixer and actual session controlled-boundary tests pass; whole-source build-only passes. No live SCK/helper launch or real per-widget attribution/recapture/signing/container/A-V acceptance. Opaque/picker/window/direct-helper conflicts remain; productionRouteQualified false and normal selector/startup stay disabled."
   },
   "issues": [
     {
@@ -846,12 +848,15 @@
       "remaining": [
         "Public transparent PDF pixels, Program-only page leases/retirement, shared-channel retention, native mixer/ISO controls and stale-seed/queued-PCM fencing are implemented and locally verified. Production selector/startup remains disabled. Positive provisioned signed/sandboxed shared-container IPC, actual WebKit audio attribution/retirement/tails, acknowledged every-route recapture exclusion, permission/device lifecycle, new live same-page A/V and sustained multi-widget qualification remain required before enablement.",
         "Capture start/Stop resource authority is fixed: seven controlled actual-owner cases and silent sibling-page IPC pass, including final Stop retirement. These are lifecycle proofs; production enablement and original audible capture/routing requirements remain pending.",
-        "Fail-closed production shared-container and bidirectional signed-peer policy is now implemented and reviewed. Real kernel/SecCode ad hoc identity/refusal and silent validation IPC pass, but prototype policy cannot compile into shipped code. No macOS profile authorizes the declared group here; no positive provisioned/sandboxed launch or real browser audio/exclusion/sync acceptance is inferred. NoReady probes do not identify which prerequisite refused."
+        "Fail-closed production shared-container and bidirectional signed-peer policy is now implemented and reviewed. Real kernel/SecCode ad hoc identity/refusal and silent validation IPC pass, but prototype policy cannot compile into shipped code. No macOS profile authorizes the declared group here; no positive provisioned/sandboxed launch or real browser audio/exclusion/sync acceptance is inferred. NoReady probes do not identify which prerequisite refused.",
+        "Supported system-mix and pinned-display owner ACK/filter/drain/history coordination is implemented and controlled actual-class/mixer/session proofs pass. Missing/retiring/failed/unsupported routes remain explicit conflicts. No live every-route recapture, actual WebKit attribution/tails, signed provisioned container launch or local HTML/subresources is qualified; selector/startup remain disabled. This partial software progress does not satisfy all three original criteria."
       ],
       "evidence": [
         "research/browser-widget-audio.md",
         "/tmp/stream-wave6-browser-shared-ipc-report-20261022.md",
-        "/tmp/stream-wave6-browser-shared-ipc-audit-20261022.md"
+        "/tmp/stream-wave6-browser-shared-ipc-audit-20261022.md",
+        "BROWSER_CAPTURE_EXCLUSIONS.md",
+        "BROWSER_CAPTURE_EXCLUSIONS_2026-10-22.json"
       ]
     },
     {
@@ -926,7 +931,8 @@
         "Retained exact9881359 hosted 600 s run 39735454725 still fails both nominal capacity gates: ARM 17252/17306 and Intel 17232/16434 versus 17,850. ARM decodes 17251/17252 replay frames; Intel 17232/17232. All writers finish with zero A/V drops, but Intel second inspection was incomplete/UNQUALIFIED at owned 1380 s teardown; raw pending is its last persisted state, not a currently running inspection. Endpoint <80 ms is not independent waveform sync; no unresolved inspection success/cause or newer 2ea819a sustained qualification is inferred.",
         "Opaque composition-clock authority now rejects retired ticks/skips after stop/restart/output changes; deterministic actual engine cases and negative controls prove lifecycle fencing, not sustained throughput. One generated-only 20 s trace from 787 records static 600/601 and replay 601/601 rendered/attempted, two 600-frame writer movies, and 599/600 replay source frames decoded. It does not reproduce hosted whole skips or qualify capacity; generated clock-compatibility changes are not a new trace.",
         "The reviewed manual fixed ARM/Intel two 20 s attribution workflow has now completed one a9 dispatch successfully. Its source/hash-bound short checks do not qualify sustained capacity; original 600 s / 17,850 frames / 80 ms / 1380 s gates and retained failures are unchanged. The earlier undispatched snapshot remains historical evidence.",
-        "New a9 fixed 2x20 s attribution jobs succeed all short raw checks with 450-frame minimum, but do not qualify original 600 s / 17,850-frame capacity. Actual per-architecture renders/writer/postwarm/source-decode counters remain distinct; Intel static writer drops 16audio chunks. Old 600 s Intel final decode inspection is terminally incomplete/UNQUALIFIED at owned 1380 s teardown, not currently running. Clock lifecycle/epoch proofs and independent baseline audits are complete, but no timing-improvement or VM-cause claim follows without a real comparison."
+        "New a9 fixed 2x20 s attribution jobs succeed all short raw checks with 450-frame minimum, but do not qualify original 600 s / 17,850-frame capacity. Actual per-architecture renders/writer/postwarm/source-decode counters remain distinct; Intel static writer drops 16audio chunks. Old 600 s Intel final decode inspection is terminally incomplete/UNQUALIFIED at owned 1380 s teardown, not currently running. Clock lifecycle/epoch proofs and independent baseline audits are complete, but no timing-improvement or VM-cause claim follows without a real comparison.",
+        "Post-clock a4 ARM two 20 s diagnostic completes with 551/562 frames versus 553/574 baseline and 10/0 audio drops; no observed throughput improvement in these samples. Binding audit and independent review pass, but zero tolerance guarantees neither timely resumption nor kernel/coalescing-cause proof. Intel follow-up remains separately active at the recorded snapshot; original 600 s qualification remains failed/open."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -948,7 +954,8 @@
         "/tmp/stream-attribution-a9cfd98-terminal-report-20261022.json",
         "/tmp/stream-performance-39735454725-inspection-terminal-review-20261022.md",
         "COMPOSITION_SLEEP_TOLERANCE.md",
-        "COMPOSITION_SLEEP_TOLERANCE_2026-10-22.json"
+        "COMPOSITION_SLEEP_TOLERANCE_2026-10-22.json",
+        "/tmp/stream-attribution-arm119771489763-analysis-20261022.json"
       ]
     },
     {
@@ -1188,11 +1195,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closures. Current 639e49a preserves 316 shipping files/vendor from validated 741 generation, unsigned universal Release/bundle PASS. Clock source explicitly requests zero extra sleep tolerance; lifecycle/epoch proofs pass, no new timing comparison or VM-cause claim. Exact a1bb native CI 39748453209 SUCCESS on all 3 jobs/full Core 588/82 and actual Intel fallback/Deck/shared transport. Exact a9 fixed 2x20 s attribution diagnostic 39757372776 SUCCESS on both hosts with 450-frame short gate, not 600 s qualification; Intel static audio drops 16. Newer a9 native CI 39757320250 is active at its recorded snapshot. Old 39735454725 Intel final inspection is terminally incomplete/UNQUALIFIED at original 1380 s teardown, not currently running. All failed historical receipts and open gates remain preserved.",
-  "integratedMain": "639e49acdf0f5db7072559b4a4fe6fed639414d4",
-  "githubStateRefreshedAt": "2026-10-22T09:36:15.823207+00:00",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers), zero open PRs at fresh 10:32:53 audit; no new closures justified. Current a428d23 preserves 317 production files/vendor from validated 461 generation, unsigned universal Release/bundle PASS. Fresh ending receipt fixture reproduces the a9 ARM setup failure and full corrected actual harness passes without production-gate changes. Bounded browser capture-owner ACK/drain/mixer coordination is software-qualified; actual live/signing/attribution gates remain false and #124 open. a9 native run still active with ARM failure / iOS success; 06b native pending. a4 ARM short clock diagnostic succeeds but 551/562 outputs vs 553/574 baseline and 10/0 audio drops show no observed throughput improvement; follow-up run now diagnostic SUCCESS on both jobs, Intel artifact interpretation separate/pending, no 600 s qualification. All historical failed receipts/open gates remain preserved.",
+  "integratedMain": "a428d2343d2f70e48246d17f856ab4ed418f2b94",
+  "githubStateRefreshedAt": "2026-10-22T10:32:53.956174+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "a9cfd98e56af023738db95113b17120fe8951d04",
+  "publishedIntegration": "06b895aa09baf584ec6a8642f7dd404d7b8a9a06",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1212,7 +1219,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "639e49acdf0f5db7072559b4a4fe6fed639414d4",
+  "currentReviewBase": "a428d2343d2f70e48246d17f856ab4ed418f2b94",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -3335,5 +3342,276 @@
       "scope": "No new post-clock timing measurement has run. A later parent-authorized fixed 2x20 s comparison needs its own source/run/result receipt; no 600 s dispatch or timing benefit/VM cause is inferred."
     },
     "excludedUnmergedWork": "Browser exclusion/coordinator #124 work remains separate and unmerged into this frozen clock cohort."
+  },
+  "wave13Review": {
+    "currentLocalHead": "a428d2343d2f70e48246d17f856ab4ed418f2b94",
+    "githubInventory": {
+      "path": "/tmp/stream-wave13-original61-github-inventory-20261022.json",
+      "bytes": 227791,
+      "sha256": "9a669d4e7e12cba34ec0b439ef904c80391642dd5902c599657cf006fe328ef5",
+      "recordedAt": "2026-10-22T10:32:53.956174+00:00",
+      "publishedMain": "06b895aa09baf584ec6a8642f7dd404d7b8a9a06",
+      "counts": {
+        "closed": 27,
+        "open": 34
+      },
+      "openPullRequests": 0,
+      "stateChanges": []
+    },
+    "acceptanceAudit": {
+      "originalIssues": 61,
+      "newClosuresJustified": [],
+      "issue124": "Original three criteria require the verified route and real recapture/lifecycle acceptance; bounded software ACK work remains partial, route false.",
+      "issue133": "Fresh grant-receipt fixture does not prove real supported-account/API consent/ingest acceptance.",
+      "issues135_147": "Already closed; fixture correction preserves current authority/no-replay/independent-output assertions, no new closure/state change."
+    },
+    "endingFixture": {
+      "originalCommit": "68411f4318abcce8c742207568488791c0ffc950",
+      "integratedAndPublished": "06b895aa09baf584ec6a8642f7dd404d7b8a9a06",
+      "receipt": {
+        "path": "/tmp/stream-owned-ending-retirement-receipts-20261022.json",
+        "bytes": 2511,
+        "sha256": "b088811e56e6e967f618342687e2a07c7a4b441f02ba47be28167b97d324a9f7"
+      },
+      "report": {
+        "path": "/tmp/stream-owned-ending-retirement-receipts-report-20261022.md",
+        "bytes": 4090,
+        "sha256": "d333a50a4d22ec3d3cf4b3a43149738b5d1abefba13852dd23e2de7f1c9d5e58"
+      },
+      "originalHostedARMFailure": {
+        "path": "/tmp/stream-ci-a9cfd98-119761646594-original.log",
+        "bytes": 3340529,
+        "sha256": "f76555dae868e2071325d5d1054dc81a573c46a5584b2253347690247e0ccc70"
+      },
+      "proofFiles": {
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/scripts/owned_ending_harness.swift": "d6e941f270a7d011d25af928d65d9c2f3173a808899306443fae093f97767ad7",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/StreamMac/ProviderTokenVault.swift": "3259b297d2cb7d6025601e8e8d6dd6a082180c0f3b911ddfeb55f8c14e442105",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/StreamMac/ProviderAccountSession.swift": "d6f1c315b91dd5dd3333e25d9675398fb5934bdb1b666ef2582090aabe927119",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/build/owned-ending-retirement-validation/repro-source.swift": "6aeae5f8d429b8e668488d55f99a4c2e14ae780367fd5d2175c188f837ab945e",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/build/owned-ending-retirement-validation/repro-compile.log": "2151098a4de26aa9f9c77fd1bc03bd496f1045bf4c493a7b27af3990d34cb172",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/build/owned-ending-retirement-validation/repro-runtime.log": "64a58898f3c9353a5f42a6bc07ebf3b5ce2a4b4f6e0f84742bf02d10909b9c18",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/build/owned-ending-retirement-validation/fixed-compile.log": "3c6d58fa6824cdff3e09e08c5ab80f3f8bcd7b9d1d36dd74705ccf4913489d94",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/build/owned-ending-retirement-validation/fixed-runtime.log": "e623bcb263d509b7fe2059e29e5b2a0c25b7b74bbc4645e5fd4435284b88f127",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/build/owned-ending-retirement-validation/owned-ending-repro": "fe01e86ef1b7ee8b002129dbbbbc5b7082d41ebe113f460f5d5907cb32cdec65",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/build/owned-ending-retirement-validation/owned-ending-fixed": "d979158b748f618a5e7a7aaafaf6e2671ddcc26cba422a94f9d1222778978f0a",
+        "/private/tmp/stream-owned-ending-retirement-receipts-20261022/apple/build/owned-ending-retirement-validation/products/StreamCore.framework/Versions/A/StreamCore": "90d9e5d5dbaed2f6a9c7f6277bee9f80aad21834b9bf46c85979c927cb0d64e4"
+      },
+      "independentReview": "Parent reports native_quality final source/proof review clear.",
+      "cause": "Successful accept consumes configure authorization receipt; credential generation is not a fresh grant receipt. Original replacement fixture reused that consumed authority. Controlled exact-source markers reproduce same CancellationError at replacement accept before intended assertions/media.",
+      "fix": "Both replacements obtain fresh deliberate same-client configure receipt; setup checks receipt/generation separation, usable replacement credential and decoded synthetic access. Captured old generations and all original stale/read/zeroPOST/independent-output assertions remain unchanged.",
+      "verification": "Full fixed actual harness PASS once; healthy peer 60 frames/no stop; actual synthetic recording 60 video / 100 audio and one-second H264/AAC decode. Xcode 27.2 / Swift 6 / -j2; owned matching previously validated Core binary. No provider/capture/personal credentials.",
+      "productionBoundary": "Only owned_ending_harness.swift differs from a4; production/Core/vendor unchanged by this fixture correction.",
+      "publicationReceipt": {
+        "path": "/tmp/stream-wave13-fixture-publish-results-20261022.json",
+        "bytes": 325,
+        "sha256": "ad1a5d08dd65173c0a5e12f6a9e94de1d70cd3f9c330d74e897f6094b77d0eee"
+      }
+    },
+    "captureExclusions": {
+      "commit": "4da538ce9a34092896a1e697a6dd2ace23f4e6d7",
+      "integratedAs": "46153b11ea81600f39d2f78f06ee7fefd524bd79",
+      "documents": [
+        {
+          "commit": "4da538ce9a34092896a1e697a6dd2ace23f4e6d7",
+          "path": "apple/docs/BROWSER_CAPTURE_EXCLUSIONS.md",
+          "bytes": 5228,
+          "sha256": "769f03816585938468ed65a1d9babf18852d3e7064a9b5a15577fd1de794bf90"
+        },
+        {
+          "commit": "4da538ce9a34092896a1e697a6dd2ace23f4e6d7",
+          "path": "apple/docs/BROWSER_CAPTURE_EXCLUSIONS_2026-10-22.json",
+          "bytes": 6977,
+          "sha256": "8c7e2f169ad88ac5223927b85ceb81e7a93b3e17ac9deb63bff9b21389c7508c"
+        }
+      ],
+      "originalLogs": {
+        "mixer": {
+          "path": "/tmp/stream-wave12-browser-exclusion-mixer-commit-20261022.log",
+          "sha256": "1293c9f219fab97d0371474c47c3833c17eb777eb0c115ba5a431e610c3a7824"
+        },
+        "session": {
+          "path": "/tmp/stream-wave12-browser-exclusion-command-multipage-final-20261022.log",
+          "sha256": "5b660f7e636ec9ec3f241c86a72ec2e48781fd376a98a4cac0c4c9296e89f2b6"
+        },
+        "wholeSourceBuildOnly": {
+          "path": "/tmp/stream-wave12-browser-exclusion-whole-commit-20261022.log",
+          "sha256": "1d1b6e728ca757d43793f3dbfc4d1ff6e75a341a9fb39a4ff812e696cc55895e"
+        }
+      },
+      "independentReview": "Parent reports recovery source/frozen review clear.",
+      "scope": "Software coexistence and retirement only; productionRouteQualified false; no real SCK/helper/UI/device/output/mixer clock/capture/runtime qualification.",
+      "remaining": [
+        "Opaque picker/static window/direct helper capture conflicts",
+        "Production signed/sandbox shared container positive launch",
+        "Actual WebKit PCM attribution/tails and every-route recapture",
+        "Live same-page tone/speech A/V, permission/device qualification",
+        "Helper local HTML/subresources unimplemented"
+      ],
+      "controlledBoundaries": "Actual classes/transaction/mixer PCM; held external install/stop/history boundaries. Actual session ACK/permit logic with inert capture/transport/mixer. Whole-source BUILD_ONLY compiles before runtime. No live SCK/helper/IPC/audio-device or output qualification."
+    },
+    "originalIssueCounts": {
+      "closed": 27,
+      "open": 34,
+      "openFeatures": 23,
+      "openTrackers": 11
+    },
+    "githubWritesPerformed": false,
+    "closuresPerformed": [],
+    "keepOpen": [
+      124,
+      133
+    ],
+    "validatedIntegratedHead": "46153b11ea81600f39d2f78f06ee7fefd524bd79",
+    "nativeChecks": [
+      {
+        "label": "generate",
+        "exit": 0,
+        "log": "/tmp/stream-wave13-parent-final-generate-20261022.log",
+        "bytes": 168,
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "label": "universal",
+        "exit": 0,
+        "log": "/tmp/stream-wave13-parent-final-universal-20261022.log",
+        "bytes": 252229,
+        "sha256": "a9dfdc2effbf97ea5ffdf2ff0f0b9318f9939a89296e0db3d37187ffc71cc716"
+      },
+      {
+        "label": "bundle",
+        "exit": 0,
+        "log": "/tmp/stream-wave13-parent-final-bundle-20261022.log",
+        "bytes": 517,
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ],
+    "productionManifest": {
+      "path": "/tmp/stream-wave13-validated-production-manifest-20261022.json",
+      "bytes": 37342,
+      "sha256": "f0d12584bbb6bbb4c2cf99b95b5d56bbbd814bbb31e61b2af216cee049f8d85b",
+      "files": 317,
+      "source": "46153b11ea81600f39d2f78f06ee7fefd524bd79",
+      "vendor": "d9fceedc068994023900b4d69588b8af19136752",
+      "currentHeadEqualityVerified": true
+    },
+    "ciOnlyFollowup": {
+      "ownerCommit": "73f4729",
+      "integratedAs": "a428d2343d2f70e48246d17f856ab4ed418f2b94",
+      "scope": "One ci.yml line invokes controlled exclusion harness. Existing command-helper main already executes permit lifecycle cases. Parent recovery review clear; no production source change."
+    },
+    "hostedSnapshots": [
+      {
+        "recordedAt": "2026-10-22T10:39:09.167623+00:00",
+        "run": {
+          "id": 39757320250,
+          "head_sha": "a9cfd98e56af023738db95113b17120fe8951d04",
+          "status": "in_progress",
+          "conclusion": null,
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39757320250"
+        },
+        "jobs": [
+          {
+            "id": 119761646018,
+            "name": "StreamMac build and tests (macos-26-intel)",
+            "status": "in_progress",
+            "conclusion": null,
+            "activeSteps": [
+              {
+                "number": 10,
+                "name": "Test native controller and automation boundaries",
+                "status": "in_progress"
+              }
+            ]
+          },
+          {
+            "id": 119761646588,
+            "name": "StreamCore tests (iOS Simulator)",
+            "status": "completed",
+            "conclusion": "success",
+            "activeSteps": []
+          },
+          {
+            "id": 119761646594,
+            "name": "StreamMac build and tests (macos-26)",
+            "status": "completed",
+            "conclusion": "failure",
+            "activeSteps": []
+          }
+        ]
+      },
+      {
+        "recordedAt": "2026-10-22T10:38:59.735551+00:00",
+        "run": {
+          "id": 39763840976,
+          "head_sha": "06b895aa09baf584ec6a8642f7dd404d7b8a9a06",
+          "status": "pending",
+          "conclusion": null,
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39763840976"
+        },
+        "jobs": []
+      },
+      {
+        "recordedAt": "2026-10-22T10:39:03.283635+00:00",
+        "run": {
+          "id": 39762992882,
+          "head_sha": "a4d0122f5b50c9816694e822e4ad730783fa6658",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39762992882"
+        },
+        "jobs": [
+          {
+            "id": 119771489763,
+            "name": "Diagnostic 2x20s, nonqualification (macos-26)",
+            "status": "completed",
+            "conclusion": "success",
+            "activeSteps": []
+          },
+          {
+            "id": 119771490095,
+            "name": "Diagnostic 2x20s, nonqualification (macos-26-intel)",
+            "status": "completed",
+            "conclusion": "success",
+            "activeSteps": []
+          }
+        ]
+      },
+      {
+        "recordedAt": "2026-10-22T10:32:55.012117+00:00",
+        "run": {
+          "id": 39762583261,
+          "head_sha": "a4d0122f5b50c9816694e822e4ad730783fa6658",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39762583261"
+        },
+        "jobs": []
+      }
+    ],
+    "clockARMFollowup": {
+      "source": "a4d0122f5b50c9816694e822e4ad730783fa6658",
+      "run": 39762992882,
+      "job": 119771489763,
+      "conclusion": "success",
+      "audit": {
+        "path": "/tmp/stream-attribution-arm119771489763-analysis-20261022.json",
+        "bytes": 440962,
+        "sha256": "25eb0e6fbbe390bf91d9916f2f7ee7ca3afd5b9210d1d11d399af64debc45948"
+      },
+      "independentReview": "Canvases 444 bindings checked, independently cleared by recording.",
+      "rendered": [
+        551,
+        562
+      ],
+      "baselineRendered": [
+        553,
+        574
+      ],
+      "writerAudioDrops": [
+        10,
+        0
+      ],
+      "scope": "All original short checks pass; no observed output-throughput improvement in these two 20 s samples. Zero tolerance does not guarantee timely resumption or prove kernel/coalescing cause. Overall follow-up is diagnostic SUCCESS at the snapshot; Intel artifact interpretation is separate/pending, with no gain inferred from run conclusion; no 600 s qualification."
+    }
   }
 }
