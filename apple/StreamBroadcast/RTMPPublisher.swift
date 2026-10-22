@@ -18,6 +18,8 @@ private let streamLog = Logger(subsystem: "com.joeblau.Stream", category: "rtmp"
 /// rtmps:// URLs auto-negotiate TLS on port 443; rtmp:// uses 1935 — the scheme
 /// alone drives the decision, no extra flag required.
 actor RTMPPublisher: Publisher {
+    private let encoderInputClock = AVClockTelemetry()
+    func encoderInputClockSnapshot() -> AVClockSnapshot { encoderInputClock.snapshot() }
     private let mixer = MediaMixer(captureSessionMode: .manual,
                                    multiTrackAudioMixingEnabled: true)
     /// Built lazily on the first `stream` access — which happens inside `start`,
@@ -206,6 +208,7 @@ actor RTMPPublisher: Publisher {
     /// Builds + starts the pipeline, connects, and begins publishing. The video
     /// size is NOT set here — it is locked from the first frame via `setOutputSize`.
     func start(_ settings: StreamSettings) async throws {
+        encoderInputClock.reset()
         self.settings = settings
         await networkController.setExternalEncoding(encodedInput)
 
@@ -298,6 +301,7 @@ actor RTMPPublisher: Publisher {
     ///
     /// rtmps:// -> TLS + port 443 automatically; rtmp:// -> 1935. No extra flag.
     private func connectAndPublish() async throws {
+        encoderInputClock.reset()
         _ = try await connection.connect(settings.rtmpURL)
         // `stop()` may have run (actor reentrancy) while we were parked in the
         // non-cancellable connect(). Its `connection.close()` is a no-op while the
@@ -752,6 +756,7 @@ actor RTMPPublisher: Publisher {
     func pause() async {
         guard isRunning, !isPaused, !userInitiatedStop else { return }
         isPaused = true
+        encoderInputClock.reset()
         if encodedInput { encodedNeedsKeyframe = true }
         await networkController.setCapturePaused(true)
         timeline.markDiscontinuity()
@@ -760,6 +765,7 @@ actor RTMPPublisher: Publisher {
     func resume() async {
         guard isRunning, isPaused, !userInitiatedStop else { return }
         isPaused = false
+        encoderInputClock.reset()
         await networkController.setCapturePaused(false)
         timeline.markDiscontinuity()
         let isConnected = await connection.connected
@@ -854,6 +860,7 @@ actor RTMPPublisher: Publisher {
         lastMediaAt = DispatchTime.now().uptimeNanoseconds
         lastVideoAppendAt = lastMediaAt
         telemetry.recordEncoded()
+        encoderInputClock.record(.video, presentationSeconds: sample.presentationTimeStamp.seconds)
         await stream.append(sample)
         return false
     }
@@ -861,6 +868,7 @@ actor RTMPPublisher: Publisher {
         guard encodedInput, !encodedNeedsKeyframe, isRunning, !isPaused, streamAttached else { return false }
         lastMediaAt = DispatchTime.now().uptimeNanoseconds
         lastMicAppendAt = lastMediaAt
+        encoderInputClock.record(.audio, presentationSeconds: audio.sample.presentationTimeStamp.seconds)
         await stream.append(audio.buffer, when: audio.when)
         return false
     }
@@ -881,7 +889,9 @@ actor RTMPPublisher: Publisher {
                               timescale: CMTimeScale(encodeFrameRate))
         let normalized = timeline.normalize(sb, kind: .video, fallbackDuration: duration)
         telemetry.recordEncoded()
-        await mixer.append(enforceMonotonicVideo(normalized, minStep: duration))
+        let admitted = enforceMonotonicVideo(normalized, minStep: duration)
+        encoderInputClock.record(.video, presentationSeconds: admitted.presentationTimeStamp.seconds)
+        await mixer.append(admitted)
     }
 
     /// Frame-repeat dupes are stamped at host-`now`, but a real capture frame
@@ -947,6 +957,7 @@ actor RTMPPublisher: Publisher {
         lastMicAppendAt = now
         let normalized = timeline.normalize(sb, kind: .program,
                                              fallbackDuration: CMTime(value: 512, timescale: 48_000))
+        encoderInputClock.record(.audio, presentationSeconds: normalized.presentationTimeStamp.seconds)
         #if os(macOS)
         if let planar = PublisherProgramAudio.planar(normalized) {
             await mixer.append(planar.buffer, when: planar.when, track: 0)

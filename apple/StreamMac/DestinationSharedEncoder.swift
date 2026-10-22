@@ -44,6 +44,7 @@ private final class SharedPCMInput: @unchecked Sendable {
 /// VideoToolbox has at most four outstanding frames. Encoding happens once;
 /// downstream readers receive the same immutable CMSampleBuffer/packet bytes.
 final class DestinationSharedEncoder: @unchecked Sendable {
+    let encodedClock = AVClockTelemetry()
     let id: UUID
     let key: DestinationSharedEncoderKey
     private let queue = DispatchQueue(label: "com.joeblau.StreamMac.sharedEncoder")
@@ -225,6 +226,9 @@ final class DestinationSharedEncoder: @unchecked Sendable {
         let result = VTCompressionSessionEncodeFrame(videoSession, imageBuffer: scaled, presentationTimeStamp: pts,
             duration: CMTime(value: 1, timescale: CMTimeScale(key.fps)), frameProperties: properties,
             infoFlagsOut: nil, outputHandler: { [self] status, _, sample in
+                if status == noErr, let sample {
+                    encodedClock.record(.video, presentationSeconds: sample.presentationTimeStamp.seconds)
+                }
                 queue.async { [self] in
                     inFlight = max(0, inFlight - 1)
                     guard status == noErr, let sample else { fail(); return }
@@ -296,6 +300,7 @@ final class DestinationSharedEncoder: @unchecked Sendable {
                 formatDescription: audioDescription, sampleCount: 1, presentationTimeStamp: pts,
                 packetDescriptions: &packet, sampleBufferOut: &encoded) == noErr, let encoded else { throw CocoaError(.coderInvalidValue) }
             audioFrames += 1024; encodedAudioCount += 1
+            encodedClock.record(.audio, presentationSeconds: pts.seconds)
             let audio = SharedEncodedAudio(sample: encoded, buffer: output,
                 when: AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: pts.seconds)))
             for sink in recipients() { sink.enqueueAudio(audio) }

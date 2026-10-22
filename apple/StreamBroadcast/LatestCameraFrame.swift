@@ -1,4 +1,5 @@
 import CoreVideo
+import CoreMedia
 import Dispatch
 import StreamCore
 import os.lock
@@ -26,6 +27,7 @@ final class LatestCameraFrame: @unchecked Sendable {
     private static let maximumAgeNanoseconds: UInt64 = 500_000_000
 
     let deliveryTelemetry = FrameTelemetry()
+    let captureClock = AVClockTelemetry()
     private var lock = os_unfair_lock_s()
     private var buffer: CVPixelBuffer?
     private var position: CameraPosition = .front
@@ -35,8 +37,9 @@ final class LatestCameraFrame: @unchecked Sendable {
 
     /// Called from the `AVCaptureVideoDataOutput` delegate queue. Replaces any
     /// previously stored frame; the old frame is released immediately.
-    func store(_ pixelBuffer: CVPixelBuffer, position: CameraPosition) {
+    func store(_ pixelBuffer: CVPixelBuffer, position: CameraPosition, presentationTime: CMTime = .invalid) {
         let now = DispatchTime.now().uptimeNanoseconds
+        if presentationTime.isNumeric { captureClock.record(.video, presentationSeconds: presentationTime.seconds) }
         os_unfair_lock_lock(&lock)
         buffer = pixelBuffer
         self.position = position
@@ -65,6 +68,7 @@ final class LatestCameraFrame: @unchecked Sendable {
 
     /// Drops any stored frame (used during teardown).
     func clear() {
+        captureClock.reset()
         os_unfair_lock_lock(&lock)
         buffer = nil
         storedAt = 0

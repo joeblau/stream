@@ -436,6 +436,11 @@ actor AudioMixEngine {
     nonisolated func enqueue(_ id: AudioChannelID, _ sampleBuffer: CMSampleBuffer) {
         registry.enqueue(id, sampleBuffer)
     }
+    /// Original source PCM PTS, before effects/resampling/delay, compared with
+    /// actual Program video observations. This is not associated-camera lip sync.
+    nonisolated func sourceClockSnapshots(videoReference: AVClockTelemetry) -> [String: AVClockSnapshot] {
+        registry.sourceClockSnapshots(videoReference: videoReference)
+    }
 
     /// Source retirement is a routing authority change, independent of its
     /// saved fader. Close synchronously before awaiting capture/inlet drain.
@@ -1244,6 +1249,12 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         defer { os_unfair_lock_unlock(&lock) }
         return Array(channels.keys)
     }
+    func sourceClockSnapshots(videoReference: AVClockTelemetry) -> [String: AVClockSnapshot] {
+        os_unfair_lock_lock(&lock)
+        let current = channels.sorted { $0.key.label < $1.key.label }.prefix(256).map { ($0.key.label, $0.value.captureClock) }
+        os_unfair_lock_unlock(&lock)
+        return Dictionary(uniqueKeysWithValues: current.map { ($0.0, $0.1.snapshot(videoReference: videoReference)) })
+    }
 
     func mixChannel(_ id: AudioChannelID, at position: Int64, frameCount: Int,
                     program: inout [Float], aux: inout [Float],
@@ -1291,6 +1302,7 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 /// channel lock, so the capture thread, the mix loop, and gain changes never
 /// race.
 private final class ChannelIngest: @unchecked Sendable {
+    let captureClock = AVClockTelemetry()
     private var lock = os_unfair_lock_s()
     private let insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)?
     private let resetInsert: (@Sendable () -> Void)?
@@ -1350,6 +1362,7 @@ private final class ChannelIngest: @unchecked Sendable {
         resetPrivateBoundary(at: now)
     }
     private func resetPrivateBoundary(at now: CMTime) {
+        captureClock.reset()
         captureFloor = now
         meter = LevelMeter()
         ring = AudioRingBuffer(capacityFrames: AudioMixEngine.ringCapacityFrames)
@@ -1408,6 +1421,7 @@ private final class ChannelIngest: @unchecked Sendable {
     /// ring write at the capture PTS's absolute engine position. Buffers with
     /// no usable PTS append contiguously; unreadable/non-LPCM buffers drop.
     func enqueue(_ sampleBuffer: CMSampleBuffer, anchor: CMTime) {
+        let observed = ProcessInfo.processInfo.systemUptime
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         let originalPTS = sampleBuffer.presentationTimeStamp
@@ -1428,6 +1442,7 @@ private final class ChannelIngest: @unchecked Sendable {
         guard let pcm = converter.convert(processed),
               let samples = CanonicalAudioConverter.interleavedFloats(pcm),
               !samples.isEmpty else { return }
+        captureClock.record(.audio, presentationSeconds: originalPTS.seconds, observedHostSeconds: observed)
         let pts = processed.presentationTimeStamp
         let position: Int64
         if anchor.isValid, anchor.isNumeric, pts.isValid, pts.isNumeric {
@@ -1440,6 +1455,7 @@ private final class ChannelIngest: @unchecked Sendable {
     }
 
     func enqueueGuest(_ samples: [Float], pts: CMTime, anchor: CMTime) {
+        captureClock.record(.audio, presentationSeconds: pts.seconds)
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         let position = Int64(((pts - anchor).seconds * Double(AudioMixEngine.sampleRate)).rounded())

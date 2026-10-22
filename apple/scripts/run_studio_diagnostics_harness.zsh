@@ -18,7 +18,7 @@ folder.joinpath('DiagnosticBoundary.swift').write_text(protocols + source + '\ns
 PY
 # Compile the actual capability/protocol sources too; cached frameworks may
 # have been built by another Xcode version and are deliberately not reused.
-swiftc -parse-as-library StreamCore/OutputProfile.swift StreamCore/StreamCapability.swift \
+swiftc -parse-as-library StreamCore/OutputProfile.swift StreamCore/StreamCapability.swift StreamCore/AVClockTelemetry.swift \
     "$DIAGNOSTIC_DIR/DiagnosticBoundary.swift" scripts/studio_diagnostics_harness.swift \
     -o "$DIAGNOSTIC_DIR/diagnostics"
 "$DIAGNOSTIC_DIR/diagnostics"

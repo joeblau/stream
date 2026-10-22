@@ -281,6 +281,12 @@ final class SourceFrameProviders: @unchecked Sendable {
         os_unfair_lock_unlock(&lock)
         return camera?.deliveryTelemetry.snapshot().captured ?? screen?.deliveryTelemetry.snapshot().captured
     }
+    func captureClock(for key: CaptureSourceKey) -> AVClockSnapshot {
+        os_unfair_lock_lock(&lock)
+        let camera = cameraHoldersByKey[key], screen = screenHoldersByKey[key]
+        os_unfair_lock_unlock(&lock)
+        return camera?.captureClock.snapshot() ?? screen?.captureClock.snapshot() ?? .unsupported
+    }
 
     // MARK: - Media playout (A02, issue #97)
 
@@ -332,10 +338,12 @@ struct SourceFrameLookup: Sendable {
 /// producing fresh frames.
 final class LatestScreenFrame: @unchecked Sendable {
     let deliveryTelemetry = FrameTelemetry()
+    let captureClock = AVClockTelemetry()
     private var lock = os_unfair_lock_s()
     private var buffer: CVPixelBuffer?
 
-    func store(_ buffer: CVPixelBuffer) {
+    func store(_ buffer: CVPixelBuffer, presentationTime: CMTime = .invalid) {
+        if presentationTime.isNumeric { captureClock.record(.video, presentationSeconds: presentationTime.seconds) }
         os_unfair_lock_lock(&lock)
         self.buffer = buffer
         deliveryTelemetry.recordCaptured()
@@ -349,6 +357,7 @@ final class LatestScreenFrame: @unchecked Sendable {
     }
 
     func clear() {
+        captureClock.reset()
         os_unfair_lock_lock(&lock)
         buffer = nil
         os_unfair_lock_unlock(&lock)
@@ -667,7 +676,7 @@ final class CaptureSourcePool: ObservableObject {
         screenFrames[key] = holder
         capture.onVideoSample = { [holder] sample in
             if let buffer = CMSampleBufferGetImageBuffer(sample) {
-                holder.store(buffer)
+                holder.store(buffer, presentationTime: sample.presentationTimeStamp)
             }
         }
         // The handler value is captured (not the MainActor pool) so the
@@ -675,7 +684,8 @@ final class CaptureSourcePool: ObservableObject {
         // assigns `onScreenAudioSample` before any capture exists, so the
         // value read here is always the live one.
         let audioHandler = onScreenAudioSample
-        capture.onAudioSampleOffMain = { sample in
+        capture.onAudioSampleOffMain = { [holder] sample in
+            holder.captureClock.record(.audio, presentationSeconds: sample.presentationTimeStamp.seconds)
             audioHandler?(key, sample)
         }
         // Mirror the capture's own state into the per-source surface: errors

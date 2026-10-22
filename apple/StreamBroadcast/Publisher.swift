@@ -60,6 +60,9 @@ protocol Publisher: Actor {
     /// A snapshot of the live encode/uplink metrics for the stats HUD, or `nil`
     /// when nothing is being published yet (pre-connect / torn down).
     func statsSnapshot() async -> LiveStats?
+    /// Actual normalized, post-admission samples handed to the encoder/mixer;
+    /// this public backend boundary is not a compressed codec callback.
+    func encoderInputClockSnapshot() async -> AVClockSnapshot
 }
 
 
@@ -75,6 +78,7 @@ final class SharedEncodedAudio: @unchecked Sendable {
 }
 
 extension Publisher {
+    func encoderInputClockSnapshot() async -> AVClockSnapshot { .unsupported }
     nonisolated var supportsSharedH264AAC: Bool { false }
     func configureEncodedInput() async -> Bool { false }
     func appendEncodedVideo(_ sample: CMSampleBuffer) async -> Bool { false }
