@@ -108,7 +108,12 @@ an independently healthy microphone, both permissions denied while callbacks
 continue, regrant that holds the offline pixels, and explicit Program restore.
 The same decoded RMS tone/silence bounds apply to every phase. Browser helper
 audio, media and guest authority remain independent from microphone and
-Screen Recording permission gates. Optional VoicePolish is disabled in this
+Screen Recording permission gates. Screen/app-audio permission ownership stays
+attached to each observed stable channel identity across empty demand, pruning
+and regrant; removing a source cannot unclassify its queued or late callbacks.
+The focused real-mixer regression requires old PCM to remain rejected after
+regrant while fresh PCM keeps that same identity. The previous demand-replacing
+classification fails this exact regression. Optional VoicePolish is disabled in this
 owned routing workload; its DSP qualification is separate.
 
 If the host's AVAssetReader AAC decode is unavailable, explicitly add

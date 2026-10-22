@@ -477,6 +477,8 @@ actor AudioMixEngine {
         await task.value
         if permissionRestoreTasks[permission]?.id == owner { permissionRestoreTasks[permission] = nil }
     }
+    /// Register permission ownership independently of current scene demand.
+    /// Retired IDs retain their authority/freshness rules for late callbacks.
     nonisolated func setScreenCaptureChannels(_ channels: Set<AudioChannelID>) {
         registry.setScreenCaptureChannels(channels)
     }
@@ -816,7 +818,12 @@ private final class CaptureRouteGate: @unchecked Sendable {
     }
     func setScreenChannels(_ channels: Set<AudioChannelID>) {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
-        screenChannels = channels
+        // A scene/demand removal must not turn a denied capture into an
+        // unclassified, default-allowed route before asynchronous prune (or
+        // when a late callback tries to recreate it). Ownership follows the
+        // stable identity for this mixer lifetime, including deny/regrant.
+        // Independent helper application IDs are never registered here.
+        screenChannels.formUnion(channels)
     }
     func deny(_ permission: AudioCapturePermission) {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }

@@ -77,6 +77,8 @@ private extension AudioMixEngine {
         let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         if CommandLine.arguments.contains("--routes-only") { try await routesAndFiles(directory); return }
+        if CommandLine.arguments.contains("--permission-ownership-only") { try await capturePermissionOwnership(); return }
+        try await capturePermissionOwnership()
         try await admissionAndClock()
         try await atomicPersistedMixer()
         try await originalSourceClock(directory)
@@ -115,6 +117,41 @@ private extension AudioMixEngine {
                      mappingGeneration: mapping, clockQuality: .senderReportAligned)
     }
     static func now() -> Double { CMClockGetTime(CMClockGetHostTimeClock()).seconds }
+
+    static func capturePermissionOwnership() async throws {
+        let engine = AudioMixEngine()
+        let screen = AudioChannelID.capture(.init(id: UUID()))
+        let application = AudioChannelID.application(bundleID: "fixture.screen-permission-application")
+        let helper = AudioChannelID.application(bundleID: "fixture.independent-browser-helper")
+        engine.setScreenCaptureChannels([screen, application])
+        await engine.addChannel(screen); await engine.addChannel(application)
+        let oldPTS = now()
+        let oldPCM = try ProgramRecordingFixtures.audio(at: 0, timestampBase: oldPTS, constantTone: true)
+        engine.enqueue(screen, oldPCM); engine.enqueue(application, oldPCM)
+        engine.denyCapturePermission(.screenCapture)
+        engine.setScreenCaptureChannels([]) // Current capture demand disappears before prune.
+        require(!engine.captureRouteIsAllowed(screen) && !engine.captureRouteIsAllowed(application),
+                "Demand removal must not erase denied screen/app-audio authority")
+        require(engine.captureRouteIsAllowed(helper), "Independent browser-helper authority must survive screen denial")
+        await engine.pruneChannels(keeping: [])
+        engine.enqueue(screen, oldPCM); engine.enqueue(application, oldPCM)
+        require(!engine.captureRouteIsAllowed(screen) && !engine.captureRouteIsAllowed(application),
+                "Late callbacks after prune must remain denied")
+        engine.setScreenCaptureChannels([screen, application])
+        await engine.restoreCapturePermission(.screenCapture)
+        require(engine.captureRouteIsAllowed(screen) && engine.captureRouteIsAllowed(application))
+        engine.enqueue(screen, oldPCM); engine.enqueue(application, oldPCM)
+        let stale = await engine.statsSnapshot()
+        require(stale.channels[screen.label] == nil && stale.channels[application.label] == nil,
+                "Readded identities must reject pregrant PCM before auto-registration")
+        let freshPTS = now() + 0.04
+        let freshPCM = try ProgramRecordingFixtures.audio(at: 0, timestampBase: freshPTS, constantTone: true)
+        engine.enqueue(screen, freshPCM); engine.enqueue(application, freshPCM)
+        let fresh = await engine.statsSnapshot()
+        require(fresh.channels[screen.label] != nil && fresh.channels[application.label] != nil,
+                "Fresh regranted callbacks must retain original registered identity")
+        emit("PASS: actual mixer screen/app-audio authority survives empty demand, prune and stale callbacks; readded identity rejects pregrant PCM while independent browser helper remains allowed")
+    }
 
     static func admissionAndClock() async throws {
         let engine = AudioMixEngine(), first = lease(), mapping = UUID()
