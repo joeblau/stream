@@ -1,0 +1,460 @@
+{
+  "auditAssertions": 53,
+  "baseCommit": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+  "host": {
+    "architecture": "arm64",
+    "machine": "Mac15,8",
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2\nBuildVersion:\t\t26B118",
+    "xcode": "Xcode 27.2\nBuild version 27B5038j"
+  },
+  "limitations": [
+    "The controlled case identifies its four source holders exactly. Prior hosted pool return -6689 diagnoses threshold exhaustion, but uninstrumented recorder/CI/SDK lifetimes prevent attributing which downstream owner held every historical surface.",
+    "Close does not free the source buffer in an already-dequeued callback or a raw sample retained elsewhere; no global isolation claim follows.",
+    "First cold graph/CI compilation and long CI spans remain unattributed timing boundaries. No render wait, resolution, FPS, schedule, source content, encoder, QoS or performance gate was changed."
+  ],
+  "negativeControl": {
+    "expectedExit": -5,
+    "message": "Retiring pending mailbox ownership must restore healthy rendering before active callbacks return",
+    "reconstructedCompiledSource": "negative-CompositionEngine.swift is reconstructed from the same source minus only three calls; its bytes match the pre-build negative-source.json compiled hash.",
+    "removedOnly": "Three removeSink primary/secondary/clean close calls"
+  },
+  "negativePressureObservations": [
+    {
+      "a": {
+        "closed": false,
+        "drops": 1,
+        "pendingSequences": [
+          3,
+          4
+        ]
+      },
+      "b": {
+        "closed": false,
+        "drops": 0,
+        "pendingSequences": [
+          3,
+          4
+        ]
+      },
+      "callbacksA": [
+        1
+      ],
+      "callbacksB": [
+        2
+      ],
+      "healthy": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "metrics": {
+        "attempts": 5,
+        "failed": 1,
+        "lastPresentationSeconds": 0.13333333333333333,
+        "maxRenderMilliseconds": 11.859458332764916,
+        "missedDeadlines": 0,
+        "rendered": 4,
+        "sampledAt": 68147.16553783334,
+        "startedAt": 68147.15106266667,
+        "subscriberDrops": 1,
+        "subscriberQueueDepth": 4,
+        "totalRenderMilliseconds": 14.087500007008202
+      },
+      "stage": "four-known-owned-surfaces"
+    },
+    {
+      "a": {
+        "closed": false,
+        "drops": 1,
+        "pendingSequences": [
+          3,
+          4
+        ]
+      },
+      "b": {
+        "closed": false,
+        "drops": 0,
+        "pendingSequences": [
+          3,
+          4
+        ]
+      },
+      "callbacksA": [
+        1
+      ],
+      "callbacksB": [
+        2
+      ],
+      "healthy": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "metrics": {
+        "attempts": 6,
+        "failed": 2,
+        "lastPresentationSeconds": 0.13333333333333333,
+        "maxRenderMilliseconds": 11.859458332764916,
+        "missedDeadlines": 0,
+        "rendered": 4,
+        "sampledAt": 68147.16561854167,
+        "startedAt": 68147.15106266667,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 2,
+        "totalRenderMilliseconds": 14.13154166948516
+      },
+      "stage": "one-retired-other-pending-still-owns"
+    },
+    {
+      "a": {
+        "closed": false,
+        "drops": 1,
+        "pendingSequences": [
+          3,
+          4
+        ]
+      },
+      "b": {
+        "closed": false,
+        "drops": 0,
+        "pendingSequences": [
+          3,
+          4
+        ]
+      },
+      "callbacksA": [
+        1
+      ],
+      "callbacksB": [
+        2
+      ],
+      "healthy": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "metrics": {
+        "attempts": 7,
+        "failed": 3,
+        "lastPresentationSeconds": 0.13333333333333333,
+        "maxRenderMilliseconds": 11.859458332764916,
+        "missedDeadlines": 0,
+        "rendered": 4,
+        "sampledAt": 68147.165656625,
+        "startedAt": 68147.15106266667,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 14.156041666865349
+      },
+      "stage": "both-retired-active-still-blocked"
+    }
+  ],
+  "policy": {
+    "actualRenderPixels": [
+      16,
+      16
+    ],
+    "allOriginalGatesUnchanged": true,
+    "boundedPendingReleasedOnRetirement": true,
+    "escapedRawBuffersNotRevoked": true,
+    "rendererPoolAllocationThreshold": 4,
+    "testPendingCapacityPerSlowSink": 2,
+    "waitForActiveCallbackInShipping": false
+  },
+  "positiveCases": [
+    "pressure-recovery",
+    "program-removal",
+    "program-replacement",
+    "secondary-removal",
+    "secondary-replacement",
+    "clean-removal",
+    "clean-replacement",
+    "cross-canvas-token",
+    "stopped-tick",
+    "restarted-tick",
+    "reconfigure",
+    "stopped-missed",
+    "restarted-missed",
+    "explicit-validation"
+  ],
+  "positivePressureObservations": [
+    {
+      "a": {
+        "closed": false,
+        "drops": 1,
+        "pendingSequences": [
+          3,
+          4
+        ]
+      },
+      "b": {
+        "closed": false,
+        "drops": 0,
+        "pendingSequences": [
+          3,
+          4
+        ]
+      },
+      "callbacksA": [
+        1
+      ],
+      "callbacksB": [
+        2
+      ],
+      "healthy": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "metrics": {
+        "attempts": 5,
+        "failed": 1,
+        "lastPresentationSeconds": 0.13333333333333333,
+        "maxRenderMilliseconds": 8.938458340708166,
+        "missedDeadlines": 0,
+        "rendered": 4,
+        "sampledAt": 68191.73445383334,
+        "startedAt": 68191.722450375,
+        "subscriberDrops": 1,
+        "subscriberQueueDepth": 4,
+        "totalRenderMilliseconds": 11.575499986065552
+      },
+      "stage": "four-known-owned-surfaces"
+    },
+    {
+      "a": {
+        "closed": true,
+        "drops": 3,
+        "pendingSequences": []
+      },
+      "b": {
+        "closed": false,
+        "drops": 0,
+        "pendingSequences": [
+          3,
+          4
+        ]
+      },
+      "callbacksA": [
+        1
+      ],
+      "callbacksB": [
+        2
+      ],
+      "healthy": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "metrics": {
+        "attempts": 6,
+        "failed": 2,
+        "lastPresentationSeconds": 0.13333333333333333,
+        "maxRenderMilliseconds": 8.938458340708166,
+        "missedDeadlines": 0,
+        "rendered": 4,
+        "sampledAt": 68191.73451879167,
+        "startedAt": 68191.722450375,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 2,
+        "totalRenderMilliseconds": 11.597374978009611
+      },
+      "stage": "one-retired-other-pending-still-owns"
+    },
+    {
+      "a": {
+        "closed": true,
+        "drops": 3,
+        "pendingSequences": []
+      },
+      "b": {
+        "closed": true,
+        "drops": 2,
+        "pendingSequences": []
+      },
+      "callbacksA": [
+        1
+      ],
+      "callbacksB": [
+        2
+      ],
+      "healthy": [
+        1,
+        2,
+        3,
+        4,
+        7
+      ],
+      "metrics": {
+        "attempts": 7,
+        "failed": 2,
+        "lastPresentationSeconds": 0.23333333333333334,
+        "maxRenderMilliseconds": 8.938458340708166,
+        "missedDeadlines": 0,
+        "rendered": 5,
+        "sampledAt": 68191.73522487501,
+        "startedAt": 68191.722450375,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 12.262583302799612
+      },
+      "stage": "both-retired-active-still-blocked"
+    }
+  ],
+  "productionChange": "Close removed or same-canvas-replaced mailboxes; stop post/dequeue and detach pending under existing lock, release outside; already-dequeued callback may finish.",
+  "proofArtifacts": [
+    {
+      "bytes": 863,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/production-source.json",
+      "sha256": "55d209466b3da919578521be2a6fde07ba4781cb5b929f4b0831752ef166284e"
+    },
+    {
+      "bytes": 862,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/negative-source.json",
+      "sha256": "a0d737ed5408c264209e5dfb81ccd1f1b272a0aae9197ebaf7a5c44ebdcb3962"
+    },
+    {
+      "bytes": 48,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/production-result.json",
+      "sha256": "ff1c33889aa27916940b8b96646e8e352407af42f47bcdfb1a1f207fc1b73839"
+    },
+    {
+      "bytes": 48,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/negative-result.json",
+      "sha256": "018afed8c235ce713c7bc80648649b19770221d37f0b1195ab4cd51da8e409c4"
+    },
+    {
+      "bytes": 2484,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/production-observations/pressure-recovery.json",
+      "sha256": "62b23e02f0c8fbd7053b97f57a1f1fffc4e235c8ab18f582a0a44891f32ee451"
+    },
+    {
+      "bytes": 2544,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/negative-observations/pressure-recovery.json",
+      "sha256": "a6661ded4f2a3e3f4587b4f70d3d40f439eeeb4ea7a9885d4ac1de27478094ff"
+    },
+    {
+      "bytes": 1466,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/production.log",
+      "sha256": "2dca731c6f3d874ff96b086e6439d544e7bb32b81c77ed7b81b02b9148c54f9b"
+    },
+    {
+      "bytes": 204,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/negative.log",
+      "sha256": "e317b418093164fa7cc49bda103db755d973afea3e1df2baf9218a15fbb18413"
+    },
+    {
+      "bytes": 49829,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/production-CompositionEngine.swift",
+      "sha256": "2ef903d78a00b6032107d7801d125b0cdf33610ceffd0acda0d0f1624dc24379"
+    },
+    {
+      "bytes": 49823,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/negative-CompositionEngine.swift",
+      "sha256": "432f47aafa00fc12f2260123ac8d167b164434aee36d7ecd3bba07f5dcdf7bba"
+    },
+    {
+      "bytes": 13032,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/clock_cases.swift",
+      "sha256": "8d986858b5490e0a60e8fca1560b13d0b8d6c637abfbbb840a71d5148747d927"
+    },
+    {
+      "bytes": 2390,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/compatibility-generated/profile-source-hashes.json",
+      "sha256": "199fffd8a554ec66051b0161b506debcd724cb7af196f96960a46d5cfe86b923"
+    },
+    {
+      "bytes": 53194,
+      "path": "/tmp/stream-mailbox-retirement-production-20261022.log",
+      "sha256": "7feea75ee3acfc808424d716be14867535576e6b642e8fd1182535b9d35f9811"
+    },
+    {
+      "bytes": 892021,
+      "path": "/tmp/stream-mailbox-retirement-negative-20261022.log",
+      "sha256": "22629b695d33109d78056a7e1c47321450644e5f769e6089c090ea33a4a0d937"
+    },
+    {
+      "bytes": 917,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/clock-observations/reconfigure.json",
+      "sha256": "7c43da7f7deab447fc4d952bace185267c2c8a621ef9aaab9301bbaff868852b"
+    },
+    {
+      "bytes": 2252,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/clock-observations/restarted-missed.json",
+      "sha256": "6f184259a6e0789fea0be090060e14b56e7d2f054ab6970b63594763e5d60c78"
+    },
+    {
+      "bytes": 926,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/clock-observations/restarted-tick.json",
+      "sha256": "a361dcf55643602220ff20d918b0d203bc90d47688d39d0782a4e8f4ee2d218a"
+    },
+    {
+      "bytes": 2424,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/clock-observations/stopped-missed.json",
+      "sha256": "de621174f3058eec86d0a0bdb74843270a7336ed4b7ed5f886629f4eeb28768b"
+    },
+    {
+      "bytes": 920,
+      "path": "/private/tmp/stream-wave13-mailbox-retirement-20261022/apple/build/composition-mailbox-retirement-validation/clock-observations/stopped-tick.json",
+      "sha256": "a6c57156bfc2fc5502e78e776b51d50c2a0096e34f3c4229175df07764b195c6"
+    }
+  ],
+  "qualification": false,
+  "scope": "Deterministic actual-engine/pool4/serial-mailbox retirement liveness only. No media/capture, clock-performance, sustained capacity, or full downstream raw-retention isolation proof.",
+  "sources": {
+    ".github/workflows/ci.yml": {
+      "bytes": 10029,
+      "sha256": "ceaaa83192e7556b76b1adc968fee94aca9f1263da55723d0ada3ca2ea6c1ecf"
+    },
+    ".github/workflows/native-composition-attribution.yml": {
+      "bytes": 11889,
+      "sha256": "6e7c96d7f32fe9fc18dfe878e9b6c5fdd9a395c64424ee16f65bc0c81876aaff"
+    },
+    ".github/workflows/native-performance-budget.yml": {
+      "bytes": 2534,
+      "sha256": "123a4cabd59421c712db5730ef2165ba9ea5beec5af423ae17034adc5d8a7217"
+    },
+    "apple/StreamMac/CompositionEngine.swift": {
+      "bytes": 49829,
+      "sha256": "2ef903d78a00b6032107d7801d125b0cdf33610ceffd0acda0d0f1624dc24379"
+    },
+    "apple/StreamMac/SceneRenderer.swift": {
+      "bytes": 123077,
+      "sha256": "d4284de75fed1e9d23cf3ead89fca0fe6d452b46d0f5b81dd04d23d31103305e"
+    },
+    "apple/scripts/composition_clock_authority_harness.swift": {
+      "bytes": 13038,
+      "sha256": "d91876c53d4d18cc86a15e1ee132325bba023b27ab43c4003c2ee82ee2647c56"
+    },
+    "apple/scripts/composition_mailbox_retirement_harness.swift": {
+      "bytes": 11741,
+      "sha256": "ff76ff1497d8b2fe75e3635648599fd5bb80064aa48b9bb187c9fdd1cce01726"
+    },
+    "apple/scripts/performance_workload_evidence.swift": {
+      "bytes": 2954,
+      "sha256": "4312804d5de645cad552adb26d5217846f3c483510fd9bcc13881500746627f3"
+    },
+    "apple/scripts/prepare_composition_hotpath_profile.py": {
+      "bytes": 25254,
+      "sha256": "acd442df5a4619e03d96c52ecdd75b34f39ee9810aba6ca3d24f5344be1b3af6"
+    },
+    "apple/scripts/prepare_composition_mailbox_retirement.py": {
+      "bytes": 3752,
+      "sha256": "4c70bf790e93994ccc602b9393d717ca22367266b2be1588dc389a71d98b24c6"
+    },
+    "apple/scripts/run_composition_mailbox_retirement_harness.zsh": {
+      "bytes": 2681,
+      "sha256": "e787290e87764ab0dc7fa64cc6e050759f722be0490841f3c1662b0e1adb71c8"
+    },
+    "apple/scripts/studio_performance_harness.swift": {
+      "bytes": 20026,
+      "sha256": "b74f5f85e5acbf50475bd9d00f0e8cb816737d10450f528bd30315417a5e46f9"
+    }
+  },
+  "version": 1
+}
