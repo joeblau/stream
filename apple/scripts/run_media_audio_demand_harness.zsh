@@ -8,7 +8,8 @@ mkdir -p "$DEMAND_BUILD"
 xcrun swiftc -j2 -swift-version 6 -strict-concurrency=complete -parse-as-library \
   -target "$(uname -m)-apple-macos14.0" -F "$DEMAND_FRAMEWORKS" -framework StreamCore \
   StreamMac/GuestMediaReceipts.swift StreamMac/IsolatedRecordingTypes.swift StreamMac/IsolatedVideoTypes.swift \
-  StreamMac/RecordingChatTypes.swift StreamMac/RecordingChatArchive.swift StreamMac/RecordingChatReader.swift \
+  StreamMac/RecordingChatPaint.swift StreamMac/RecordingChatTypes.swift StreamMac/RecordingChatArchive.swift StreamMac/RecordingChatReader.swift \
+  StreamMac/RawVideoResourceCoordinator.swift StreamMac/FrameDeliveryBroker.swift StreamMac/FrameDeliveryConverter.swift StreamMac/RecordingFrameDelivery.swift \
   StreamMac/RecordingPreferences.swift StreamMac/ProgramRecordingSession.swift StreamMac/AudioMixEngine.swift \
   StreamMac/MediaAudioChannelDemand.swift scripts/program_recording_fixtures.swift \
   scripts/media_audio_demand_harness.swift -o "$DEMAND_BUILD/harness"

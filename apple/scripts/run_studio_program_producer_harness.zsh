@@ -38,7 +38,8 @@ xcrun swiftc -j2 -swift-version 6 -strict-concurrency=complete -parse-as-library
   -import-objc-header scripts/studio_program_driver_fixture.h \
   "$PROGRAM_BUILD/ProductionIdentities.swift" \
   StreamMac/GuestMediaReceipts.swift StreamMac/IsolatedRecordingTypes.swift StreamMac/IsolatedVideoTypes.swift \
-  StreamMac/RecordingChatTypes.swift StreamMac/RecordingChatArchive.swift StreamMac/RecordingChatReader.swift \
+  StreamMac/RecordingChatPaint.swift StreamMac/RecordingChatTypes.swift StreamMac/RecordingChatArchive.swift StreamMac/RecordingChatReader.swift \
+  StreamMac/RawVideoResourceCoordinator.swift StreamMac/FrameDeliveryBroker.swift StreamMac/FrameDeliveryConverter.swift StreamMac/RecordingFrameDelivery.swift \
   StreamMac/RecordingPreferences.swift StreamMac/ProgramRecordingSession.swift StreamMac/AudioMixEngine.swift \
   prototypes/VirtualMicrophone/StudioProgramProducer.swift scripts/studio_program_producer_harness.swift \
   "$PROGRAM_BUILD/StudioProgramRender.o" "$PROGRAM_BUILD/DriverFixture.o" \
@@ -48,7 +49,9 @@ readonly PROGRAM_ARTIFACTS="$PROGRAM_BUILD/artifacts-$(uuidgen | tr '[:upper:]' 
 python3 - "$PROGRAM_ARTIFACTS" "$PROGRAM_BUILD" <<'PY'
 import hashlib,json,pathlib,platform,sys
 artifacts,build=map(pathlib.Path,sys.argv[1:])
-inputs=['StreamMac/AudioMixEngine.swift','prototypes/VirtualMicrophone/StreamVirtualMicrophone.c',
+inputs=['StreamMac/AudioMixEngine.swift','StreamMac/RecordingChatPaint.swift',
+        'StreamMac/RawVideoResourceCoordinator.swift','StreamMac/FrameDeliveryBroker.swift',
+        'StreamMac/FrameDeliveryConverter.swift','StreamMac/RecordingFrameDelivery.swift','prototypes/VirtualMicrophone/StreamVirtualMicrophone.c',
         'prototypes/VirtualMicrophone/StreamLoopback.c','prototypes/VirtualMicrophone/StudioProgramProducer.swift',
         'prototypes/VirtualMicrophone/StudioProgramRender.c','prototypes/VirtualMicrophone/StudioProgramRender.h',
         'scripts/studio_program_driver_fixture.c','scripts/studio_program_driver_fixture.h',

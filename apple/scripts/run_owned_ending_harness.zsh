@@ -12,9 +12,11 @@ xcrun swiftc -swift-version 6 -parse-as-library -D STREAM_NATIVE_VALIDATION \
     StreamMac/ProviderHTTP.swift StreamMac/ProviderTokenVault.swift StreamMac/OAuthLoopbackReceiver.swift \
     StreamMac/StudioChatModel.swift StreamMac/StudioDirectChatModel.swift StreamMac/StudioChatSocket.swift \
     StreamMac/StudioChatOutbox.swift StreamMac/StudioDirectChatManager.swift StreamMac/ProviderPendingCatalog.swift StreamMac/ProviderAccountSession.swift \
-    StreamBroadcast/Publisher.swift StreamMac/SessionState.swift StreamMac/DestinationOutputController.swift \
+    StreamBroadcast/Publisher.swift StreamMac/SessionState.swift StreamMac/RawVideoResourceCoordinator.swift StreamMac/FrameDeliveryBroker.swift StreamMac/FrameDeliveryConverter.swift \
+    StreamMac/DestinationVideoIngress.swift StreamMac/DestinationOutputController.swift \
     StreamMac/DestinationEncodedMailbox.swift StreamMac/DestinationSharedEncoder.swift \
-    StreamMac/IsolatedRecordingTypes.swift StreamMac/IsolatedVideoTypes.swift StreamMac/RecordingChatTypes.swift \
+    StreamMac/IsolatedRecordingTypes.swift StreamMac/IsolatedVideoTypes.swift StreamMac/RecordingChatPaint.swift StreamMac/RecordingChatTypes.swift \
+    StreamMac/RecordingFrameDelivery.swift \
     StreamMac/RecordingChatArchive.swift StreamMac/RecordingChatReader.swift StreamMac/RecordingPreferences.swift StreamMac/ProgramRecordingSession.swift \
     scripts/program_recording_fixtures.swift scripts/owned_ending_harness.swift -o "$OWNED_ENDING_BUILD_PATH/owned-ending-harness"
 "$OWNED_ENDING_BUILD_PATH/owned-ending-harness"

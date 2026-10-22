@@ -25,8 +25,9 @@ fi
 xcrun swiftc -swift-version 6 -strict-concurrency=complete -parse-as-library \
   -target "$(uname -m)-apple-macos14.0" -F "$FRAMEWORKS" -framework StreamCore \
   "$APPLE_DIR/StreamMac/IsolatedRecordingTypes.swift" "$APPLE_DIR/StreamMac/IsolatedVideoTypes.swift" \
-  "$APPLE_DIR/StreamMac/RecordingChatTypes.swift" "$APPLE_DIR/StreamMac/RecordingChatArchive.swift" \
+  "$APPLE_DIR/StreamMac/RecordingChatPaint.swift" "$APPLE_DIR/StreamMac/RecordingChatTypes.swift" "$APPLE_DIR/StreamMac/RecordingChatArchive.swift" \
   "$APPLE_DIR/StreamMac/RecordingChatReader.swift" "$APPLE_DIR/StreamMac/RecordingPreferences.swift" \
+  "$APPLE_DIR/StreamMac/RawVideoResourceCoordinator.swift" "$APPLE_DIR/StreamMac/FrameDeliveryBroker.swift" "$APPLE_DIR/StreamMac/FrameDeliveryConverter.swift" "$APPLE_DIR/StreamMac/RecordingFrameDelivery.swift" \
   "$APPLE_DIR/StreamMac/ProgramRecordingSession.swift" "$APPLE_DIR/StreamMac/IsolatedVideoRecorder.swift" \
   "$SCRIPT_DIR/fractional_iso_audio_harness.swift" -o "$BUILD_DIR/FractionalISOAudioHarness"
 env DYLD_FRAMEWORK_PATH="$FRAMEWORKS" "$BUILD_DIR/FractionalISOAudioHarness" "$BUILD_DIR/media-$(uuidgen)"

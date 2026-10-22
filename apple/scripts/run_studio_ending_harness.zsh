@@ -11,7 +11,8 @@ fi
 readonly ENDING_PRODUCTS="${STREAM_CORE_FRAMEWORK_DIR:-$ENDING_BUILD_PATH/Build/Products/Debug}"
 xcrun swiftc -j2 -swift-version 6 -parse-as-library -F "$ENDING_PRODUCTS" -framework StreamCore \
     -Xlinker -rpath -Xlinker "${ENDING_PRODUCTS:A}" \
-    StreamBroadcast/Publisher.swift StreamMac/SessionState.swift StreamMac/DestinationOutputController.swift StreamMac/DestinationEncodedMailbox.swift StreamMac/DestinationSharedEncoder.swift \
+    StreamBroadcast/Publisher.swift StreamMac/SessionState.swift StreamMac/RecordingChatPaint.swift StreamMac/RawVideoResourceCoordinator.swift StreamMac/FrameDeliveryBroker.swift StreamMac/FrameDeliveryConverter.swift \
+    StreamMac/DestinationVideoIngress.swift StreamMac/DestinationOutputController.swift StreamMac/DestinationEncodedMailbox.swift StreamMac/DestinationSharedEncoder.swift \
     StreamMac/StudioEndingCoordinator.swift scripts/studio_ending_harness.swift \
     -o "$ENDING_BUILD_PATH/ending-harness"
 "$ENDING_BUILD_PATH/ending-harness"

@@ -11,7 +11,8 @@ xcrun swiftc -swift-version 6 -parse-as-library \
     -F "$REVIEW_PRODUCTS" -framework StreamCore \
     -Xlinker -rpath -Xlinker "${REVIEW_PRODUCTS:A}" \
     StreamBroadcast/Publisher.swift StreamMac/SessionState.swift \
-    StreamMac/DestinationOutputController.swift StreamMac/DestinationEncodedMailbox.swift StreamMac/DestinationSharedEncoder.swift \
+    StreamMac/RecordingChatPaint.swift StreamMac/RawVideoResourceCoordinator.swift StreamMac/FrameDeliveryBroker.swift StreamMac/FrameDeliveryConverter.swift \
+    StreamMac/DestinationVideoIngress.swift StreamMac/DestinationOutputController.swift StreamMac/DestinationEncodedMailbox.swift StreamMac/DestinationSharedEncoder.swift \
     StreamMac/SessionRecoveryCoordinator.swift StreamMac/RecoveryEventReviewCoordinator.swift \
     scripts/recovery_event_review_harness.swift -o "$REVIEW_BUILD_PATH/recovery-event-harness"
 "$REVIEW_BUILD_PATH/recovery-event-harness"
