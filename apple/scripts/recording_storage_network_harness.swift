@@ -231,7 +231,12 @@ private struct StorageNetworkMedia: Codable {
         try await wait("Shipping recorder did not accept real compositor/mixer tracks", until: { recorder.state == .recording && recorder.progress.durationSeconds >= 0.5 })
         print("TRACE actual publishers acknowledged; recorder accepted both tracks; encoder owners \(controller.activePublishingEncoderCount)/\(controller.reservedRecordingEncoderCount)")
         var clockEvidence: [String: StudioDiagnosticSnapshot] = [:]
-        func freshEncodedObservation(_ value: AVClockSnapshot?) -> Bool {
+        defer {
+            // Even failed semantic/media qualification keeps inspectable
+            // production snapshots; these remain bounded and redacted.
+            for (phase, snapshot) in clockEvidence { try? snapshot.redactedExportData().write(to: root.appendingPathComponent("clock-" + phase + ".json"), options: .atomic) }
+        }
+        func freshObservation(_ value: AVClockSnapshot?) -> Bool {
             guard let value, value.audioSamples >= 8, value.videoSamples >= 8, value.windowSeconds >= 2,
                   let audioAge = value.audioAgeMilliseconds, let videoAge = value.videoAgeMilliseconds,
                   audioAge <= 2_000, videoAge <= 2_000,
@@ -241,8 +246,11 @@ private struct StorageNetworkMedia: Codable {
             }
             return [.stable, .offset, .drifting].contains(value.state) && value.relativeRateMillisecondsPerSecond != nil && value.audioMinusVideoMilliseconds != nil
         }
+        func faultOutputObservation(_ output: DestinationDiagnosticSnapshot) -> Bool {
+            freshObservation(output.encoderInputClock) && (output.sharedEncodedClock.map { freshObservation($0) } ?? !controller.destinations.sharesFixedH264AAC)
+        }
         func outputObservation(_ output: DestinationDiagnosticSnapshot) -> Bool {
-            if controller.destinations.sharesFixedH264AAC { return freshEncodedObservation(output.encoderInputClock) && freshEncodedObservation(output.sharedEncodedClock) }
+            if controller.destinations.sharesFixedH264AAC { return freshObservation(output.encoderInputClock) && freshObservation(output.sharedEncodedClock) }
             return output.encoderInputClock?.state == .stable && output.sharedEncodedClock == nil
         }
         if validateClocks {
@@ -265,7 +273,7 @@ private struct StorageNetworkMedia: Codable {
             try check(held.state == .unstable && held.relativeRateMillisecondsPerSecond == nil, "Held actual PCM callback fabricated confident clock drift")
             if controller.destinations.sharesFixedH264AAC {
                 for output in measured.outputs { print("CLOCK actual shared encoded callbacks: \(String(describing: output.sharedEncodedClock))") }
-                try check(measured.outputs.allSatisfy { freshEncodedObservation($0.sharedEncodedClock) }, "Actual shared encoder callback freshness/uncertainty semantics failed")
+                try check(measured.outputs.allSatisfy { freshObservation($0.sharedEncodedClock) }, "Actual shared encoder callback freshness/uncertainty semantics failed")
             } else {
                 try check(measured.outputs.allSatisfy { $0.sharedEncodedClock == nil }, "Default backend invented post-encode observations")
             }
@@ -286,7 +294,7 @@ private struct StorageNetworkMedia: Codable {
             try await Task.sleep(for: .seconds(2.1))
             let stale = await sampledHealth(); clockEvidence["stopped-source-clocks"] = stale
             try check(clockIDs.allSatisfy { stale.sourceAudioClocks[$0.label]?.state == .staleAudio }, "Stopped actual PCM source retained a confident current reading")
-            try check(stale.programClock.state == .stable && stale.outputs.allSatisfy(outputObservation), "Stopped PCM sources disturbed healthy real output clocks")
+            try check(freshObservation(stale.programClock) && stale.outputs.allSatisfy(faultOutputObservation), "Stopped PCM sources disturbed healthy real output clocks")
             capture.setClockSourcesActive(true)
             try await Task.sleep(for: .milliseconds(100))
             let rejoined = await sampledHealth(); clockEvidence["rejoined-source-clocks"] = rejoined
@@ -324,7 +332,7 @@ private struct StorageNetworkMedia: Codable {
             try check(afterFailure.outputs.allSatisfy { $0.startedAt == beforeFailureStarts[$0.id] }, "Unrelated recording failure reset the acknowledged live elapsed timer")
             print("CLOCK Program after recording failure: \(afterFailure.programClock)")
             for output in afterFailure.outputs { print("CLOCK output \(output.id) after recording failure: \(String(describing: output.encoderInputClock))") }
-            try check(afterFailure.programClock.state == .stable && afterFailure.outputs.allSatisfy(outputObservation), "Actual storage failure disturbed real output timestamp clocks")
+            try check(freshObservation(afterFailure.programClock) && afterFailure.outputs.allSatisfy(faultOutputObservation), "Fault-time Program/output clock observations were stale or violated residual/uncertainty semantics")
         }
         let framesAtCleanup = capture.snapshot().videos
         try await pulse(); try await pulse()
@@ -365,7 +373,7 @@ private struct StorageNetworkMedia: Codable {
         try check(library.entries.contains { $0.url.lastPathComponent == original.lastPathComponent && $0.status == "recoverable" && $0.canExport },
             "Readable interrupted local media was not conservatively classified as recoverable")
         if validateClocks {
-            print("PASS: actual original PCM timestamps distinguish stable, 120ms fixed offset, 1% rate skew, dropped and held callbacks, source stop/rejoin and video-only camera; actual Program clock stays stable, raw publisher clocks stay stable or compressed callback jitter remains explicitly uncertain, and independent real RTMP/SRT media survives recorder storage failure")
+            print("PASS: actual original PCM timestamps distinguish stable, 120ms fixed offset, 1% rate skew, dropped and held callbacks, source stop/rejoin and video-only camera; initial Program/raw clocks stable, fresh fault-time observations preserve explicit delivery uncertainty, and independent real RTMP/SRT media survives recorder storage failure")
         }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(results).write(to: root.appendingPathComponent("decoded-media.json"), options: .atomic)
