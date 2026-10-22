@@ -308,7 +308,9 @@ final class NativeGuestReturnVideoSender: @unchecked Sendable {
             stop(ifCurrent: current, state: Task.isCancelled ? .off : .failed); return false
         }
         guard isActive(current) else {
-            sink.revokeReturnVideo(token: current); sink.removeReturnVideo(token: current); return false
+            // Stop already revoked this token and queued the codec close.
+            // Its queue owns source removal after VT has actually drained.
+            return false
         }
         return true
     }
