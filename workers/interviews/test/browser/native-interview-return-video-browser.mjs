@@ -168,6 +168,7 @@ try {
   startup.phase('navigation-accepted');
   await browser.until(g,"typeof document.getElementById('prepare').onclick==='function'",'actual guest page');
   startup.phase('guest-ready');
+  await browser.evaluate(g,`(()=>{const v=document.getElementById('return');window.__returnPlayerLifecycle={loads:0,emptied:0};for(const [event,key]of [['loadstart','loads'],['emptied','emptied']])v.addEventListener(event,()=>{window.__returnPlayerLifecycle[key]++;});})()`);
   assert(browser.errors.length===0&&await browser.evaluate(g,'Array.isArray(window.__fixtureCamera)'),'Generated capture and local TURN override must initialize without script errors');
   assert(await browser.evaluate(g,"location.hash===''")===true,'Guest strips capability fragment');
   await browser.evaluate(g,"document.getElementById('prepare').click()");await browser.until(g,"!document.getElementById('join').disabled",'generated devices prepared');
@@ -284,10 +285,21 @@ try {
     command({type:'stop'});await wait('Final capture native terminal cleanup',()=>{check();return stopped&&closed;},10000);
     assert(browser.errors.length===0,'No actual shipping guest runtime error during return capture retirement');
   }else{
+  const playerBeforeVideo=await browser.evaluate(g,`(()=>{const v=document.getElementById('return');window.__returnPlayerStream=v.srcObject;return {...window.__returnPlayerLifecycle,time:v.currentTime,paused:v.paused};})()`);
   assert(await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0"),'Program video is opt-in, with no visible remote video before enable');
   command({type:'video-on'});
   await wait('actual fixed Program return decoded green pixels',async()=>{check();const r=await browser.evaluate(g,videoPixels);return r?.pixel[1]>150&&r.pixel[0]<60&&r.pixel[2]<110&&r.width<=320&&r.height<=180;},20000);
   const originalVideo=await browser.evaluate(g,videoPixels);console.log(`Actual native Program return green: ${JSON.stringify(originalVideo)}`);
+  let previousPlayer=playerBeforeVideo;
+  async function preservesPlayer(label){
+    const observed=await browser.evaluate(g,`(()=>{const v=document.getElementById('return');return {...window.__returnPlayerLifecycle,time:v.currentTime,paused:v.paused,sameStream:v.srcObject===window.__returnPlayerStream};})()`);
+    console.log('Actual normal HTML player '+label+': '+JSON.stringify({before:previousPlayer,after:observed}));
+    assert(observed.sameStream&&!observed.paused&&observed.loads===playerBeforeVideo.loads&&observed.emptied===playerBeforeVideo.emptied,
+      'Video changes must preserve the current normal HTML media-player renderer without loading the same stream again');
+    assert(observed.time>=previousPlayer.time,'Current full-lease HTML playback clock must not reset across video changes');
+    previousPlayer=observed;
+  }
+  await preservesPlayer('video attachment');
   await wait('real Chrome H264 return codec and frame count',async()=>{const r=await browser.evaluate(g,decodedVideoStats);return r?.codec==='video/H264'&&r.frames>=5&&r.width<=320&&r.height<=180;});
   await wait('Authenticated actual Chrome receiver reports for current outbound SSRC',()=>{check();return state.videoFeedback?.rr>0;},15000);
   console.log(`Actual Chrome return feedback: ${JSON.stringify(state.videoFeedback)}; profile=${JSON.stringify(state.videoProfile)}`);
@@ -322,12 +334,14 @@ try {
   await wait('actual taken black Program replaces prior return pixels',async()=>{check();const r=await browser.evaluate(g,videoPixels);return r&&r.pixel.every(v=>v<8);});
   command({type:'video-off'});
   await browser.until(g,"document.getElementById('return').srcObject?.getVideoTracks().length===0",'explicit stop clears visible return video');
+  await preservesPlayer('video off retains audio');
   ack=undefined;command({type:'video-budget-free'});await wait('actual VT teardown releases aggregate reservation',()=>{check();return ack==='video-budget-free';});
   command({type:'video-purple'});await pause(350);
   assert(await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0"),'New Program changes cannot re-open stopped video return');
   command({type:'video-on'});
   await wait('fresh opt-in decodes current purple Program',async()=>{check();const r=await browser.evaluate(g,videoPixels);return r?.pixel[0]>100&&r.pixel[1]<80&&r.pixel[2]>140;},20000);
   console.log(`PASS actual native fixed Program H264 return: current pixels, <=320x180 bounds, deliberate start/stop/restart and hidden stopped video; ${JSON.stringify(await browser.evaluate(g,videoPixels))}`);
+  await preservesPlayer('deliberate video restart');
   if(!process.argv.includes('--video-fault-only')&&!process.argv.includes('--video-flow-only')) await qualifyAV('Program');
   else console.log('Scope: focused partial-AU invocation; decoded AV cue qualification is separate.');
   command({type:'video-noise'});await pause(500);
@@ -354,13 +368,16 @@ try {
   await wait('actual distinct blue portrait Secondary return',blue,20000);
   await wait('Secondary return owns canvas source demand',()=>state.secondaryDemand===true);
   console.log(`PASS actual distinct Program-purple/Secondary-blue pixels and bounded portrait H264: ${JSON.stringify(await browser.evaluate(g,videoPixels))}`);
+  await preservesPlayer('Secondary selection');
   ack=undefined;command({type:'video-budget-held'});await wait('Secondary owns actual shared encoder budget',()=>{check();return ack==='video-budget-held';});
   command({type:'video-secondary-remove'});
   await browser.until(g,"document.getElementById('return').srcObject.getVideoTracks().length===0",'Secondary layout removal fences visible return');
+  await preservesPlayer('Secondary removal retains audio');
   ack=undefined;command({type:'video-budget-free'});await wait('Secondary loss tears down encoder and releases budget',()=>{check();return ack==='video-budget-free'&&state.secondaryDemand===false;});
   command({type:'video-secondary-restore'});await pause(350);
   assert(await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0"),'Restoring Secondary does not replay earlier On');
   command({type:'video-on'});await wait('fresh explicit Secondary enable after source restoration',blue,20000);
+  await preservesPlayer('Secondary restoration');
   if(!process.argv.includes('--video-fault-only')&&!process.argv.includes('--video-flow-only')) await qualifyAV('Secondary');
   command({type:'video-secondary-restore'});await wait('Secondary blue restored after AV cue',blue);
   }else{
@@ -388,6 +405,7 @@ try {
     if(!process.argv.includes('--video-fault-only')&&!process.argv.includes('--video-flow-only')) await qualifyAV('Clean');
     command({type:'video-purple'});await wait('Clean retains original purple Program after AV cue',purple);
     console.log(`PASS actual separately composed Clean return excludes project overlay and preserves Program scene: ${JSON.stringify(await browser.evaluate(g,videoPixels))}`);
+    await preservesPlayer('Clean selection');
   }else{
     command({type:'video-on'});await wait('Unqualified additional Clean composition refused',()=>{check();return state.members[0].returnVideo==='failed';});
     assert(state.cleanDemand===false,'Refused Clean retains no composition demand');
@@ -418,6 +436,7 @@ try {
   console.log(`Actual own signal positive in shipping Program before return exclusion: ${JSON.stringify(state.program)}`);await spectrum('onair-own440-880-excluded',.4,.2);
   ack=undefined;command({type:'mute'});await wait('actual local mixer mute acknowledged',()=>{check();return ack==='mute';});await pause(400);await spectrum('local-muted',0,0);
   ack=undefined;command({type:'restore'});await wait('actual local mixer nonunity restore acknowledged',()=>{check();return ack==='restore';});await pause(300);await spectrum('local-nonunity-restore',.16,.08);
+  await preservesPlayer('source transitions, own exclusion and mute/restore');
   const oldGeneration=state.lease.generation;
   if(state.secondaryQualified){
     command({type:'video-select-secondary'});await wait('Select Secondary before actual rejoin',()=>state.members[0].returnSource==='secondary');
@@ -429,6 +448,9 @@ try {
   await wait('actual host reconnected awaiting admission',()=>{check();return state.phase==='connected'&&state.members[0]?.membership==='waiting';});
   command({type:'admit',id:guest});await wait('fresh full lease actual return ready',()=>{check();return state.lease?.generation>oldGeneration&&state.members[0]?.returnAudio==='ready'&&state.transport?.local==='relay';},20000);
   await browser.until(g,"document.getElementById('return').srcObject?.getAudioTracks().length===1",'new shipping return stream');
+  const replacementPlayer=await browser.evaluate(g,`(()=>{const v=document.getElementById('return');return {...window.__returnPlayerLifecycle,newStream:v.srcObject!==window.__returnPlayerStream};})()`);
+  assert(replacementPlayer.newStream&&replacementPlayer.loads>playerBeforeVideo.loads,'Actual full-lease replacement must retire the old player and attach its new stream');
+  console.log('PASS actual guest HTML player preserves clock across video changes and replaces its stream for a new full lease: '+JSON.stringify(replacementPlayer));
   await browser.evaluate(g,returnAnalyzer);await spectrum('rejoined-new-fulllease',.16,.08);
   assert(await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0"),'A new full lease cannot inherit Program video opt-in');
   assert(state.members[0].returnSource==='program','A new full lease resets ephemeral Secondary selection to Program');
