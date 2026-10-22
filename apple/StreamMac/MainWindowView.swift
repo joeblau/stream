@@ -553,44 +553,46 @@ struct MainWindowView: View {
     /// marks staged work program doesn't have yet, and the Direct Live toggle
     /// switches to the explicit edit-straight-to-program mode.
     private var transitionControls: some View {
-        HStack(spacing: 12) {
-            Button {
-                dispatcher.execute(.take)
-            } label: {
-                Text("Take")
-                    .frame(minWidth: 64)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(dispatcher.state.hasPendingStagedEdits ? .accentColor : nil)
-            .disabled(!dispatcher.canExecute(.take))
-            .help("Publish the previewed scene to the program output (⏎)")
+        StudioControlRow(accessibilityLabel: "Scene transition controls") {
+            HStack(spacing: 12) {
+                Button {
+                    dispatcher.execute(.take)
+                } label: {
+                    Text("Take")
+                        .frame(minWidth: 64)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(dispatcher.state.hasPendingStagedEdits ? .accentColor : nil)
+                .disabled(!dispatcher.canExecute(.take))
+                .help("Publish the previewed scene to the program output (⏎)")
 
-            Button("Revert") {
-                dispatcher.execute(.revert)
-            }
-            .disabled(!dispatcher.canExecute(.revert))
-            .help("Discard unpublished edits (preview goes back to the program scene)")
+                Button("Revert") {
+                    dispatcher.execute(.revert)
+                }
+                .disabled(!dispatcher.canExecute(.revert))
+                .help("Discard unpublished edits (preview goes back to the program scene)")
 
-            if dispatcher.state.hasPendingStagedEdits {
-                Label("Unpublished changes", systemImage: "circle.fill")
-                    .foregroundStyle(.yellow)
-                    .studioTextStyle(.caption, weight: .semibold)
-                    .labelStyle(.titleAndIcon)
-            }
+                if dispatcher.state.hasPendingStagedEdits {
+                    Label("Unpublished changes", systemImage: "circle.fill")
+                        .foregroundStyle(.yellow)
+                        .studioTextStyle(.caption, weight: .semibold)
+                        .labelStyle(.titleAndIcon)
+                }
 
-            Spacer()
+                Spacer()
 
-            Toggle(isOn: directLiveBinding) {
-                Text("Direct Live")
-                    .studioTextStyle(.callout)
+                Toggle(isOn: directLiveBinding) {
+                    Text("Direct Live")
+                        .studioTextStyle(.callout)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help("When on, scene edits and selections apply straight to the program output")
             }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .help("When on, scene edits and selections apply straight to the program output")
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .animation(reduceMotion ? nil : .default, value: dispatcher.state.hasPendingStagedEdits)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .animation(reduceMotion ? nil : .default, value: dispatcher.state.hasPendingStagedEdits)
     }
 
     private var directLiveBinding: Binding<Bool> {
@@ -911,66 +913,68 @@ struct MainWindowView: View {
     /// Every button routes through the W05 dispatcher and every label reads
     /// the published `StudioState` — this bar is the reference subscriber.
     private var transportBar: some View {
-        HStack(spacing: 16) {
-            Button {
-                dispatcher.execute(recorder.canStop
-                                   ? .stopRecording : .startRecording)
-            } label: {
-                Label(recorder.canStop ? "Stop Recording"
-                      : dispatcher.state.recording == .stopping ? "Stopping…" : "Record",
-                      systemImage: dispatcher.state.recording.isRecording ? "stop.circle.fill" : "record.circle")
+        StudioControlRow(accessibilityLabel: "Recording and streaming controls") {
+            HStack(spacing: 16) {
+                Button {
+                    dispatcher.execute(recorder.canStop
+                                       ? .stopRecording : .startRecording)
+                } label: {
+                    Label(recorder.canStop ? "Stop Recording"
+                          : dispatcher.state.recording == .stopping ? "Stopping…" : "Record",
+                          systemImage: dispatcher.state.recording.isRecording ? "stop.circle.fill" : "record.circle")
+                }
+                .tint(dispatcher.state.recording.isRecording ? .red : nil)
+                .disabled(dispatcher.state.recording == .stopping)
+
+                Button {
+                    dispatcher.execute(recorder.state == .paused ? .resumeRecording : .pauseRecording)
+                } label: {
+                    Label(recorder.state == .paused ? "Resume" : "Pause", systemImage: recorder.state == .paused ? "play.fill" : "pause.fill")
+                }
+                .disabled(recorder.state != .recording && recorder.state != .paused)
+
+                Button("New File", systemImage: "doc.badge.plus") {
+                    dispatcher.execute(.startNewRecordingFile)
+                }
+                .disabled(!dispatcher.canExecute(.startNewRecordingFile))
+
+                RecordingOptionsView(recorder: recorder)
+                RecordingLibraryView(recorder: recorder, openRequest: $workspace.showRecordingLibrary) { title in
+                    dispatcher.execute(.addRecordingMarker(title))
+                }
+
+                Button {
+                    dispatcher.execute(dispatcher.state.preview == .active
+                                       ? .stopPreview : .startPreview)
+                } label: {
+                    Label(dispatcher.state.preview == .active ? "Stop Preview" : "Preview",
+                          systemImage: dispatcher.state.preview == .active ? "eye.slash" : "eye")
+                }
+                .help(dispatcher.state.preview == .active
+                      ? "Stop the on-screen preview (an active stream or recording keeps running)"
+                      : "Start the on-screen preview")
+
+                Spacer()
+
+                streamStatusBadge
+                SessionRecoveryReviewButton(relink: {
+                    inspectorTab = .assets; showInspectorPanel = true
+                })
+
+                Button {
+                    inspectorTab = .destinations
+                    showInspectorPanel = true
+                    showPreflight = true
+                } label: { Label("Preflight", systemImage: "checklist") }
+                if controller.isRehearsing {
+                    Label("LOCAL REHEARSAL", systemImage: "record.circle").foregroundStyle(.orange)
+                }
+                goLiveButton
             }
-            .tint(dispatcher.state.recording.isRecording ? .red : nil)
-            .disabled(dispatcher.state.recording == .stopping)
-
-            Button {
-                dispatcher.execute(recorder.state == .paused ? .resumeRecording : .pauseRecording)
-            } label: {
-                Label(recorder.state == .paused ? "Resume" : "Pause", systemImage: recorder.state == .paused ? "play.fill" : "pause.fill")
-            }
-            .disabled(recorder.state != .recording && recorder.state != .paused)
-
-            Button("New File", systemImage: "doc.badge.plus") {
-                dispatcher.execute(.startNewRecordingFile)
-            }
-            .disabled(!dispatcher.canExecute(.startNewRecordingFile))
-
-            RecordingOptionsView(recorder: recorder)
-            RecordingLibraryView(recorder: recorder, openRequest: $workspace.showRecordingLibrary) { title in
-                dispatcher.execute(.addRecordingMarker(title))
-            }
-
-            Button {
-                dispatcher.execute(dispatcher.state.preview == .active
-                                   ? .stopPreview : .startPreview)
-            } label: {
-                Label(dispatcher.state.preview == .active ? "Stop Preview" : "Preview",
-                      systemImage: dispatcher.state.preview == .active ? "eye.slash" : "eye")
-            }
-            .help(dispatcher.state.preview == .active
-                  ? "Stop the on-screen preview (an active stream or recording keeps running)"
-                  : "Start the on-screen preview")
-
-            Spacer()
-
-            streamStatusBadge
-            SessionRecoveryReviewButton(relink: {
-                inspectorTab = .assets; showInspectorPanel = true
-            })
-
-            Button {
-                inspectorTab = .destinations
-                showInspectorPanel = true
-                showPreflight = true
-            } label: { Label("Preflight", systemImage: "checklist") }
-            if controller.isRehearsing {
-                Label("LOCAL REHEARSAL", systemImage: "record.circle").foregroundStyle(.orange)
-            }
-            goLiveButton
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .animation(reduceMotion ? nil : .default, value: dispatcher.state.stream)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .animation(reduceMotion ? nil : .default, value: dispatcher.state.stream)
     }
 
     /// The streaming session status: LIVE only on an acknowledged publish;
