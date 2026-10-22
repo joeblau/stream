@@ -128,6 +128,15 @@ Their member payload digest matched the measured full-media archive, and the
 retained standalone recipe successfully relinked a separate copy with that
 replacement archive. The original measured executable remained untouched.
 
+An additional `lipo -create` and `xcodebuild -create-xcframework` packaging check
+produced an owned optional `libdatachannel-nice.xcframework` containing ARM64
+and x86_64. Extracted slices matched their corresponding input archive hashes,
+and both slices reported minOS 14.0. The universal archive SHA-256 was
+`6b54738c241ad0236f603011d6cfec12af29ec954a27454a069da1a603ed0abd`.
+Its ARM input was the separately receipted warm archive with identical measured
+member payloads; this packaging check does not substitute it for the full-media
+artifact or adopt it into the shipping cache.
+
 macOS 14 execution, Intel hardware
 full media, Internet/mobile/Safari qualification, measured rendered A/V sync,
 physical capture/playout/AEC and release adoption remain outside this evidence.
