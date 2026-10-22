@@ -17,11 +17,14 @@ rejects the result. Public server discovery receives no bearer. A current rate
 refusal installs the provider cooldown; import never retries automatically.
 
 Both `channels.read` and `stream.read` must be present in the actual token grant.
-Restream's returned grant scopes are stored beside its machine credentials in
-Keychain, retained when a same-account refresh omits `scope`, and removed at
-sign-out/client replacement. Existing grants whose scopes were never recorded
-require **Forget Authorization**, then Connect in **Settings → Chat**. Unknown
-scope metadata cannot authorize stream-key retrieval.
+The configured authorization broker returns only actual grant scopes beside a
+scoped access token and opaque broker credential. Native clients store this
+broker grant in device-bound Keychain entries; the server retains the provider
+refresh token and confidential application secret. Legacy direct-native grants
+remain preserved and inactive. Configure the trusted broker URL and authorize
+again in **Settings → Chat**; without that service, authorization and ingest
+discovery stay unavailable. Unknown scope metadata cannot authorize stream-key
+retrieval. See [broker contract and deployment gates](RESTREAM_AUTH_BROKER.md).
 
 Only the service-returned RTMP/RTMPS `/live` endpoint on a Restream host is used;
 the adapter does not invent an encrypted URL from an RTMP response. Other URL

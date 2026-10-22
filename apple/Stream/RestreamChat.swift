@@ -14,12 +14,10 @@ private let chatLog = Logger(subsystem: "com.joeblau.Stream", category: "chat")
 // MARK: - Restream API constants
 
 enum RestreamAPI {
-    /// Custom URL scheme for the OAuth redirect. Register the full redirect URI
-    /// below on your Restream application's settings.
+    /// Native completion only. Restream registers the broker's HTTPS callback;
+    /// the broker returns this fixed scheme after spending provider state.
     static let redirectScheme = "streamchat"
     static let redirectURI = "streamchat://oauth"
-    static let authorizeURL = "https://api.restream.io/login"
-    static let tokenURL = URL(string: "https://api.restream.io/oauth/token")!
     static let chatWebSocketURL = "wss://chat.api.restream.io/ws"
 }
 
@@ -32,39 +30,17 @@ struct ChatMessage: Identifiable, Sendable {
     let platform: String?
 }
 
-// MARK: - Minimal app-only Keychain for the Restream client credentials + tokens
+// MARK: - App-only Keychain for broker configuration and device-bound grants
 
 private enum RestreamKeychain {
     #if os(macOS)
     private static let service = "com.joeblau.Stream.mac.restream"
-    /// Copy once, preserving legacy iOS/shared credentials. A marker in the new
-    /// service prevents sign-out from resurrecting the old access token.
-    private static func migrateLegacyIfNeeded() {
-        #if !STREAM_NATIVE_VALIDATION
-        let flag = "restream.desktopCredentialMigration.v1"
-        if UserDefaults.standard.bool(forKey: flag) || read("desktopMigration", service: service) != nil { return }
-        // Record the attempt before copying. Even if Keychain is locked or an
-        // item write fails, a later sign-out/relaunch must not restore an old
-        // iOS token. Missing values can be repaired with explicit authorization.
-        UserDefaults.standard.set(true, forKey: flag)
-        for account in ["clientID", "clientSecret", "accessToken", "refreshToken"] {
-            if read(account, service: service) == nil,
-               let value = read(account, service: "com.joeblau.Stream.restream") {
-                guard write(value, for: account) else { return }
-            }
-        }
-        _ = write("1", for: "desktopMigration")
-        #endif
-    }
     #else
     private static let service = "com.joeblau.Stream.restream"
     #endif
 
-    static func set(_ value: String?, for account: String) {
-        #if os(macOS)
-        migrateLegacyIfNeeded()
-        #endif
-        _ = write(value, for: account)
+    @discardableResult static func set(_ value: String?, for account: String) -> Bool {
+        return write(value, for: account)
     }
     private static func write(_ value: String?, for account: String) -> Bool {
         #if STREAM_NATIVE_VALIDATION
@@ -77,7 +53,7 @@ private enum RestreamKeychain {
             return result == errSecSuccess || result == errSecItemNotFound
         }
         let values: [String: Any] = [kSecValueData as String: Data(value.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         let updated = SecItemUpdate(base as CFDictionary, values as CFDictionary)
         if updated == errSecSuccess { return true }
         guard updated == errSecItemNotFound else { return false }
@@ -87,9 +63,6 @@ private enum RestreamKeychain {
         #endif
     }
     static func get(_ account: String) -> String? {
-        #if os(macOS)
-        migrateLegacyIfNeeded()
-        #endif
         return read(account, service: service)
     }
     private static func read(_ account: String, service: String) -> String? {
@@ -113,7 +86,7 @@ private enum RestreamKeychain {
 @Observable
 final class RestreamChat: NSObject {
     enum Status: Equatable {
-        case needsCredentials   // client id/secret not set
+        case needsCredentials   // trusted broker not configured
         case signedOut          // credentials set, no token
         case connecting
         case connected
@@ -123,18 +96,21 @@ final class RestreamChat: NSObject {
     private(set) var status: Status = .needsCredentials
     private(set) var messages: [ChatMessage] = []
 
-    @ObservationIgnored private var clientID = RestreamKeychain.get("clientID") ?? ""
-    @ObservationIgnored private var clientSecret = RestreamKeychain.get("clientSecret") ?? ""
-    @ObservationIgnored private var accessToken = RestreamKeychain.get("accessToken")
-    @ObservationIgnored private var refreshToken = RestreamKeychain.get("refreshToken")
-    @ObservationIgnored private var grantedScopes: Set<String>? = RestreamKeychain.get("grantedScopes").flatMap { raw in
-        guard let data = raw.data(using: .utf8), data.count <= 16_384,
-              let scopes = try? JSONDecoder().decode([String].self, from: data), scopes.count <= 100,
-              scopes.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 }) else { return nil }
-        return Set(scopes)
-    }
+    @ObservationIgnored private var brokerURL = RestreamKeychain.get("brokerOrigin") ?? ""
+    @ObservationIgnored private var brokerSession: RestreamBrokerSession?
+    @ObservationIgnored private var authorizationJob: Task<Void, Never>?
+    @ObservationIgnored private let brokerStore = RestreamBrokerGrantStore(
+        readGrant: { RestreamKeychain.get("brokerGrant") },
+        writeGrant: { RestreamKeychain.set($0, for: "brokerGrant") },
+        isRetired: { UserDefaults.standard.bool(forKey: "restream.broker.retired.v1") },
+        setRetired: { value in
+            UserDefaults.standard.set(value, forKey: "restream.broker.retired.v1")
+            return UserDefaults.standard.synchronize()
+        })
+    private var accessToken: String? { brokerSession?.authorizedGrant?.access }
+    private var grantedScopes: Set<String>? { brokerSession?.authorizedGrant.map { Set($0.scopes) } }
     #if os(macOS)
-    var hasProviderAuthorization: Bool { accessToken != nil }
+    var hasProviderAuthorization: Bool { hasCredentials && accessToken != nil }
     var providerAuthorizationGeneration: UUID? { accessToken == nil ? nil : sessionGeneration }
     var providerGrantedScopes: Set<String>? { grantedScopes }
 
@@ -143,19 +119,22 @@ final class RestreamChat: NSObject {
     func authorizedProviderRequest(_ request: URLRequest) async throws -> Data {
         guard request.url?.scheme == "https", request.url?.host == "api.restream.io",
               request.url?.path.hasPrefix("/v2/user/") == true,
-              request.url?.user == nil, request.url?.password == nil else { throw ProviderFailure(.invalidRequest) }
+              request.url?.user == nil, request.url?.password == nil, request.url?.port == nil, request.url?.fragment == nil else { throw ProviderFailure(.invalidRequest) }
+        try Task.checkCancellation()
         let generation = sessionGeneration
-        guard let token = accessToken else { throw ProviderFailure(.authorization) }
+        guard hasCredentials, let token = accessToken else { throw ProviderFailure(.authorization) }
         var req = request; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         var (data, response) = try await ProviderHTTP.shared.send(req)
-        guard sessionGeneration == generation else { throw CancellationError() }
+        guard sessionGeneration == generation, hasProviderAuthorization else { throw CancellationError() }
         try Task.checkCancellation()
         if response.statusCode == 401 && (request.httpMethod ?? "GET") == "GET" {
             guard await refreshAccessToken(), sessionGeneration == generation, let token = accessToken else { throw ProviderFailure(.authorization) }
+            try Task.checkCancellation()
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             (data, response) = try await ProviderHTTP.shared.send(req)
         }
-        guard sessionGeneration == generation else { throw CancellationError() }
+        guard sessionGeneration == generation, hasProviderAuthorization else { throw CancellationError() }
+        try Task.checkCancellation()
         try ProviderFailure.check(data: data, response: response)
         return data
     }
@@ -164,7 +143,8 @@ final class RestreamChat: NSObject {
     @ObservationIgnored var onStudioReset: (() -> Void)?
 
     func disconnectStudioSession() {
-        sessionGeneration = UUID(); oauthState = nil
+        sessionGeneration = UUID()
+        authorizationJob?.cancel(); authorizationJob = nil; brokerSession?.cancel()
         tokenRefreshTask?.cancel(); tokenRefreshTask = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
@@ -176,14 +156,19 @@ final class RestreamChat: NSObject {
     @ObservationIgnored private var sessionGeneration = UUID()
     @ObservationIgnored private var reconnectAttempts = 0
     @ObservationIgnored private var tokenRefreshTask: Task<Bool, Never>?
-    @ObservationIgnored private var oauthState: String?
     @ObservationIgnored private var authSession: ASWebAuthenticationSession?
     @ObservationIgnored private var webSocket: URLSessionWebSocketTask?
 
-    var hasCredentials: Bool { !clientID.isEmpty && !clientSecret.isEmpty }
+    var hasCredentials: Bool { configuredBroker != nil }
+    var configuredBrokerURL: String { brokerURL }
+    private var configuredBroker: RestreamAuthBroker? {
+        guard let url = URL(string: brokerURL) else { return nil }
+        return try? RestreamAuthBroker(origin: url)
+    }
 
     override init() {
         super.init()
+        loadBrokerSession()
         refreshStatus()
     }
 
@@ -192,34 +177,29 @@ final class RestreamChat: NSObject {
         else if accessToken == nil { status = .signedOut }
     }
 
-    /// Store the Restream application's client id + secret (obtained by registering
-    /// an app at dashboard.restream.io and whitelisting the redirect URI).
-    func saveCredentials(clientID: String, clientSecret: String) {
-        let clientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let clientSecret = clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
-        let credentialsChanged = clientID != self.clientID || clientSecret != self.clientSecret
-        self.clientID = clientID
-        self.clientSecret = clientSecret
-        RestreamKeychain.set(self.clientID, for: "clientID")
-        RestreamKeychain.set(self.clientSecret, for: "clientSecret")
-        // OAuth tokens belong to the client credentials that issued them. Never
-        // reuse an old token after the user replaces either credential.
-        if credentialsChanged {
-            sessionGeneration = UUID(); oauthState = nil
-            tokenRefreshTask?.cancel(); tokenRefreshTask = nil
-            authSession?.cancel(); authSession = nil
-            #if os(macOS)
-            onStudioReset?()
-            #endif
-            webSocket?.cancel(with: .goingAway, reason: nil)
-            webSocket = nil
-            accessToken = nil
-            refreshToken = nil
-            grantedScopes = nil; RestreamKeychain.set(nil, for: "grantedScopes")
-            RestreamKeychain.set(nil, for: "accessToken")
-            RestreamKeychain.set(nil, for: "refreshToken")
+    /// The server owns Restream application credentials. Legacy native secrets
+    /// remain untouched and inactive; no authorization is migrated implicitly.
+    @discardableResult func saveBrokerURL(_ value: String) -> Bool {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: value), let broker = try? RestreamAuthBroker(origin: url) else {
+            status = .failed("Enter the trusted HTTPS Restream authorization service URL."); return false
         }
-        refreshStatus()
+        sessionGeneration = UUID(); authorizationJob?.cancel(); brokerSession?.retireAuthorization()
+        authSession?.cancel(); authSession = nil
+        tokenRefreshTask?.cancel(); tokenRefreshTask = nil
+        webSocket?.cancel(with: .goingAway, reason: nil); webSocket = nil
+        guard RestreamKeychain.set(broker.origin.absoluteString, for: "brokerOrigin") else {
+            status = .failed("The authorization service configuration could not be saved."); return false
+        }
+        brokerURL = broker.origin.absoluteString; loadBrokerSession(); status = .signedOut
+        #if os(macOS)
+        onStudioReset?()
+        #endif
+        return true
+    }
+    private func loadBrokerSession() {
+        guard let client = configuredBroker else { brokerSession = nil; return }
+        brokerSession = RestreamBrokerSession(client: client, grant: brokerStore.load(), persist: brokerStore.save)
     }
 
     /// Reconnect silently when both credentials and a prior OAuth token are in
@@ -244,92 +224,70 @@ final class RestreamChat: NSObject {
     }
 
     func signOut() {
-        sessionGeneration = UUID(); oauthState = nil
+        sessionGeneration = UUID()
+        authorizationJob?.cancel(); authorizationJob = nil
+        let saved = brokerSession?.forget() ?? true
         tokenRefreshTask?.cancel(); tokenRefreshTask = nil
         authSession?.cancel(); authSession = nil
         #if os(macOS)
         onStudioReset?()
         #endif
-        webSocket?.cancel(with: .goingAway, reason: nil)
-        webSocket = nil
-        accessToken = nil
-        refreshToken = nil
-        grantedScopes = nil; RestreamKeychain.set(nil, for: "grantedScopes")
-        RestreamKeychain.set(nil, for: "accessToken")
-        RestreamKeychain.set(nil, for: "refreshToken")
+        webSocket?.cancel(with: .goingAway, reason: nil); webSocket = nil
         messages.removeAll()
-        status = .signedOut
+        status = saved ? (hasCredentials ? .signedOut : .needsCredentials)
+            : .failed("Connection stopped. Stored authorization removal failed; retry sign-out when local storage is available.")
+    }
+    /// Cancel this connection without revoking another workspace's account.
+    func cancelConnection() {
+        sessionGeneration = UUID(); authorizationJob?.cancel(); authorizationJob = nil
+        brokerSession?.cancel(); tokenRefreshTask?.cancel(); tokenRefreshTask = nil
+        authSession?.cancel(); authSession = nil
+        webSocket?.cancel(with: .goingAway, reason: nil); webSocket = nil
+        #if os(macOS)
+        onStudioReset?()
+        #endif
+        status = hasCredentials ? .signedOut : .needsCredentials
     }
 
-    // MARK: OAuth authorization-code flow
-
+    // Provider code and confidential tokens stay at the configured broker.
     private func startAuthorization() {
-        let state = UUID().uuidString
-        let generation = sessionGeneration
-        oauthState = state
-        var comps = URLComponents(string: RestreamAPI.authorizeURL)!
-        comps.queryItems = [
-            .init(name: "response_type", value: "code"),
-            .init(name: "client_id", value: clientID),
-            .init(name: "redirect_uri", value: RestreamAPI.redirectURI),
-            .init(name: "state", value: state)
-        ]
-        guard let url = comps.url else { return }
-
-        status = .connecting
-        let session = ASWebAuthenticationSession(
-            url: url, callbackURLScheme: RestreamAPI.redirectScheme
-        ) { [weak self] callbackURL, error in
-            Task { @MainActor in
-                guard let self, self.sessionGeneration == generation else { return }
-                self.handleCallback(callbackURL, error: error)
+        guard let brokerSession else { status = .needsCredentials; return }
+        sessionGeneration = UUID(); let generation = sessionGeneration
+        authorizationJob?.cancel(); authSession?.cancel(); status = .connecting
+        authorizationJob = Task { [weak self] in
+            do {
+                let attempt = try await brokerSession.begin()
+                guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
+                let session = ASWebAuthenticationSession(url: attempt.authorizationURL, callbackURLScheme: RestreamAPI.redirectScheme) { [weak self] callback, error in
+                    Task { @MainActor in
+                        guard let self, self.sessionGeneration == generation else { return }
+                        if let error {
+                            brokerSession.cancel()
+                            self.status = (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin ? .signedOut : .failed("Authorization is unavailable. Review the service configuration.")
+                            return
+                        }
+                        guard let callback else { self.status = .failed("Authorization did not return a callback."); return }
+                        self.authorizationJob = Task { [weak self] in
+                            do {
+                                let value = try await brokerSession.complete(attempt, callback: callback)
+                                guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
+                                self.openWebSocket(token: value.access)
+                            } catch {
+                                guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
+                                self.status = .failed("Authorization could not be accepted. Reconnect through the configured service.")
+                            }
+                        }
+                    }
+                }
+                session.presentationContextProvider = self; session.prefersEphemeralWebBrowserSession = false
+                self.authSession = session
+                if !session.start() { brokerSession.cancel(); self.status = .failed("Authorization browser could not be opened.") }
+            } catch {
+                guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
+                self.status = .failed("The Restream authorization service is unavailable or unconfigured.")
             }
         }
-        session.presentationContextProvider = self
-        session.prefersEphemeralWebBrowserSession = false
-        authSession = session
-        session.start()
     }
-
-    private func handleCallback(_ url: URL?, error: Error?) {
-        if let error {
-            // User-cancelled is not an error worth surfacing.
-            if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin {
-                refreshStatus()
-            } else {
-                status = .failed("Authorization is unavailable. Review the app configuration and reconnect.")
-            }
-            return
-        }
-        guard let url, url.scheme == RestreamAPI.redirectScheme, url.host == "oauth",
-              url.user == nil, url.password == nil, url.fragment == nil,
-              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
-              items.filter({ $0.name == "code" }).count == 1,
-              items.filter({ $0.name == "state" }).count == 1,
-              let code = items.first(where: { $0.name == "code" })?.value, !code.isEmpty,
-              items.first(where: { $0.name == "state" })?.value == oauthState else {
-            status = .failed("Authorization failed or was tampered with.")
-            return
-        }
-        oauthState = nil
-        let generation = sessionGeneration
-        Task { await exchangeCode(code, generation: generation) }
-    }
-
-    private func exchangeCode(_ code: String, generation: UUID) async {
-        do {
-            let tokens = try await requestTokens(
-                body: ProviderOAuth.form(["grant_type": "authorization_code", "redirect_uri": RestreamAPI.redirectURI, "code": code]))
-            guard sessionGeneration == generation else { return }
-            grantedScopes = nil
-            store(tokens)
-            if let token = tokens.access { openWebSocket(token: token) }
-        } catch {
-            guard sessionGeneration == generation else { return }
-            status = .failed("Token exchange failed — reconnect to retry.")
-        }
-    }
-
     private func refreshAccessToken() async -> Bool {
         if let task = tokenRefreshTask { return await task.value }
         let generation = sessionGeneration
@@ -340,50 +298,15 @@ final class RestreamChat: NSObject {
         return result
     }
     private func performTokenRefresh() async -> Bool {
-        guard let refresh = refreshToken else { return false }
+        guard let brokerSession else { return false }
         let generation = sessionGeneration
         do {
-            let tokens = try await requestTokens(
-                body: ProviderOAuth.form(["grant_type": "refresh_token", "refresh_token": refresh]))
-            guard sessionGeneration == generation else { return false }
-            store(tokens)
-            return tokens.access != nil
+            _ = try await brokerSession.refresh()
+            return sessionGeneration == generation && !Task.isCancelled
         } catch {
-            chatLog.error("Token refresh failed with code \((error as NSError).code)")
+            if (error as? ProviderFailure)?.kind == .authorization, sessionGeneration == generation { brokerSession.forget() }
             return false
         }
-    }
-
-    private struct Tokens { let access: String?; let refresh: String?; let scopes: Set<String>? }
-
-    private func requestTokens(body: Data) async throws -> Tokens {
-        var req = URLRequest(url: RestreamAPI.tokenURL)
-        req.httpMethod = "POST"
-        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let basic = Data("\(clientID):\(clientSecret)".utf8).base64EncodedString()
-        req.setValue("Basic \(basic)", forHTTPHeaderField: "Authorization")
-        req.httpBody = body; req.timeoutInterval = 30
-        #if os(macOS)
-        let (data, http) = try await ProviderHTTP.shared.send(req)
-        let response: URLResponse = http
-        #else
-        let (data, response) = try await URLSession.shared.data(for: req)
-        #endif
-        guard data.count <= 65_536, (response as? HTTPURLResponse)?.statusCode == 200,
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw URLError(.userAuthenticationRequired)
-        }
-        let scopes = (obj["scope"] as? String)?.split(separator: " ").map(String.init)
-        guard scopes.map({ $0.count <= 100 && $0.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 }) }) ?? true else { throw URLError(.cannotParseResponse) }
-        return Tokens(access: obj["access_token"] as? String,
-                      refresh: obj["refresh_token"] as? String, scopes: scopes.map(Set.init))
-    }
-
-    private func store(_ tokens: Tokens) {
-        if let a = tokens.access { accessToken = a; RestreamKeychain.set(a, for: "accessToken") }
-        if let r = tokens.refresh { refreshToken = r; RestreamKeychain.set(r, for: "refreshToken") }
-        if let scopes = tokens.scopes { grantedScopes = scopes }
-        RestreamKeychain.set(grantedScopes.flatMap { try? String(data: JSONEncoder().encode($0.sorted()), encoding: .utf8) }, for: "grantedScopes")
     }
 
     // MARK: Chat WebSocket
@@ -404,6 +327,13 @@ final class RestreamChat: NSObject {
         socket.receive { [weak self] result in
             Task { @MainActor in
                 guard let self, self.webSocket === socket else { return }
+                guard self.hasCredentials, self.accessToken != nil else {
+                    socket.cancel(with: .goingAway, reason: nil); self.webSocket = nil; self.status = .signedOut
+                    #if os(macOS)
+                    self.onStudioReset?()
+                    #endif
+                    return
+                }
                 switch result {
                 case .success(.string(let text)):
                     self.ingest(Data(text.utf8))

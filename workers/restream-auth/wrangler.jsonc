@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "stream-restream-auth",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-22",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SESSIONS",
+        "class_name": "RestreamAuthorization"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RestreamAuthorization"
+      ]
+    }
+  ],
+  "vars": {
+    "PUBLIC_ORIGIN": "",
+    "RESTREAM_CLIENT_ID": ""
+  },
+  "secrets": {
+    "required": [
+      "RESTREAM_CLIENT_SECRET"
+    ]
+  },
+  "ratelimits": [
+    {
+      "name": "ATTEMPTS",
+      "namespace_id": "1331",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": false
+    },
+    "head_sampling_rate": 1
+  }
+}

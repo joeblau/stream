@@ -83,8 +83,7 @@ struct SettingsView: View {
 
     // MARK: - Chat credential fields
 
-    @State private var clientIDField = ""
-    @State private var clientSecretField = ""
+    @State private var brokerURLField = ""
     /// Forces the credential fields to show even when a Restream app is already
     /// stored, so the user can replace it.
     @State private var editingChatCredentials = false
@@ -818,26 +817,24 @@ struct SettingsView: View {
                 Label { Text("Connecting to Restream…") } icon: {
                     ProgressView().controlSize(.mini)
                 }
+                Button("Cancel Connection") { chat.cancelConnection() }
 
             case .needsCredentials, .signedOut, .failed:
                 if chat.hasCredentials && !editingChatCredentials {
                     Button("Connect with Restream") { Haptics.tap(); chat.connect() }
-                    Button("Change Restream App") { Haptics.tap(); editingChatCredentials = true }
+                    Button("Change Authorization Service") { Haptics.tap(); brokerURLField = chat.configuredBrokerURL; editingChatCredentials = true }
                 } else {
-                    TextField("Client ID", text: $clientIDField)
+                    TextField("Trusted HTTPS authorization service URL", text: $brokerURLField)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Client Secret", text: $clientSecretField)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button("Save & Connect") {
+                    Button("Save Service & Connect") {
                         Haptics.tap()
-                        chat.saveCredentials(clientID: clientIDField, clientSecret: clientSecretField)
-                        editingChatCredentials = false
-                        chat.connect()
-                    }
-                    .disabled(clientIDField.isEmpty || clientSecretField.isEmpty)
+                        if chat.saveBrokerURL(brokerURLField) { editingChatCredentials = false; chat.connect() }
+                    }.disabled(brokerURLField.isEmpty)
+
                 }
 
                 if case .failed(let message) = chat.status {
+                    Button("Forget Stored Authorization", role: .destructive) { chat.signOut() }
                     Label(message, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                         .font(.caption)
@@ -846,7 +843,7 @@ struct SettingsView: View {
         } header: {
             Text("Chat")
         } footer: {
-            Text("Register an app at dashboard.restream.io, set its redirect URI to \(RestreamAPI.redirectURI), then paste the Client ID + Secret here and sign in. Chat from every connected platform appears on the main screen.")
+            Text("Restream requires a configured authorization service that holds the confidential application secret and refresh token on its server. Enter only a service URL you trust. No service is provisioned automatically. Legacy native credentials remain preserved and inactive; authorize again through the service.")
         }
     }
 }
