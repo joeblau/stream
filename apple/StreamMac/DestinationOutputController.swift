@@ -218,7 +218,8 @@ final class DestinationOutputController: ObservableObject {
     }
 
     @discardableResult
-    func start(_ destination: StreamDestination, settings: StreamSettings, sourceSize: CGSize? = nil) -> Bool {
+    func start(_ destination: StreamDestination, settings: StreamSettings, sourceSize: CGSize? = nil,
+               authorization: @escaping @MainActor (UUID) -> Bool = { _ in true }) -> Bool {
         let id = destination.id
         guard isPublishingAllowed, startIsCurrent(destination) else { return false }
         guard !(states[id]?.isActive ?? false) else { return false }
@@ -325,6 +326,11 @@ final class DestinationOutputController: ObservableObject {
                 if !usesEncoded, let programSourceFrameRate { await publisher.configureProgramVideo(sourceFrameRate: programSourceFrameRate) }
                 try Task.checkCancellation()
                 guard self.startStillCurrent(id: id, generation: generation, destination: destination) else { return }
+                // Managed review is consumed synchronously at handoff, while
+                // local resource preparation may suspend. Recheck captured
+                // startup authority once, at the final pre-start boundary.
+                // Already-started outputs are not revoked by this closure.
+                guard authorization(generation) else { self.stop(id); return }
                 try await publisher.start(settings)
                 try Task.checkCancellation()
                 guard self.startStillCurrent(id: id, generation: generation, destination: destination) else { return }

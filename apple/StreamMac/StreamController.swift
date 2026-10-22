@@ -1768,9 +1768,14 @@ final class StreamController: ObservableObject {
         managedStartHasEntries = false
     }
 
-    private func managedStartContext(_ id: UUID) -> ManagedYouTubeStartContext? {
-        guard !managedStartClosed, !resilience.isLocked, !isRehearsing,
-              destinationOutputs.isPublishingAllowed, !(destinationOutputs.states[id]?.isActive ?? false),
+    private func managedStartContext(_ id: UUID, connectingSession: UUID? = nil) -> ManagedYouTubeStartContext? {
+        let stateAllowsReview: Bool
+        if let connectingSession {
+            stateAllowsReview = destinationOutputs.states[id] == .connecting &&
+                destinationOutputs.sessionToken(id) == connectingSession
+        } else { stateAllowsReview = !(destinationOutputs.states[id]?.isActive ?? false) }
+        guard stateAllowsReview, !managedStartClosed, !resilience.isLocked, !isRehearsing,
+              destinationOutputs.isPublishingAllowed,
               let accounts = managedStartAccounts,
               let destination = destinations.saved.first(where: { $0.id == id }),
               destination.providerBinding != nil, canvasStartError(destinations: [destination]) == nil else { return nil }
@@ -1781,8 +1786,15 @@ final class StreamController: ObservableObject {
 
     private func publishReviewedManagedDestination(_ context: ManagedYouTubeStartContext,
                                                   credentials: DestinationCredentials) -> Bool {
-        guard managedStartContext(context.destination.id) == context else { return false }
-        return publishDestination(context.destination, credentials: credentials, base: context.settings)
+        guard managedStartContext(context.destination.id) == context,
+              let accounts = managedStartAccounts else { return false }
+        let revision = accounts.managedReadRevision
+        return publishDestination(context.destination, credentials: credentials, base: context.settings,
+            authorization: { [weak self, weak accounts] generation in
+                guard let self, let accounts, self.managedStartAccounts === accounts,
+                      accounts.managedReadRevision == revision else { return false }
+                return self.managedStartContext(context.destination.id, connectingSession: generation) == context
+            })
     }
 
     func goLive() {
@@ -1846,7 +1858,8 @@ final class StreamController: ObservableObject {
     /// starts, preserving aggregate/shared encoder and dual-canvas checks.
     @discardableResult
     private func publishDestination(_ destination: StreamDestination, credentials: DestinationCredentials,
-                                    base: StreamSettings) -> Bool {
+                                    base: StreamSettings,
+                                    authorization: @escaping @MainActor (UUID) -> Bool = { _ in true }) -> Bool {
         let id = destination.id
         guard !resilience.isLocked, !isRehearsing, destinationOutputs.isPublishingAllowed,
               !(destinationOutputs.states[id]?.isActive ?? false),
@@ -1886,7 +1899,7 @@ final class StreamController: ObservableObject {
             errorMessage = message; destinationOutputs.recordFailure(destination, message: message); return false
         }
         resilience.acknowledgeManualRestart()
-        return destinationOutputs.start(destination, settings: adapted, sourceSize: canvasProfile.canvasSize)
+        return destinationOutputs.start(destination, settings: adapted, sourceSize: canvasProfile.canvasSize, authorization: authorization)
     }
 
     func stopDestination(_ id: UUID) { managedStart?.cancel(id); destinationOutputs.stop(id) }
