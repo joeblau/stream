@@ -322,3 +322,27 @@ Final combined `862ee7d` also passes universal Release and the actual bundle
 audit after adding the guarded macOS TLS source. Its shared Core/iOS source
 is unchanged from the broker integration proof. No shipping TLS guard or SDK
 was adopted.
+
+
+## Playback CI fixture correction — 2026-10-22
+
+`7898737` changes only the playback fixture and its generated clock boundary.
+Controlled scheduler starvation reproduced both the original pause-range and
+loop-reset failures while actual playback followed the measured host clock.
+The exact elapsed time in the failed hosted job remains unknown. The correction
+preserves the original **0.39...0.49** pause range and exact **0.3** loop reset
+under controlled time, and adds separate measured real-host pause/PCM/PTS/end
+checks. Normal and deliberately delayed runs pass all ten cases; independent
+review and the parent integrated runner pass. Production playback is unchanged.
+Parent log: `/tmp/stream-wave4-root-media-lifecycle-20261022.log`. Fresh hosted
+CI remains required.
+
+Exact published `a346f56` iOS now passes all586 Core tests/82 suites in180.802s;
+the broker and browser interview workflows also pass. These results do not
+claim the whole desktop CI succeeds. The pending ISO branch now passes all
+four decoded files at the unchanged80ms gate, with exact cue counts, identities,
+marked black/silence and common origins/frontiers. Its complete workload still
+fails the separate RTMP frame count:3143 over123.9s versus the unchanged>3400
+requirement, despite continuous media and68ms maximum frame spacing. That
+production publisher discrepancy is under investigation. #171 remains open;
+the verified inventory remains **24 closed /37 open**.

@@ -30,7 +30,7 @@
     "guestPrivateMessages": "Actual shipping dispatcher/manager/default receiver through local TURN/Chrome passes both directions/receipts, private Backstage routes, rejoin history wipe and stale-context refusal alongside unchanged stereo audio return",
     "review": "Final independent subagent review finds no actionable merge-resolution issue in portable package bounds/typed token remapping, workspace operation ownership/asset grants, recorder warnings or recovery. Production-source diff from e5925bf through reviewed HEAD is empty; later commits are fixture-only, so the successful universal build covers current shipping code.",
     "performance": "Two earlier quiet120-second owned ARM workloads and separate60-second effects rendering remain scoped evidence. Actual hosted600-second ARM workloads at0d79056 fail original30fps qualification: approximately19.5367 and20.2333 rendered fps, with7/0 failed renders. c3fda71 preserves atomic failure metrics and distinguishes sparse replay-source inventory from nominal capacity while retaining the original gate; its focused smoke is not a sustained qualification fix. Native Intel hosted run is terminalFAIL:10123/2209 rendered frames and original80ms video-PTS-versus-host-arrival duration check reports59.192148398s divergence. This is not a decoded waveform A/V drift diagnosis. Both architecture performance jobs failed; representative resource ceilings remain unqualified. See PERFORMANCE_HOSTED_ARM_FAILURE_2026-10-22.json.",
-    "sharedCoreIOS": "Post-merge iOS: 576 tests in 80 suites passed on an owned simulator; /tmp/stream-postmerge-core-ios-20261021.log and matching xcresult. Owned simulator was shut down and deleted; cleanup receipt verifies its UDID is absent.",
+    "sharedCoreIOS": "Exact published a346f56 hosted iOS full586 tests/82 suites PASS180.802s, job119633732045. Original log /tmp/stream-ci-a346f56-119633732045-original.log SHA256112939a6917de52b3b0be2ecf9e075327b7087a01a75caeb584b50b4382264bb. New playback fixture7898737 changes no shared Core/iOS app source.",
     "appIntentsMetadata": "Actual unsigned bundle contains all six documented App Intents and three stable resource entities; an owned bundle with scene action removed is rejected",
     "guestPrivateTalkback": "Actual shipping manager/default receiver through owned TURN/Chrome passes addressed microphone PCM and decoded Opus, public/Monitor/Aux/pre+post ISO exclusion, no private sidechain ducking, FX/ring/converter boundary resets, exact public settings restoration, queued revision invalidation and full-lease press/release/rejoin/deadline safety. Native AppKit mouse/Space/repeat/modifier/responder/removal checks pass. Mixer and send authority expire the hold after ten seconds while MainActor is deliberately blocked.",
     "guestProgramVideo": "Actual default manager/controller/VT/H264 sender through owned TURN/Chrome decodes Program pixels, starting at <=320x180/15fps and constraining bitrate to real receiver feedback. Explicit source/stop/restart/rejoin, pre-BEGIN/held-install/control-close, encoder ownership and held-compositor privacy regressions pass. A real partial FU-A send recovers on the next successful IDR. Earlier repeated raw-track-recorder A/V67.94/76.19ms stayed below100ms, native cues below50ms; source timestamps and capture-disabled retained audio channel preserve the actual clock path.",
@@ -148,7 +148,23 @@
           "sha256": "b8ab6f2984961e3909b3c968bc1ee60b6148f9b65c03a428710d2aa725163763"
         }
       }
-    }
+    },
+    "wave4PlaybackCI": {
+      "source": "7898737",
+      "productionChanges": false,
+      "cause": "Controlled scheduler delay reproduces both original fixture failures while actual playback position agrees with independently bracketed host time. Exact hosted elapsed was not printed and remains unknown.",
+      "correction": "Original 0.39...0.49 pause bound and exact 0.3 loop reset stay on production transport under a controlled fixture clock; independent real-host pause/PCM/PTS/duration/unreferenced-end checks remain.",
+      "verification": "Normal and deliberate 150ms-starved owner runs PASS10 cases; independent reviewer approved. Parent integrated runner also PASS10 cases and exit0.",
+      "parentLog": "/tmp/stream-wave4-root-media-lifecycle-20261022.log",
+      "parentLogSHA256": "560c24120b95f3efd62c54f7742ea142ee6af13e1e315505ac98ed8daee79467",
+      "parentRealPauseSeconds": 0.438824042,
+      "parentExpectedHostBracketSeconds": [
+        0.4388187500007916,
+        0.43883295900013763
+      ],
+      "remaining": "Fresh hosted CI required; source-only correction does not claim a previous failed workflow succeeded."
+    },
+    "wave4ISOQualificationPending": "Outside main pending recording branch: all4 actual ISO decodes across2x60s pass original80ms pairwise cues (camera16.42/14.88ms, oldleaseguest49.75ms), exact3camera/2guest counts, identity, markedblack/silence, origins/frontiers and zero recording render/audio drops. Whole test remainsFAIL: RTMP123.9s/3143frames does not meet unchanged>3400 frame gate although maxstep68ms and continuity pass. Actual same-rate sharedencoder phase-gate is under investigation; no new fullqualification or issueclosure."
   },
   "issues": [
     {
@@ -259,8 +275,8 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Finish the strict80ms/alias-repeat qualification after the current processed-ISO missing-pixel fix: the strict guest lease-gap check found a SceneRenderer offline placeholder in processed ISO, which must remain black while Program placeholder behavior stays unchanged. The RecordingVideoSourceFactory follow-up and final strict rerun are pending and not counted integrated.",
-        "The originald41310-second baseline loses ISO audio while Program remains complete; the focused local correction passes. A local2x60-second run retains all four ISO files, source handoff and healthy RTMP, and cameraA associated PCM cues meet80ms, but these partial positives do not supersede the remaining strict gap/repeat gate."
+        "Integrate the reviewed physical-camera identity, original-source history/pause mapping, retired-associated PCM silence and processed guest black-gap corrections after complete source/consumer proof. These pending source changes are not published yet.",
+        "All four actual 2x60s ISO files pass the original80ms gates with exact cue counts, origins/frontiers and gaps. Combined workload still FAILS RTMP frame count3143 over123.9s against unchanged>3400. Prove/fix publisher cadence before final acceptance; retain previous failed receipts."
       ]
     },
     {
@@ -976,7 +992,7 @@
     "currentlyOpen": 37,
     "closedSinceInitialInventory": 24
   },
-  "overallStatus": "Incomplete roadmap:37 open /24 closed in the initial61 tasks; zero open PRs at last API audit. Tasks128/129 are closed and parent54 reconciled. Broker implementation and guarded optionalTLS control evidence are integrated; no new closure follows. Broker source passes unsigned universal macOS Release, bundle audit, full iOS source build and563 filtered local Core tests. OptionalTLS full browser-returnPCM still fails and its shipping guard remains disabled. Prior b285 hosted ARM/iOS full586 Core tests pass; ARM then fails playback fixture pause position, under investigation. Both original600-second performance jobs retain failed bounds. ISO source-clock history/pause fixes await strict actual media proof.",
+  "overallStatus": "Incomplete roadmap:37 open /24 closed in the initial61 tasks; no new task closure. Broker and guarded optionalTLS prototype are published, and current iOS full586 Core tests plus broker/interview workflows pass. Playback fixture clock correction7898737 preserves original bounds, passes independent review and parent native runner; fresh hosted CI is required. All4 pending ISO files meet original80ms sync, identities, gaps and commonfrontiers, but combined RTMP frame count3143 fails unchanged>3400. ISO/sharedencoder follow-up remains outside main. Original sustainedperformance qualification and native keyboard chooser remain incomplete.",
   "integratedMain": "862ee7d",
   "githubStateRefreshedAt": "2026-10-22T03:52:14.493741+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
@@ -1039,8 +1055,7 @@
     "proposedClosureAfterFinalCombinedBuildAndPublication": [],
     "pendingFinalVerification": [],
     "notIntegrated": [
-      "Issue171 bounded original-source history, pause mapping and strict80ms repeated media proof",
-      "Hosted playback pause-position failure investigation"
+      "Issue171 source-clock/history/pause and retirement fixes: ISO media passes but fullRTMP cadence gate fails; sharedencoder cause under investigation"
     ],
     "githubCountsNote": "Exact paginated API reconciliation of the initial 61 issues verifies 37 open / 24 closed, zero open PRs, and parent54 checked for 128/129 after source publication and closure."
   }
