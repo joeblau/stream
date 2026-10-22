@@ -334,6 +334,25 @@ private final class ReturnAVProbe: @unchecked Sendable {
                         "secondaryQualified": IsolatedVideoBudget.current.qualified, "secondaryDemand": current.controller.secondaryCanvasDemanded,
                         "cleanQualified": IsolatedVideoBudget.current.qualified, "cleanDemand": current.controller.cleanReturnDemanded]
                     if let context = current.manager.currentReadyLease {
+                        let now = CMClockGetTime(CMClockGetHostTimeClock())
+                        var incoming: [String: Any] = [:]
+                        for (name, role) in [("camera", GuestReceiveRole.camera), ("screen", GuestReceiveRole.screen)] {
+                            let health = current.controller.guestVideoFrames.sourceHealth(slot: context.receive.slot, role: role, at: now)
+                            var receipt: [String: Any] = ["state": health.state, "frames": health.deliveredFrames ?? 0]
+                            if let pixels = current.controller.guestVideoFrames.pixels(slot: context.receive.slot, role: role,
+                                at: now, program: false, requiring: context.receive),
+                               CVPixelBufferLockBaseAddress(pixels, .readOnly) == kCVReturnSuccess {
+                                if let base = CVPixelBufferGetBaseAddress(pixels) {
+                                    let offset = (CVPixelBufferGetHeight(pixels) / 2) * CVPixelBufferGetBytesPerRow(pixels)
+                                        + (CVPixelBufferGetWidth(pixels) / 2) * 4
+                                    let center = base.advanced(by: offset).assumingMemoryBound(to: UInt8.self)
+                                    receipt["rgb"] = [Int(center[2]), Int(center[1]), Int(center[0])]
+                                }
+                                CVPixelBufferUnlockBaseAddress(pixels, .readOnly)
+                            }
+                            incoming[name] = receipt
+                        }
+                        state["incoming"] = incoming
                         state["lease"] = ["generation": context.receive.generation, "slot": context.receive.slot.uuidString.lowercased(),
                                           "peer": context.receive.peerID.uuidString.lowercased(), "negotiation": context.receive.negotiation.uuidString.lowercased()]
                         if let pair = current.manager.fixtureSelectedICEPair {
@@ -371,6 +390,9 @@ private final class ReturnAVProbe: @unchecked Sendable {
                     guard current.manager.state.snapshot.phase == .connected else { throw NativeInterviewError.timeout }
                     _ = output.emit(["type": "private-invite", "url": try await current.manager.inviteForSharing().absoluteString])
                 case "admit": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.admit(guest))
+                case "approval":
+                    guard let guest, let approved = object["approved"] as? Bool else { throw NativeInterviewError.malformed }
+                    try current.command(.approveScreen(guest, approved))
                 case "message":
                     guard let context = current.manager.currentReadyLease, context.receive.peerID == guest,
                           let text = object["text"] as? String else { throw NativeInterviewError.changed }

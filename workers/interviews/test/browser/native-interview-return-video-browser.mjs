@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import {spawn} from 'node:child_process';
+import {spawn,execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {WebSocket} from 'ws';
 import {analyzeReturnAV} from './native-return-video-analysis.mjs';
@@ -28,6 +28,9 @@ async function wait(label,predicate,timeout=15_000){const end=Date.now()+timeout
 async function port(){const server=net.createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const value=server.address().port;await new Promise(resolve=>server.close(resolve));return value;}
 const workerRoot=fileURLToPath(new URL('../../',import.meta.url));
 const cli=process.env.NATIVE_INTERVIEW_RETURN_AUDIO_CLI, turnserver=process.env.STREAM_INTERVIEW_TURN_SERVER;
+const relayTransport=process.env.STREAM_INTERVIEW_RELAY_TRANSPORT??'udp';
+if(relayTransport==='tcp')console.log('Qualification backend: explicit opt-in current-host libnice; packaged shipping SDK remains UDP-only.');
+assert(['udp','tcp'].includes(relayTransport),'Use an explicitly supported owned TURN transport');
 assert(cli&&path.isAbsolute(cli)&&turnserver&&path.isAbsolute(turnserver),'Set absolute owned native CLI and pinned Coturn executable paths');
 await fs.access(cli,fs.constants.X_OK);await fs.access(turnserver,fs.constants.X_OK);
 const owned=await fs.mkdtemp(path.join(os.tmpdir(),'stream-native-return-relay-'));await fs.chmod(owned,0o700);
@@ -74,7 +77,7 @@ Object.defineProperty(navigator.mediaDevices,'getUserMedia',{value:async()=>{con
 const context=new AudioContext({sampleRate:48000});await context.resume();const destination=context.createMediaStreamDestination(),merge=context.createChannelMerger(2);
 for(const [channel,frequency]of [[0,440],[1,880]]){const oscillator=context.createOscillator(),gain=context.createGain();oscillator.frequency.value=frequency;gain.gain.value=channel===0?.14:.07;oscillator.connect(gain).connect(merge,0,channel);oscillator.start();}
 merge.connect(destination);window.__fixtureAudio.push({context,stream:destination.stream});destination.stream.getTracks()[0].addEventListener('ended',()=>context.close());return new MediaStream([...camera.getTracks(),...destination.stream.getTracks()]);}});
-Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{value:async()=>{const stream=canvasTrack('rgb(15,20,220)');window.__fixtureScreens.push(stream);return stream;}});
+Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{value:async()=>{if(window.__fixtureDenyDisplay)throw new DOMException('Owned chooser denial','NotAllowedError');const stream=canvasTrack('rgb(15,20,220)');window.__fixtureScreens.push(stream);return stream;}});
 `;
 
 
@@ -111,12 +114,12 @@ try {
   await fs.writeFile(path.join(assets,'fixture-return-meter.js'),returnMeterModule,{mode:0o600});
   await fs.writeFile(path.join(assets,'fixture-rendered-return-cue.js'),renderedReturnWorklet,{mode:0o600});
   const operatorToken=randomBytes(32).toString('hex'),turnUsername=randomBytes(16).toString('hex'),turnCredential=randomBytes(32).toString('hex');
-  const turnURL=`turn:127.0.0.1:${turnPort}?transport=udp`;
+  const turnURL=`turn:127.0.0.1:${turnPort}?transport=${relayTransport}`;
   const workerConfig={name:'native-session-relay-validation',main:path.join(workerRoot,'src/index.ts'),compatibility_date:'2026-10-02',compatibility_flags:['nodejs_compat'],durable_objects:{bindings:[{name:'ROOMS',class_name:'InterviewRoom'}]},migrations:[{tag:'v1',new_sqlite_classes:['InterviewRoom']}],assets:{directory:assets,binding:'ASSETS',run_worker_first:true},vars:{OPERATOR_TOKEN:operatorToken,ALLOWED_ORIGIN:origin,TURN_KEY_ID:''},observability:{enabled:false}};
   const config=path.join(owned,'wrangler.json'),relayConfig=path.join(owned,'turnserver.conf'),nativeConfig=path.join(owned,'native.json');
   await fs.writeFile(config,JSON.stringify(workerConfig),{mode:0o600});
   await fs.writeFile(nativeConfig,JSON.stringify({serviceURL:origin,operatorToken,turnURL,turnUsername,turnCredential,mediaDirectory:pathToFileURL(path.join(owned,"media")).href}),{mode:0o600});
-  await fs.writeFile(relayConfig,[`listening-port=${turnPort}`,'listening-ip=127.0.0.1','relay-ip=127.0.0.1','min-port=49160','max-port=49175','realm=owned-fixture.invalid','lt-cred-mech',`user=${turnUsername}:${turnCredential}`,'fingerprint','allow-loopback-peers','allowed-peer-ip=127.0.0.1','denied-peer-ip=0.0.0.0-255.255.255.255','no-multicast-peers','no-tcp','no-tls','no-tcp-relay','no-stdout-log','log-file=/dev/null',`pidfile=${path.join(owned,'turn.pid')}`,`userdb=${path.join(owned,'turn.db')}`,'relay-threads=1','cpus=2','user-quota=8','total-quota=8','max-allocate-lifetime=120','max-bps=1048576','bps-capacity=8388608'].join('\n')+'\n',{mode:0o600});
+  await fs.writeFile(relayConfig,[`listening-port=${turnPort}`,'listening-ip=127.0.0.1','relay-ip=127.0.0.1',`min-port=${relayTransport==='tcp'?49200:49160}`,`max-port=${relayTransport==='tcp'?49215:49175}`,'realm=owned-fixture.invalid','lt-cred-mech',`user=${turnUsername}:${turnCredential}`,'fingerprint','allow-loopback-peers','allowed-peer-ip=127.0.0.1','denied-peer-ip=0.0.0.0-255.255.255.255','no-multicast-peers',relayTransport==='tcp'?'no-udp':'no-tcp','no-tls','no-tcp-relay','no-stdout-log','log-file=/dev/null',`pidfile=${path.join(owned,'turn.pid')}`,`userdb=${path.join(owned,'turn.db')}`,'relay-threads=1','cpus=2','user-quota=8','total-quota=8','max-allocate-lifetime=120','max-bps=1048576','bps-capacity=8388608'].join('\n')+'\n',{mode:0o600});
   turn=child(turnserver,['-c',relayConfig]);
   worker=child(process.execPath,[path.join(workerRoot,'node_modules/wrangler/bin/wrangler.js'),'dev','--local','--config',config,'--ip','127.0.0.1','--port',String(servicePort),'--inspector-port',String(inspectorPort),'--persist-to',path.join(owned,'state'),'--log-level','none','--show-interactive-dev-session=false']);
   await wait('real local Worker readiness',async()=>{check();try{return(await fetch(`${origin}/guest.html`,{signal:AbortSignal.timeout(1000)})).status===200;}catch{return false;}},20_000);
@@ -419,6 +422,48 @@ try {
   await wait('Program purple after explicit overlay removal',async()=>{const p=await browser.evaluate(g,videoPixels);return p?.pixel[0]>100&&p.pixel[1]<80&&p.pixel[2]>140;});
   const pair=await browser.evaluate(g,`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats();let result={};for(const s of stats.values()){if(s.type==='inbound-rtp'&&s.kind==='audio'){result={...result,packets:s.packetsReceived,samples:s.totalSamplesReceived,codec:stats.get(s.codecId)?.mimeType,channels:stats.get(s.codecId)?.channels};}if(s.type==='transport'&&s.selectedCandidatePairId){const pair=stats.get(s.selectedCandidatePairId);result={...result,local:stats.get(pair.localCandidateId)?.candidateType,remote:stats.get(pair.remoteCandidateId)?.candidateType};}}return result;})()`);
   assert(pair.local==='relay'&&pair.packets>10&&pair.samples>24000&&pair.codec==='audio/opus'&&state.transport.local==='relay'&&state.transport.udp);
+  async function verifyRelayTransport(phase){
+    const selected=await browser.evaluate(g,`(async()=>{const stats=await window.__fixturePeers.at(-1).getStats();for(const s of stats.values())if(s.type==='transport'&&s.selectedCandidatePairId){const p=stats.get(s.selectedCandidatePairId),c=stats.get(p.localCandidateId);return{kind:c?.candidateType,allocation:c?.protocol,relay:c?.relayProtocol};}return null;})()`);
+    assert(selected?.kind==='relay'&&selected.relay===relayTransport,'Actual selected browser TURN connection transport must match the requested restriction');
+    if(relayTransport==='tcp'){
+      // Read-only process socket evidence; no addresses or credentials are
+      // printed. Candidate UDP describes the relay allocation, not its TCP
+      // client/server connection. Coturn's UDP listener is disabled above.
+      const sockets=execFileSync('/usr/sbin/lsof',['-nP','-a','-p',String(native.pid),'-iTCP','-sTCP:ESTABLISHED','-Fn'],{encoding:'utf8',timeout:3000,maxBuffer:65536});
+      const connections=sockets.split('\n').filter(line=>line.startsWith('n')&&line.endsWith(`->127.0.0.1:${turnPort}`)).length;
+      assert(connections>0&&state.transport?.local==='relay','Actual native selected relay must have an established TCP connection to the sole owned TURN endpoint');
+      let udpSockets='';
+      try{udpSockets=execFileSync('/usr/sbin/lsof',['-nP','-a','-p',String(turn.pid),'-iUDP','-Fn'],{encoding:'utf8',timeout:3000,maxBuffer:65536});}
+      catch(error){if(error.status!==1)throw error;}
+      const udpListener=udpSockets.split('\n').some(line=>line===`n127.0.0.1:${turnPort}`);
+      assert(!udpListener,'Owned restricted TURN endpoint must have no UDP listener');
+      console.log(`Actual restricted relay receipt: ${JSON.stringify({phase,nativeTURN:'tcp',browserTURN:selected.relay,nativeLocalRelay:true,browserLocalRelay:true,relayAllocation:selected.allocation,nativeEstablishedTURNConnections:connections,serverUDPListener:false})}`);
+    }
+  }
+  await verifyRelayTransport('before-rejoin');
+  await wait('shipping controller admitted actual red camera and Opus',()=>{check();const camera=state.incoming?.camera;return camera?.frames>=3&&camera.rgb?.[0]>150&&camera.rgb[2]<80&&state.audioAccepted>10;});
+  assert(!state.members[0].approved&&!state.members[0].sharing&&state.incoming.screen.frames===0,'Screen requires an explicit grant in the current full lease');
+  command({type:'approval',id:guest,approved:true});
+  await browser.until(g,"!document.getElementById('share').disabled",'shipping Manager screen approval reaches guest over actual control');
+  const beforeDenied={generation:state.lease.generation,camera:state.incoming.camera.frames,audio:state.audioAccepted};
+  await browser.evaluate(g,"window.__fixtureDenyDisplay=true;document.getElementById('share').click()");
+  await browser.until(g,"document.getElementById('status').textContent.includes('Screen sharing was cancelled or unavailable')&&!document.getElementById('share').disabled",'owned screen chooser denial recovers the actual guest controls');
+  await wait('same lease camera and audio continue after chooser denial',()=>{check();return state.lease?.generation===beforeDenied.generation&&state.incoming?.camera.frames>beforeDenied.camera&&state.audioAccepted>beforeDenied.audio;});
+  assert(!state.members[0].sharing&&state.incoming.screen.frames===0&&await browser.evaluate(g,'window.__fixtureScreens.length===0'),'Denied capture cannot admit screen pixels or replace the guest');
+  await browser.evaluate(g,'window.__fixtureDenyDisplay=false');
+  await browser.evaluate(g,"document.getElementById('share').click()");
+  await wait('shipping controller independently admits actual blue screen and red camera',()=>{check();const screen=state.incoming?.screen,camera=state.incoming?.camera;return state.members[0].sharing&&screen?.frames>=3&&screen.rgb?.[2]>150&&screen.rgb[0]<80&&camera.rgb?.[0]>150;},20000);
+  await browser.evaluate(g,"document.getElementById('stopshare').click()");
+  await wait('independent screen stop clears actual controller pixels',()=>{check();return state.members[0].approved&&!state.members[0].sharing&&state.incoming?.screen.state==='inactive'&&!state.incoming.screen.rgb;});
+  await browser.until(g,"window.__fixtureScreens.every(s=>s.getTracks().every(t=>t.readyState==='ended'))&&!document.getElementById('share').disabled",'actual guest can retry after independent stop');
+  await browser.evaluate(g,"document.getElementById('share').click()");
+  await wait('new explicit screen capture admitted without replacing guest camera',()=>{check();return state.members[0].sharing&&state.incoming?.screen.frames>=3&&state.incoming.screen.rgb?.[2]>150&&state.lease?.generation===beforeDenied.generation;},20000);
+  const beforeRevoke={camera:state.incoming.camera.frames,audio:state.audioAccepted};
+  command({type:'approval',id:guest,approved:false});
+  await wait('shipping controller immediately retires revoked screen pixels',()=>{check();return !state.members[0].approved&&!state.members[0].sharing&&state.incoming?.screen.state==='inactive'&&!state.incoming.screen.rgb;});
+  await browser.until(g,"window.__fixtureScreens.every(s=>s.getTracks().every(t=>t.readyState==='ended'))",'shipping guest stops its revoked screen capture');
+  await wait('camera and audio remain live after screen revoke',()=>{check();return state.incoming?.camera.frames>beforeRevoke.camera&&state.audioAccepted>beforeRevoke.audio;});
+  console.log(`PASS actual ${relayTransport} relay shipping Manager/controller camera H264 + independently approved screen H264 + Opus; chooser denial, independent stop/retry and revocation preserve camera/audio`);
   console.log(`Actual decoded Opus and both-local relay metadata: ${JSON.stringify(pair)}`);
   const messageDigest=text=>createHash('sha256').update(text).digest('hex');
   const privateHostText='Owned shipping Manager private message ✓';
@@ -447,6 +492,8 @@ try {
   assert(await browser.evaluate(g,"window.__returnAnalysis.track.readyState==='ended'")===true,'Actual previous remote return track retires');
   await wait('actual host reconnected awaiting admission',()=>{check();return state.phase==='connected'&&state.members[0]?.membership==='waiting';});
   command({type:'admit',id:guest});await wait('fresh full lease actual return ready',()=>{check();return state.lease?.generation>oldGeneration&&state.members[0]?.returnAudio==='ready'&&state.transport?.local==='relay';},20000);
+  await verifyRelayTransport('fresh-rejoin');
+  assert(!state.members[0].approved&&!state.members[0].sharing&&state.incoming?.screen.frames===0,'Actual full-lease replacement cannot inherit screen approval or pixels');
   await browser.until(g,"document.getElementById('return').srcObject?.getAudioTracks().length===1",'new shipping return stream');
   const replacementPlayer=await browser.evaluate(g,`(()=>{const v=document.getElementById('return');return {...window.__returnPlayerLifecycle,newStream:v.srcObject!==window.__returnPlayerStream};})()`);
   assert(replacementPlayer.newStream&&replacementPlayer.loads>playerBeforeVideo.loads,'Actual full-lease replacement must retire the old player and attach its new stream');
