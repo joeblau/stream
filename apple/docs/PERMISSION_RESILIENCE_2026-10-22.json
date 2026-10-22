@@ -1,0 +1,170 @@
+{
+  "host": {
+    "model": "Mac15,8",
+    "chip": "Apple M3 Max",
+    "macOS": "27.2 (26B118)",
+    "Xcode": "27.2 (27B5038j)"
+  },
+  "qualification": "Controlled permission/discovery/capture producer boundaries; shipping controller, pool, mixer, GPU compositor, recording and lifecycle. Actual offline H264/AAC/PCM decode. No physical TCC or OS event-delivery claim.",
+  "sourceBase": "40d0737 + lifecycle/path fixes + permission retirement and independent recovery ownership",
+  "result": "passed",
+  "originalLimits": {
+    "trackStartSeconds": 0.04,
+    "trackDurationSeconds": 0.08,
+    "minimumPhaseFrames": 3,
+    "minimumPhasePCMSamples": 2400,
+    "minimumToneRMS": 0.03,
+    "maximumSilentRMS": 0.002
+  },
+  "measured": {
+    "decoder": "ffmpeg-offline",
+    "durationSeconds": 15.635,
+    "videoFrames": 469,
+    "videoStart": 0.0,
+    "audioStart": 0.0,
+    "videoDuration": 15.635,
+    "audioDuration": 15.63425,
+    "phases": [
+      {
+        "name": "healthy",
+        "decodedFrames": 16,
+        "pcmSamples": 18263,
+        "pcmRMS": 0.3727514175237254
+      },
+      {
+        "name": "freeze-last-frame",
+        "decodedFrames": 14,
+        "pcmSamples": 18219,
+        "pcmRMS": 0.19339794145437142
+      },
+      {
+        "name": "recovered-provider-stays-frozen-until-manual-restore",
+        "decodedFrames": 16,
+        "pcmSamples": 18213,
+        "pcmRMS": 0.37673765764025746
+      },
+      {
+        "name": "blank-shows-project-background",
+        "decodedFrames": 15,
+        "pcmSamples": 18175,
+        "pcmRMS": 0.3841760824074518
+      },
+      {
+        "name": "visible-source-offline-card",
+        "decodedFrames": 15,
+        "pcmSamples": 19791,
+        "pcmRMS": 0.37979184441140923
+      },
+      {
+        "name": "configured-healthy-standby-source",
+        "decodedFrames": 15,
+        "pcmSamples": 18331,
+        "pcmRMS": 0.37751924484765986
+      },
+      {
+        "name": "missing-standby-source-uses-offline-card",
+        "decodedFrames": 14,
+        "pcmSamples": 18204,
+        "pcmRMS": 0.3848627578703956
+      },
+      {
+        "name": "unknown-standby-id-uses-offline-card",
+        "decodedFrames": 15,
+        "pcmSamples": 18138,
+        "pcmRMS": 0.38733613146714807
+      },
+      {
+        "name": "explicit-source-restore",
+        "decodedFrames": 14,
+        "pcmSamples": 18125,
+        "pcmRMS": 0.38759066666026437
+      },
+      {
+        "name": "actual-controller-standby-scene",
+        "decodedFrames": 15,
+        "pcmSamples": 18190,
+        "pcmRMS": 0.1869433276683533
+      },
+      {
+        "name": "manual-standby-scene-restore",
+        "decodedFrames": 14,
+        "pcmSamples": 18218,
+        "pcmRMS": 0.37545228576670725
+      },
+      {
+        "name": "actual-runtime-private-lock-slate",
+        "decodedFrames": 15,
+        "pcmSamples": 18174,
+        "pcmRMS": 0.0
+      },
+      {
+        "name": "unlock-does-not-restore-private-program",
+        "decodedFrames": 16,
+        "pcmSamples": 18290,
+        "pcmRMS": 0.0
+      },
+      {
+        "name": "manual-private-program-restore",
+        "decodedFrames": 15,
+        "pcmSamples": 18292,
+        "pcmRMS": 0.3790555581767374
+      },
+      {
+        "name": "unrelated-discovery-unavailable-during-mic-regrant-keeps-healthy-output",
+        "decodedFrames": 15,
+        "pcmSamples": 18277,
+        "pcmRMS": 0.37116421084497914
+      },
+      {
+        "name": "known-microphone-grant",
+        "decodedFrames": 14,
+        "pcmSamples": 18204,
+        "pcmRMS": 0.09463239664472935
+      },
+      {
+        "name": "microphone-denial-rejects-continuing-callbacks-keeps-video-recording",
+        "decodedFrames": 16,
+        "pcmSamples": 18258,
+        "pcmRMS": 0.0
+      },
+      {
+        "name": "microphone-regrant-keeps-original-recording",
+        "decodedFrames": 15,
+        "pcmSamples": 18264,
+        "pcmRMS": 0.08943149014841457
+      },
+      {
+        "name": "screen-denial-offline-with-independent-healthy-mic",
+        "decodedFrames": 15,
+        "pcmSamples": 18333,
+        "pcmRMS": 0.09847303080869846
+      },
+      {
+        "name": "both-permissions-denied-retired-callbacks-silent",
+        "decodedFrames": 16,
+        "pcmSamples": 18241,
+        "pcmRMS": 0.0
+      },
+      {
+        "name": "screen-regrant-waits-for-manual-program-restore",
+        "decodedFrames": 14,
+        "pcmSamples": 18280,
+        "pcmRMS": 0.37609524319255067
+      },
+      {
+        "name": "manual-restore-after-screen-regrant",
+        "decodedFrames": 14,
+        "pcmSamples": 18194,
+        "pcmRMS": 0.38297523113743326
+      }
+    ]
+  },
+  "controlledResetBarrier": {
+    "timeoutSeconds": 5,
+    "timedOut": false,
+    "unrelatedScreenResult": "unavailable",
+    "pendingMicrophoneRestored": true,
+    "confirmedDenialClosesBeforeSetterReturns": true,
+    "busyChannelStatistics": "unavailable; sampling does not wait for opaque reset or hold registry during channel reads"
+  }
+}

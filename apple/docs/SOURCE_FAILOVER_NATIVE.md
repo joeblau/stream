@@ -84,3 +84,71 @@ gates. Calling the shipping lifecycle coordinator with controlled events proves
 its owned callbacks and resume policy, not delivery of real hardware/OS events.
 Independent publisher reconnect acceptance is covered by its separate endpoint
 recovery fixture. These source results alone do not close issue #158.
+
+`--permission-transitions` adds controlled permission-authority transitions to
+the same recorder/source graph. ScreenCaptureKit discovery is replaced only at
+the OS boundary; real pending screen/app-audio requests must stay retired across
+deny/regrant. The actual permission probe separately runs with controlled
+preflight/discovery results. Explicit SCK-domain user-declined is distinguished
+from transient errors, missing display lists and a matching code in an unrelated
+domain. Confirmed denials survive stale preflight until a successful re-probe;
+older completions cannot overwrite a newer result.
+
+The additional eight media phases keep the original recording session and
+clock. An owned one-use microphone history-reset barrier retains its five-second
+deadline while an unrelated screen-discovery result becomes unavailable.
+The pending microphone restoration must complete, and the independently healthy
+Program video/audio must remain in the original recording. Per-permission
+recovery ownership prevents that unrelated result from canceling microphone
+restoration. Confirmed denial closes authority synchronously using the emitted
+permission snapshot. Diagnostics omit busy/retired channel statistics instead
+of blocking the mixer registry behind an opaque reset. The remaining phases
+exercise microphone grant/denial/regrant with healthy video, screen denial with
+an independently healthy microphone, both permissions denied while callbacks
+continue, regrant that holds the offline pixels, and explicit Program restore.
+The same decoded RMS tone/silence bounds apply to every phase. Browser helper
+audio, media and guest authority remain independent from microphone and
+Screen Recording permission gates. Screen/app-audio permission ownership stays
+attached to each observed stable channel identity across empty demand, pruning
+and regrant; removing a source cannot unclassify its queued or late callbacks.
+The focused real-mixer regression requires old PCM to remain rejected after
+regrant while fresh PCM keeps that same identity. The previous demand-replacing
+classification fails this exact regression. Optional VoicePolish is disabled in this
+owned routing workload; its DSP qualification is separate.
+
+If the host's AVAssetReader AAC decode is unavailable, explicitly add
+`--external-decoder`. The native child must still finalize the real file,
+retire captures/runtime and write original-host receipts. Its output says
+**PENDING DECODE** until a second bounded offline FFmpeg process validates the
+actual H.264 pixels and 48 kHz stereo PCM. This decoder retains the exact
+original 40 ms track-start / 80 ms track-duration limits, painted-frame and
+independent-animation assertions, and per-phase sample-count/RMS thresholds.
+It checks decoded frame/sample counts against FFprobe timestamps and writes
+`external-decoder-summary.json`, decoded frame receipts and the actual PCM
+file. The default AVAssetReader path remains available. This mode changes no
+audio device or system audio service.
+
+The 2026-10-22 permission run on the named Mac15,8/M3 Max host passes all
+22 actual decoded windows, 469 frames over 15.635 seconds. Video/audio
+starts are both zero; durations are 15.635/15.63425 seconds. The blocked
+microphone-reset phase retains healthy audio at RMS 0.37116; microphone
+grant/regrant RMS is 0.09463/0.08943. Screen denial retains the independently
+healthy microphone at RMS 0.09847, while microphone denial and both-denied
+windows decode to exact zero despite continuing callbacks. All original
+fourteen source/privacy windows and thresholds also pass. The sanitized
+[measured receipt](PERMISSION_RESILIENCE_2026-10-22.json) records every phase.
+The actual guest admission, queued-revocation, isolated-ring and guest-return
+regression harnesses also pass with the new independent permission authority.
+
+A controlled-reset regression also retained its failure receipt: diagnostic
+sampling held the registry while waiting for the reset, exhausting the unchanged
+five-second barrier and stalling independent audio delivery. The corrected
+22-phase run above passes that same barrier and real decoded healthy audio.
+
+Two prior attempts retained explicit failure receipts: the original mic test
+called its inlet on MainActor with optional VoicePolish enabled; the corrected
+source run then finalized successfully but AVAssetReader's AAC decoder blocked
+inside an AudioQueue/HAL device call. Neither is reported as a decoded media
+pass. The successful run selects `--external-decoder` and owned off-main PCM,
+with the optional effect disabled. No global audio reset or device mutation
+was used to obtain a result.

@@ -15,6 +15,10 @@ import StreamCore
     static var independent: CaptureSourceKey!
     static var standby: CaptureSourceKey!
     static var primaryBlue = false
+    static var screenAudio = true
+    static var micAudio = false
+    static var retiredScreenAudio = false
+    static var audioLead = 0.02
     static func start(_ key: CaptureSourceKey) -> LatestScreenFrame? {
         guard let holder = holders[key] else { return nil }
         enabled.insert(key)
@@ -34,7 +38,7 @@ private struct RGB: Codable, Sendable {
     var isDark: Bool { red < 45 && green < 45 && blue < 45 }
 }
 private enum PaintedMode: String, Codable, Sendable {
-    case red, blue, blank, offline, sceneStandby, privateSlate
+    case red, blue, blank, offline, sceneStandby, privateSlate, allOffline
     func matches(_ frame: PaintedFrame) -> Bool {
         switch self {
         case .red: return frame.left.isRed && frame.right.isHealthy
@@ -43,6 +47,7 @@ private enum PaintedMode: String, Codable, Sendable {
         case .offline: return frame.left.isDark && frame.leftWhite > 100 && frame.right.isHealthy
         case .sceneStandby: return frame.left.isBlue && frame.right.isBlue
         case .privateSlate: return frame.left.isDark && frame.right.isDark && frame.allWhite > 100
+        case .allOffline: return frame.left.isDark && frame.right.isDark && frame.leftWhite > 100 && frame.allWhite - frame.leftWhite > 100
         }
     }
 }
@@ -152,7 +157,7 @@ private final class FailoverAudioProbe: @unchecked Sendable {
         let end = probe.snapshot().last!.pts
         let observed = probe.snapshot().filter { $0.pts >= start && $0.pts <= end }
         try check(observed.count >= 3 && observed.allSatisfy(mode.matches), "Actual live composition changed unexpectedly during \(name)")
-        if mode != .sceneStandby && mode != .privateSlate {
+        if mode != .sceneStandby && mode != .privateSlate && mode != .allOffline {
             try check(Set(observed.map { $0.right.blue > 100 }).count == 2,
                       "Independent healthy source did not advance during \(name)")
         }
@@ -241,6 +246,7 @@ private final class FailoverAudioProbe: @unchecked Sendable {
             try await PublisherPathSupervisionHarness.run(directory: root)
             return
         }
+        if CommandLine.arguments.contains("--permission-transitions") { try await PermissionResilienceHarness.probePolicy() }
         try await pendingSourceGains()
         let catalog = StudioProjectCatalog(project: StudioProject(name: "Owned resilience show",
             profiles: [StudioProfile(name: "Failure pixels"), StudioProfile(name: "Retirement target")]))
@@ -279,6 +285,9 @@ private final class FailoverAudioProbe: @unchecked Sendable {
         var settings = StreamSettings.default
         settings.outputProfile = .init(canvasWidth: 640, canvasHeight: 360, frameRate: 30)
         settings.micVolume = 0; settings.audioInputs = []
+        // This fixture qualifies capture authority/routing with owned PCM;
+        // optional VoicePolish DSP and its platform audio graph are separate.
+        settings.voicePolishEnabled = false
         DesktopSettingsStore().saveNonSecret(settings)
         var policy = DesktopResiliencePolicy()
         // A newly demanded standby has a genuine asynchronous first frame.
@@ -300,11 +309,14 @@ private final class FailoverAudioProbe: @unchecked Sendable {
                     else { image = Int(host * 5) % 2 == 0 ? green : cyan }
                     FailoverOwnedSources.holders[key]?.store(image)
                 }
-                if let sample = try? ProgramRecordingFixtures.audio(at: 0, timestampBase: host + 0.02,
+                if let sample = try? ProgramRecordingFixtures.audio(at: 0, timestampBase: host + FailoverOwnedSources.audioLead,
                     constantTone: true, amplitude: 0.3) {
-                    for key in FailoverOwnedSources.enabled.intersection(FailoverOwnedSources.available) {
-                        controller.capturePool.onScreenAudioSample?(key, sample)
+                    if FailoverOwnedSources.screenAudio || FailoverOwnedSources.retiredScreenAudio {
+                        let audioKeys = FailoverOwnedSources.retiredScreenAudio ? Set(FailoverOwnedSources.holders.keys)
+                            : FailoverOwnedSources.enabled.intersection(FailoverOwnedSources.available)
+                        for key in audioKeys { controller.capturePool.onScreenAudioSample?(key, sample) }
                     }
+                    if FailoverOwnedSources.micAudio { controller.failoverFixtureMicSample(sample) }
                 }
                 try? await Task.sleep(for: .milliseconds(10))
             }
@@ -366,6 +378,53 @@ private final class FailoverAudioProbe: @unchecked Sendable {
         try await phase("unlock-does-not-restore-private-program", .privateSlate, tone: false)
         controller.restoreResilienceProgram()
         try await phase("manual-private-program-restore", .red)
+        if CommandLine.arguments.contains("--permission-transitions") {
+            let barrier = OwnedPermissionResetBarrier()
+            defer { barrier.release() }
+            await controller.failoverFixtureHoldMicRestore(barrier)
+            controller.failoverFixturePermission(.microphone, .granted)
+            try await wait("Owned mic restoration never reached its signal-history drain") { barrier.hasEntered }
+            controller.failoverFixturePermission(.screenCapture, .unavailable)
+            try await wait("Unrelated screen availability result was not folded") { controller.failoverFixtureScreenStatus == .unavailable }
+            try await phase("unrelated-discovery-unavailable-during-mic-regrant-keeps-healthy-output", .red)
+            barrier.release()
+            try await wait("Unrelated permission result cancelled the pending microphone regrant") { controller.failoverFixtureMicPermissionAvailable }
+            try check(!barrier.didTimeOut, "Owned signal-history drain exceeded its unchanged five-second deadline")
+            controller.failoverFixturePermission(.screenCapture, .granted)
+            print("PASS: pending mic history drain preserves healthy video/recording; unrelated unavailable screen result cannot cancel mic recovery")
+            FailoverOwnedSources.audioLead = 0 // Original capture clock, never a future callback time after permission restore.
+            FailoverOwnedSources.screenAudio = false; FailoverOwnedSources.micAudio = true
+            controller.applyMixerChannelGain(.microphone(deviceUID: nil), volume: 0.5, isMuted: false)
+            controller.failoverFixturePermission(.microphone, .granted)
+            try await wait("Microphone grant did not reopen its actual route") { controller.failoverFixtureAudioAllowed(.microphone(deviceUID: nil)) }
+            try await phase("known-microphone-grant", .red)
+            controller.failoverFixturePermission(.microphone, .denied)
+            try check(!controller.failoverFixtureAudioAllowed(.microphone(deviceUID: nil)),
+                      "A confirmed denial did not close audio authority before returning")
+            try await wait("Microphone denial did not synchronously close its actual route") { !controller.failoverFixtureAudioAllowed(.microphone(deviceUID: nil)) }
+            try await phase("microphone-denial-rejects-continuing-callbacks-keeps-video-recording", .red, tone: false)
+            controller.failoverFixturePermission(.microphone, .granted)
+            try await wait("Microphone regrant did not restore its route") { controller.failoverFixtureAudioAllowed(.microphone(deviceUID: nil)) }
+            try await phase("microphone-regrant-keeps-original-recording", .red)
+            controller.resilience.policy.defaultSourceMode = .offline
+            controller.resilience.policy.sourceRules = [.init(sourceID: primary.id.rawValue, mode: .offline)]
+            controller.failoverFixturePermission(.screenCapture, .denied)
+            FailoverOwnedSources.retiredScreenAudio = true
+            try await wait("Screen denial did not retire all owned producers") { controller.capturePool.activeSources.isEmpty && FailoverOwnedSources.enabled.isEmpty }
+            try await phase("screen-denial-offline-with-independent-healthy-mic", .allOffline)
+            controller.failoverFixturePermission(.microphone, .denied)
+            try await wait("Second mic denial did not close its route") { !controller.failoverFixtureAudioAllowed(.microphone(deviceUID: nil)) }
+            try await phase("both-permissions-denied-retired-callbacks-silent", .allOffline, tone: false)
+            controller.failoverFixturePermission(.screenCapture, .granted)
+            try await wait("Screen regrant did not resume exact owned source demand") { controller.capturePool.activeSources.count >= 2 }
+            try await phase("screen-regrant-waits-for-manual-program-restore", .allOffline)
+            FailoverOwnedSources.retiredScreenAudio = false; FailoverOwnedSources.screenAudio = true; FailoverOwnedSources.micAudio = false
+            controller.restoreResilienceProgram()
+            try await phase("manual-restore-after-screen-regrant", .red)
+            try check(recorder.currentOutputURL == movie && recorder.state == .recording && controller.destinationOutputs.states.isEmpty,
+                      "Permission transitions restarted/stopped recording or unexpectedly started publishing")
+            print("PENDING PCM DECODE: actual permission callbacks retire only affected capture/audio authority, retain recorder/healthy video and require manual failed-source restore; retained phases must verify healthy microphone and retired PCM silence")
+        }
         try check(probe.clockIsValid(), "Source failure/scene/privacy switches reset or retimed the actual engine clock")
         try check(controller.failoverFixtureRetainedFrames <= 3, "Source cache exceeded owned active source count")
         controller.resilience.handle(.sleep)
@@ -383,8 +442,13 @@ private final class FailoverAudioProbe: @unchecked Sendable {
         try check(!controller.failoverFixturePipelineRunning && !recorder.state.isActive && controller.destinationOutputs.states.isEmpty,
                   "Wake unexpectedly restarted output or preview without opt-in")
         controller.removeFrameSink(subscription)
-        try await decode(movie)
-        try await ProgramRecordingFixtures.inspect(movie, expectedDuration: nil, checkSync: false)
+        let externalDecoder = CommandLine.arguments.contains("--external-decoder")
+        if externalDecoder {
+            try JSONEncoder().encode(["movie": movie.path]).write(to: root.appendingPathComponent("external-decoder-input.json"), options: .atomic)
+        } else {
+            try await decode(movie)
+            try await ProgramRecordingFixtures.inspect(movie, expectedDuration: nil, checkSync: false)
+        }
         controller.resilience.policy.previewAfterWake = true
         controller.resilience.handle(.wake)
         try await Task.sleep(for: .milliseconds(150))
@@ -414,7 +478,8 @@ private final class FailoverAudioProbe: @unchecked Sendable {
                   "Retired runtime retained source cache, captures or render demand")
         try JSONEncoder().encode(phases).write(to: root.appendingPathComponent("painted-source-windows.json"), options: .atomic)
         try JSONEncoder().encode(probe.snapshot()).write(to: root.appendingPathComponent("original-live-frame-receipts.json"), options: .atomic)
-        print("PASS: shipping source health/configuration→freeze/blank/offline/healthy+missing standby→GPU compositor→real H264/AAC decoded Program pixels; independent healthy source keeps advancing")
+        print(externalDecoder ? "PENDING DECODE: live source pixels/clock, recorder finalization, permission callbacks and lifecycle assertions passed; runner must decode retained media"
+            : "PASS: shipping source health/configuration→freeze/blank/offline/healthy+missing standby→GPU compositor→real H264/AAC decoded Program pixels; independent healthy source keeps advancing")
         print("PASS: actual configured standby scene and runtime lifecycle callbacks preserve source clock/manual restore; silent private slate, real sleep writer finalization, duplicate wake stays idle, locked wake defers capture until unlock, opt-in preview only, bounded cache/producer retirement")
         print("LIMIT: owned producer and lifecycle event injection; no physical capture/device removal, TCC revocation, screen lock, sleep/wake or provider/network qualification")
         print("Owned artifacts: \(root.path)")
@@ -457,7 +522,7 @@ private final class FailoverAudioProbe: @unchecked Sendable {
         for (index, phase) in phases.enumerated() {
             let actual = decoded.filter { $0.pts >= phase.startHostSeconds && $0.pts <= phase.endHostSeconds }
             try check(actual.count >= 3 && actual.allSatisfy(phase.mode.matches), "Encoded program lost actual \(phase.name) pixels")
-            if phase.mode != .sceneStandby && phase.mode != .privateSlate {
+            if phase.mode != .sceneStandby && phase.mode != .privateSlate && phase.mode != .allOffline {
                 try check(Set(actual.map { $0.right.blue > 100 }).count == 2, "Encoded healthy independent source froze during \(phase.name)")
             }
             let rms = sqrt(energies[index] / Double(max(1, samples[index])))

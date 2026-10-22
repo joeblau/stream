@@ -7,6 +7,8 @@ import os.lock
 /// channel IDs"). Sources tap in and out with their S05 capture demand, but
 /// the ID survives: scene snapshots (S08/S09), mixer UI (A04), and per-source
 /// FX (A08) all address channels through these values, never by index.
+enum AudioCapturePermission: Hashable, Sendable { case microphone, screenCapture }
+
 enum AudioChannelID: Hashable, Sendable {
     /// A microphone/line input. `deviceUID` nil = the system-default input
     /// (today's single mic); A05 pins additional mics by device UID.
@@ -456,6 +458,30 @@ actor AudioMixEngine {
     nonisolated func captureRouteIsAllowed(_ id: AudioChannelID) -> Bool {
         registry.captureRouteIsAllowed(id)
     }
+    nonisolated func denyCapturePermission(_ permission: AudioCapturePermission) {
+        registry.denyCapturePermission(permission)
+    }
+    private var permissionRestoreTasks: [AudioCapturePermission: (id: UUID, task: Task<Void, Never>)] = [:]
+    func restoreCapturePermission(_ permission: AudioCapturePermission) async {
+        guard let revision = registry.permissionRestoreRevision(permission) else { return }
+        while let pending = permissionRestoreTasks[permission] {
+            await pending.task.value
+            if permissionRestoreTasks[permission]?.id == pending.id { permissionRestoreTasks[permission] = nil }
+        }
+        guard registry.permissionRestoreRevision(permission) == revision else { return }
+        let registry = self.registry, owner = UUID()
+        let task = Task.detached(priority: .userInitiated) {
+            registry.restoreCapturePermission(permission, revision: revision)
+        }
+        permissionRestoreTasks[permission] = (owner, task)
+        await task.value
+        if permissionRestoreTasks[permission]?.id == owner { permissionRestoreTasks[permission] = nil }
+    }
+    /// Register permission ownership independently of current scene demand.
+    /// Retired IDs retain their authority/freshness rules for late callbacks.
+    nonisolated func setScreenCaptureChannels(_ channels: Set<AudioChannelID>) {
+        registry.setScreenCaptureChannels(channels)
+    }
     /// Call only after the retired source's inlet has drained. Keep its
     /// inserts/fader/solo/delay configuration, clearing their signal history.
     func resetCaptureRouteHistory(_ id: AudioChannelID) {
@@ -776,6 +802,48 @@ private final class CaptureRouteGate: @unchecked Sendable {
     private var lock = os_unfair_lock_s()
     private var closed: Set<AudioChannelID> = []
     private var minimumPTS: [AudioChannelID: CMTime] = [:]
+    private var deniedPermissions: Set<AudioCapturePermission> = []
+    private var permissionRevisions: [AudioCapturePermission: UUID] = [:]
+    private var permissionFloors: [AudioCapturePermission: CMTime] = [:]
+    private var screenChannels: Set<AudioChannelID> = []
+    private func permission(for id: AudioChannelID) -> AudioCapturePermission? {
+        switch id {
+        case .microphone: return .microphone
+        case _ where screenChannels.contains(id): return .screenCapture
+        default: return nil
+        }
+    }
+    private func allowedLocked(_ id: AudioChannelID) -> Bool {
+        !closed.contains(id) && !(permission(for: id).map { deniedPermissions.contains($0) } ?? false)
+    }
+    func setScreenChannels(_ channels: Set<AudioChannelID>) {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        // A scene/demand removal must not turn a denied capture into an
+        // unclassified, default-allowed route before asynchronous prune (or
+        // when a late callback tries to recreate it). Ownership follows the
+        // stable identity for this mixer lifetime, including deny/regrant.
+        // Independent helper application IDs are never registered here.
+        screenChannels.formUnion(channels)
+    }
+    func deny(_ permission: AudioCapturePermission) {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        deniedPermissions.insert(permission)
+        permissionRevisions[permission] = UUID()
+    }
+    func restoreRevision(_ permission: AudioCapturePermission) -> UUID? {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return deniedPermissions.contains(permission) ? permissionRevisions[permission] : nil
+    }
+    func depends(_ id: AudioChannelID, on permission: AudioCapturePermission) -> Bool {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return self.permission(for: id) == permission
+    }
+    func restore(_ permission: AudioCapturePermission, revision: UUID) {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        guard permissionRevisions[permission] == revision else { return }
+        permissionFloors[permission] = CMClockGetTime(CMClockGetHostTimeClock())
+        deniedPermissions.remove(permission)
+    }
     func set(_ id: AudioChannelID, allowed: Bool) {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
         if allowed { closed.remove(id) }
@@ -783,17 +851,19 @@ private final class CaptureRouteGate: @unchecked Sendable {
     }
     func allowed(_ id: AudioChannelID) -> Bool {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
-        return !closed.contains(id)
+        return allowedLocked(id)
     }
     func allowsSample(_ id: AudioChannelID, at pts: CMTime) -> Bool {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
-        guard !closed.contains(id) else { return false }
+        guard allowedLocked(id) else { return false }
+        if let permission = permission(for: id), let floor = permissionFloors[permission],
+           !pts.isNumeric || pts < floor { return false }
         guard let minimum = minimumPTS[id] else { return true }
         return pts.isNumeric && pts >= minimum
     }
     func commit<T>(_ id: AudioChannelID, _ body: (Bool) -> T) -> T {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
-        return body(!closed.contains(id))
+        return body(allowedLocked(id))
     }
 }
 
@@ -1173,6 +1243,18 @@ private final class AudioChannelRegistry: @unchecked Sendable {
         guard !isGuest(id) else { return }
         captureGate.set(id, allowed: allowed)
     }
+    func denyCapturePermission(_ permission: AudioCapturePermission) { captureGate.deny(permission) }
+    func setScreenCaptureChannels(_ channels: Set<AudioChannelID>) { captureGate.setScreenChannels(channels) }
+    func permissionRestoreRevision(_ permission: AudioCapturePermission) -> UUID? { captureGate.restoreRevision(permission) }
+    func restoreCapturePermission(_ permission: AudioCapturePermission, revision: UUID) {
+        guard captureGate.restoreRevision(permission) == revision else { return }
+        os_unfair_lock_lock(&lock)
+        let affected = channels.filter { captureGate.depends($0.key, on: permission) }.map(\.value)
+        os_unfair_lock_unlock(&lock)
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        for channel in affected { channel.resetCaptureHistory(at: now) }
+        captureGate.restore(permission, revision: revision)
+    }
     func captureRouteIsAllowed(_ id: AudioChannelID) -> Bool { captureGate.allowed(id) }
     func captureRouteAllowsSample(_ id: AudioChannelID, at pts: CMTime) -> Bool { captureGate.allowsSample(id, at: pts) }
     func resetCaptureRouteHistory(_ id: AudioChannelID) {
@@ -1233,9 +1315,9 @@ private final class AudioChannelRegistry: @unchecked Sendable {
     }
 
     func enqueue(_ id: AudioChannelID, _ sampleBuffer: CMSampleBuffer) {
-        guard captureGate.allowed(id) else { return }
+        guard captureGate.allowsSample(id, at: sampleBuffer.presentationTimeStamp) else { return }
         os_unfair_lock_lock(&lock)
-        guard !isGuest(id), captureGate.allowed(id) else { os_unfair_lock_unlock(&lock); return }
+        guard !isGuest(id), captureGate.allowsSample(id, at: sampleBuffer.presentationTimeStamp) else { os_unfair_lock_unlock(&lock); return }
         let anchor = self.anchor
         let channel = channels[id] ?? {
             let created = ChannelIngest(insert: nil, captureFloor: captureFloors[id],
@@ -1267,6 +1349,12 @@ private final class AudioChannelRegistry: @unchecked Sendable {
                     isolated: inout [Float], preEffects: inout [Float], monitor: inout [Float],
                     contribution: inout [Float],
                     soloActive: Bool) -> (pre: Int, post: Int, privateRecipient: GuestReceiveLease?) {
+        // A closed authority must not wait behind the source's opaque insert
+        // while its signal history is being retired on another executor.
+        if !captureGate.allowed(id) {
+            for index in 0..<(frameCount * 2) { isolated[index] = 0; preEffects[index] = 0; contribution[index] = 0 }
+            return (frameCount, frameCount, nil)
+        }
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         expireTalkbackLocked()
@@ -1285,8 +1373,15 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func statistics() -> AudioEngineStatistics {
         os_unfair_lock_lock(&lock)
-        let entries = channels.map { ($0.key.label, $0.value.statistics()) }
+        let current = channels.filter { captureGate.allowed($0.key) }
         os_unfair_lock_unlock(&lock)
+        // Sampling cannot wait behind an opaque insert or a permission drain,
+        // nor pin the registry while unrelated sources deliver their PCM.
+        // A busy/retired channel is unavailable in this sample, not zeroed.
+        let entries = current.compactMap { id, channel -> (String, AudioChannelStatistics)? in
+            guard captureGate.allowed(id), let value = channel.statisticsIfAvailable(), captureGate.allowed(id) else { return nil }
+            return (id.label, value)
+        }
         var stats = AudioEngineStatistics()
         stats.channels = Dictionary(uniqueKeysWithValues: entries)
         return stats
@@ -1542,8 +1637,8 @@ private final class ChannelIngest: @unchecked Sendable {
         return meter.levels
     }
 
-    func statistics() -> AudioChannelStatistics {
-        os_unfair_lock_lock(&lock)
+    func statisticsIfAvailable() -> AudioChannelStatistics? {
+        guard os_unfair_lock_trylock(&lock) else { return nil }
         defer { os_unfair_lock_unlock(&lock) }
         var stats = AudioChannelStatistics()
         stats.droppedFrames = ring.droppedFrames

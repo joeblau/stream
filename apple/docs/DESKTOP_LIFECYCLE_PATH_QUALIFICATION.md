@@ -91,9 +91,16 @@ shipping callbacks and actual recorder/capture/render teardown. Network-change
 policy is exercised through shipping callbacks and real reconnecting sockets.
 
 These controlled events do not measure OS delivery of physical lock/sleep,
-display removal or TCC revocation, nor an actual interface handoff. The new
-fixture does not execute the controller's camera/screen/microphone permission
-transition handlers or display-removal callbacks. Those original acceptance
-paths still need explicit focused evidence before claiming all of issue #158;
+display removal or TCC revocation, nor an actual interface handoff. The base
+fixture does not execute permission-transition or display-removal callbacks.
+Its optional `--permission-transitions` mode now qualifies screen/microphone
+retirement, regrant, transient-error classification and stale discovery
+completion with owned producer/discovery boundaries and actual decoded media.
+The 22-phase recording additionally verifies independent permission-recovery
+ownership and nonblocking diagnostic sampling during a controlled microphone
+history drain, with its original five-second deadline;
+see [the measured source qualification](SOURCE_FAILOVER_NATIVE.md).
+Display-removal and camera-permission callbacks still need focused evidence
+before claiming all of issue #158;
 physical devices or Internet/provider tests are qualification limits, not new
 universal acceptance requirements inferred from this fixture.

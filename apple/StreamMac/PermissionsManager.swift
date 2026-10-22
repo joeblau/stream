@@ -77,6 +77,9 @@ final class PermissionsManager: ObservableObject {
         /// Denied or revoked: the OS will NOT prompt again; repair means
         /// sending the user to System Settings.
         case denied
+        /// Capture discovery failed without an affirmative permission denial.
+        /// A locked session or unavailable display list cannot establish TCC.
+        case unavailable
     }
 
     /// A source-specific repair state (W06 acceptance: a denial must surface
@@ -94,6 +97,8 @@ final class PermissionsManager: ObservableObject {
     @Published private(set) var statuses: [Kind: Status] = [:]
 
     private static let screenRequestedKey = "permissions.screenCaptureRequested"
+    private var screenProbeIssue: Status?
+    private var screenProbeGeneration = UUID()
 
     init() {
         refresh()
@@ -117,6 +122,9 @@ final class PermissionsManager: ObservableObject {
         updated[.microphone] = Self.map(AVCaptureDevice.authorizationStatus(for: .audio))
         updated[.screenCapture] = screenStatus()
         statuses = updated
+        if screenProbeIssue != nil, CGPreflightScreenCaptureAccess() {
+            Task { [weak self] in await self?.probeScreenAccess() }
+        }
     }
 
     /// Screen-recording revocation probe: preflight can lag a revocation, so
@@ -126,15 +134,26 @@ final class PermissionsManager: ObservableObject {
     /// whatever display happens to be first (W06 acceptance: no silent
     /// fallback to another display).
     func probeScreenAccess() async {
+        let generation = UUID()
+        screenProbeGeneration = generation
         if CGPreflightScreenCaptureAccess() {
             do {
                 _ = try await SCShareableContent.current
+                guard screenProbeGeneration == generation else { return }
+                screenProbeIssue = nil
                 statuses[.screenCapture] = .granted
                 return
             } catch {
-                // Fall through to the denial mapping below.
+                guard screenProbeGeneration == generation else { return }
+                let error = error as NSError
+                let issue: Status = error.domain == SCStreamErrorDomain
+                    && error.code == SCStreamError.Code.userDeclined.rawValue ? .denied : .unavailable
+                screenProbeIssue = issue
+                statuses[.screenCapture] = issue
+                return
             }
         }
+        screenProbeIssue = nil
         statuses[.screenCapture] = screenStatus()
     }
 
@@ -176,6 +195,10 @@ final class PermissionsManager: ObservableObject {
                 title: "\(kind.title) access denied",
                 message: "\(kind.title) permission is off for Stream. Enable it in System Settings > Privacy & Security, then return here — the app re-reads permissions when it becomes active.",
                 canReRequest: false)
+        case .unavailable:
+            return RepairAction(kind: kind, title: "\(kind.title) temporarily unavailable",
+                message: "Capture availability could not be checked. Unlock this Mac, check that a display is connected, then retry. This does not establish that permission was denied.",
+                canReRequest: false)
         }
     }
 
@@ -209,7 +232,9 @@ final class PermissionsManager: ObservableObject {
     }
 
     private func screenStatus() -> Status {
-        if CGPreflightScreenCaptureAccess() { return .granted }
+        if CGPreflightScreenCaptureAccess() { return screenProbeIssue ?? .granted }
+        screenProbeGeneration = UUID()
+        screenProbeIssue = nil
         return UserDefaults.standard.bool(forKey: Self.screenRequestedKey)
             ? .denied
             : .needsRequest
