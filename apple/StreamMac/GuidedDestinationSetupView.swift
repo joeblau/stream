@@ -21,8 +21,13 @@ struct GuidedDestinationSetupView: View {
                         ForEach(template.transports, id: \.self) { Text($0.displayName).tag($0) }
                     }
                     let destination = template.makeDestination(transport: transport)
-                    Text("Starting profile: \(destination.outputProfile.canvasWidth)×\(destination.outputProfile.canvasHeight) at \(destination.outputProfile.frameRate) fps, H.264, \(destination.videoBitrate / 1000) kbps video, \(destination.audioBitrate / 1000) kbps audio, \(destination.keyframeSeconds ?? 2, specifier: "%.0f")-second keyframes.")
-                        .font(.caption)
+                    if destination.followsProgramProfile {
+                        Text("Follows the Program output profile. Review the active canvas, frame rate and encoder settings against your account-issued event requirements before enabling this destination.")
+                            .font(.caption)
+                    } else {
+                        Text("Starting profile: \(destination.outputProfile.canvasWidth)×\(destination.outputProfile.canvasHeight) at \(destination.outputProfile.frameRate) fps, H.264, \(destination.videoBitrate / 1000) kbps video, \(destination.audioBitrate / 1000) kbps audio, \(destination.keyframeSeconds ?? 2, specifier: "%.0f")-second keyframes.")
+                            .font(.caption)
+                    }
                     Text("This creates a disabled draft with empty credentials. Paste the account-issued details, review its canvas and test the event, then apply and enable it when ready.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("My account has granted external ingest credentials", isOn: $grantedIngest)
@@ -43,7 +48,7 @@ struct DestinationProviderGuidance: View {
     var transport: StreamProtocol
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("Guidance reviewed \(DestinationProviderTemplate.reviewedOn); verify current account requirements before each event.")
+            Text("Guidance reviewed \(template.guidanceReviewedOn); verify current account requirements before each event.")
                 .foregroundStyle(.secondary)
             requirement("Account / access", template.accountRequirement)
             requirement("Key lifecycle", template.keyLifecycle)

@@ -107,6 +107,13 @@ final class DestinationSession: ObservableObject {
     }
 
     func createManual(_ provider: ManagedProvider) {
+        // A manual guide survives rename/reload without claiming an account or
+        // event binding. Authorization and all remote controls remain unavailable.
+        switch provider {
+        case .facebookPages: create(.facebookPages, transport: .rtmps); return
+        case .linkedinLive: create(.linkedinLive, transport: .rtmps); return
+        default: break
+        }
         let destination = StreamDestination(name: "\(provider.name) Manual RTMPS", isEnabled: false)
         draft.append(destination); credentials[destination.id] = .init(); selectedID = destination.id
     }
