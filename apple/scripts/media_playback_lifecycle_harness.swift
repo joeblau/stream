@@ -10,6 +10,24 @@ final class FixtureSample: @unchecked Sendable {
     init(_ value: CMSampleBuffer) { self.value = value }
 }
 
+/// Only the exact transport-semantics case controls time. Every other case
+/// reads the actual CM host clock, including PCM PTS and late-pull coverage.
+final class FixtureClock: @unchecked Sendable {
+    static let shared = FixtureClock()
+    private let lock = NSLock()
+    private var controlled: CMTime?
+    func now() -> CMTime { lock.withLock { controlled } ?? CMClockGetTime(CMClockGetHostTimeClock()) }
+    var isControlled: Bool { lock.withLock { controlled != nil } }
+    func freeze() { lock.withLock { controlled = CMClockGetTime(CMClockGetHostTimeClock()) } }
+    func advance(seconds: Double) {
+        lock.withLock {
+            precondition(controlled != nil && seconds >= 0)
+            controlled = controlled! + CMTime(seconds: seconds, preferredTimescale: 1_000_000_000)
+        }
+    }
+    func restoreHostClock() { lock.withLock { controlled = nil } }
+}
+
 /// A controlled external-file ownership boundary and post-metadata suspension.
 /// Asset metadata, AVPlayer, audio decoder, observers and retirement are real.
 final class FixtureState: @unchecked Sendable {
@@ -78,6 +96,8 @@ private final class FixtureAudioEvents: @unchecked Sendable {
     private var malformed = false
     private var rate: Double = 0
     private var channels: UInt32 = 0
+    private let usesFixtureClock: Bool
+    init(usesFixtureClock: Bool = false) { self.usesFixtureClock = usesFixtureClock }
     func note(_ value: MediaSourceStatus) { lock.withLock { status = value; statusUpdates += 1 } }
     func end() { lock.withLock { ends += 1 } }
     func resetFirst() { lock.withLock { first = nil } }
@@ -85,7 +105,7 @@ private final class FixtureAudioEvents: @unchecked Sendable {
         guard let data = sample.dataBuffer else { preconditionFailure("Actual decoder PCM has no bytes") }
         var value: Float = 0
         precondition(CMBlockBufferCopyDataBytes(data, atOffset: 0, dataLength: 4, destination: &value) == noErr)
-        let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        let now = (usesFixtureClock ? FixtureClock.shared.now() : CMClockGetTime(CMClockGetHostTimeClock())).seconds
         let frames = CMSampleBufferGetNumSamples(sample)
         guard let format = sample.formatDescription, let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format) else {
             preconditionFailure("Actual PCM has no audio format")
@@ -186,20 +206,23 @@ private final class FixtureAudioEvents: @unchecked Sendable {
 
         fixture.configure(loops: false, end: .hold, trimIn: 0.3, trimOut: 0.9)
         let transport = MediaSourcePlayback(sourceID: SourceDefinitionID()) { fixture.payload() }
-        let events = FixtureAudioEvents()
+        let events = FixtureAudioEvents(usesFixtureClock: true)
         transport.onStatus = { _, status in events.note(status) }
         transport.onReachedEnd = { _, _ in events.end() }
         transport.onAudioSample = { events.sample($0) }
         transport.load()
         try await until("trimmed offline PCM ready") { events.snapshot.status.phase == .ready }
         precondition(!transport.lifecycleState().videoPlayer && transport.lifecycleState().decoder)
+        FixtureClock.shared.freeze()
         transport.play(); _ = transport.pullFrame()
         precondition(abs((events.snapshot.first ?? 9) - 0.1 * sin(Float(14_400) * 0.0576)) < 0.001, "Trim-in PCM did not start at source frame14400")
-        for _ in 0..<12 { _ = transport.pullFrame(); try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<12 { _ = transport.pullFrame(); FixtureClock.shared.advance(seconds: 0.01); await Task.yield() }
         transport.pause()
         let paused = events.snapshot
         precondition((0.39...0.49).contains(paused.status.positionSeconds))
-        for _ in 0..<10 { _ = transport.pullFrame(); try await Task.sleep(for: .milliseconds(10)) }
+        precondition(abs(paused.status.positionSeconds - 0.42) < 0.000001, "Exact120ms controlled clock did not freeze source at0.42s")
+        print("TRACE controlled pause: original0.39...0.49 bound retained; source=\(paused.status.positionSeconds), elapsed=0.12s")
+        for _ in 0..<10 { _ = transport.pullFrame(); FixtureClock.shared.advance(seconds: 0.01); await Task.yield() }
         precondition(events.snapshot.count == paused.count && events.snapshot.status.positionSeconds == paused.status.positionSeconds,
             "Paused offline source advanced its clock or emitted PCM")
         events.resetFirst(); transport.play(); _ = transport.pullFrame()
@@ -209,7 +232,7 @@ private final class FixtureAudioEvents: @unchecked Sendable {
         transport.pause()
         transport.seek(toSeconds: 0.65); events.resetFirst(); transport.play(); _ = transport.pullFrame()
         precondition(abs((events.snapshot.first ?? 9) - 0.1 * sin(Float(31_200) * 0.0576)) < 0.001, "Seek did not change the actual decoded source frame")
-        for _ in 0..<40 { _ = transport.pullFrame(); if events.snapshot.status.phase == .ended { break }; try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<40 { _ = transport.pullFrame(); if events.snapshot.status.phase == .ended { break }; FixtureClock.shared.advance(seconds: 0.01); await Task.yield() }
         precondition(events.snapshot.status.phase == .ended && abs(events.snapshot.status.positionSeconds - 0.9) < 0.00001 && events.snapshot.ends == 1)
         precondition(!events.snapshot.malformed, "PCM duration/frame count or shared-host-clock PTS was invalid")
         transport.play(); _ = transport.pullFrame(); transport.stop()
@@ -218,19 +241,54 @@ private final class FixtureAudioEvents: @unchecked Sendable {
         precondition(events.snapshot.status.phase == .paused && events.snapshot.status.positionSeconds == 0.7)
         fixture.configure(loops: true, end: .hold, trimIn: 0.3, trimOut: 0.9)
         transport.seek(toSeconds: 0.88); transport.play()
-        for _ in 0..<8 { _ = transport.pullFrame(); try await Task.sleep(for: .milliseconds(10)) }
+        FixtureClock.shared.advance(seconds: 0.03); _ = transport.pullFrame()
         precondition(events.snapshot.status.phase == .playing && events.snapshot.status.positionSeconds == 0.3 && events.snapshot.ends == 1,
             "Looping changed terminal action or failed to rewind")
         fixture.configure(loops: false, end: .stop, trimIn: 0.3, trimOut: 0.9)
         transport.seek(toSeconds: 0.88)
-        for _ in 0..<20 { _ = transport.pullFrame(); if events.snapshot.status.phase == .ready { break }; try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<20 { _ = transport.pullFrame(); if events.snapshot.status.phase == .ready { break }; FixtureClock.shared.advance(seconds: 0.01); await Task.yield() }
         precondition(events.snapshot.status.phase == .ready && events.snapshot.status.positionSeconds == 0.3 && events.snapshot.ends == 2)
-        transport.play(); transport.seek(toSeconds: 0.88)
-        try await until("unreferenced audition reaches end without pulling or a device player") { events.snapshot.status.phase == .ready && events.snapshot.ends == 3 }
         transport.shutdown()
-        precondition(fixture.scopes == 0)
+        FixtureClock.shared.restoreHostClock()
+        precondition(fixture.scopes == 0 && !FixtureClock.shared.isControlled)
         fixture.configure(loops: true, end: .hold, trimIn: nil, trimOut: nil)
         print("PASS offline transport: actual source-frame trim/seek, paused clock/PCM hold, recovery, restart/stop, looping/HOLD/STOP and host-PTS/frame durations without AVPlayer")
+
+        // Real-clock qualification is independent of the exact controlled
+        // transport assertions above. Task.sleep supplies a minimum delay;
+        // observed play/pause host-time brackets define the correct position.
+        fixture.configure(loops: false, end: .stop, trimIn: 0.3, trimOut: nil)
+        let real = MediaSourcePlayback(sourceID: SourceDefinitionID()) { fixture.payload() }, realEvents = FixtureAudioEvents()
+        real.onStatus = { _, status in realEvents.note(status) }; real.onAudioSample = { realEvents.sample($0) }
+        real.onReachedEnd = { _, _ in realEvents.end() }
+        real.load(); try await until("independent real-host decoder") { realEvents.snapshot.status.phase == .ready }
+        precondition(!FixtureClock.shared.isControlled)
+        let playHostBefore = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        real.play()
+        let playHostAfter = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        _ = real.pullFrame()
+        for _ in 0..<12 { _ = real.pullFrame(); try await Task.sleep(for: .milliseconds(10)) }
+        let pauseHostBefore = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        real.pause()
+        let pauseHostAfter = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        let realPaused = realEvents.snapshot
+        let lower = 0.3 + pauseHostBefore - playHostAfter, upper = 0.3 + pauseHostAfter - playHostBefore
+        print("TRACE real host pause: source=\(realPaused.status.positionSeconds), expected=\(lower)...\(upper), elapsed=\(pauseHostBefore-playHostAfter)...\(pauseHostAfter-playHostBefore)")
+        precondition(realPaused.status.phase == .paused && realPaused.status.positionSeconds >= lower - 0.000001 && realPaused.status.positionSeconds <= upper + 0.000001,
+            "Offline pause does not match the measured real host clock")
+        for _ in 0..<10 { _ = real.pullFrame(); try await Task.sleep(for: .milliseconds(10)) }
+        precondition(realEvents.snapshot.count == realPaused.count && realEvents.snapshot.status.positionSeconds == realPaused.status.positionSeconds,
+            "Real-host pause advanced source position or emitted PCM")
+        real.play(); _ = real.pullFrame()
+        precondition(realEvents.snapshot.count > realPaused.count && !realEvents.snapshot.malformed,
+            "Actual real-host resume supplied no correctly timed PCM")
+        real.stop(); real.play(); real.seek(toSeconds: realEvents.snapshot.status.durationSeconds - 0.02)
+        try await until("real-host unreferenced audition reaches end without pulling or a device player") {
+            realEvents.snapshot.status.phase == .ready && realEvents.snapshot.ends == 1
+        }
+        precondition(realEvents.snapshot.status.positionSeconds == 0.3 && !FixtureClock.shared.isControlled)
+        real.shutdown(); precondition(fixture.scopes == 0)
+        print("PASS independent real clock: measured pause brackets, frozen position/PCM, resumed native PCM PTS/duration and unreferenced end observer")
 
         fixture.configure(loops: false, end: .hold, trimIn: nil, trimOut: nil)
         for name in ["mono.aiff", "compressed.m4a"] {
