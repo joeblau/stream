@@ -70,6 +70,8 @@ final class StreamController: ObservableObject {
     /// On-screen monitor lifecycle (W03: both studio monitors). Independent
     /// from streaming/recording.
     @Published private(set) var previewState: PreviewSessionState = .idle
+    @Published private(set) var previewResourceLevel: DesktopResourceBudget.PreviewLevel = .normal
+    var previewResourceNotice: String? { previewResourceLevel.notice }
     /// The latest STAGED composition for the PREVIEW monitor, ~30 fps (W03:
     /// rendered by the preview engine, so staged edits never touch program).
     @Published private(set) var previewImage: CGImage?
@@ -316,6 +318,8 @@ final class StreamController: ObservableObject {
     private let previewConverter = PreviewImageConverter()
     /// Converts program-composition frames to CGImages, off the main actor.
     private let programConverter = PreviewImageConverter()
+    private let resourcePreviewThrottle = DesktopPreviewThrottle()
+    private var resourceBudgetCoordinator: DesktopResourceBudgetCoordinator?
 
     private var settings: StreamSettings = .default
     private let settingsStore = DesktopSettingsStore()
@@ -603,6 +607,12 @@ final class StreamController: ObservableObject {
         // survive (re)starts, so this covers every later start too.
         syncDelays(persisted)
         syncDucking(persisted.ducking)
+        resourceBudgetCoordinator = DesktopResourceBudgetCoordinator(
+            reportURL: DesktopStorage.machineDirectory.appendingPathComponent("resource-budget.v1.json"),
+            metrics: { [weak self] in
+                guard let self else { return CompositionMetrics() }
+                return await self.engine.metricsSnapshot()
+            }, apply: { [weak self] in self?.applyResourcePreviewBudget($0) })
     }
 
     /// Live encode/uplink metrics for the stats HUD, straight from the publisher.
@@ -972,15 +982,16 @@ final class StreamController: ObservableObject {
         // Both conversions run on each subscription's serial queue, off-main;
         // the sinks self-throttle to ~30 fps before hopping to the UI.
         let previewConverter = self.previewConverter
+        let monitorThrottle = resourcePreviewThrottle
         previewMonitorSubscription = addMonitorSink(to: previewEngine) { [weak self] frame in
-            guard let image = previewConverter.makeImage(frame, throttleNanoseconds: 33_000_000) else { return }
+            guard let image = previewConverter.makeImage(frame, throttleNanoseconds: monitorThrottle.nanoseconds) else { return }
             Task { @MainActor [weak self] in
                 self?.previewImage = image
             }
         }
         let programConverter = self.programConverter
         programMonitorSubscription = addMonitorSink(to: engine) { [weak self] frame in
-            guard let image = programConverter.makeImage(frame, throttleNanoseconds: 33_000_000) else { return }
+            guard let image = programConverter.makeImage(frame, throttleNanoseconds: monitorThrottle.nanoseconds) else { return }
             Task { @MainActor [weak self] in
                 self?.programImage = image
             }
@@ -1019,9 +1030,31 @@ final class StreamController: ObservableObject {
     /// called while the monitors are visible and the pipeline is running.
     private func startPreviewEngine() {
         let staged = previewProgram.stagedScene
-        let canvasSize = activeProfile.canvasSize
-        let fps = encodeFrameRate
+        let canvasSize = resourcePreviewSize(activeProfile.canvasSize)
+        let fps = min(encodeFrameRate, previewResourceLevel.maximumFrameRate)
         Task { await previewEngine.run(scene: staged, canvasSize: canvasSize, frameRate: fps) }
+    }
+
+    private func resourcePreviewSize(_ size: CGSize) -> CGSize {
+        let scale = min(1, Double(previewResourceLevel.maximumLongEdge) / Double(max(size.width, size.height)))
+        return CGSize(width: max(16, Int(size.width * scale) / 2 * 2),
+                      height: max(16, Int(size.height * scale) / 2 * 2))
+    }
+
+    /// Optional rasters/conversions only. Active Program, its source clock,
+    /// publisher identities, recording geometry and encoder counts are untouched.
+    func applyResourcePreviewBudget(_ level: DesktopResourceBudget.PreviewLevel) {
+        guard level != previewResourceLevel else { return }
+        previewResourceLevel = level; resourcePreviewThrottle.set(level)
+        guard previewState == .active, isPipelineRunning else { return }
+        let canvasSize = resourcePreviewSize(activeProfile.canvasSize)
+        let secondarySize = resourcePreviewSize(secondaryStagedProfile.canvasSize)
+        let fps = min(encodeFrameRate, level.maximumFrameRate)
+        let previewEngine = self.previewEngine
+        Task {
+            await previewEngine.setOutput(canvasSize: canvasSize, frameRate: fps)
+            await previewEngine.setSecondaryOutput(canvasSize: secondarySize)
+        }
     }
 
     var secondaryStagedProfile: OutputProfile {
@@ -1057,6 +1090,7 @@ final class StreamController: ObservableObject {
         reconcileSourceDemand()
     }
     private func refreshSecondaryMonitors() {
+        let monitorThrottle = resourcePreviewThrottle
         // New monitor demand takes priority over an optional guest raster.
         // Revocation also disables Clean rendering before its VT drain ends.
         if cleanReturnDemanded, cleanReturnStartError != nil, guestReturnVideoSink?.returnVideoSource == .clean {
@@ -1066,14 +1100,14 @@ final class StreamController: ObservableObject {
             if secondaryPreviewSubscription == nil {
                 let converter = secondaryPreviewConverter
                 secondaryPreviewSubscription = addMonitorSink(to: previewEngine, canvas: .secondary) { [weak self] frame in
-                    guard let image = converter.makeImage(frame, throttleNanoseconds: 33_000_000) else { return }
+                    guard let image = converter.makeImage(frame, throttleNanoseconds: monitorThrottle.nanoseconds) else { return }
                     Task { @MainActor [weak self] in self?.secondaryPreviewImage = image }
                 }
             }
             if secondaryProgramSubscription == nil {
                 let converter = secondaryProgramConverter
                 secondaryProgramSubscription = addMonitorSink(to: engine, canvas: .secondary) { [weak self] frame in
-                    guard let image = converter.makeImage(frame, throttleNanoseconds: 33_000_000) else { return }
+                    guard let image = converter.makeImage(frame, throttleNanoseconds: monitorThrottle.nanoseconds) else { return }
                     Task { @MainActor [weak self] in self?.secondaryProgramImage = image }
                 }
             }
@@ -1085,7 +1119,7 @@ final class StreamController: ObservableObject {
         }
     }
     private func updateSecondaryGeometryIfIdle() {
-        let previewSize = secondaryStagedProfile.canvasSize
+        let previewSize = resourcePreviewSize(secondaryStagedProfile.canvasSize)
         Task { await previewEngine.setSecondaryOutput(canvasSize: previewSize) }
         guard !outputsOwnProfile else { return }
         let layout = previewProgram.programScene?.secondaryCanvas
@@ -1849,7 +1883,9 @@ final class StreamController: ObservableObject {
         let fps = encodeFrameRate
         Task { await engine.setOutput(canvasSize: canvasSize, frameRate: fps) }
         let previewEngine = self.previewEngine
-        Task { await previewEngine.setOutput(canvasSize: canvasSize, frameRate: fps) }
+        let previewSize = resourcePreviewSize(canvasSize)
+        let previewFPS = min(fps, previewResourceLevel.maximumFrameRate)
+        Task { await previewEngine.setOutput(canvasSize: previewSize, frameRate: previewFPS) }
     }
 
     /// Applies a staged profile once no stream/recording owns the geometry.
@@ -1863,6 +1899,7 @@ final class StreamController: ObservableObject {
     private func startPipeline() {
         guestProgramReturnAuthority.change(active: true)
         isPipelineRunning = true
+        resourceBudgetCoordinator?.start()
         resilienceTask = Task { [weak self] in
             while !Task.isCancelled && self != nil {
                 self?.evaluateSourceResilience()
@@ -2017,6 +2054,7 @@ final class StreamController: ObservableObject {
     }
 
     private func stopPipeline() {
+        resourceBudgetCoordinator?.stop()
         audioEngine.cancelGuestTalkback()
         guestProgramReturnAuthority.change(active: false)
         guestReturnVideoSink?.stopProgramReturn()

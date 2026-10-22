@@ -251,6 +251,9 @@ final class SceneRenderer {
     var debugNestedCacheCount: Int { nestedCache.count }
     #endif
 
+    private(set) var kernelMetrics = CompositionKernelMetrics()
+    private var completedRenderCount = 0
+
     init(sourceEffectsProvider: @escaping () -> [SourceDefinitionID: SourceEffects] =
             { SourceEffectsStore.shared.snapshot() },
          segmentation: PersonSegmentationCoordinator = .shared,
@@ -274,8 +277,10 @@ final class SceneRenderer {
         if usesSoftwareRendering { options[.useSoftwareRenderer] = true }
         if !usesSoftwareRendering, let device = MTLCreateSystemDefaultDevice() {
             ciContext = CIContext(mtlDevice: device, options: options)
+            kernelMetrics.backend = "Core Image on Metal: \(String(device.name.prefix(128)))"
         } else {
             ciContext = CIContext(options: options)
+            kernelMetrics.unavailableReason = usesSoftwareRendering ? "Software renderer selected." : "No Metal device available."
         }
     }
 
@@ -606,7 +611,24 @@ final class SceneRenderer {
             }
             CVPixelBufferUnlockBaseAddress(outBuffer, [])
         } else {
-            ciContext.render(output, to: outBuffer, bounds: canvas, colorSpace: workingColorSpace)
+            completedRenderCount += 1
+            if kernelMetrics.backend != "unavailable", completedRenderCount % 30 == 1 {
+                // Sample one actual render task per thirty frames. Never infer
+                // GPU utilization from CPU wall time or insert an empty GPU job.
+                let destination = CIRenderDestination(pixelBuffer: outBuffer)
+                destination.colorSpace = workingColorSpace
+                do {
+                    let task = try ciContext.startTask(toRender: output, from: canvas, to: destination, at: .zero)
+                    let info = try task.waitUntilCompleted()
+                    kernelMetrics.record(seconds: info.kernelExecutionTime)
+                } catch {
+                    kernelMetrics.unavailableSamples += 1
+                    kernelMetrics.unavailableReason = "Core Image render-task timing unavailable."
+                    ciContext.render(output, to: outBuffer, bounds: canvas, colorSpace: workingColorSpace)
+                }
+            } else {
+                ciContext.render(output, to: outBuffer, bounds: canvas, colorSpace: workingColorSpace)
+            }
         }
 
         guard let sample = makeSampleBuffer(from: outBuffer,
