@@ -528,6 +528,12 @@ final class CaptureSourcePool: ObservableObject {
     /// drops the key from demand, so its page rides through untouched.
     private var webHosts: [CaptureSourceKey: BrowserOverlayHost] = [:]
     private var programBrowserAudioKeys: Set<CaptureSourceKey> = []
+    private var refreshingBrowserAudio = false
+    private var browserAudioRefreshPending = false
+    private var captureAudioBoundaries: [AudioChannelID: CaptureAudioBoundaryOwners] = [:]
+    private var browserExclusionEpoch = UUID()
+    private var browserExclusionSignature = ""
+    private var browserExclusionPermit: BrowserCaptureExclusionPermit?
     private var browserAudioCaptureConflict: String?
     weak var browserAudioMixer: AudioMixEngine?
     private var ownedBrowserAudioSession: BrowserWidgetHelperSession? {
@@ -646,17 +652,16 @@ final class CaptureSourcePool: ObservableObject {
     }
 
     private func updateBrowserAudioConflict(in demand: Set<CaptureSourceKey>, settings: StreamSettings) {
-        // The picker filter is opaque and SCK's broad app-audio attribution is not
-        // qualified here. Keep other captures running; the optional helper fails closed.
         browserAudioCaptureConflict = demand.contains { key in
             switch key {
-            case .screen(let payload): return payload.effectivePrivacy(defaults: settings).capturesAudio
+            case .screen(let payload):
+                let privacy = payload.effectivePrivacy(defaults: settings)
+                return privacy.capturesAudio && (payload.target != .display || payload.targetIdentifier == nil || !privacy.excludedWindows.isEmpty)
             case .appAudio(let payload):
-                return payload.mode == .system || requiredBrowserAudioExclusions.contains(payload.channelBundleID)
+                return payload.mode == .application && requiredBrowserAudioExclusions.contains(payload.channelBundleID)
             default: return false
             }
-        } ? "Independent browser audio is unavailable while a screen-audio or overlapping application-audio route is active; helper exclusion is unqualified." : nil
-        refreshBrowserAudioDemand()
+        } ? "Independent browser audio cannot coexist with an opaque screen filter or direct helper recapture." : nil
     }
     private func settingsExcludingBrowserHelper(_ settings: StreamSettings) -> StreamSettings {
         var result = settings
@@ -664,9 +669,74 @@ final class CaptureSourcePool: ObservableObject {
         return result
     }
     private func refreshBrowserAudioDemand() {
+        // A synchronous owner publication revokes authority in this same turn,
+        // without recursively walking all capture owners for each ready source.
+        if refreshingBrowserAudio { browserAudioRefreshPending = true; return }
+        refreshingBrowserAudio = true
+        repeat {
+            browserAudioRefreshPending = false
+            reconcileBrowserAudioExclusions()
+        } while browserAudioRefreshPending
+        refreshingBrowserAudio = false
+    }
+    private func reconcileBrowserAudioExclusions() {
+        guard let session = ownedBrowserAudioSession else { return }
         let leases = Set(programBrowserAudioKeys.compactMap { webHosts[$0]?.helperPageLease })
-        ownedBrowserAudioSession?.setProgramAudioDemand(leases,
-            applyingExclusions: requiredBrowserAudioExclusions, unavailableReason: browserAudioCaptureConflict)
+        let pid = session.helperPID
+        let owners = screens.map { ($0.key, $0.value.browserExclusion) } + appAudioCaptures.map { ($0.key, $0.value.browserExclusion) }
+        // Requested-but-not-created routes are not an acknowledged empty inventory.
+        let required = requested.filter { if case .screen = $0 { return true }; if case .appAudio = $0 { return true }; return false }
+        let missing = !required.isSubset(of: Set(owners.map(\.0)))
+        let signature = owners.map { "\($0.1.id):\($0.1.revision):\(required.contains($0.0))" }.sorted().joined(separator: ",")
+            + "|\(ObjectIdentifier(session))|\(pid ?? -1)|\(missing)|\(screenPermissionAvailable)|\(browserAudioCaptureConflict ?? "")|"
+            + leases.map { "\($0.widgetID):\($0.generation)" }.sorted().joined(separator: ",")
+        if signature != browserExclusionSignature {
+            browserExclusionSignature = signature; browserExclusionEpoch = UUID(); browserExclusionPermit = nil
+        }
+        if let pid, !missing, screenPermissionAvailable, browserAudioCaptureConflict == nil,
+           owners.allSatisfy({ $0.1.accepts(helperPID: pid, demanded: required.contains($0.0)) }) {
+            if browserExclusionPermit == nil {
+                let epoch = browserExclusionEpoch
+                browserExclusionPermit = .init(id: epoch, helperPID: pid, isCurrent: { [weak self, weak session] in
+                    guard let self, let session else { return false }
+                    return self.ownedBrowserAudioSession === session && session.helperPID == pid &&
+                        self.browserExclusionEpoch == epoch && self.screenPermissionAvailable &&
+                        owners.allSatisfy { $0.1.accepts(helperPID: pid, demanded: required.contains($0.0)) }
+                })
+            }
+        } else { browserExclusionPermit = nil }
+        session.setProgramAudioDemand(leases, exclusions: browserExclusionPermit,
+            unavailableReason: browserAudioCaptureConflict)
+        guard let pid, screenPermissionAvailable, browserAudioCaptureConflict == nil else { return }
+        for (key, capture) in screens where requested.contains(key) {
+            if capture.browserExclusion.needsFreshHelper(pid) { capture.invalidateBrowserExclusion() }
+            if capture.browserExclusion.state == .ready { capture.prepareBrowserExclusion(helperPID: pid) }
+        }
+        for (key, capture) in appAudioCaptures where requested.contains(key) {
+            if capture.browserExclusion.needsFreshHelper(pid) { capture.invalidateBrowserExclusion() }
+            if capture.browserExclusion.state == .ready { capture.prepareBrowserExclusion(helperPID: pid) }
+        }
+    }
+    private func closeCaptureAudioBoundary(owner: UUID, revision: UUID, channel: AudioChannelID) {
+        let boundaries = captureAudioBoundaries[channel] ?? CaptureAudioBoundaryOwners()
+        captureAudioBoundaries[channel] = boundaries
+        boundaries.close(owner: owner, revision: revision)
+        browserAudioMixer?.setCaptureRouteAllowed(channel, allowed: false)
+    }
+    private func releaseCaptureAudioBoundary(owner: UUID, revision: UUID, channel: AudioChannelID) {
+        guard let boundaries = captureAudioBoundaries[channel] else { return }
+        boundaries.release(owner: owner, revision: revision)
+        if boundaries.isEmpty { browserAudioMixer?.setCaptureRouteAllowed(channel, allowed: true) }
+    }
+    private func captureAudioOwnerChanged(_ owner: BrowserCaptureExclusionOwner, channel: AudioChannelID) {
+        // Both terminal retirement states are published only after callback/history
+        // drain. A failed stop still blocks helper permission, but cannot mute a
+        // different current source which feeds the same application channel.
+        if owner.state == .stopped || owner.state == .failed,
+           let revision = captureAudioBoundaries[channel]?.revision(for: owner.id) {
+            releaseCaptureAudioBoundary(owner: owner.id, revision: revision, channel: channel)
+        }
+        refreshBrowserAudioDemand()
     }
     func retireBrowserAudio() {
         programBrowserAudioKeys = []; refreshBrowserAudioDemand()
@@ -733,6 +803,13 @@ final class CaptureSourcePool: ObservableObject {
         capture.setPermissionAvailable(screenPermissionAvailable)
         let holder = LatestScreenFrame()
         screens[key] = capture
+        let owner = capture.browserExclusion
+        capture.browserExclusion.changed = { [weak self, weak owner] in
+            guard let owner else { return }; self?.captureAudioOwnerChanged(owner, channel: .capture(key))
+        }
+        capture.closeAudioRoute = { [weak self] revision in self?.closeCaptureAudioBoundary(owner: owner.id, revision: revision, channel: .capture(key)) }
+        capture.drainAudioRoute = { [weak self] in await self?.browserAudioMixer?.resetCaptureRouteHistory(.capture(key)) }
+        capture.openAudioRoute = { [weak self] revision in self?.releaseCaptureAudioBoundary(owner: owner.id, revision: revision, channel: .capture(key)) }
         screenFrames[key] = holder
         capture.onVideoSample = { [holder] sample in
             if let buffer = CMSampleBufferGetImageBuffer(sample) {
@@ -1517,6 +1594,16 @@ final class CaptureSourcePool: ObservableObject {
         let capture = AppAudioCapture()
         capture.setPermissionAvailable(screenPermissionAvailable)
         appAudioCaptures[key] = capture
+        let owner = capture.browserExclusion
+        let channel: AudioChannelID
+        if case .appAudio(let payload) = key { channel = .application(bundleID: payload.channelBundleID) }
+        else { preconditionFailure("App audio owner requires an app-audio key") }
+        capture.browserExclusion.changed = { [weak self, weak owner] in
+            guard let owner else { return }; self?.captureAudioOwnerChanged(owner, channel: channel)
+        }
+        capture.closeAudioRoute = { [weak self] revision in self?.closeCaptureAudioBoundary(owner: owner.id, revision: revision, channel: channel) }
+        capture.drainAudioRoute = { [weak self] in await self?.browserAudioMixer?.resetCaptureRouteHistory(channel) }
+        capture.openAudioRoute = { [weak self] revision in self?.releaseCaptureAudioBoundary(owner: owner.id, revision: revision, channel: channel) }
         // The handler value is captured (not the MainActor pool) so the
         // off-main @Sendable closure stays isolation-clean. The controller
         // assigns `onAppAudioSample` before any capture exists, so the value

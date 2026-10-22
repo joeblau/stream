@@ -54,6 +54,17 @@ final class AppAudioCapture: ObservableObject {
     /// never runs on the main thread (the `ScreenSourceCapture` contract).
     var onAudioSampleOffMain: (@Sendable (CMSampleBuffer) -> Void)?
 
+    let browserExclusion = BrowserCaptureExclusionOwner()
+    var closeAudioRoute: (@MainActor (UUID) -> Void)?
+    var drainAudioRoute: (@MainActor () async -> Void)?
+    var openAudioRoute: (@MainActor (UUID) -> Void)?
+    private var activePayload: AppAudioSourcePayload?
+    private var activeExclusions: Set<String> = []
+    private var exclusionTask: Task<Void, Never>?
+    private var retirementTask: Task<Bool, Never>?
+    private var unretiredStreams: [SCStream] = []
+    private let pendingStarts = CaptureAudioPendingStarts()
+    private var audioDelivery = CaptureAudioDeliveryGate()
     private var stream: SCStream?
     private var output: AppAudioOutputShim?
     private var delivery: CaptureSampleLifetime?
@@ -77,8 +88,10 @@ final class AppAudioCapture: ObservableObject {
                excludingBundleIDs: Set<String> = []) async {
         guard permissionAvailable else { return }
         let request = UUID(); requestGeneration = request
-        let previous = retireCurrentStream()
-        if let previous { try? await previous.stopCapture() }
+        let retired = retireCurrentStream()
+        guard await retired.value else { return }
+        guard requestGeneration == request else { return }
+        browserExclusion.publish(.pending)
         guard permissionAvailable, requestGeneration == request else { return }
         errorMessage = nil
         do {
@@ -86,7 +99,7 @@ final class AppAudioCapture: ObservableObject {
             guard permissionAvailable, requestGeneration == request else { return }
             switch Self.filter(for: payload, excluding: excludingBundleIDs, in: content) {
             case .filter(let filter):
-                await startStream(with: filter)
+                await startStream(with: filter, payload: payload, exclusions: excludingBundleIDs)
             case .failed(let reason):
                 errorMessage = reason
                 appAudioLog.error("App-audio target unresolvable: \(reason, privacy: .public)")
@@ -105,24 +118,78 @@ final class AppAudioCapture: ObservableObject {
 
     func stop() async {
         requestGeneration = UUID()
-        let stream = retireCurrentStream()
-        if let stream { try? await stream.stopCapture() }
-        appAudioLog.info("App-audio stream stopped")
+        _ = await retireCurrentStream().value
     }
 
     func retire() {
         requestGeneration = UUID()
-        let stream = retireCurrentStream()
-        Task { if let stream { try? await stream.stopCapture() } }
+        _ = retireCurrentStream()
     }
 
-    private func retireCurrentStream() -> SCStream? {
+    private func retireCurrentStream() -> Task<Bool, Never> {
+        let revision = browserExclusion.beginRetirement()
+        closeAudioRoute?(revision); audioDelivery.setOpen(false)
         delivery?.invalidate(); delivery = nil
-        let stream = self.stream
-        self.stream = nil
-        self.output = nil
-        isCapturing = false
-        return stream
+        if let stream, !unretiredStreams.contains(where: { $0 === stream }) { unretiredStreams.append(stream) }
+        self.stream = nil; output = nil; isCapturing = false
+        activePayload = nil
+        let previous = retirementTask, installing = exclusionTask
+        let generation = requestGeneration
+        let task = Task { [self] in
+            _ = await previous?.value
+            await installing?.value
+            await pendingStarts.waitUntilDrained()
+            return await browserExclusion.finishRetirement(revision: revision, stop: { [self] in
+                for stream in unretiredStreams {
+                    do { try await stream.stopCapture(); unretiredStreams.removeAll { $0 === stream } }
+                    catch { /* Retain failed cleanup; a later explicit generation can retry. */ }
+                }
+                return unretiredStreams.isEmpty
+            }, drain: { [self] in await drainSamplesAndHistory() }, current: { [self] in requestGeneration == generation })
+        }
+        retirementTask = task
+        return task
+    }
+
+    private func drainSamplesAndHistory() async {
+        await withCheckedContinuation { continuation in sampleQueue.async { continuation.resume() } }
+        await drainAudioRoute?()
+    }
+
+    /// Only an acknowledged live app-exclusion filter may authorize coexistence.
+    /// Updating it preserves the stream and every unrelated application route.
+    func prepareBrowserExclusion(helperPID: Int32) {
+        guard browserExclusion.state == .ready, exclusionTask == nil,
+              let stream, isCapturing, let payload = activePayload else { return }
+        if payload.mode == .application, payload.bundleID != BrowserWidgetAudioIdentity.helperBundleID {
+            browserExclusion.publish(.installed(helperPID)); return
+        }
+        let request = requestGeneration
+        let revision = browserExclusion.beginInstallation(helperPID: helperPID)
+        closeAudioRoute?(revision); audioDelivery.setOpen(false)
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer { self.exclusionTask = nil; self.browserExclusion.changed?() }
+            await self.browserExclusion.finishInstallation(revision: revision, helperPID: helperPID,
+                install: {
+                    let content = try await SCShareableContent.current
+                    guard self.permissionAvailable, self.requestGeneration == request, self.stream === stream else { return false }
+                    guard payload.mode == .system,
+                          content.applications.contains(where: { $0.processID == helperPID && $0.bundleIdentifier == BrowserWidgetAudioIdentity.helperBundleID }),
+                          case .filter(let filter) = Self.filter(for: payload,
+                            excluding: self.activeExclusions.union([BrowserWidgetAudioIdentity.helperBundleID]), in: content) else { return false }
+                    try await stream.updateContentFilter(filter)
+                    return true
+                }, drain: { await self.drainSamplesAndHistory() },
+                current: { self.permissionAvailable && self.requestGeneration == request && self.stream === stream },
+                reopen: { self.restoreAudioDelivery(revision: revision) })
+        }
+        exclusionTask = task
+    }
+    private func restoreAudioDelivery(revision: UUID? = nil) { audioDelivery.setOpen(true); openAudioRoute?(revision ?? browserExclusion.revision) }
+    func invalidateBrowserExclusion() {
+        guard stream != nil, isCapturing else { return }
+        browserExclusion.publish(.ready)
     }
 
     // MARK: - Filter resolution (fail closed)
@@ -179,7 +246,7 @@ final class AppAudioCapture: ObservableObject {
 
     // MARK: - Stream lifecycle
 
-    private func startStream(with filter: SCContentFilter) async {
+    private func startStream(with filter: SCContentFilter, payload: AppAudioSourcePayload, exclusions: Set<String>) async {
         guard permissionAvailable else { return }
         let request = requestGeneration
         let configuration = SCStreamConfiguration()
@@ -200,11 +267,12 @@ final class AppAudioCapture: ObservableObject {
         configuration.queueDepth = 4
 
         let offMainAudio = onAudioSampleOffMain
+        let audioDelivery = CaptureAudioDeliveryGate(); self.audioDelivery = audioDelivery
         let lifetime = CaptureSampleLifetime()
         delivery = lifetime
         let output = AppAudioOutputShim(
             onAudioSample: { sample in
-                guard lifetime.isActive else { return }
+                guard lifetime.isActive, audioDelivery.isOpen else { return }
                 offMainAudio?(sample.value)
             },
             onStopped: { [weak self] error in
@@ -221,13 +289,20 @@ final class AppAudioCapture: ObservableObject {
             try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
             self.stream = stream
             self.output = output
+            let starting = pendingStarts.begin()
+            defer { pendingStarts.finish(starting) }
             try await stream.startCapture()
             guard permissionAvailable, requestGeneration == request, lifetime.isActive, self.stream === stream else {
                 lifetime.invalidate()
-                try? await stream.stopCapture()
+                // The retirement transaction already owns this exact stream and
+                // waits for starting to finish. A second stop can fail even after
+                // successful cleanup and must never become a false leaked lease.
                 return
             }
+            activePayload = payload; activeExclusions = exclusions
             isCapturing = true
+            restoreAudioDelivery()
+            browserExclusion.publish(.ready)
             appAudioLog.info("App-audio stream started")
         } catch {
             lifetime.invalidate()
@@ -236,13 +311,17 @@ final class AppAudioCapture: ObservableObject {
             self.output = nil
             isCapturing = false
             let nsError = error as NSError
+            browserExclusion.publish(.failed)
             errorMessage = "\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))"
             appAudioLog.error("App-audio stream start failed: domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) message=\(nsError.localizedDescription, privacy: .public)")
         }
     }
 
     private func captureDidStop(_ error: NSError) {
-        delivery?.invalidate(); delivery = nil
+        // The delegate already acknowledges that this exact active stream stopped.
+        // Do not turn a second stopCapture's invalid-state error into a leaked lease.
+        stream = nil
+        _ = retireCurrentStream()
         isCapturing = false
         stream = nil
         output = nil

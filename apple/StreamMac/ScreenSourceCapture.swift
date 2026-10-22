@@ -72,6 +72,17 @@ final class ScreenSourceCapture: ObservableObject {
     private var pickerStartFailed = false
     /// The filter the user last picked (or a fallback resolved to), reused on
     /// restart so an unchanged source never re-presents the picker (S05).
+    let browserExclusion = BrowserCaptureExclusionOwner()
+    var closeAudioRoute: (@MainActor (UUID) -> Void)?
+    var drainAudioRoute: (@MainActor () async -> Void)?
+    var openAudioRoute: (@MainActor (UUID) -> Void)?
+    private var activePinnedPayload: ScreenSourcePayload?
+    private var activePrivacy: EffectiveCapturePrivacy?
+    private var exclusionTask: Task<Void, Never>?
+    private var retirementTask: Task<Bool, Never>?
+    private var unretiredStreams: [SCStream] = []
+    private let pendingStarts = CaptureAudioPendingStarts()
+    private var audioDelivery = CaptureAudioDeliveryGate()
     private var lastFilter: SCContentFilter?
     /// C03: the privacy applied to the picker path's next start (the picker
     /// filter is opaque, so only the configuration flags can carry it).
@@ -129,6 +140,7 @@ final class ScreenSourceCapture: ObservableObject {
     func pickAndStart(defaults: StreamSettings = .default) async {
         guard permissionAvailable, stream == nil, pickerContinuation == nil else { return }
         let request = UUID(); requestGeneration = request
+        browserExclusion.publish(.pending)
         errorMessage = nil
         pickerPrivacy = EffectiveCapturePrivacy(
             showsCursor: defaults.captureShowsCursor,
@@ -136,6 +148,7 @@ final class ScreenSourceCapture: ObservableObject {
             excludedBundleIDs: defaults.captureExcludedBundleIDs,
             excludedWindows: [])
         if let lastFilter {
+            activePinnedPayload = nil
             await start(with: lastFilter, privacy: pickerPrivacy)
             return
         }
@@ -148,6 +161,7 @@ final class ScreenSourceCapture: ObservableObject {
         picker.isActive = false
         guard permissionAvailable, requestGeneration == request else { return }
         if let selection {
+            activePinnedPayload = nil
             await start(with: selection.value, privacy: pickerPrivacy)
         } else if pickerStartFailed {
             errorMessage = "The content-sharing picker could not be presented. Add a screen source from the Sources tab instead, or try again."
@@ -163,10 +177,15 @@ final class ScreenSourceCapture: ObservableObject {
     /// `ScreenRegionDynamicsController` + `updateConfiguration`.
     func start(with filter: SCContentFilter,
                privacy: EffectiveCapturePrivacy = .standard,
-               dynamics: ScreenRegionDynamicsInput? = nil) async {
+               dynamics: ScreenRegionDynamicsInput? = nil,
+               pinnedPayload: ScreenSourcePayload? = nil) async {
         guard permissionAvailable else { return }
         let request = UUID(); requestGeneration = request
-        if stream != nil { await stopCurrentStream() }
+        // Even with no current stream, an earlier retirement may still own
+        // queued input. The new request must own a new boundary/release token.
+        let retired = retireCurrentStream()
+        guard await retired.value else { return }
+        browserExclusion.publish(.pending)
         guard permissionAvailable, requestGeneration == request else { return }
         errorMessage = nil
         lastFilter = filter
@@ -195,6 +214,7 @@ final class ScreenSourceCapture: ObservableObject {
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
 
         let offMainAudio = onAudioSampleOffMain
+        let audioDelivery = CaptureAudioDeliveryGate(); self.audioDelivery = audioDelivery
         let lifetime = CaptureSampleLifetime()
         delivery = lifetime
         let output = StreamOutputShim(
@@ -205,10 +225,10 @@ final class ScreenSourceCapture: ObservableObject {
                 }
             },
             onAudioSample: { [weak self] sample in
-                guard lifetime.isActive else { return }
+                guard lifetime.isActive, let token = audioDelivery.token else { return }
                 offMainAudio?(sample.value)
                 Task { @MainActor in
-                    guard lifetime.isActive else { return }
+                    guard lifetime.isActive, audioDelivery.accepts(token) else { return }
                     self?.onAudioSample?(sample.value)
                 }
             },
@@ -232,13 +252,21 @@ final class ScreenSourceCapture: ObservableObject {
             self.stream = stream
             self.output = output
             self.activeConfiguration = dynamics != nil ? configuration : nil
+            let starting = pendingStarts.begin()
+            defer { pendingStarts.finish(starting) }
             try await stream.startCapture()
             guard permissionAvailable, requestGeneration == request, lifetime.isActive, self.stream === stream else {
                 lifetime.invalidate()
-                try? await stream.stopCapture()
+                // The retirement transaction already owns this exact stream and
+                // waits for starting to finish. A second stop can fail even after
+                // successful cleanup and must never become a false leaked lease.
                 return
             }
+            activePinnedPayload = pinnedPayload
+            activePrivacy = privacy
             isCapturing = true
+            restoreAudioDelivery()
+            browserExclusion.publish(.ready)
             if let dynamics {
                 startRegionDynamics(dynamics)
             }
@@ -287,6 +315,7 @@ final class ScreenSourceCapture: ObservableObject {
                defaults: StreamSettings = .default) async {
         guard permissionAvailable, stream == nil, pickerContinuation == nil else { return }
         let request = UUID(); requestGeneration = request
+        browserExclusion.publish(.pending)
         errorMessage = nil
         let privacy = payload.effectivePrivacy(defaults: defaults)
         do {
@@ -306,7 +335,7 @@ final class ScreenSourceCapture: ObservableObject {
                     screenSourceLog.error("Region unresolvable: \(reason, privacy: .public)")
                     return
                 }
-                await start(with: filter, privacy: privacy, dynamics: dynamics.input)
+                await start(with: filter, privacy: privacy, dynamics: dynamics.input, pinnedPayload: payload)
             case .missing(let reason):
                 errorMessage = reason
                 screenSourceLog.error("Pinned screen source unresolvable: \(reason, privacy: .public)")
@@ -398,40 +427,79 @@ final class ScreenSourceCapture: ObservableObject {
 
     func stop() async {
         requestGeneration = UUID()
-        await stopCurrentStream()
+        _ = await stopCurrentStream()
     }
-
-    /// Synchronously retire callback ownership before an asynchronous drain.
-    /// The drain captures only this stream, never a later replacement.
     func retire() {
         requestGeneration = UUID()
-        let stream = retireCurrentStream()
-        Task { if let stream { try? await stream.stopCapture() } }
+        _ = retireCurrentStream()
     }
-
-    private func stopCurrentStream() async {
-        let stream = retireCurrentStream()
-        if let stream { try? await stream.stopCapture() }
-        screenSourceLog.info("ScreenCaptureKit stream stopped")
+    @discardableResult private func stopCurrentStream() async -> Bool {
+        await retireCurrentStream().value
     }
-
-    private func retireCurrentStream() -> SCStream? {
+    private func retireCurrentStream() -> Task<Bool, Never> {
+        let revision = browserExclusion.beginRetirement()
+        closeAudioRoute?(revision); audioDelivery.setOpen(false)
         delivery?.invalidate(); delivery = nil
-        // Dismiss a picker still waiting on this capture (demand dropped
-        // mid-presentation), so it can't resume a start nobody wants.
         if let continuation = pickerContinuation {
-            pickerContinuation = nil
-            picker.isActive = false
-            continuation.resume(returning: nil)
+            pickerContinuation = nil; picker.isActive = false; continuation.resume(returning: nil)
         }
-        let stream = self.stream
-        self.stream = nil
-        self.output = nil
-        self.activeConfiguration = nil
-        regionDynamics?.stop()
-        regionDynamics = nil
-        isCapturing = false
-        return stream
+        if let stream, !unretiredStreams.contains(where: { $0 === stream }) { unretiredStreams.append(stream) }
+        self.stream = nil; output = nil; activeConfiguration = nil
+        regionDynamics?.stop(); regionDynamics = nil; isCapturing = false
+        activePrivacy = nil; activePinnedPayload = nil
+        let previous = retirementTask, installing = exclusionTask, generation = requestGeneration
+        let task = Task { [self] in
+            _ = await previous?.value; await installing?.value
+            await pendingStarts.waitUntilDrained()
+            return await browserExclusion.finishRetirement(revision: revision, stop: { [self] in
+                for stream in unretiredStreams {
+                    do { try await stream.stopCapture(); unretiredStreams.removeAll { $0 === stream } }
+                    catch { /* Retain failed cleanup; a later explicit generation can retry. */ }
+                }
+                return unretiredStreams.isEmpty
+            }, drain: { [self] in await drainSamplesAndHistory() }, current: { [self] in requestGeneration == generation })
+        }
+        retirementTask = task
+        return task
+    }
+    private func drainSamplesAndHistory() async {
+        await withCheckedContinuation { continuation in sampleQueue.async { continuation.resume() } }
+        await drainAudioRoute?()
+    }
+    private func restoreAudioDelivery(revision: UUID? = nil) { audioDelivery.setOpen(true); openAudioRoute?(revision ?? browserExclusion.revision) }
+    func invalidateBrowserExclusion() {
+        guard stream != nil, isCapturing else { return }
+        browserExclusion.publish(.ready)
+    }
+    func prepareBrowserExclusion(helperPID: Int32) {
+        guard browserExclusion.state == .ready, exclusionTask == nil,
+              let stream, isCapturing else { return }
+        if activePrivacy?.capturesAudio == false { browserExclusion.publish(.installed(helperPID)); return }
+        guard let privacy = activePrivacy, let payload = activePinnedPayload,
+              payload.target == .display, privacy.excludedWindows.isEmpty else {
+            browserExclusion.publish(.unsupported); return
+        }
+        let request = requestGeneration
+        let revision = browserExclusion.beginInstallation(helperPID: helperPID)
+        closeAudioRoute?(revision); audioDelivery.setOpen(false)
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer { self.exclusionTask = nil; self.browserExclusion.changed?() }
+            await self.browserExclusion.finishInstallation(revision: revision, helperPID: helperPID,
+                install: {
+                    let content = try await SCShareableContent.current
+                    guard self.permissionAvailable, self.requestGeneration == request, self.stream === stream else { return false }
+                    guard content.applications.contains(where: { $0.processID == helperPID && $0.bundleIdentifier == BrowserWidgetAudioIdentity.helperBundleID }) else { return false }
+                    var excluded = privacy
+                    excluded.excludedBundleIDs = Array(Set(privacy.excludedBundleIDs + [BrowserWidgetAudioIdentity.helperBundleID]))
+                    guard case .filter(let filter) = Self.resolve(payload, privacy: excluded, in: content) else { return false }
+                    try await stream.updateContentFilter(filter)
+                    return true
+                }, drain: { await self.drainSamplesAndHistory() },
+                current: { self.permissionAvailable && self.requestGeneration == request && self.stream === stream },
+                reopen: { self.restoreAudioDelivery(revision: revision) })
+        }
+        exclusionTask = task
     }
 
     // MARK: - Region dynamics (C04, issue #104)
@@ -690,7 +758,11 @@ final class ScreenSourceCapture: ObservableObject {
     // MARK: - Stream delegate
 
     private func captureDidStop(_ error: NSError) {
+        // The delegate already acknowledges that this exact active stream stopped.
+        // Do not turn a second stopCapture's invalid-state error into a leaked lease.
+        stream = nil
         delivery?.invalidate(); delivery = nil
+        retire()
         isCapturing = false
         stream = nil
         output = nil

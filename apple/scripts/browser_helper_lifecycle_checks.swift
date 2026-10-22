@@ -7,21 +7,24 @@ import Foundation
     @MainActor private final class Driver: BrowserWidgetAudioDriver {
         var isCapturing = false
         var starts = 0
+        var beforeStart: (@MainActor () async -> Void)?
         let requiresScreenCaptureAccess = false
         var onFailure: (@MainActor (String) -> Void)?
-        func start(helperPID: Int32) async throws { precondition(helperPID == 42); starts += 1; isCapturing = true }
+        func start(helperPID: Int32) async throws { precondition(helperPID == 42); await beforeStart?(); starts += 1; isCapturing = true }
         func invalidateInput() {}
         func stop() async { isCapturing = false }
     }
     @MainActor private final class Transport: BrowserWidgetHelperTransport {
         let pid: Int32 = 42
         var rejectedAction: BrowserWidgetAudioCommand.Action?
+        var onSend: (@MainActor (BrowserWidgetAudioCommand) -> Void)?
         var commands: [BrowserWidgetAudioCommand] = []
         var closed = false
         var reply: ((BrowserWidgetAudioReply) -> Void)?
         func send(_ value: BrowserWidgetAudioCommand) throws {
             if value.action == rejectedAction { throw BrowserWidgetHelperSession.SessionError.unavailable }
             commands.append(value)
+            onSend?(value)
             let state: BrowserWidgetAudioReply.State
             switch value.action {
             case .load, .resume: state = .loaded
@@ -43,8 +46,75 @@ import Foundation
         }
         var hasFailure: Bool { values.contains { if case .failed = $0 { true } else { false } } }
     }
+    @MainActor private final class HeldStart {
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var entered = false
+        func wait() async {
+            entered = true; let pending = waiters; waiters = []; for waiter in pending { waiter.resume() }
+            await withCheckedContinuation { continuation = $0 }
+        }
+        func untilEntered() async { if !entered { await withCheckedContinuation { waiters.append($0) } } }
+        func release() { continuation?.resume(); continuation = nil }
+    }
     static func run() async throws {
         let path = URL(fileURLWithPath: "/unavailable-owned-browser-fixture.app")
+        // Actual session consumption of a current capture-owner proof. A retired
+        // demand while capture start is held must never reach helper Resume.
+        do {
+            let transport = Transport(), driver = Driver(), states = States(), held = HeldStart()
+            let session = BrowserWidgetHelperSession(applicationURL: path, mixer: AudioMixEngine(),
+                validationAudioDriver: driver, transportForQualification: transport)
+            session.prepareMixerForAudio = { .init(isCurrent: { true }) }
+            transport.reply = { [weak session] in session?.validationReceive($0) }
+            let id = UUID(), generation = UUID(), lease = BrowserWidgetPageLease(widgetID: id, generation: generation)
+            try await session.loadForQualification(id: id, generation: generation, html: "owned-proof", options: .init(), callbacks: states.callbacks)
+            let owner = BrowserCaptureExclusionOwner(); owner.publish(.installed(42))
+            var epoch = UUID(); let first = epoch
+            let proof = BrowserCaptureExclusionPermit(id: first, helperPID: 42,
+                isCurrent: { epoch == first && owner.accepts(helperPID: 42, demanded: true) })
+            driver.beforeStart = { await held.wait() }
+            session.setProgramAudioDemand([lease], exclusions: proof)
+            await held.untilEntered()
+            owner.publish(.pending); epoch = UUID()
+            session.setProgramAudioDemand([lease], exclusions: nil)
+            held.release(); await session.waitUntilStopped()
+            precondition(session.audibleLeases.isEmpty && !driver.isCapturing && !transport.commands.contains { $0.action == .resume },
+                         "Retired capture owner resumed helper after held capture start")
+            driver.beforeStart = nil
+            owner.publish(.installed(42)); let replacement = epoch
+            session.setProgramAudioDemand([lease], exclusions: .init(id: replacement, helperPID: 42,
+                isCurrent: { epoch == replacement && owner.accepts(helperPID: 42, demanded: true) }))
+            await session.waitUntilStopped()
+            precondition(session.audibleLeases == [lease], "Valid replacement exclusion generation remained latched unavailable")
+            session.setProgramAudioDemand([lease], exclusions: .init(id: UUID(), helperPID: 43, isCurrent: { true }))
+            precondition(session.audibleLeases.isEmpty)
+            await session.waitUntilStopped()
+            precondition(!driver.isCapturing, "Old PID proof authorized a different helper")
+            session.release(id); await session.waitUntilStopped()
+            print("PASS: actual helper session rejects retired capture/demand proof during held start, accepts fresh proof without latch and rejects other helper PID; inert driver only")
+        }
+        // A permit can retire during one page's Resume acknowledgment. No
+        // sibling page may receive a later Resume from that obsolete proof.
+        do {
+            let transport = Transport(), driver = Driver(), states = States()
+            let session = BrowserWidgetHelperSession(applicationURL: path, mixer: AudioMixEngine(),
+                validationAudioDriver: driver, transportForQualification: transport)
+            session.prepareMixerForAudio = { .init(isCurrent: { true }) }
+            transport.reply = { [weak session] in session?.validationReceive($0) }
+            var valid = true
+            let first = UUID(), sibling = UUID(), generation = UUID()
+            try await session.loadForQualification(id: first, generation: generation, html: "first", options: .init(), callbacks: states.callbacks)
+            try await session.loadForQualification(id: sibling, generation: generation, html: "sibling", options: .init(), callbacks: states.callbacks)
+            transport.onSend = { if $0.action == .resume { valid = false } }
+            session.setProgramAudioDemand([.init(widgetID: first, generation: generation), .init(widgetID: sibling, generation: generation)],
+                exclusions: .init(id: UUID(), helperPID: 42, isCurrent: { valid }))
+            await session.waitUntilStopped()
+            precondition(transport.commands.filter { $0.action == .resume }.count == 1 && session.audibleLeases.isEmpty && !driver.isCapturing,
+                         "Retired permit resumed a sibling page after an awaited acknowledgment")
+            session.release(first); session.release(sibling); await session.waitUntilStopped()
+            print("PASS: actual helper rechecks current owner proof before each page Resume, including retirement during sibling acknowledgment")
+        }
         // Registration without a current mixer preparer is a visual-only
         // demand. It must never resume the page/capture at default gain.
         do {
