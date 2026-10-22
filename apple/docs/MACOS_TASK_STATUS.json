@@ -307,7 +307,9 @@
           "sha256": "96e2b17a71a42d3e558be985c7a885f7f01284c3be7edd8cc61e206e3cc83176"
         }
       ]
-    }
+    },
+    "wave15PublisherCache": "Whole actual publisher actors pass six positive/four exact negative ownership checks with selected SDK media effects inert; independent source/proof review clear. Combined unsigned universal app/bundle source eecaddc PASS. No media transport/VT/performance qualification; #92 open.",
+    "wave15OwnedRTC": "One exact e803 owned all-Chromium attempt completes in 11.398 s, UNQUALIFIED 77. All ten observed API calls fulfill, but no exposed pair/remote-candidate rows and no connection/RTP measurement. Source/raw/cleanup independently reviewed; no retry/native #127 qualification."
   },
   "issues": [
     {
@@ -815,7 +817,8 @@
         "Program/Secondary/Clean selection, conservative feedback-driven bitrate and whole-AU admission, same-lease budget retention and optional-video failure isolation are implemented and locally verified. Multiple simultaneous recipients/capacity, physical AEC, desktop/mobile browsers, deployed/restricted-network and sustained A/V qualification remain. Natural higher-resolution upshift and actual high-to-low resolution impairment have not been qualified.",
         "Current source/wire audit and independent libopus decode demonstrate non-silent interoperable generated Opus payloads, without production changes or successful network sends. The receive-clock cause remains a source-supported hypothesis. Both owned browser discriminators stop before connected/RTP measurement and are UNQUALIFIED 77, not a repair or a reproduced old 931-packet symptom.",
         "One completed repaired owned null-output diagnostic at EA exits77/UNQUALIFIED after 11.429 s before connection or the 12 s measurement. Both ICE/connection states remain new, sender source PCM is positive but its outbound RTP row reports 0 packets/bytes, receiver inbound rows are absent and PCM is zero. Partial callback lowerbounds and verified process-group/browser/directory cleanup do not reproduce the old 931 RTP/zero-emission case, establish its cause, or qualify native return/normal output/AEC/A/V.",
-        "New bounded pre-RTP failure/signaling diagnostics pass 18 Node and six syntax checks with independent review. These are generated diagnostic/test changes; no new RTC/media attempt, native return repair, normal-output/AEC/A/V or connection qualification is claimed."
+        "New bounded pre-RTP failure/signaling diagnostics pass 18 Node and six syntax checks with independent review. These are generated diagnostic/test changes; no new RTC/media attempt, native return repair, normal-output/AEC/A/V or connection qualification is claimed.",
+        "One exact published e803 owned all-Chromium diagnostic ends UNQUALIFIED 77 in 11.398 s before connection / 12 s measurement. All ten observed API calls fulfill; snapshots expose unselected ICE/DTLS-new transports, no remote-candidate/pair rows and four local candidate rows per peer. API fulfillment does not prove internal candidate handling, wire checks, cause or native/normal-output/AEC/A-V acceptance. Source/raw and full owned-process retirement are independently verified; no retry."
       ],
       "evidence": [
         "GUEST_RETURN_AV_ORACLES.md",
@@ -823,7 +826,8 @@
         "NATIVE_GUEST_RETURN_WIRE_AUDIT.md",
         "NATIVE_GUEST_RETURN_WIRE_AUDIT_2026-10-22.json",
         "NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE11_2026-10-22.json",
-        "NATIVE_GUEST_RETURN_PRE_RTP_DIAGNOSTICS.md"
+        "NATIVE_GUEST_RETURN_PRE_RTP_DIAGNOSTICS.md",
+        "NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE12_2026-10-22.json"
       ]
     },
     {
@@ -963,7 +967,8 @@
         "The reviewed manual fixed ARM/Intel two 20 s attribution workflow has now completed one a9 dispatch successfully. Its source/hash-bound short checks do not qualify sustained capacity; original 600 s / 17,850 frames / 80 ms / 1380 s gates and retained failures are unchanged. The earlier undispatched snapshot remains historical evidence.",
         "New a9 fixed 2x20 s attribution jobs succeed all short raw checks with 450-frame minimum, but do not qualify original 600 s / 17,850-frame capacity. Actual per-architecture renders/writer/postwarm/source-decode counters remain distinct; Intel static writer drops 16audio chunks. Old 600 s Intel final decode inspection is terminally incomplete/UNQUALIFIED at owned 1380 s teardown, not currently running. Clock lifecycle/epoch proofs and independent baseline audits are complete, but no timing-improvement or VM-cause claim follows without a real comparison.",
         "Post-clock a4 ARM two 20 s diagnostic completes with 551/562 frames versus 553/574 baseline and 10/0 audio drops; no observed throughput improvement in these samples. Binding audit and independent review pass, but zero tolerance guarantees neither timely resumption nor kernel/coalescing-cause proof. Intel follow-up remains separately active at the recorded snapshot; original 600 s qualification remains failed/open.",
-        "Final independently audited a4 comparison: ARM 551/562 vs 553/574 baseline with 10/0 audio-chunk drops; Intel 553/569 vs 528/565 with 0/0 vs 16/0 drops. All short 450-frame checks pass, but no causal/general or 600 s performance qualification follows. Actual eight-case mailbox retirement plus six clock proofs pass, with a three-call negative control; releasing pending ownership does not revoke active/raw external holders or identify all historical holders."
+        "Final independently audited a4 comparison: ARM 551/562 vs 553/574 baseline with 10/0 audio-chunk drops; Intel 553/569 vs 528/565 with 0/0 vs 16/0 drops. All short 450-frame checks pass, but no causal/general or 600 s performance qualification follows. Actual eight-case mailbox retirement plus six clock proofs pass, with a three-call negative control; releasing pending ownership does not revoke active/raw external holders or identify all historical holders.",
+        "Both whole raw publisher actors now release unused repeat-cache ownership at accepted Program audio entry before the existing await and avoid caching later Program video. Actual one-buffer-pool six positive/four exact negative cases pass with selected SDK media effects inert. This does not qualify opaque SDK/VideoToolbox release, historical surface holders, full isolation or sustained performance; original issue remains open."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -990,7 +995,9 @@
         "COMPOSITION_HOSTED_CLOCK_COMPARISON_2026-10-22.md",
         "PERFORMANCE_HOSTED_ATTRIBUTION_39762992882.json",
         "COMPOSITION_MAILBOX_RETIREMENT.md",
-        "COMPOSITION_MAILBOX_RETIREMENT_2026-10-22.json"
+        "COMPOSITION_MAILBOX_RETIREMENT_2026-10-22.json",
+        "PUBLISHER_PROGRAM_REPEAT_CACHE.md",
+        "PUBLISHER_PROGRAM_REPEAT_CACHE_2026-10-22.json"
       ]
     },
     {
@@ -1233,11 +1240,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closure justified. Current local 4376dad preserves validated 5c7dbea source/recipes/vendor; generation, unsigned universal arm64/x86_64 Release and bundle audit PASS, bound to 659 source/recipe paths plus vendor. New labels, diagnostic-only RTC observations, actual compositor mailbox retirement and controlled scoped local HTML software pass their named checks; mounted AX, real WebKit/audio/capture/provisioned-helper and original sustained qualification remain open. Both architectures of a4 short clock diagnostic succeed without a causal/general performance claim: ARM 551/562 vs 553/574 and 10/0 audio drops; Intel 553/569 vs 528/565 and 0/0 vs 16/0 audio drops. Old a9 native CI terminal FAILURE on both Mac ending fixtures/iOS SUCCESS; current published c90 native CI remains active at 11:10:54 UTC with iOS 588/82 PASS. Earlier successful and failed receipts retain their original sources and scopes.",
-  "integratedMain": "4376dad968b3ce920d403356e1fba59e66db5532",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closure justified. Exact local eecaddc generation, unsigned universal arm64/x86_64 Release and bundle audit PASS, bound to expanded 662 source/recipe paths plus vendor. Whole actual raw-publisher actors pass six positive/four exact negative repeat-cache ownership cases with selected SDK media effects inert; no transport/encoder/device/performance qualification. One exact published e803 owned all-Chromium diagnostic finishes UNQUALIFIED 77 after 11.398 s: ten observed APIs fulfill, but no exposed candidate-pair/remote-candidate rows; no connection is established and the original 12 s positive measurement is unreached. Internal handling/cause remains unknown. Current published e803, c90 native CI active at 11:26:56 UTC with ARM 13 / Intel 10 and iOS 588/82 PASS in 210.314 s. #90/#92/#124/#127 and all other original incomplete gates remain open; earlier source-scoped receipts and failed runs are preserved.",
+  "integratedMain": "eecaddce45d96f852cbf858b73f80337f59a02c2",
   "githubStateRefreshedAt": "2026-10-22T10:32:53.956174+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+  "publishedIntegration": "e8033037ee0a5bd51ed9b7b803ea8c34347f265b",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1257,7 +1264,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "4376dad968b3ce920d403356e1fba59e66db5532",
+  "currentReviewBase": "eecaddce45d96f852cbf858b73f80337f59a02c2",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -3958,5 +3965,155 @@
     },
     "acceptance": "Counts 27/34 unchanged. #90, #92, #124 and #127 remain open, as do all other earlier incomplete original issues. Local software proofs do not qualify mounted operator delivery, genuine browser audio/provisioned sandbox, sustained capacity or hardware/live services. Unintegrated publisher-cache candidate is excluded.",
     "postBuildDocsOnly": "Current 4376dad adds the approved two-architecture comparison and exact sleep-threshold label correction after validated 5c7dbea. Parent verifies all 659 source/recipe paths and vendor remain unchanged."
+  },
+  "wave15Review": {
+    "currentLocalHead": "eecaddce45d96f852cbf858b73f80337f59a02c2",
+    "publishedMainAtSnapshot": "e8033037ee0a5bd51ed9b7b803ea8c34347f265b",
+    "countsUnchanged": {
+      "closed": 27,
+      "open": 34,
+      "newClosuresJustified": []
+    },
+    "combinedNative": {
+      "source": "eecaddce45d96f852cbf858b73f80337f59a02c2",
+      "status": "PASS: generation, unsigned universal arm64/x86_64 Release and actual bundle audit",
+      "receipt": {
+        "path": "/tmp/stream-wave15-parent-final-results-20261022.json",
+        "bytes": 768,
+        "sha256": "f87ff278f81e47cfe837dc0f97f5bdcfbb8e8145798332d4959a9dc0563c999a"
+      },
+      "checks": [
+        {
+          "label": "generate",
+          "exit": 0,
+          "log": "/tmp/stream-wave15-parent-final-generate-20261022.log",
+          "bytes": 168,
+          "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+        },
+        {
+          "label": "universal",
+          "exit": 0,
+          "log": "/tmp/stream-wave15-parent-final-universal-20261022.log",
+          "bytes": 330168,
+          "sha256": "0b2f430b91977c07650b3298291c07f996e1c81e972bbbc8d83868de56e598ce"
+        },
+        {
+          "label": "bundle",
+          "exit": 0,
+          "log": "/tmp/stream-wave15-parent-final-bundle-20261022.log",
+          "bytes": 517,
+          "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+        }
+      ],
+      "sourceManifest": {
+        "path": "/tmp/stream-wave15-validated-production-manifest-20261022.json",
+        "bytes": 80468,
+        "sha256": "3a8358fd0d0f7d6123c859f23e6ea572bd841b74ae64d147e9f5ab33812ad1a3",
+        "paths": 662,
+        "vendor": "d9fceedc068994023900b4d69588b8af19136752"
+      }
+    },
+    "publisherRepeatCache": {
+      "originalCommit": "621eff5fa79efd8131633090aeed9f0dc0d37d06",
+      "integratedCommit": "bacfe526bff11d3c4208a9fea269392a76310682",
+      "ciInvocationCommit": "eecaddce45d96f852cbf858b73f80337f59a02c2",
+      "documents": [
+        {
+          "source": "eecaddce45d96f852cbf858b73f80337f59a02c2",
+          "path": "apple/docs/PUBLISHER_PROGRAM_REPEAT_CACHE.md",
+          "bytes": 5011,
+          "sha256": "634435b4f42e927e613a7bad5cf58235db413b9c527f2dee31f55e5251d1a8da"
+        },
+        {
+          "source": "eecaddce45d96f852cbf858b73f80337f59a02c2",
+          "path": "apple/docs/PUBLISHER_PROGRAM_REPEAT_CACHE_2026-10-22.json",
+          "bytes": 26897,
+          "sha256": "47bab248dd3bd9e4c55cf3a8c2cf95dfea70567379177d066a52578f9aeb9f7d"
+        }
+      ],
+      "independentReview": "Root and owner source review clear; nine source / 56 artifact / three SDK bindings verified.",
+      "actualProof": "Whole production RTMPPublisher and SessionPublisher actors: six positive legacy/entry/future ownership cases PASS; four negative children fail exact unchanged ownership assertions. Real one-buffer Core Video pool proves release, including before held mixer-configuration await.",
+      "externalBoundary": "Selected mixer SDK media effects are inert/nonretaining; no publisher start, socket, encoder, device or capture runs.",
+      "scope": "Unused cache is cleared before first accepted Program audio await and future Program video is not cached. Rejected calls, legacy repeat, numeric Program duration, normalizer/admission/PTS/call order remain unchanged. No opaque SDK/VideoToolbox lifetime, historical holder attribution, full output isolation, sustained improvement or #92 closure."
+    },
+    "ownedRTC": {
+      "source": "e8033037ee0a5bd51ed9b7b803ea8c34347f265b",
+      "report": {
+        "path": "/tmp/stream-wave12-owned-RTC-report-20261022.md",
+        "bytes": 6223,
+        "sha256": "bb353a3b3fda08134e6203eccd46e5f47cc49e78e7b51e7ce8bbb86c6a372508"
+      },
+      "artifactInventory": {
+        "path": "/tmp/stream-wave12-owned-RTC-20261022/frozen-artifact-hashes.json",
+        "bytes": 1658,
+        "sha256": "5ba4963658aafae7eee0120f0d049384a81d99c6eff1b6051b917d7a5a98d760"
+      },
+      "status": "One actual owned all-Chromium attempt, UNQUALIFIED exit 77 after 11.398 s; no retry.",
+      "independentReview": "Recording verifies source/raw bindings and actual process/group/directory retirement.",
+      "observations": "Ten observed description/candidate API calls fulfill with no rejection/in-flight operations. Each peer exposes an unselected transport with ICE/DTLS new and zero packet/byte counters; no exposed remote-candidate/pair rows, four local candidate rows per side. Sender source PCM is positive, explicit outbound Opus 0 packets/bytes; receiver inbound rows absent and measured PCM zero.",
+      "scope": "10 s connection gate failed; original 12 s positive measurement never began. API fulfillment does not establish internal candidate handling, wire checks, connectivity or cause. No native SDK/return-audio/AEC/normal-output/A-V/performance or #127 acceptance. Prior failed/partial receipts remain unchanged.",
+      "trackedEvidence": [
+        {
+          "commit": "0c229da1ef42434ac4e8b2682c39f61427a38dee",
+          "path": "apple/docs/NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE12_2026-10-22.json",
+          "bytes": 36052,
+          "sha256": "7e98e10c70b97ae9799e4d4b9ae36bdd068b6f8f61a0e7efe46e73780a370ed7"
+        },
+        {
+          "commit": "0c229da1ef42434ac4e8b2682c39f61427a38dee",
+          "path": "apple/docs/NATIVE_GUEST_RETURN_PRE_RTP_DIAGNOSTICS.md",
+          "bytes": 8176,
+          "sha256": "41a7abe2b570971bec86806cb1b03b8c1daec9ba4cebf27c3fa6ed33fed2e9c4"
+        }
+      ],
+      "statsScope": "Pinned WebRTC collector emits remote-candidate rows from connection_infos while creating pairs; absence of those remote rows is coupled to absent pairs, not independent candidate-resolution evidence. Internal handling remains unknown."
+    },
+    "acceptance": "Counts 27/34 unchanged; all earlier open original criteria remain open. No mounted AX/real WebKit/provisioned browser capture/sustained qualification or whole current native CI success follows. Parent owns fresh preflight/publication.",
+    "hostedCI": {
+      "snapshot": {
+        "path": "/tmp/stream-wave15-c90-native-ci-snapshot-20261022.json",
+        "bytes": 32727,
+        "sha256": "12671f7b2f302e2bcd9d520c02ee046a66b70ca460b12228080e459bdec3301c"
+      },
+      "checkedAt": "2026-10-22T11:26:56.888715+00:00",
+      "source": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+      "run": 39764965913,
+      "status": "in_progress",
+      "conclusion": null,
+      "jobs": [
+        {
+          "id": 119784721840,
+          "name": "StreamMac build and tests (macos-26)",
+          "status": "in_progress",
+          "conclusion": null,
+          "activeSteps": [
+            {
+              "number": 13,
+              "name": "Test managed event review and shipping publisher gates"
+            }
+          ]
+        },
+        {
+          "id": 119784721962,
+          "name": "StreamCore tests (iOS Simulator)",
+          "status": "completed",
+          "conclusion": "success",
+          "activeSteps": []
+        },
+        {
+          "id": 119784722074,
+          "name": "StreamMac build and tests (macos-26-intel)",
+          "status": "in_progress",
+          "conclusion": null,
+          "activeSteps": [
+            {
+              "number": 10,
+              "name": "Test native controller and automation boundaries"
+            }
+          ]
+        }
+      ],
+      "scope": "ARM managed-event step 13 and Intel controller step 10 active; iOS 588/82 PASS in 210.314 s. No whole CI conclusion. Earlier a9 both-Mac ending failures and source-specific success/failure history remain unchanged."
+    }
   }
 }
