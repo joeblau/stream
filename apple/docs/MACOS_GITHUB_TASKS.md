@@ -931,3 +931,69 @@ ARM sample renders **551 / 562** frames versus baseline
 improvement in these samples. Independent binding review passes; this does not
 prove a kernel/coalescing cause or qualify the unchanged 600 s gates. Detailed
 timing interpretation remains separate from run conclusions. **#92 stays open.**
+
+## Reviewed software cohort and final short clock comparison — 2026-10-22 UTC
+
+Exact local `5c7dbea` passes generation, unsigned universal arm64/x86_64 Release
+and the actual bundle audit. The expanded source/recipe manifest binds 659 paths
+and the vendor gitlink, including StreamBroadcast, helper and shared/native
+sources; its count differs in scope from the earlier 317-path manifest. Root
+receipts and exact source hashes are bound under `wave14Review` in
+[the ledger](MACOS_TASK_STATUS.json). Published main is still `c90de17` at this
+snapshot. Current local `4376dad` adds the approved comparison documents and
+exact threshold-label correction; all 659 validated paths/vendor remain
+unchanged. Counts remain **27 closed / 34 open**; no new closure is justified.
+
+- Native effect/AU parameter names and truthful units, secondary-canvas controls
+  and cue-specific rundown operations now have explicit labels. Independent
+  source reviews and the combined application typecheck pass. Mounted
+  AX/keyboard/VoiceOver delivery, full-window layout and contrast remain
+  unqualified; **#90 stays open**.
+- Actual compositor mailbox retirement releases pending surfaces without waiting
+  for already-active callbacks. Eight actual mailbox cases and six unchanged
+  clock cases pass. Removing only three removal-close calls makes the unchanged
+  pressure-recovery assertion fail. The four-surface pool threshold remains;
+  active callbacks or external raw-buffer owners cannot be revoked. This proves
+  the bounded ownership repair, not historical holder attribution or sustained
+  throughput. See [the proof](COMPOSITION_MAILBOX_RETIREMENT.md).
+- Local HTML now has an explicit library file/folder path, bounded immutable
+  copies, generation/lease checks and Stop/exit-bound cleanup with persistent
+  quarantine admission. Actual file-store/session checks use inert capture,
+  mixer and transport boundaries; helper typecheck and whole-source compilation
+  pass. No real WebKit/App Group sandbox subresource, media, capture or signing
+  qualification follows. **#124 stays open and production routing/startup stay
+  disabled.** See [the local-content scope](BROWSER_WIDGET_LOCAL_CONTENT.md).
+- Bounded pre-RTP RTC failure/signaling diagnostics pass 18 Node tests and six
+  syntax checks with independent review. No new RTC/media attempt or return-audio
+  repair ran; **#127 stays open**. See [the diagnostic scope](NATIVE_GUEST_RETURN_PRE_RTP_DIAGNOSTICS.md).
+
+The final independently audited [two-architecture clock comparison](COMPOSITION_HOSTED_CLOCK_COMPARISON_2026-10-22.md)
+and [machine receipt](PERFORMANCE_HOSTED_ATTRIBUTION_39762992882.json) bind exact
+baseline `a9cfd98` and zero-tolerance `a4d0122`. Both diagnostic jobs pass all
+original short checks with their **450-frame minimum**:
+
+| Host | Baseline static / replay output | Zero-tolerance output | Baseline → candidate audio-chunk drops |
+| --- | --- | --- | --- |
+| ARM | 553 / 574 | 551 / 562 | 0 / 0 → 10 / 0 |
+| Intel | 528 / 565 | 553 / 569 | 16 / 0 → 0 / 0 |
+
+ARM has no observed output improvement. Intel's static difference coincides
+with cold measured-tick time 1,018.380 → 418.638 ms and first skips 29 → 11;
+separate virtual instances and new observer work prevent a controlled causal
+or general performance claim. Return lateness includes executor/host resumption;
+there is no baseline sleep-return observation. Intel's extra legacy entry 568 is
+rejected before the production body: actual attempts are 567. Iteration, rendered
+output, warmup, replay-source decoding and writer audio accounting remain distinct.
+No 600 s workload ran for this cohort, and **#92 remains open** with all original
+600 s / 17,850-frame / 80 ms / 1,380 s gates and failed receipts unchanged.
+
+Older `a9cfd98` native run `39757320250` is now terminal **FAILURE**: both Mac
+jobs fail the owned-ending fixture with top-level `CancellationError`; iOS
+succeeds. All three Core suites pass 588 tests / 82 suites (ARM 140.215 s,
+Intel 238.018 s, iOS 185.470 s). The later fresh-receipt fixture correction does
+not rewrite that result. At the frozen **11:10:54 UTC** watcher snapshot,
+published `c90de17` native run `39764965913` remains **active**: ARM is in
+controller step 10, Intel in Core step 9, and iOS passes 588 / 82 in 210.314 s.
+This is not a whole native CI success. The separate publisher-cache candidate
+is excluded from this validated cohort; no new run, issue write or publication
+was performed for this documentation update.
