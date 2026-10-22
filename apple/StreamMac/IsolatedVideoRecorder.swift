@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import StreamCore
 
 /// A source render queue and a separately bounded Apple writer. Reads the
 /// program's accepted clock, so pause/split cannot accumulate independent drift.
@@ -32,6 +33,7 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
     private let spaceProbe: @Sendable (URL) throws -> Int64?
     private let unavailableReason: String
     private var render: IsolatedVideoSource.Render?
+    private let frameDelivery: RecordingVideoFrameDelivery?
     private let event: @Sendable (IsolatedVideoProgress) -> Void
     private let queue = DispatchQueue(label: "com.joeblau.StreamMac.recording.isolatedVideo")
     private let lock = NSLock()
@@ -45,7 +47,10 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
     private var nextAudioTime: CMTime = .invalid
     private var establishedAudioGrid = false
     private var firstVideoTime: CMTime = .invalid
-    private var blackPixelBuffer: CVPixelBuffer?
+    private var blackBank: RawVideoResourceBank?
+    private var blackReceipt: RawVideoResourceReceipt?
+    private var transferProgress = RecordingVideoTransferProgress()
+    private var writerTransferProgress: RecordingVideoTransferProgress?
     private var sequence: Int64 = 0
     private var renderDropCount = 0
     private var writerVideoDrops = 0
@@ -64,12 +69,14 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
     init(outputURL: URL, selection: IsolatedVideoSelection, source: IsolatedVideoSource?,
          sessionID: String, segmentIndex: Int, programFile: String, context: RecordingContext,
          budget: IsolatedVideoBudget, timeline: RecordingTimeline,
+         frameDelivery: RecordingVideoFrameDelivery? = nil,
          unavailableReason: String = "The selected video source is unavailable or was deleted; no other source was substituted.",
          spaceProbe: @escaping @Sendable (URL) throws -> Int64? = { url in
              try url.deletingLastPathComponent().resourceValues(forKeys: [.volumeAvailableCapacityKey]).volumeAvailableCapacity.map(Int64.init)
          },
          event: @escaping @Sendable (IsolatedVideoProgress) -> Void) {
         self.outputURL = outputURL; self.selection = selection; self.render = source?.makeRenderer()
+        self.frameDelivery = frameDelivery
         self.sessionID = sessionID; self.segmentIndex = segmentIndex; self.programFile = programFile
         self.context = context; self.budget = budget; self.timeline = timeline; self.event = event
         self.unavailableReason = unavailableReason; self.spaceProbe = spaceProbe
@@ -117,6 +124,7 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
             config.sessionID = sessionID; config.segmentIndex = segmentIndex; config.context = context
             config.requiresAudio = selection.audioTargetID != nil; config.sourceStartTime = timing.origin
             config.videoCapacity = 6; config.maxVideoMemoryBytes = 48_000_000; config.audioCapacity = 128
+            config.videoBank = frameDelivery?.privateBank
             writer = ProgramRecordingSession(outputURL: outputURL, configuration: config, spaceProbe: spaceProbe, event: { [weak self] event in
                 self?.queue.async { [weak self] in self?.receive(event) }
             })
@@ -142,6 +150,11 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
                 failOnQueue("The source renderer could not produce a frame."); return
             }
             progress.sourceAvailable = frame.sourceAvailable
+            if let transferFailure = frame.transferFailure {
+                transferFailure.record(in: &transferProgress)
+                nextVideoTime = nextVideoTime + duration
+                continue
+            }
             if !frame.sourceAvailable {
                 progress.missingVideoFrames += 1
                 gap(at: (nextVideoTime - timing.origin).seconds, duration: duration.seconds, reason: "source-unavailable-black")
@@ -158,7 +171,8 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
                 sample = black
             }
             if !firstVideoTime.isNumeric { firstVideoTime = nextVideoTime }
-            writer?.appendVideo(sample)
+            if let prepared = frame.preparedVideo { writer?.appendPreparedVideo(prepared) }
+            else { writer?.appendVideo(sample) }
             nextVideoTime = nextVideoTime + duration
         }
         if selection.audioTargetID != nil {
@@ -244,6 +258,7 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
         case .progress(let value):
             progress.videoSamples = value.videoSamples; progress.durationSeconds = value.durationSeconds
             writerVideoDrops = value.droppedVideo; writerAudioDrops = value.droppedAudio
+            writerTransferProgress = value.videoTransfer
             progress.warning = value.warning; publish()
         case .failed(let message): failOnQueue(message)
         case .paused: break // The parent timeline owns pause decisions.
@@ -267,12 +282,16 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
         if let result {
             progress.videoSamples = result.progress.videoSamples; progress.durationSeconds = result.progress.durationSeconds
             writerVideoDrops = result.progress.droppedVideo; writerAudioDrops = result.progress.droppedAudio
+            writerTransferProgress = result.progress.videoTransfer
             progress.status = failure == nil && result.completed ? "complete" : "failed"
             progress.error = failure ?? result.error; progress.warning = result.progress.warning
         }
         // Completed tracks remain in the session group for their status. Do
         // not retain the renderer's pixel pool after an encoder has stopped.
-        finished = true; writer = nil; render = nil; blackPixelBuffer = nil; publish()
+        finished = true; writer = nil; render = nil
+        if let blackBank { RawVideoResourceCoordinator.shared.retire(bankID: blackBank.id) }
+        if let blackReceipt { RawVideoResourceCoordinator.shared.rollback(blackReceipt) }
+        blackBank = nil; blackReceipt = nil; publish()
         let callbacks = completions; completions.removeAll(); callbacks.forEach { $0() }
     }
     private func gap(at start: Double, duration: Double, reason: String) {
@@ -284,6 +303,16 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
     private func publish() {
         lastPublish = Date(); lock.lock(); progress.droppedAudio = audioDrops + writerAudioDrops; lock.unlock()
         progress.renderDrops = renderDropCount + writerVideoDrops
+        var transfer = transferProgress
+        if let writer = writerTransferProgress {
+            transfer.admissionFailures += writer.admissionFailures
+            transfer.privateCapacityDrops += writer.privateCapacityDrops
+            transfer.conversionFailures += writer.conversionFailures
+            transfer.provenanceDrops += writer.provenanceDrops
+            transfer.lastError = writer.lastError ?? transfer.lastError
+        }
+        progress.videoTransfer = transfer.hasFailure ? transfer : nil
+        if transfer.hasFailure { progress.warning = "Source recording video transfer dropped frames: \(transfer.lastError ?? "private capacity occupied")" }
         if failure == nil && progress.renderDrops > 0 { progress.warning = "Source rendering shed frames; inspect the marked gaps and reduce encoder load." }
         if failure == nil && !progress.sourceAvailable && progress.missingVideoFrames > 0 { progress.warning = "Source unavailable; marked black frames are being recorded." }
         let timing = timeline.snapshot()
@@ -299,17 +328,34 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
         event(progress)
     }
     private func blackSample(pts: CMTime, duration: CMTime) -> CMSampleBuffer? {
-        if blackPixelBuffer == nil {
-            var pixels: CVPixelBuffer?
-            guard CVPixelBufferCreate(nil, selection.resolution.width, selection.resolution.height,
-                kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary, &pixels) == kCVReturnSuccess,
-                let pixels else { return nil }
-            CVPixelBufferLockBaseAddress(pixels, [])
+        var admitting = false
+        do {
+            let bank: RawVideoResourceBank
+            if let frameDelivery { bank = frameDelivery.sourceBank }
+            else if let blackBank { bank = blackBank }
+            else {
+                admitting = true
+                let generation = UUID()
+                let receipt = try RawVideoResourceCoordinator.shared.reserveBatch([.init(domain:
+                    .init(workspace: generation, kind: .rendererSource, outputID: "isolated-black", plane: .isolated),
+                    descriptor: .init(width: selection.resolution.width, height: selection.resolution.height, capacity: 1),
+                    sessionGeneration: generation)])
+                guard let admitted = receipt.banks.first else { throw RawVideoResourceFailure.invalidRequest }
+                blackReceipt = receipt; blackBank = admitted; bank = admitted
+                admitting = false
+            }
+            let pixels = try bank.allocatePixelBuffer()
+            guard CVPixelBufferLockBaseAddress(pixels, []) == kCVReturnSuccess else { throw FrameDeliveryTransferError.copyFailed }
             memset(CVPixelBufferGetBaseAddress(pixels), 0, CVPixelBufferGetDataSize(pixels))
             CVPixelBufferUnlockBaseAddress(pixels, [])
-            blackPixelBuffer = pixels
+            return Self.blackSample(pixels: pixels, pts: pts, duration: duration)
+        } catch {
+            let failure = admitting ? RecordingVideoTransferFailure.admission(error.localizedDescription) : .init(error)
+            failure.record(in: &transferProgress)
+            return nil
         }
-        guard let pixels = blackPixelBuffer else { return nil }
+    }
+    private static func blackSample(pixels: CVPixelBuffer, pts: CMTime, duration: CMTime) -> CMSampleBuffer? {
         var format: CMVideoFormatDescription?
         guard CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pixels, formatDescriptionOut: &format) == noErr,
             let format else { return nil }
@@ -362,6 +408,7 @@ final class IsolatedVideoGroup: @unchecked Sendable {
     private let tracks: [String: IsolatedVideoRecorder]
     init(programURL: URL, selections: [IsolatedVideoSelection], sources: [String: IsolatedVideoSource],
          unavailableSourceReasons: [String: String] = [:],
+         frameDeliveries: [String: RecordingVideoFrameDelivery] = [:],
          sessionID: String, segmentIndex: Int, context: RecordingContext, budget: IsolatedVideoBudget,
          timeline: RecordingTimeline, event: @escaping @Sendable (IsolatedVideoProgress) -> Void) {
         var tracks: [String: IsolatedVideoRecorder] = [:]
@@ -371,6 +418,7 @@ final class IsolatedVideoGroup: @unchecked Sendable {
             tracks[selection.targetID] = IsolatedVideoRecorder(outputURL: url, selection: selection, source: sources[selection.targetID],
                 sessionID: sessionID, segmentIndex: segmentIndex, programFile: programURL.lastPathComponent, context: context,
                 budget: budget, timeline: timeline,
+                frameDelivery: frameDeliveries[selection.targetID],
                 unavailableReason: unavailableSourceReasons[selection.targetID] ?? "The selected video source is unavailable or was deleted; no other source was substituted.", event: event)
         }
         self.tracks = tracks; files = tracks.values.map { $0.outputURL.lastPathComponent }.sorted()

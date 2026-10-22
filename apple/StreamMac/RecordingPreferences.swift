@@ -117,6 +117,11 @@ final class ProgramRecordingRouter: @unchecked Sendable {
         boundary?.resolveFinishBoundary(sample.presentationTimeStamp)
         session?.appendVideo(sample)
     }
+    func appendPreparedVideo(_ frame: RecordingPreparedVideoFrame) {
+        lock.lock(); let session = session; let boundary = pendingBoundary; pendingBoundary = nil; lock.unlock()
+        boundary?.resolveFinishBoundary(frame.sample.presentationTimeStamp)
+        session?.appendPreparedVideo(frame)
+    }
     func appendAudio(_ sample: CMSampleBuffer) {
         lock.lock()
         guard session != nil || !retiring.isEmpty else { lock.unlock(); return }

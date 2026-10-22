@@ -29,7 +29,8 @@ final class RecordingController: ObservableObject {
 
     var isRecording: Bool { state.isRecording }
     @Published private var pausePending = false
-    var canSplit: Bool { state == .recording && !pausePending && finishingSegments == 0 }
+    private var pauseAfterDeliveryHandoff = false
+    var canSplit: Bool { state == .recording && !pausePending && finishingSegments == 0 && frameDeliveryTask == nil }
     var currentOutputURL: URL? { session?.outputURL }
     var activeOutputURLs: Set<URL> {
         guard let session else { return finishingURLs.filter { !$0.lastPathComponent.hasSuffix(".chat.jsonl") } }
@@ -71,7 +72,13 @@ final class RecordingController: ObservableObject {
     }
     private var session: ProgramRecordingSession?
     private weak var stream: StreamController?
-    private var frameSubscription: StreamController.FrameSubscription?
+    private let frameDeliveryToken = UUID()
+    private lazy var programDelivery = RecordingProgramFrameDelivery(router: router)
+    private let videoDeliveryProvider = RecordingVideoDeliveryProvider()
+    private var frameDeliveryTask: Task<Void, Never>?
+    private var pendingDeliveryCancellation: FrameDeliveryCancellation?
+    private var activeDelivery: (lease: FrameDeliveryLease, cancellation: FrameDeliveryCancellation,
+                                 resources: RecordingSegmentVideoResources)?
     private var audioSubscription: StreamController.AudioTapSubscription?
     private var sessionID = UUID()
     private var recordingID = UUID()
@@ -200,7 +207,7 @@ final class RecordingController: ObservableObject {
     func toggle(stream: StreamController) { canStop ? stop() : start(stream: stream) }
 
     func start(stream: StreamController, useCountdown: Bool = true) {
-        guard !state.isActive, session == nil, finishingSegments == 0 else { return }
+        guard !state.isActive, session == nil, finishingSegments == 0, frameDeliveryTask == nil else { return }
         if let error = stream.reserveRecordingEncoders(encoderReservationID, count: 1 + preferences.isolatedVideoTracks.count, canvas: outputCanvas) {
             lastError = error; state = .failed(error); return
         }
@@ -264,22 +271,70 @@ final class RecordingController: ObservableObject {
         }
     }
 
+    private func prepareVideoResources(stream: StreamController) throws -> RecordingSegmentVideoResources {
+        let size = outputCanvas == .program ? stream.activeProfile.canvasSize : stream.activeSecondaryProfile.canvasSize
+        return try RecordingSegmentVideoResources(workspace: stream.rawVideoResourceWorkspaceID,
+            generation: UUID(), canvas: outputCanvas, size: size,
+            sourceRequest: stream.sourceFrameResourceRequest(canvasSize: size, canvas: outputCanvas),
+            selections: activePreferences.isolatedVideoTracks)
+    }
+
     private func beginPrepared(stream: StreamController) throws {
+        // Atomic admission precedes every writer/ISO renderer construction.
+        let resources = try prepareVideoResources(stream: stream)
+        let cancellation = FrameDeliveryCancellation()
+        pendingDeliveryCancellation = cancellation
+        let id = recordingID
+        frameDeliveryTask = Task { @MainActor [weak self, stream] in
+            guard let self else { resources.rollback(); return }
+            var installed: FrameDeliveryLease?
+            do {
+                try await stream.awaitFrameDeliveryGeometry(canvas: self.outputCanvas,
+                    expectedSize: CGSize(width: resources.program.descriptor.width, height: resources.program.descriptor.height))
+                let delivery = self.programDelivery
+                let lease = try await stream.installFrameDelivery(token: self.frameDeliveryToken,
+                    domain: resources.program.reservation.request.domain, generation: resources.generation,
+                    bank: resources.program, sourceBank: resources.source, sourceReceipt: resources.sourceReceipt,
+                    capacity: 2, canvas: self.outputCanvas, cancellation: cancellation,
+                    sink: { frame in delivery.receive(frame.sampleBuffer, bank: resources.program) })
+                installed = lease
+                guard !Task.isCancelled, !cancellation.isCancelled, self.recordingID == id,
+                      self.state == .preparing else { throw CancellationError() }
+                try self.finishBeginning(stream: stream, resources: resources)
+                self.activeDelivery = (lease, cancellation, resources)
+            } catch {
+                cancellation.cancel()
+                if let installed { await stream.removeFrameDelivery(installed) }
+                resources.rollback()
+                if self.recordingID == id, self.state == .preparing {
+                    self.lastError = error.localizedDescription
+                    self.state = error is CancellationError ? .idle : .failed(error.localizedDescription)
+                    self.stream = nil
+                }
+            }
+            self.pendingDeliveryCancellation = nil
+            self.frameDeliveryTask = nil
+            self.completeStopsIfReady()
+        }
+    }
+
+    private func finishBeginning(stream: StreamController, resources: RecordingSegmentVideoResources) throws {
+            videoDeliveryProvider.install(resources.isolated)
             demandStream = stream
             let catalog = stream.recordingVideoSources()
             for selection in activePreferences.isolatedVideoTracks {
-                if let (token, source) = stream.addRecordingVideoSource(targetID: selection.targetID) {
+                if let (token, source) = stream.addRecordingVideoSource(targetID: selection.targetID,
+                    deliveryProvider: { [videoDeliveryProvider] in videoDeliveryProvider.delivery(for: selection.targetID) }) {
                     videoSubscriptions.append(token); videoSources[selection.targetID] = source
                 } else { unavailableVideoSourceReasons[selection.targetID] = catalog.first { $0.id == selection.targetID }?.unsupportedReason }
             }
-            let session = try makeSegment(stream: stream)
+            let session = try makeSegment(stream: stream, resources: resources)
             self.session = session
-            router.install(session)
+            programDelivery.activate(bank: resources.program, session: session)
             chatFeed.install(chatArchive)
             isolatedRouter.install(isolatedGroup)
             isolatedVideoRouter.install(isolatedVideoGroup)
             let router = router
-            frameSubscription = stream.addFrameSink(canvas: outputCanvas) { frame in router.appendVideo(frame.sampleBuffer) }
             audioSubscription = stream.addProgramAudioTap { sample in router.appendAudio(sample) }
             let isolatedRouter = isolatedRouter
             for selection in activePreferences.isolatedTracks {
@@ -321,7 +376,7 @@ final class RecordingController: ObservableObject {
         return RecordingStore(directory: url)
     }
 
-    private func makeSegment(stream: StreamController) throws -> ProgramRecordingSession {
+    private func makeSegment(stream: StreamController, resources: RecordingSegmentVideoResources) throws -> ProgramRecordingSession {
         guard let url = store.makeRecordingURL(date: Date(), prefix: activePreferences.filenamePrefix, fileExtension: activePreferences.container.rawValue) else {
             throw RecordingError.message("The recordings folder is unavailable.")
         }
@@ -339,6 +394,7 @@ final class RecordingController: ObservableObject {
         configuration.sessionID = recordingID.uuidString
         configuration.segmentIndex = segmentIndex
         configuration.context = activeContext
+        configuration.videoBank = resources.program
         let timeline = RecordingTimeline()
         chatSummary = nil; chatArchive = nil
         if activePreferences.chatArchive.enabled {
@@ -381,7 +437,7 @@ final class RecordingController: ObservableObject {
         }
         isolatedVideoProgress = activePreferences.isolatedVideoTracks.map { .init(id: $0.targetID, name: $0.name, file: "") }
         let videoGroup = IsolatedVideoGroup(programURL: url, selections: activePreferences.isolatedVideoTracks, sources: videoSources,
-            unavailableSourceReasons: unavailableVideoSourceReasons,
+            unavailableSourceReasons: unavailableVideoSourceReasons, frameDeliveries: resources.isolated,
             sessionID: recordingID.uuidString, segmentIndex: segmentIndex, context: activeContext, budget: videoBudget ?? .current,
             timeline: timeline) { [weak self] progress in
                 Task { @MainActor in
@@ -401,11 +457,22 @@ final class RecordingController: ObservableObject {
                 switch event {
                 case .recording:
                     if self.state == .preparing { self.state = .recording }
+                    self.applyHandoffPauseIfReady()
                 case .paused:
                     self.pausePending = false
                     if self.state == .recording { self.state = .paused }
                 case .progress(let progress):
                     self.progress = progress
+                    if let active = self.activeDelivery {
+                        let lease = active.lease
+                        let currentSession = self.session
+                        Task { @MainActor [weak self, weak stream] in
+                            guard let stream else { return }
+                            let statistics = await stream.frameDeliveryStatistics(lease)
+                            guard let self, self.activeDelivery?.lease == lease, self.session === currentSession else { return }
+                            currentSession?.updateVideoDelivery(.init(statistics))
+                        }
+                    }
                     self.warning = progress.warning ?? self.chatSummary?.warning ?? self.isolatedProgress.first(where: { $0.error != nil }).map { "\($0.name): \($0.error!)" }
                         ?? self.isolatedVideoProgress.first(where: { $0.error != nil || $0.warning != nil }).map { "\($0.name): \($0.error ?? $0.warning!)" }
                     if self.canSplit,
@@ -427,7 +494,14 @@ final class RecordingController: ObservableObject {
 
     func pause() {
         guard state == .recording, !pausePending else { return }
+        if frameDeliveryTask != nil {
+            pausePending = true; pauseAfterDeliveryHandoff = true; return
+        }
         pausePending = true; session?.pause()
+    }
+    private func applyHandoffPauseIfReady() {
+        guard pauseAfterDeliveryHandoff, frameDeliveryTask == nil, state == .recording else { return }
+        pauseAfterDeliveryHandoff = false; pausePending = false; pause()
     }
     func resume() {
         guard state == .paused else { return }
@@ -447,33 +521,75 @@ final class RecordingController: ObservableObject {
         let previousURLs = Set([previous.outputURL] + ((previousIsolated?.files ?? []) + (previousVideo?.files ?? [])).map {
             previous.outputURL.deletingLastPathComponent().appendingPathComponent($0)
         }).union(previousChat.map { [$0.url] } ?? [])
-        do {
-            let next = try makeSegment(stream: stream)
-            session = next; router.rotate(to: next, finishing: previous); chatFeed.install(chatArchive)
-            isolatedRouter.retire(previousIsolated, installing: isolatedGroup)
-            isolatedVideoRouter.retire(previousVideo, installing: isolatedVideoGroup)
-            finishingSegments += 1
-            finishingURLs.formUnion(previousURLs)
-            let router = self.router
-            let isolatedRouter = self.isolatedRouter; let isolatedVideoRouter = self.isolatedVideoRouter
-            previous.finish(waitingForSourceBoundary: true) { [weak self, store, router] result in
-                router.finished(previous)
-                if result.completed { store.markComplete(result.url) }
-                RecordingController.finishAssociated(audio: previousIsolated, video: previousVideo, chat: previousChat, completed: result.completed) {
-                    isolatedRouter.finished(previousIsolated); isolatedVideoRouter.finished(previousVideo)
-                    Task { @MainActor in
-                        stream.releaseRecordingEncoders(rotationReservation)
-                        guard let self else { return }
-                        self.finishingSegments -= 1
-                        self.finishingURLs.subtract(previousURLs)
-                        self.acceptFinished(result, final: false)
-                        self.completeStopsIfReady()
+        let resources: RecordingSegmentVideoResources
+        do { resources = try prepareVideoResources(stream: stream) }
+        catch {
+            stream.releaseRecordingEncoders(rotationReservation)
+            warning = "Cannot admit a new recording file: \(error.localizedDescription)"; return
+        }
+        let cancellation = FrameDeliveryCancellation()
+        pendingDeliveryCancellation = cancellation
+        let previousDelivery = activeDelivery
+        frameDeliveryTask = Task { @MainActor [weak self, stream] in
+            guard let self else { resources.rollback(); stream.releaseRecordingEncoders(rotationReservation); return }
+            var installed: FrameDeliveryLease?
+            do {
+                try await stream.awaitFrameDeliveryGeometry(canvas: self.outputCanvas,
+                    expectedSize: CGSize(width: resources.program.descriptor.width, height: resources.program.descriptor.height))
+                let delivery = self.programDelivery
+                let lease = try await stream.installFrameDelivery(token: self.frameDeliveryToken,
+                    domain: resources.program.reservation.request.domain, generation: resources.generation,
+                    bank: resources.program, sourceBank: resources.source, sourceReceipt: resources.sourceReceipt,
+                    capacity: 2, canvas: self.outputCanvas, cancellation: cancellation,
+                    sink: { frame in delivery.receive(frame.sampleBuffer, bank: resources.program) })
+                installed = lease
+                guard !Task.isCancelled, !cancellation.isCancelled, self.session === previous,
+                      self.state == .recording else { throw CancellationError() }
+                self.videoDeliveryProvider.install(resources.isolated)
+                let next = try self.makeSegment(stream: stream, resources: resources)
+                self.activeDelivery = (lease, cancellation, resources)
+                previousDelivery?.cancellation.cancel()
+                session = next; programDelivery.activate(bank: resources.program, session: next, finishing: previous); chatFeed.install(chatArchive)
+                isolatedRouter.retire(previousIsolated, installing: isolatedGroup)
+                isolatedVideoRouter.retire(previousVideo, installing: isolatedVideoGroup)
+                finishingSegments += 1
+                finishingURLs.formUnion(previousURLs)
+                let router = self.router
+                let isolatedRouter = self.isolatedRouter; let isolatedVideoRouter = self.isolatedVideoRouter
+                if let previousDelivery {
+                    let statistics = await stream.removeFrameDelivery(previousDelivery.lease)
+                    previous.updateVideoDelivery(.init(statistics))
+                }
+                previous.finish(waitingForSourceBoundary: true) { [weak self, store, router] result in
+                    router.finished(previous)
+                    if result.completed { store.markComplete(result.url) }
+                    RecordingController.finishAssociated(audio: previousIsolated, video: previousVideo, chat: previousChat, completed: result.completed) {
+                        isolatedRouter.finished(previousIsolated); isolatedVideoRouter.finished(previousVideo)
+                        Task { @MainActor in
+                            stream.releaseRecordingEncoders(rotationReservation)
+                            previousDelivery?.resources.retire()
+                            guard let self else { return }
+                            self.finishingSegments -= 1
+                            self.finishingURLs.subtract(previousURLs)
+                            self.acceptFinished(result, final: false)
+                            self.completeStopsIfReady()
+                        }
                     }
                 }
+            } catch {
+                cancellation.cancel()
+                if let installed { await stream.removeFrameDelivery(installed) }
+                resources.rollback()
+                stream.releaseRecordingEncoders(rotationReservation)
+                self.warning = "Cannot start a new recording file: \(error.localizedDescription)"
+                // A failed/canceled actor handoff cannot promise the former
+                // registration remains installed. Stop this recorder honestly.
+                if self.session === previous, self.state != .stopping { self.stop() }
             }
-        } catch {
-            stream.releaseRecordingEncoders(rotationReservation)
-            warning = "Cannot start a new recording file: \(error.localizedDescription)"
+            self.pendingDeliveryCancellation = nil
+            self.frameDeliveryTask = nil
+            self.applyHandoffPauseIfReady()
+            self.completeStopsIfReady()
         }
     }
 
@@ -481,6 +597,10 @@ final class RecordingController: ObservableObject {
     /// segment still finishing. Pausing/rotating never touches network outputs.
     func stop(completion: (() -> Void)? = nil) {
         pausePending = false
+        pauseAfterDeliveryHandoff = false
+        pendingDeliveryCancellation?.cancel()
+        frameDeliveryTask?.cancel()
+        activeDelivery?.cancellation.cancel()
         if let completion { stopCompletions.append(completion) }
         countdownTask?.cancel(); countdownTask = nil; countdownRemaining = 0
         videoPreflightTask?.cancel(); videoPreflightTask = nil
@@ -490,15 +610,16 @@ final class RecordingController: ObservableObject {
         }
         guard state != .stopping else { return }
         state = .stopping
-        router.stop(session); chatFeed.install(nil)
+        programDelivery.stop(session); chatFeed.install(nil)
         isolatedRouter.retire(isolatedGroup, installing: nil)
         isolatedVideoRouter.retire(isolatedVideoGroup, installing: nil)
         let finalIsolatedSubscriptions = isolatedSubscriptions
         isolatedSubscriptions.removeAll()
-        if let frameSubscription { stream?.removeFrameSink(frameSubscription) }
+        let finalDelivery = activeDelivery
+        activeDelivery = nil
         let finalAudioSubscription = audioSubscription
         let finalStream = stream
-        frameSubscription = nil; audioSubscription = nil
+        audioSubscription = nil
         stream = nil
         let id = sessionID
         let isolated = isolatedGroup
@@ -506,19 +627,26 @@ final class RecordingController: ObservableObject {
         let chat = chatArchive
         let router = self.router
         let isolatedRouter = self.isolatedRouter; let isolatedVideoRouter = self.isolatedVideoRouter
-        session.finish { [weak self, store, router] result in
-            router.finished(session)
-            if result.completed { store.markComplete(result.url) }
-            RecordingController.finishAssociated(audio: isolated, video: video, chat: chat, completed: result.completed) {
-                isolatedRouter.finished(isolated); isolatedVideoRouter.finished(video)
-                Task { @MainActor in
-                    if let finalAudioSubscription { finalStream?.removeAudioTap(finalAudioSubscription) }
-                    for subscription in finalIsolatedSubscriptions { finalStream?.removeAudioTap(subscription) }
-                    guard let self, self.sessionID == id else { return }
-                    self.session = nil; self.isolatedGroup = nil; self.isolatedVideoGroup = nil; self.chatArchive = nil
-                    self.progress = result.progress
-                    self.acceptFinished(result, final: true)
-                    self.completeStopsIfReady()
+        Task { @MainActor [weak self, store, router] in
+            if let finalDelivery, let finalStream {
+                let statistics = await finalStream.removeFrameDelivery(finalDelivery.lease)
+                session.updateVideoDelivery(.init(statistics))
+            }
+            session.finish { [weak self, store, router] result in
+                router.finished(session)
+                if result.completed { store.markComplete(result.url) }
+                RecordingController.finishAssociated(audio: isolated, video: video, chat: chat, completed: result.completed) {
+                    isolatedRouter.finished(isolated); isolatedVideoRouter.finished(video)
+                    Task { @MainActor in
+                        if let finalAudioSubscription { finalStream?.removeAudioTap(finalAudioSubscription) }
+                        for subscription in finalIsolatedSubscriptions { finalStream?.removeAudioTap(subscription) }
+                        finalDelivery?.resources.retire()
+                        guard let self, self.sessionID == id else { return }
+                        self.session = nil; self.isolatedGroup = nil; self.isolatedVideoGroup = nil; self.chatArchive = nil
+                        self.progress = result.progress
+                        self.acceptFinished(result, final: true)
+                        self.completeStopsIfReady()
+                    }
                 }
             }
         }
@@ -537,10 +665,11 @@ final class RecordingController: ObservableObject {
     }
 
     private func completeStopsIfReady() {
-        guard session == nil, countdownTask == nil, videoPreflightTask == nil, finishingSegments == 0 else { return }
+        guard session == nil, countdownTask == nil, videoPreflightTask == nil, frameDeliveryTask == nil, finishingSegments == 0 else { return }
         reservationStream?.releaseRecordingEncoders(encoderReservationID); reservationStream = nil
         for subscription in videoSubscriptions { demandStream?.removeRecordingVideoSource(subscription) }
         videoSubscriptions.removeAll(); videoSources.removeAll(); unavailableVideoSourceReasons.removeAll()
+        videoDeliveryProvider.install([:])
         if ownsPipelineDemand { demandStream?.noteRecordingStopped(canvas: outputCanvas) }
         ownsPipelineDemand = false; demandStream = nil
         folderAccess?.stopAccessingSecurityScopedResource(); folderAccess = nil
