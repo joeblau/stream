@@ -148,6 +148,26 @@ change or a successful visual contrast comparison. The current actual evidence,
 run hash and precise remaining scope are in
 [`STUDIO_ACCESSIBILITY_2026-10-22.json`](STUDIO_ACCESSIBILITY_2026-10-22.json).
 
+Queued native focus restoration also checks ownership when the callback runs.
+A new presentation, newer restoration request or changed/detached window retires
+older queued work, including its fallback. A missing scope cannot execute a
+fallback without a corresponding saved bookmark. Normal same-window updates do
+not cancel a valid restore, and child/parent presentations retain their own
+bookmarks.
+
+Run `apple/scripts/run_studio_focus_restoration_harness.zsh` for the small native
+regression. It compiles the production coordinator/attachment directly and uses
+mounted AppKit text fields/shared field editors, real attached sheets and the
+actual main queue. The 2026-10-22 baseline reproduced six stale outcomes before
+the fix; the corrected source passes all six cancellation checks plus positive
+restoration, nested presentation and sheet-notification checks. The
+`--reproduce-stale` mode expects the pre-fix defects and is intended only for
+baseline source. No full app build, semantic AX tree, permission or global input
+is required. See
+[`STUDIO_FOCUS_OWNERSHIP_2026-10-22.json`](STUDIO_FOCUS_OWNERSHIP_2026-10-22.json)
+for exact source/run hashes and both transcripts. Issue #90 remains open for its
+previously recorded semantic and visual qualification gaps.
+
 ## Show macros
 
 Inspector > Macros creates named ordered sequences from the shared command
