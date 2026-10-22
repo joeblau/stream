@@ -400,3 +400,17 @@ open, with zero open pull requests. No other task closes from this batch. The
 source and qualification limits above remain in force; no unmeasured Mac class,
 physical capture, signed installation, browser PCM or sustained GPU result is
 implied by this scoped completion.
+
+
+## Reviewed accessibility and browser capture integration (2026-10-22)
+
+Fresh paginated GitHub state remains **25 closed / 36 open** for the original 61 issues, with zero open pull requests. This batch adds no issue closures.
+
+The final combined shipping source `16e8782` passes unsigned universal macOS Release for arm64 and x86_64 and the actual embedded-bundle/sandbox/App Intents audit. Later changes affect only scripts, CI and documentation; exact shipping source equality was verified. StreamCore, iOS, broadcast and project source remain unchanged from `b53ae5d`; the current full hosted Core/iOS results are retained without rerunning an unchanged local suite. Exact source and log hashes are in [the task ledger](MACOS_TASK_STATUS.json).
+
+- Scene thumbnails now use real selection buttons. Media seek/trim/transport and folder/group controls name their targets; the mixer exposes passive non-color clipping status. Independent source review is clear. The locked-host semantic/keyboard fixture explicitly exits 77, so **#90 remains open** for complete native accessibility and contrast acceptance. See [the scoped receipt](STUDIO_SEMANTIC_CONTROLS.md).
+- Browser capture intent is established before any await. Each run owns its inlet, producer tasks and timing token; stale cleanup cannot affect a replacement, and Stop waits exact final retirement. Seven controlled resource cases, actual silent helper sibling-page IPC and independent review pass. CI now runs the capture-free cases. **#124 remains open** for genuine SCK/WebKit audio, signed sandbox IPC and complete routing/exclusion qualification. See [the lifecycle scope](research/browser-widget-audio.md).
+- CI explicitly selects and checks an RTMP/SRT-capable FFmpeg receiver using the actual Homebrew prefix, and opts into real Deck transport validation. Four parser tests, actionlint and a small existing-tool RTMP decode smoke pass. Earlier CI did not opt into that transport branch; this change does not claim its coverage retroactively.
+- A diagnostic source-availability check now uses the original 17,850 total-frame allowance; decoder grace and all original nominal/render/A/V gates remain unchanged. The new real ARM run still **fails**: 16,957 and 17,047 rendered frames, approximately 28.26/28.41 fps, versus 17,850 required. Both recordings complete, and replay decodes all 16,956 available source frames. Intel also fails at 17,366/17,058 rendered frames; replay decodes all 17,366 available frames and both recordings complete. The earlier long stall did not recur, while the nominal frame deficit remains. **#92 remains open**; see [the preserved ARM](PERFORMANCE_HOSTED_ARM_39724736435.json) and [Intel](PERFORMANCE_HOSTED_INTEL_39724736435.json) measured failures.
+
+The older `b53ae5d` CI run has passed both macOS Core and lifecycle steps, and iOS passed all 586 tests in 82 suites. Its later Mac stages are still active at this snapshot, so no complete macOS CI pass is asserted. New-source CI must validate the newly enabled checks.

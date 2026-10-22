@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks61 original macOS issues (48feature tasks/13roadmap or epic trackers). Fresh paginated GitHub inventory:36open/25closed, consisting of25openfeatures and11opentrackers. Issue171 closed after originalcriteria review, exactcombinedmedia/parentchecks and publication; parent56 reconciled. Scoped software completion does not claim universal device/provider/release qualification.",
+  "scope": "Tracks 61 original macOS issues (48 feature tasks and 13 roadmap or epic trackers). Fresh paginated GitHub inventory: 36 open and 25 closed, consisting of 25 open features and 11 open trackers. This batch adds no issue closures.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -236,7 +236,30 @@
       "status": "Local actual mixer\u2192mailbox\u2192unchangedOpusencoder\u2192independentdecoderPASS. Full controlledTLS browserattempt stillFAILS originalPCM gate:933successful native sends and positive independently decodedOpus, Chrome931RTP/0loss but0jitterbuffer samples and zero workletPCM.",
       "limits": "No production behavior/permissions/sink/gates changed; consumer/playout cause not proven, no TLS qualification. Recorded single lease; bounded singleton receipt windows aggregate process lifetime."
     },
-    "wave4HostedCI": "Exact a346f56: ARM/Intel/iOS FULL586/82 Core PASS90.260s/282.945s/180.802s; bothMac appbuildsPASS, both thenFAIL same media_playback_lifecycle_harness.swift201 pause predicate; actualpausedvalues not logged. Broker8/8+browserinterview workflowsPASS. Originalfull logs preserved /tmp/stream-ci-a346f56-*-original.log. Source7898737 now fixes fixture timing without weakening original assertions, parentnative10casesPASS. Fresh finalhead CI remains required."
+    "wave4HostedCI": "Exact a346f56: ARM/Intel/iOS FULL586/82 Core PASS90.260s/282.945s/180.802s; bothMac appbuildsPASS, both thenFAIL same media_playback_lifecycle_harness.swift201 pause predicate; actualpausedvalues not logged. Broker8/8+browserinterview workflowsPASS. Originalfull logs preserved /tmp/stream-ci-a346f56-*-original.log. Source7898737 now fixes fixture timing without weakening original assertions, parentnative10casesPASS. Fresh finalhead CI remains required.",
+    "wave5CombinedNative": [
+      {
+        "label": "generate",
+        "exit": 0,
+        "log": "/tmp/stream-wave5-parent-final-generate-20261022.log",
+        "bytes": 168,
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "label": "universal",
+        "exit": 0,
+        "log": "/tmp/stream-wave5-parent-final-universal-20261022.log",
+        "bytes": 842784,
+        "sha256": "a0b57c922e9dcb827b3406aac027c3f756602fa8233ea5c58cabb8b65330245d"
+      },
+      {
+        "label": "bundle",
+        "exit": 0,
+        "log": "/tmp/stream-wave5-parent-final-bundle-20261022.log",
+        "bytes": 517,
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ]
   },
   "issues": [
     {
@@ -772,7 +795,8 @@
       "githubState": "open",
       "completion": "production enablement and acceptance remain gated",
       "remaining": [
-        "Public transparent PDF pixels, Program-only page leases/retirement, shared-channel retention, native mixer/ISO controls and stale-seed/queued-PCM fencing are implemented and locally verified. Production selector/startup remains disabled. Signed/sandboxed shared-container IPC, actual WebKit audio attribution/retirement/tails, acknowledged every-route recapture exclusion, permission/device lifecycle, new live same-page A/V and sustained multi-widget qualification remain required before enablement."
+        "Public transparent PDF pixels, Program-only page leases/retirement, shared-channel retention, native mixer/ISO controls and stale-seed/queued-PCM fencing are implemented and locally verified. Production selector/startup remains disabled. Signed/sandboxed shared-container IPC, actual WebKit audio attribution/retirement/tails, acknowledged every-route recapture exclusion, permission/device lifecycle, new live same-page A/V and sustained multi-widget qualification remain required before enablement.",
+        "Capture start/Stop resource authority is fixed: seven controlled actual-owner cases and silent sibling-page IPC pass, including final Stop retirement. These are lifecycle proofs; production enablement and original audible capture/routing requirements remain pending."
       ]
     },
     {
@@ -841,7 +865,8 @@
         "Original30fps sustained qualification is not met: actual hosted ARM600-second workloads achieve approximately19.5367/20.2333 rendered fps and fail the unchanged nominal gate. c3fda71 preserves failure evidence and separates actual replay-source inventory; it does not repair capacity or qualify the failed run.",
         "Both hosted architecture performance jobs failed. Native Intel reaches10123/2209 rendered frames then fails the original80ms video-PTS versus host-arrival-duration check at59.192148398s divergence; no decoded waveform A/V drift diagnosis is inferred. Representative mixes, independent sustained waveform A/V, thermal evidence and resource ceilings remain unqualified.",
         "Measured encoder/output counts and storage/uplink ceilings; observed recording write rate is not a maximum.",
-        "Production due-tick idle cliff is corrected and its actual scheduling helper passes deterministic600s simulation, but no fresh sustained GPU/hardware qualification follows from that virtual-clock result; original resource/performance failures remain failed."
+        "Production due-tick idle cliff is corrected and its actual scheduling helper passes deterministic600s simulation, but no fresh sustained GPU/hardware qualification follows from that virtual-clock result; original resource/performance failures remain failed.",
+        "Fresh run 39724736435 on native ARM VirtualMac2,1 improves to about 28.26/28.41 rendered fps but still fails the unchanged 17,850-frame gate with 16,957/17,047 frames. Both writers complete and actual-source replay decodes all 16,956 available frames; this is not nominal 30 fps capacity. Current Intel also fails nominal capacity at 17,366/17,058 rendered frames; replay decodes all 17,366 available frames and both writers complete. The prior long stall did not recur, but the real frame deficit remains."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -851,7 +876,9 @@
         "RECORDING_STORAGE_NETWORK.md",
         "/tmp/stream-wave2-recording-report-20261022.md",
         "PERFORMANCE_HOSTED_ARM_FAILURE_2026-10-22.json",
-        "/tmp/stream-wave3-published-ci-performance-report-20261022.md"
+        "/tmp/stream-wave3-published-ci-performance-report-20261022.md",
+        "PERFORMANCE_HOSTED_ARM_39724736435.json",
+        "PERFORMANCE_HOSTED_INTEL_39724736435.json"
       ]
     },
     {
@@ -880,13 +907,16 @@
       "completion": "remaining acceptance",
       "remaining": [
         "SwiftUI semantic AX labels/actions/order, named table/layer actions, virtual fader/panel operator qualification and visual contrast comparison remain open; the locked-session AX/contrast limitations are unchanged.",
-        "Six concrete stale native focus ownership races are reproduced and fixed in e2a3fbf, with current-owner/removed-target/nested-presentation/real-sheet positive controls passing. This does not substitute for the remaining semantic accessibility or contrast acceptance."
+        "Six concrete stale native focus ownership races are reproduced and fixed in e2a3fbf, with current-owner/removed-target/nested-presentation/real-sheet positive controls passing. This does not substitute for the remaining semantic accessibility or contrast acceptance.",
+        "Concrete scene-button, media-label and non-color clipping source gaps are repaired and compiled universally. Full semantic actions/order, keyboard operator traversal and visual contrast remain unqualified; the bounded locked-host fixture exits 77."
       ],
       "evidence": [
         "STUDIO_CONTROLS.md",
         "STUDIO_ACCESSIBILITY_2026-10-22.json",
         "/tmp/stream-wave2-90-acceptance-20261022.md",
-        "STUDIO_FOCUS_OWNERSHIP_2026-10-22.json"
+        "STUDIO_FOCUS_OWNERSHIP_2026-10-22.json",
+        "STUDIO_SEMANTIC_CONTROLS.md",
+        "STUDIO_SEMANTIC_CONTROLS_2026-10-22.json"
       ]
     },
     {
@@ -1070,11 +1100,11 @@
     "currentlyOpen": 36,
     "closedSinceInitialInventory": 25
   },
-  "overallStatus": "Incomplete roadmap: fresh initial61 inventory36open/25closed (25features/11trackers), zeroopenPRs. Issue171 closed after original3AC review, exactcombined4ISO/RTMP/media/resource proof, parentuniversalMac/bundle/fulliOSsource/563filteredCorePASS and sourcepublication; parent56checked. Other Mac classes and physicalcaptureIO remainunqualified. Playbackfixture, sourcehistory, raw/sharedpublishercadence, compositor scheduling, feedbackguard, evaluationpackaging andreturndiagnostics are published. Native sustainedGPU/Intelperformance, browserreturnedPCM/AEC, keyboardchooser and signedinstalleddevice qualification remainopen; finalheadhostedCIstillrequired.",
-  "integratedMain": "1322847",
-  "githubStateRefreshedAt": "2026-10-22T04:50:39.723078+00:00",
+  "overallStatus": "Incomplete roadmap: 36 of the original 61 issues remain open; 25 are closed, and there are zero open pull requests. Integrated accessibility, browser capture retirement, CI receiver prerequisites and a diagnostic input boundary correction pass their scoped reviews/checks. Final universal macOS Release and bundle audit pass. Both real hosted ARM and Intel performance runs fail the unchanged frame-count gate; their recordings complete. No whole accessibility or browser-audio acceptance is inferred.",
+  "integratedMain": "16e8782",
+  "githubStateRefreshedAt": "2026-10-22T05:28:04.265601+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "1322847abd6e9cf06cdabe5f4ca30ed329628b28",
+  "publishedIntegration": "16e8782b80ef806e58efa5cbfcc992a8e7103317",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1094,7 +1124,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "9cbe0b9",
+  "currentReviewBase": "16e8782",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -1169,5 +1199,77 @@
     ],
     "githubClosureComment": "https://github.com/joeblau/stream/issues/171#issuecomment-6332976567",
     "parentUpdated": 56
+  },
+  "wave5Review": {
+    "recordedAt": "2026-10-22T05:28:04.265601+00:00",
+    "validatedShippingSource": "16e8782b80ef806e58efa5cbfcc992a8e7103317",
+    "postValidationChanges": "Only scripts, CI and documentation changed after this source. Exact StreamMac, StreamCore, iOS, broadcast and project source equality was verified before publication.",
+    "nativeChecks": [
+      {
+        "label": "generate",
+        "exit": 0,
+        "log": "/tmp/stream-wave5-parent-final-generate-20261022.log",
+        "bytes": 168,
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "label": "universal",
+        "exit": 0,
+        "log": "/tmp/stream-wave5-parent-final-universal-20261022.log",
+        "bytes": 842784,
+        "sha256": "a0b57c922e9dcb827b3406aac027c3f756602fa8233ea5c58cabb8b65330245d"
+      },
+      {
+        "label": "bundle",
+        "exit": 0,
+        "log": "/tmp/stream-wave5-parent-final-bundle-20261022.log",
+        "bytes": 517,
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ],
+    "accessibility": {
+      "source": "5ce9151",
+      "review": "/tmp/stream-wave5-providers-accessibility-review.md",
+      "result": "Real scene selection Button, named media seek/trim/transport and group controls, and passive non-color clipping status. Universal app compilation passes. Locked-session native semantic/keyboard fixture explicitly exits 77; issue 90 remains open.",
+      "receipt": "STUDIO_SEMANTIC_CONTROLS_2026-10-22.json"
+    },
+    "browserCapture": {
+      "source": "16e8782",
+      "report": "/tmp/stream-wave5-browser-audio-capture-report-20261022.md",
+      "result": "Seven actual capture-owner/mixer resource cases and silent owned helper IPC pass. Intent precedes all awaits, run-local inlets/tasks/tokens cannot affect replacements, and Stop waits final exact producer retirement. Independent source and log-hash review is clear. Genuine SCK/WebKit audio, signed sandbox IPC and every-route exclusion remain unqualified; issue 124 stays open.",
+      "ci": "70d3088 adds capture-free resource cases to the existing serial browser-helper CI step."
+    },
+    "receiverCI": {
+      "source": "bdddf76",
+      "report": "/tmp/stream-ci-ffmpeg-prerequisite-fix-20261022.md",
+      "result": "Explicit ffmpeg-full install, architecture-independent brew prefix, required receiver capability checks and actual Deck transport opt-in. Four parser tests, actionlint and existing-tool RTMP smoke pass. This fixes historical missing coverage and does not diagnose the running b53 CI as failed."
+    },
+    "performance": {
+      "boundarySource": "a9443ef",
+      "boundaryResult": "Six tests pass for the original 17,850 total-frame allowance. The 595-second actual-decoder grace, 17,850 compositor/decode gates and 80 ms host-duration gate remain unchanged. Existing failures are preserved.",
+      "run": 39724736435,
+      "head": "b53ae5d23a4b66df65b4974ea5ab90cc461e5267",
+      "arm": "Failed: 16,957 and 17,047 rendered frames in 600-second workloads, below 17,850. Replay decoded all 16,956 available frames, still below nominal capacity. Both recordings completed. Endpoint checks are not independent waveform drift qualification.",
+      "intel": "Failed: 17,366 and 17,058 rendered frames versus 17,850 required. Replay decodes all 17,366 available source frames. Both writers complete; endpoint-duration errors 7.074/25.533 ms pass their 80 ms gate. The earlier 59-second endpoint divergence/ten-second no-video stall did not recur; no independent waveform drift or nominal 30 fps pass is claimed.",
+      "receipt": "PERFORMANCE_HOSTED_ARM_39724736435.json",
+      "issue92": "open",
+      "intelReceipt": "PERFORMANCE_HOSTED_INTEL_39724736435.json"
+    },
+    "hostedCI": {
+      "run": 39724634018,
+      "head": "b53ae5d23a4b66df65b4974ea5ab90cc461e5267",
+      "snapshot": "Both macOS Core steps and the previously failing lifecycle step have passed. iOS full 586 tests in 82 suites passed. Remaining macOS stages are active; no full-job pass is claimed. The ordinary new-source push may automatically supersede this older run; preserve original logs and classify canceled stages honestly."
+    },
+    "sharedSource": "No StreamCore, iOS, broadcast or project source changes from b53ae5d. Their complete current hosted iOS/Core results are retained without another unchanged local suite run.",
+    "github": {
+      "originalIssues": 61,
+      "closed": 25,
+      "open": 36,
+      "openFeatureTasks": 25,
+      "openTrackers": 11,
+      "openPullRequests": 0,
+      "newClosures": 0,
+      "inventory": "/tmp/stream-wave5-publication-inventory-20261022.json"
+    }
   }
 }
