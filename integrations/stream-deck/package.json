@@ -7,6 +7,8 @@
     "build": "node scripts/build.mjs",
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:browser": "node tests/inspector-browser.mjs",
+    "test:install": "node tests/install-lifecycle.mjs",
     "validate": "streamdeck validate com.joeblau.stream-studio.sdPlugin",
     "package": "npm run build && npm run validate && streamdeck pack com.joeblau.stream-studio.sdPlugin --output dist --force"
   },
