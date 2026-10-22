@@ -116,7 +116,7 @@ final class DestinationSession: ObservableObject {
         let transport: StreamProtocol = URL(string: connection.endpoint)?.scheme == "rtmp" ? .rtmp : .rtmps
         let destination = StreamDestination(name: "\(provider.name): \(event?.title ?? channel.title)",
             transport: transport, isEnabled: false, videoCodec: .h264,
-            providerBinding: .init(provider: provider, channelID: channel.id, eventID: event?.id))
+            providerBinding: provider == .youtube ? .init(provider: provider, channelID: channel.id, eventID: event?.id) : nil)
         draft.append(destination); credentials[destination.id] = connection; selectedID = destination.id
     }
 

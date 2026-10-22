@@ -14,6 +14,6 @@ xcrun swiftc -j2 -swift-version 6 -strict-concurrency=complete -parse-as-library
     StreamMac/StudioChatModel.swift StreamMac/StudioDirectChatModel.swift StreamMac/StudioChatSocket.swift \
     StreamMac/StudioChatOutbox.swift StreamMac/StudioDirectChatManager.swift StreamMac/ProviderPendingCatalog.swift \
     StreamMac/ProviderAccountSession.swift StreamMac/DestinationSession.swift StreamMac/ProviderAccountsView.swift \
-    StreamMac/YouTubeStreamControls.swift StreamMac/DirectChatControls.swift Stream/RestreamChat.swift \
-    scripts/restream_provider_harness.swift -o "$RESTREAM_BUILD_PATH/harness"
+    StreamMac/YouTubeStreamControls.swift StreamMac/DirectChatControls.swift StreamMac/TwitchIngestDiscovery.swift Stream/RestreamChat.swift \
+    scripts/restream_provider_harness.swift scripts/twitch_ingest_fixture.swift -o "$RESTREAM_BUILD_PATH/harness"
 "$RESTREAM_BUILD_PATH/harness"

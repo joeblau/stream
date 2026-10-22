@@ -534,7 +534,14 @@ final class ProviderAccountSession: ObservableObject {
                 guard let self, requested == .restream else { throw ProviderFailure(.invalidRequest) }
                 return try await self.restreamImportRead(request, credential: credential, lease: lease)
             }
-            do { return try await api.restreamIngest(channelID: channel.id) }
+            do {
+                let connection = try await api.restreamIngest(channelID: channel.id)
+                try Task.checkCancellation()
+                guard !closed, lease.isCurrent(), restream.hasProviderAuthorization,
+                      restream.providerAuthorizationGeneration == credential,
+                      restream.providerGrantedScopes?.isSuperset(of: ["channels.read", "stream.read"]) == true else { throw CancellationError() }
+                return connection
+            }
             catch {
                 try Task.checkCancellation()
                 guard !closed, lease.isCurrent(), restream.providerAuthorizationGeneration == credential else { throw CancellationError() }
@@ -560,9 +567,57 @@ final class ProviderAccountSession: ObservableObject {
         }
         if provider == .twitch {
             guard let url = URL(string: endpoint), ["rtmp", "rtmps"].contains(url.scheme ?? ""), url.host != nil else { throw ProviderFailure(.invalidRequest) }
-            return .init(endpoint: endpoint, streamKey: try await api().twitchStreamKey(channelID: channel.id))
+            let lease = endingIntentLease(.twitch), credential = await vault.generation(.twitch)
+            guard !closed, lease.isCurrent(), !Task.isCancelled else { throw CancellationError() }
+            let api = ProviderAPI { [weak self] requested, request in
+                guard let self, requested == .twitch else { throw ProviderFailure(.invalidRequest) }
+                return try await self.twitchImportRead(request, credential: credential, lease: lease)
+            }
+            do {
+                guard try await api.channels(.twitch).contains(where: { $0.id == channel.id }) else { throw ProviderFailure(.permission) }
+                let key = try await api.twitchStreamKey(channelID: channel.id)
+                let current = await vault.generation(.twitch)
+                try Task.checkCancellation()
+                guard !closed, lease.isCurrent(), current == credential else { throw CancellationError() }
+                return .init(endpoint: endpoint, streamKey: key)
+            } catch {
+                try Task.checkCancellation()
+                let revoked = (error as? ProviderFailure)?.kind == .authorization
+                    ? await vault.revocationGeneration(.twitch, previous: credential) : nil
+                let current = await vault.generation(.twitch)
+                try Task.checkCancellation()
+                guard !closed, lease.isCurrent(), current == credential || current == revoked else { throw CancellationError() }
+                if let failure = error as? ProviderFailure {
+                    accounts[.twitch]?.failure = failure
+                    if failure.kind == .authorization {
+                        accounts[.twitch]?.hasCredential = false; accounts[.twitch]?.verifiedAt = nil; accounts[.twitch]?.scopes = []
+                        chatAuthorizations[.twitch] = nil; directChat?.stop(.twitch)
+                    }
+                    if failure.kind == .rateLimited {
+                        let delay = max(1, failure.retryAfter ?? 60)
+                        accounts[.twitch]?.retryUntil = Date().addingTimeInterval(delay)
+                        cooldowns[.twitch]?.cancel()
+                        cooldowns[.twitch] = Task { [weak self] in
+                            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                            self?.accounts[.twitch]?.retryUntil = nil; self?.cooldowns[.twitch] = nil
+                        }
+                    }
+                }
+                throw error
+            }
         }
         throw ProviderFailure(.unavailable)
+    }
+    private func twitchImportRead(_ request: URLRequest, credential: UUID, lease: ProviderEndingIntentLease) async throws -> Data {
+        guard !closed, lease.isCurrent(), request.httpMethod == "GET",
+              ["/helix/users", "/helix/streams/key"].contains(request.url?.path ?? "") else { throw ProviderFailure(.authorization) }
+        try Task.checkCancellation()
+        let data = try await vault.send(.twitch, request: request, expectedGeneration: credential,
+            authorizationIsCurrent: { lease.isCurrent() }, requiredAnyScope: ["channel:read:stream_key"])
+        let current = await vault.generation(.twitch)
+        guard !closed, lease.isCurrent(), current == credential else { throw CancellationError() }
+        try Task.checkCancellation()
+        return data
     }
     private func restreamImportRead(_ request: URLRequest, credential: UUID, lease: ProviderEndingIntentLease) async throws -> Data {
         func validate() throws {
