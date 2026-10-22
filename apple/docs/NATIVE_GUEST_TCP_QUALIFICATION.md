@@ -115,6 +115,11 @@ the final floor check; Meson now reapplies explicit compiler/linker minimums
 before reuse. The rebuilt archive is a separately recorded artifact, not a
 substitution for the measured media CLI above.
 
+`python3 apple/scripts/test_owned_nice_transport.py` checks staged top-level
+source mutations and staged/unstaged recursive submodule mutations, including
+when parent Git configuration hides dirty submodules. Every refusal preserves
+the source working files and index; no SDK build or network is needed.
+
 This result does not establish shipping restricted-network support. Internet
 and mobile networks, TLS, deployed TURN, older runtimes, physical
 capture/playout/AEC and signed installation remain separate acceptance
