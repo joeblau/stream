@@ -67,6 +67,20 @@ identities += declaration('StreamMac/BrowserOverlayHost.swift', 'BrowserOverlayL
 frameworks = output / 'frameworks'
 frameworks.mkdir()
 shutil.copytree(core, frameworks / 'StreamCore.framework')
+def expected_outcome(name, result, runtime_text):
+    if result.get('compileExit') != 0 or 'runtimeTimeoutSeconds' in result:
+        return False
+    if name.startswith('positive'):
+        return result.get('runtimeExit') == 0
+    markers = {
+        'false-confirmation-capture': 'Unconfirmed native stop discarded its exact producer or holdback',
+        'false-confirmation-session': 'Unconfirmed native retirement lost old helper or local page ownership',
+        'old-close-order-session': 'Helper close preceded actual driver stop completion',
+    }
+    marker = markers.get(name)
+    return marker is not None and result.get('runtimeExit') in (-4, -5) and marker in runtime_text
+
+
 results = {}
 source_hashes = {name: sha(source / name) for name in compiled + fixtures + context}
 
@@ -128,12 +142,12 @@ for variant in variants:
                 result['runtimeExit'] = completed.returncode
             except subprocess.TimeoutExpired:
                 result['runtimeTimeoutSeconds'] = 45
+    runtime_log = variant_dir / 'runtime.log'
+    runtime_text = runtime_log.read_text() if runtime_log.exists() else ''
+    result['expectedOutcomeMatched'] = expected_outcome(variant, result, runtime_text)
     (output / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     print(variant, json.dumps(result), flush=True)
-    positive = variant.startswith('positive')
-    if result.get('compileExit') != 0 or 'runtimeTimeoutSeconds' in result or (positive and result.get('runtimeExit') != 0):
-        break
-    if not positive and result.get('runtimeExit') == 0:
+    if not result['expectedOutcomeMatched']:
         break
 
 receipt = {'scope': 'Controlled actual Capture/Session and real mixer construction/registry/holdback only; no mixer.run, devices, SCK, helper, WebKit, IPC, output or network.',
@@ -144,7 +158,5 @@ receipt = {'scope': 'Controlled actual Capture/Session and real mixer constructi
            'retryBound': 'One attempt per admitted old run/owner; production opaque await has no wall-clock deadline.',
            'artifacts': {str(path): sha(path) for path in output.rglob('*') if path.is_file()}}
 (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
-passed = len(results) == len(variants) and all(result.get('compileExit') == 0 and
-    (result.get('runtimeExit') == 0 if name.startswith('positive') else result.get('runtimeExit', 0) != 0)
-    and 'runtimeTimeoutSeconds' not in result for name, result in results.items())
+passed = len(results) == len(variants) and all(result['expectedOutcomeMatched'] for result in results.values())
 raise SystemExit(0 if passed else 1)
