@@ -337,18 +337,24 @@ private struct PadEditorView: View {
                 HStack(spacing: 4) {
                     ForEach(Self.colorPresets, id: \.self) { hex in
                         let components = HexColor.components(hex)
-                        Circle()
-                            .fill(Color(red: components.red, green: components.green,
-                                        blue: components.blue))
-                            .frame(width: 16, height: 16)
-                            .overlay {
-                                if hex == pad.colorHex {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundStyle(.white)
+                        Button {
+                            update { $0.colorHex = hex }
+                        } label: {
+                            Circle()
+                                .fill(Color(red: components.red, green: components.green,
+                                            blue: components.blue))
+                                .frame(width: 16, height: 16)
+                                .overlay {
+                                    if hex == pad.colorHex {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundStyle(.white)
+                                    }
                                 }
-                            }
-                            .onTapGesture { update { $0.colorHex = hex } }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(pad.name) pad color: \(colorName(hex))")
+                        .accessibilityValue(hex == pad.colorHex ? "Selected" : "Not selected")
                     }
                 }
             }
@@ -367,12 +373,28 @@ private struct PadEditorView: View {
             Toggle("Loop", isOn: binding(\.loops))
             LabeledContent("Volume") {
                 Slider(value: binding(\.volume), in: 0...2)
+                    .accessibilityLabel("\(pad.name) pad volume")
+                    .accessibilityValue("\(Int((pad.volume * 100).rounded())) percent")
             }
             Button("Relink Audio File…", action: onRelink)
         }
         .formStyle(.grouped)
         .frame(width: 300)
         .padding(8)
+    }
+
+    private func colorName(_ hex: String) -> String {
+        switch hex {
+        case "#FF9500": "Orange"
+        case "#FF3B30": "Red"
+        case "#34C759": "Green"
+        case "#0A84FF": "Blue"
+        case "#BF5AF2": "Purple"
+        case "#FFD60A": "Yellow"
+        case "#64D2FF": "Cyan"
+        case "#FF9F0A": "Amber"
+        default: hex
+        }
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<SoundPad, T>) -> Binding<T> {
@@ -415,6 +437,7 @@ private struct PlaylistRowView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Previous track")
+                .accessibilityLabel("Previous track in \(playlist.name)")
                 Button {
                     dispatcher.execute(state.isPlaying
                                        ? .playlistPause(playlist.id)
@@ -424,6 +447,7 @@ private struct PlaylistRowView: View {
                 }
                 .buttonStyle(.borderless)
                 .help(state.isPlaying ? "Pause" : "Play")
+                .accessibilityLabel("\(state.isPlaying ? "Pause" : "Play") playlist \(playlist.name)")
                 Button {
                     dispatcher.execute(.playlistStop(playlist.id))
                 } label: {
@@ -431,6 +455,7 @@ private struct PlaylistRowView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Stop — rewind to the start of the track")
+                .accessibilityLabel("Stop playlist \(playlist.name) and rewind track")
                 Button {
                     dispatcher.execute(.playlistNext(playlist.id))
                 } label: {
@@ -438,6 +463,7 @@ private struct PlaylistRowView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Next track")
+                .accessibilityLabel("Next track in \(playlist.name)")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(playlist.name)
                         .font(.callout)
@@ -457,6 +483,8 @@ private struct PlaylistRowView: View {
             }
             HStack(spacing: 8) {
                 Slider(value: volumeBinding, in: 0...2)
+                    .accessibilityLabel("\(playlist.name) playlist volume")
+                    .accessibilityValue("\(Int((playlist.volume * 100).rounded())) percent")
                     .frame(maxWidth: 140)
                 Picker("Repeat", selection: repeatBinding) {
                     ForEach(PlaylistRepeatMode.allCases, id: \.self) { mode in
@@ -593,6 +621,7 @@ private struct SceneSoundRowView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Relink this sound's audio file")
+                .accessibilityLabel("Relink scene sound \(binding.name)")
                 Button {
                     updateBindings { $0.removeAll { $0.id == binding.id } }
                 } label: {
@@ -600,6 +629,7 @@ private struct SceneSoundRowView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Remove this scene sound")
+                .accessibilityLabel("Remove scene sound \(binding.name)")
             }
             HStack(spacing: 8) {
                 Text(binding.fileName ?? "No file linked")
@@ -607,6 +637,8 @@ private struct SceneSoundRowView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Slider(value: volumeBinding, in: 0...2)
+                    .accessibilityLabel("\(binding.name) scene sound volume")
+                    .accessibilityValue("\(Int((binding.volume * 100).rounded())) percent")
                     .frame(maxWidth: 120)
             }
         }
