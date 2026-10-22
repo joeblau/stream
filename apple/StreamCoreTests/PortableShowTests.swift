@@ -3,6 +3,20 @@ import Testing
 @testable import StreamCore
 
 @Suite struct PortableShowTests {
+    @Test func stingerGrantIsExcludedAndPortableAssetReferenceRemaps() throws {
+        let id = UUID().uuidString
+        let input = try JSONSerialization.data(withJSONObject: ["defaultTransition": [
+            "style": "stinger", "stingerBookmarkData": "machine-grant-sentinel", "stingerFileName": "transition.mov", "stingerAssetIdentifier": id]])
+        var mapping: [String: String] = [:]
+        let exported = try PortableShow.redact(input, idMap: &mapping)
+        #expect(!String(decoding: exported, as: UTF8.self).contains("machine-grant-sentinel"))
+        let imported = try PortableShow.redact(exported, remappingIDs: true, idMap: &mapping)
+        let object = try #require(JSONSerialization.jsonObject(with: imported) as? [String: Any])
+        let transition = try #require(object["defaultTransition"] as? [String: Any])
+        #expect(transition["stingerBookmarkData"] == nil)
+        #expect(transition["stingerAssetIdentifier"] as? String == mapping[id])
+        #expect(transition["stingerFileName"] as? String == "transition.mov")
+    }
     @Test func redactionAndConsistentResourceRemapping() throws {
         let id = UUID().uuidString
         let json = Data("{\"sceneID\":\"\(id)\",\"layers\":[{\"sourceID\":\"\(id)\",\"bookmarkData\":\"grant\",\"configuration\":{\"urlString\":\"https://private.example/?token=secret\"}}],\"rtmpURL\":\"rtmps://secret\",\"streamKey\":\"secret\",\"lastKnownPath\":\"/private/path\"}".utf8)

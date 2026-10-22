@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 import StreamCore
 import UniformTypeIdentifiers
@@ -80,7 +81,10 @@ enum ShowPackageIO {
         let granted = url.startAccessingSecurityScopedResource()
         defer { if granted { url.stopAccessingSecurityScopedResource() } }
         let manifest = try PortableShow.validate(at: url)
-        let sceneData = try PortableShow.readDocument(at: PortableShow.safeURL("stream.scenes.v2.json", under: url))
+        guard let sceneFile = manifest.files.first(where: { $0.path == "stream.scenes.v2.json" }) else {
+            throw PortableShow.Failure.invalid("The package has no scene document.")
+        }
+        let sceneData = try readVerifiedDocument(sceneFile, root: url)
         guard case .success(let migrated) = SceneDocumentMigration.migrateToCurrent(sceneData) else {
             throw PortableShow.Failure.invalid("The package scene version is not supported.")
         }
@@ -89,6 +93,9 @@ enum ShowPackageIO {
               Set(document.scenes.map(\.id)).count == document.scenes.count,
               document.sources.count <= 2000, Set(document.sources.map(\.id)).count == document.sources.count else {
             throw PortableShow.Failure.invalid("The package contains invalid or duplicate scene/source IDs.")
+        }
+        if let assets = manifest.files.first(where: { $0.path == "stream.assets.v1.json" }) {
+            try validateAssetReferences(readVerifiedDocument(assets, root: url), manifest: manifest, root: url)
         }
         return ShowPackagePreview(url: url, name: manifest.name, sceneNames: document.scenes.map(\.name),
             includedMedia: manifest.includesMedia, fileCount: manifest.files.count, manifest: manifest)
@@ -112,9 +119,17 @@ enum ShowPackageIO {
             let to = try PortableShow.safeURL(importedPath, under: staging)
             try manager.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
             if PortableShow.documentNames.contains(file.path) {
-                let data = try PortableShow.redact(PortableShow.readDocument(at: from), remappingIDs: true, idMap: &mapping)
+                let raw = try readVerifiedDocument(file, root: source)
+                if file.path == "stream.assets.v1.json" { try validateAssetReferences(raw, manifest: manifest, root: source) }
+                let data = try PortableShow.redact(raw, remappingIDs: true, idMap: &mapping)
                 try data.write(to: to, options: .atomic)
-            } else { try manager.copyItem(at: from, to: to) }
+            } else {
+                try manager.copyItem(at: from, to: to)
+                let copied = try PortableShow.fileDescription(path: importedPath, root: staging)
+                guard copied.bytes == file.bytes, copied.sha256 == file.sha256 else {
+                    throw PortableShow.Failure.invalid("The package changed while importing. Open it again before importing.")
+                }
+            }
         }
         // Every imported destination needs an explicit credentials/enable step.
         let destinations = staging.appendingPathComponent("destinations.json")
@@ -124,5 +139,31 @@ enum ShowPackageIO {
         }
         try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         try manager.moveItem(at: staging, to: destination)
+    }
+
+    private static func readVerifiedDocument(_ file: PortableShowManifest.File, root: URL) throws -> Data {
+        let raw = try PortableShow.readDocument(at: PortableShow.safeURL(file.path, under: root))
+        let checksum = SHA256.hash(data: raw).map { String(format: "%02x", $0) }.joined()
+        guard Int64(raw.count) == file.bytes, checksum == file.sha256 else {
+            throw PortableShow.Failure.invalid("The package changed while reading. Open it again before importing.")
+        }
+        return raw
+    }
+
+    private static func validateAssetReferences(_ data: Data, manifest: PortableShowManifest, root: URL) throws {
+        let library = try JSONDecoder().decode(AssetLibraryDocument.self, from: data)
+        guard library.version == AssetLibraryDocument.currentVersion, library.assets.count <= 2000,
+              Set(library.assets.map(\.id)).count == library.assets.count else {
+            throw PortableShow.Failure.invalid("The package contains an unsupported asset library or duplicate asset IDs.")
+        }
+        for asset in library.assets where asset.storage == .projectCopy {
+            guard manifest.includesMedia, let path = asset.relativePath, path.hasPrefix("Assets/") else {
+                throw PortableShow.Failure.invalid("A copied asset must reference included package media.")
+            }
+            _ = try PortableShow.safeURL(path, under: root)
+            guard manifest.files.contains(where: { $0.path == path || (asset.kind == .folder && $0.path.hasPrefix(path + "/")) }) else {
+                throw PortableShow.Failure.invalid("A copied asset is missing from the package manifest: \(asset.fileName)")
+            }
+        }
     }
 }

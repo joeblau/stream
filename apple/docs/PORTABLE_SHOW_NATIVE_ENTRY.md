@@ -144,3 +144,55 @@ scoped missing-asset repair and cold restart. Log:
 not claim a Finder pointer gesture. The shipping native chooser was attempted
 and canceled/aborted, so successful keyboard selection remains UNQUALIFIED.
 No unlock, permission, default association or personal settings change was made.
+
+
+## File-backed media and package consistency, 2026-10-22
+
+Export now promotes ordinary bookmark-backed video, sound pads, playlist tracks,
+scene sounds, and stinger media into the package snapshot's asset registry.
+Include media retains each grant through copying; references-only exports retain
+repairable asset IDs without the grant. The active profile is unchanged. Imported
+playback resolves those IDs through Assets, and same-ID file repair retires the
+old decoder before reloading. Transition bookmark data is explicitly redacted;
+its asset reference remaps with the copied media. Clearing or choosing a new
+stinger removes the previous library binding.
+
+Preview and import verify the actual consumed document bytes against the manifest.
+Imported media is checked again in staging before the new project becomes visible.
+Unsupported asset-library versions, duplicate IDs, escaping copied paths, and
+undeclared copied content are rejected by both preview and import.
+
+The signed native media run in
+`/tmp/stream-wave2-projects-native-final-run-20261022.log` passed package promotion,
+malformed-metadata rejection, import and actual copied-video decoding after the
+original file was removed. It then failed its bounded 35-second media receipt at
+sound-pad playback. An owned-process sample located the stall in
+`AVAssetReader.startReading` through AudioQueue XPC and HAL property access;
+`/tmp/stream-wave2-portable-media-owned-hang.sample.txt` retains the evidence.
+The driver cleaned up its owned app; no system audio reset or permission change
+was performed. This failure remains a qualification limit, and is not a passing
+sound-pad decode result.
+
+`STREAM_PORTABLE_CONTENT_ONLY=1` selects a separate, explicitly limited native
+fixture: package promotion/redaction, original-file removal, real copied-video
+decoding, copied WAV content through `AVAudioFile`, missing linked access and
+same-ID Assets repair. It omits the blocked sound-pad `AVAssetReader` path and
+native picker attempt; a pass cannot establish either criterion. Build-only mode
+(`PORTABLE_NATIVE_BUILD_ONLY=1`) verifies the exact signed app but runs no UI.
+
+
+The final whole-source fixture build passed and its exact ad hoc sandbox signature
+was verified in `/tmp/stream-wave2-projects-native-stinger-build-20261022.log`.
+The separate content-only signed sandbox run passed in
+`/tmp/stream-wave2-projects-native-content-20261022.log`: all malformed metadata
+packages were rejected; video/pad/playlist/scene-sound/stinger references remapped
+with grants excluded; original media files were removed; copied video decoded;
+copied and same-ID-repaired WAV files yielded real PCM through `AVAudioFile`;
+and the active profile remained unchanged. The app quit normally. Its receipt
+records `mediaContentQualified: true` and `mediaQualified: false`, preserving the
+full sound-pad qualification limit. Bounded receipts and package artifacts are in
+`build/portable-show-native-validation/artifacts-d24f5aae-0461-4645-9682-9f803d73703a`
+of the isolated worktree. Twelve PortableShow/StudioProjects tests also passed in
+`/tmp/stream-wave2-projects-core-tests-20261022.log`, including stinger grant
+exclusion and asset-ID remapping. The library-aware engine separately passed all
+five actual lifecycle cases in `/tmp/stream-wave2-projects-lifecycle-20261022.log`.

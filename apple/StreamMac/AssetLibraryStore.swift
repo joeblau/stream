@@ -35,8 +35,22 @@ import UniformTypeIdentifiers
 final class AssetLibraryStore: ObservableObject {
     /// Every registered asset, in import order.
     @Published private(set) var assets: [LibraryAsset] {
-        didSet { scheduleAutosave() }
+        didSet {
+            scheduleAutosave()
+            let previous = Dictionary(uniqueKeysWithValues: oldValue.map { ($0.id, $0) })
+            var changed = Set(oldValue.map(\.id)).subtracting(assets.map(\.id))
+            for asset in assets {
+                let old = previous[asset.id]
+                if old?.storage != asset.storage || old?.relativePath != asset.relativePath || old?.bookmarkData != asset.bookmarkData
+                    || old?.contentHash != asset.contentHash || old?.lastKnownPath != asset.lastKnownPath || old?.fileName != asset.fileName {
+                    changed.insert(asset.id)
+                }
+            }
+            if !changed.isEmpty { fileChanges.send(changed) }
+        }
     }
+    /// File identity changes, separate from editable labels and probe results.
+    let fileChanges = PassthroughSubject<Set<AssetID>, Never>()
     /// The latest probe result per asset (`.unknown` before the first probe).
     @Published private(set) var availability: [AssetID: AssetAvailability] = [:]
     /// Usage site key → referenced asset IDs (the document's usage map).

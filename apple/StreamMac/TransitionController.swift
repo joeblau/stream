@@ -67,6 +67,7 @@ struct SceneTransition: Hashable, Codable, Sendable {
     var dipColorHex: String
     /// Security-scoped bookmark for the stinger video (alpha-aware).
     var stingerBookmarkData: Data?
+    var stingerAssetIdentifier: String?
     var stingerFileName: String?
     /// Seconds from stinger playback start at which the scene swaps under it.
     var stingerCutPointSeconds: Double
@@ -80,6 +81,7 @@ struct SceneTransition: Hashable, Codable, Sendable {
          direction: TransitionDirection = .right,
          dipColorHex: String = "#000000",
          stingerBookmarkData: Data? = nil,
+         stingerAssetIdentifier: String? = nil,
          stingerFileName: String? = nil,
          stingerCutPointSeconds: Double = 1.0,
          stingerVolume: Double = 1,
@@ -90,6 +92,7 @@ struct SceneTransition: Hashable, Codable, Sendable {
         self.direction = direction
         self.dipColorHex = dipColorHex
         self.stingerBookmarkData = stingerBookmarkData
+        self.stingerAssetIdentifier = stingerAssetIdentifier
         self.stingerFileName = stingerFileName
         self.stingerCutPointSeconds = stingerCutPointSeconds
         self.stingerVolume = stingerVolume
@@ -100,6 +103,12 @@ struct SceneTransition: Hashable, Codable, Sendable {
     /// The factory/persisted fallback: a cut, so upgraded installs keep the
     /// exact pre-S09 Take behavior until the user picks a transition.
     static let `default` = SceneTransition()
+    var hasStingerMedia: Bool { stingerBookmarkData != nil || stingerAssetIdentifier != nil }
+    mutating func clearStingerMedia() {
+        stingerBookmarkData = nil
+        stingerAssetIdentifier = nil
+        stingerFileName = nil
+    }
 
     /// Decode every field with a default so documents written before later
     /// refinements keep loading (the established additive-wire pattern).
@@ -110,6 +119,7 @@ struct SceneTransition: Hashable, Codable, Sendable {
         direction = try container.decodeIfPresent(TransitionDirection.self, forKey: .direction) ?? .right
         dipColorHex = try container.decodeIfPresent(String.self, forKey: .dipColorHex) ?? "#000000"
         stingerBookmarkData = try container.decodeIfPresent(Data.self, forKey: .stingerBookmarkData)
+        stingerAssetIdentifier = try container.decodeIfPresent(String.self, forKey: .stingerAssetIdentifier)
         stingerFileName = try container.decodeIfPresent(String.self, forKey: .stingerFileName)
         stingerCutPointSeconds = try container.decodeIfPresent(Double.self, forKey: .stingerCutPointSeconds) ?? 1.0
         stingerVolume = try container.decodeIfPresent(Double.self, forKey: .stingerVolume) ?? 1
@@ -322,6 +332,16 @@ final class TransitionController: ObservableObject {
     private let audioIngest: (@Sendable (SourceDefinitionID, CMSampleBuffer) -> Void)?
     private var stingerPlayback: MediaSourcePlayback?
     private var stingerBookmark: Data?
+    private var stingerAssetIdentifier: String?
+    private weak var assetLibrary: AssetLibraryStore?
+    private var assetFileObservation: AnyCancellable?
+
+    func bindAssetLibrary(_ library: AssetLibraryStore) {
+        assetLibrary = library
+        assetFileObservation = library.fileChanges.sink { [weak self] identifiers in
+            self?.stingerPlayback?.reloadAsset(identifiers)
+        }
+    }
     /// The transition awaiting its end notice (blend timer or stinger end).
     private var pendingEndTarget: SceneID?
     var hasActiveTransition: Bool { pendingEndTarget != nil }
@@ -360,14 +380,13 @@ final class TransitionController: ObservableObject {
         case .cut:
             break
         case .stinger:
-            guard let bookmark = transition.stingerBookmarkData else {
+            guard transition.hasStingerMedia else {
                 lastError = "The stinger transition has no media file — the Take fell back to a dissolve."
                 scheduleEndNotice(targetSceneID: targetSceneID,
                                   after: transition.durationSeconds)
                 return
             }
-            startStinger(bookmark: bookmark,
-                         fileName: transition.stingerFileName,
+            startStinger(transition: transition,
                          cutPointSeconds: transition.stingerCutPointSeconds,
                          volume: transition.stingerVolume,
                          targetSceneID: targetSceneID)
@@ -381,17 +400,16 @@ final class TransitionController: ObservableObject {
     /// transition is configured, and at launch for restored settings), so a
     /// Take starts decoding immediately instead of mid-transition.
     func preloadStinger(for transition: SceneTransition?) {
-        guard transition?.style == .stinger,
-              let bookmark = transition?.stingerBookmarkData else { return }
-        playback(for: bookmark, fileName: transition?.stingerFileName).load()
+        guard let transition, transition.style == .stinger, transition.hasStingerMedia else { return }
+        playback(for: transition).load()
     }
 
     // MARK: Stinger lifecycle
 
-    private func startStinger(bookmark: Data, fileName: String?,
+    private func startStinger(transition: SceneTransition,
                               cutPointSeconds: Double, volume: Double,
                               targetSceneID: SceneID) {
-        let playback = playback(for: bookmark, fileName: fileName)
+        let playback = playback(for: transition)
         TransitionStingerStore.shared.arm(StingerSnapshot(
             playback: playback,
             startedAt: CMClockGetTime(CMClockGetHostTimeClock()),
@@ -420,16 +438,20 @@ final class TransitionController: ObservableObject {
     /// when the media is unchanged, else a fresh one (a bookmark change is a
     /// new file; building a new engine beats racing the A02 relink path on a
     /// Take's first tick). The old engine is stopped immediately.
-    private func playback(for bookmark: Data, fileName: String?) -> MediaSourcePlayback {
-        if let stingerPlayback, stingerBookmark == bookmark { return stingerPlayback }
-        stingerPlayback?.stop()
+    private func playback(for transition: SceneTransition) -> MediaSourcePlayback {
+        let bookmark = transition.stingerBookmarkData, identifier = transition.stingerAssetIdentifier
+        if let stingerPlayback, stingerBookmark == bookmark, stingerAssetIdentifier == identifier { return stingerPlayback }
+        stingerPlayback?.shutdown()
         let box = StingerPayloadBox()
-        box.payload = MediaSourcePayload(bookmarkData: bookmark,
-                                         fileName: fileName,
+        box.payload = MediaSourcePayload(assetIdentifier: identifier, bookmarkData: bookmark,
+                                         fileName: transition.stingerFileName,
                                          loops: false,
                                          autoplay: false,
                                          endAction: .stop)
-        let playback = MediaSourcePlayback(sourceID: Self.stingerChannelID) { box.payload }
+        let playback = MediaSourcePlayback(sourceID: Self.stingerChannelID, assetAccessProvider: { [weak self] raw in
+            guard let uuid = UUID(uuidString: raw) else { return nil }
+            return self?.assetLibrary?.access(for: AssetID(uuid))
+        }) { box.payload }
         let ingest = audioIngest
         playback.onAudioSample = { sample in
             ingest?(Self.stingerChannelID, sample)
@@ -449,6 +471,7 @@ final class TransitionController: ObservableObject {
         }
         stingerPlayback = playback
         stingerBookmark = bookmark
+        stingerAssetIdentifier = identifier
         return playback
     }
 

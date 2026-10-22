@@ -94,6 +94,19 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try require(ownedApplication?.isFinishedLaunching == true && ready.studioWindowVisible && ready.studioWindows == 1,
             "Actual shipping studio window was not visible after native application launch completed")
         print("Stage: actual native launch finished with one visible owned Studio window")
+        if ProcessInfo.processInfo.environment["STREAM_PORTABLE_CONTENT_ONLY"] == "1" {
+            let content = try await command("mediaContent")
+            try require(content.mediaContentQualified && content.assetMetadataQualified, "Focused native media content proof did not finish")
+            print("PASS: focused signed-sandbox package content: unsafe asset metadata rejected; normal video/pad/playlist/scene-sound/stinger references remap with grants excluded; copied video decodes and AVAudioFile verifies copied/repaired WAV PCM after originals removed; active profile unchanged")
+            _ = try await command("quit")
+            for _ in 0..<500 {
+                if ownedApplication?.isTerminated == true { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            try require(ownedApplication?.isTerminated == true, "Focused native content app did not quit")
+            print("Focused content proof does not qualify the keyboard picker or full sound-pad AVAssetReader path.")
+            return
+        }
         let initialProject = ready.project
         let open = NSWorkspace.OpenConfiguration(); open.addsToRecentItems = false
         open.environment = launch.environment
@@ -168,6 +181,9 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try require(linked.scopeGranted && linked.linkedReadable && linked.project == applied.project,
             "Shipping relink could not persist/read a real LaunchServices user-selected grant")
         print("PASS: actual native file grant→shipping missing-linked-asset repair→app-scope bookmark; chooser UI qualification remains separate")
+        let mediaProof = try await command("mediaPortable")
+        try require(mediaProof.mediaQualified && mediaProof.assetMetadataQualified, "Native package media/metadata qualification did not finish")
+        print("PASS: actual sandbox package metadata rejects unsafe/undeclared/duplicate assets; normal video/pad/playlist/scene-sound portability, copied video decode and PCM after original removal, missing-reference Assets repair, and unchanged live profile")
         for _ in 0..<2 { _ = try await NSWorkspace.shared.open([repair], withApplicationAt: appURL, configuration: open) }
         var ignored = linked
         for _ in 0..<100 {
@@ -238,10 +254,10 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         let request = PortableNativeCommand(id: UUID(), action: action, path: path)
         if action != "inspect" { print("Stage: native command \(action), \(request.id)") }
         try JSONEncoder().encode(request).write(to: receiptDirectory.appendingPathComponent("command.json"), options: .atomic)
-        return try await wait(id: request.id)
+        return try await wait(id: request.id, attempts: ["mediaPortable", "mediaContent"].contains(action) ? 3_500 : 1_200)
     }
-    static func wait(id: UUID? = nil, phase: String? = nil) async throws -> PortableNativeReport {
-        for _ in 0..<1_200 {
+    static func wait(id: UUID? = nil, phase: String? = nil, attempts: Int = 1_200) async throws -> PortableNativeReport {
+        for _ in 0..<attempts {
             try require(ownedApplication?.isTerminated != true, "Owned app terminated before its native receipt")
             if let data = try? Data(contentsOf: receiptDirectory.appendingPathComponent("report.json")),
                let report = try? JSONDecoder().decode(PortableNativeReport.self, from: data), report.pid == ownedApplication?.processIdentifier {
@@ -252,8 +268,10 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         }
         let latest = (try? Data(contentsOf: receiptDirectory.appendingPathComponent("report.json")))
             .flatMap { try? JSONDecoder().decode(PortableNativeReport.self, from: $0) }
+        let mediaStage = (try? Data(contentsOf: receiptDirectory.appendingPathComponent("media-progress.json")))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "none"
         throw NSError(domain: "PortableNativeDriver", code: 4, userInfo: [NSLocalizedDescriptionKey:
-            "Owned app receipt exceeded12-second bound (latest phase=\(latest?.phase ?? "none"), busy=\(latest?.packageBusy ?? false), error=\(latest?.error ?? "none"))"])
+            "Owned app receipt exceeded\(attempts / 100)-second bound (latest phase=\(latest?.phase ?? "none"), busy=\(latest?.packageBusy ?? false), error=\(latest?.error ?? "none"), media=\(mediaStage))"])
     }
     static func packageBytes(_ root: URL) throws -> [String: Data] {
         var values: [String: Data] = [:]

@@ -111,6 +111,7 @@ final class StudioWorkspace: ObservableObject {
         var failed = false
     }
     private var pendingPackageDrop: PackageDropRead?
+    private var occupiedPackageDrops: [UUID: Int] = [:]
     private let maximumPackageDropFiles = 8
     var selection: Selection { Selection(project: catalog.selectedProjectID, profile: catalog.selectedProfileID) }
     var currentProject: StudioProject { catalog.projects.first { $0.id == catalog.selectedProjectID }! }
@@ -430,10 +431,16 @@ final class StudioWorkspace: ObservableObject {
             error = "Wait for the current package import or export to finish before opening another package."
             return true
         }
+        guard occupiedPackageDrops.count < maximumPackageReads else {
+            error = "Wait for the existing dropped files to finish, or use Import Show."
+            showProjects = true
+            return true
+        }
         let request = UUID()
         latestPackageRead = nil
         refreshPackageBusy()
         pendingPackageDrop = PackageDropRead(id: request, remaining: files.count)
+        occupiedPackageDrops[request] = files.count
         for provider in files {
             provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { [weak self] item, _ in
                 let url: URL?
@@ -453,6 +460,10 @@ final class StudioWorkspace: ObservableObject {
     }
 
     private func receivePackageDrop(_ url: URL?, request: UUID) {
+        // Retired callbacks still own their capacity until the provider replies.
+        guard let remaining = occupiedPackageDrops[request] else { return }
+        if remaining == 1 { occupiedPackageDrops.removeValue(forKey: request) }
+        else { occupiedPackageDrops[request] = remaining - 1 }
         guard var read = pendingPackageDrop, read.id == request else { return }
         read.remaining -= 1
         if let url, url.isFileURL { read.urls.append(url) }
@@ -557,7 +568,7 @@ final class StudioWorkspace: ObservableObject {
         }
         documents["stream.scenes.v2.json"] = try? JSONEncoder().encode(document)
         let packageAssets: (document: AssetLibraryDocument, media: [ShowPackageIO.Media])
-        do { packageAssets = try packageAssetContents(includeMedia: includeMedia) }
+        do { packageAssets = try packageAssetContents(includeMedia: includeMedia, documents: &documents) }
         catch { self.error = String(describing: error); finishPackageWrite(operation); return }
         documents["stream.assets.v1.json"] = try? JSONEncoder().encode(packageAssets.document)
         let packageDocuments = documents, packageMedia = packageAssets.media, name = currentProject.name
@@ -596,12 +607,73 @@ final class StudioWorkspace: ObservableObject {
     /// Capture retained security grants together with the registry that will be
     /// exported, so Include Media cannot silently become references-only.
     func packageAssetContents(includeMedia: Bool) throws -> (document: AssetLibraryDocument, media: [ShowPackageIO.Media]) {
+        var documents: [String: Data] = [:]
+        return try packageAssetContents(includeMedia: includeMedia, documents: &documents)
+    }
+
+    /// Bookmark-backed video, pads and scene sounds predate the asset library.
+    /// Give their transfer snapshot a portable library identity without editing
+    /// the active profile or persisting any machine-bound grant in the package.
+    func packageAssetContents(includeMedia: Bool, documents: inout [String: Data]) throws -> (document: AssetLibraryDocument, media: [ShowPackageIO.Media]) {
         var assets = runtime.dispatcher.assetLibrary.assets
         var media: [ShowPackageIO.Media] = []
+        var bookmarks: [Data: AssetID] = [:]
+        for asset in assets { if let bookmark = asset.bookmarkData { bookmarks[bookmark] = asset.id } }
+        var promotedAccess: [AssetID: ResolvedAssetAccess] = [:]
+        func visit(_ value: Any) throws -> Any {
+            if var record = value as? [String: Any] {
+                if let name = record["stingerFileName"] as? String {
+                    var file: [String: Any] = ["fileName": name]
+                    file["bookmarkData"] = record["stingerBookmarkData"]
+                    file["assetIdentifier"] = record["stingerAssetIdentifier"]
+                    if let promoted = try visit(file) as? [String: Any] {
+                        record["stingerAssetIdentifier"] = promoted["assetIdentifier"]
+                    }
+                }
+                if let fileName = record["fileName"] as? String, !fileName.isEmpty {
+                    let existing = (record["assetIdentifier"] as? String).flatMap(UUID.init(uuidString:)).map(AssetID.init)
+                    if existing == nil || !assets.contains(where: { $0.id == existing }) {
+                        let bookmark = (record["bookmarkData"] as? String).flatMap { Data(base64Encoded: $0) }
+                        let id: AssetID
+                        if let bookmark, let known = bookmarks[bookmark] { id = known }
+                        else {
+                            guard assets.count < 2000 else { throw PortableShow.Failure.invalid("A show package can contain at most 2,000 assets.") }
+                            id = AssetID()
+                            let file = URL(fileURLWithPath: fileName).lastPathComponent
+                            assets.append(LibraryAsset(id: id, name: URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent,
+                                kind: AssetKind.inferring(fromExtension: URL(fileURLWithPath: file).pathExtension), storage: .linked,
+                                fileName: file, lastKnownPath: ""))
+                            if let bookmark { bookmarks[bookmark] = id }
+                            if includeMedia {
+                                guard let bookmark, let resolved = AssetBookmarkCodec.resolve(bookmark) else {
+                                    throw PortableShow.Failure.invalid("Cannot include \(file). Relink the source, pad or scene sound before exporting, or turn off Include media.")
+                                }
+                                let access = ResolvedAssetAccess(url: resolved.url, needsSecurityScope: true)
+                                guard access.isAccessible else {
+                                    throw PortableShow.Failure.invalid("Cannot include \(file). Relink the source, pad or scene sound before exporting, or turn off Include media.")
+                                }
+                                promotedAccess[id] = access
+                            }
+                        }
+                        record["assetIdentifier"] = id.rawValue.uuidString
+                    }
+                }
+                for (key, item) in record { record[key] = try visit(item) }
+                return record
+            }
+            if let items = value as? [Any] { return try items.map(visit) }
+            return value
+        }
+        for name in documents.keys.sorted() where name != "stream.assets.v1.json" {
+            guard let data = documents[name], data.count <= PortableShow.maximumDocumentBytes else {
+                throw PortableShow.Failure.invalid("A show document exceeds 16 MiB.")
+            }
+            documents[name] = try JSONSerialization.data(withJSONObject: visit(JSONSerialization.jsonObject(with: data)), options: [.sortedKeys])
+        }
         for i in assets.indices {
             let path = "Assets/\(assets[i].id)/\(URL(fileURLWithPath: assets[i].fileName).lastPathComponent)"
             if includeMedia {
-                guard let access = runtime.dispatcher.assetLibrary.access(for: assets[i].id), access.isAccessible else {
+                guard let access = promotedAccess[assets[i].id] ?? runtime.dispatcher.assetLibrary.access(for: assets[i].id), access.isAccessible else {
                     throw PortableShow.Failure.invalid("Cannot include \(assets[i].name). Relink missing assets in Assets, or turn off Include media to transfer references only.")
                 }
                 assets[i].storage = .projectCopy

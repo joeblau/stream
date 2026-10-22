@@ -82,6 +82,7 @@ struct MediaSourcesSectionView: View {
             // Relink keeps the source's playback policy (loop/autoplay/end
             // action/trim) and replaces only the file identity.
             payload.bookmarkData = picked.bookmarkData
+            payload.assetIdentifier = nil
             payload.fileName = picked.fileName
             sceneStore.relinkSource(relinkTarget.id, to: .media(payload))
             self.relinkTarget = nil

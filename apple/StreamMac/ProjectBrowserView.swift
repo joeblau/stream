@@ -62,7 +62,7 @@ struct ProjectBrowserView: View {
             Text("Transfers exclude credentials, device identities, remote widget URLs, and sandbox bookmarks. Missing assets can be relinked in Assets.")
                 .font(.caption).foregroundStyle(.secondary)
             Text(includeMedia
-                 ? "Include media copies every library asset, including folder contents. Relink unavailable assets before exporting."
+                 ? "Include media copies library assets and files used by sources, sounds, and transitions, including folder contents. Relink unavailable files before exporting."
                  : "References only: media files, local paths, and access grants are omitted. Relink assets on the receiving Mac.")
                 .font(.caption).foregroundStyle(.secondary)
             if workspace.pending != nil {

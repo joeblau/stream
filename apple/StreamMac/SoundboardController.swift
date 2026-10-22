@@ -1,6 +1,7 @@
 import Combine
 import CoreMedia
 import Foundation
+import StreamCore
 import os.lock
 
 /// A03 (issue #98): the soundboard / music-playlist / scene-sound playback
@@ -100,6 +101,15 @@ final class SoundboardController: ObservableObject {
     private var playingEngines: Set<UUID> = []
     private var pumpTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
+    private weak var assetLibrary: AssetLibraryStore?
+    private var assetFileObservation: AnyCancellable?
+
+    func bindAssetLibrary(_ library: AssetLibraryStore) {
+        assetLibrary = library
+        assetFileObservation = library.fileChanges.sink { [weak self] identifiers in
+            for engine in self?.engineList.snapshot() ?? [] { engine.reloadAsset(identifiers) }
+        }
+    }
 
     init(store: SoundboardStore, controller: StreamController) {
         self.store = store
@@ -545,7 +555,10 @@ final class SoundboardController: ObservableObject {
     private func makeEngine(channelID: SourceDefinitionID, instanceID: UUID,
                             box: SoundPayloadBox) -> MediaSourcePlayback {
         controller.retainSoundboardAudioChannel(channelID)
-        let engine = MediaSourcePlayback(sourceID: channelID) { box.payload }
+        let engine = MediaSourcePlayback(sourceID: channelID, assetAccessProvider: { [weak self] identifier in
+            guard let uuid = UUID(uuidString: identifier) else { return nil }
+            return self?.assetLibrary?.access(for: AssetID(uuid))
+        }) { box.payload }
         let ingest = audioIngest
         engine.onAudioSample = { sample in
             ingest?(channelID, sample)
@@ -597,7 +610,7 @@ final class SoundboardController: ObservableObject {
     }
 
     private func payload(for pad: SoundPad) -> MediaSourcePayload {
-        MediaSourcePayload(bookmarkData: pad.bookmarkData,
+        MediaSourcePayload(assetIdentifier: pad.assetIdentifier, bookmarkData: pad.bookmarkData,
                            fileName: pad.fileName,
                            loops: pad.loops,
                            autoplay: false,
@@ -606,7 +619,7 @@ final class SoundboardController: ObservableObject {
 
     private func trackPayload(playlist: MusicPlaylist, index: Int) -> MediaSourcePayload {
         let track = playlist.tracks.indices.contains(index) ? playlist.tracks[index] : nil
-        return MediaSourcePayload(bookmarkData: track?.bookmarkData,
+        return MediaSourcePayload(assetIdentifier: track?.assetIdentifier, bookmarkData: track?.bookmarkData,
                                   fileName: track?.fileName,
                                   loops: playlist.repeatMode == .one,
                                   autoplay: false,
@@ -614,7 +627,7 @@ final class SoundboardController: ObservableObject {
     }
 
     private func payload(for binding: SceneSoundBinding, loops: Bool) -> MediaSourcePayload {
-        MediaSourcePayload(bookmarkData: binding.bookmarkData,
+        MediaSourcePayload(assetIdentifier: binding.assetIdentifier, bookmarkData: binding.bookmarkData,
                            fileName: binding.fileName,
                            loops: loops,
                            autoplay: false,

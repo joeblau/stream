@@ -68,6 +68,9 @@ struct PortableNativeReport: Codable {
     var repairDeliveries = 0
     var studioWindows = 0
     var studioWindowVisible = false
+    var mediaQualified = false
+    var assetMetadataQualified = false
+    var mediaContentQualified = false
 }
 
 @MainActor enum PortableNativeAppDriver {
@@ -77,6 +80,9 @@ struct PortableNativeReport: Codable {
     static var outsideDenied = false
     static var scopeGranted = false
     static var openedRepair: URL?
+    static var mediaQualified = false
+    static var assetMetadataQualified = false
+    static var mediaContentQualified = false
     static var lifecycleTrace: Timer?
     static var closeTrace: NSObjectProtocol?
     static var deliveries: [String: Int] = [:]
@@ -207,6 +213,16 @@ struct PortableNativeReport: Codable {
                                   workspace.error == "The package changed after its preview. Open it again before importing." else {
                                 throw Failure.message("Import accepted different package contents than the confirmed preview")
                             }
+                        case "mediaPortable":
+                            try PortableNativeMedia.assetMetadata(workspace)
+                            assetMetadataQualified = true
+                            try await PortableNativeMedia.qualify(workspace)
+                            mediaQualified = true
+                        case "mediaContent":
+                            try PortableNativeMedia.assetMetadata(workspace)
+                            assetMetadataQualified = true
+                            try await PortableNativeMedia.qualify(workspace, decodeSoundPad: false)
+                            mediaContentQualified = true
                         case "chooser":
                             guard let path = command.path else { throw Failure.message("Missing owned chooser path") }
                             let driver = OwnedPanelDriver(path: path)
@@ -301,6 +317,9 @@ struct PortableNativeReport: Codable {
         let windows = NSApp.windows.filter { $0.title == "Stream Studio" }
         value.studioWindows = windows.count; value.studioWindowVisible = windows.count == 1 && windows[0].isVisible
         value.scopeGranted = scopeGranted
+        value.mediaQualified = mediaQualified
+        value.assetMetadataQualified = assetMetadataQualified
+        value.mediaContentQualified = mediaContentQualified
         for asset in workspace.runtime.dispatcher.assetLibrary.assets {
             if let access = workspace.runtime.dispatcher.assetLibrary.access(for: asset.id), access.isAccessible {
                 if asset.storage == .projectCopy { value.includedBytes = try? Data(contentsOf: access.url) }
@@ -341,7 +360,7 @@ struct PortableNativeReport: Codable {
     }
     func stop() { timers.forEach { $0.invalidate() }; timers.removeAll() }
     static func key(_ text: String, code: UInt16 = 0, flags: NSEvent.ModifierFlags = []) {
-        guard let window = NSApp.keyWindow, NSApp.windows.contains(window),
+        guard let window = NSApp.modalWindow ?? NSApp.keyWindow, NSApp.windows.contains(window),
               window === NSApp.modalWindow || window is NSPanel || window.sheetParent != nil,
               let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,

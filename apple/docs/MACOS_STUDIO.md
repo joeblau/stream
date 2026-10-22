@@ -51,7 +51,10 @@ are not duplicated on every autosave.
 
 Export Show writes a versioned `.streamshow` package with SHA-256 file checks.
 Choose the selected scene (including nested scene dependencies) or the whole
-profile, and whether to include readable library media. Without media, import
+profile, and whether to include readable library media and files used by media
+sources, sound pads, playlists, scene sounds, and stinger transitions. Export
+registers those file references in its package snapshot without changing the
+active profile. Without media, import
 keeps repairable asset entries. Stream keys, credentials, remote widget URLs,
 machine device selections, and sandbox bookmarks are omitted. Account and PTZ
 configuration are not included. Finder opening, a package dropped onto Shows and Profiles, and the Import Show button show
@@ -59,8 +62,7 @@ a preview; import creates a separate show, remaps IDs, then stages it for Apply.
 Mixed drops select the single package; multiple packages show an error. A delayed
 drop cannot replace a newer selection. Import refuses a package changed since
 its preview. Relink missing sources/assets and configure destinations before production.
-Raw legacy media bookmarks without library registrations need importing into
-Assets before transfer. Copied HTML/media can contain the producer's own content.
+Copied HTML/media can contain the producer's own content.
 Native file delivery and sandbox/restart evidence, including the remaining
 picker and physical gesture limits, are documented in
 [Portable show native entry](PORTABLE_SHOW_NATIVE_ENTRY.md).
