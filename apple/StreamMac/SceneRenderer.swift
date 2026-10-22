@@ -142,6 +142,7 @@ final class SceneRenderer {
     private let ciContext: CIContext
     private let usesSoftwareRendering: Bool
     private let workingColorSpace = CGColorSpaceCreateDeviceRGB()
+    private var frameAllocator: RawVideoResourceBank?
     private var pool: CVPixelBufferPool?
     private var poolWidth = 0
     private var poolHeight = 0
@@ -266,7 +267,9 @@ final class SceneRenderer {
             { GuestSlotRenderStore.shared.snapshot() },
          imageProvider: @escaping (ImageSourcePayload) -> CIImage? =
             { ImageLayerImageStore.shared.image(for: $0) },
-         usesSoftwareRendering: Bool = false) {
+         usesSoftwareRendering: Bool = false,
+         frameAllocator: RawVideoResourceBank? = nil) {
+        self.frameAllocator = frameAllocator
         self.sourceEffectsProvider = sourceEffectsProvider
         self.segmentation = segmentation
         self.tokenProvider = tokenProvider
@@ -594,18 +597,24 @@ final class SceneRenderer {
                         presentationTime: CMTime,
                         frameDuration: CMTime,
                         sequence: Int64) -> CompositedFrame? {
-        guard let pool = ensurePool(width: outWidth, height: outHeight) else { return nil }
-        // Same steady-state budget as the legacy compositor: one buffer rendering
-        // here, one in a subscriber, one pinned by the publisher's frame-repeat,
-        // one of slack — with drop-oldest mailboxes a slow consumer can no longer
-        // pin more than its mailbox capacity.
-        let allocationLimit = [
-            kCVPixelBufferPoolAllocationThresholdKey as String: 4
-        ] as CFDictionary
-        var out: CVPixelBuffer?
-        guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
-            kCFAllocatorDefault, pool, allocationLimit, &out
-        ) == kCVReturnSuccess, let outBuffer = out else { return nil }
+        let outBuffer: CVPixelBuffer
+        if let frameAllocator {
+            guard frameAllocator.descriptor.width == outWidth,
+                  frameAllocator.descriptor.height == outHeight,
+                  frameAllocator.allocationThreshold == 4,
+                  let allocated = try? frameAllocator.allocatePixelBuffer() else { return nil }
+            outBuffer = allocated
+        } else {
+            guard let pool = ensurePool(width: outWidth, height: outHeight) else { return nil }
+            // Standalone render validation retains the original cap. Shipping
+            // Engine/ISO renderers inject an admitted source bank at this cap.
+            let allocationLimit = [kCVPixelBufferPoolAllocationThresholdKey as String: 4] as CFDictionary
+            var out: CVPixelBuffer?
+            guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+                kCFAllocatorDefault, pool, allocationLimit, &out
+            ) == kCVReturnSuccess, let allocated = out else { return nil }
+            outBuffer = allocated
+        }
 
         if usesSoftwareRendering {
             CVPixelBufferLockBaseAddress(outBuffer, [])
@@ -2142,6 +2151,13 @@ final class SceneRenderer {
             sampleTiming: &timing,
             sampleBufferOut: &sample) == noErr else { return nil }
         return sample
+    }
+
+    func setFrameAllocator(_ allocator: RawVideoResourceBank) {
+        guard frameAllocator?.id != allocator.id else { return }
+        frameAllocator = allocator
+        pool = nil
+        formatDescription = nil
     }
 
     private func ensurePool(width: Int, height: Int) -> CVPixelBufferPool? {

@@ -88,6 +88,10 @@ jobs:
               'apple/StreamMac/CompositionFrameSchedule.swift',
               'apple/StreamMac/SceneRenderer.swift',
               'apple/StreamMac/TitleRenderFontCache.swift',
+              'apple/StreamMac/FrameDeliveryBroker.swift',
+              'apple/StreamMac/FrameDeliveryConverter.swift',
+              'apple/StreamMac/RawVideoResourceCoordinator.swift',
+              'apple/StreamCore/RawVideoResourceBudget.swift',
               'apple/StreamMac/ProgramRecordingSession.swift',
               'apple/scripts/studio_performance_harness.swift',
               'apple/scripts/performance_owned_replay.swift',
@@ -102,7 +106,7 @@ jobs:
           # Pin the reviewed fixed-duration tool and its workload inputs. An
           # unreviewed generator/template change must fail before any runner.
           expected = {
-              'apple/scripts/prepare_composition_hotpath_profile.py': 'acd442df5a4619e03d96c52ecdd75b34f39ee9810aba6ca3d24f5344be1b3af6',
+              'apple/scripts/prepare_composition_hotpath_profile.py': '9e1f62f5f9c4dc68f769a5c9afa63e4d5f1cf1f381f73456813abf39e5513e46',
               'apple/scripts/composition_hotpath_profile.swift': '512dac74a982ecc7d49337fb46bd1fc43e72cd89a2f035b096d0fa45801a1b1b',
               'apple/scripts/run_composition_hotpath_profile.zsh': 'b051da683fd67b9a69cc6f1eca5261ab47607feba19edd27130b8bbc52e27804',
               'apple/scripts/studio_performance_harness.swift': 'b74f5f85e5acbf50475bd9d00f0e8cb816737d10450f528bd30315417a5e46f9',
