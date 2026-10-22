@@ -90,7 +90,13 @@ manager_path=File.join(folder,'fixtures/InterviewProgramManager.swift')
 File.write(manager_path,manager)
 target['sources'][0]['excludes'] << 'NativeInterviewManager.swift'
 target['sources'] << manager_path
-target['sources'] += [ENV.fetch('STREAM_INTERVIEW_RETURN_CLI_SOURCE','native_interview_return_audio_cli.swift')].map{|file| File.join(root,'scripts',file)}
+if ENV['STREAM_GUEST_RETURN_DIAGNOSTIC'] == '1'
+  abort 'Return diagnostics require the owned video CLI' unless ENV['STREAM_INTERVIEW_RETURN_CLI_SOURCE'] == 'native_interview_return_video_cli.swift'
+  require File.join(root, 'scripts/guest_return_diagnostic_sources')
+  StreamGuestReturnDiagnosticSources.apply(target, root, folder)
+else
+  target['sources'] += [ENV.fetch('STREAM_INTERVIEW_RETURN_CLI_SOURCE','native_interview_return_audio_cli.swift')].map{|file| File.join(root,'scripts',file)}
+end
 spec['targets']['NativeInterviewReturnAudioCLI']=target
 spec['schemes']['NativeInterviewReturnAudioCLI']={'build'=>{'targets'=>{'NativeInterviewReturnAudioCLI'=>'all'}}}
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))

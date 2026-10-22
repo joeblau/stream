@@ -14,6 +14,7 @@ import {renderedReturnWorklet,installRenderedReturnOracle} from './rendered-retu
 import {chromeFixtureExecutable, chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
 const elementAudioProbe=process.argv.find(value=>value.startsWith('--video-element-audio-probe='))?.split('=')[1];
 const ownedNullContexts=process.argv.includes('--owned-null-contexts');
+const senderDiagnostic=process.env.STREAM_GUEST_RETURN_DIAGNOSTIC==='1';
 const isolatedMode=Boolean(elementAudioProbe)||process.argv.includes('--video-flow-only')||process.argv.includes('--video-fault-only')||process.argv.includes('--video-delivery-failure')||process.argv.some(value=>value.startsWith('--video-av-final='));
 assert(!ownedNullContexts||process.argv.includes('--video-flow-only'),'Explicit null contexts apply only to the separate video-flow fixture, never AV qualification');
 if(!isolatedMode){
@@ -141,7 +142,7 @@ try {
   await wait('real local Worker readiness',async()=>{check();try{return(await fetch(`${origin}/guest.html`,{signal:AbortSignal.timeout(1000)})).status===200;}catch{return false;}},20_000);
   assert(turn.exitCode===null,'Owned Coturn must remain running');
 
-  let pending='',nativeBytes=0,stderrBytes=0,state,invite,ack,stopped=false,closed=false,linesAfterStop=0;
+  let pending='',nativeBytes=0,stderrBytes=0,state,invite,ack,audioDiagnostic,stopped=false,closed=false,linesAfterStop=0;
   native=child(cli,[nativeConfig],{stdio:['pipe','pipe','pipe'],env:{...process.env,...(tls?{STREAM_OWNED_TURN_TLS_CA_FILE:tls.caFile}:{})}});
   native.stdin.on('error',()=>{failure=new Error('Native command pipe closed');});
   native.stderr.on('data',chunk=>{stderrBytes+=chunk.length;if(stderrBytes>262144)failure=new Error('Native diagnostic budget exceeded');});
@@ -156,6 +157,7 @@ try {
         case'private-invite':assert(!invite&&typeof value.url==='string'&&value.url.length<=2048,'Private invite IPC shape');invite=value.url;break;
         case'state':assert(typeof value.phase==='string'&&Array.isArray(value.members)&&value.members.length<=1,'Native state shape');state=value;break;
         case'ack':ack=value.command;break;
+        case'audio-diagnostic':assert(senderDiagnostic,'Unexpected audio diagnostic');audioDiagnostic=value.receipt;break;
         case'stopped':stopped=true;break;
         case'error':throw new Error(`Native safe error: ${/^[a-zA-Z]{1,32}$/.test(value.reason)?value.reason:'unknown'}`);
         default:throw new Error('Unknown native receipt');
@@ -242,13 +244,20 @@ try {
     }else await browser.evaluate(g,returnAnalyzer);
   }
   await startReturnAnalyzer();
+  async function collectAudioDiagnostic(label){
+    const inbound=await browser.evaluate(g,`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats(),audio=[];for(const r of stats.values())if(r.type==='inbound-rtp'&&r.kind==='audio')audio.push({packetsReceived:r.packetsReceived,bytesReceived:r.bytesReceived,packetsLost:r.packetsLost,jitterBufferEmittedCount:r.jitterBufferEmittedCount,jitterBufferDelay:r.jitterBufferDelay,totalAudioEnergy:r.totalAudioEnergy,totalSamplesDuration:r.totalSamplesDuration,totalSamplesReceived:r.totalSamplesReceived,concealedSamples:r.concealedSamples,silentConcealedSamples:r.silentConcealedSamples,audioLevel:r.audioLevel,codec:stats.get(r.codecId)?.mimeType});const a=window.__returnAnalysis;return{audio,context:{state:a.context.state,sampleRate:a.context.sampleRate,time:a.context.currentTime,sink:a.context.sinkId?.type??'default'},track:{enabled:a.track.enabled,muted:a.track.muted,ready:a.track.readyState},worklet:window.__returnSpectrum()};})()`);
+    audioDiagnostic=undefined;command({type:'audio-diagnostic'});
+    await wait('bounded independent native return Opus decode',()=>{check();return audioDiagnostic;},5000);
+    console.log(`Actual sender/browser audio diagnostic ${label}: ${JSON.stringify({native:audioDiagnostic,browser:inbound})}`);
+  }
   async function spectrum(label,left,right){
     await browser.evaluate(g,'window.__resetReturn()');
     let observed;
-    const result=await wait(label,async()=>{check();const r=await browser.evaluate(g,'window.__returnSpectrum()');observed=r;if(!r.n||r.n<24576)return false;const a=r.channels[0].amplitudes,b=r.channels[1].amplitudes;if(Math.abs(a[0]-left)>.035||Math.abs(b[1]-right)>.025||a[2]>.01||a[3]>.01||b[2]>.01||b[3]>.01)return false;return r;},6000).catch(error=>{console.error(`Observed actual Chrome ${label}: ${JSON.stringify(observed)}`);if(tls)console.error(`Native gate/tone at failed return: ${JSON.stringify({hostSyntheticInput:state.hostSyntheticInput,program:state.program,tls:state.tls})}`);throw error;});
+    const result=await wait(label,async()=>{check();const r=await browser.evaluate(g,'window.__returnSpectrum()');observed=r;if(!r.n||r.n<24576)return false;const a=r.channels[0].amplitudes,b=r.channels[1].amplitudes;if(Math.abs(a[0]-left)>.035||Math.abs(b[1]-right)>.025||a[2]>.01||a[3]>.01||b[2]>.01||b[3]>.01)return false;return r;},6000).catch(async error=>{console.error(`Observed actual Chrome ${label}: ${JSON.stringify(observed)}`);if(tls)console.error(`Native gate/tone at failed return: ${JSON.stringify({hostSyntheticInput:state.hostSyntheticInput,program:state.program,tls:state.tls})}`);if(senderDiagnostic)await collectAudioDiagnostic(label+'-failed');throw error;});
     assert(result.rate===48000&&result.live==='live'&&result.channels.length===2);if(left===0&&right===0)assert(result.channels.every(c=>c.rms<.002),'Muted return must carry actual near-zero decoded PCM');console.log(`Actual Chrome decoded return ${label}: ${JSON.stringify(result)}`);return result;
   }
   const first=await spectrum('backstage-local-only',.4,.2);
+  if(senderDiagnostic)await collectAudioDiagnostic('backstage-local-only-passed');
   const videoPixels=`(()=>{const v=document.getElementById('return');if(!v.srcObject?.getVideoTracks().length||v.readyState<2)return null;const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);const pixel=[...c.getContext('2d').getImageData(c.width/2,c.height/2,1,1).data].slice(0,3);return{width:c.width,height:c.height,pixel,track:v.srcObject.getVideoTracks()[0].id};})()`;
   const decodedVideoStats=`(async()=>{const stats=await window.__fixturePeers.at(-1).getStats();for(const r of stats.values())if(r.type==='inbound-rtp'&&r.kind==='video')return{bytes:r.bytesReceived,packetsLost:r.packetsLost,timestamp:r.timestamp,frames:r.framesDecoded,width:r.frameWidth,height:r.frameHeight,fps:r.framesPerSecond,codec:stats.get(r.codecId)?.mimeType};return null;})()`;
   async function qualifyAV(sourceName,probeElementAudio=false){

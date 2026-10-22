@@ -20,6 +20,7 @@ parser.add_argument("--reference-derived", type=Path, required=True)
 parser.add_argument("--output-dir", type=Path, required=True)
 parser.add_argument("--vendor-root", type=Path, required=True)
 parser.add_argument("--tls", action="store_true")
+parser.add_argument("--dependencies-only", action="store_true", help="Copy immutable package inputs, leaving all compiler products/caches fresh")
 args = parser.parse_args()
 os.umask(0o077)
 repository = Path(__file__).resolve().parents[2]
@@ -65,7 +66,11 @@ flags = settings.get("OTHER_LDFLAGS", [])
 settings["OTHER_LDFLAGS"] = ([flags] if isinstance(flags, str) else flags) + receipt["additionalSystemLinkFlags"]
 spec_path.write_text(json.dumps(spec, indent=2) + "\n")
 subprocess.run(["xcodegen", "generate", "--spec", str(spec_path), "--project", str(project)], check=True)
-subprocess.run(["cp", "-cR", str(reference), str(derived)], check=True)
+if args.dependencies_only:
+    derived.mkdir(mode=0o700)
+    subprocess.run(["cp", "-cR", str(reference / "SourcePackages"), str(derived / "SourcePackages")], check=True)
+else:
+    subprocess.run(["cp", "-cR", str(reference), str(derived)], check=True)
 workspace = derived / "SourcePackages/workspace-state.json"
 workspace.write_text(workspace.read_text().replace(str(reference), str(derived)).replace(str(args.reference_derived), str(derived)))
 replaced = 0
@@ -81,11 +86,13 @@ for info in (derived / "SourcePackages/artifacts").glob("**/libdatachannel.xcfra
     info.write_bytes(plistlib.dumps(value))
 if not replaced:
     raise RuntimeError("Reference has no owned macOS transport artifact to overlay")
+(derived / "Build/Products/Debug").mkdir(parents=True, exist_ok=True)
 (derived / "Build/Products/Debug/libdatachannel.a").write_bytes(archive.read_bytes())
 proof = {"backendSHA256": digest(archive), "architecture": receipt["architecture"], "tlsExplicitlyEnabled": args.tls,
          "repositoryHEAD": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repository, text=True).strip(),
          "shippingControllerSHA256": digest(repository / "apple/StreamMac/StreamController.swift"),
          "generatedControllerSHA256": digest(controller), "projectSHA256": digest(spec_path),
+         "compilerCachesReused": not args.dependencies_only,
          "scope": "prepared owned full-source fixture; not build/runtime qualification or shipping adoption"}
 (output / "prepared-project.json").write_text(json.dumps(proof, indent=2) + "\n")
 print(json.dumps(proof))
