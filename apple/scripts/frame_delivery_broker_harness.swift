@@ -33,6 +33,15 @@ final class MailboxHealthySink: @unchecked Sendable {
     func validDimensions() -> Bool { lock.lock(); defer { lock.unlock() }; return dimensions.allSatisfy { $0 == [16, 16] } }
 }
 
+final class FractionalPixelReceipt: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sizes: [[Int]] = []
+    func receive(_ frame: CompositedFrame) {
+        lock.lock(); sizes.append([CVPixelBufferGetWidth(frame.pixelBuffer!), CVPixelBufferGetHeight(frame.pixelBuffer!)]); lock.unlock()
+    }
+    func valid() -> Bool { lock.lock(); defer { lock.unlock() }; return sizes == Array(repeating: [17, 18], count: 3) }
+}
+
 final class TransferRestartGate: @unchecked Sendable {
     let entered = ClockLatch()
     private let lock = NSLock()
@@ -238,6 +247,39 @@ final class EscapedPrivatePixels: @unchecked Sendable {
         precondition(current.snapshot().closed && s.snapshot().closed && clean.snapshot().closed)
         print("PASS cross-canvas-token: same-canvas replacement preserves other planes; removal closes every registered plane")
     }
+    static func fractionalGeometry() async throws {
+        let requested = CGSize(width: 16.5, height: 17.5), received = FractionalPixelReceipt()
+        let engine = CompositionEngine(screenProvider: { nil }, cameraProvider: { nil },
+            sourcePayloadProvider: { [:] }, overlayContextProvider: { .empty }, sceneRegistryProvider: { [:] },
+            transitionRequestProvider: { nil }, annotationProvider: { .empty }, canvasSize: requested, frameRate: 30)
+        let exited = ClockLatch()
+        await engine.setValidationClockHooks(.init(onExit: { exited.signal() }))
+        let scene = Scene(name: "Fractional source geometry", layers: [LayerNode(name: "Owned shape", payload: .shape(.init(fillColorHex: "#4070C0")), transform: .fullscreen)])
+        await engine.prepareValidation(scene: scene, canvasSize: requested, frameRate: 30, at: .zero)
+        await exited.wait()
+        let sourceRequest = try engine.sourceFrameResourceRequest(canvasSize: requested)
+        precondition(sourceRequest.descriptor.width == 17 && sourceRequest.descriptor.height == 18,
+            "Source admission must round geometry exactly as the actual renderer")
+        let domain = StableFrameDomainID(workspace: UUID(), kind: .validation, outputID: "fractional", plane: .program), generation = UUID(), token = UUID()
+        let batch = try RawVideoResourceCoordinator.shared.reserveBatch([sourceRequest, .init(domain: domain,
+            descriptor: .init(width: 17, height: 18, capacity: 4), sessionGeneration: generation)])
+        let sourceChild = try batch.selecting(domain: sourceRequest.domain), child = try batch.selecting(domain: domain)
+        let lease = try await engine.installFrameDelivery(token: token, domain: domain, generation: generation,
+            bank: child.banks[0], sourceBank: sourceChild.banks[0], sourceReceipt: sourceChild, sink: { received.receive($0) })
+        RawVideoResourceCoordinator.shared.rollback(batch); RawVideoResourceCoordinator.shared.rollback(sourceChild)
+        let probe = await probe(engine, token: token, plane: "program")
+        let compatibility = FractionalPixelReceipt(), compatibilityToken = UUID()
+        await engine.addSink(token: compatibilityToken, sink: { compatibility.receive($0) })
+        let compatibilityProbe = await self.probe(engine, token: compatibilityToken, plane: "program")
+        for frame in 1...3 { await engine.renderValidationFrame(at: CMTime(value: Int64(frame), timescale: 30)); await engine.validationFrameDeliveryBarrier(); await probe.barrier(); await compatibilityProbe.barrier() }
+        let metrics = await engine.metricsSnapshot()
+        precondition(metrics.attempts == 3 && metrics.rendered == 3 && metrics.failed == 0 && received.valid() && compatibility.valid(),
+            "Fractional canvas must retain actual rounded renderer output and healthy delivery")
+        let reusedRequest = try engine.sourceFrameResourceRequest(canvasSize: requested)
+        precondition(reusedRequest == sourceRequest)
+        await engine.removeFrameDelivery(lease); await engine.removeSink(compatibilityToken); RawVideoResourceCoordinator.shared.rollback(child)
+        print("PASS fractional-geometry: actual16.5x17.5 canvas renders/delivers17x18 three times using one rounded admitted source generation")
+    }
     static func restartPublicationIdentity() async {
         let engine = await engine(), gate = TransferRestartGate(), receipt = RestartPixelReceipt(), token = UUID()
         await engine.addSink(token: token, sink: { receipt.receive($0) })
@@ -299,6 +341,7 @@ final class EscapedPrivatePixels: @unchecked Sendable {
         print("PASS canceled-admission: explicit pending ticket rejects late registration without UUID history")
     }
     static func main() async throws {
+        if CommandLine.arguments.contains("--fractional-geometry") { try await fractionalGeometry(); return }
         if CommandLine.arguments.contains("--sequence-negative-control") { await restartPublicationIdentity(); preconditionFailure("Sequence-only negative must fail") }
         try await rawEscapes()
         if CommandLine.arguments.contains("--negative-control") { preconditionFailure("Negative control must fail the unchanged raw-holder isolation assertion") }
