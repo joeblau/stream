@@ -17,6 +17,8 @@ struct StudioControlRequest: Codable, Sendable {
     var page: Int?
     var text: String?
     var cursor: Int?
+    /// Negotiate bounded response framing in the authentication handshake.
+    var responseChunks: Bool?
 }
 struct StudioControlProtocolError: Codable, Equatable, Error, Sendable {
     var code: String
@@ -32,6 +34,8 @@ struct StudioControlCapability: Codable, Equatable, Sendable {
     var argument: String? = nil
     var sourceKind: String? = nil
     var sourceAvailable: Bool? = nil
+    var requiresConfirmation: Bool? = nil
+    var target: StudioControlTarget? = nil
 }
 struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var projectID: String
@@ -54,6 +58,7 @@ struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var chat: StudioControlChatState? = nil
     var interview: StudioControlInterviewState? = nil
     var recordingCountdown: Int? = nil
+    var transport: StudioControlTransportState? = nil
     var visuals: [String: StudioControlVisualState]? = nil
 }
 /// Resource-scoped visual intent receipts. Visibility reports the actual
@@ -129,7 +134,7 @@ struct StudioControlSession {
         guard let clientID, clientStillPaired(clientID), let sessionID, request.sessionID == sessionID else {
             return .init(code: "unauthorized", message: "This connection needs a fresh authenticated session.")
         }
-        guard request.type != .authenticate, request.token == nil else {
+        guard request.type != .authenticate, request.token == nil, request.responseChunks == nil else {
             return .init(code: "invalidRequest", message: "Authenticate only once per connection; tokens belong only in the handshake.")
         }
         guard !requests.contains(request.id) else { return .init(code: "duplicateRequest", message: "This request ID was already handled. It will not execute again.") }
@@ -172,6 +177,32 @@ struct StudioControlFrameBuffer {
         guard buffer.count <= Self.maximumFrameBytes else { throw StudioControlProtocolError(code: "messageSize", message: "A JSON message exceeded 65536 bytes.") }
         return frames
     }
+}
+
+struct StudioControlTarget: Codable, Equatable, Sendable {
+    var kind: String
+    var id: String
+    var name: String
+    var eventID: String? = nil
+    var provider: String? = nil
+    var channelID: String? = nil
+}
+struct StudioControlTransportState: Codable, Equatable, Sendable {
+    struct Destination: Codable, Equatable, Sendable {
+        var id: UUID
+        var name: String
+        var state: String
+        var eventKey: String?
+        var managedStart: String?
+        var localStop: String?
+        var remoteEnd: String?
+        var endingPending: Bool
+        var confirmationPending: Bool
+    }
+    var destinations: [Destination]
+    var confirmationPending: Bool
+    var endingPending: Bool
+    var endingCountdown: Int?
 }
 
 /// A negotiated framing extension: reconstruct the complete original response

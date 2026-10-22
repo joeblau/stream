@@ -112,6 +112,11 @@ struct MainWindowView: View {
         }, didDismiss: {
             focusedPanel = panelBeforeSheet; panelBeforeSheet = nil
         }))
+        .background(StudioControllerEndingReview(coordinator: controller.ending, willPresent: {
+            panelBeforeSheet = focusedPanel
+        }, didDismiss: {
+            focusedPanel = panelBeforeSheet; panelBeforeSheet = nil
+        }))
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button { workspace.showProjects.toggle() } label: {

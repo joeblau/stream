@@ -5,6 +5,7 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
                          capabilities: Map<string, Capability>): KeyFeedback {
   const unavailable = (title: string) => ({ title, badge: "!", color: "#5b3340", unavailable: true });
   if (status !== "Connected" || !snapshot) return unavailable(status);
+  if (snapshot.receiptsPending) return unavailable("Updating\nState");
   if (!binding.commandID || !binding.projectID) return unavailable("Choose\nCommand");
   if (binding.projectID !== snapshot.projectID) return unavailable("Project\nChanged");
   const command = capabilities.get(binding.commandID);
@@ -12,11 +13,37 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
   let sourceUnavailable = false;
   let badge = command.available ? "READY" : "WAIT";
   let color = command.available ? "#233b4a" : "#5a4828";
-  const scene = /^scene\.([0-9a-f-]+)\.select$/i.exec(binding.commandID)?.[1]?.toLowerCase();
+  const scene = /^scene\.([0-9a-f-]+)\.(?:select|run)$/i.exec(binding.commandID)?.[1]?.toLowerCase();
   if (scene && snapshot.programSceneID?.toLowerCase() === scene) { badge = "PGM"; color = "#983c4a"; }
   else if (scene && snapshot.stagedSceneID?.toLowerCase() === scene) { badge = "PVW"; color = "#266848"; }
   if (binding.commandID.startsWith("output.stream.")) {
     badge = snapshot.stream.toUpperCase(); color = snapshot.stream === "live" ? "#983c4a" : "#233b4a";
+  }
+  if (binding.commandID === "output.stream.endAll" && snapshot.transport) {
+    const transport = snapshot.transport;
+    badge = transport.confirmationPending ? "CONFIRM IN STUDIO" : transport.endingCountdown !== undefined ? `END IN ${transport.endingCountdown}`
+      : transport.endingPending ? "ENDING" : snapshot.stream === "idle" ? "LOCAL IDLE" : snapshot.stream.toUpperCase();
+    color = transport.confirmationPending || transport.endingPending ? "#766021" : color;
+  }
+  const destination = /^destination\.([0-9a-f-]+)(?:\.event\.([0-9a-f]{64}))?\.(start|stop|endRemote|endBoth|reviewRemote)$/i.exec(binding.commandID);
+  if (destination && snapshot.transport) {
+    const target = snapshot.transport.destinations.find(target => target.id.toLowerCase() === destination[1].toLowerCase());
+    if (!target) return unavailable("Missing\nDestination");
+    const ending = destination[3] === "endRemote" || destination[3] === "endBoth" || destination[3] === "reviewRemote";
+    // Event-bound keys cannot borrow receipts from a different current event.
+    if (destination[2] && destination[2] !== target.eventKey) { badge = "EVENT NOT CURRENT"; color = "#5a4828"; }
+    else if (target.confirmationPending) { badge = "CONFIRM IN STUDIO"; color = "#766021"; }
+    else if (target.endingPending && ending) { badge = "ENDING"; color = "#766021"; }
+    else if (ending && target.remoteEnd) {
+      badge = target.remoteEnd === "ended" ? "REMOTE ENDED" : `REMOTE ${target.remoteEnd.toUpperCase()}`;
+      color = target.remoteEnd === "ended" ? "#266848" : "#766021";
+      if (destination[3] === "endBoth" && target.remoteEnd === "ended") {
+        badge = target.state === "idle" && target.localStop === "Stopped" ? "ENDED" : target.localStop === "Stop unconfirmed" ? "LOCAL STOP UNKNOWN" : `LOCAL ${target.state.toUpperCase()}`;
+        color = badge === "ENDED" ? "#266848" : "#766021";
+      }
+    } else if (destination[3] === "start" && target.managedStart) {
+      badge = target.managedStart === "review" ? "REVIEW IN STUDIO" : target.managedStart.toUpperCase(); color = "#766021";
+    } else { badge = target.state === "idle" ? "LOCAL IDLE" : target.state.toUpperCase(); color = target.state === "live" ? "#983c4a" : "#233b4a"; }
   }
   if (binding.commandID.startsWith("output.record.")) {
     badge = snapshot.recording.toUpperCase(); color = snapshot.recording === "recording" ? "#983c4a" : snapshot.recording === "paused" ? "#766021" : "#233b4a";

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Network
 import StreamCore
@@ -130,6 +131,7 @@ import StreamCore
         print("PASS: actual distinct 256-layer Program + 256-layer Preview receipts survive \(original.count)-byte response in \(frames.count) bounded chunks (largest \(frames.map(\.count).max() ?? 0) bytes), exact full-state reassembly and explicit legacy-client rejection")
     }
     static func main() async throws {
+        _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("stream-deck-native-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -206,9 +208,81 @@ import StreamCore
         try run("comments.hide")
         try require(dispatcher.controllerChatSnapshot()?.stagedVisible == false && dispatcher.controllerChatSnapshot()?.programVisible == true, "Hide changed Program before Take")
         try require(dispatcher.availabilityError(for: .selectNextComment) != nil, "Queue boundary did not reject next")
+        // A direct scene run uses the same Take hooks and can publish the
+        // currently selected edited preview without restaging away its work.
+        try run("scene.\(scene.id.rawValue.uuidString).run")
+        try require(dispatcher.controllerChatSnapshot()?.programVisible == false, "Run scene discarded edited preview before Take")
+        let alternate = Scene(name: "Second Transport Scene", layers: [])
+        try require(dispatcher.execute(.insertScene(alternate)).error == nil, "Insert alternate run target")
+        let runID = "scene.\(alternate.id.rawValue.uuidString).run"
+        try run("scene.\(scene.id.rawValue.uuidString).run")
+        try require(runtime.previewProgram.programScene?.id == scene.id, "Run scene failed to publish target")
+        try require(dispatcher.execute(.renameScene(alternate.id, to: "Renamed Transport Scene")).error == nil, "Rename run target")
+        try require(dispatcher.catalogueActions().first(where: { $0.id == runID })?.title.contains("Renamed Transport Scene") == true, "Run binding lost renamed scene")
+        try run(runID)
+        try require(runtime.previewProgram.programScene?.id == alternate.id, "Direct run did not update actual Program")
+        try run("studio.scene.previous")
+        try require(runtime.previewProgram.stagedScene?.id != alternate.id && runtime.previewProgram.programScene?.id == alternate.id,
+            "Previous scene changed Program before Take")
+        try run("studio.revert")
+        try require(runtime.previewProgram.stagedScene == runtime.previewProgram.programScene, "Revert failed to restore authoritative Program")
+        try run("studio.scene.previous"); try run("studio.scene.next")
+        try require(runtime.previewProgram.stagedScene?.id == alternate.id, "Next scene did not select the adjacent scene")
+        try run("studio.directLive.enable")
+        try require(dispatcher.state.directLiveEditing, "Direct Live action did not set native editing policy")
+        try run("studio.directLive.disable")
+        try require(!dispatcher.state.directLiveEditing, "Preview-mode action did not set native editing policy")
+        try run("scene.\(scene.id.rawValue.uuidString).run")
+        try require(dispatcher.execute(.deleteScene(alternate.id)).error == nil && !dispatcher.catalogueActions().contains { $0.id == runID }, "Deleted run scene retained binding")
+
+        let destinationSession = runtime.controller.destinations
+        let destinationPrefix = "destination.\(budgetDestination.id.uuidString)"
+        try require(dispatcher.catalogueActions().contains { $0.id == destinationPrefix + ".start" }, "Missing selected destination Start")
+        let managed = StreamDestination(name: "Owned event fixture", transport: .rtmp,
+            providerBinding: .init(provider: .youtube, channelID: "fixture-owner", eventID: "fixture-event"))
+        destinationSession.draft.append(managed)
+        destinationSession.credentials[managed.id] = .init(endpoint: "rtmp://127.0.0.1/live", streamKey: "fixture-only")
+        try require(destinationSession.apply(), "Save event-bound test destination")
+        let binding = managed.providerBinding!
+        try require(StudioDestinationCommand.eventKey(binding) == StudioDestinationCommand.eventKey(binding), "Event key is unstable")
+        try require(StudioDestinationCommand.eventKey(.init(provider: .youtube, channelID: "a", eventID: "bc")) != StudioDestinationCommand.eventKey(.init(provider: .youtube, channelID: "ab", eventID: "c")), "Ambiguous event identity collision")
+        try require(StudioDestinationCommand.eventKey(.init(provider: .youtube, channelID: "a")) != StudioDestinationCommand.eventKey(.init(provider: .youtube, channelID: "a", eventID: "")), "Optional event identity collision")
+        let eventPrefix = "destination.\(managed.id.uuidString).event.\(StudioDestinationCommand.eventKey(binding))"
+        let capturedStart = StudioCommand.destination(.init(kind: .start, id: managed.id, binding: binding, eventBound: true))
+        try require(dispatcher.catalogueActions().contains { $0.id == eventPrefix + ".start" }, "Missing exact event binding")
+        if let index = destinationSession.draft.firstIndex(where: { $0.id == managed.id }) { destinationSession.draft[index].name = "Renamed owned event" }
+        try require(destinationSession.apply(), "Rename selected event")
+        try require(dispatcher.catalogueActions().first(where: { $0.id == eventPrefix + ".start" })?.title.contains("Renamed owned event") == true, "Event identity changed on rename")
+        try run(eventPrefix + ".start")
+        try require(runtime.controller.managedStart?.entries.contains { $0.id == managed.id } == true && !runtime.controller.outputSessionActive,
+            "Event-bound Start bypassed native managed review")
+        try run(eventPrefix + ".stop")
+        try require(runtime.controller.managedStart?.entries.contains { $0.id == managed.id } == false,
+            "Explicit Stop did not cancel pending native managed review")
+        var remoteCalls = 0
+        let endingTarget = StudioEndingTarget(id: managed.id, name: "Renamed owned event", session: nil, binding: binding)
+        runtime.controller.ending.bind(.init(targets: { [endingTarget] }, stopLocal: { _ in .superseded },
+            localReceipt: { _ in .superseded }, remote: { _, _ in remoteCalls += 1; return .init(.ended) }, canEndRemote: { _ in true }))
+        let endID = eventPrefix + ".endRemote"
+        try require(dispatcher.catalogueActions().first(where: { $0.id == endID })?.requiresConfirmation == true, "End Remote omitted confirmation descriptor")
+        try run(endID)
+        try require(remoteCalls == 0 && dispatcher.controllerTransportSnapshot().confirmationPending, "Remote end mutated provider before studio confirmation")
+        guard let reviewID = dispatcher.controllerEndingReviewID() else { throw NSError(domain: "DeckNativeHarness", code: 9) }
+        dispatcher.cancelControllerEndingReview(reviewID)
+        try require(!dispatcher.controllerTransportSnapshot().confirmationPending && remoteCalls == 0, "Disconnect cancellation did not retire unconfirmed review")
+        try run(endID)
+        runtime.controller.ending.confirmControllerReview(dispatcher.controllerEndingReviewID()!)
+        for _ in 0..<100 where runtime.controller.ending.isWorking { try await Task.sleep(for: .milliseconds(10)) }
+        try require(remoteCalls == 1 && dispatcher.controllerTransportSnapshot().destinations.first(where: { $0.id == managed.id })?.remoteEnd == "ended", "Confirmed native end lacks authoritative receipt")
+        if let index = destinationSession.draft.firstIndex(where: { $0.id == managed.id }) { destinationSession.draft[index].providerBinding?.eventID = "replacement-event" }
+        try require(destinationSession.apply(), "Change saved event")
+        try require(dispatcher.execute(capturedStart).error != nil, "Captured event start silently retargeted replacement")
+        destinationSession.remove(managed.id); try require(destinationSession.apply(), "Delete event-bound destination")
+        try require(!dispatcher.catalogueActions().contains { $0.id.hasPrefix("destination.\(managed.id.uuidString).") }, "Deleted destination retained command bindings")
         try require(!runtime.controller.outputSessionActive && !runtime.recorder.state.isActive, "Controller test started an output")
         try await visualActions(runtime, directory: directory)
         try maximumVisualReceipts(runtime)
-        print("PASS: actual dispatcher stable layer/group/global-overlay catalogue, overlay rename/delete/toggle, preview/program policy, numeric gain/mute, idle recording countdown, comment staging/Take/hide feedback, queue boundary; no output started")
+        if ProcessInfo.processInfo.environment["STREAM_DECK_VALIDATE_TRANSPORT"] == "1" { try await DeckTransportFixtures.run(directory: directory) }
+        print("PASS: actual dispatcher stable layer/group/global-overlay catalogue, overlay rename/delete/toggle, preview/program policy, numeric gain/mute, idle recording countdown, comment staging/Take/hide feedback, queue boundary, direct scene-run/rename/delete, destination/event discovery/rename/delete, stale event rejection, reviewed remote-end receipt; no public output started")
     }
 }

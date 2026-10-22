@@ -25,11 +25,18 @@ import Network
     private var execute: (String, Double?, Double?, Int?, String?) -> StudioControlCommandResult = { id, _, _, _, _ in .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "No studio is bound.")) }
     private var cancelledRemoteRun: (UUID) -> Void = { _ in }
     private var currentRunID: () -> UUID? = { nil }
+    private var currentEndingReviewID: () -> UUID? = { nil }
+    private var cancelEndingReview: (UUID) -> Void = { _ in }
     var interactionBlocked: () -> Bool = { false }
     /// Optional external-adapter grants, checked after authentication and
     /// before every command. Returning nil leaves normal paired clients alone.
     var clientAuthorization: (UUID, String?) -> StudioControlProtocolError? = { _, _ in nil }
     var authenticatedClientIDs: Set<UUID> { Set(peers.values.compactMap { $0.session.clientID }) }
+    private struct Outbound {
+        var frames: [Data]
+        var index = 0
+        var close: Bool
+    }
     private final class Peer {
         let id = UUID()
         let connection: NWConnection
@@ -38,7 +45,10 @@ import Network
         var subscribed = false
         var closing = false
         var pendingSends = 0
+        var responseChunks = false
+        var outbound: [Outbound] = []
         var ownedMacroRun: UUID?
+        var ownedEndingReview: UUID?
         var rateWindowStart = ProcessInfo.processInfo.systemUptime
         var requestsInWindow = 0
         var handshakeTimeout: Task<Void, Never>?
@@ -56,7 +66,8 @@ import Network
             var result: [StudioControlCapability] = dispatcher?.catalogueActions().map { .init(id: $0.id, title: $0.title, category: $0.category,
                                                       available: $0.command != nil && $0.unavailableReason == nil,
                                                       unavailableReason: $0.unavailableReason, kind: "command",
-                                                      argument: $0.id.hasSuffix(".source.select") ? "source" : $0.id == "output.record.marker" ? "text" : $0.id.hasPrefix("pdf.") && $0.id.hasSuffix(".goto") ? "page" : nil, sourceKind: $0.sourceKind, sourceAvailable: $0.sourceAvailable) } ?? []
+                                                      argument: $0.id.hasSuffix(".source.select") ? "source" : $0.id == "output.record.marker" ? "text" : $0.id.hasPrefix("pdf.") && $0.id.hasSuffix(".goto") ? "page" : nil, sourceKind: $0.sourceKind, sourceAvailable: $0.sourceAvailable,
+                                                      requiresConfirmation: $0.requiresConfirmation, target: $0.target) } ?? []
             for target in dispatcher?.controllerTargets() ?? [] where target.kind == .value {
                 result.append(.init(id: target.id, title: target.title, category: "Audio Levels", available: target.unavailableReason == nil, unavailableReason: target.unavailableReason, kind: "value"))
             }
@@ -82,7 +93,7 @@ import Network
                                     media: member.media.rawValue, slot: route?.slot, programAllowed: route?.programAllowed ?? false,
                                     monitorAllowed: route?.monitorAllowed ?? false, screenApproved: member.screenApproved, screenSharing: member.screenSharing)
                             }),
-                         recordingCountdown: dispatcher.controllerRecordingCountdown(), visuals: dispatcher.controllerVisualSnapshot())
+                         recordingCountdown: dispatcher.controllerRecordingCountdown(), transport: dispatcher.controllerTransportSnapshot(), visuals: dispatcher.controllerVisualSnapshot())
         }
         execute = { [weak self, weak dispatcher] id, value, delta, page, text in
             guard let self, let dispatcher else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "The studio is unavailable.")) }
@@ -123,6 +134,8 @@ import Network
             }
             return .init(commandID: id, succeeded: true)
         }
+        currentEndingReviewID = { [weak dispatcher] in dispatcher?.controllerEndingReviewID() }
+        cancelEndingReview = { [weak dispatcher] id in dispatcher?.cancelControllerEndingReview(id) }
         currentRunID = { [weak dispatcher] in dispatcher?.macros.isRunning == true ? dispatcher?.macros.progress.runID : nil }
         cancelledRemoteRun = { [weak dispatcher] runID in
             if dispatcher?.macros.progress.runID == runID { dispatcher?.macros.cancel() }
@@ -153,6 +166,7 @@ import Network
         stop(); stateObservation = nil
         capabilities = { [] }; interactionBlocked = { true }
         currentRunID = { nil }; cancelledRemoteRun = { _ in }
+        currentEndingReviewID = { nil }; cancelEndingReview = { _ in }
     }
     private func start() {
         guard listener == nil else { return }
@@ -238,6 +252,7 @@ import Network
         if peer.session.clientID == nil {
             if let error = peer.session.authorize(request, tokenForClient: pairingStore.token) { sendError(error, id: request.id, peer: peer, close: true); return }
             if let error = clientAuthorization(peer.session.clientID!, nil) { sendError(error, id: request.id, peer: peer, close: true); return }
+            peer.responseChunks = request.responseChunks == true
             peer.handshakeTimeout?.cancel(); peer.handshakeTimeout = nil
             objectWillChange.send()
             send(.init(type: "authenticated", id: request.id, sessionID: peer.session.sessionID, snapshot: currentSnapshot()), peer: peer)
@@ -269,8 +284,10 @@ import Network
                        commands: page, nextCursor: end < all.count ? end : nil, totalCommands: all.count), peer: peer)
         case .command:
             let commandID = request.commandID!
+            let previousReview = currentEndingReviewID()
             let previousRun = currentRunID()
             let result = execute(commandID, request.value, request.delta, request.page, request.text)
+            if result.succeeded, currentEndingReviewID() != previousReview { peer.ownedEndingReview = currentEndingReviewID() }
             if result.succeeded, commandID.hasPrefix("macro."), commandID.hasSuffix(".run"), currentRunID() != previousRun { peer.ownedMacroRun = currentRunID() }
             send(.init(type: "result", id: request.id, sessionID: peer.session.sessionID, snapshot: currentSnapshot(), result: result), peer: peer)
         }
@@ -280,16 +297,34 @@ import Network
     }
     private func send(_ response: StudioControlResponse, peer: Peer, close: Bool = false) {
         guard peers[peer.id] != nil, !peer.closing else { return }
-        guard var data = try? JSONEncoder().encode(response), data.count <= StudioControlFrameBuffer.maximumFrameBytes,
-              peer.pendingSends < 8 else { disconnect(peer); return }
+        let frames: [Data]
+        do { frames = try StudioControlResponseFramer.frames(response, chunking: peer.responseChunks) }
+        catch {
+            let failure = error as? StudioControlProtocolError ?? .init(code: "encoding", message: "The local response could not be encoded.")
+            sendError(failure, id: response.id, peer: peer, close: true); return
+        }
+        guard peer.outbound.count < 8 else { disconnect(peer); return }
         if close { peer.closing = true }
-        data.append(10); peer.pendingSends += 1
+        peer.outbound.append(.init(frames: frames.map { frame in var data = frame; data.append(10); return data }, close: close))
+        sendNextFrame(peer)
+    }
+    /// One bounded frame in flight per peer. Large complete responses cannot
+    /// overflow the old eight-send backpressure budget or interleave bytes.
+    private func sendNextFrame(_ peer: Peer) {
+        guard peers[peer.id] != nil, peer.pendingSends == 0, !peer.outbound.isEmpty else { return }
+        let data = peer.outbound[0].frames[peer.outbound[0].index]
+        peer.outbound[0].index += 1; peer.pendingSends = 1
         let peerID = peer.id
         peer.connection.send(content: data, completion: .contentProcessed { [weak self] error in
             Task { @MainActor [weak self] in
                 guard let self, let current = self.peers[peerID] else { return }
-                current.pendingSends -= 1
-                if close || error != nil { self.disconnect(current) }
+                current.pendingSends = 0
+                if error != nil { self.disconnect(current); return }
+                if current.outbound[0].index == current.outbound[0].frames.count {
+                    let sent = current.outbound.removeFirst()
+                    if sent.close { self.disconnect(current); return }
+                }
+                self.sendNextFrame(current)
             }
         })
     }
@@ -319,6 +354,7 @@ import Network
     private func disconnect(_ peer: Peer) {
         guard peers.removeValue(forKey: peer.id) != nil else { return }
         peer.handshakeTimeout?.cancel(); peer.connection.cancel()
+        if let review = peer.ownedEndingReview { cancelEndingReview(review) }
         if let run = peer.ownedMacroRun { cancelledRemoteRun(run) }
         connectedClients = peers.count
     }

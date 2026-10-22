@@ -69,6 +69,8 @@ enum LayerDistribution: String, CaseIterable, Sendable {
 enum StudioCommand: Equatable, Sendable {
     // Output sessions (W02 state machines).
     case startStream
+    case destination(StudioDestinationCommand)
+    case runScene(SceneID)
     case stopStream
     case startPreview
     case stopPreview
@@ -608,6 +610,15 @@ enum StudioCommand: Equatable, Sendable {
     /// Short human label for rejection notices and future automation logs.
     var label: String {
         switch self {
+        case .destination(let action):
+            switch action.kind {
+            case .start: return "Start Destination"
+            case .stop: return "Stop Local Destination"
+            case .endRemote: return "End Remote Event"
+            case .endBoth: return "End Remote Events and Local Outputs"
+            case .reviewRemote: return "Review Remote Event"
+            }
+        case .runScene: return "Run Scene"
         case .startStream: return "Go Live"
         case .stopStream: return "End Stream"
         case .startPreview: return "Start Preview"
@@ -979,6 +990,8 @@ final class StudioCommandDispatcher: ObservableObject {
     /// The W03 preview/program model: staged vs program scene snapshots.
     private let previewProgram: PreviewProgramModel
     private weak var chatCoordinator: StudioChatCoordinator?
+    private var transportObservation: AnyCancellable?
+    private var lastControllerTransport: StudioControlTransportState?
     private var chatObservation: AnyCancellable?
     private weak var interviewManager: NativeInterviewManager?
     private var interviewObservation: AnyCancellable?
@@ -1188,6 +1201,7 @@ final class StudioCommandDispatcher: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+        observeControllerTransport()
         Publishers.Merge(soundboard.objectWillChange, controller.capturePool.objectWillChange)
             .sink { [weak self] _ in Task { @MainActor [weak self] in self?.refreshState() } }
             .store(in: &cancellables)
@@ -1198,6 +1212,17 @@ final class StudioCommandDispatcher: ObservableObject {
             .store(in: &cancellables)
     }
 
+    func observeControllerTransport() {
+        transportObservation = controller.ending.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let current = self.controllerTransportSnapshot()
+                guard self.lastControllerTransport != current else { return }
+                self.lastControllerTransport = current
+                self.refreshState()
+            }
+        }
+    }
     func catalogueActions(includeMacros: Bool = true) -> [StudioPaletteAction] {
         paletteActions(scenes: sceneStore.scenes, sources: sceneStore.sources, stagedScene: previewProgram.stagedScene, includeMacros: includeMacros)
     }
@@ -1379,7 +1404,10 @@ final class StudioCommandDispatcher: ObservableObject {
     /// rules, including the proposed scene/visibility change, before capture.
     func automationCapturePermissions(for command: StudioCommand?) -> Set<PermissionsManager.Kind> {
         var staged = previewProgram.stagedScene
-        if case .selectScene(let id) = command { staged = sceneStore.scenes.first { $0.id == id } }
+        switch command {
+        case .selectScene(let id), .runScene(let id): staged = sceneStore.scenes.first { $0.id == id }
+        default: break
+        }
         if case .setLayerVisibility(let id, let visible, let sceneID) = command,
            sceneID == nil || sceneID == staged?.id, let index = staged?.layers.firstIndex(where: { $0.id == id }) {
             staged?.layers[index].isVisible = visible
@@ -1394,6 +1422,10 @@ final class StudioCommandDispatcher: ObservableObject {
         var secondaryRequested = controller.secondaryCanvasDemanded
         if case .startStream = command {
             secondaryRequested = secondaryRequested || controller.destinations.enabled.contains { $0.canvas == .secondary }
+        }
+        if case .destination(let action) = command, action.kind == .start,
+           let id = action.id, controller.destinations.saved.first(where: { $0.id == id })?.canvas == .secondary {
+            secondaryRequested = true
         }
         let registry = SceneGraph.index(sceneStore.scenes)
         let layers = [previewProgram.programScene, staged].compactMap { $0 }
@@ -1491,7 +1523,7 @@ final class StudioCommandDispatcher: ObservableObject {
         }
         if !executingMacroStep {
             switch command {
-            case .stopStream, .stopRecording: macros.cancel()
+            case .stopStream, .stopRecording, .destination: macros.cancel()
             default: break
             }
         }
@@ -1542,7 +1574,7 @@ final class StudioCommandDispatcher: ObservableObject {
     private func validate(_ command: StudioCommand) -> StudioCommandError? {
         if macros.isRunning && !executingMacroStep {
             switch command {
-            case .startStream, .startRecording, .take, .runRundownCue, .rundownPlay:
+            case .startStream, .startRecording, .take, .runScene, .runRundownCue, .rundownPlay:
                 return .unavailable("A show macro owns output transitions. Cancel it before starting a conflicting action.")
             default: break
             }
@@ -1555,6 +1587,10 @@ final class StudioCommandDispatcher: ObservableObject {
         case .interview(let action):
             return interviewManager?.availabilityError(for: action) ?? (interviewManager == nil
                 ? .unavailable("Create an interview room in Guests first.") : nil)
+        case .destination(let action): return destinationAvailability(action)
+        case .runScene(let id):
+            guard sceneStore.scenes.contains(where: { $0.id == id }) else { return .invalidTarget("The scene no longer exists.") }
+            return nil
         case .startStream:
             guard !controller.isRehearsing else { return .unavailable("End local rehearsal before public Go Live.") }
             guard controller.streamState.canStart else {
@@ -1568,8 +1604,8 @@ final class StudioCommandDispatcher: ObservableObject {
             guard errors.isEmpty else { return .invalidValue(errors.joined(separator: "\n")) }
             return nil
         case .stopStream:
-            return controller.streamState.isActive
-                ? nil : .unavailable("No stream is running.")
+            return controller.streamState.isActive || controller.managedStartHasEntries
+                ? nil : .unavailable("No stream or managed start review is running.")
         case .startPreview:
             return controller.previewState == .idle
                 ? nil : .unavailable("The preview is already running.")
@@ -2505,9 +2541,15 @@ final class StudioCommandDispatcher: ObservableObject {
 
     private func perform(_ command: StudioCommand) {
         switch command {
+        case .destination(let action): performDestination(action)
+        case .runScene(let id):
+            sceneStore.selectedID = id
+            if previewProgram.stagedScene?.id != id { previewProgram.stage(sceneStore.selected) }
+            publishStaged()
         case .interview: break // execute preserves the manager's synchronous acceptance/rejection.
         case .startStream:
             controller.goLive()
+            if controller.managedStartHasEntries { StudioAutomationEndpoint.shared.focusStudio() }
             if recorder.preferences.autoRecordOnGoLive, !recorder.state.isActive {
                 recorder.start(stream: controller, useCountdown: false)
             }
@@ -4069,7 +4111,7 @@ private extension StudioCommand {
              .setLayerWeb, .setOverlayWeb,
              .setLayerImage, .setOverlayImage:
             return true
-        case .startStream, .stopStream, .startPreview, .stopPreview,
+        case .destination, .runScene, .startStream, .stopStream, .startPreview, .stopPreview,
              .interview,
              .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile, .addRecordingMarker,
              .startRehearsal, .stopRehearsal,
@@ -4185,5 +4227,143 @@ private extension StreamSessionState {
         case .stopping: return "stopping"
         case .failed: return "failed"
         }
+    }
+}
+
+extension StudioCommandDispatcher {
+    func controllerEndingReviewID() -> UUID? { controller.ending.controllerReview?.id }
+    func cancelControllerEndingReview(_ id: UUID) { controller.ending.cancelControllerReview(id) }
+
+    func controllerDestinationActions() -> [StudioPaletteAction] {
+        var result: [StudioPaletteAction] = []
+        func add(_ id: String, _ title: String, _ action: StudioDestinationCommand, target: StudioControlTarget? = nil) {
+            let command = StudioCommand.destination(action)
+            result.append(.init(id: id, title: title, category: "Destinations", command: command,
+                unavailableReason: availabilityError(for: command)?.description,
+                requiresConfirmation: action.kind == .endRemote || action.kind == .endBoth, target: target))
+        }
+        add("output.stream.endAll", "End All Remote Events and Local Outputs…", .init(kind: .endBoth, id: nil))
+        for destination in controller.destinations.saved {
+            let prefix = "destination.\(destination.id.uuidString)"
+            let activeBinding = controller.ending.targets.first { $0.id == destination.id && $0.session != nil }?.binding
+            func actions(prefix: String, binding: ProviderDestinationBinding?, bound: Bool) {
+                let suffix = bound ? " — Event \(binding?.eventID ?? binding?.channelID ?? "")" : ""
+                for (kind, label) in [(StudioDestinationCommand.Kind.start, "Start"), (.stop, "Stop Local"),
+                    (.endRemote, "End Remote…"), (.endBoth, "End Both…"), (.reviewRemote, "Review Remote")] {
+                    let representedBinding = bound || kind == .start ? binding : activeBinding ?? destination.providerBinding
+                    let target = StudioControlTarget(kind: "destination", id: destination.id.uuidString, name: destination.name,
+                        eventID: representedBinding?.eventID, provider: representedBinding?.provider.rawValue, channelID: representedBinding?.channelID)
+                    add(prefix + "." + kind.rawValue, label + " " + destination.name + suffix,
+                        .init(kind: kind, id: destination.id, binding: binding, eventBound: bound), target: target)
+                }
+            }
+            actions(prefix: prefix, binding: destination.providerBinding, bound: false)
+            var bindings: [ProviderDestinationBinding] = []
+            if let planned = destination.providerBinding { bindings.append(planned) }
+            if let activeBinding, !bindings.contains(activeBinding) { bindings.append(activeBinding) }
+            for binding in bindings {
+                actions(prefix: prefix + ".event." + StudioDestinationCommand.eventKey(binding), binding: binding, bound: true)
+            }
+        }
+        return result
+    }
+
+    private func destinationAvailability(_ action: StudioDestinationCommand) -> StudioCommandError? {
+        let ending = controller.ending
+        guard let id = action.id else {
+            guard action.kind == .endBoth else { return .invalidTarget("Choose a destination.") }
+            return ending.isBound && !ending.activeTargets.isEmpty && !ending.isWorking && ending.controllerReview == nil
+                ? nil : .unavailable("An active local output and an available native ending review are required.")
+        }
+        guard let saved = controller.destinations.saved.first(where: { $0.id == id }) else {
+            return .invalidTarget("The selected destination no longer exists.")
+        }
+        let active = controller.destinationOutputs.states[id]?.isActive == true
+        let target = ending.targets.first { $0.id == id }
+        if action.eventBound {
+            let binding = action.kind == .start ? saved.providerBinding : target?.binding
+            guard binding == action.binding else { return .invalidTarget("The destination event binding changed. Choose the event again.") }
+        }
+        switch action.kind {
+        case .start:
+            guard !controller.resilience.isLocked, !controller.isRehearsing,
+                  controller.destinationOutputs.isPublishingAllowed else { return .unavailable("Unlock the studio and end rehearsal before starting a public output.") }
+            guard !active else { return .unavailable("This destination already owns a publishing session.") }
+            guard ending.controllerReview == nil, !ending.isWorking else { return .unavailable("Finish or cancel the pending ending first.") }
+            if let entry = controller.managedStart?.entries.first(where: { $0.id == id }), entry.phase != .blocked {
+                return .unavailable("Complete this destination's managed start review in Stream Studio.")
+            }
+            if let binding = saved.providerBinding {
+                guard binding.provider == .youtube, controller.managedStart != nil else { return .unavailable("This managed provider requires a supported native event review before publishing.") }
+            } else {
+                let issues = DestinationValidator.startErrors(saved, credentials: controller.destinations.savedCredentials(for: id), program: session.activeSettings.outputProfile)
+                if !issues.isEmpty { return .invalidValue(issues.joined(separator: "\n")) }
+            }
+            if macros.isRunning && !executingMacroStep { return .unavailable("Cancel the running macro before starting a destination.") }
+            return nil
+        case .stop:
+            return active || controller.managedStart?.entries.contains(where: { $0.id == id }) == true
+                ? nil : .unavailable("This destination has no active local session or managed start review.")
+        case .endRemote, .endBoth, .reviewRemote:
+            guard ending.isBound, !ending.isWorking, ending.controllerReview == nil, let target else {
+                return .unavailable("Finish the pending native ending review or wait for ending receipts.")
+            }
+            if action.kind == .endBoth { return active ? nil : .unavailable("This destination has no active local session to end.") }
+            if action.kind == .endRemote { return ending.canEndRemote(target) ? nil : .unavailable("Remote ending requires a supported event and current provider permission. Local stop does not complete a remote event.") }
+            return target.binding?.provider == .youtube ? nil : .unavailable("Remote review is unavailable for this provider.")
+        }
+    }
+
+    private func performDestination(_ action: StudioDestinationCommand) {
+        switch action.kind {
+        case .start:
+            if let id = action.id {
+                controller.startDestination(id)
+                if controller.destinations.saved.first(where: { $0.id == id })?.providerBinding != nil {
+                    StudioAutomationEndpoint.shared.focusStudio()
+                }
+                soundboard.syncProgramScene(previewProgram.programScene)
+            }
+        case .stop:
+            if let id = action.id { controller.stopDestination(id) }
+        case .endRemote, .endBoth, .reviewRemote:
+            let targets = action.id.map { id in controller.ending.targets.filter { $0.id == id } } ?? controller.ending.activeTargets
+            if action.kind == .reviewRemote { controller.ending.request(targets, mode: .review) }
+            else if controller.ending.requestControllerReview(targets, mode: action.kind == .endRemote ? .remote : .both) {
+                StudioAutomationEndpoint.shared.focusStudio()
+            }
+        }
+    }
+
+    func controllerTransportSnapshot() -> StudioControlTransportState {
+        let ending = controller.ending
+        let destinations = controller.destinations.saved.map { saved -> StudioControlTransportState.Destination in
+            let target = ending.targets.first { $0.id == saved.id }
+            // A prior event/session receipt must not become feedback for a replacement.
+            let report = ending.reports[saved.id].flatMap { report -> StudioEndingReport? in
+                guard let target else { return nil }
+                return report.target.matches(target) || (target.session == nil && report.local == .stopped && target.binding == report.target.binding) ? report : nil
+            }
+            let phase = controller.managedStart?.entries.first { $0.id == saved.id }?.phase
+            let managed: String? = phase.map { switch $0 { case .checking: "checking"; case .review: "review"; case .preparing: "preparing"; case .blocked: "blocked" } }
+            let remote = report?.remote.map { receipt in receipt.confirmsEnd ? "ended" : receipt.disposition == .observed ? receipt.event?.state.rawValue ?? "unknown" : receipt.disposition.rawValue }
+            let binding = target?.binding ?? saved.providerBinding
+            let state: String
+            switch controller.destinationOutputs.states[saved.id] ?? .idle {
+            case .idle: state = "idle"
+            case .connecting: state = "connecting"
+            case .live: state = "live"
+            case .reconnecting: state = "reconnecting"
+            case .stopping: state = "stopping"
+            case .failed: state = "failed"
+            }
+            return .init(id: saved.id, name: saved.name, state: state,
+                eventKey: binding.map(StudioDestinationCommand.eventKey), managedStart: managed,
+                localStop: report?.local.rawValue, remoteEnd: remote,
+                endingPending: report?.remotePending == true || report?.local == .pending,
+                confirmationPending: ending.controllerReview?.targets.contains { $0.id == saved.id } == true)
+        }
+        return .init(destinations: destinations, confirmationPending: ending.controllerReview != nil,
+            endingPending: ending.isWorking, endingCountdown: ending.countdown)
     }
 }

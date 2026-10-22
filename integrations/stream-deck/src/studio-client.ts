@@ -1,16 +1,25 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
+import { NativeResponseAssembler } from "./response-assembler.ts";
 
 export type Pairing = { version: 1; clientID: string; token: string; host?: string; port?: number };
-export type Capability = { id: string; title: string; category: string; available: boolean; unavailableReason?: string; kind?: "command" | "value"; argument?: "text" | "page" | "source"; sourceKind?: "camera" | "screen"; sourceAvailable?: boolean };
+export type Capability = { id: string; title: string; category: string; available: boolean; unavailableReason?: string; kind?: "command" | "value"; argument?: "text" | "page" | "source"; sourceKind?: "camera" | "screen"; sourceAvailable?: boolean;
+  requiresConfirmation?: boolean; target?: { kind: string; id: string; name: string; eventID?: string; provider?: string; channelID?: string } };
 export type CommandArgument = { value: number } | { delta: number } | { page: number } | { text: string };
 export type VisualState = { previewVisible?: boolean; programVisible?: boolean; bypassed?: boolean; programBypassed?: boolean; sourceID?: string; programSourceID?: string };
+export type Transport = {
+  destinations: { id: string; name: string; state: string; eventKey?: string; managedStart?: string; localStop?: string; remoteEnd?: string;
+    endingPending: boolean; confirmationPending: boolean }[];
+  confirmationPending: boolean; endingPending: boolean; endingCountdown?: number;
+};
 export type Snapshot = {
   visuals?: Record<string, VisualState>;
-  receiptsPending?: boolean;
   projectID: string; revision: number; stream: string; recording: string; preview: string;
   recordingCountdown?: number;
+  transport?: Transport;
+  /** Local loading marker; never expose a partially assembled resource map. */
+  receiptsPending?: boolean;
   stagedSceneID?: string; programSceneID?: string; pendingStagedEdits: boolean;
   layerVisibility: Record<string, boolean>;
   values?: Record<string, number>; mutes?: Record<string, boolean>;
@@ -45,7 +54,10 @@ function validResponse(value: unknown): value is Response {
         && (c.kind === undefined || c.kind === "command" || c.kind === "value")
         && (c.argument === undefined || c.argument === "text" || c.argument === "page" || c.argument === "source")
         && (c.sourceKind === undefined || c.sourceKind === "camera" || c.sourceKind === "screen")
-        && (c.sourceAvailable === undefined || typeof c.sourceAvailable === "boolean")))) return false;
+        && (c.sourceAvailable === undefined || typeof c.sourceAvailable === "boolean")
+        && (c.requiresConfirmation === undefined || typeof c.requiresConfirmation === "boolean")
+        && (c.target === undefined || (object(c.target) && [c.target.kind, c.target.id, c.target.name].every(value => typeof value === "string")
+          && [c.target.eventID, c.target.provider, c.target.channelID].every(value => value === undefined || typeof value === "string")))))) return false;
   const state = value.snapshot;
   if (["authenticated", "snapshot", "event"].includes(value.type) && !object(state)) return false;
   if (state !== undefined) {
@@ -68,6 +80,21 @@ function validResponse(value: unknown): value is Response {
     if (state.playback !== undefined && (!object(state.playback) || !Object.values(state.playback).every(value => typeof value === "string"))) return false;
     if (state.directLiveEditing !== undefined && typeof state.directLiveEditing !== "boolean") return false;
     if (state.recordingCountdown !== undefined && (!Number.isSafeInteger(state.recordingCountdown) || (state.recordingCountdown as number) < 0 || (state.recordingCountdown as number) > 60)) return false;
+    if (state.transport !== undefined) {
+      const transport = state.transport;
+      if (!object(transport) || typeof transport.confirmationPending !== "boolean" || typeof transport.endingPending !== "boolean"
+          || (transport.endingCountdown !== undefined && (!Number.isSafeInteger(transport.endingCountdown) || (transport.endingCountdown as number) < 0 || (transport.endingCountdown as number) > 120))
+          || !Array.isArray(transport.destinations)) return false;
+      const destinations = new Set<string>();
+      for (const target of transport.destinations) {
+        if (!object(target) || typeof target.id !== "string" || !UUID.test(target.id) || destinations.has(target.id.toLowerCase())
+            || typeof target.name !== "string" || !["idle", "connecting", "live", "reconnecting", "stopping", "failed"].includes(target.state as string)
+            || typeof target.endingPending !== "boolean" || typeof target.confirmationPending !== "boolean"
+            || [target.managedStart, target.localStop, target.remoteEnd].some(value => value !== undefined && typeof value !== "string")
+            || (target.eventKey !== undefined && (typeof target.eventKey !== "string" || !/^[0-9a-f]{64}$/.test(target.eventKey)))) return false;
+        destinations.add(target.id.toLowerCase());
+      }
+    }
     if (state.chat !== undefined && (!object(state.chat) || !Number.isSafeInteger(state.chat.queuedCount) || (state.chat.queuedCount as number) < 0
         || typeof state.chat.ready !== "boolean" || typeof state.chat.stagedVisible !== "boolean" || typeof state.chat.programVisible !== "boolean"
         || [state.chat.selectedID, state.chat.featuredID].some(id => id !== undefined && typeof id !== "string"))) return false;
@@ -117,6 +144,8 @@ export class StudioClient extends EventEmitter {
   private queueDepth = 0;
   private nextSendAt = 0;
   private stopped = false;
+  private assembler = new NativeResponseAssembler();
+  private chunkTimeout?: NodeJS.Timeout;
 
   configure(pairing: Pairing): void {
     this.credentials = validatePairing(pairing);
@@ -143,7 +172,7 @@ export class StudioClient extends EventEmitter {
     socket.on("connect", async () => {
       try {
         const credentials = this.credentials!;
-        const authenticated = await this.request("authenticate", { clientID: credentials.clientID, token: credentials.token });
+        const authenticated = await this.request("authenticate", { clientID: credentials.clientID, token: credentials.token, responseChunks: true });
         if (!authenticated.sessionID || !UUID.test(authenticated.sessionID)) throw new Error("Invalid session response");
         this.sessionID = authenticated.sessionID;
         this.receiveSnapshot(authenticated.snapshot);
@@ -171,6 +200,7 @@ export class StudioClient extends EventEmitter {
     const socket = this.socket; this.socket = undefined; socket?.destroy();
     this.sessionID = undefined; this.snapshot = undefined; this.capabilities.clear(); this.refreshing = false;
     for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error("Stream disconnected; the command will not be retried.")); }
+    clearTimeout(this.chunkTimeout); this.chunkTimeout = undefined; this.assembler = new NativeResponseAssembler();
     this.pending.clear(); this.status = status; this.emit("change");
   }
   private async request(type: string, payload: Record<string, unknown> = {}): Promise<Response> {
@@ -206,11 +236,24 @@ export class StudioClient extends EventEmitter {
       let candidate: unknown;
       try { candidate = JSON.parse(frame.toString("utf8")); }
       catch { this.socket?.destroy(); return; }
+      if (object(candidate) && candidate.type === "responseChunk") {
+        if (this.sessionID && candidate.sessionID !== this.sessionID) { this.socket?.destroy(); return; }
+        try { candidate = this.assembler.accept(candidate); }
+        catch { this.status = "Incompatible"; this.socket?.destroy(); return; }
+        if (this.assembler.pendingCount && !this.chunkTimeout) {
+          this.chunkTimeout = setTimeout(() => { this.socket?.destroy(); }, 5000);
+        } else if (!this.assembler.pendingCount) { clearTimeout(this.chunkTimeout); this.chunkTimeout = undefined; }
+        if (this.snapshot && (this.assembler.pendingSnapshotRevision ?? -1) > this.snapshot.revision && !this.snapshot.receiptsPending) {
+          this.snapshot = { ...this.snapshot, receiptsPending: true }; this.emit("change");
+        }
+        if (candidate === undefined) continue;
+      }
       if (!validResponse(candidate)) {
         this.status = "Incompatible"; this.socket?.destroy(); return;
       }
       const response = candidate;
       if (this.sessionID && response.sessionID !== this.sessionID) { this.socket?.destroy(); return; }
+      if (response.error?.code === "responseLimit" || response.error?.code === "responseChunksRequired") this.status = "Incompatible";
       if (response.error?.code === "versionMismatch") this.status = "Incompatible";
       if (response.error?.code === "unauthorized") this.status = "Pairing revoked";
       this.receiveSnapshot(response.snapshot);
@@ -229,7 +272,9 @@ export class StudioClient extends EventEmitter {
     if (this.buffer.byteLength > MAX_FRAME) this.socket?.destroy();
   }
   private receiveSnapshot(snapshot?: Snapshot): void {
-    if (!snapshot || (this.snapshot && snapshot.revision < this.snapshot.revision)) return;
+    if (!snapshot || snapshot.revision < this.assembler.newestSnapshotRevision || (this.snapshot && snapshot.revision < this.snapshot.revision)) return;
+    this.assembler.noteCompleteSnapshot(snapshot.revision);
+    if (!this.assembler.pendingCount) { clearTimeout(this.chunkTimeout); this.chunkTimeout = undefined; }
     this.snapshot = snapshot; this.emit("change");
   }
   private scheduleCatalogRefresh(): void {
@@ -260,6 +305,7 @@ export class StudioClient extends EventEmitter {
   }
   async execute(commandID: string, projectID: string, argument?: CommandArgument): Promise<Response> {
     if (this.status !== "Connected" || !this.snapshot) throw new Error("Stream is disconnected.");
+    if (this.snapshot.receiptsPending) throw new Error("Stream is updating complete resource state. Try again after feedback refreshes.");
     if (this.snapshot.projectID !== projectID) throw new Error("The configured project is not open in Stream.");
     if (!this.capabilities.has(commandID) || commandID.startsWith("unavailable.")) throw new Error("The bound resource is missing or unsupported.");
     if (argument) {

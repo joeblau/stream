@@ -24,6 +24,7 @@ end
 target=spec['targets'].delete('StreamMac')
 target['type']='tool'
 target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
+target['settings']['base']['OTHER_SWIFT_FLAGS']='$(inherited) -j2'
 keychain=File.read('StreamCore/KeychainStore.swift')
 prefix=keychain.split('    private let service: String',2).first
 abort 'Keychain fixture boundary changed' if prefix==keychain
@@ -35,7 +36,15 @@ File.write(File.join(folder,'fixtures/KeychainStore.swift'),prefix + <<'SWIFT')
 }
 SWIFT
 spec['targets']['StreamCore']['sources']=[{'path'=>File.join(root,'StreamCore'),'excludes'=>['KeychainStore.swift']},File.join(root,folder,'fixtures/KeychainStore.swift')]
-target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
+# Deny physical microphone capture in this generated tool. Composition,
+# audio mixing, real native publishers and recording writers remain shipping code.
+mic=File.read('StreamMac/MacAudioInput.swift')
+start=mic.index('    private nonisolated static func requestMicrophoneAccess() async -> Bool {')
+finish=mic.index('    private func configureAndStart(device:',start)
+abort 'Microphone fixture boundary changed' unless start && finish
+File.write(File.join(folder,'fixtures/MacAudioInput.swift'),mic[0...start] + "    private nonisolated static func requestMicrophoneAccess() async -> Bool { false }\n\n" + mic[finish..])
+target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift','MacAudioInput.swift']}
+target['sources'] << File.join(root,folder,'fixtures/MacAudioInput.swift')
 target['sources'] << File.join(root,'scripts/studio_deck_native_harness.swift')
 wire=File.read('scripts/studio_local_control_harness.swift')
 wire_start=wire.index('@MainActor final class MemoryCredentials:')
@@ -43,6 +52,7 @@ wire_end=wire.index('/// Actual loopback peers')
 abort 'Wire fixture extraction boundary changed' unless wire_start && wire_end && wire_end>wire_start
 File.write(File.join(folder,'fixtures/VisualWireClient.swift'), "import Foundation\nimport Network\nimport Security\n" + wire[wire_start...wire_end])
 target['sources'] << File.join(root,folder,'fixtures/VisualWireClient.swift')
+target['sources'] << File.join(root,'scripts/studio_deck_transport_fixtures.swift')
 spec['targets']['StudioDeckNativeHarness']=target
 spec['schemes']['StudioDeckNativeHarness']={'build'=>{'targets'=>{'StudioDeckNativeHarness'=>'all'}}}
 require File.join(root, 'scripts/desktop_transport_fixture')

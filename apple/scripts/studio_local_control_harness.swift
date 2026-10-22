@@ -59,6 +59,8 @@ struct StudioPaletteAction {
     var unavailableReason: String?
     var sourceKind: String? = nil
     var sourceAvailable: Bool? = nil
+    var requiresConfirmation = false
+    var target: StudioControlTarget? = nil
 }
 @MainActor final class StudioCommandDispatcher: ObservableObject {
     @Published var state = HarnessState()
@@ -67,8 +69,11 @@ struct StudioPaletteAction {
     var emitted: [String] = []
     @Published var gain = 0.5
     @Published var recordingCountdown = 0
+    var receiptDestinations: [StudioControlTransportState.Destination] = []
     var valueTargetExists = true
     var marker = "", page = 0
+    @Published var endingReview: UUID?
+    var cancelledEndingReviews: [UUID] = []
     func controllerTargets() -> [StudioControllerTarget] {
         guard valueTargetExists else { return [] }
         return [.init(id: "audio.microphone.gain", title: "Mic Gain", kind: .value, normalizedValue: gain, unavailableReason: nil, execute: { [weak self] value in self?.gain = value!; return nil })]
@@ -82,6 +87,11 @@ struct StudioPaletteAction {
     func controllerChatSnapshot() -> StudioControlChatState? { nil }
     func controllerRecordingCountdown() -> Int { recordingCountdown }
     func controllerVisualSnapshot() -> [String: StudioControlVisualState] { [:] }
+    func controllerTransportSnapshot() -> StudioControlTransportState { .init(destinations: receiptDestinations, confirmationPending: endingReview != nil, endingPending: false) }
+    func controllerEndingReviewID() -> UUID? { endingReview }
+    func cancelControllerEndingReview(_ id: UUID) {
+        if endingReview == id { cancelledEndingReviews.append(id); endingReview = nil }
+    }
     func catalogueActions() -> [StudioPaletteAction] { actions }
     func execute(_ command: StudioCommand) -> StudioCommandResult {
         switch command {
@@ -91,6 +101,7 @@ struct StudioPaletteAction {
         case .action(let id):
             if id == "output.stream.start", state.stream.isActive { return .init(outcome: .rejected(.unavailable("Already active"))) }
             if id.hasPrefix("macro."), let uuid = UUID(uuidString: String(id.dropFirst(6).dropLast(4))) { macros.start(uuid) }
+            if id == "output.stream.endAll" { endingReview = UUID() }
             emitted.append(id)
             return .init(outcome: .success)
         }
@@ -139,6 +150,8 @@ private final class WireOperation<Value: Sendable>: @unchecked Sendable {
     let connection: NWConnection
     private var buffer = StudioControlFrameBuffer()
     private var frames: [StudioControlResponse] = []
+    private var chunks: [UUID: [Int: Data]] = [:]
+    private(set) var maximumReceivedFrameBytes = 0
     private(set) var receivedFrameCount = 0
     private var operationPhase = "idle"
     private let timeout: Duration
@@ -199,8 +212,21 @@ private final class WireOperation<Value: Sendable>: @unchecked Sendable {
                 }
             }
             guard ContinuousClock.now < deadline else { connection.cancel(); throw WireDeadlineFailure() }
-            let decoded = try buffer.append(data).map { try JSONDecoder().decode(StudioControlResponse.self, from: $0) }
-            receivedFrameCount += decoded.count; frames += decoded
+            for frame in try buffer.append(data) {
+                maximumReceivedFrameBytes = max(maximumReceivedFrameBytes, frame.count)
+                receivedFrameCount += 1
+                let decoded = try JSONDecoder().decode(StudioControlResponse.self, from: frame)
+                if let part = decoded.responseChunk {
+                    chunks[part.transferID, default: [:]][part.index] = part.body
+                    if chunks[part.transferID]?.count == part.count {
+                        var complete = Data()
+                        for index in 0..<part.count { complete.append(chunks[part.transferID]![index]!) }
+                        precondition(complete.count == part.totalBytes)
+                        chunks[part.transferID] = nil
+                        frames.append(try JSONDecoder().decode(StudioControlResponse.self, from: complete))
+                    }
+                } else { frames.append(decoded) }
+            }
         }
         return frames.removeFirst()
     }
@@ -370,6 +396,32 @@ private final class BoundedProcessText: @unchecked Sendable {
         precondition(partialFrames.count == 2)
         do { _ = try frameBuffer.append(Data(repeating: 32, count: 65537)); preconditionFailure("Oversize frame accepted") }
         catch let error as StudioControlProtocolError { precondition(error.code == "messageSize") }
+        // A separate actual server keeps large snapshot state away from the
+        // ordinary/legacy adapter tests below. No resource cap is invented.
+        let largeDispatcher = StudioCommandDispatcher()
+        largeDispatcher.receiptDestinations = (0..<512).map { index in
+            .init(id: UUID(), name: "Saved destination \(index) " + String(repeating: "日", count: 128), state: "idle",
+                endingPending: false, confirmationPending: false)
+        }
+        let largeServer = StudioLocalControlServer(defaults: preferences, pairingStore: store, port: 0)
+        largeServer.bind(to: largeDispatcher); largeServer.setEnabled(true)
+        await waitUntil { largeServer.listeningPort != nil }
+        let legacy = WireClient(port: largeServer.listeningPort!)
+        let legacyResponse = try await legacy.request(handshake)
+        precondition(legacyResponse.error?.code == "responseChunksRequired", "Oversize legacy response silently truncated or disconnected without explanation")
+        legacy.connection.cancel()
+        let largeClient = WireClient(port: largeServer.listeningPort!)
+        let largeAuth = try await largeClient.request(.init(type: .authenticate, id: UUID(), clientID: pairing.id, token: pairing.token, responseChunks: true))
+        precondition(largeAuth.snapshot?.transport?.destinations == largeDispatcher.receiptDestinations, "Large authentication omitted destination feedback")
+        let largeSnapshot = try await largeClient.request(.init(type: .snapshot, id: UUID(), sessionID: largeAuth.sessionID))
+        precondition(largeSnapshot.snapshot?.transport?.destinations.count == 512 && largeClient.receivedFrameCount > 8,
+            "Large complete snapshot did not traverse bounded frames")
+        precondition(largeClient.maximumReceivedFrameBytes <= StudioControlFrameBuffer.maximumFrameBytes)
+        let originalLarge = StudioControlResponse(type: "snapshot", id: UUID(), sessionID: largeAuth.sessionID, snapshot: largeSnapshot.snapshot)
+        let boundedFrames = try StudioControlResponseFramer.frames(originalLarge, chunking: true)
+        precondition(boundedFrames.count > 8 && boundedFrames.allSatisfy { $0.count <= 65_536 })
+        largeClient.connection.cancel(); largeServer.shutdown()
+        progress("PASS: 512 saved destination receipts over actual Network sockets, negotiated complete response chunks, <=64 KiB frames, explicit legacy upgrade error, no truncation")
         let dispatcher = StudioCommandDispatcher()
         let stable = "scene.\(UUID()).select"
         dispatcher.actions = [.init(id: stable, title: "Intro", command: .action(stable)),
@@ -578,6 +630,28 @@ private final class BoundedProcessText: @unchecked Sendable {
         precondition(dispatcher.macros.update(ShowMacroDocument(macros: [macro])) == nil)
         let macroCommandID = "macro.\(macro.id.uuidString).run"
         dispatcher.actions.append(.init(id: macroCommandID, title: "Run Remote", command: .action(macroCommandID)))
+        let endingCommand = "output.stream.endAll"
+        dispatcher.actions.append(.init(id: endingCommand, title: "End All…", command: .action(endingCommand), requiresConfirmation: true,
+            target: .init(kind: "destination", id: "all", name: "Active destinations")))
+        let endingOwner = WireClient(port: port)
+        let endingAuth = try await endingOwner.request(.init(type: .authenticate, id: UUID(), clientID: pairing.id, token: pairing.token))
+        let endingCapabilities = try await endingOwner.request(.init(type: .capabilities, id: UUID(), sessionID: endingAuth.sessionID))
+        precondition(endingCapabilities.commands?.first { $0.id == endingCommand }?.requiresConfirmation == true)
+        let endingResult = try await endingOwner.request(.init(type: .command, id: UUID(), sessionID: endingAuth.sessionID, commandID: endingCommand))
+        precondition(endingResult.result?.succeeded == true && dispatcher.endingReview != nil)
+        let ownedReview = dispatcher.endingReview!
+        endingOwner.connection.cancel()
+        await waitUntil { dispatcher.endingReview == nil }
+        precondition(dispatcher.cancelledEndingReviews == [ownedReview], "Disconnect left an unconfirmed ending available for late consent")
+        // A confirmed or replaced review is no longer owned by the old peer.
+        let oldOwner = WireClient(port: port)
+        let oldAuth = try await oldOwner.request(.init(type: .authenticate, id: UUID(), clientID: pairing.id, token: pairing.token))
+        _ = try await oldOwner.request(.init(type: .command, id: UUID(), sessionID: oldAuth.sessionID, commandID: endingCommand))
+        let replacementReview = UUID(); dispatcher.endingReview = replacementReview
+        oldOwner.connection.cancel()
+        try await Task.sleep(for: .milliseconds(50))
+        precondition(dispatcher.endingReview == replacementReview, "Old connection cancelled another review or confirmed work")
+        dispatcher.endingReview = nil
         progress("Local control fixture: authenticate ordinary macro owner · native peers=\(server.connectedClients)")
         let owner = WireClient(port: port)
         let ownerAuth = try await owner.request(.init(type: .authenticate, id: UUID(), clientID: pairing.id, token: pairing.token))

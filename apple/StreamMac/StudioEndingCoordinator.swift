@@ -30,7 +30,30 @@ struct StudioEndingSceneHooks {
 /// A deliberate ending plan, scoped to the runtime and exact publishing
 /// sessions confirmed by the operator. No plans or mutations are persisted.
 @MainActor final class StudioEndingCoordinator: ObservableObject {
-    enum Mode { case local, remote, both, review }
+    enum Mode: Equatable, Sendable { case local, remote, both, review }
+    struct ControllerReview: Identifiable, Equatable, Sendable {
+        let id: UUID
+        let targets: [StudioEndingTarget]
+        let mode: Mode
+    }
+    @Published private(set) var controllerReview: ControllerReview?
+    /// A controller may request review, never supply the native user's consent.
+    @discardableResult
+    func requestControllerReview(_ selected: [StudioEndingTarget], mode: Mode) -> Bool {
+        guard isBound, !isWorking, controllerReview == nil, !selected.isEmpty,
+              selected.count <= 128, mode == .remote || mode == .both,
+              selected.allSatisfy(unchanged) else { return false }
+        controllerReview = .init(id: UUID(), targets: selected, mode: mode)
+        return true
+    }
+    func confirmControllerReview(_ id: UUID) {
+        guard let review = controllerReview, review.id == id else { return }
+        controllerReview = nil
+        request(review.targets, mode: review.mode)
+    }
+    func cancelControllerReview(_ id: UUID) {
+        if controllerReview?.id == id { controllerReview = nil }
+    }
     enum LocalResult { case stopped, superseded, unconfirmed }
     typealias Sleep = @Sendable (Double) async throws -> Void
     struct Boundary {
@@ -48,7 +71,13 @@ struct StudioEndingSceneHooks {
     @Published private(set) var availabilityRevision = UUID()
     private var bindingObservations: [AnyCancellable] = []
     func retainBindings(_ observations: [AnyCancellable]) { bindingObservations = observations }
-    func refreshAvailability() { availabilityRevision = UUID() }
+    func refreshAvailability() {
+        if let review = controllerReview, !review.targets.allSatisfy(unchanged) {
+            controllerReview = nil
+            notice = "The requested destination session or event changed. Review and request ending again."
+        }
+        availabilityRevision = UUID()
+    }
     private var boundary: Boundary?
     private var sceneHooks: StudioEndingSceneHooks?
     private var epoch = UUID()
@@ -90,6 +119,7 @@ struct StudioEndingSceneHooks {
     private func unchanged(_ target: StudioEndingTarget) -> Bool { targets.first { $0.id == target.id }.map(target.matches) == true }
     func cancelPending() {
         let hadPendingPlan = isWorking
+        controllerReview = nil
         epoch = UUID(); plan?.cancel(); plan = nil
         for worker in workers.values { worker.cancel() }; workers = [:]
         for work in remoteWork.values { work.task?.cancel() }; remoteWork = [:]
@@ -112,6 +142,7 @@ struct StudioEndingSceneHooks {
         guard duration.isFinite, (0...120).contains(duration), outroScene == nil || (mode == .both && sceneHooks != nil && selected.allSatisfy { $0.session != nil }) else {
             notice = "Timed outro requires an active captured session and the shared scene command hooks."; return
         }
+        controllerReview = nil
         epoch = UUID(); let captured = epoch; isWorking = true; notice = nil
         remoteWork = [:]
         for target in selected {

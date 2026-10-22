@@ -159,7 +159,7 @@ test("visual receipts preserve on-air tally independently of locks, source ident
   state.visuals![prefix]={programVisible:true,programBypassed:false};
   assert.equal(feedback(bind(prefix+".effects.bypass"),"Connected",state,commands).badge,"EFFECTS ON");
   state.receiptsPending=true;
-  assert.equal(feedback(bind(prefix+".effects.bypass"),"Connected",state,commands).title,"Updating\nVisuals");
+  assert.equal(feedback(bind(prefix+".effects.bypass"),"Connected",state,commands).title,"Updating\nState");
   state.receiptsPending=false;
   state.visuals![prefix]={programVisible:true,programSourceID:sourceA};
   const selector=bind(prefix+".source.select",sourceA);commands.get(`source.${sourceA}.effects.bypass`)!.sourceAvailable=false;
