@@ -885,3 +885,49 @@ identical. Counts stay **27 closed / 34 open**. The new post-clock comparison is
 **not dispatched at this snapshot**; independent Intel binding/counter review is
 complete while causal interpretation remains unqualified. Browser exclusions remain separate, unmerged #124 work. No open
 issue or original qualification gate is closed by this cohort.
+
+## Ending fixture receipts and bounded capture exclusions — 2026-10-22 UTC
+
+The 10:32:53 UTC read-only refresh of all original 61 issue bodies/states confirms
+**27 closed / 34 open**, zero open PRs and published `06b895a`. No new closure is
+justified by this cohort. #124's verified live browser route and original full
+recapture/lifecycle acceptance remain gated; #133's real provider-account/API
+acceptance is unchanged. Already-closed #135/#147 retain their original scope.
+
+The original `a9cfd98` ARM failure at 10:21:29 is reproduced with exact ending,
+vault and account source: fixture replacement reused a consumed configure grant
+receipt and threw `CancellationError` before its intended stale-response/media
+checks. Fixture-only `06b895a` obtains fresh deliberate receipts in both setups,
+checks the installed replacement and retains captured old generations and every
+original zero-POST/stale-response/independent-output assertion. The full actual
+fixed harness passes once, including healthy independent output and a decoded
+one-second H.264/AAC recording. Production/Core/vendor are unchanged by this
+fixture correction; the original hosted failure remains failed evidence.
+
+The separate browser capture change provides owner-revision acknowledgments for
+supported system-mix and pinned-display exclusions. Filter installation, serial
+callback drain and affected mixer-history retirement precede helper permission;
+missing/retiring/failed owners and opaque/picker/window/direct-helper routes
+remain conflicts. Controlled actual-class/mixer/session proofs and build-only
+whole-source compilation establish software ordering. They do not qualify live
+SCK, every-route recapture, actual WebKit attribution/tails, signed provisioned
+shared-container launch, permission/device workflows or local HTML/subresources.
+**#124 stays open; production selection/startup remain disabled.** Source and
+scope are in [the exclusion receipt](BROWSER_CAPTURE_EXCLUSIONS.md) and
+`wave13Review` in [the ledger](MACOS_TASK_STATUS.json).
+
+Exact capture source `46153b1` passes generation, unsigned universal arm64/x86_64
+Release and the actual bundle audit. Current `a428d23` adds only the reviewed CI
+harness invocation; all 317 validated production paths/vendor remain identical.
+The root proof and source manifest are bound in the ledger.
+
+At the recorded snapshot, `a9cfd98` native CI remains active with ARM failed and
+iOS successful; published `06b895a` native CI is pending. The older pending-only
+`a4d0122` native run coalesced automatically with zero jobs; no manual cancel is
+inferred. The separate `a4d0122` clock diagnostic is terminal **SUCCESS on both jobs**
+at 10:39:03 UTC; Intel artifact interpretation is separate/pending. Its audited
+ARM sample renders **551 / 562** frames versus baseline
+**553 / 574**, with **10 / 0** audio drops: no observed output-throughput
+improvement in these samples. Independent binding review passes; this does not
+prove a kernel/coalescing cause or qualify the unchanged 600 s gates. Detailed
+timing interpretation remains separate from run conclusions. **#92 stays open.**
