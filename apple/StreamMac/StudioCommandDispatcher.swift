@@ -550,6 +550,9 @@ enum StudioCommand: Equatable, Sendable {
     /// tilt 1…20). A matching `.ptzStop` ends the drive.
     case ptzMove(UUID, direction: PTZMoveDirection, panSpeed: Int, tiltSpeed: Int)
     case ptzZoom(UUID, direction: PTZZoomDirection, speed: Int)
+    /// Native keyboard/AX activation: a 250 ms intent with a controller-owned Stop.
+    case ptzNudge(UUID, direction: PTZMoveDirection, panSpeed: Int, tiltSpeed: Int)
+    case ptzZoomNudge(UUID, direction: PTZZoomDirection, speed: Int)
     /// Stops pan/tilt AND zoom on one target.
     case ptzStop(UUID)
     /// The focus-loss/disappear path: stops every target with outstanding
@@ -793,6 +796,8 @@ enum StudioCommand: Equatable, Sendable {
         case .ptzRemoveTarget: return "Remove PTZ Camera"
         case .ptzMove(_, let direction, _, _): return "Pan/Tilt \(direction.displayName)"
         case .ptzZoom(_, let direction, _): return direction.displayName
+        case .ptzNudge(_, let direction, _, _): return "Nudge Pan/Tilt \(direction.displayName)"
+        case .ptzZoomNudge(_, let direction, _): return "Nudge \(direction.displayName)"
         case .ptzStop: return "Stop PTZ Camera"
         case .ptzStopAll: return "Stop All PTZ Cameras"
         case .ptzStorePreset(_, let number, _): return "Store PTZ Preset \(number)"
@@ -2510,7 +2515,8 @@ final class StudioCommandDispatcher: ObservableObject {
         case .ptzRemoveTarget(let id), .ptzStop(let id):
             return ptzStore.target(withID: id) != nil
                 ? nil : .invalidTarget("PTZ camera \(id) is not configured.")
-        case .ptzMove(let id, _, let panSpeed, let tiltSpeed):
+        case .ptzMove(let id, _, let panSpeed, let tiltSpeed),
+             .ptzNudge(let id, _, let panSpeed, let tiltSpeed):
             guard ptzStore.target(withID: id) != nil else {
                 return .invalidTarget("PTZ camera \(id) is not configured.")
             }
@@ -2519,7 +2525,7 @@ final class StudioCommandDispatcher: ObservableObject {
                 return .invalidValue("Pan speed must be 1…\(VISCAPacket.maxPanSpeed), tilt speed 1…\(VISCAPacket.maxTiltSpeed).")
             }
             return nil
-        case .ptzZoom(let id, _, let speed):
+        case .ptzZoom(let id, _, let speed), .ptzZoomNudge(let id, _, let speed):
             guard ptzStore.target(withID: id) != nil else {
                 return .invalidTarget("PTZ camera \(id) is not configured.")
             }
@@ -3231,6 +3237,10 @@ final class StudioCommandDispatcher: ObservableObject {
             ptz.move(id, direction: direction, panSpeed: panSpeed, tiltSpeed: tiltSpeed)
         case .ptzZoom(let id, let direction, let speed):
             ptz.zoom(id, direction: direction, speed: speed)
+        case .ptzNudge(let id, let direction, let panSpeed, let tiltSpeed):
+            ptz.nudge(id, direction: direction, panSpeed: panSpeed, tiltSpeed: tiltSpeed)
+        case .ptzZoomNudge(let id, let direction, let speed):
+            ptz.nudgeZoom(id, direction: direction, speed: speed)
         case .ptzStop(let id):
             ptz.stop(id)
         case .ptzStopAll:
@@ -4261,7 +4271,7 @@ private extension StudioCommand {
              .playlistPlay, .playlistPause, .playlistStop,
              .playlistNext, .playlistPrevious,
              .ptzAddTarget, .ptzUpdateTarget, .ptzRemoveTarget,
-             .ptzMove, .ptzZoom, .ptzStop, .ptzStopAll,
+             .ptzMove, .ptzZoom, .ptzNudge, .ptzZoomNudge, .ptzStop, .ptzStopAll,
              .ptzStorePreset, .ptzRecallPreset, .ptzRemovePreset,
              .ptzSetSceneRecall, .ptzRemoveSceneRecall,
              .addAnnotationStroke, .undoAnnotationStroke, .redoAnnotationStroke,
