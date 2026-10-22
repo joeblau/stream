@@ -17,7 +17,8 @@ struct ExternalDisplayOutputView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Picker("Feed", selection: $output.feed) {
-                Text("Program (clean video)").tag(ExternalDisplayFeed.program)
+                Text("Program (with overlays)").tag(ExternalDisplayFeed.program)
+                Text("Clean Program (no overlays or annotations)").tag(ExternalDisplayFeed.clean)
                 Text("Destination canvas").tag(ExternalDisplayFeed.selectedCanvas)
                 Text("Secondary layout").tag(ExternalDisplayFeed.secondaryCanvas)
             }.disabled(output.isActive)
@@ -50,7 +51,7 @@ struct ExternalDisplayOutputView: View {
                     }
                 }.disabled(!output.isActive && output.selectedDisplayID == nil)
             }
-            Text("Video only; production controls stay in the studio. The program includes its composed overlays. Destination canvas fits program into that canvas without starting publishing. Display disconnect, sleep or studio relocation stops this optional output; restart it manually.")
+            Text("Video only; production controls stay in the studio. Program includes its composed overlays; Clean Program omits global overlays and annotations while retaining the taken scene. Destination canvas fits program into that canvas without starting publishing. Display disconnect, sleep or studio relocation stops this optional output; restart it manually.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

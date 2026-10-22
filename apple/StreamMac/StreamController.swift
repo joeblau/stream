@@ -281,28 +281,47 @@ final class StreamController: ObservableObject {
     func stopVirtualCameraOutput() { virtualCameraController?.stop() }
     private var externalDisplayDemand = 0
     private var secondaryExternalDisplayDemand = 0
+    private var cleanExternalDisplayDemand = 0
+    private let externalDisplayScreens: @MainActor () -> [ExternalDisplayDescriptor]
+    private let externalDisplaySurface: @MainActor (ExternalDisplayDescriptor) -> (any ExternalDisplaySurface)?
     private var externalDisplayController: ExternalDisplayOutputController?
     var externalDisplayOutput: ExternalDisplayOutputController {
         if let existing = externalDisplayController { return existing }
-        let output = ExternalDisplayOutputController { [weak self] profile, sink in
+        let output = ExternalDisplayOutputController(screensProvider: externalDisplayScreens, surfaceFactory: externalDisplaySurface, startError: { [weak self] feed in
+            guard let self else { return "The studio is unavailable." }
+            return self.externalDisplayStartError(feed)
+        }) { [weak self] profile, sink in
             guard let self else { return nil }
+            let feed = self.externalDisplayController?.feed ?? .program
+            guard self.externalDisplayStartError(feed) == nil else { return nil }
             let canvas = self.outputCanvas(for: self.externalDisplayController?.feed, destinationID: self.externalDisplayController?.selectedDestinationID)
             if canvas == .secondary, !self.secondaryCanvasAvailable { return nil }
             if canvas == .secondary, self.canvasStartError(destinations: [.init(name: "External Display", canvas: .secondary)]) != nil { return nil }
             let converter = ExternalProgramImageConverter(profile: profile)
+            let cleanPermit = feed == .clean ? ExternalCleanRenderPermit() : nil
             self.externalDisplayDemand += 1
+            if cleanPermit != nil { self.cleanExternalDisplayDemand += 1 }
             if canvas == .secondary { self.secondaryExternalDisplayDemand += 1 }
-            let subscription = self.addFrameSink(capacity: 1, canvas: canvas) { frame in
+            let receive: @Sendable (CompositedFrame) -> Void = { frame in
                 if let image = converter.image(frame) { sink(image) }
             }
+            let subscription = cleanPermit != nil
+                ? self.addCleanFrameSink(capacity: 1, authorized: { cleanPermit?.isActive == true }, sink: receive)
+                : self.addFrameSink(capacity: 1, canvas: canvas, sink: receive)
             self.updatePipelineDemand()
             return { [weak self] in
+                cleanPermit?.finish()
                 guard let self else { return }
-                self.removeFrameSink(subscription)
-                self.externalDisplayDemand = max(0, self.externalDisplayDemand - 1)
-                if canvas == .secondary { self.secondaryExternalDisplayDemand = max(0, self.secondaryExternalDisplayDemand - 1) }
-                self.promoteStagedProfileIfOutputsIdle()
-                self.updatePipelineDemand()
+                let engine = self.engine
+                Task { @MainActor [weak self] in
+                    await engine.removeSink(subscription.token)
+                    guard let self else { return }
+                    self.externalDisplayDemand = max(0, self.externalDisplayDemand - 1)
+                    if cleanPermit != nil { self.cleanExternalDisplayDemand = max(0, self.cleanExternalDisplayDemand - 1) }
+                    if canvas == .secondary { self.secondaryExternalDisplayDemand = max(0, self.secondaryExternalDisplayDemand - 1) }
+                    self.promoteStagedProfileIfOutputsIdle()
+                    self.updatePipelineDemand()
+                }
             }
         }
         externalDisplayController = output
@@ -349,6 +368,8 @@ final class StreamController: ObservableObject {
     init(sceneStore: SceneStore, previewProgram: PreviewProgramModel,
          permissions: PermissionsManager,
          audioEngine: AudioMixEngine = AudioMixEngine(),
+         externalDisplayScreens: @escaping @MainActor () -> [ExternalDisplayDescriptor] = ExternalDisplayOutputController.systemDisplays,
+         externalDisplaySurface: @escaping @MainActor (ExternalDisplayDescriptor) -> (any ExternalDisplaySurface)? = { NativeExternalDisplaySurface(display: $0) },
          publisherFactory: @escaping (StreamCore.StreamProtocol) -> any Publisher = { transport in
              switch transport {
              case .rtmp, .rtmps: return RTMPPublisher()
@@ -356,6 +377,8 @@ final class StreamController: ObservableObject {
              }
          }) {
         self.audioEngine = audioEngine
+        self.externalDisplayScreens = externalDisplayScreens
+        self.externalDisplaySurface = externalDisplaySurface
         self.sceneStore = sceneStore
         self.previewProgram = previewProgram
         self.permissions = permissions
@@ -709,9 +732,9 @@ final class StreamController: ObservableObject {
     }
 
     @discardableResult
-    func addCleanFrameSink(capacity: Int = 1, sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
+    func addCleanFrameSink(capacity: Int = 1, authorized: @escaping @Sendable () -> Bool = { true }, sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
         let subscription = FrameSubscription()
-        Task { await engine.addCleanSink(token: subscription.token, capacity: capacity, sink: sink) }
+        Task { await engine.addCleanSink(token: subscription.token, capacity: capacity, authorized: authorized, sink: sink) }
         return subscription
     }
 
@@ -1169,8 +1192,11 @@ final class StreamController: ObservableObject {
         let monitorThrottle = resourcePreviewThrottle
         // New monitor demand takes priority over an optional guest raster.
         // Revocation also disables Clean rendering before its VT drain ends.
-        if cleanReturnDemanded, cleanReturnStartError != nil, guestReturnVideoSink?.returnVideoSource == .clean {
-            guestReturnVideoSink?.stopProgramReturn()
+        if cleanReturnDemanded, let error = cleanReturnStartError {
+            if guestReturnVideoSink?.returnVideoSource == .clean { guestReturnVideoSink?.stopProgramReturn() }
+            if cleanExternalDisplayDemand > 0, externalDisplayController?.feed == .clean {
+                externalDisplayController?.stop(reason: error)
+            }
         }
         if secondaryMonitorsEnabled, previewState == .active {
             if secondaryPreviewSubscription == nil {
@@ -1581,23 +1607,25 @@ final class StreamController: ObservableObject {
         var copy = destination; copy.followsProgramProfile = false; copy.outputProfile = activeSecondaryProfile
         return copy
     }
-    var cleanReturnDemanded: Bool { !guestCleanReturnTokens.isEmpty }
+    var cleanReturnDemanded: Bool { !guestCleanReturnTokens.isEmpty || cleanExternalDisplayDemand > 0 }
     private var cleanReturnStartError: String? {
-        guard IsolatedVideoBudget.current.qualified else { return "Additional composition is not qualified on this Mac class." }
-        let programPixels = activeProfile.canvasWidth * activeProfile.canvasHeight * activeProfile.frameRate
-        let secondaryPixels = secondaryCanvasDemanded
-            ? activeSecondaryProfile.canvasWidth * activeSecondaryProfile.canvasHeight * activeSecondaryProfile.frameRate : 0
-        guard programPixels * 2 + secondaryPixels <= 3840 * 2160 * 30 else { return "Clean return exceeds the compositor budget (4K30 total pixels per second)." }
+        CompositorWorkloadBudget.cleanStartError(program: activeProfile,
+            secondary: secondaryCanvasDemanded ? activeSecondaryProfile : nil,
+            qualified: IsolatedVideoBudget.current.qualified)
+    }
+    private func externalDisplayStartError(_ feed: ExternalDisplayFeed) -> String? {
+        guard !resilience.isLocked else { return "Unlock this Mac before starting external output." }
+        if feed == .clean { return cleanReturnStartError }
+        if outputCanvas(for: feed, destinationID: externalDisplayController?.selectedDestinationID) == .secondary {
+            return canvasStartError(destinations: [.init(name: "External Display", canvas: .secondary)])
+        }
         return nil
     }
-
     private func canvasStartError(destinations selected: [StreamDestination]) -> String? {
         guard selected.contains(where: { $0.canvas == .secondary }) else { return nil }
         guard secondaryCanvasAvailable else { return "Take a configured secondary layout to Program before starting this output." }
-        let pixels = activeProfile.canvasWidth * activeProfile.canvasHeight * activeProfile.frameRate * (guestCleanReturnTokens.isEmpty ? 1 : 2) +
-            activeSecondaryProfile.canvasWidth * activeSecondaryProfile.canvasHeight * activeSecondaryProfile.frameRate
-        guard pixels <= 3840 * 2160 * 30 else { return "Both canvases exceed the compositor budget (4K30 total pixels per second). Reduce their size or frame rate before starting outputs." }
-        return nil
+        return CompositorWorkloadBudget.secondaryStartError(program: activeProfile,
+            secondary: activeSecondaryProfile, cleanDemanded: cleanReturnDemanded)
     }
 
     func beginLocalRehearsal(recorder: RecordingController) {
