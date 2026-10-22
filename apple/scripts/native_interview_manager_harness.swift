@@ -884,7 +884,9 @@ private actor InteractionProviderHTTP {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let binding = ProviderDestinationBinding(provider: .youtube, channelID: "owned-channel", eventID: "owned-broadcast")
         let destination = StreamDestination(name: "Owned provider fixture", isEnabled: false, providerBinding: binding)
-        try JSONEncoder().encode([destination]).write(to: directory.appendingPathComponent("destinations.json"))
+        let unavailable = (0..<64).map { StreamDestination(name: "Uncached \($0)", isEnabled: false,
+            providerBinding: .init(provider: .youtube, channelID: "owned-channel", eventID: "uncached-\($0)")) }
+        try JSONEncoder().encode(unavailable + [destination]).write(to: directory.appendingPathComponent("destinations.json"))
         DesktopStorage.projectDirectory = directory
         defer { DesktopStorage.projectDirectory = previousDirectory }
         let studio = ManagerStudio(directory: directory), http = InteractionProviderHTTP()
@@ -897,9 +899,9 @@ private actor InteractionProviderHTTP {
         accounts.refreshLive(binding)
         try await wait("Actual provider audience read did not finish") { accounts.viewerReading(binding).freshness == .current }
         let reading = studio.dispatcher.interactions.audienceSnapshot()
-        try require(reading.readings.first?.count == 0 && reading.readings.first?.freshness == "current" && reading.liveSeconds == nil && reading.health == "idle", "Audience controls did not preserve actual zero/idle state")
+        try require(reading.readings.count == 65 && reading.readings.last?.destinationID == destination.id && reading.readings.last?.count == 0 && reading.readings.last?.freshness == "current" && reading.liveSeconds == nil && reading.health == "idle", "Audience controls did not preserve actual zero/idle state")
         let future = studio.dispatcher.interactions.audienceSnapshot(now: Date().addingTimeInterval(61))
-        try require(future.readings.first?.count == nil && future.readings.first?.freshness == "expired", "Cached provider reading did not expire")
+        try require(future.readings.last?.count == nil && future.readings.last?.freshness == "expired", "Cached provider reading did not expire")
         let direct = studio.chat.directChat!
         direct.connect(.youtube, eventID: "owned-broadcast")
         try await wait("Actual owned provider reader did not connect") { direct.snapshot(.youtube).isConnected }
@@ -930,7 +932,7 @@ private actor InteractionProviderHTTP {
         try require(studio.preview.programScene == program, "Latest command bypassed Take")
         try require(studio.dispatcher.execute(.hideComment).error == nil, "Controller Hide failed")
         accounts.forget(.youtube)
-        try require(studio.dispatcher.interactions.audienceSnapshot().readings.first?.count == nil && target.execute(nil) != nil, "Revoked account retained audience or write authority")
+        try require(studio.dispatcher.interactions.audienceSnapshot().readings.last?.count == nil && target.execute(nil) != nil, "Revoked account retained audience or write authority")
         accounts.shutdown(); await studio.close()
         trace("D07 actual vault/session/reader/outbox with controlled HTTP: zero/expired/revoked audience, exact preset target+ACK/no echo/no stale reader replay, latest/hide Preview policy")
     }

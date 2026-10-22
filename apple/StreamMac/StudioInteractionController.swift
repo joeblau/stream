@@ -234,7 +234,9 @@ enum StudioInteractionCommand: Equatable, Sendable {
             requestedProjectID: profileRequest?.project, requestedProfileID: profileRequest?.profile)
     }
     func audienceSnapshot(now: Date = Date()) -> StudioControlAudienceState {
-        let readings = (controller?.destinations.saved ?? []).filter { $0.providerBinding != nil }.prefix(64).map { destination -> StudioControlAudienceState.Reading in
+        // Preserve every advertised destination; complete-response byte bounds
+        // belong to the IPC framing rather than silently dropping later keys.
+        let readings = (controller?.destinations.saved ?? []).filter { $0.providerBinding != nil }.map { destination -> StudioControlAudienceState.Reading in
             let value = destination.providerBinding.flatMap { accounts?.viewerReading($0, now: now) }
             return .init(destinationID: destination.id, name: GuestPublicChatEnvelope.prefix(destination.name, bytes: 512), count: value?.count, readAt: value?.readAt?.timeIntervalSince1970,
                 freshness: value?.freshness.rawValue ?? "unavailable")

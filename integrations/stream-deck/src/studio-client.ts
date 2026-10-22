@@ -41,6 +41,10 @@ export type Response = { version: 1; type: string; id?: string; sessionID?: stri
   commands?: Capability[]; nextCursor?: number; totalCommands?: number;
   error?: { code: string; message: string }; result?: { succeeded: boolean; error?: { code: string; message: string } } };
 const MAX_FRAME = 65536;
+// Complete audience projection uses the same global logical response byte
+// ceiling as native chunk framing, with a separate generous record bound.
+const MAX_AUDIENCE_READINGS = 16384;
+const MAX_AUDIENCE_BYTES = 16 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 function validResponse(value: unknown): value is Response {
@@ -124,9 +128,9 @@ function validResponse(value: unknown): value is Response {
     }
     if (state.audience !== undefined) {
       const audience = state.audience;
-      if (!object(audience) || typeof audience.observedAt !== "number" || !Number.isFinite(audience.observedAt)
+      if (!object(audience) || Buffer.byteLength(JSON.stringify(audience), "utf8") > MAX_AUDIENCE_BYTES || typeof audience.observedAt !== "number" || !Number.isFinite(audience.observedAt)
           || typeof audience.health !== "string" || (audience.liveSeconds !== undefined && (!Number.isSafeInteger(audience.liveSeconds) || (audience.liveSeconds as number) < 0 || (audience.liveSeconds as number) > 31536000))
-          || !Array.isArray(audience.readings) || audience.readings.length > 64 || !object(audience.presetDelivery)
+          || !Array.isArray(audience.readings) || audience.readings.length > MAX_AUDIENCE_READINGS || !object(audience.presetDelivery)
           || Object.keys(audience.presetDelivery).length > 64 || !Object.values(audience.presetDelivery).every(value => typeof value === "string")) return false;
       if (!audience.readings.every(reading => object(reading) && typeof reading.destinationID === "string" && UUID.test(reading.destinationID)
           && typeof reading.name === "string" && reading.name.length <= 512 && typeof reading.freshness === "string"
