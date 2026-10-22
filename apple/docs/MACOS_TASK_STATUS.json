@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Original61 macOS issues:27 closed/34 open (23 features/11 trackers). Fresh complete paginated read-only20:20:13UTC inventory accounts for all 135macOS issues:101 closed/34 open; all 74 outside original inventory closed, zero open PRs or other open issues. All61 body/state bindings unchanged; no new closure.",
+  "scope": "Original 61 macOS issues:27 closed / 34 open (23 features / 11 trackers). Fresh complete paginated read-only inventory at 21:07:34 UTC accounts for all 135 macOS issues:101 closed / 34 open; all 74 outside the original inventory are closed, zero open PRs or other open issues. All 61 original bodies/states unchanged. No new closure.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -17,8 +17,8 @@
     "signing": "Read-only inventory:3 valid signing identities (1 Developer ID Application, 2 Apple Development); 5 macOS profiles, none authorizing the declared shared browser App Group for host/helper. Two iOS profiles contain that group. No positive provisioned macOS shared-container launch, Developer ID distribution artifact, notarization or extension/driver installation is claimed; no profiles/identities/containers changed."
   },
   "validation": {
-    "sharedCore": "Fresh local ARM Debug framework from76 shipping Core files passes all609 tests/83 suites across58 test files. Optimized actual provider-session focused throttling runtime also PASS; full session compiled but only focused mode executed. Published1ba iOS 607/83 PASS is separate older source; neither Mac reached Core because desktop compile failed.",
-    "shippingApp": "Exact d09 generation, unsigned universal arm64/x86_64Release and actual bundle audit PASS.827-path expanded source/recipe set+vendor exactly verified; subsequent 4f76e76 package/contrast validation-only recipes differ explicitly. All shipping app/Core/helper/extension/worker sources match built d09. No signed/provisioned distribution or corrected hosted-Xcode 26.6pass claimed.",
+    "sharedCore": "Earlier fresh local full609 tests/83 suites PASS remains named evidence. New Twitch title suite separately compiles all 76 actual Core sources and passes 4 focused tests with an exact-test original CJK-only negative; full combined suite not rerun locally. Exact published e41 iOS609/83 PASS 190.578 s. Both Mac CI jobs remain active; no full run success asserted.",
+    "shippingApp": "Exact 4e17084 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS. All838 expanded source/recipe path/hash bindings and vendor independently match the exact built Git tree. Component fixture results remain bound to their named frozen sources; final app compilation does not relabel them as full combined runtime or provisioned acceptance.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -29,13 +29,13 @@
     "nativeInterviewProgramISO": "Actual manager/default native receiver through local TURN/Chrome decoded Program and guest ISO: 316946/294390 identical Float32 values, zero rational cue difference/history misses; separate screen approval/stop and Backstage privacy pass",
     "guestPrivateMessages": "Actual shipping dispatcher/manager/default receiver through local TURN/Chrome passes both directions/receipts, private Backstage routes, rejoin history wipe and stale-context refusal alongside unchanged stereo audio return",
     "review": "Current independent source review clears paragraph pointer scopes (recording), scene reordering selection/runtime fences (pro_adapters) and persistent control-row source/state/layout (providers). Root exact final source compiles universally and executes all 40 strengthened row/style cases. No native AX/menu-key/VoiceOver, full-window/contrast or physical qualification is inferred.",
-    "performance": "One original named local Apple M3 Max/Mac15,8/macOS 27.2 ARM invocation passes both 600 sstatic/replay workloads and all 7+11 checks:18001/17978renders,0renderfailures,0/23skips,18000/17977writerframes, all18000inputframesdecoded,9.500/1.785 msendpoint errors,0A/Vwriterdrops. Independent789 checks pass. This scoped ARM result does not relabel earlier hosted failures or establish Intel, physical capture, allmixes, uplink/encoder/storage ceilings or independent waveform drift.",
+    "performance": "Named local M3 Max two 600 s workload PASS remains separate. Exact e41 hosted original ARM/Intel bothFAIL:ARM static/replay17148/17020 vs17850, Intel16988/15248. Actual-source replay decoding passes; nominal replay checks depend on the sparse first recording. ARM both inspections complete; Intel second inspection incomplete/UNQUALIFIED at unchanged1380 s deadline. Final endpoint errors pass but intermediate writer frontier skew is material; neither is independent waveform drift or a causal diagnosis. No gate/retry change or#92closure.",
     "sharedCoreIOS": "Exact published a346f56 hosted iOS full586 tests/82 suites PASS180.802s, job119633732045. Original log /tmp/stream-ci-a346f56-119633732045-original.log SHA256112939a6917de52b3b0be2ecf9e075327b7087a01a75caeb584b50b4382264bb. New playback fixture7898737 changes no shared Core/iOS app source.",
     "appIntentsMetadata": "Actual unsigned bundle contains all six documented App Intents and three stable resource entities; an owned bundle with scene action removed is rejected",
     "guestPrivateTalkback": "Actual shipping manager/default receiver through owned TURN/Chrome passes addressed microphone PCM and decoded Opus, public/Monitor/Aux/pre+post ISO exclusion, no private sidechain ducking, FX/ring/converter boundary resets, exact public settings restoration, queued revision invalidation and full-lease press/release/rejoin/deadline safety. Native AppKit mouse/Space/repeat/modifier/responder/removal checks pass. Mixer and send authority expire the hold after ten seconds while MainActor is deliberately blocked.",
     "guestProgramVideo": "Actual default manager/controller/VT/H264 sender through owned TURN/Chrome decodes Program pixels, starting at <=320x180/15fps and constraining bitrate to real receiver feedback. Explicit source/stop/restart/rejoin, pre-BEGIN/held-install/control-close, encoder ownership and held-compositor privacy regressions pass. A real partial FU-A send recovers on the next successful IDR. Earlier repeated raw-track-recorder A/V67.94/76.19ms stayed below100ms, native cues below50ms; source timestamps and capture-disabled retained audio channel preserve the actual clock path.",
     "distributionHooks": "Fresh production bundle audit inspects executable and debug dylibs; no guest transport validation hooks. An owned bundle containing a real exported injection hook is rejected.",
-    "accessibility": "Actual owned native standard/increased production-style contrast view passes unchanged red/black/white thresholds after fixing embedded-ICC/NSBitmap sampling through explicit sRGB bytes. Old archived pixels were rendered red; prior increase-contrast environment diagnosis was a fixture-sampler error. Independent91 binding/pixel checks clear this style boundary. Complete labels/actions/order, native keyboard traversal and focus/smaller-panel flows remain unqualified. No added human-listening or physical-keyboard requirement.",
+    "accessibility": "Owned production-style contrast PASS is unchanged. New genuine stock SwiftUI/AppKit semantic baselines remain unavailable in nine retained diagnostic boundaries; regular policy and LaunchServices do not establish lock/TCC cause or production control defect. Final classification/runner changes syntax-checked only, not rerun. Complete original native labels/actions/order, traversal, focus and smaller-panel flows remain open. No human-listening or physical-keyboard condition added.",
     "combinedGuestMedia": "Post-merge actual shipping dispatcher/manager/default SDK through owned TURN and Chrome 155 passes stereo public-show mix-minus, future-only opt-in public chat with expiry/gaps/rejoin/source-close, private text/receipts and rejoin history wipe, addressed private microphone PCM, Program/Monitor/Aux/pre+post ISO exclusion, release/focus/deadline/rejoin safety and retained-command refusal. Log: /tmp/stream-macos-postmerge-combined-audio-20261021.log. This successful audio/privacy suite does not supersede the separately failing raw-track video A/V gate.",
     "audienceEvents": "Actual shipping public decoders/coordinator/dispatcher/renderer produce accepted text-event alert pixels only after Take; native filter/palette, literal Unicode pagination, default-off/direct-live/stale-session/removed-event guards, bounded preferences and shared16-slot capacity pass. Existing HTTP/WebSocket provider model/mutation fixtures pass. No shared Core/iOS source changed.",
     "guestSecondaryVideo": "Actual distinct Program landscape and100x180 portrait Secondary pixels pass through owned TURN/Chrome. Earlier repeated raw-track-recorder Secondary A/V37.06/64.58ms; native source cues below50ms and independent playout below100ms. Cross-source held installs, no-yield cancellation/replacement, late geometry, held compositor privacy, source removal/restore/default-Program-off rejoin and demand/budget teardown pass. Additional canvas remains gated to measured M3 Max class.",
@@ -332,7 +332,8 @@
       "manifestPaths": 775
     },
     "wave17Isolation": "Reviewed actual owned resource/broker/publisher/converter/recording/optional-image/guest component proofs integrate into final universal App. Exact runtime boundaries, earlier failed controls, compiled-only Factory/ISO paths and no physical/network/sustained qualification are recorded in wave17Review.",
-    "wave18PortableDurability": "Actual copied Workspace methods+ShowPackageIO pass catalog-read/recovery/precommit rollback/postcommit pruning/concurrent edit/cancellation/ambiguity/restart controls and all5read-race phases. Original-method recovery-refusal control fails as expected;4 generation tests pass. Independent109 bindings clear22 sources+32 artifacts. No full runtime/Finder/chooser/sandbox qualification."
+    "wave18PortableDurability": "Actual copied Workspace methods+ShowPackageIO pass catalog-read/recovery/precommit rollback/postcommit pruning/concurrent edit/cancellation/ambiguity/restart controls and all5read-race phases. Original-method recovery-refusal control fails as expected;4 generation tests pass. Independent109 bindings clear22 sources+32 artifacts. No full runtime/Finder/chooser/sandbox qualification.",
+    "wave19PortableSoundPad": "Historical actual imported/repaired pad AVAudioFile PCM2 chunks and nonzero Program 1 chunk each passed after original deletion. Former audio-only AVAssetReader/HAL blocker is resolved, not a current remaining requirement. Later playback delivery-clock changes have exact separate PCM/lifecycle evidence; old full graph is not relabelled current. Successful native keyboard chooser selection remains unqualified, no established lock/TCC cause."
   },
   "issues": [
     {
@@ -438,7 +439,11 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Matching camera-extension signing profile, OS activation and real conferencing/browser/FaceTime consumer checks."
+        "Matching camera-extension signing profile, OS activation and real conferencing/browser/FaceTime consumer checks.",
+        "Unconfirmed native camera stop retains transport, queue/sample ownership and private admission; new lifetimes/deactivation are blocked until exact explicit retry succeeds. Controlled native-effects producer/controller proof passes; actual installed extension/discovery/activation/target clients not executed."
+      ],
+      "evidence": [
+        "/tmp/stream-virtual-camera-stop-retirement-receipt-20261022.json"
       ]
     },
     {
@@ -575,16 +580,18 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Successful native keyboard file-chooser selection remains unqualified in the locked session. Actual LaunchServices and typed NSItemProvider intake are verified; neither is relabelled a physical Finder gesture.",
+        "Successful native keyboard file-chooser selection remains unqualified. Existing actual LaunchServices and typed NSItemProvider intake remain separately verified; no physical Finder gesture or lock/TCC cause is inferred.",
         "Preview-manifest forwarding in the package fixture and exact copied Workspace methods now verify five actual IO/read-generation/ownership/catalog/import phases, retaining original condition holds/deadline, plus three generation checks. No full runtime, native chooser, sandbox or LaunchServices qualification is added; prior native keyboard acceptance gap remains.",
-        "Durable-before-publication importer now preserves current catalog, rolls back only verified uncommitted owned copies, retains uncertain/committed files and fences stale writes until reload. Actual filesystem/race/restart fixtures pass; native keyboard chooser selection remains separately unqualified."
+        "Durable-before-publication importer now preserves current catalog, rolls back only verified uncommitted owned copies, retains uncertain/committed files and fences stale writes until reload. Actual filesystem/race/restart fixtures pass; native keyboard chooser selection remains separately unqualified.",
+        "Historical full imported/repaired sound-pad production AVAudioFile PCM and nonzero Program proof already passed. Later source drift is explicit and separate exact PCM/lifecycle proof passes. Do not retain the old audio-only AVAssetReader/HAL concern as a current gap; only successful native keyboard chooser selection remains unqualified."
       ],
       "evidence": [
         "PORTABLE_SHOW_NATIVE_ENTRY.md",
         "/tmp/stream-wave3-portable-audio-report-20261022.md",
         "PACKAGE_READ_METHODS_2026-10-22.json",
         "PORTABLE_IMPORT_DURABILITY.md",
-        "PORTABLE_IMPORT_DURABILITY_2026-10-22.json"
+        "PORTABLE_IMPORT_DURABILITY_2026-10-22.json",
+        "/tmp/stream-wave18-portable-sound-pad-qualification-review-20261022.json"
       ]
     },
     {
@@ -596,7 +603,8 @@
       "completion": "remaining actual profile-import and package lifecycle acceptance",
       "remaining": [
         "Three reproducible 15-key stream/record/interview candidate archives now exist, are registered and included in packaging, with public MIT-template provenance. Actual Stream Deck application importer acceptance remains unproved. Manual editor export is not a required producer; candidate byte/schema/package checks do not establish importer acceptance.",
-        "Actual package install/update/uninstall remains unproved. The existing owned development link/update/unlink and actual SDK configuration/restart tests are scoped evidence, not application package-install lifecycle or physical delivery qualification."
+        "Actual package install/update/uninstall remains unproved. The existing owned development link/update/unlink and actual SDK configuration/restart tests are scoped evidence, not application package-install lifecycle or physical delivery qualification.",
+        "One ordinary installed7.4.2 launch/public Configure AXpress returned0 but exposed no editor/device controls; importer not reached, virtual-device status unknown. Existing profiles/plugins/keys/pairing/devices unchanged and prior app-closed state restored. Actual sample import/install/update/uninstall remains open; manual export provenance is not a required criterion."
       ],
       "evidence": [
         "../../integrations/stream-deck/INSPECTOR_QUALIFICATION.md",
@@ -604,7 +612,8 @@
         "../../integrations/stream-deck/profiles/README.md",
         "../../integrations/stream-deck/com.joeblau.stream-studio.sdPlugin/profiles/provenance.json",
         "../../integrations/stream-deck/tests/lifecycle.test.ts",
-        "../../integrations/stream-deck/tests/profile-package-refusals.py"
+        "../../integrations/stream-deck/tests/profile-package-refusals.py",
+        "/tmp/stream-e41-152-genuine-importer-attempt-receipt-20261022.json"
       ]
     },
     {
@@ -695,10 +704,13 @@
       "completion": "remaining acceptance",
       "remaining": [
         "Authorized live events/viewer readings and provider permissions/rate acceptance remain. Supported static Twitch tiles, typed text-event cards, filters/styles and optional manual promotion are locally verified; animated/inline emotes, undocumented sticker graphics and unsupported reaction subscriptions stay unavailable.",
-        "Native authorized-reader static Twitch emote controls now have controlled coordinator/renderer/recording pixel proof and independent 1015-check review. No live authorized feed/event/viewer acceptance follows; original issue remains open."
+        "Native authorized-reader static Twitch emote controls now have controlled coordinator/renderer/recording pixel proof and independent 1015-check review. No live authorized feed/event/viewer acceptance follows; original issue remains open.",
+        "Public subscription/gift event entries preserve literal text, anonymity, typed filters and bounded limits; entries without supported mutation IDs remain read-only. Controlled positives/negatives do not establish live provider event/viewer or new Program/UI acceptance."
       ],
       "evidence": [
-        "NATIVE_CHAT_STATIC_EMOTE_2026-10-22.json"
+        "NATIVE_CHAT_STATIC_EMOTE_2026-10-22.json",
+        "TWITCH_PUBLIC_NOTICES_2026-10-22.json",
+        "YOUTUBE_GIFT_EVENTS_2026-10-22.json"
       ]
     },
     {
@@ -720,7 +732,12 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Authorized live-provider public chat acceptance and deployed/mobile/restricted-network guest feed qualification."
+        "Authorized live-provider public chat acceptance and deployed/mobile/restricted-network guest feed qualification.",
+        "Documented public Twitch subscription notices and YouTube gift events now enter the typed shared queue under controlled native decoder/manager proofs. Authorized live-feed acceptance remains separate; no new Program/UI run or whole issue completion."
+      ],
+      "evidence": [
+        "TWITCH_PUBLIC_NOTICES_2026-10-22.json",
+        "YOUTUBE_GIFT_EVENTS_2026-10-22.json"
       ]
     },
     {
@@ -758,14 +775,16 @@
       "remaining": [
         "Configure/deploy the reviewed confidential-server/public-native Restream broker and qualify actual registered consent/refresh/chat/ingest; no service or app approval is provisioned by this source change.",
         "Registered OAuth apps and real authorized consent/refresh/ingest acceptance remain unqualified. Public Twitch14/Restream19-server discovery and exact-account native disabled-draft imports pass; these are not authorized broadcast acceptance.",
-        "Documented YouTube live-request403throttling now activates existing cooldown;609 Core/83and focused actual session test pass with controlled HTTP/memory credentials. Actual registered consent/authorized provider acceptance is still incomplete."
+        "Documented YouTube live-request403throttling now activates existing cooldown;609 Core/83and focused actual session test pass with controlled HTTP/memory credentials. Actual registered consent/authorized provider acceptance is still incomplete.",
+        "Twitch title local validation now counts Swift characters rather than UTF8 bytes. Same four actual Core tests pass after a CJK-only original failure; accepted title bytes remain unchanged, invalid empty/141 cases make zero injected requests. Official Unicode segmentation remains unspecified; no new authorization/live-account qualification claimed."
       ],
       "evidence": [
         "PROVIDER_ACCOUNTS.md",
         "/tmp/stream-wave3-provider-133-ac-review-20261022.md",
         "RESTREAM_AUTH_BROKER.md",
         "/tmp/stream-wave3-restream-broker-report-20261022.md",
-        "YOUTUBE_RATE_LIMIT_ERRORS.md"
+        "YOUTUBE_RATE_LIMIT_ERRORS.md",
+        "TWITCH_TITLE_CHARACTER_LIMIT.md"
       ]
     },
     {
@@ -876,14 +895,16 @@
       "completion": "remaining acceptance",
       "remaining": [
         "Real desktop/mobile devices, permissions, AEC/headphones and restricted Internet network acceptance.",
-        "Current original-scope gap remains Safari/mobile device-preparation, permission/device-switch/reconnect qualification. Controlled Node tests now reject ended tracks before Join/new offers while preserving healthy devices/invite;17 guest+35 existingclient tests pass. These add no AEC or universal-browser condition to this issue."
+        "Current original-scope gap remains Safari/mobile device-preparation, permission/device-switch/reconnect qualification. Controlled Node tests now reject ended tracks before Join/new offers while preserving healthy devices/invite;17 guest+35 existingclient tests pass. These add no AEC or universal-browser condition to this issue.",
+        "Committed page-memory camera/microphone IDs now survive rechecks; failed/stale device switches cannot silently select a new default. Original controlled23 tests:17 PASS/6 FAIL; fixed23 plus35 existing clients PASS. Original Safari/mobile permission/device/reconnect qualification remains open."
       ],
       "qualificationLimits": [
         "Optional TCP backend: arm64 and x86_64 archives and corresponding-source/relink materials are verified at the declared macOS 14 floor; native ARM full media and Rosetta Intel control smoke pass. Shipping still uses UDP-only transport. Actual macOS 14 runtime, native Intel full media, TLS, Internet/mobile/Safari and rendered A/V are not established by these optional artifacts."
       ],
       "evidence": [
         "NATIVE_GUEST_TCP_PORTABILITY.md",
-        "GUEST_JOIN_DEVICE_RECOVERY_2026-10-22.json"
+        "GUEST_JOIN_DEVICE_RECOVERY_2026-10-22.json",
+        "GUEST_DEVICE_SELECTION_RECHECK_2026-10-22.json"
       ]
     },
     {
@@ -921,7 +942,8 @@
         "Fail-closed production shared-container and bidirectional signed-peer policy is now implemented and reviewed. Real kernel/SecCode ad hoc identity/refusal and silent validation IPC pass, but prototype policy cannot compile into shipped code. No macOS profile authorizes the declared group here; no positive provisioned/sandboxed launch or real browser audio/exclusion/sync acceptance is inferred. NoReady probes do not identify which prerequisite refused.",
         "Supported system-mix and pinned-display owner ACK/filter/drain/history coordination is implemented and controlled actual-class/mixer/session proofs pass. Missing/retiring/failed/unsupported routes remain explicit conflicts. No live every-route recapture, actual WebKit attribution/tails, signed provisioned container launch or local HTML/subresources is qualified; selector/startup remain disabled. This partial software progress does not satisfy all three original criteria.",
         "Scoped local-HTML file/folder staging and exact generation/lease Stop/exit cleanup are implemented and controlled real-store/session checks pass, including persistent bounded quarantine admission. This is software authority evidence only: actual signed/provisioned sandboxed App Group WebKit subresources, same-page sound/pixels/routing/A/V and all original browser capture gates remain unqualified; production selector/startup remain disabled.",
-        "Actual session retirement now joins held audio preparation/stop and owned cleanup before helper close; controlled owner positive and ordering negative pass. Real transport termination, mixer/audio/capture are not exercised; provisioned/routing/audio acceptance remains open and startup disabled."
+        "Actual session retirement now joins held audio preparation/stop and owned cleanup before helper close; controlled owner positive and ordering negative pass. Real transport termination, mixer/audio/capture are not exercised; provisioned/routing/audio acceptance remains open and startup disabled.",
+        "Unconfirmed capture stop now retains exact producer, holdback, admission, helper and pages; fresh loads remain fenced until explicit confirmed retirement. Two actual-owner controlled positives and three exact policy negatives pass; strengthened oracle checks specific trap markers. Actual SCStream/helper termination/audio/routing remain unqualified and selector disabled."
       ],
       "evidence": [
         "research/browser-widget-audio.md",
@@ -932,7 +954,10 @@
         "BROWSER_WIDGET_LOCAL_CONTENT.md",
         "BROWSER_WIDGET_LOCAL_CONTENT_2026-10-22.json",
         "BROWSER_HELPER_SHUTDOWN.md",
-        "BROWSER_HELPER_SHUTDOWN_2026-10-22.json"
+        "BROWSER_HELPER_SHUTDOWN_2026-10-22.json",
+        "BROWSER_AUDIO_STOP_CONFIRMATION.md",
+        "BROWSER_AUDIO_STOP_CONFIRMATION_2026-10-22.json",
+        "BROWSER_AUDIO_STOP_ORACLE_2026-10-22.json"
       ]
     },
     {
@@ -1013,7 +1038,8 @@
         "Both whole raw publisher actors now release unused repeat-cache ownership at accepted Program audio entry before the existing await and avoid caching later Program video. Actual one-buffer-pool six positive/four exact negative cases pass with selected SDK media effects inert. This does not qualify opaque SDK/VideoToolbox release, historical surface holders, full isolation or sustained performance; original issue remains open.",
         "Actual Program failed/attempt pressure is now separate from scheduler misses, with absent-versus-measured-zero intervals and fresh recovery windows. Twelve Core tests, exact coordinator/report-block probe and combined universal build pass. This optional preview policy correction does not repair render allocation, identify failure cause, qualify active-output isolation or complete original representative sustained/resource measurements.",
         "Process-wide measured raw-bank admission and independently backed broker/publisher/recorder/camera/optional/guest domains now have reviewed owned component proofs and combined d28 universal compile. Exposed banks remain charged; intentional footprint-plus-ceilings admission is conservative software policy, not hard memory/hardware capacity. Full representative sustained A/V/resource qualification and original 600 s failures remain open; component copies have costs not yet qualified.",
-        "One named M3 Max/macOS 27.2 ARM original2 \u00d7 600 s workload now passes all 7+11unchangedchecks. This positive does not change any historical failure, qualify supported Intel/representative mixes or establish complete UI/A/V/resource ceilings; original issue remains open."
+        "One named M3 Max/macOS 27.2 ARM original2 \u00d7 600 s workload now passes all 7+11unchangedchecks. This positive does not change any historical failure, qualify supported Intel/representative mixes or establish complete UI/A/V/resource ceilings; original issue remains open.",
+        "Exact e41 hosted original two 600 s ARM/Intel jobs both fail original capacity gates. ARM17148/17020, Intel16988/15248; actual-source replay decoding passes but nominal replay requirements are dependent on sparse static recordings. Intel second inspection was incomplete at original1380 s teardown, not running or eventually passed. Endpoint alignment does not prove sustained80 ms or waveform sync; causal mechanism unknown."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -1050,7 +1076,9 @@
         "OPTIONAL_FRAME_IMAGE_DELIVERY.md",
         "POOL_DRAIN_ORACLE.md",
         "PERFORMANCE_OWNED_ARM_1BA7351.md",
-        "PERFORMANCE_OWNED_ARM_1BA7351_2026-10-22.json"
+        "PERFORMANCE_OWNED_ARM_1BA7351_2026-10-22.json",
+        "/tmp/stream-performance-e41fa06-terminal-report-20261022.json",
+        "/tmp/stream-performance-e41fa06-arm-analysis-20261022/analysis.json"
       ]
     },
     {
@@ -1087,7 +1115,8 @@
         "Latest source names native effect/AU parameters and operations, secondary safe-zone/Follow Program controls and cue-specific rundown actions. Independent source reviews and combined 5c7dbea unsigned universal typecheck pass; actual mounted AX/keyboard/VoiceOver, full-window/contrast acceptance remains unqualified.",
         "Annotation toolbar now retains narrow-canvas controls using the existing native scroll row and intrinsic picker width. All 192 actual hidden native geometry cases and separate failure-artifact custody checks pass; actions/owners are inert. Native keyboard/AX/VoiceOver, focus, pixels/contrast and full-window operator acceptance remain unqualified.",
         "The annotation fixture now identifies actual native segmented/switch types, preserving192geometry cases and a missing-picker negative. This repairs fixture matching only; original hosted types/count/case unknown, and complete AX/keyboard/focus/text/contrast/operator validation remains unqualified.",
-        "Current owned standard/increased contrast style pixels are qualified after ICC-aware sampler correction; the old red-reference failure was a fixture error, not an environmental rendering refusal. Complete original native AX/actions/order, keyboard traversal, smaller-panel and focus flows remain open; no human-listening/physical-key requirement is introduced."
+        "Current owned standard/increased contrast style pixels are qualified after ICC-aware sampler correction; the old red-reference failure was a fixture error, not an environmental rendering refusal. Complete original native AX/actions/order, keyboard traversal, smaller-panel and focus flows remain open; no human-listening/physical-key requirement is introduced.",
+        "Nine genuine scene-semantic diagnostic boundaries remain unqualified; the last runtime used a regular-policy snapshot, while final conservative classifications/runner are syntax-checked only. Native style contrast remains PASS. Full original AX/keyboard/focus/window scope stays open without inferred lock or invented manual-only requirements."
       ],
       "evidence": [
         "STUDIO_CONTROLS.md",
@@ -1116,7 +1145,9 @@
         "ANNOTATION_TOOLBAR_LAYOUT_2026-10-22.json",
         "ANNOTATION_TOOLBAR_RETENTION_2026-10-22.json",
         "STUDIO_CONTRAST_PIXELS.md",
-        "STUDIO_CONTRAST_PIXELS_2026-10-22.json"
+        "STUDIO_CONTRAST_PIXELS_2026-10-22.json",
+        "SCENE_SEMANTIC_OBSERVATION.md",
+        "SCENE_SEMANTIC_OBSERVATION_2026-10-22.json"
       ]
     },
     {
@@ -1301,11 +1332,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap:27of61 original issues closed/34 open. Exact d09 generation, unsigned universal arm64+x86_64Release and bundle PASS;827-path expanded source/recipe manifest verified. Later 4f76e76 documentation/validation recipes are separately scoped, shipping sources unchanged. Fresh609 Core/83 suites and focused provider test PASS locally. Named M3 Max original2 \u00d7 600 s workload PASS; Intel/representative resource and full original#92 qualification remain incomplete. Actual production-style contrast passes after ICC sampler correction; full#90 remains open. Durable import, controlled helper/guest/chat and distribution-policy repairs do not close original features. Published1ba native CI terminalFAIL both desktop builds; iOS 607/83 PASS. Corrected source not yet hosted-Xcode 26.6verified. Historical wave objects, failed receipts and all 61states preserved.",
-  "integratedMain": "d09da50f6803381374887780a5fdf88f342c04ff",
-  "githubStateRefreshedAt": "2026-10-22T20:20:13Z",
+  "overallStatus": "Incomplete roadmap:27 of 61 original issues closed / 34 open. Exact 4e17084 generation, unsigned universal arm64+x86_64 Release and bundle PASS with838-path expanded source/recipe set and vendor verified. Scoped Twitch title/public notices, YouTube gift events, guest device choices and unconfirmed camera/browser retirement proofs pass at named sources; no original feature closes. Genuine scene AX/key baselines and Elgato importer remain unqualified without inferred lock/TCC cause. Historical full imported/repaired pad AVAudioFile PCM+Program proof is valid; current playback-source drift is explicit, successful keyboard chooser remains open. Exact e41 hosted sustained ARM/Intel bothFAIL:nominal capacity missed and Intel second inspection incomplete at original1380 s teardown. Native e41 CI remains active with iOS609/83 PASS; no whole-run success. Historical wave objects, all 61states and failed receipts preserved.",
+  "integratedMain": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+  "githubStateRefreshedAt": "2026-10-22T21:07:34Z",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "1ba73513a5d5f29f34a6467ea9ddc07410ff810f",
+  "publishedIntegration": "e41fa06bae39ba14f3767a7bf3f92537f66b6313",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1325,7 +1356,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "4f76e766954392b6b9b86a9580e416173b37548f",
+  "currentReviewBase": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -5167,5 +5198,287 @@
       "repair": "7d2afd4explicitcapturerenameisincurrentd09localappPASS; nohostedXcode 26.6correctedsourceverificationyet. Original30fPCM/annotationfailurecausesnotrelabeled."
     },
     "limits": "No newclosure. Oldwaveobjects, all 61statesandhistoricalfailedrawreceiptsunchanged. NativeAX/fullwindow, provisionedcapture/distribution, liveprovider/media/guestA/V andcompleteperformancequalificationremainseparate."
+  },
+  "wave19Review": {
+    "currentLocalHead": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+    "publishedMainAtSnapshot": "e41fa06bae39ba14f3767a7bf3f92537f66b6313",
+    "githubAudit": {
+      "recordedAt": "2026-10-22T21:07:34Z",
+      "inventory": {
+        "path": "/tmp/stream-wave19-macos-inventory-20261022.json",
+        "bytes": 4105571,
+        "sha256": "995cc859f7fd04ffa8a57069992c68d50ddf92e89e0e82d39bdfbc2a22da3eea"
+      },
+      "originalCriteriaReview": {
+        "path": "/tmp/stream-wave19-closure-audit-20261022.json",
+        "bytes": 27597,
+        "sha256": "de83480d9467ff4677a49fbc4599fa11f340781aa771f0ed12c8fe2722a34993"
+      },
+      "counts": {
+        "original61": {
+          "closed": 27,
+          "open": 34
+        },
+        "allMacOS": {
+          "closed": 101,
+          "open": 34
+        },
+        "openPRs": 0
+      },
+      "all61BodiesAndStatesEqualPrior": true,
+      "outsideOriginal61Open": [],
+      "openPRs": [],
+      "additionalClosures": [],
+      "all11OpenTrackersHaveIncompleteChildren": true
+    },
+    "combinedNative": {
+      "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+      "status": "PASS:generation, unsigned universal arm64+x86_64 Release, actual bundle audit",
+      "receipt": {
+        "path": "/tmp/stream-wave19-parent-final-results-20261022.json",
+        "bytes": 932,
+        "sha256": "49582fd9b7d414f7ee5543f1e4fdb1420e3a96c67d5e56680a3bf7057a99a27d"
+      },
+      "checks": [
+        {
+          "label": "generate",
+          "exit": 0,
+          "log": "/tmp/stream-wave19-parent-final-generate-20261022.log",
+          "bytes": 168,
+          "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+        },
+        {
+          "label": "universal",
+          "exit": 0,
+          "log": "/tmp/stream-wave19-parent-final-universal-20261022.log",
+          "bytes": 347412,
+          "sha256": "e2b744e55df9a267307a2c7c5c7a394be4ad1bb3cb7dd50ee0a5f09dbdb67610"
+        },
+        {
+          "label": "bundle",
+          "exit": 0,
+          "log": "/tmp/stream-wave19-parent-final-bundle-20261022.log",
+          "bytes": 517,
+          "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+        }
+      ],
+      "expandedManifest": {
+        "path": "/tmp/stream-wave19-built-production-manifest-20261022.json",
+        "bytes": 102433,
+        "sha256": "0a91162900b5d4ffdd7f214ed7260dae13a0395e3a9d8fd233f8d5a4d4ea8392"
+      },
+      "paths": 838,
+      "vendor": "d9fceedc068994023900b4d69588b8af19136752",
+      "exactSourceVerification": {
+        "path": "/tmp/stream-wave19-ledger-source-verification-20261022.json",
+        "bytes": 443,
+        "sha256": "969bf507ed0fb104bc0c0791fe2e40ba0a76537be20ab9423004af08be40a5c9"
+      }
+    },
+    "twitchTitle": {
+      "document": {
+        "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+        "path": "apple/docs/TWITCH_TITLE_CHARACTER_LIMIT.md",
+        "bytes": 2413,
+        "sha256": "ee7534fa276b157200dccf84f36ae84ee1737475680fff87622c1db44ec61be6"
+      },
+      "receipt": {
+        "path": "/tmp/stream-twitch-title-character-limit-receipt-20261022.json",
+        "bytes": 12862,
+        "sha256": "90a9aed6131746411c2d9ae8cc428d22da9f2c747dd445e1f18bae160ede35aa"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-wave19-twitch-title-independent-review-20261022.json",
+        "bytes": 19883,
+        "sha256": "5b78ba38afe543dea2ae96b1f0959b85c4c0c71445169ab7e77c5882fba39eb4"
+      },
+      "proof": "One-line actual guard; baseline3 PASS/only CJK FAIL, exact 4tests fixed PASS.140 ASCII/simple CJK each 1 unchanged PATCH; empty/141 each 0 requests.266 read-only checks. Local String.count graphemes not asserted universal provider semantics. No full suite rerun/live HTTP."
+    },
+    "twitchPublicNotices": {
+      "receipt": {
+        "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+        "path": "apple/docs/TWITCH_PUBLIC_NOTICES_2026-10-22.json",
+        "bytes": 6277,
+        "sha256": "589f48e5869f46d5395565d4656b7cea51a93b936703d324622274e485a65aac"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-wave18-twitch-public-notices-independent-review-20261022.json",
+        "bytes": 10901,
+        "sha256": "d8a7f6a960a4ac79bd516553aac0259f1293e38ac42409f469826aa0b4454592"
+      },
+      "proof": "Actual decoder/shared manager with controlled identity/HTTP/socket. Original fails first decoder check; fixed PASS. Four public notice kinds, strict anonymity, exact literal text,5 subscription ACKs, migration/stale callback and nonreplyable actions.32 review bindings. Earlier4 subscription fixtures updated but not rerun; prior native-emote proof historical."
+    },
+    "youtubeGiftEvents": {
+      "receipt": {
+        "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+        "path": "apple/docs/YOUTUBE_GIFT_EVENTS_2026-10-22.json",
+        "bytes": 12005,
+        "sha256": "f6abd3b370454fbad4d7f9e84640607990846c2068152b16241dab0d1f4ff08d"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-wave18-youtube-gift-events-independent-review-20261022.json",
+        "bytes": 19810,
+        "sha256": "134545960b774de5de91311dabfabe64e42becebb8607d168019397cdf6d6cd8"
+      },
+      "scope": "Actual public decoder/manager controlled identity/HTTP; bounded read-only entries, dedup and mutation refusal.67 independent bindings. No authorized live feed, renderer/Program/UI/device/RTC run. Existing queue/filters/styles reused."
+    },
+    "guestDeviceRecheck": {
+      "receipt": {
+        "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+        "path": "apple/docs/GUEST_DEVICE_SELECTION_RECHECK_2026-10-22.json",
+        "bytes": 6701,
+        "sha256": "53aadb2b43d68146caeb9b2de31d9646ba7f1d3de837cb0f46a52ade207e0354"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-wave19-device-choice-independent-review-20261022/review.json",
+        "bytes": 1879,
+        "sha256": "134207f662cede4d9cc97d229963a50f51b185ec87e4debc0bf6d73affe4b0a5"
+      },
+      "scope": "ShippingJS in Node VM, controlled UA tracks/promises/signaling. Transactional committed choices, exact recheck constraints, no silent fallback. Original17 PASS/6 FAIL; fixed23 + 35 existing clientsPASS.36 independent checks/19 bindings. Actual Safari/mobile/permission/device capture not qualified."
+    },
+    "cameraStopRetirement": {
+      "receipt": {
+        "path": "/tmp/stream-virtual-camera-stop-retirement-receipt-20261022.json",
+        "bytes": 2739,
+        "sha256": "6553492f393cccff5bdb106284d64ce7f4f64cbc4e31a6abee8cf012f2ff047d"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-virtual-camera-stop-independent-review-20261022.json",
+        "bytes": 9322,
+        "sha256": "43b2015892b129868ec36b8f306925ce211d43187b096cc435a332930628298c"
+      },
+      "proof": "Actual producer/controller/broker with controlled native status/discovery/queue effects. FailedStop retains exact transport/queue/private bank/admission; no automatic retry, explicit exact success and quarantine keep successor safe. First native build+runtimePASS. StreamController argument/UI source-reviewed, now full universal compiled. No installed CMIO/discovery/activation/client/capture/network."
+    },
+    "browserStopConfirmation": {
+      "documents": [
+        {
+          "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+          "path": "apple/docs/BROWSER_AUDIO_STOP_CONFIRMATION.md",
+          "bytes": 5290,
+          "sha256": "372f2082de4e647a441bdf1bf757c1acd4d0d759a8bbf0846c9a594ee3d08f6b"
+        },
+        {
+          "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+          "path": "apple/docs/BROWSER_AUDIO_STOP_CONFIRMATION_2026-10-22.json",
+          "bytes": 46851,
+          "sha256": "839683ceb9db67b6c334be39b131bafdf04f75aedc35175c75df2f9ffba19056"
+        },
+        {
+          "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+          "path": "apple/docs/BROWSER_AUDIO_STOP_ORACLE_2026-10-22.json",
+          "bytes": 6877,
+          "sha256": "4000da0252aa7719eb215e2c765ebd928b63c0b28ad1105ea794a5168222b0b6"
+        }
+      ],
+      "independentReview": {
+        "path": "/tmp/stream-wave19-browser-stop-independent-review-20261022.json",
+        "bytes": 70478,
+        "sha256": "8aff6e01ebddc462c12327cd4e12c085c8f8e67d7ece8625e8ecfd8134f0463a"
+      },
+      "proof": "Actual Capture/Session with actual mixer constructor/registry/holdback and controlled producer/driver/transport. Two positives exit 0, three exact policy negatives trap at intended markers.602 review checks/207 final artifacts. Oracle-only followup checks 21 signal/marker cases plus compile/deadline refusals and rechecks 5 retained native logs, no rerun.",
+      "scope": "Explicitretry bounds attempt count, not native wall-clock. Unconfirmed producer/helper/page/admission ownership retained and new loads fenced. Actual SCStream/helperprocess termination source-reviewed only. No SCK/capture, WebKit, IPC, device/network, mixerclock/audio/routing/A/V qualification; selector disabled."
+    },
+    "sceneSemanticObservation": {
+      "documents": [
+        {
+          "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+          "path": "apple/docs/SCENE_SEMANTIC_OBSERVATION.md",
+          "bytes": 5874,
+          "sha256": "3ca61b8d642d79b45d47c6f28c0362683786104a1b1844d2f608a738c94ed2f0"
+        },
+        {
+          "source": "4e1708455aaef49eaa45dd40961fa2dd686dc611",
+          "path": "apple/docs/SCENE_SEMANTIC_OBSERVATION_2026-10-22.json",
+          "bytes": 28120,
+          "sha256": "1b280c68bdfa94bb491c3c5337462636a8fd3b0d333baf4e5a5c61af70c67e2d"
+        }
+      ],
+      "scope": "Nine original genuine-baseline observations preserved; native AX/key baseline unavailable or API-disabled, no production action acceptance. Last regular-policy snapshot runtime separate from final syntax-only classifications/runner. No lock/TCC diagnosis, synthetic tree or physical-key/listening condition. Production SceneSelectionButton unchanged; stylecontrast PASS separate."
+    },
+    "genuineDeckAttempt": {
+      "receipt": {
+        "path": "/tmp/stream-e41-152-genuine-importer-attempt-receipt-20261022.json",
+        "bytes": 6732,
+        "sha256": "b207dcd4179387d9d68bd71ae9aa7780aa5ed1c9ae0af787d3801063e319b30f"
+      },
+      "scope": "One ordinary installed7.4.2 launch/public Configure AXpress0; editor/device controls unavailable, importer unreached, virtual-device status unknown. No existing profile/plugin/key/pairing/device mutation; owned PID restored app closed. No manualexport provenance gate."
+    },
+    "portableSoundPadCorrection": {
+      "review": {
+        "path": "/tmp/stream-wave18-portable-sound-pad-qualification-review-20261022.json",
+        "bytes": 9307,
+        "sha256": "dea649a6639a3b9e8ebc63e012c1d6a4ffe46eb9ab5281153de1a7370dc99c98"
+      },
+      "historicalProof": "Full signed sandbox imported/repaired sound pad:production AVAudioFile2 PCM/1 Programchunk each, originalsremoved. Oldaudio-only AVAssetReaderHALblocker resolved, notcurrent acceptance.",
+      "drift": "CurrentMediaSourcePlayback 35d31 differs by freshdelivery-clock sample clipping; exact separate fullPCM/lifecycle evidencePASS. Soundboard/asset/package/mediafixture unchanged butentire old runtime not relabelledcurrent. Successful actual native keyboardchooser selection remainsunqualified, no inferredlock/TCCcause."
+    },
+    "ciIntegration": {
+      "independentReview": {
+        "path": "/tmp/stream-wave18-ci-three-runners-independent-review-20261022.json",
+        "bytes": 3211,
+        "sha256": "7b1fe0aba94ebd2239f5b8132a580a81118d2c62caaae78ea049e6946e615405"
+      },
+      "scope": "Exactlyonce three added runner invocations with reviewedCore/output/owneddeadline bindings; source-only review, not hosted execution of new4esource."
+    },
+    "hostedNativeCI": {
+      "source": "e41fa06bae39ba14f3767a7bf3f92537f66b6313",
+      "run": 39849105419,
+      "snapshot": {
+        "path": "/tmp/stream-wave19-native-ci-snapshot-20261022.json",
+        "bytes": 33183,
+        "sha256": "9f8fb491763f0db00f87cdd66edc30ac21a0ef88a6e6fd909a4858a4c4a9e623"
+      },
+      "recordedAt": "2026-10-22T21:12:35.867321+00:00",
+      "state": "IN PROGRESS at retained snapshot:ARM managed-event/publisher step 13, Intel controller step 10. Both earlier desktop builds passed; no whole-CI pass. iOS609/83 PASS 190.578 s.",
+      "iOSOriginal": {
+        "path": "/tmp/stream-ci-e41fa06-120070198749-original.log",
+        "bytes": 366166,
+        "sha256": "28c1bb8f4518114fb8a806958af3f91c821dc669ca16b2d47830724fee46e73c"
+      }
+    },
+    "hostedOriginalPerformance": {
+      "source": "e41fa06bae39ba14f3767a7bf3f92537f66b6313",
+      "run": 39849236437,
+      "state": "TERMINAL FAILURE both architectures; originalattempt 1/no retry, unchanged600 s/17850/80 ms/1380 s gates.",
+      "terminalReport": {
+        "path": "/tmp/stream-performance-e41fa06-terminal-report-20261022.json",
+        "bytes": 32460,
+        "sha256": "43bf08fc11557841b2ce47a40a721cfe614b905eb5f7f59ae37bbb73a5010982"
+      },
+      "readable": {
+        "path": "/tmp/stream-performance-e41fa06-terminal-report-20261022.md",
+        "bytes": 3406,
+        "sha256": "0bad31c08d4577736475961f38a799d64e988b33115b0ec00335cdb6728416be"
+      },
+      "armIndependentAnalysis": {
+        "path": "/tmp/stream-performance-e41fa06-arm-analysis-20261022/analysis.json",
+        "bytes": 18431,
+        "sha256": "10c04017879af3091aeee392111d56c24d88de3ba67807abaac756be9dc5573b"
+      },
+      "armReadable": {
+        "path": "/tmp/stream-performance-e41fa06-arm-analysis-20261022/analysis.md",
+        "bytes": 3898,
+        "sha256": "83e2df4508d283c43d780343b458dcdde3cb567af4cd08cfbc94cf76710017df"
+      },
+      "arm": "Static/replay17148/17020 renders,0 failedattempts,853/980 skips. Both writers/inspections complete; replay17147 available/all decoded,17008 due. Four failed nominal checks include dependent sparseinput/decode; not 4independentcauses. Endpoint4.230/3.395 msPASS versusmaxwriterfrontier1022.480/612.454 ms.",
+      "intel": "Static/replay16988/15248 renders,0 failedattempts,1012/2753 skips. Writerscomplete; actualreplay16988/16988decode\u226516845 due. Firstinspectioncomplete102.311758 s; second validationCompletefalse/PENDING at original1380 s teardown, terminallyincomplete not running. Persisted0.286497 s is preinspection overhead, notelapsed/success. Endpoint35.821/37.922 msPASS vswriterfrontier779.955/864.685 ms.",
+      "limits": "Aggregate counters do not establish scheduler/GPU/allocator cause or hardware exhaustion. Endpoint alignment does not prove sustained80 ms or independent waveformdrift. NamedlocalM3 MaxPASSremainsdistinct; #92open.",
+      "intelIndependentAnalysis": {
+        "path": "/tmp/stream-performance-e41fa06-intel-analysis-20261022/analysis.json",
+        "bytes": 20727,
+        "sha256": "d1ab40b7b271cd8ab7db69501bd548367694181f3b34ea33e938d211853573f1"
+      },
+      "intelReadable": {
+        "path": "/tmp/stream-performance-e41fa06-intel-analysis-20261022/analysis.md",
+        "bytes": 4718,
+        "sha256": "e5b961d30e752b359c04caf257cf64f1b644590219084d13f43f19266ece03ee"
+      },
+      "independentChecks": {
+        "arm": 37,
+        "intel": 41
+      },
+      "intelInspectionStatus": "13 PASS / 4 FAIL / 1 PENDING retained. Both writers complete; second inspection terminally incomplete at original deadline. Native child final exit not separately observed; launcher exit 1."
+    },
+    "limits": "No newclosure. All historical wave objects,61states and failed receipts unchanged. Componentproofs scoped to named snapshots, final combined build not a full runtime repeat. No remote write/native run by ledger agent."
   }
 }
