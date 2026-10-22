@@ -214,12 +214,35 @@ private final class RehearsalMediaClock: @unchecked Sendable {
         try Data("A file cannot be a recording directory".utf8).write(to: unavailable)
         let failedRecorder = RecordingController(defaults: defaults, defaultDirectory: unavailable)
         controller.beginLocalRehearsal(recorder: failedRecorder)
+        // Writer-directory validation follows asynchronous frame-delivery
+        // installation. Preparing still owns its preview and publishing guard;
+        // it is not a leaked terminal failure while that transaction is pending.
+        if failedRecorder.state.isActive {
+            try check(failedRecorder.state == .preparing && controller.isPreviewing,
+                "Pending unavailable-directory preparation lost its owned preview")
+            try blocked(controller, recorder: failedRecorder)
+        }
+        try await wait("Unavailable-directory failure did not release its owned rehearsal", until: {
+            !failedRecorder.state.isActive && failedRecorder.lastError != nil && !controller.isRehearsing
+        })
         try check(!failedRecorder.state.isActive && failedRecorder.lastError != nil && !controller.isRehearsing && !controller.isPreviewing,
-            "Synchronous storage failure leaked owned rehearsal or preview")
+            "Storage failure leaked owned rehearsal or preview")
+        try check(failedRecorder.lastError?.contains("The recordings folder is unavailable.") == true,
+            "Unavailable-directory case failed before exercising the actual recording-folder rejection")
         controller.startPreview()
         controller.beginLocalRehearsal(recorder: failedRecorder)
+        if failedRecorder.state.isActive {
+            try check(failedRecorder.state == .preparing && controller.isPreviewing,
+                "Pending unavailable-directory preparation removed the existing preview")
+            try blocked(controller, recorder: failedRecorder)
+        }
+        try await wait("Unavailable-directory failure did not release rehearsal around the existing preview", until: {
+            !failedRecorder.state.isActive && failedRecorder.lastError != nil && !controller.isRehearsing
+        })
         try check(controller.isPreviewing && !controller.isRehearsing && controller.destinationOutputs.isPublishingAllowed,
             "Storage failure removed an existing preview or retained its publishing guard")
+        try check(failedRecorder.lastError?.contains("The recordings folder is unavailable.") == true,
+            "Existing-preview case failed before exercising the actual recording-folder rejection")
         controller.stopPreview()
 
         let live = StreamDestination(name: "Already live fixture")
