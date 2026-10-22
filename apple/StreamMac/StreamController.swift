@@ -304,7 +304,7 @@ final class StreamController: ObservableObject {
                     await engine.removeFrameDelivery(lease)
                     throw CancellationError()
                 }
-            }, cancel: { [weak self] in
+            }, revoke: { state.cancellation.cancel() }, cancel: { [weak self] in
                 state.cancellation.cancel()
                 guard !state.cancelled else { return }
                 state.cancelled = true
