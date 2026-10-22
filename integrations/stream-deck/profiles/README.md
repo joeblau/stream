@@ -16,7 +16,7 @@ These layouts use current native command IDs. Drag **Studio Command** to each ke
 | Record | Open Studio; `output.record.start`; `output.record.stop`; `output.record.pause`; `output.record.resume`; `output.record.split`; `output.record.marker`; `audio.microphone.mute`; `audio.monitor.toggle`; `studio.take`; `studio.revert` |
 | Interview | Open Studio; `comments.previous`; `comments.next`; `comments.show`; `comments.hide`; `studio.take`; `studio.revert`; `audio.microphone.mute`; `audio.monitor.toggle`; `studio.scene.previous`; `studio.scene.next`; `rundown.play`; `rundown.pause`; `rundown.stop`; `rundown.skip` |
 
-The interview layout controls queued comments and scene transport. Guest moderation, preset chat, show-profile switching, and audience-stat actions remain missing product features; exported profiles cannot supply those native commands.
+The resource-free interview layout focuses on queued comments and scene transport. Native guest moderation, preset chat, show-profile selection, and audience feedback are implemented in the current catalog. Add producer-specific guest-slot, preset, or saved-profile bindings through the live inspector after import; these personalized targets do not belong in a generic starter layout.
 
 These controls need no scene/source UUID, but **Studio Command** deliberately persists the open project's ID. Imported samples must be explicitly rebound in the destination project using the live inspector. Keep this protection; do not invent a wildcard project binding. Tokens remain in Keychain and must never be pasted into settings or archives. For a Plus variant, add an Audio Level Dial bound to the microphone or monitor bus, and export that device variant separately.
 
@@ -30,3 +30,9 @@ These controls need no scene/source UUID, but **Studio Command** deliberately pe
 6. Perform physical key/dial/Pedal/Mobile tests and signed install/update/uninstall qualification separately. Marketplace upload is a distinct authorized release action. Standalone Marketplace profiles follow Elgato's [profile packaging workflow](https://docs.elgato.com/stream-deck/profiles/packaging/).
 
 No importable sample archives or manifest profile registrations exist yet. This document is an authoring plan, and does not satisfy the exported-profile acceptance criterion by itself.
+
+## Current application authoring check (2026-10-22)
+
+A fresh bounded check used the installed Stream Deck 7.4.2 application and the existing macOS Accessibility grant. The public AX API reported trusted access. The application's **Configure Stream Deck** and **Preferences…** menu actions each accepted AX Press, but their reported window entries were cyclic application proxies: no actual editor window, layout controls, Profiles table, or Export control was exposed. This differs from successfully capturing an owned test window and does not establish that the external profile editor can be operated in the current session. No unlock or permission change was attempted.
+
+The application was initially stopped, was launched only for this check, and was quit afterward. All existing ProfilesV2 and ProfilesV3 file hashes and the installed plugin inventory remained unchanged. No profiles, plugin links, pairing credentials, or production actions were written. Genuine stream, record, and interview exports remain unfinished application authoring work; no private-format archive was manufactured. Complete the supported compose/export/import workflow when the actual editor is accessible. This is not a signing or physical-device prerequisite for authoring.
