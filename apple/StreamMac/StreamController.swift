@@ -811,6 +811,9 @@ final class StreamController: ObservableObject {
     /// is still honored).
     struct FrameSubscription: Hashable, Sendable {
         fileprivate let token = UUID()
+        fileprivate let cancellation = FrameDeliveryCancellation()
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.token == rhs.token }
+        func hash(into hasher: inout Hasher) { hasher.combine(token) }
     }
 
     /// Subscribes an output to composited program frames. The sink runs on the
@@ -822,7 +825,8 @@ final class StreamController: ObservableObject {
                       canvas: OutputCanvas = .program,
                       sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
         let subscription = FrameSubscription()
-        Task { await engine.addSink(token: subscription.token, capacity: capacity, canvas: canvas, sink: sink) }
+        Task { await engine.addSink(token: subscription.token, capacity: capacity,
+            cancellation: subscription.cancellation, canvas: canvas, sink: sink) }
         return subscription
     }
 
@@ -871,11 +875,13 @@ final class StreamController: ObservableObject {
     @discardableResult
     func addCleanFrameSink(capacity: Int = 1, authorized: @escaping @Sendable () -> Bool = { true }, sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
         let subscription = FrameSubscription()
-        Task { await engine.addCleanSink(token: subscription.token, capacity: capacity, authorized: authorized, sink: sink) }
+        Task { await engine.addCleanSink(token: subscription.token, capacity: capacity,
+            cancellation: subscription.cancellation, authorized: authorized, sink: sink) }
         return subscription
     }
 
     func removeFrameSink(_ subscription: FrameSubscription) {
+        subscription.cancellation.cancel()
         Task { await engine.removeSink(subscription.token) }
     }
 

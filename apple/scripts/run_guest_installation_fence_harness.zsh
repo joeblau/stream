@@ -11,9 +11,10 @@ fi
 python3 - "$output" "$native" <<'PY'
 import hashlib,json,pathlib,re,shutil,sys
 output,native=map(pathlib.Path,sys.argv[1:]); root=pathlib.Path.cwd()
-names=['GuestMediaReceipts','IsolatedRecordingTypes','IsolatedVideoTypes','RecordingChatTypes',
+names=['GuestMediaReceipts','IsolatedRecordingTypes','IsolatedVideoTypes','RecordingChatPaint','RecordingChatTypes',
 'RecordingChatArchive','RecordingChatReader','RecordingPreferences','ProgramRecordingSession','AudioMixEngine',
 'GuestVideoFrameStore','NativeInterviewTypes','NativeGuestReturnVideoBudget','RawVideoResourceCoordinator',
+'FrameDeliveryBroker','FrameDeliveryConverter','RecordingFrameDelivery',
 'NativeGuestMediaSink','GuestReturnVideoResources']
 origins={}
 for name in names:
