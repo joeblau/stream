@@ -116,7 +116,33 @@ extension StreamController {
 }
 SWIFT
 end
-target['sources'] += ['source_failover_native_harness.swift', 'program_recording_fixtures.swift'].map { |name| File.join(root, 'scripts', name) }
+# The optional path-recovery case substitutes only NWPathMonitor delivery.
+# Sockets/publishers/reconnect/backoff remain real and all endpoints are owned
+# loopback. Read-only observations let the test await the actual callback.
+rtmp_path = File.join(root, 'StreamBroadcast/RTMPPublisher.swift')
+rtmp = File.read(rtmp_path)
+abort 'RTMP monitor fixture boundary changed' unless rtmp.include?('for await path in NWPathMonitor()') && rtmp.include?('self?.handlePathUpdate(NetworkPathSnapshot(path))')
+rtmp.sub!('for await path in NWPathMonitor()', 'for await path in OwnedPublisherPathFeed.updates.stream')
+rtmp.sub!('self?.handlePathUpdate(NetworkPathSnapshot(path))', 'self?.handlePathUpdate(path)')
+rtmp += <<'SWIFT'
+
+extension RTMPPublisher {
+    var pathFixtureCurrent: NetworkPathSnapshot? { currentPath }
+    var pathFixtureDetached: Bool { !streamAttached }
+    var pathFixtureRecovering: Bool { recoveryInProgress }
+}
+SWIFT
+rtmp_copy = File.join(folder, 'fixtures/RTMPPublisher.swift')
+File.write(rtmp_copy, rtmp)
+abort 'RTMP source entry changed' unless target['sources'].include?(rtmp_path)
+target['sources'][target['sources'].index(rtmp_path)] = rtmp_copy
+support = File.read(File.join(root, 'scripts/shared_encoder_harness.swift'))
+abort 'Shared encoder support boundary changed' unless support.include?('@main @MainActor struct SharedEncoderHarness')
+support.sub!('@main @MainActor struct SharedEncoderHarness', '@MainActor struct SharedEncoderHarness')
+support_copy = File.join(folder, 'fixtures/SharedEncoderNativeSupport.swift')
+File.write(support_copy, support)
+target['sources'] << support_copy
+target['sources'] += ['source_failover_native_harness.swift', 'publisher_path_supervision_harness.swift', 'program_recording_fixtures.swift'].map { |name| File.join(root, 'scripts', name) }
 spec['targets']['SourceFailoverNativeHarness'] = target
 spec['schemes']['SourceFailoverNativeHarness'] = {'build' => {'targets' => {'SourceFailoverNativeHarness' => 'all'}}}
 File.write(File.join(folder, 'project.json'), JSON.pretty_generate(spec))
@@ -128,10 +154,10 @@ python3 scripts/repair_desktop_transport_archives.py "$FAILOVER_NATIVE_BUILD_PAT
 xcodebuild -project "$FAILOVER_NATIVE_DIR/SourceFailoverNativeValidation.xcodeproj" -scheme SourceFailoverNativeHarness \
   -destination 'platform=macOS' -derivedDataPath "$FAILOVER_NATIVE_BUILD_PATH" -jobs 2 CODE_SIGNING_ALLOWED=NO build
 FAILOVER_NATIVE_PRODUCTS="${FAILOVER_NATIVE_BUILD_PATH:A}/Build/Products/Debug"
-env DYLD_FRAMEWORK_PATH="$FAILOVER_NATIVE_PRODUCTS" python3 - "$FAILOVER_NATIVE_PRODUCTS/SourceFailoverNativeHarness" "${FAILOVER_NATIVE_DIR:A}" <<'PY'
+env DYLD_FRAMEWORK_PATH="$FAILOVER_NATIVE_PRODUCTS" python3 - "$FAILOVER_NATIVE_PRODUCTS/SourceFailoverNativeHarness" "${FAILOVER_NATIVE_DIR:A}" "$@" <<'PY'
 import pathlib,subprocess,sys,uuid
 root=pathlib.Path(sys.argv[2])/('artifacts-'+str(uuid.uuid4()));root.mkdir()
-try:raise SystemExit(subprocess.run([sys.argv[1],str(root)],timeout=60).returncode)
+try:raise SystemExit(subprocess.run([sys.argv[1],str(root)]+sys.argv[3:],timeout=60).returncode)
 except subprocess.TimeoutExpired:
  print('FAIL: source failover native harness exceeded60s; owned artifacts retained at '+str(root),flush=True)
  raise SystemExit(1)

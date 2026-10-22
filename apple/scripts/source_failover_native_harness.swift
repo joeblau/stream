@@ -234,9 +234,14 @@ private final class FailoverAudioProbe: @unchecked Sendable {
     }
     static func main() async throws {
         setbuf(stdout, nil)
-        try await pendingSourceGains()
         let root = GuestFixtureStorage.artifactRoot
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        if CommandLine.arguments.contains("--path-supervision-only") {
+            print("Owned path artifacts: \(root.path)")
+            try await PublisherPathSupervisionHarness.run(directory: root)
+            return
+        }
+        try await pendingSourceGains()
         let catalog = StudioProjectCatalog(project: StudioProject(name: "Owned resilience show",
             profiles: [StudioProfile(name: "Failure pixels"), StudioProfile(name: "Retirement target")]))
         let machine = GuestFixtureStorage.machineDirectory
