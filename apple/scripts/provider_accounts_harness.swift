@@ -131,6 +131,8 @@ actor ProviderHTTPFixture {
             body = "{\"items\":[{\"id\":\"\(viewerEventID)\",\"liveStreamingDetails\":{\"concurrentViewers\":\"23\"}}]}"
         } else if path == "/helix/users" {
             body = #"{"data":[{"id":"42","display_name":"Operator","login":"operator"}]}"#
+        } else if path == "/helix/streams" {
+            body = #"{"data":[{"id":"stream42","user_id":"42","viewer_count":7}]}"#
         } else { body = #"{"data":[]}"# }
         if host == "oauth2.googleapis.com" || (host == "id.twitch.tv" && path == "/oauth2/token") {
             status = tokenStatus
@@ -714,14 +716,33 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         try await vault.accept(.init(access: "cancel-forget", refresh: "refresh", expiresAt: .distantFuture, scopes: ["read"]), provider: .youtube, generation: reconnected)
         session.refresh(.youtube)
         await settle { @MainActor in session.snapshot(.youtube).verifiedAt != nil }
+        let twitchGrant = try await vault.configure(.twitch, clientID: "client")
+        try await vault.accept(.init(access: "unrelated-twitch", refresh: "refresh", expiresAt: .distantFuture), provider: .twitch, generation: twitchGrant)
+        let youtube = ProviderDestinationBinding(provider: .youtube, channelID: "UC1", eventID: "event1")
+        let twitch = ProviderDestinationBinding(provider: .twitch, channelID: "42")
+        session.refreshLive(youtube)
+        await settle { @MainActor in !session.snapshot(.youtube).isWorking }
+        session.refreshLive(twitch)
+        await settle { @MainActor in !session.snapshot(.twitch).isWorking }
+        let youtubeBefore = session.viewerReading(youtube), twitchBefore = session.viewerReading(twitch)
+        precondition(youtubeBefore.count == 23 && youtubeBefore.readAt != nil && youtubeBefore.freshness == .current)
+        precondition(twitchBefore.count == 7 && twitchBefore.readAt != nil && twitchBefore.freshness == .current)
+        precondition(session.viewers[ProviderAccountSession.viewerKey(youtube)] == 23 && session.viewers[ProviderAccountSession.viewerKey(twitch)] == 7)
         session.forget(.youtube); session.cancel(.youtube)
+        precondition(session.viewers[ProviderAccountSession.viewerKey(youtube)] == nil)
+        precondition(session.viewerReading(youtube).readAt == nil, "Canceled Forget retained the old provider's observation date")
+        precondition(session.viewers[ProviderAccountSession.viewerKey(twitch)] == 7 && session.viewerReading(twitch).readAt == twitchBefore.readAt)
         let canceled = session.snapshot(.youtube)
         precondition(!canceled.hasCredential && canceled.scopes.isEmpty && canceled.channels.isEmpty && canceled.events.isEmpty && canceled.verifiedAt == nil)
         precondition(canceled.localCredentialFailure?.contains("not been confirmed") == true)
         await settle { await !vault.hasToken(.youtube) }
+        precondition(session.viewers[ProviderAccountSession.viewerKey(youtube)] == nil && session.viewerReading(youtube).readAt == nil)
+        precondition(session.viewerReading(twitch).count == 7 && session.viewerReading(twitch).readAt == twitchBefore.readAt)
         session.forget(.youtube)
         await settle { @MainActor in !session.snapshot(.youtube).isWorking }
         precondition(session.snapshot(.youtube).localCredentialFailure == nil)
+        precondition(session.viewerReading(twitch).count == 7 && session.viewerReading(twitch).readAt == twitchBefore.readAt)
+        print("PASS: actual synthetic YouTube/Twitch audience reads; Forget→Cancel immediately removes only YouTube count/date and preserves Twitch through retirement/retry")
     }
     static func vaultLifecycle() async throws {
         let memory = MemoryProviderCredentials(), http = ProviderHTTPFixture()
