@@ -119,6 +119,7 @@ applicationRoot += content + "\n.defaultAppStorage(WorkspaceFixtureDefaults.valu
 fixture_write(File.join(folder,'fixtures/WorkspaceApplicationRoot.swift'),applicationRoot)
 h['sources'] << File.join(folder,'fixtures/WorkspaceApplicationRoot.swift')
 h['sources'] << File.join(root,'scripts/studio_workspace_harness.swift')
+h['sources'] << File.join(root,'scripts/scene_browser_reordering_harness.swift')
 h['sources'] << File.join(root,'scripts/studio_accessibility_harness.swift')
 h['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 h['sources'] << File.join(root,'scripts/provider_viewer_ui_fixture.swift')

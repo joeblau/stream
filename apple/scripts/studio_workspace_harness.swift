@@ -119,6 +119,12 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         try FileManager.default.createDirectory(at: seededDirectory, withIntermediateDirectories: true)
         try JSONEncoder().encode(seededCatalog).write(to: root.appendingPathComponent("projects.v1.json"))
         let workspace = StudioWorkspace(root: root)
+        if CommandLine.arguments.contains("--scene-reordering") {
+            try SceneBrowserReorderingHarness.run(runtime: workspace.runtime, directory: seededDirectory)
+            try await SceneBrowserReorderingHarness.menuOwnership(workspace: workspace)
+            workspace.runtime.providerAccounts.shutdown()
+            return
+        }
         if CommandLine.arguments.contains("--viewer-freshness") {
             try await ProviderViewerUIFixture.run()
             workspace.runtime.providerAccounts.shutdown()
