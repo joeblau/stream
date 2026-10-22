@@ -1,0 +1,101 @@
+{
+  "date": "2026-10-22",
+  "baseCommit": "30f2209199b818cc685a24647a46e5a54263daa3",
+  "host": {
+    "name": "Joes-MacBook-Pro.local",
+    "architecture": "arm64",
+    "macOS": "27.2"
+  },
+  "status": "Focused resource foundation PASS; full broker/output migration remains separate integration work",
+  "sources": {
+    "StreamCore/RawVideoResourceBudget.swift": "f608982f1ebf961838c66acf2d32b42c2802851dd1ebec0b0c1cf9d9e4fd1488",
+    "StreamCoreTests/RawVideoResourceBudgetTests.swift": "2844c8e4ed5f389dc189b4dd8706e2884723428fdd88ebc1db8808f19d04bc1e",
+    "StreamMac/RawVideoResourceCoordinator.swift": "16e4c0314c6f3da380743017bbef82635319ca75c428f318fa433785543f1d90",
+    "scripts/raw_video_resource_harness.swift": "2f808175f1c06532aca8e3d6795e49f12bd100efe1a4a2478d5bcdfecdc35b6e",
+    "scripts/run_raw_video_resource_harness.zsh": "25922d02b07b221c7ff9391bd5906f75d6cae5d0475fd36de335697a423e5de7",
+    "StreamCore/StreamCapability.swift": "0f230c20778d0f91837b85e38fa845e300d445870b1859e7abe896a2da65bc7c",
+    "StreamCore/OutputProfile.swift": "d37dfad0a5a6378dc39e85cca89445e98558848c7afd6f6f999b439af9a2b78b",
+    "StreamCore/StreamSettings.swift": "8e7842000e8bbc315abaeb5e332170300cbb859e23ce190a4d9f4bd8c9c4c526"
+  },
+  "logs": {
+    "/tmp/stream-wave17-raw-resource-tests-first-20261022.log": {
+      "sha256": "6deb716eea681dfd962cd0132f7263063a681af5143ca3697f08a04c2bfadf5c",
+      "scope": "Retained initial minimal test module dependency failure; no tests executed"
+    },
+    "/tmp/stream-wave17-raw-resource-tests-second-20261022.log": {
+      "sha256": "5536f73d99ed5eaff99dd4a08453917a4dc69851aa93a9e5711bab94479e7243",
+      "scope": "Retained Swift Testing mutating-expression macro compile failure; no tests executed"
+    },
+    "/tmp/stream-wave17-raw-resource-tests-third-20261022.log": {
+      "sha256": "06fffad3b20870ee509e8a27c6ae36d9d5afa56d1d4988d442cba8becbd48a34",
+      "scope": "PASS eleven actual pure budget tests"
+    },
+    "/tmp/stream-wave17-raw-resource-coordinator-typecheck-20261022.log": {
+      "sha256": "57fe71d77cc643460f62264475a7efd0a11dd9f947227b69ddfb6e52826467d5",
+      "scope": "PASS initial coordinator Swift6 strict typecheck"
+    },
+    "/tmp/stream-wave17-raw-resource-harness-typecheck-20261022.log": {
+      "sha256": "61b9ef6766d20379a6e135ae1d5a97f15988a488cc3162776a21f5b97bf4c175",
+      "scope": "PASS initial native harness typecheck"
+    },
+    "/tmp/stream-wave17-raw-resource-harness-compile-20261022.log": {
+      "sha256": "52bf80098cb96e79b7612eb02322063f1ccd341463fc2cbe1030ebcdc55cb613",
+      "scope": "PASS first native harness compile"
+    },
+    "/tmp/stream-wave17-raw-resource-owned-pool-proof-20261022.log": {
+      "sha256": "06ab6eafca0e6024dfd7b32fdbfe7d65d60b6788a46bb9509fd270416cef7e99",
+      "scope": "PASS first owned16px proof; explicit retire and healthy-global-lock cases added afterwards"
+    },
+    "/tmp/stream-wave17-raw-resource-final-typecheck-20261022.log": {
+      "sha256": "6ffe974418819d06a465013fbf4472be5b86c076fe48e0116d29828276e8c29f",
+      "scope": "PASS changed final coordinator+harness typecheck"
+    },
+    "/tmp/stream-wave17-raw-resource-final-compile-20261022.log": {
+      "sha256": "3568d3cd116dca2d0c99a5ae92f50ee66fb60b4c76bed2cd46759a3836e88fd9",
+      "scope": "PASS final exact coordinator+harness compile"
+    },
+    "/tmp/stream-wave17-raw-resource-final-owned-pool-proof-20261022.log": {
+      "sha256": "0cb229fb1b3453668b348732b51e06ad5322a65ff2923936bf7c281e664d0878",
+      "scope": "PASS final eight owned16px lifecycle assertions; no retry"
+    }
+  },
+  "artifacts": {
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/RawVideoResourceHarness.final": "cb7570716f0dad68a7057b6afb61d11b810031fda64383d1f43cc64471ba86d8",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/RawVideoResourceHarness": "1efdffbd79f218762bb3f66358c25d78fca14bee14c230a006ae56213455bf60",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/RawVideoResourceHarness.executed-first.swift": "3d60ba747adc3790ba26fcd009b49693000a3f04894460d55771fb52380df5f1",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/RawVideoResourceCoordinator.first-proof-reconstructed.swift": "d47bb5d1b652df1fe3ba943110994bf509d88adf0812face2b73368207ed4ee0",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/Package.swift": "19fa6f9cc9dbdd56a04d8fb207b7d294de7c5035aac2e47ca51d4cfac614d2f4",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/Sources/StreamCore/StreamSettingsEnums.swift": "381ce6fea0f94e74dcace71446aeff50702df800a0382ec2262c3a9ef033db20",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/Sources/StreamCore/RawVideoResourceBudget.swift": "f608982f1ebf961838c66acf2d32b42c2802851dd1ebec0b0c1cf9d9e4fd1488",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/Sources/StreamCore/StreamCapability.swift": "0f230c20778d0f91837b85e38fa845e300d445870b1859e7abe896a2da65bc7c",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/Sources/StreamCore/OutputProfile.swift": "d37dfad0a5a6378dc39e85cca89445e98558848c7afd6f6f999b439af9a2b78b",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/Tests/StreamCoreTests/RawVideoResourceBudgetTests.swift": "2844c8e4ed5f389dc189b4dd8706e2884723428fdd88ebc1db8808f19d04bc1e",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/.build/out/Products/Debug/libStreamCore.a": "98a778007117720cbf91a5829595a075824777ab1c0049a2390cf83c91f8e977",
+    "/private/tmp/stream-wave17-raw-video-resources-20261022/apple/build/raw-resource-foundation-validation/.build/out/Products/Debug/StreamCore.swiftmodule/arm64-apple-macos.swiftmodule": "f19d39a643d383c748a63b42bc608012cebbad4ee66e8ee026b5c70e6e655858"
+  },
+  "policy": {
+    "ceiling": "Explicit NEW admission policy equal numerical existing desktopPreviewFootprintBudget; actualfreshP + ALLcommittedraw + proposed <= C; intentionaldoublecount",
+    "singleProvisionalProbeBytes": 67108864,
+    "maximumBanks": 256,
+    "maximumConcurrentPreparationsIncludingActive": 32,
+    "maximumClaimsPerBank": 32,
+    "maximumBatch": 32,
+    "maximumBufferCount": 64,
+    "maximumSnapshotAgeSeconds": 2,
+    "reuse": "Only same ACTIVE session+exactdescriptor; no newactivation geometry-only reuse",
+    "refund": "Only never-exposed actual owned pool after close+allocation drain+nativepooldetach. Exposed banks retain full charge forever in initial contract",
+    "recording": "Original queue Q uses actual queueCostBytes=max(1,CVPixelBufferGetDataSize). Charged storage uses max(dataSize,checked all-plane stride bytes,IOSurface allocation). ProgramQ+5, ISOdirectQ+2"
+  },
+  "proofRecipe": {
+    "coreModule": "Minimal actual-source SwiftPM module named StreamCore: unmodified RawVideoResourceBudget.swift, StreamCapability.swift, OutputProfile.swift; exact StreamSettings.swift prefix before // MARK: - StreamSettings (the ONLY shared persisted model). No fake schemas or stubs. Eleven unmodified actual RawVideoResourceBudgetTests.swift tests. swift test --jobs 2 under shared slot wrapper",
+    "native": "swiftc -j2 -swift-version 6 -strict-concurrency=complete -DSTREAM_NATIVE_VALIDATION -parse-as-library -I <minimal actual Core products> -L <same> -lStreamCore StreamMac/RawVideoResourceCoordinator.swift scripts/raw_video_resource_harness.swift; final binary executed ONCE with subprocess45s deadline and shared build-slot wrapper",
+    "runner": "Tracked framework runner was shell-syntax checked; final focused run used actual-source minimal staticCore module, not the framework runner/full Core/app build",
+    "firstProofSource": "Original Mac hash was recorded BEFORE first runtime. Current artifact reconstructs only the exact inverse of subsequent retire/healthy-fastpath patches and verifies that recorded d47bb5d1... byte hash; it is explicitly not claimed as a pre-run archived file"
+  },
+  "scope": [
+    "Only owned16x16 CoreVideo pools, actual process footprint, semaphores and synthetic identities",
+    "No renderer, SDK, media, capture, device, network, window, permission, user-default or output graph constructed",
+    "No CoreVideo all-N refund, retain-count or attachment-lifetime accounting",
+    "No full vertical output migration/CI/hardware or sustainedperformance qualification"
+  ]
+}
