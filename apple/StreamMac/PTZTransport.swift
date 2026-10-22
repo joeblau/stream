@@ -41,8 +41,8 @@ enum PTZConnectionState: Equatable, Sendable {
 protocol PTZTransport: AnyObject, Sendable {
     /// Brings the connection up (lazy connects may defer to the first send).
     func connect() async
-    /// Sends one raw VISCA frame. Fire-and-forget: transport errors are
-    /// reported via the state callback, not thrown.
+    /// Completes after the local transport processes the write or its bounded
+    /// failure path. This is not a device acknowledgment. Errors use the state callback.
     func send(_ packet: Data) async
     /// Tears the connection down. The controller always sends a VISCA stop
     /// BEFORE calling this, so a camera never keeps moving after its
@@ -69,6 +69,8 @@ final class NWPTZTransport: PTZTransport, @unchecked Sendable {
     /// Serializes reconnect decisions on `queue` (coalesces rapid sends
     /// racing a dropped connection into one restart).
     private var state: PTZConnectionState = .disconnected
+    private var closed = false
+    private var pending: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     init(target: PTZTarget) {
         self.target = target
@@ -81,31 +83,55 @@ final class NWPTZTransport: PTZTransport, @unchecked Sendable {
     }
 
     func connect() async {
-        queue.async { self.ensureConnection() }
+        await withCheckedContinuation { continuation in
+            queue.async { self.ensureConnection(); continuation.resume() }
+        }
     }
 
     func send(_ packet: Data) async {
-        queue.async {
-            self.ensureConnection()
-            guard let connection = self.connection else { return }
-            // One VISCA frame per datagram/write. `.idempotent` content
-            // context: no framing protocol, matching the raw-serial
-            // assumption pinned in StreamCore/PTZ.swift.
-            connection.send(content: packet, completion: .idempotent)
+        await withCheckedContinuation { continuation in
+            queue.async {
+                self.ensureConnection()
+                guard let connection = self.connection, !self.closed else { continuation.resume(); return }
+                let id = UUID(); self.pending[id] = continuation
+                connection.send(content: packet, completion: .contentProcessed { error in
+                    self.queue.async {
+                        guard let continuation = self.pending.removeValue(forKey: id) else { return }
+                        if let error, self.connection === connection {
+                            self.connection = nil; connection.cancel()
+                            self.publish(.failed(error.localizedDescription))
+                        }
+                        continuation.resume()
+                    }
+                })
+                self.queue.asyncAfter(deadline: .now() + .seconds(2)) {
+                    guard let continuation = self.pending.removeValue(forKey: id) else { return }
+                    if self.connection === connection {
+                        self.connection = nil; connection.cancel()
+                        self.publish(.failed("The PTZ write timed out; camera motion is unconfirmed."))
+                    }
+                    continuation.resume()
+                }
+            }
         }
     }
 
     func disconnect() async {
-        queue.async {
-            self.connection?.cancel()
-            self.connection = nil
-            self.publish(.disconnected)
+        await withCheckedContinuation { continuation in
+            queue.async {
+                self.closed = true
+                let old = self.connection; self.connection = nil; old?.cancel()
+                let pending = self.pending.values; self.pending.removeAll()
+                for continuation in pending { continuation.resume() }
+                self.publish(.disconnected); continuation.resume()
+            }
         }
     }
 
     // MARK: - Internals (queue-confined)
 
     private func ensureConnection() {
+        guard !closed else { return }
         if connection != nil, state.isConnected || state == .connecting { return }
         let endpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(target.host),
@@ -114,8 +140,8 @@ final class NWPTZTransport: PTZTransport, @unchecked Sendable {
         let parameters: NWParameters = target.kind == .viscaOverTCP
             ? .tcp : .udp
         let connection = NWConnection(to: endpoint, using: parameters)
-        connection.stateUpdateHandler = { [weak self] nwState in
-            guard let self else { return }
+        connection.stateUpdateHandler = { [weak self, weak connection] nwState in
+            guard let self, let connection, self.connection === connection else { return }
             switch nwState {
             case .ready:
                 self.publish(.connected)

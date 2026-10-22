@@ -33,7 +33,7 @@ struct PTZControlSectionView: View {
         .onDisappear {
             // The controls are gone — stop every camera with outstanding
             // motion (the issue's stop-on-focus-loss requirement).
-            dispatcher.execute(.ptzStopAll)
+            dispatcher.ptz.endInteractiveControl()
         }
         .sheet(isPresented: $isAddingTarget) {
             PTZTargetEditorSheet { target in
@@ -159,20 +159,15 @@ private struct PTZTargetControlView: View {
     }
 
     private func moveButton(_ direction: PTZMoveDirection, systemImage: String) -> some View {
-        Image(systemName: systemImage)
+        PTZMotionButton(title: "", systemImage: systemImage,
+            accessibilityLabel: "\(target.name): Pan/Tilt \(direction.displayName)",
+            onNudge: { beginInput(.ptzNudge(target.id, direction: direction,
+                panSpeed: Int(panSpeed), tiltSpeed: Int(tiltSpeed))) },
+            onPress: { beginInput(.ptzMove(target.id, direction: direction,
+                panSpeed: Int(panSpeed), tiltSpeed: Int(tiltSpeed))) },
+            onStop: { controller.stop($0) },
+            onWindowDeactivated: { controller.endInteractiveControl() })
             .frame(width: 28, height: 28)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        dispatcher.execute(.ptzMove(target.id,
-                                                    direction: direction,
-                                                    panSpeed: Int(panSpeed),
-                                                    tiltSpeed: Int(tiltSpeed)))
-                    }
-                    .onEnded { _ in
-                        dispatcher.execute(.ptzStop(target.id))
-                    })
     }
 
     private var zoomRow: some View {
@@ -183,18 +178,17 @@ private struct PTZTargetControlView: View {
     }
 
     private func zoomButton(_ direction: PTZZoomDirection, title: String) -> some View {
-        Button(title) {}
-            .controlSize(.small)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        dispatcher.execute(.ptzZoom(target.id,
-                                                    direction: direction,
-                                                    speed: Int(zoomSpeed)))
-                    }
-                    .onEnded { _ in
-                        dispatcher.execute(.ptzStop(target.id))
-                    })
+        PTZMotionButton(title: title, accessibilityLabel: "\(target.name): \(title)",
+            onNudge: { beginInput(.ptzZoomNudge(target.id, direction: direction, speed: Int(zoomSpeed))) },
+            onPress: { beginInput(.ptzZoom(target.id, direction: direction, speed: Int(zoomSpeed))) },
+            onStop: { controller.stop($0) },
+            onWindowDeactivated: { controller.endInteractiveControl() })
+            .fixedSize()
+    }
+
+    private func beginInput(_ command: StudioCommand) -> PTZController.MotionLease? {
+        let result = dispatcher.execute(command)
+        return result.error == nil ? controller.motionLease(for: target.id) : nil
     }
 
     private var speedSliders: some View {

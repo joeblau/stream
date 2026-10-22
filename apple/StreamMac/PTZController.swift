@@ -2,189 +2,183 @@ import Combine
 import Foundation
 import StreamCore
 
-/// E06 (issue #165): the PTZ runtime. Owns one `PTZTransport` per configured
-/// target and turns dispatcher commands into VISCA frames; the store stays
-/// the source of truth for configuration (targets, presets, recall links).
-///
-/// **Stop discipline** (the issue's safety requirement): every movement or
-/// zoom marks the target ACTIVE; `endInteractiveControl()` — called when the
-/// control view disappears/loses focus — and `disconnectTarget(_:)` send a
-/// VISCA stop to every active target first, so a camera never keeps driving
-/// after its controls go away or its transport tears down. Movement commands
-/// are fire-and-forget (VISCA over IP is best-effort; see the pinned
-/// assumptions in StreamCore/PTZ.swift), so failures surface as connection
-/// state, never as thrown errors.
-///
-/// **Testability**: the transport factory is injectable, so tests (or a
-/// future on-hardware harness) can substitute a fake transport and assert on
-/// the exact frames emitted without any network.
-@MainActor
-final class PTZController: ObservableObject {
-    /// Live connection state per target, for the UI's status line.
+/// One ordered operation stream per immutable camera connection. Stop is a
+/// transport-processing barrier, not a VISCA/device acknowledgment.
+@MainActor final class PTZController: ObservableObject {
     @Published private(set) var connectionStates: [UUID: PTZConnectionState] = [:]
-
     let store: PTZPresetStore
-
+    struct MotionLease: Equatable, Sendable {
+        let targetID: UUID
+        fileprivate let connection: UUID
+        fileprivate let motion: UUID
+    }
     private let transportFactory: (PTZTarget) -> any PTZTransport
-    private var transports: [UUID: any PTZTransport] = [:]
-    /// Targets with an outstanding move/zoom — the stop-on-focus-loss set.
+    private let nudgeWait: @MainActor () async -> Void
+    @MainActor private final class Runtime {
+        let id = UUID()
+        let target: PTZTarget
+        let transport: any PTZTransport
+        var tail: Task<Void, Never>?
+        var motion: UUID?
+        var nudge: Task<Void, Never>?
+        var retired = false
+        init(target: PTZTarget, transport: any PTZTransport) { self.target = target; self.transport = transport }
+    }
+    private var runtimes: [UUID: Runtime] = [:]
+    private var retiring: [UUID: Task<Void, Never>] = [:]
     private var activeMotion: Set<UUID> = []
     private var cancellables: Set<AnyCancellable> = []
 
     init(store: PTZPresetStore,
-         transportFactory: @escaping (PTZTarget) -> any PTZTransport = { NWPTZTransport(target: $0) }) {
-        self.store = store
-        self.transportFactory = transportFactory
-        syncTransports(with: store.targets)
-        // Configuration edits re-key transports: a target whose host/port/
-        // kind changed gets a fresh connection; a removed target is stopped
-        // and torn down.
-        store.$targets
-            .sink { [weak self] targets in
-                Task { @MainActor [weak self] in
-                    self?.syncTransports(with: targets)
-                }
+         transportFactory: @escaping (PTZTarget) -> any PTZTransport = { NWPTZTransport(target: $0) },
+         nudgeWait: @escaping @MainActor () async -> Void = { try? await Task.sleep(for: .milliseconds(250)) }) {
+        self.store = store; self.transportFactory = transportFactory; self.nudgeWait = nudgeWait
+        store.$targets.sink { [weak self] _ in
+            Task { @MainActor [weak self] in
+                // Read current configuration, never a delayed old publisher snapshot.
+                guard let self else { return }
+                self.syncTransports(with: self.store.targets)
             }
-            .store(in: &cancellables)
+        }.store(in: &cancellables)
     }
-
-    // MARK: - Movement and zoom
 
     func move(_ targetID: UUID, direction: PTZMoveDirection, panSpeed: Int, tiltSpeed: Int) {
-        guard let (target, transport) = resolve(targetID) else { return }
-        activeMotion.insert(targetID)
-        let packet = VISCAPacket.panTiltDrive(address: target.cameraAddress,
-                                              direction: direction,
-                                              panSpeed: panSpeed,
-                                              tiltSpeed: tiltSpeed)
-        Task { await transport.send(packet) }
+        drive(targetID, nudge: false) { VISCAPacket.panTiltDrive(address: $0.cameraAddress,
+            direction: direction, panSpeed: panSpeed, tiltSpeed: tiltSpeed) }
     }
-
     func zoom(_ targetID: UUID, direction: PTZZoomDirection, speed: Int) {
-        guard let (target, transport) = resolve(targetID) else { return }
-        activeMotion.insert(targetID)
-        let packet = VISCAPacket.zoom(address: target.cameraAddress,
-                                      direction: direction,
-                                      speed: speed)
-        Task { await transport.send(packet) }
+        drive(targetID, nudge: false) { VISCAPacket.zoom(address: $0.cameraAddress, direction: direction, speed: speed) }
     }
-
-    /// Stops pan/tilt AND zoom on one target (both axes can be driving).
+    func nudge(_ targetID: UUID, direction: PTZMoveDirection, panSpeed: Int, tiltSpeed: Int) {
+        drive(targetID, nudge: true) { VISCAPacket.panTiltDrive(address: $0.cameraAddress,
+            direction: direction, panSpeed: panSpeed, tiltSpeed: tiltSpeed) }
+    }
+    func nudgeZoom(_ targetID: UUID, direction: PTZZoomDirection, speed: Int) {
+        drive(targetID, nudge: true) { VISCAPacket.zoom(address: $0.cameraAddress, direction: direction, speed: speed) }
+    }
+    private func drive(_ targetID: UUID, nudge: Bool, packet: (PTZTarget) -> Data) {
+        guard let runtime = resolve(targetID) else { return }
+        invalidateMotion(runtime)
+        let lease = UUID(); runtime.motion = lease; activeMotion.insert(targetID)
+        let bytes = packet(runtime.target)
+        enqueue(runtime) {
+            guard !runtime.retired, runtime.motion == lease else { return }
+            await runtime.transport.send(bytes)
+        }
+        if nudge {
+            let wait = nudgeWait
+            runtime.nudge = Task { [weak self, weak runtime] in
+                // The bounded intent starts now, not after a potentially slow send.
+                await wait()
+                guard !Task.isCancelled, let self, let runtime,
+                      self.runtimes[targetID] === runtime, runtime.motion == lease else { return }
+                self.stopRuntime(runtime)
+            }
+        }
+    }
+    private func invalidateMotion(_ runtime: Runtime) {
+        runtime.nudge?.cancel(); runtime.nudge = nil; runtime.motion = nil
+        activeMotion.remove(runtime.target.id)
+    }
+    private func enqueue(_ runtime: Runtime, _ operation: @escaping @MainActor () async -> Void) {
+        let previous = runtime.tail
+        runtime.tail = Task { await previous?.value; await operation() }
+    }
+    private func stopRuntime(_ runtime: Runtime) {
+        invalidateMotion(runtime)
+        enqueue(runtime) { await Self.sendStop(runtime) }
+    }
+    private static func sendStop(_ runtime: Runtime) async {
+        await runtime.transport.send(VISCAPacket.panTiltStop(address: runtime.target.cameraAddress))
+        await runtime.transport.send(VISCAPacket.zoomStop(address: runtime.target.cameraAddress))
+    }
     func stop(_ targetID: UUID) {
-        guard let (target, transport) = resolve(targetID) else { return }
-        activeMotion.remove(targetID)
-        let panTilt = VISCAPacket.panTiltStop(address: target.cameraAddress)
-        let zoom = VISCAPacket.zoomStop(address: target.cameraAddress)
-        Task {
-            await transport.send(panTilt)
-            await transport.send(zoom)
-        }
+        guard let runtime = runtimes[targetID] ?? resolve(targetID) else { return }
+        stopRuntime(runtime)
     }
-
-    /// The panic/focus-loss path: stop every target with outstanding motion.
-    /// Called when the control surface disappears or the window loses key
-    /// status — a camera must never drive unattended.
+    func motionLease(for targetID: UUID) -> MotionLease? {
+        guard let runtime = runtimes[targetID], let motion = runtime.motion else { return nil }
+        return MotionLease(targetID: targetID, connection: runtime.id, motion: motion)
+    }
+    func stop(_ lease: MotionLease) {
+        guard let runtime = runtimes[lease.targetID], runtime.id == lease.connection,
+              runtime.motion == lease.motion else { return }
+        stopRuntime(runtime)
+    }
+    /// Cleanup is independent of UI command availability: it only revokes
+    /// motion this controller already owns, and never starts another drive.
     func endInteractiveControl() {
-        for targetID in activeMotion {
-            stop(targetID)
+        for id in Array(activeMotion) { if let runtime = runtimes[id] { stopRuntime(runtime) } }
+    }
+
+    func storePreset(_ targetID: UUID, number: UInt8, name: String) {
+        guard let runtime = resolve(targetID) else { return }
+        store.storePreset(PTZPreset(number: number, name: name), forTargetID: targetID)
+        enqueue(runtime) {
+            guard !runtime.retired else { return }
+            await runtime.transport.send(VISCAPacket.memorySet(address: runtime.target.cameraAddress, preset: number))
         }
     }
-
-    // MARK: - Presets
-
-    /// Stores the camera's CURRENT position into a VISCA slot (sends
-    /// CAM_Memory set) and records the slot's name in the document.
-    func storePreset(_ targetID: UUID, number: UInt8, name: String) {
-        guard let (target, transport) = resolve(targetID) else { return }
-        store.storePreset(PTZPreset(number: number, name: name), forTargetID: targetID)
-        let packet = VISCAPacket.memorySet(address: target.cameraAddress, preset: number)
-        Task { await transport.send(packet) }
-    }
-
-    /// Recalls a stored slot (CAM_Memory recall). Only slots the document
-    /// knows about are recallable through the command interface — recalling
-    /// an unstored slot is rejected upstream by the dispatcher.
     func recallPreset(_ targetID: UUID, number: UInt8) {
-        guard let (target, transport) = resolve(targetID) else { return }
-        activeMotion.remove(targetID)  // a recall supersedes manual driving
-        let packet = VISCAPacket.memoryRecall(address: target.cameraAddress, preset: number)
-        Task { await transport.send(packet) }
+        guard let runtime = resolve(targetID) else { return }
+        // A recall supersedes manual motion and its timer. Stop both axes
+        // before recall so the old zoom cannot continue alongside the preset.
+        stopRuntime(runtime)
+        enqueue(runtime) {
+            guard !runtime.retired else { return }
+            await runtime.transport.send(VISCAPacket.memoryRecall(address: runtime.target.cameraAddress, preset: number))
+        }
     }
-
-    /// Removes the app-side record of a slot. The camera's own memory is
-    /// deliberately left intact — the app never erases on-camera state the
-    /// operator may reach from the camera's own remote.
-    func removePreset(_ targetID: UUID, number: UInt8) {
-        store.removePreset(number: number, forTargetID: targetID)
-    }
-
-    // MARK: - Scene-linked recall (the Take seam)
-
-    /// Fires the EXPLICIT, opted-in recall links for a scene that just
-    /// became program. Called only from the dispatcher's Take paths —
-    /// previewing a scene never reaches here, and links with
-    /// `recallOnProgramEntry == false` are inert by design.
+    func removePreset(_ targetID: UUID, number: UInt8) { store.removePreset(number: number, forTargetID: targetID) }
     func recallLinkedPresets(forSceneID sceneID: UUID) {
         for link in store.recallLinks(forSceneID: sceneID) where link.recallOnProgramEntry {
-            guard store.preset(number: link.presetNumber, forTargetID: link.targetID) != nil
-            else { continue }
+            guard store.preset(number: link.presetNumber, forTargetID: link.targetID) != nil else { continue }
             recallPreset(link.targetID, number: link.presetNumber)
         }
     }
 
-    // MARK: - Target lifecycle
-
-    /// Stops motion, then tears the transport down (removal and
-    /// reconfiguration). Stop always precedes disconnect.
     func disconnectTarget(_ targetID: UUID) {
-        stop(targetID)
-        if let transport = transports.removeValue(forKey: targetID) {
-            Task { await transport.disconnect() }
-        }
+        guard let runtime = runtimes.removeValue(forKey: targetID) else { return }
+        invalidateMotion(runtime); runtime.retired = true
+        runtime.transport.setStateHandler(nil)
         connectionStates.removeValue(forKey: targetID)
+        let previous = runtime.tail
+        let task = Task { [weak self] in
+            await previous?.value
+            // Uses the OLD address/transport even after its store entry changes.
+            await Self.sendStop(runtime)
+            await runtime.transport.disconnect()
+            self?.retiring[runtime.id] = nil
+        }
+        runtime.tail = task; retiring[runtime.id] = task
     }
-
-    // MARK: - Internals
-
-    private func resolve(_ targetID: UUID) -> (PTZTarget, any PTZTransport)? {
+    /// Waits owned operations/retirement, useful to an orderly shutdown or an
+    /// owned fixture. It cannot establish physical camera completion.
+    func waitForPendingOperations() async {
+        let owned = Array(runtimes.values), old = Array(retiring.values)
+        for runtime in owned { await runtime.nudge?.value; await runtime.tail?.value }
+        for task in old { await task.value }
+    }
+    private func resolve(_ targetID: UUID) -> Runtime? {
         guard let target = store.target(withID: targetID) else { return nil }
-        if let transport = transports[targetID] { return (target, transport) }
-        let transport = transportFactory(target)
-        transports[targetID] = transport
+        if let current = runtimes[targetID] {
+            if current.target == target { return current }
+            disconnectTarget(targetID)
+        }
+        let transport = transportFactory(target), runtime = Runtime(target: target, transport: transport)
+        runtimes[targetID] = runtime
+        let generation = runtime.id
         transport.setStateHandler { [weak self] state in
             Task { @MainActor [weak self] in
-                self?.connectionStates[targetID] = state
+                guard let self, self.runtimes[targetID]?.id == generation else { return }
+                self.connectionStates[targetID] = state
             }
         }
-        Task { await transport.connect() }
-        return (target, transport)
+        enqueue(runtime) { if !runtime.retired { await transport.connect() } }
+        return runtime
     }
-
-    /// Re-keys transports against the configured targets: stops+removes
-    /// transports for deleted targets and for targets whose connection
-    /// parameters changed (host/port/kind/address); leaves healthy ones.
     private func syncTransports(with targets: [PTZTarget]) {
         let byID = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0) })
-        for (id, _) in transports {
-            guard let target = byID[id] else {
-                disconnectTarget(id)
-                continue
-            }
-            // A reconfigured connection can't migrate in place — rebuild it.
-            // (Transport equality is by the parameters it was built with.)
-            if let existing = transports[id] as? NWPTZTransport,
-               !existing.matches(target) {
-                disconnectTarget(id)
-            }
-        }
-    }
-}
-
-private extension NWPTZTransport {
-    /// True when the transport was built with the same connection
-    /// parameters the target now carries (compared against the stored
-    /// target snapshot captured at build time).
-    func matches(_ target: PTZTarget) -> Bool {
-        self.target == target
+        for (id, runtime) in runtimes where byID[id] != runtime.target { disconnectTarget(id) }
     }
 }
