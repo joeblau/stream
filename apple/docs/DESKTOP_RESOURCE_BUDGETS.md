@@ -146,6 +146,70 @@ workloads; the measurements were not repeated or relabeled as a later commit.
 
 ## Qualification limits
 
+### Hosted run after font caching: original capacity gates still fail
+
+Run [39735454725](https://github.com/joeblau/stream/actions/runs/39735454725)
+measured exact source `98813596d02a58d4eb6538c2b0b538bdeb7008f8` with two
+600-second 1080p30, 12-layer static/replay cases on each platform. Both jobs
+**failed**. All four cases remained below the original 17,850-frame requirement;
+the canvas, frame rate, allowance and launcher deadline were unchanged.
+
+| Platform / case | Previous → current rendered frames | Current fps | Mean render wall time | Whole skipped opportunities |
+|---|---:|---:|---:|---:|
+| ARM static | 16,957 → 17,252 | 28.7508 | 10.250 ms | 740 |
+| ARM replay | 17,047 → 17,306 | 28.8404 | 8.992 ms | 695 |
+| Intel static | 17,366 → 17,232 | 28.7166 | 19.685 ms | 745 |
+| Intel replay | 17,058 → 16,434 | 27.3864 | 27.538 ms | 1,525 |
+
+The comparison is with run `39724736435` on the same advertised host classes
+and OS versions. ARM gained 295/259 frames; Intel lost 134/624. Mean render wall
+time fell in all four cases, from 13.802/12.624 ms on ARM and 28.213/31.431 ms on
+Intel. These are observations across separate hosted runs, not a universal
+cadence improvement or controlled causal proof. ARM reported VirtualMac2,1,
+three CPUs, 7 GiB RAM and macOS 26.6.2; Intel reported Macmini6,2, four CPUs,
+14 GiB RAM and macOS 26.6.1. Both exposed Apple Paravirtual Metal devices, so
+these results do not certify physical M1 or Intel machines.
+
+ARM replay decoded **17,251 of 17,252** available source frames, against 17,110
+due before decoder grace ended. Intel decoded **17,232 of 17,232**, against
+17,090 due. Both actual-source checks passed; both nominal replay input and
+decoding gates still failed. Render failures were 9/0 on ARM and 24/42 on Intel.
+The recorder wrote every reported rendered frame in these cases; all four
+writers completed with zero reported audio/video drops. The healthy recorder
+sink is removed before the mailbox metrics snapshot, leaving the deliberate
+80 ms sink's drops/depth. Those counters are not recorder loss or actual UI
+preview drops.
+
+Both ARM media inspections and Intel's first inspection completed. Intel's final
+inspection remained **pending** when the owned launcher reached its existing
+`2 × 600 + 180 = 1,380` second wall deadline. Both measurement windows and both
+writers had already finished. Its numeric capacity failures remain failures
+independently of that additional timeout; neither eventual inspection success
+nor a blocking API is inferred.
+
+Endpoint host-clock errors were 6.404/2.634 ms on ARM and 2.965/5.215 ms on
+Intel, within the original 80 ms bound. They do not measure independent waveform
+A/V drift. Main-actor maximum lag was 471/335 ms on ARM and 129/461 ms on Intel.
+All sampled thermal states were nominal. Mean CPU fractions of total logical
+capacity were 9.97%/12.72% and 7.78%/12.43%, respectively. Maximum render wall
+times reached 787/1,183 ms on ARM and 1,000/482 ms on Intel despite the lower
+means. Sampled CI kernel means were 4.703/5.428 ms and 12.768/16.507 ms; these
+are not GPU utilization or complete render time. The aggregate resource samples
+do not identify the remaining latency or skip cause.
+
+[The terminal machine receipt](PERFORMANCE_HOSTED_39735454725.json) retains
+source hashes, unchanged gates, all raw check statuses, logs/archive/media
+digests, resource summaries and the exact incomplete Intel validation state.
+The original earlier failures remain unchanged; issue #92 remains open.
+
+No additional benchmark or dispatch was performed. A future, separately
+authorized 20-second trace could keep this same content and distinguish
+deadline-start lateness, thread CPU versus wall time in graph/CI/fanout phases,
+and mailbox lock/drop-release/callback costs. `tick()` is synchronous, while
+its wall metric spans rendering and fanout; the scheduler counts whole elapsed
+opportunities. Those facts justify the proposed discrimination, not a new
+production fix. Local M3 timings would not establish a hosted Intel stall cause.
+
 ### Bounded local title preparation profile
 
 A separate 20-second static/replay comparison on Mac15,8 / M3 Max found an

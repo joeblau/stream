@@ -1,0 +1,807 @@
+{
+  "schemaVersion": 1,
+  "dateUTC": "2026-10-22",
+  "runID": 39735454725,
+  "runURL": "https://github.com/joeblau/stream/actions/runs/39735454725",
+  "sourceCommit": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+  "runConclusion": "failure",
+  "qualification": false,
+  "configuration": "Native Debug, two 600-second 1920x1080/30fps generated static/replay cases per platform;12 layers, one real recorder, deliberate 80ms subscriber; no personal capture or external output.",
+  "unchangedGates": {
+    "secondsPerWorkload": 600,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "layers": 12,
+    "minimumNominalRenderedAndDecodedFrames": 17850,
+    "endpointHostClockDurationErrorSecondsExclusive": 0.08,
+    "ownedProcessWallDeadlineSeconds": 1380
+  },
+  "sourceSHA256": {
+    "apple/StreamMac/CompositionEngine.swift": "bd08893be8606a8e22608bbf186f10cb9f297754a88eac5ba463e52f0f942674",
+    "apple/StreamMac/CompositionFrameSchedule.swift": "02dab6e6d3dbe79c8f124bde5a57dff7598e7901995a54946e7f8446c995bf1b",
+    "apple/StreamMac/SceneRenderer.swift": "4bd6e70b51a59fd5bec82129ae0a08dff3e020761b2596b586210f0ebcdbc661",
+    "apple/StreamMac/TitleRenderFontCache.swift": "b5d31b366da19ef7af64a3d28cc80e8603f70ec8721518023a95f7f1d7024862",
+    "apple/StreamMac/ProgramRecordingSession.swift": "e9e076d3e85d8c063c79a297d63810f7019c6f9b998ce097d0b849893a93d1a9",
+    "apple/scripts/studio_performance_harness.swift": "b74f5f85e5acbf50475bd9d00f0e8cb816737d10450f528bd30315417a5e46f9",
+    "apple/scripts/performance_owned_replay.swift": "a37d3a5aba9bffc4e6e4516bfccc2e9461aa9bceb4b52a69c818f443140a937d",
+    "apple/scripts/performance_workload_evidence.swift": "4312804d5de645cad552adb26d5217846f3c483510fd9bcc13881500746627f3",
+    "apple/scripts/run_studio_performance_harness.zsh": "58112c6092bf57e41c53923cf5d99bef22007e4481e0e666ef3f0608fc24d055",
+    ".github/workflows/native-performance-budget.yml": "123a4cabd59421c712db5730ef2165ba9ea5beec5af423ae17034adc5d8a7217"
+  },
+  "dispatch": {
+    "requestedAt": "2026-10-22T06:40:46.623108+00:00",
+    "head": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+    "workflow": "native-performance-budget.yml",
+    "secondsPerWorkload": 600,
+    "state": "accepted",
+    "reason": "Reviewed production font-cache optimization; final combined universal build and scoped pixel/registry proofs pass; original workload/gates unchanged"
+  },
+  "terminalObservation": {
+    "at": "2026-10-22T07:15:37.020258+00:00",
+    "run": 39735454725,
+    "status": "completed",
+    "conclusion": "failure",
+    "jobs": [
+      {
+        "id": 119679960787,
+        "name": "Sustained owned workloads (macos-26-intel)",
+        "status": "completed",
+        "conclusion": "failure",
+        "started_at": "2026-10-22T06:40:52Z",
+        "completed_at": "2026-10-22T07:15:10Z",
+        "activeSteps": []
+      },
+      {
+        "id": 119679961057,
+        "name": "Sustained owned workloads (macos-26)",
+        "status": "completed",
+        "conclusion": "failure",
+        "started_at": "2026-10-22T06:40:52Z",
+        "completed_at": "2026-10-22T07:06:54Z",
+        "activeSteps": []
+      }
+    ]
+  },
+  "hosts": [
+    {
+      "jobID": 119679961057,
+      "jobURL": "https://github.com/joeblau/stream/actions/runs/39735454725/job/119679961057",
+      "jobConclusion": "failure",
+      "startedAt": "2026-10-22T06:40:52Z",
+      "completedAt": "2026-10-22T07:06:54Z",
+      "rawHarnessStatus": "failed",
+      "host": {
+        "hardwareModel": "VirtualMac2,1",
+        "os": "Version 26.6.2 (Build 25G83)",
+        "architecture": "arm64",
+        "processTranslated": false,
+        "processors": 3,
+        "physicalMemory": 7516192768,
+        "metal": {
+          "counterSets": [],
+          "device": "Apple Paravirtual device",
+          "recommendedWorkingSetBytes": 5010800640,
+          "unifiedMemory": true,
+          "utilizationUnavailableReason": "Metal does not expose process-wide GPU utilization through this collector."
+        }
+      },
+      "rawLog": {
+        "file": "stream-performance-arm119679961057-original.log",
+        "bytes": 719568,
+        "sha256": "ab698c98df66b5f32b6de0210d5ded9f43282c0525f25df2c0261a7a2e7ce6b3"
+      },
+      "artifact": {
+        "id": 12408310891,
+        "name": "performance-budget-macos-26",
+        "bytes": 607804462,
+        "sha256": "21fce057f1b392fbe62995218dbfb089f65e46418d4ad22bc03a8ecc69f72592",
+        "localSHA256": "21fce057f1b392fbe62995218dbfb089f65e46418d4ad22bc03a8ecc69f72592",
+        "reportSHA256": "5faf7f4e95f0fc88277195fc864b10d460b12158f874453f4e6dcf7f9b88d03a"
+      },
+      "workloads": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30,
+          "seconds": 600.0523000000001,
+          "workload": "Static owned desktop/camera placeholders + 10 shape/title layers",
+          "healthySinkFrames": 17231,
+          "hostClockDurationErrorSeconds": 0.006403707000004033,
+          "maxMainActorSchedulingDelayMilliseconds": 471.17225,
+          "decodedSourceFrames": 0,
+          "replaySource": null,
+          "validationComplete": true,
+          "validationSeconds": 31.874067208999918,
+          "recordingComplete": true,
+          "sourceAudioTailCoverageSeconds": 0.009146543,
+          "maximumRecordingFrontierSkewSeconds": 0.671926126,
+          "checks": [
+            {
+              "detail": "An actual submitted video endpoint is required.",
+              "name": "videoSourceFrontier",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual post-warmup arrivals 17231; monotonic true; required > 30.",
+              "name": "monotonicArrivals",
+              "status": "passed"
+            },
+            {
+              "detail": "Duration error 0.006403707000004033s; original bound <0.08s.",
+              "name": "hostClockDuration",
+              "status": "passed"
+            },
+            {
+              "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.009146543)s.",
+              "name": "audioSourceTailCoverage",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual writer completion.",
+              "name": "recordingFinalization",
+              "status": "passed"
+            },
+            {
+              "detail": "Original track/start/end/decode inspection completed.",
+              "name": "recordingDecodeInspection",
+              "status": "passed"
+            },
+            {
+              "detail": "Rendered 17252; required at least 17850 for 30 fps over 600.0s with the existing 5s allowance.",
+              "name": "nominalCompositorCapacity",
+              "status": "failed"
+            }
+          ],
+          "compositor": {
+            "attempts": 17261,
+            "rendered": 17252,
+            "failed": 9,
+            "missedDeadlines": 740,
+            "subscriberQueueDepth": 1,
+            "subscriberDrops": 13358,
+            "totalRenderMilliseconds": 176924.35633333298,
+            "maxRenderMilliseconds": 787.498416666665,
+            "observedFPS": 28.75082721956069,
+            "meanRenderMilliseconds": 10.249948226251838
+          },
+          "resources": {
+            "samples": 590,
+            "peakPhysicalFootprintBytes": 103090304,
+            "peakResidentBytes": 189628416,
+            "peakMetalAllocationBytes": 76082240,
+            "thermalStates": [
+              0
+            ],
+            "meanCPUFraction": 0.09971734777524824,
+            "largestObservationGapSeconds": 1.0929784999999583
+          },
+          "kernels": {
+            "backend": "Core Image on Metal: Apple Paravirtual device",
+            "maximumMilliseconds": 31.140624999977717,
+            "samples": 576,
+            "totalMilliseconds": 2709.1240416676783,
+            "unavailableSamples": 0,
+            "meanMilliseconds": 4.703340350117497
+          },
+          "recording": {
+            "videoSamples": 17252,
+            "audioSamples": 60005,
+            "droppedVideo": 0,
+            "droppedAudio": 0,
+            "durationSeconds": 600.040343749,
+            "elapsedWallSeconds": 600.1603379249573,
+            "videoStatus": "complete",
+            "audioStatus": "complete",
+            "videoError": null,
+            "audioError": null,
+            "avEndDifferenceSeconds": -7.09e-07
+          },
+          "case": 0,
+          "layers": 12,
+          "storageBytesPerSecond": 547532.7783333333,
+          "schedulerAccounting": {
+            "totalOpportunities": 18001,
+            "attempts": 17261,
+            "whollySkipped": 740
+          },
+          "caseReportSHA256": "c10744db2d6bc18badabd7314e5791dc6758e0321060c2445447639347797973",
+          "recordingJournalSHA256": "21c86cba8b8d2019852ee22197d922d3d22e868cd14ed5fd90ff059d81f09748",
+          "originalMedia": {
+            "file": "case0-1920x1080-30.mp4",
+            "bytes": 328519667,
+            "sha256": "7f49010290cdd323f155009dbf089217620b674755888f9188fb010de58d0aa6"
+          },
+          "resourceQuarterSummaries": {
+            "physicalFootprintBytes": {
+              "firstQuarterMean": 83161330.50340135,
+              "lastQuarterMean": 85507262.69387755,
+              "minimum": 7161408,
+              "maximum": 103090304
+            },
+            "metalAllocatedBytes": {
+              "firstQuarterMean": 53409800.272108845,
+              "lastQuarterMean": 54140018.93877551,
+              "minimum": 0,
+              "maximum": 76082240
+            },
+            "cpuFraction": {
+              "firstQuarterMean": 0.09620913503578955,
+              "lastQuarterMean": 0.10012330584029366,
+              "minimum": 0,
+              "maximum": 0.15219144065801574
+            }
+          },
+          "sameNamedHostClassPreviousRun": {
+            "runID": 39724736435,
+            "sourceCommit": "b53ae5d23a4b66df65b4974ea5ab90cc461e5267",
+            "rendered": 16957,
+            "renderedDelta": 295,
+            "meanRenderMilliseconds": 13.801500790471234,
+            "whollySkipped": 1028,
+            "meanCPUFraction": 0.13103349058935662,
+            "maxMainActorSchedulingDelayMilliseconds": 695.413917,
+            "note": "Observational across hosted runs of the same named class/OS; not a controlled physical-machine or universal causal claim."
+          }
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30,
+          "seconds": 600.0602754583333,
+          "workload": "Real owned 1080p H.264 decode reused by desktop/camera placeholders + 10 shape/title layers",
+          "healthySinkFrames": 17276,
+          "hostClockDurationErrorSeconds": 0.002634040999964782,
+          "maxMainActorSchedulingDelayMilliseconds": 334.995792,
+          "decodedSourceFrames": 17251,
+          "replaySource": {
+            "availableFrames": 17252,
+            "durationSeconds": 600.04,
+            "framesDueBeforeGraceEnd": 17110,
+            "monotonic": true
+          },
+          "validationComplete": true,
+          "validationSeconds": 27.559052208666685,
+          "recordingComplete": true,
+          "sourceAudioTailCoverageSeconds": 0.009968334,
+          "maximumRecordingFrontierSkewSeconds": 0.609669334,
+          "checks": [
+            {
+              "detail": "An actual submitted video endpoint is required.",
+              "name": "videoSourceFrontier",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual post-warmup arrivals 17276; monotonic true; required > 30.",
+              "name": "monotonicArrivals",
+              "status": "passed"
+            },
+            {
+              "detail": "Duration error 0.002634040999964782s; original bound <0.08s.",
+              "name": "hostClockDuration",
+              "status": "passed"
+            },
+            {
+              "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.009968334)s.",
+              "name": "audioSourceTailCoverage",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual writer completion.",
+              "name": "recordingFinalization",
+              "status": "passed"
+            },
+            {
+              "detail": "Original track/start/end/decode inspection completed.",
+              "name": "recordingDecodeInspection",
+              "status": "passed"
+            },
+            {
+              "detail": "Rendered 17306; required at least 17850 for 30 fps over 600.0s with the existing 5s allowance.",
+              "name": "nominalCompositorCapacity",
+              "status": "failed"
+            },
+            {
+              "detail": "Source has 17252 total frames for the 600.0s workload; nominal requirement 17850. 17110 frames are due before decoder grace ends.",
+              "name": "nominalReplayInputAvailability",
+              "status": "failed"
+            },
+            {
+              "detail": "Decoded 17251 actual frames; required 17110 from compressed source timestamps. This does not qualify nominal 30 fps capacity.",
+              "name": "actualSourceDecodeCadence",
+              "status": "passed"
+            },
+            {
+              "detail": "Original nominal gate unchanged: decoded 17251, required at least 17850. Input availability and actual-source decoding are reported separately.",
+              "name": "nominalReplayDecodeCapacity",
+              "status": "failed"
+            },
+            {
+              "detail": "No decoder error before sampling ended.",
+              "name": "replayDecoderCompletion",
+              "status": "passed"
+            }
+          ],
+          "compositor": {
+            "attempts": 17306,
+            "rendered": 17306,
+            "failed": 0,
+            "missedDeadlines": 695,
+            "subscriberQueueDepth": 1,
+            "subscriberDrops": 13211,
+            "totalRenderMilliseconds": 155616.51091664343,
+            "maxRenderMilliseconds": 1183.0601666667917,
+            "observedFPS": 28.84043604916434,
+            "meanRenderMilliseconds": 8.992055409490549
+          },
+          "resources": {
+            "samples": 589,
+            "peakPhysicalFootprintBytes": 209586496,
+            "peakResidentBytes": 201162752,
+            "peakMetalAllocationBytes": 185441856,
+            "thermalStates": [
+              0
+            ],
+            "meanCPUFraction": 0.12724372403080206,
+            "largestObservationGapSeconds": 1.0946522916667618
+          },
+          "kernels": {
+            "backend": "Core Image on Metal: Apple Paravirtual device",
+            "maximumMilliseconds": 23.684708333121307,
+            "samples": 577,
+            "totalMilliseconds": 3131.862750002938,
+            "unavailableSamples": 0,
+            "meanMilliseconds": 5.427838388219996
+          },
+          "recording": {
+            "videoSamples": 17306,
+            "audioSamples": 60006,
+            "droppedVideo": 0,
+            "droppedAudio": 0,
+            "durationSeconds": 600.049065458,
+            "elapsedWallSeconds": 600.0788469314575,
+            "videoStatus": "complete",
+            "audioStatus": "complete",
+            "videoError": null,
+            "audioError": null,
+            "avEndDifferenceSeconds": -1.0001e-05
+          },
+          "case": 1,
+          "layers": 12,
+          "storageBytesPerSecond": 524296.9866666667,
+          "schedulerAccounting": {
+            "totalOpportunities": 18001,
+            "attempts": 17306,
+            "whollySkipped": 695
+          },
+          "caseReportSHA256": "c6644bf2d3f405d6158970ab7c287d173bfa09debc1e57a8cd93852606801927",
+          "recordingJournalSHA256": "4e524ab9e6ea41fe6d9d48bae021b1426ebf9e43f71fde5f21466828a9abfc42",
+          "originalMedia": {
+            "file": "case1-1920x1080-30.mp4",
+            "bytes": 314578192,
+            "sha256": "a6ca845d20107c9ba70024a5b0ee9f8d93c0105ddedf18546ee11315f0c950e9"
+          },
+          "resourceQuarterSummaries": {
+            "physicalFootprintBytes": {
+              "firstQuarterMean": 183353147.6462585,
+              "lastQuarterMean": 184707225.25170067,
+              "minimum": 70453440,
+              "maximum": 209586496
+            },
+            "metalAllocatedBytes": {
+              "firstQuarterMean": 160625625.68707484,
+              "lastQuarterMean": 160447290.7755102,
+              "minimum": 9343040,
+              "maximum": 185441856
+            },
+            "cpuFraction": {
+              "firstQuarterMean": 0.12677306201705252,
+              "lastQuarterMean": 0.12356420032573587,
+              "minimum": 0.05827428856817223,
+              "maximum": 0.24687471543872083
+            }
+          },
+          "sameNamedHostClassPreviousRun": {
+            "runID": 39724736435,
+            "sourceCommit": "b53ae5d23a4b66df65b4974ea5ab90cc461e5267",
+            "rendered": 17047,
+            "renderedDelta": 259,
+            "meanRenderMilliseconds": 12.624202085899743,
+            "whollySkipped": 955,
+            "meanCPUFraction": 0.1555613604090825,
+            "maxMainActorSchedulingDelayMilliseconds": 209.550958,
+            "note": "Observational across hosted runs of the same named class/OS; not a controlled physical-machine or universal causal claim."
+          }
+        }
+      ],
+      "previousNamedHostClassMatches": true
+    },
+    {
+      "jobID": 119679960787,
+      "jobURL": "https://github.com/joeblau/stream/actions/runs/39735454725/job/119679960787",
+      "jobConclusion": "failure",
+      "startedAt": "2026-10-22T06:40:52Z",
+      "completedAt": "2026-10-22T07:15:10Z",
+      "rawHarnessStatus": "failed",
+      "host": {
+        "hardwareModel": "Macmini6,2",
+        "os": "Version 26.6.1 (Build 25G76)",
+        "architecture": "x86_64",
+        "processTranslated": false,
+        "processors": 4,
+        "physicalMemory": 15032385536,
+        "metal": {
+          "counterSets": [],
+          "device": "Apple Paravirtual device",
+          "recommendedWorkingSetBytes": 1073741824,
+          "unifiedMemory": false,
+          "utilizationUnavailableReason": "Metal does not expose process-wide GPU utilization through this collector."
+        }
+      },
+      "rawLog": {
+        "file": "stream-performance-intel119679960787-original.log",
+        "bytes": 2481948,
+        "sha256": "1ec9e0e297609f62de2808ec6013075006ee707629285ae25a66844dc4e06911"
+      },
+      "artifact": {
+        "id": 12408397193,
+        "name": "performance-budget-macos-26-intel",
+        "bytes": 789646267,
+        "sha256": "8e4d6c6f7436e4e68157334d16e4c2f7a841c2f688fd9eaaa300b910c9ca8dcf",
+        "localSHA256": "8e4d6c6f7436e4e68157334d16e4c2f7a841c2f688fd9eaaa300b910c9ca8dcf",
+        "reportSHA256": "79443dd9566d835cfde8bd5b5373f65fb3806110da2a86aa76fdec0a3ed80bc3"
+      },
+      "workloads": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30,
+          "seconds": 600.0705128469999,
+          "workload": "Static owned desktop/camera placeholders + 10 shape/title layers",
+          "healthySinkFrames": 17212,
+          "hostClockDurationErrorSeconds": 0.0029645730000993353,
+          "maxMainActorSchedulingDelayMilliseconds": 128.981052,
+          "decodedSourceFrames": 0,
+          "replaySource": null,
+          "validationComplete": true,
+          "validationSeconds": 86.50770725300004,
+          "recordingComplete": true,
+          "sourceAudioTailCoverageSeconds": 0.007794804,
+          "maximumRecordingFrontierSkewSeconds": 0.59640391,
+          "checks": [
+            {
+              "detail": "An actual submitted video endpoint is required.",
+              "name": "videoSourceFrontier",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual post-warmup arrivals 17212; monotonic true; required > 30.",
+              "name": "monotonicArrivals",
+              "status": "passed"
+            },
+            {
+              "detail": "Duration error 0.0029645730000993353s; original bound <0.08s.",
+              "name": "hostClockDuration",
+              "status": "passed"
+            },
+            {
+              "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.007794804)s.",
+              "name": "audioSourceTailCoverage",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual writer completion.",
+              "name": "recordingFinalization",
+              "status": "passed"
+            },
+            {
+              "detail": "Original track/start/end/decode inspection completed.",
+              "name": "recordingDecodeInspection",
+              "status": "passed"
+            },
+            {
+              "detail": "Rendered 17232; required at least 17850 for 30 fps over 600.0s with the existing 5s allowance.",
+              "name": "nominalCompositorCapacity",
+              "status": "failed"
+            }
+          ],
+          "compositor": {
+            "attempts": 17256,
+            "rendered": 17232,
+            "failed": 24,
+            "missedDeadlines": 745,
+            "subscriberQueueDepth": 1,
+            "subscriberDrops": 12627,
+            "totalRenderMilliseconds": 339686.5020129982,
+            "maxRenderMilliseconds": 999.7669540000516,
+            "observedFPS": 28.716625181670352,
+            "meanRenderMilliseconds": 19.685124131490394
+          },
+          "resources": {
+            "samples": 591,
+            "peakPhysicalFootprintBytes": 183328768,
+            "peakResidentBytes": 157134848,
+            "peakMetalAllocationBytes": 76100352,
+            "thermalStates": [
+              0
+            ],
+            "meanCPUFraction": 0.077821745551185,
+            "largestObservationGapSeconds": 1.0829904219999662
+          },
+          "kernels": {
+            "backend": "Core Image on Metal: Apple Paravirtual device",
+            "maximumMilliseconds": 48.708887999964645,
+            "samples": 575,
+            "totalMilliseconds": 7341.736209003557,
+            "unavailableSamples": 0,
+            "meanMilliseconds": 12.768236885223576
+          },
+          "recording": {
+            "videoSamples": 17232,
+            "audioSamples": 60006,
+            "droppedVideo": 0,
+            "droppedAudio": 0,
+            "durationSeconds": 600.059737243,
+            "elapsedWallSeconds": 600.1937460899353,
+            "videoStatus": "complete",
+            "audioStatus": "complete",
+            "videoError": null,
+            "audioError": null,
+            "avEndDifferenceSeconds": -0.007794804
+          },
+          "case": 0,
+          "layers": 12,
+          "storageBytesPerSecond": 761039.3016666666,
+          "schedulerAccounting": {
+            "totalOpportunities": 18001,
+            "attempts": 17256,
+            "whollySkipped": 745
+          },
+          "caseReportSHA256": "91390029033b2fdb61db6e3fa882f10de7d77ad7c955e0fb3e6d7ec173f10d85",
+          "recordingJournalSHA256": "5281ca609fc17b68999399d5ac1cfe26f8419a2187fcd35706d5c8d4bf1c2f81",
+          "originalMedia": {
+            "file": "case0-1920x1080-30.mp4",
+            "bytes": 456623581,
+            "sha256": "eb111e6e58ef754c5c18070d3e96f612aecf1e03a0b99685d4a28b4e8b389031"
+          },
+          "resourceQuarterSummaries": {
+            "physicalFootprintBytes": {
+              "firstQuarterMean": 174791979.53741497,
+              "lastQuarterMean": 181090317.9319728,
+              "minimum": 5718016,
+              "maximum": 183328768
+            },
+            "metalAllocatedBytes": {
+              "firstQuarterMean": 63132060.29931973,
+              "lastQuarterMean": 57076459.972789116,
+              "minimum": 0,
+              "maximum": 76100352
+            },
+            "cpuFraction": {
+              "firstQuarterMean": 0.07670134265836195,
+              "lastQuarterMean": 0.07841542728768697,
+              "minimum": 0,
+              "maximum": 0.14833864319436835
+            }
+          },
+          "sameNamedHostClassPreviousRun": {
+            "runID": 39724736435,
+            "sourceCommit": "b53ae5d23a4b66df65b4974ea5ab90cc461e5267",
+            "rendered": 17366,
+            "renderedDelta": -134,
+            "meanRenderMilliseconds": 28.213053463571033,
+            "whollySkipped": 597,
+            "meanCPUFraction": 0.11511723969207681,
+            "maxMainActorSchedulingDelayMilliseconds": 199.180696,
+            "note": "Observational across hosted runs of the same named class/OS; not a controlled physical-machine or universal causal claim."
+          }
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30,
+          "seconds": 600.079158347,
+          "workload": "Real owned 1080p H.264 decode reused by desktop/camera placeholders + 10 shape/title layers",
+          "healthySinkFrames": 16404,
+          "hostClockDurationErrorSeconds": 0.0052146010002616094,
+          "maxMainActorSchedulingDelayMilliseconds": 461.366198,
+          "decodedSourceFrames": 17232,
+          "replaySource": {
+            "availableFrames": 17232,
+            "durationSeconds": 600.0516666666666,
+            "framesDueBeforeGraceEnd": 17090,
+            "monotonic": true
+          },
+          "validationComplete": false,
+          "validationSeconds": 0.1985364170000139,
+          "recordingComplete": true,
+          "sourceAudioTailCoverageSeconds": 0.001674724,
+          "maximumRecordingFrontierSkewSeconds": 0.153004356,
+          "checks": [
+            {
+              "detail": "An actual submitted video endpoint is required.",
+              "name": "videoSourceFrontier",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual post-warmup arrivals 16404; monotonic true; required > 30.",
+              "name": "monotonicArrivals",
+              "status": "passed"
+            },
+            {
+              "detail": "Duration error 0.0052146010002616094s; original bound <0.08s.",
+              "name": "hostClockDuration",
+              "status": "passed"
+            },
+            {
+              "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.001674724)s.",
+              "name": "audioSourceTailCoverage",
+              "status": "passed"
+            },
+            {
+              "detail": "Actual writer completion.",
+              "name": "recordingFinalization",
+              "status": "passed"
+            },
+            {
+              "detail": "Original track/start/end/decode inspection has not completed.",
+              "name": "recordingDecodeInspection",
+              "status": "pending"
+            },
+            {
+              "detail": "Rendered 16434; required at least 17850 for 30 fps over 600.0s with the existing 5s allowance.",
+              "name": "nominalCompositorCapacity",
+              "status": "failed"
+            },
+            {
+              "detail": "Source has 17232 total frames for the 600.0s workload; nominal requirement 17850. 17090 frames are due before decoder grace ends.",
+              "name": "nominalReplayInputAvailability",
+              "status": "failed"
+            },
+            {
+              "detail": "Decoded 17232 actual frames; required 17090 from compressed source timestamps. This does not qualify nominal 30 fps capacity.",
+              "name": "actualSourceDecodeCadence",
+              "status": "passed"
+            },
+            {
+              "detail": "Original nominal gate unchanged: decoded 17232, required at least 17850. Input availability and actual-source decoding are reported separately.",
+              "name": "nominalReplayDecodeCapacity",
+              "status": "failed"
+            },
+            {
+              "detail": "No decoder error before sampling ended.",
+              "name": "replayDecoderCompletion",
+              "status": "passed"
+            }
+          ],
+          "compositor": {
+            "attempts": 16476,
+            "rendered": 16434,
+            "failed": 42,
+            "missedDeadlines": 1525,
+            "subscriberQueueDepth": 1,
+            "subscriberDrops": 11823,
+            "totalRenderMilliseconds": 453722.04850499396,
+            "maxRenderMilliseconds": 482.3128580001139,
+            "observedFPS": 27.38638689813807,
+            "meanRenderMilliseconds": 27.53836176893627
+          },
+          "resources": {
+            "samples": 590,
+            "peakPhysicalFootprintBytes": 76804096,
+            "peakResidentBytes": 166481920,
+            "peakMetalAllocationBytes": 87565088,
+            "thermalStates": [
+              0
+            ],
+            "meanCPUFraction": 0.12433965052317594,
+            "largestObservationGapSeconds": 1.3925723610000205
+          },
+          "kernels": {
+            "backend": "Core Image on Metal: Apple Paravirtual device",
+            "maximumMilliseconds": 116.31877600029839,
+            "samples": 548,
+            "totalMilliseconds": 9045.917123004983,
+            "unavailableSamples": 0,
+            "meanMilliseconds": 16.507148034680625
+          },
+          "recording": {
+            "videoSamples": 16434,
+            "audioSamples": 60006,
+            "droppedVideo": 0,
+            "droppedAudio": 0,
+            "durationSeconds": 600.059427649,
+            "elapsedWallSeconds": 600.2756170034409,
+            "videoStatus": "complete",
+            "audioStatus": "complete",
+            "videoError": null,
+            "audioError": null,
+            "avEndDifferenceSeconds": -0.001674724
+          },
+          "case": 1,
+          "layers": 12,
+          "storageBytesPerSecond": 672191.41,
+          "schedulerAccounting": {
+            "totalOpportunities": 18001,
+            "attempts": 16476,
+            "whollySkipped": 1525
+          },
+          "caseReportSHA256": "d13048c8c61c31d14964978ef3597b422e3034db8559d80e72b4164f143d9ec6",
+          "recordingJournalSHA256": "1d4ef71917cec89599817f8ebbee04f875b1cb10a653c5e0c3b2edc08ae9e6df",
+          "originalMedia": {
+            "file": "case1-1920x1080-30.mp4",
+            "bytes": 403314846,
+            "sha256": "600ec565c030a3a5559a7dfd98a8cd0bf1f903d772475ab84041db4d2835ab78"
+          },
+          "resourceQuarterSummaries": {
+            "physicalFootprintBytes": {
+              "firstQuarterMean": 70977299.15646258,
+              "lastQuarterMean": 72619210.01360545,
+              "minimum": 41066496,
+              "maximum": 76804096
+            },
+            "metalAllocatedBytes": {
+              "firstQuarterMean": 72319356.5170068,
+              "lastQuarterMean": 70603796.89795919,
+              "minimum": 11708480,
+              "maximum": 87565088
+            },
+            "cpuFraction": {
+              "firstQuarterMean": 0.1097868535920281,
+              "lastQuarterMean": 0.15457056345170056,
+              "minimum": 0.08760151595447885,
+              "maximum": 0.2516335730414619
+            }
+          },
+          "sameNamedHostClassPreviousRun": {
+            "runID": 39724736435,
+            "sourceCommit": "b53ae5d23a4b66df65b4974ea5ab90cc461e5267",
+            "rendered": 17058,
+            "renderedDelta": -624,
+            "meanRenderMilliseconds": 31.43094178092259,
+            "whollySkipped": 893,
+            "meanCPUFraction": 0.14289085024486486,
+            "maxMainActorSchedulingDelayMilliseconds": 356.54337,
+            "note": "Observational across hosted runs of the same named class/OS; not a controlled physical-machine or universal causal claim."
+          },
+          "validationTimingMeaning": "Persisted validationSeconds is pre-inspection overhead, not total final inspection duration. Final inspection did not complete before the unchanged 1380-second launcher deadline."
+        }
+      ],
+      "previousNamedHostClassMatches": true,
+      "additionalFailure": {
+        "kind": "existingOwnedProcessWallDeadline",
+        "seconds": 1380,
+        "logTimeUTC": "2026-10-22T07:14:24.192407Z",
+        "finalInspection": "pending",
+        "firstInspection": "passed",
+        "bothRecordingWritersComplete": true,
+        "explanation": "Both 600-second measurement/writer windows completed and already failed nominal frame capacity. Final replay-file track/start/end/decode inspection remained pending at forced process teardown. Its blocking API or eventual outcome is not established."
+      }
+    }
+  ],
+  "scope": [
+    "All four nominal compositor results fail the unchanged 17850-frame gate: ARM 17252/17306; Intel 17232/16434. Both nominal replay input and decode gates also fail.",
+    "ARM replay decoded 17251 of 17252 available frames, 17110 due before grace;Intel decoded 17232 of 17232 available, 17090 due. Both actual-source cadence checks pass, separately from the failed nominal capacity. Do not relabel ARM as decoding every available frame.",
+    "Both ARM inspections and Intel first inspection pass. Intel final inspection remains pending at the unchanged 1380-second launcher deadline. Numeric capacity already failed before that deadline; extending a deadline would not turn those counts into passes.",
+    "Writer video samples equal rendered counts in all four cases; all writer-reported audio/video drops are 0 and all four writers completed. No waveform drift or complete end-to-end A/V sync claim follows from endpoint latency, frontier skew or successful finalization.",
+    "The healthy recorder sink is removed before metricsSnapshot; the remaining subscriber drops/depth in this fixture are from the deliberately slow sink. They are not recording-frame loss or an actual UI-preview drop measurement.",
+    "All sampled thermal states are nominal. CPU, memory, Metal allocations, main-actor lag and sampled actual CI kernel time are retained; GPU utilization remains unavailable. These aggregate samples do not identify a host/CPU/GPU/driver stall cause.",
+    "Compared with the previous named host classes, ARM gained 295/259 renders while Intel lost 134/624. Lower mean render time on all four cases does not prove a universal cadence gain or causality across separate hosted VMs.",
+    "VirtualMac2,1 and the Macmini6,2-advertised runner both expose Apple Paravirtual Metal. These named hosted configurations do not certify physical M1/Intel or representative physical camera/desktop capture. No Rosetta translation is reported.",
+    "No additional dispatch, rerun, cancellation, lower target FPS/canvas, narrower workload or gate/deadline change. Earlier runs 39713883982 and 39724736435 and their raw failures remain unchanged. #92 remains open."
+  ],
+  "sourceBackedDiscriminatingTracePlan": {
+    "executed": false,
+    "qualification": false,
+    "durationPerCaseSeconds": 20,
+    "workload": "If separately authorized after native builds drain: same 1080p30 generated static/replay content, recorder and deliberate80ms sink. No narrower scene or changed output target.",
+    "reason": "Tick is synchronous and its wall-time metric spans scene preparation, CI render/completion and fanout; missedDeadlines records whole elapsed opportunities. Current data show fewer mean render milliseconds but still hundreds of whole skips and long tails. Aggregate kernel samples and main-actor lag do not locate those tails.",
+    "boundedCounters": [
+      "Per-tick deadline-start lateness and whole-skip count on the actual existing scheduler.",
+      "Thread CPU and wall deltas for graph/title preparation, pooled allocation, CI render submission/completion and fanout; sample real CI kernel task time without labeling it utilization.",
+      "Separate mailbox post/lock/drop-release and sink callback wall times; count delivery for recorder and deliberate slow sink independently.",
+      "Correlate bounded per-tick records with main-actor scheduling observations; preserve actual host-clock PTS, source inventory, original numeric gates and all writer/drop counters."
+    ],
+    "discrimination": "High start lateness versus wall-with-little-thread-CPU would separate wake/host descheduling from synchronous CPU cost. Long CI or drop/release spans would identify a different path than a bare cadence failure. No concrete next production fix is justified yet."
+  }
+}
