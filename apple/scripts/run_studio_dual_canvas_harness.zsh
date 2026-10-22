@@ -26,7 +26,16 @@ target['type']='tool'
 target['settings'] ||= {}
 target['settings']['base'] ||= {}
 target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
-target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
+target['settings']['base']['OTHER_SWIFT_FLAGS']='$(inherited) -j2'
+controller=File.read('StreamMac/StreamController.swift')
+constructor='DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))'
+abort 'Owned lifecycle constructor boundary changed' unless controller.scan(constructor).length == 1
+# The fixture models an explicitly unlocked session, without observing or
+# changing the host session. The production constructor remains unchanged.
+controller.sub!(constructor, 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"), observeSystem: false, initialSessionState: .unlocked)')
+File.write(File.join(folder,'StreamController.swift'),controller)
+target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift','StreamController.swift']}
+target['sources'] << File.join(root,folder,'StreamController.swift')
 target['sources'] << File.join(root,'scripts/studio_dual_canvas_harness.swift')
 target['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 spec['targets']['StudioDualCanvasHarness']=target
@@ -37,11 +46,11 @@ File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$DUAL_CANVAS_DIR/project.json" --project "$DUAL_CANVAS_DIR"
 xcodebuild -resolvePackageDependencies -project "$DUAL_CANVAS_DIR/StudioDualCanvasValidation.xcodeproj" \
-  -scheme StudioDualCanvasHarness -derivedDataPath "$DUAL_CANVAS_BUILD_PATH"
+  -scheme StudioDualCanvasHarness -derivedDataPath "$DUAL_CANVAS_BUILD_PATH" -jobs 2
 python3 scripts/repair_desktop_transport_archives.py "$DUAL_CANVAS_BUILD_PATH"
 xcodebuild -project "$DUAL_CANVAS_DIR/StudioDualCanvasValidation.xcodeproj" \
   -scheme StudioDualCanvasHarness -destination 'platform=macOS' \
-  -derivedDataPath "$DUAL_CANVAS_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath "$DUAL_CANVAS_BUILD_PATH" -jobs 2 OTHER_SWIFT_FLAGS='$(inherited) -j2' CODE_SIGNING_ALLOWED=NO build
 readonly DUAL_CANVAS_PRODUCTS="${DUAL_CANVAS_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="$DUAL_CANVAS_PRODUCTS" \
   "$DUAL_CANVAS_PRODUCTS/StudioDualCanvasHarness"

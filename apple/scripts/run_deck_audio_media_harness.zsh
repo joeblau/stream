@@ -88,6 +88,13 @@ def fixture_replace(target, root, folder, relative)
     target['sources'] << copy
   end
 end
+fixture_replace(target, root, folder, 'StreamController.swift') do |source|
+  constructor = 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))'
+  abort 'Owned lifecycle constructor boundary changed' unless source.scan(constructor).length == 1
+  # Test-only simulated session; the shipping default and actual-host
+  # observation fixture keep their real locked/unknown publishing gates.
+  source.sub(constructor, 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"), observeSystem: false, initialSessionState: .unlocked)')
+end
 fixture_replace(target, root, folder, 'RecordingController.swift') do |source|
   abort 'Recording folder fixture boundary changed' unless source.include?('defaultDirectory: URL? = nil')
   source.sub('defaultDirectory: URL? = nil', 'defaultDirectory: URL? = GuestFixtureStorage.recordingsDirectory')

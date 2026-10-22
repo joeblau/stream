@@ -139,6 +139,8 @@ import StreamCore
         let budgetDestination = StreamDestination(name: "Budget Fixture", transport: .rtmp)
         try JSONEncoder().encode([budgetDestination]).write(to: directory.appendingPathComponent("destinations.json"))
         let runtime = StudioRuntime()
+        try require(!runtime.controller.resilience.isLocked && !runtime.controller.resilience.requiresManualRestart,
+                    "Owned native controller fixture must construct its explicit simulated unlocked session")
         runtime.controllers.shutdown(); runtime.localControl.shutdown()
         runtime.dispatcher.bindChatCoordinator(runtime.chat)
         // The generated tool replaces Keychain with a no-op boundary. These

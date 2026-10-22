@@ -280,6 +280,8 @@ private final class DeckInputTiming: @unchecked Sendable {
         }
         let scenes = SceneStore(), preview = PreviewProgramModel(selected: scenes.selected), mixer = AudioMixEngine()
         let controller = StreamController(sceneStore: scenes, previewProgram: preview, permissions: PermissionsManager(), audioEngine: mixer)
+        try require(!controller.resilience.isLocked && !controller.resilience.requiresManualRestart,
+                    "Owned audio/media fixture must construct its explicit simulated unlocked session")
         let session = SettingsSession(controller: controller), recorder = RecordingController(defaults: GuestFixtureDefaults.value, defaultDirectory: GuestFixtureStorage.recordingsDirectory)
         let dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: scenes, session: session, recorder: recorder, previewProgram: preview)
         let probe = DeckPCM(), tap = controller.addProgramAudioTap(capacity: 16) { probe.receive($0) }
