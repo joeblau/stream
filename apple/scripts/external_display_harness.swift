@@ -24,6 +24,27 @@ import StreamCore
     init(_ values: [ExternalDisplayDescriptor]) { self.values = values }
 }
 @main struct ExternalDisplayHarness {
+    @MainActor static func startAndWait(_ output: ExternalDisplayOutputController,
+                                       programProfile: OutputProfile, selectedProfile: OutputProfile? = nil) async throws {
+        output.start(programProfile: programProfile, selectedProfile: selectedProfile)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while output.isStarting {
+            precondition(ContinuousClock.now < deadline, "External startup did not acknowledge within the owned bound")
+            await Task.yield()
+        }
+    }
+    static func convertedExternalFrame(_ frame: CompositedFrame, profile: OutputProfile) throws -> CGImage {
+        let request = RawVideoResourceRequest(domain: .init(workspace: UUID(), kind: .validation,
+            outputID: "legacy-owned-external-conversion", plane: .program),
+            descriptor: .init(width: profile.canvasWidth, height: profile.canvasHeight, capacity: 5), sessionGeneration: UUID())
+        let receipt = try RawVideoResourceCoordinator.shared.reserveBatch([request])
+        defer { RawVideoResourceCoordinator.shared.rollback(receipt) }
+        let output = try receipt.banks[0].allocatePixelBuffer()
+        let converted = try FrameDeliveryConverter().prepare(frame.sampleBuffer, into: output, transfer: .aspectFitBGRA)
+        let privateFrame = CompositedFrame(sampleBuffer: converted, presentationTime: frame.presentationTime,
+            frameDuration: frame.frameDuration, sequence: frame.sequence)
+        return ExternalProgramImageConverter().image(privateFrame)!
+    }
     @MainActor static func main() async throws {
         _ = NSApplication.shared
         let actualDisplays = ExternalDisplayOutputController.systemDisplays()
@@ -49,16 +70,16 @@ import StreamCore
         var requestedProfile: OutputProfile?
         let output = ExternalDisplayOutputController(screensProvider: { screens.values }, surfaceFactory: { _ in
             let surface = FakeDisplaySurface(); surfaces.append(surface); return surface
-        }, observeSystem: false, subscribe: { profile, sink in
-            requestedProfile = profile; consumer = sink; subscriptions += 1
+        }, observeSystem: false, subscribe: { request, sink in
+            requestedProfile = request.profile; consumer = sink; subscriptions += 1
             return { cancellations += 1 }
         })
         output.selectedDisplayID = 1
-        output.start(programProfile: .default)
+        try await startAndWait(output, programProfile: .default)
         precondition(!output.isActive && subscriptions == 0)
         output.selectedDisplayID = 2
-        output.start(programProfile: .default)
-        precondition(output.isActive && subscriptions == 1 && requestedProfile == nil)
+        try await startAndWait(output, programProfile: .default)
+        precondition(output.isActive && subscriptions == 1 && requestedProfile == .default)
         let ceiling = OutputProfile(canvasWidth: 1920, canvasHeight: 1080, frameRate: 60)
         precondition(CompositorWorkloadBudget.cleanStartError(program: ceiling, secondary: nil, qualified: true) == nil)
         precondition(CompositorWorkloadBudget.cleanStartError(program: ceiling, secondary: nil, qualified: false) != nil)
@@ -66,15 +87,15 @@ import StreamCore
         precondition(CompositorWorkloadBudget.secondaryStartError(program: ceiling, secondary: ceiling, cleanDemanded: false) == nil)
         precondition(CompositorWorkloadBudget.secondaryStartError(program: ceiling, secondary: ceiling, cleanDemanded: true) != nil)
         let denied = ExternalDisplayOutputController(screensProvider: { screens.values }, surfaceFactory: { _ in fatalError("Budget rejection allocated a surface") }, observeSystem: false, startError: { _ in "Measured compositor budget refusal" }, subscribe: { _, _ in fatalError("Budget rejection subscribed") })
-        denied.selectedDisplayID = 2; denied.feed = .clean; denied.start(programProfile: .default)
+        denied.selectedDisplayID = 2; denied.feed = .clean; try await startAndWait(denied, programProfile: .default)
         precondition(denied.state == .failed("Measured compositor budget refusal"))
         let permit = ExternalCleanRenderPermit(); precondition(permit.isActive); permit.finish(); precondition(!permit.isActive)
         let image = try makeImage()
         let sample = try sampleBuffer()
         let frame = CompositedFrame(sampleBuffer: sample, presentationTime: CMTime(value: 42, timescale: 30), frameDuration: CMTime(value: 1, timescale: 30), sequence: 1)
-        let raw = ExternalProgramImageConverter(profile: nil).image(frame)!
+        let raw = ExternalProgramImageConverter().image(frame)!
         precondition(raw.width == 16 && raw.height == 10 && raw.colorSpace?.name == CGColorSpace.sRGB)
-        let converted = ExternalProgramImageConverter(profile: .init(canvasWidth: 10, canvasHeight: 20, frameRate: 30)).image(frame)!
+        let converted = try convertedExternalFrame(frame, profile: .init(canvasWidth: 10, canvasHeight: 20, frameRate: 30))
         precondition(converted.width == 10 && converted.height == 20 && converted.colorSpace?.name == CGColorSpace.sRGB)
         let corner = pixel(converted, x: 0, y: 0), center = pixel(converted, x: 5, y: 10)
         precondition(corner[0] == 0 && corner[1] == 0 && corner[2] == 0 && corner[3] == 255, "Selected canvas needs opaque black letterboxing")
@@ -99,10 +120,10 @@ import StreamCore
         screens.values = [builtIn, external]; output.refreshDisplays()
         precondition(!output.isActive && subscriptions == 1)
         output.feed = .selectedCanvas
-        output.start(programProfile: .default)
+        try await startAndWait(output, programProfile: .default)
         precondition(!output.isActive && subscriptions == 1)
         let portrait = OutputProfile(canvasWidth: 1080, canvasHeight: 1920, frameRate: 30)
-        output.start(programProfile: .default, selectedProfile: portrait)
+        try await startAndWait(output, programProfile: .default, selectedProfile: portrait)
         precondition(output.isActive && requestedProfile == portrait && subscriptions == 2)
         consumer?(image)
         try await Task.sleep(for: .milliseconds(80))
@@ -111,19 +132,21 @@ import StreamCore
         precondition(!output.isActive && cancellations == 2)
         external.hostsStudio = false; screens.values = [builtIn, external]; output.refreshDisplays()
         output.feed = .clean
-        output.start(programProfile: .default)
-        precondition(output.isActive && requestedProfile == nil && subscriptions == 3, "Clean Program must retain the taken Program geometry")
+        try await startAndWait(output, programProfile: .default)
+        precondition(output.isActive && requestedProfile == .default && subscriptions == 3, "Clean Program must retain the taken Program geometry")
         output.stop()
         output.feed = .selectedCanvas
-        output.start(programProfile: .default, selectedProfile: .init(canvasWidth: 8192, canvasHeight: 8192, frameRate: 60))
+        try await startAndWait(output, programProfile: .default, selectedProfile: .init(canvasWidth: 8192, canvasHeight: 8192, frameRate: 60))
         precondition(!output.isActive && subscriptions == 3)
-        let allocationFailure = ExternalDisplayOutputController(screensProvider: { screens.values }, surfaceFactory: { _ in nil }, observeSystem: false, subscribe: { _, _ in fatalError("A failed surface must allocate no subscription") })
-        allocationFailure.selectedDisplayID = 2; allocationFailure.start(programProfile: .default)
-        precondition(!allocationFailure.isActive)
+        var allocationFailureCancellations = 0
+        let allocationFailure = ExternalDisplayOutputController(screensProvider: { screens.values }, surfaceFactory: { _ in nil }, observeSystem: false, subscribe: { _, _ in { allocationFailureCancellations += 1 } })
+        allocationFailure.selectedDisplayID = 2; try await startAndWait(allocationFailure, programProfile: .default)
+        precondition(!allocationFailure.isActive && allocationFailureCancellations == 1)
         let subscriptionFailureSurface = FakeDisplaySurface()
-        let subscriptionFailure = ExternalDisplayOutputController(screensProvider: { screens.values }, surfaceFactory: { _ in subscriptionFailureSurface }, observeSystem: false, subscribe: { _, _ in nil })
-        subscriptionFailure.selectedDisplayID = 2; subscriptionFailure.start(programProfile: .default)
-        precondition(!subscriptionFailure.isActive && subscriptionFailureSurface.closed)
+        var subscriptionFailureFactories = 0
+        let subscriptionFailure = ExternalDisplayOutputController(screensProvider: { screens.values }, surfaceFactory: { _ in subscriptionFailureFactories += 1; return subscriptionFailureSurface }, observeSystem: false, subscribe: { _, _ in nil })
+        subscriptionFailure.selectedDisplayID = 2; try await startAndWait(subscriptionFailure, programProfile: .default)
+        precondition(!subscriptionFailure.isActive && subscriptionFailureFactories == 0 && !subscriptionFailureSurface.closed)
         let offscreen = ExternalDisplayDescriptor(id: 9, name: "Native offscreen", frame: CGRect(x: -20000, y: -20000, width: 640, height: 360), maximumFPS: 60, isBuiltIn: false, hostsStudio: false)
         let native = NativeExternalDisplaySurface(display: offscreen)!
         precondition(native.window.styleMask == .borderless && !native.window.canBecomeKey && !native.window.canBecomeMain && native.window.ignoresMouseEvents)
@@ -146,7 +169,7 @@ import StreamCore
             let value = NativeExternalDisplaySurface(display: display); nativeSurface = value; return value
         }, subscribe: { _, sink in nativeConsumer = sink; return { nativeCancellations += 1 } })
         nativeOutput.selectedDisplayID = ownedDisplay.id
-        nativeOutput.start(programProfile: .init(canvasWidth: 160, canvasHeight: 100, frameRate: 30))
+        try await startAndWait(nativeOutput, programProfile: .init(canvasWidth: 160, canvasHeight: 100, frameRate: 30))
         let pattern = try patternImage()
         expectPixel(pattern, x: 20, y: 50, rgb: [255, 0, 0])
         expectPixel(pattern, x: 80, y: 50, rgb: [0, 255, 0])
@@ -227,7 +250,7 @@ import StreamCore
         }, subscribe: { _, consumer in sink = consumer; return {} })
         defer { output.stop() }
         output.selectedDisplayID = target.id
-        output.start(programProfile: .init(canvasWidth: 160, canvasHeight: 100, frameRate: 30))
+        try await startAndWait(output, programProfile: .init(canvasWidth: 160, canvasHeight: 100, frameRate: 30))
         guard output.isActive, let surface else { throw NSError(domain: "DisplayHarness", code: 20) }
         precondition(surface.window.frame == target.frame && !surface.window.canBecomeKey && surface.window.ignoresMouseEvents)
         sink?(pattern)

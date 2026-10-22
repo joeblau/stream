@@ -15,6 +15,11 @@ struct ExternalDisplayDescriptor: Identifiable, Equatable, Sendable {
 }
 enum ExternalDisplayScaling: String, CaseIterable, Sendable { case fit, fill }
 enum ExternalDisplayFeed: String, CaseIterable, Sendable { case program, clean, selectedCanvas, secondaryCanvas }
+struct ExternalDisplayFeedRequest: Sendable {
+    let feed: ExternalDisplayFeed
+    let selectedDestinationID: UUID?
+    let profile: OutputProfile?
+}
 
 @MainActor protocol ExternalDisplaySurface: AnyObject, Sendable {
     func move(to display: ExternalDisplayDescriptor)
@@ -44,10 +49,11 @@ final class ExternalDisplayMailbox: @unchecked Sendable {
 @MainActor
 final class ExternalDisplayOutputController: ObservableObject {
     typealias Cancel = @MainActor () -> Void
-    typealias Subscribe = @MainActor (OutputProfile?, @escaping @Sendable (CGImage) -> Void) -> Cancel?
+    typealias Subscribe = @MainActor (ExternalDisplayFeedRequest, @escaping @Sendable (CGImage) -> Void) async throws -> Cancel?
     enum State: Equatable { case idle, active(display: UInt32), failed(String) }
     @Published private(set) var displays: [ExternalDisplayDescriptor] = []
     @Published private(set) var state: State = .idle
+    @Published private(set) var isStarting = false
     @Published var selectedDisplayID: UInt32?
     @Published var scaling: ExternalDisplayScaling = .fit
     @Published var feed: ExternalDisplayFeed = .program
@@ -63,6 +69,9 @@ final class ExternalDisplayOutputController: ObservableObject {
     private var outputProfile: OutputProfile?
     private var activeDisplay: ExternalDisplayDescriptor?
     private var presentationFPS: Int?
+    private var startTask: Task<Void, Never>?
+    private var startGeneration = UUID()
+    private var pendingDisplayID: UInt32?
     private var displayRefresh: Task<Void, Never>?
     private static weak var studioWindow: NSWindow?
     private static let studioWindowChanged = Notification.Name("StreamExternalDisplayStudioWindowChanged")
@@ -98,7 +107,7 @@ final class ExternalDisplayOutputController: ObservableObject {
         }
     }
     deinit {
-        timer?.invalidate(); displayRefresh?.cancel()
+        timer?.invalidate(); displayRefresh?.cancel(); startTask?.cancel()
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         mailbox?.finish()
         let cancel = cancelSubscription, surface = surface
@@ -116,6 +125,11 @@ final class ExternalDisplayOutputController: ObservableObject {
     var droppedImages: UInt64 { mailbox?.droppedImages ?? 0 }
     func refreshDisplays() {
         displays = screensProvider()
+        if isStarting, let id = pendingDisplayID,
+           !displays.contains(where: { $0.id == id && $0.canShowCleanOutput }) {
+            stop(reason: "The output display disconnected or now hosts the studio. Choose a separate display and restart manually.")
+            return
+        }
         if case .active(let id) = state {
             guard let display = displays.first(where: { $0.id == id }), display.canShowCleanOutput else {
                 stop(reason: "The output display disconnected or now hosts the studio. Choose a separate display and restart manually.")
@@ -127,30 +141,71 @@ final class ExternalDisplayOutputController: ObservableObject {
         }
     }
     func start(programProfile: OutputProfile, selectedProfile: OutputProfile? = nil) {
-        guard !isActive else { return }
+        guard !isActive, !isStarting else { return }
         refreshDisplays()
         guard let id = selectedDisplayID, let display = displays.first(where: { $0.id == id }), display.canShowCleanOutput else {
             state = .failed("Select a connected external display that does not host the studio."); return
         }
         let usesProgramGeometry = feed == .program || feed == .clean
         let profile = usesProgramGeometry ? programProfile : selectedProfile
-        guard let profile, profile.canvasWidth <= 4096, profile.canvasHeight <= 4096, profile.frameRate <= 60 else {
+        guard let profile, profile.canvasWidth > 0, profile.canvasHeight > 0, profile.frameRate > 0,
+              profile.canvasWidth <= 4096, profile.canvasHeight <= 4096, profile.frameRate <= 60 else {
             state = .failed("Choose an available canvas up to 4096 pixels per dimension and 60 fps."); return
         }
         if let error = startError(feed) { state = .failed(error); return }
-        guard let surface = surfaceFactory(display) else { state = .failed("The video surface could not be allocated."); return }
-        let mailbox = ExternalDisplayMailbox()
-        // Selected feed converts on the independent subscription queue before
-        // bounded presentation; the studio supplies its actual composed canvas.
-        guard let cancel = subscribe(usesProgramGeometry ? nil : profile, { mailbox.enqueue($0) }) else {
-            mailbox.finish(); surface.close(); state = .failed("The program feed is unavailable."); return
+        let request = ExternalDisplayFeedRequest(feed: feed, selectedDestinationID: selectedDestinationID,
+                                                profile: profile)
+        let generation = UUID(), mailbox = ExternalDisplayMailbox()
+        startGeneration = generation; pendingDisplayID = id; isStarting = true
+        self.mailbox = mailbox
+        state = .idle
+        startTask = Task { @MainActor [weak self] in
+            guard let self else { mailbox.finish(); return }
+            var preparedCancel: Cancel?
+            do {
+                guard let cancel = try await self.subscribe(request, { mailbox.enqueue($0) }) else {
+                    throw ExternalDisplayStartFailure.unavailable
+                }
+                preparedCancel = cancel
+                try Task.checkCancellation()
+                guard self.startGeneration == generation, self.isStarting,
+                      self.mailbox === mailbox, self.selectedDisplayID == id,
+                      self.feed == request.feed, self.selectedDestinationID == request.selectedDestinationID else {
+                    throw CancellationError()
+                }
+                self.refreshDisplays()
+                try Task.checkCancellation()
+                guard self.startGeneration == generation,
+                      let currentDisplay = self.displays.first(where: { $0.id == id }), currentDisplay.canShowCleanOutput else {
+                    throw CancellationError()
+                }
+                // The exact subscription has acknowledged admission/installation
+                // before AppKit is allowed to construct any native video surface.
+                guard let surface = self.surfaceFactory(currentDisplay) else {
+                    throw ExternalDisplayStartFailure.surface
+                }
+                do {
+                    try Task.checkCancellation()
+                    guard self.startGeneration == generation else { throw CancellationError() }
+                } catch { surface.close(); throw error }
+                self.surface = surface; self.cancelSubscription = cancel
+                preparedCancel = nil
+                self.outputProfile = profile; self.activeDisplay = currentDisplay; self.presentedImages = 0
+                self.pendingDisplayID = nil; self.isStarting = false; self.startTask = nil
+                self.state = .active(display: id)
+                self.startTimer(fps: min(currentDisplay.maximumFPS, profile.frameRate))
+            } catch {
+                mailbox.finish(); preparedCancel?()
+                guard self.startGeneration == generation else { return }
+                self.mailbox = nil; self.pendingDisplayID = nil; self.isStarting = false; self.startTask = nil
+                if error is CancellationError || Task.isCancelled { self.state = .idle }
+                else { self.state = .failed(error.localizedDescription) }
+            }
         }
-        self.surface = surface; self.mailbox = mailbox; self.cancelSubscription = cancel
-        outputProfile = profile; activeDisplay = display; presentedImages = 0
-        state = .active(display: id)
-        startTimer(fps: min(display.maximumFPS, profile.frameRate))
     }
     func stop(reason: String? = nil) {
+        startGeneration = UUID(); startTask?.cancel(); startTask = nil
+        isStarting = false; pendingDisplayID = nil
         timer?.invalidate(); timer = nil; presentationFPS = nil
         mailbox?.finish(); mailbox = nil
         cancelSubscription?(); cancelSubscription = nil
@@ -177,6 +232,16 @@ final class ExternalDisplayOutputController: ObservableObject {
             guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32 else { return nil }
             return ExternalDisplayDescriptor(id: id, name: screen.localizedName, frame: screen.frame,
                 maximumFPS: screen.maximumFramesPerSecond, isBuiltIn: CGDisplayIsBuiltin(id) != 0, hostsStudio: hostsStudio(screen.frame))
+        }
+    }
+}
+
+private enum ExternalDisplayStartFailure: LocalizedError {
+    case unavailable, surface
+    var errorDescription: String? {
+        switch self {
+        case .unavailable: "The program feed is unavailable."
+        case .surface: "The video surface could not be allocated."
         }
     }
 }
