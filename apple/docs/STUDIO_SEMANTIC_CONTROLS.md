@@ -85,8 +85,13 @@ whether it is selected. The existing checkmark, dimensions, color values and
 `updateSoundPad` command are preserved.
 
 Pad, playlist and scene-sound volume sliders now identify their target and
-report percent; 100 percent remains unity gain and the range remains
-0 through 200 percent. Playlist transport and scene-sound relink/remove
+report percent; 100 percent remains unity gain and the slider range remains
+0 through 200 percent. Persisted values outside that range are described
+without clamping: large finite percentages use scientific notation; a finite
+gain whose multiplication by 100 overflows is reported in multiples of unity
+gain. Nonfinite values report “Volume unavailable.” A shared formatter avoids
+trapping integer conversions and does not change the stored or playback gain.
+Playlist transport and scene-sound relink/remove
 buttons identify their targets. PDF page sliders, previous/next buttons and
 thumbnail buttons identify the document and page; the current thumbnail
 reports “Current page.” All existing bindings, dispatcher commands, identity,
@@ -106,3 +111,17 @@ PTZ direction controls are drag-only while zoom buttons have empty native
 button actions. A keyboard alternative for PTZ must preserve the existing
 explicit stop and teardown behavior rather than starting indefinite motion.
 Those behaviors are not changed or qualified by `2db81fb`.
+
+Independent source review caught an unsafe integer conversion in the initial
+percentage labels. The follow-up compiles the actual production formatter
+under strict Swift 6 and exercises ordinary, negative, huge finite,
+multiplication-overflow and nonfinite values. In particular, 0.5 reports
+“50 percent,” 2 reports “200 percent,” and a persisted gain of `1e20` reports
+“1e+22 percent.” Run the small check with:
+
+```sh
+zsh apple/scripts/run_studio_gain_accessibility_harness.zsh
+```
+
+The shipping helper check and parsing both complete views passed. This is a
+numeric robustness check, not native AX action or operator qualification.
