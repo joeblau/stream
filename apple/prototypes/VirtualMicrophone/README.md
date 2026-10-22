@@ -8,6 +8,69 @@ transfer PCM, but an installed, signed device has not yet been qualified in
 another app. There is therefore **no supported shipping-path decision yet**;
 #173 stays open and #174 remains gated.
 
+## Studio Program producer evaluation
+
+`StudioProgramProducer.swift` and `StudioProgramRender.{c,h}` now provide an
+evaluation-only application producer for this same public HAL output route.
+They are under `prototypes/`, excluded from every shipping target; no main-window
+controls, settings, demand, or automatic output activation are added. An explicit
+unqualified-route acknowledgement is required. The producer subscribes to the
+actual `AudioMixEngine` **Program** bus with a two-chunk mailbox. It does not
+start the mixer, microphones, publisher or recorder. Aux is not called clean or
+mix-minus, and no conferencing client is assigned a fabricated guest lease.
+
+The real transport implements public device lookup/identity/ASBD reads,
+`AudioDeviceCreateIOProcID`, `AudioDeviceStart`, `AudioDeviceStop`, destruction
+and property listeners. It selects only this prototype's exact stable UID and
+refuses unavailable, non-stereo or non-48-kHz devices; it never changes device
+rate, format or defaults. There is no alternate AVAudioEngine/monitor route.
+The actual OS transport is implemented and compiled, but has **not** been run.
+
+The producer preallocates 32768 timestamped stereo frames (about 683 ms) and
+accepts at most 4096 frames per chunk/callback. Source conversion runs only on
+the tap queue; the C IO callback has no allocation, mutex, wait or logging.
+Atomic stamps and packed stereo values return the requested timestamp's whole
+pair or silence during ring overwrite. Original host PTS is rounded to the
+48-kHz sample grid, never rebased to arrival. A valid HAL sample/host-time pair
+anchors the device clock; a backward or inconsistent clock latches silence until
+an explicit fresh session. Missing/invalid/retired data produces silence.
+
+The explicit evaluation scheduling delay is **12288 frames (256 ms)**, in
+addition to the driver's **512 frames (10.667 ms)**. The controlled nominal
+sum is 266.667 ms; this is not measured installed-HAL latency or A/V sync with
+the camera extension. Callback output timestamps retain the HAL clock. Stop
+retires the mailbox synchronously before tap removal/IO cleanup. Shared stop
+callers await one captured-session barrier; restart cannot overtake it. A failed
+IOProc/listener cleanup retains its context, refuses a second session and can be
+retried explicitly. Already delivered driver/client buffers are not retroactively
+erased; future missing producer frames follow the driver's silence behavior.
+
+```sh
+zsh apple/scripts/run_studio_program_producer_harness.zsh
+```
+
+The owned fixture compiles the whole actual mixer and producer, independently
+taps Program, and paces the same C IO callback from original host-clock positions
+into the actual dynamically loaded driver's WriteMix/ReadInput callbacks. It
+checks sample equality, real channel/bus gain and mute, independent stop and
+consumer silence, old callbacks, UID/44.1-kHz/acknowledgement refusal, clock fault,
+wrap/underrun/bounds, concurrent timestamp/stereo replacement, held actual-mixer
+stop/restart ordering and cleanup retry. Artifacts bind source, driver and fixture
+hashes to the observed PCM error and scheduled timestamps. Both driver slices
+are built; only the host architecture executes.
+Cancellation while the synchronous HAL start returns is checked before the
+producer can report running; the owned case starts the actual loaded driver,
+cancels that request and verifies complete cleanup.
+
+Only HAL syscalls are replaced: system UID lookup and buffer size, creation and
+IO lifecycle/listener delivery are owned fixture boundaries; actual driver UID,
+alive, stream/ASBD, clock and PCM callbacks are used. No OS device/session,
+permission, signing, playback/capture, install or default/rate mutation occurs.
+This proves the in-process Program producer, **not** installed IPC, sandbox access,
+another application's input selection/audio, producer authorization against other
+processes, real device hot-plug, signed activation/update/removal or target-app
+sync. O07's supported-path decision remains unproven and O08 stays gated.
+
 ## Source and bounds
 
 `StreamVirtualMicrophone.c` adapts Apple's 2024 NullAudio sample, downloaded
