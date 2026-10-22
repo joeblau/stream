@@ -17,6 +17,7 @@ final class CompositionHotPathProfile: @unchecked Sendable {
     private var omittedEvents = 0
     private var labels: [UUID: String] = [:]
     private var pixelHash: String?
+    private var profileEpoch = UUID()
     private static let eventLimit = 100_000
     static func now() -> Double { ProcessInfo.processInfo.systemUptime }
     static func stamp() -> Stamp {
@@ -53,6 +54,30 @@ final class CompositionHotPathProfile: @unchecked Sendable {
         lock.unlock()
     }
     func count(_ name: String) { recordValue(name, 0) }
+    func captureEpoch() -> UUID {
+        lock.lock(); defer { lock.unlock() }; return profileEpoch
+    }
+    /// A clock from a retired case can resume after reset. Check and commit its
+    /// entire boundary atomically so neither events nor aggregates cross cases.
+    @discardableResult
+    func recordClockSleep(epoch: UUID, sequence: Int64, requestedAt: Double, returnedAt: Double,
+                          requestedMS: Double, returnedMS: Double, tolerance: String, completed: Bool) -> Bool {
+        let wallMS = (returnedAt - requestedAt) * 1000
+        let event: [String: Any] = ["phase": "clockSleepBoundary", "sequence": sequence,
+            "uptime": Self.now(), "requestedUptime": requestedAt, "returnedUptime": returnedAt,
+            "requestedDelayMilliseconds": requestedMS, "wallMilliseconds": wallMS,
+            "returnLatenessMilliseconds": returnedMS, "requestedTolerance": tolerance,
+            "completed": completed, "profileEpoch": epoch.uuidString]
+        lock.lock(); defer { lock.unlock() }
+        guard epoch == profileEpoch else { return false }
+        if completed {
+            entries["clockSleepRequestedDelay", default: []].append(requestedMS)
+            entries["clockSleepWall", default: []].append(wallMS)
+            entries["clockSleepReturnLateness", default: []].append(returnedMS)
+        }
+        if events.count < Self.eventLimit { events.append(event) } else { omittedEvents += 1 }
+        return true
+    }
     func hash(_ image: CVPixelBuffer?) {
         guard let image else { return }
         lock.lock(); let needed = pixelHash == nil; if needed { pixelHash = "pending" }; lock.unlock()
@@ -67,7 +92,7 @@ final class CompositionHotPathProfile: @unchecked Sendable {
         lock.lock(); pixelHash = value; lock.unlock(); record("oneTimePixelHash", since: t)
     }
     func reset() {
-        lock.lock(); entries.removeAll(); labels.removeAll(); pixelHash = nil
+        lock.lock(); profileEpoch = UUID(); entries.removeAll(); labels.removeAll(); pixelHash = nil
         events.removeAll(keepingCapacity: true); events.reserveCapacity(Self.eventLimit); omittedEvents = 0
         lock.unlock()
         for _ in 0..<200 { let t = Self.stamp(); record("counterEmptySpanCalibration", since: t) }

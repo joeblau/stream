@@ -18,6 +18,14 @@ if src.exists(): shutil.rmtree(src)
 marker.write_text('Generated counter-only source copies; shipping sources are untouched.\n')
 
 shutil.copytree(root/'StreamMac',src,dirs_exist_ok=True)
+# Recognize the exact production call without silently changing its tolerance.
+clock_source=(root/'StreamMac/CompositionEngine.swift').read_text()
+clock_calls=[('try await clock.sleep(until: deadline, tolerance: .zero)', 'zero'),
+             ('try await clock.sleep(until: deadline)', 'default(nil)')]
+clock_matches=[(call,tolerance) for call,tolerance in clock_calls
+               if 'do { '+call+' } catch { break }' in clock_source]
+assert len(clock_matches)==1, 'Expected one recognized production clock sleep'
+clock_call,clock_tolerance=clock_matches[0]
 def edit(file,old,new,count=1):
  p=src/file;s=p.read_text();assert s.count(old)==count,(file,old,s.count(old));p.write_text(s.replace(old,new))
 profile=(root/'scripts/composition_hotpath_profile.swift').read_text()
@@ -43,9 +51,39 @@ harness=harness.replace('            await engine.addSink(token: UUID(), capacit
 harness=harness.replace('            previousRecording = url','            try CompositionHotPathProfile.shared.write(directory.appendingPathComponent("hotpath-case-\\(caseIndex).json"), caseIndex: caseIndex)\n            previousRecording = url')
 harness=harness.replace('        let failures = results.flatMap(\\.checks).filter { $0.status == .failed }','        let failures: [PerformanceWorkloadCheck] = [] // Bounded attribution never claims sustained qualification. Original raw checks remain in reports.')
 # Match the scheduling and fixture-phase spans used in the retained trace.
-edit('CompositionEngine.swift','            while !Task.isCancelled {', '            while !Task.isCancelled {\n                let lateness=deadline.duration(to: clock.now).components\n                CompositionHotPathProfile.shared.recordValue("tickStartDeadlineLateness", max(0, Double(lateness.seconds)*1000 + Double(lateness.attoseconds)/1e15))')
+edit('CompositionEngine.swift','        tickTask = Task { [weak self] in','        let profileClockEpoch = CompositionHotPathProfile.shared.captureEpoch()\n        tickTask = Task { [weak self] in')
+edit('CompositionEngine.swift','            var deadline = clock.now','            var deadline = clock.now\n            var profileClockSequence: Int64 = 0')
+edit('CompositionEngine.swift','            while !Task.isCancelled {', '            while !Task.isCancelled {\n                profileClockSequence += 1\n                let lateness=deadline.duration(to: clock.now).components\n                CompositionHotPathProfile.shared.recordValue("tickStartDeadlineLateness", max(0, Double(lateness.seconds)*1000 + Double(lateness.attoseconds)/1e15))')
 edit('CompositionEngine.swift','                deadline = next.deadline','                deadline = next.deadline\n                CompositionHotPathProfile.shared.recordValue("skippedSlotsEquivalentMilliseconds", Double(next.skipped)*1000/30.0)')
 edit('CompositionEngine.swift','                    await Task.yield()','                    let yieldStarted=CompositionHotPathProfile.now()\n                    await Task.yield()\n                    CompositionHotPathProfile.shared.recordWall("overdueYieldWait", since: yieldStarted)')
+# Bracket the existing single sleep. Capture only wall/clock values around the
+# suspension; construct/store the event after return and never subtract CPU here.
+sleep_probe = r'''                    let sleepRequestInstant = clock.now
+                    let sleepStarted = CompositionHotPathProfile.now()
+                    let requestedDistance = sleepRequestInstant.duration(to: deadline).components
+                    do {
+                        CLOCK_SLEEP_CALL
+                        let sleepReturnInstant = clock.now
+                        let sleepEnded = CompositionHotPathProfile.now()
+                        let returnedDistance = deadline.duration(to: sleepReturnInstant).components
+                        CompositionHotPathProfile.shared.recordClockSleep(epoch: profileClockEpoch, sequence: profileClockSequence,
+                            requestedAt: sleepStarted, returnedAt: sleepEnded,
+                            requestedMS: Double(requestedDistance.seconds) * 1000 + Double(requestedDistance.attoseconds) / 1e15,
+                            returnedMS: Double(returnedDistance.seconds) * 1000 + Double(returnedDistance.attoseconds) / 1e15,
+                            tolerance: "CLOCK_TOLERANCE", completed: true)
+                    } catch {
+                        let sleepReturnInstant = clock.now
+                        let sleepEnded = CompositionHotPathProfile.now()
+                        let returnedDistance = deadline.duration(to: sleepReturnInstant).components
+                        CompositionHotPathProfile.shared.recordClockSleep(epoch: profileClockEpoch, sequence: profileClockSequence,
+                            requestedAt: sleepStarted, returnedAt: sleepEnded,
+                            requestedMS: Double(requestedDistance.seconds) * 1000 + Double(requestedDistance.attoseconds) / 1e15,
+                            returnedMS: Double(returnedDistance.seconds) * 1000 + Double(returnedDistance.attoseconds) / 1e15,
+                            tolerance: "CLOCK_TOLERANCE", completed: false)
+                        break
+                    }'''
+edit('CompositionEngine.swift','                    do { '+clock_call+' } catch { break }',
+     sleep_probe.replace('CLOCK_SLEEP_CALL',clock_call).replace('CLOCK_TOLERANCE',clock_tolerance))
 harness=harness.replace('                    let sample = try ProgramRecordingFixtures.audio(at:', '                    let pcmStarted=CompositionHotPathProfile.stamp()\n                    let sample = try ProgramRecordingFixtures.audio(at:')
 harness=harness.replace('                    recording.appendAudio(timed)','                    recording.appendAudio(timed)\n                    CompositionHotPathProfile.shared.record("fixturePCMGenerateAndEnqueue", since: pcmStarted)')
 harness=harness.replace('                    let sample = sampler.sample(', '                    let sampleStarted=CompositionHotPathProfile.stamp()\n                    let sample = sampler.sample(')
@@ -77,6 +115,7 @@ edit('CompositionEngine.swift', '    private func drain() {\n        while true 
 ruby='''require 'yaml';require 'json';root=ARGV[0];folder=ARGV[1];spec=YAML.load_file(File.join(root,'project.yml'));spec['name']='CompositionHotPathProfile';spec['packages'].each_value{|p|p['path']=File.join(ENV.fetch('STREAM_VENDOR_ROOT',File.join(root,'Vendor')),File.basename(p['path'])) if p['path']};spec['targets'].select!{|name,_|['StreamCore','StreamMac'].include?(name)};spec['targets'].each_value{|t|t['dependencies']&.reject!{|d|d['target']&&!spec['targets'].key?(d['target'])};t['sources'].map!{|s|s.is_a?(String) ? File.join(root,s) : s.merge('path'=>File.join(root,s['path']))};t.delete('entitlements')};spec['schemes']={};h=spec['targets'].delete('StreamMac');h['type']='tool';h['sources'][0]={'path'=>File.join(folder,'StreamMac'),'excludes'=>['StreamMacApp.swift']};h['sources']<<File.join(folder,'hotpath_harness.swift');['program_recording_fixtures.swift','performance_owned_replay.swift','performance_workload_evidence.swift'].each{|s|h['sources']<<File.join(root,'scripts',s)};spec['targets']['StudioPerformanceHarness']=h;spec['schemes']['StudioPerformanceHarness']={'build'=>{'targets'=>{'StudioPerformanceHarness'=>'all'}}};require File.join(root,'scripts/desktop_transport_fixture');StreamDesktopTransportFixture.apply(h,root);File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))'''
 subprocess.run(['ruby','-e',ruby,str(root),str(build)],check=True)
 manifest={'baseCommit':subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip(),'sourceSHA256':{},'generatedSHA256':{},'qualification':False,'secondsPerCase':20,'scope':'Only bounded instrumented attribution. Lookup count is not a measured cache-miss/builder count.'}
+manifest['clockSleep']={'productionCall':clock_call,'requestedTolerance':clock_tolerance,'wallOnlyAcrossSuspension':True,'event':'clockSleepBoundary','sequence':'Clock-loop iteration; a rejected retired tick need not render','scope':'Requested delay is sampled just before the existing call. Return lateness observes task resumption against its deadline, not kernel wake alone; wall includes suspension, executor resumption and bookkeeping. Observer work after return precedes the next tick. No CPU subtraction across suspension, new timer/wait or guarantee of on-time wake. Canceled returns are excluded from successful aggregates. Run-captured profile epoch atomically fences all new sleep events/aggregates against case reset; legacy counters are unchanged. Phase files still require completed case validation.'}
 for path in [root/'StreamMac/CompositionEngine.swift',root/'StreamMac/SceneRenderer.swift',root/'StreamMac/TitleRenderFontCache.swift',root/'scripts/studio_performance_harness.swift',root/'scripts/composition_hotpath_profile.swift',root/'scripts/prepare_composition_hotpath_profile.py',root/'scripts/run_composition_hotpath_profile.zsh']:
  if path.exists(): manifest['sourceSHA256'][str(path.relative_to(root))]=hashlib.sha256(path.read_bytes()).hexdigest()
 for path in [src/'CompositionEngine.swift',src/'SceneRenderer.swift',src/'CompositionHotPathProfile.swift',build/'hotpath_harness.swift']:

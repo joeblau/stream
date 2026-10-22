@@ -1,0 +1,368 @@
+{
+  "baseCommit": "a9cfd98e56af023738db95113b17120fe8951d04",
+  "compiledSource": {
+    "compiledEngineSHA256": "773c3fb4d90cb6fb2495f5e2e438783b77ac2d21de68407c14389d7c4d2a5edb",
+    "guardsRemoved": 0,
+    "harnessSHA256": "d91876c53d4d18cc86a15e1ee132325bba023b27ab43c4003c2ee82ee2647c56",
+    "negativeControl": false,
+    "scope": "Actual CompositionEngine clock/task/tick/schedule/render paths; native-validation-only continuation gates. No sleeps, retry timing, synthetic scheduler implementation, benchmark or throughput qualification.",
+    "sourceCommit": "a9cfd98e56af023738db95113b17120fe8951d04",
+    "sourceSHA256": "773c3fb4d90cb6fb2495f5e2e438783b77ac2d21de68407c14389d7c4d2a5edb"
+  },
+  "dateUTC": "2026-10-22",
+  "generatedSourceManifest": {
+    "baseCommit": "a9cfd98e56af023738db95113b17120fe8951d04",
+    "clockSleep": {
+      "event": "clockSleepBoundary",
+      "productionCall": "try await clock.sleep(until: deadline, tolerance: .zero)",
+      "requestedTolerance": "zero",
+      "scope": "Requested delay is sampled just before the existing call. Return lateness observes task resumption against its deadline, not kernel wake alone; wall includes suspension, executor resumption and bookkeeping. Observer work after return precedes the next tick. No CPU subtraction across suspension, new timer/wait or guarantee of on-time wake. Canceled returns are excluded from successful aggregates. Run-captured profile epoch atomically fences all new sleep events/aggregates against case reset; legacy counters are unchanged. Phase files still require completed case validation.",
+      "sequence": "Clock-loop iteration; a rejected retired tick need not render",
+      "wallOnlyAcrossSuspension": true
+    },
+    "generatedSHA256": {
+      "StreamMac/CompositionEngine.swift": "54ba369b73b82b24d950c88f1d498aebef1f045714018441c649efb574cc0233",
+      "StreamMac/CompositionHotPathProfile.swift": "512dac74a982ecc7d49337fb46bd1fc43e72cd89a2f035b096d0fa45801a1b1b",
+      "StreamMac/SceneRenderer.swift": "a73398d761a1d127cb45cd65d6024cc2bff745842bb3ca60b467e78baf2f67ca",
+      "hotpath_harness.swift": "49332e9d5b45484c06fca3ee38d823ebec5af453b50f0e364696f3f85fd045ce"
+    },
+    "qualification": false,
+    "scope": "Only bounded instrumented attribution. Lookup count is not a measured cache-miss/builder count.",
+    "secondsPerCase": 20,
+    "sourceSHA256": {
+      "StreamMac/CompositionEngine.swift": "773c3fb4d90cb6fb2495f5e2e438783b77ac2d21de68407c14389d7c4d2a5edb",
+      "StreamMac/SceneRenderer.swift": "d4284de75fed1e9d23cf3ead89fca0fe6d452b46d0f5b81dd04d23d31103305e",
+      "StreamMac/TitleRenderFontCache.swift": "b5d31b366da19ef7af64a3d28cc80e8603f70ec8721518023a95f7f1d7024862",
+      "scripts/composition_hotpath_profile.swift": "512dac74a982ecc7d49337fb46bd1fc43e72cd89a2f035b096d0fa45801a1b1b",
+      "scripts/prepare_composition_hotpath_profile.py": "e2560d80a680ede6435e932ed2f00b8dcb2c37a91905fa9beddfb578ec20c491",
+      "scripts/run_composition_hotpath_profile.zsh": "b051da683fd67b9a69cc6f1eca5261ab47607feba19edd27130b8bbc52e27804",
+      "scripts/studio_performance_harness.swift": "b74f5f85e5acbf50475bd9d00f0e8cb816737d10450f528bd30315417a5e46f9"
+    }
+  },
+  "lifecycle": [
+    {
+      "case": "all",
+      "exitCode": 0,
+      "expectedFailure": false
+    }
+  ],
+  "positiveObservations": {
+    "reconfigure": {
+      "after": {
+        "attempts": 0,
+        "failed": 0,
+        "maxRenderMilliseconds": 0,
+        "missedDeadlines": 0,
+        "rendered": 0,
+        "sampledAt": 64813.10621529167,
+        "startedAt": 64813.10610145834,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 0
+      },
+      "before": {
+        "attempts": 0,
+        "failed": 0,
+        "maxRenderMilliseconds": 0,
+        "missedDeadlines": 0,
+        "rendered": 0,
+        "sampledAt": 64813.10620062501,
+        "startedAt": 64813.10610145834,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 0
+      },
+      "sourceAfter": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [],
+        "overridePulls": 0,
+        "pulls": 0,
+        "skipped": 0
+      },
+      "sourceBefore": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [],
+        "overridePulls": 0,
+        "pulls": 0,
+        "skipped": 0
+      }
+    },
+    "restarted-missed": {
+      "after": {
+        "attempts": 0,
+        "failed": 0,
+        "maxRenderMilliseconds": 0,
+        "missedDeadlines": 0,
+        "rendered": 0,
+        "sampledAt": 64813.151793833335,
+        "startedAt": 64813.15177566667,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 0
+      },
+      "before": {
+        "attempts": 0,
+        "failed": 0,
+        "maxRenderMilliseconds": 0,
+        "missedDeadlines": 0,
+        "rendered": 0,
+        "sampledAt": 64813.15178645834,
+        "startedAt": 64813.15177566667,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 0
+      },
+      "sourceAfter": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [
+          "screen(CompositionClockAuthorityHarness.ScreenSourcePayload(target: CompositionClockAuthorityHarness.ScreenSourcePayload.Target.display, targetIdentifier: Optional(\"owned-missed-old\"), applicationBundleID: nil, windowTitle: nil, privacy: CompositionClockAuthorityHarness.CapturePrivacyOptions(showsCursor: nil, capturesAudio: nil, excludedBundleIDs: [], excludedWindows: []), region: nil, zoom: CompositionClockAuthorityHarness.ScreenZoomOptions(isEnabled: false, zoomFactor: 2.0, followsCursor: true, pauseWithControlKey: true), appTracking: CompositionClockAuthorityHarness.ActiveAppTrackingOptions(isEnabled: false, allowedBundleIDs: [])))"
+        ],
+        "overridePulls": 1,
+        "pulls": 1,
+        "skipped": 29
+      },
+      "sourceBefore": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [
+          "screen(CompositionClockAuthorityHarness.ScreenSourcePayload(target: CompositionClockAuthorityHarness.ScreenSourcePayload.Target.display, targetIdentifier: Optional(\"owned-missed-old\"), applicationBundleID: nil, windowTitle: nil, privacy: CompositionClockAuthorityHarness.CapturePrivacyOptions(showsCursor: nil, capturesAudio: nil, excludedBundleIDs: [], excludedWindows: []), region: nil, zoom: CompositionClockAuthorityHarness.ScreenZoomOptions(isEnabled: false, zoomFactor: 2.0, followsCursor: true, pauseWithControlKey: true), appTracking: CompositionClockAuthorityHarness.ActiveAppTrackingOptions(isEnabled: false, allowedBundleIDs: [])))"
+        ],
+        "overridePulls": 1,
+        "pulls": 1,
+        "skipped": 29
+      }
+    },
+    "restarted-tick": {
+      "after": {
+        "attempts": 0,
+        "failed": 0,
+        "maxRenderMilliseconds": 0,
+        "missedDeadlines": 0,
+        "rendered": 0,
+        "sampledAt": 64813.080763875005,
+        "startedAt": 64813.08074579167,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 0
+      },
+      "before": {
+        "attempts": 0,
+        "failed": 0,
+        "maxRenderMilliseconds": 0,
+        "missedDeadlines": 0,
+        "rendered": 0,
+        "sampledAt": 64813.08075283334,
+        "startedAt": 64813.08074579167,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 0
+      },
+      "sourceAfter": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [],
+        "overridePulls": 0,
+        "pulls": 0,
+        "skipped": 0
+      },
+      "sourceBefore": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [],
+        "overridePulls": 0,
+        "pulls": 0,
+        "skipped": 0
+      }
+    },
+    "stopped-missed": {
+      "after": {
+        "attempts": 1,
+        "failed": 0,
+        "lastPresentationSeconds": 64813.128838875,
+        "maxRenderMilliseconds": 5.0050416684825905,
+        "missedDeadlines": 0,
+        "rendered": 1,
+        "sampledAt": 64813.133871750004,
+        "startedAt": 64813.12882316667,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 5.0050416684825905
+      },
+      "before": {
+        "attempts": 1,
+        "failed": 0,
+        "lastPresentationSeconds": 64813.128838875,
+        "maxRenderMilliseconds": 5.0050416684825905,
+        "missedDeadlines": 0,
+        "rendered": 1,
+        "sampledAt": 64813.133862083334,
+        "startedAt": 64813.12882316667,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 5.0050416684825905
+      },
+      "sourceAfter": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [
+          "screen(CompositionClockAuthorityHarness.ScreenSourcePayload(target: CompositionClockAuthorityHarness.ScreenSourcePayload.Target.display, targetIdentifier: Optional(\"owned-missed-old\"), applicationBundleID: nil, windowTitle: nil, privacy: CompositionClockAuthorityHarness.CapturePrivacyOptions(showsCursor: nil, capturesAudio: nil, excludedBundleIDs: [], excludedWindows: []), region: nil, zoom: CompositionClockAuthorityHarness.ScreenZoomOptions(isEnabled: false, zoomFactor: 2.0, followsCursor: true, pauseWithControlKey: true), appTracking: CompositionClockAuthorityHarness.ActiveAppTrackingOptions(isEnabled: false, allowedBundleIDs: [])))"
+        ],
+        "overridePulls": 1,
+        "pulls": 1,
+        "skipped": 29
+      },
+      "sourceBefore": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [
+          "screen(CompositionClockAuthorityHarness.ScreenSourcePayload(target: CompositionClockAuthorityHarness.ScreenSourcePayload.Target.display, targetIdentifier: Optional(\"owned-missed-old\"), applicationBundleID: nil, windowTitle: nil, privacy: CompositionClockAuthorityHarness.CapturePrivacyOptions(showsCursor: nil, capturesAudio: nil, excludedBundleIDs: [], excludedWindows: []), region: nil, zoom: CompositionClockAuthorityHarness.ScreenZoomOptions(isEnabled: false, zoomFactor: 2.0, followsCursor: true, pauseWithControlKey: true), appTracking: CompositionClockAuthorityHarness.ActiveAppTrackingOptions(isEnabled: false, allowedBundleIDs: [])))"
+        ],
+        "overridePulls": 1,
+        "pulls": 1,
+        "skipped": 29
+      }
+    },
+    "stopped-tick": {
+      "after": {
+        "attempts": 0,
+        "failed": 0,
+        "maxRenderMilliseconds": 0,
+        "missedDeadlines": 0,
+        "rendered": 0,
+        "sampledAt": 64813.059929,
+        "startedAt": 64813.05969454167,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 0
+      },
+      "before": {
+        "attempts": 0,
+        "failed": 0,
+        "maxRenderMilliseconds": 0,
+        "missedDeadlines": 0,
+        "rendered": 0,
+        "sampledAt": 64813.059879500004,
+        "startedAt": 64813.05969454167,
+        "subscriberDrops": 0,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 0
+      },
+      "sourceAfter": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [],
+        "overridePulls": 0,
+        "pulls": 0,
+        "skipped": 0
+      },
+      "sourceBefore": {
+        "dimensions": [],
+        "duration": 0,
+        "keys": [],
+        "overridePulls": 0,
+        "pulls": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "primarySemanticsSource": "https://github.com/swiftlang/swift/blob/main/stdlib/public/Concurrency/ContinuousClock.swift",
+  "productionChange": "Same ContinuousClock deadline/sleep; explicitly request tolerance:.zero. No guarantee of on-time resumption or proved hosted performance improvement.",
+  "proofArtifacts": [
+    {
+      "bytes": 1137708,
+      "path": "/tmp/stream-composition-zero-tolerance-lifecycle-20261022.log",
+      "sha256": "f8a228c6189633cbfd843ccd6b3c2269c9cab41a4b24c008d8865b6fa9b91790"
+    },
+    {
+      "bytes": 211,
+      "path": "/tmp/stream-composition-sleep-epoch-20261022.log",
+      "sha256": "2321b0b3e23246f90f3da71720e2f555baf42cbf77bae4f44492acbeccc2f743"
+    },
+    {
+      "bytes": 603,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/build/composition-clock-authority-validation/production-source.json",
+      "sha256": "05cc4b029f7a5ddd5b207ebc3ff7b2c00c5d78584f71dc19ec4729d8f7526fc8"
+    },
+    {
+      "bytes": 79,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/build/composition-clock-authority-validation/production-results.json",
+      "sha256": "ce97890d0aefc1ff30c2bcc9084c8184d2e133ef70a7548cef6969f6c9b7133f"
+    },
+    {
+      "bytes": 5371,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/build/composition-sleep-epoch-validation/epoch-case.json",
+      "sha256": "719140083b4bf355452653ad1a96b851cb70e3b0a114c333576300b7ba680af3"
+    },
+    {
+      "bytes": 176233,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/build/composition-sleep-epoch-validation/epoch-case.events.json",
+      "sha256": "c04d5bc3bae3069732ff401f5bff8ae66ebde83d362364b8007ae6e1b81f2473"
+    },
+    {
+      "bytes": 4405,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/build/composition-sleep-epoch-validation/next-case.json",
+      "sha256": "5a9e83c7ff3cd51cfc9ff4424326fed152c1dee9e920062949a00b3a9aa3320b"
+    },
+    {
+      "bytes": 173629,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/build/composition-sleep-epoch-validation/next-case.events.json",
+      "sha256": "33bf3f4a50c9a356436ff62a53bcf23dfd765af5fb79017e26798d8ed83535f2"
+    },
+    {
+      "bytes": 2390,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/build/composition-hotpath-profile/profile-source-hashes.json",
+      "sha256": "5832136534480034cebbb0d1ea67b762063c371eb3ed865ba2dad2363f9dbf9f"
+    },
+    {
+      "bytes": 2146,
+      "path": "/tmp/stream-composition-generated-sleep-typecheck-20261022.swift",
+      "sha256": "86e3d361d55227bb7220fdd29630512fcbb6c44dd616a5d69e06a1c0a8c68e18"
+    }
+  ],
+  "qualification": false,
+  "schemaVersion": 1,
+  "scope": [
+    "Actual6-case clock lifecycle suite passes unchanged; no negative-suite rerun or local benchmark. Explicit validation still renders from stopped/canceled fixture callers.",
+    "The actual helper test deterministically retires an epoch before old successful/canceled writes and validates no new-case event or successful scalar contamination. Epoch check and all writes share the existing profiler lock.",
+    "Sleep request/return distances are ContinuousClock values around the same existing call. Wall includes suspension/resumption/bookkeeping; no CPU subtraction across suspension. Added observer work is absent from the baseline and must be retained as a comparison limitation.",
+    "New sleep records use a run-captured case epoch and clock-loop iteration, not an actor hop or asserted rendered-frame identity. Canceled points are excluded from successful aggregates. Existing other counter behavior is unchanged.",
+    "Generated sleep block typechecked with actual helper; entire generated engine parsed. The new generated fullapp trace was not locally built or run. Root may perform an independently reviewed future hosted comparison; none has been dispatched by this task.",
+    "No original sustained workflow, source workload, numeric gate, runtime deadline, QoS, process-wide preference or renderer/encoder/mailbox change. #92 remains open."
+  ],
+  "semantics": "The public API comment permits wake coalescing with unspecified tolerance. Explicit zero requests no additional tolerance; runtime/OS/VM scheduling can still cause lateness.",
+  "source": [
+    {
+      "bytes": 47431,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/StreamMac/CompositionEngine.swift",
+      "sha256": "773c3fb4d90cb6fb2495f5e2e438783b77ac2d21de68407c14389d7c4d2a5edb"
+    },
+    {
+      "bytes": 24381,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/scripts/prepare_composition_hotpath_profile.py",
+      "sha256": "e2560d80a680ede6435e932ed2f00b8dcb2c37a91905fa9beddfb578ec20c491"
+    },
+    {
+      "bytes": 7934,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/scripts/composition_hotpath_profile.swift",
+      "sha256": "512dac74a982ecc7d49337fb46bd1fc43e72cd89a2f035b096d0fa45801a1b1b"
+    },
+    {
+      "bytes": 3132,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/scripts/composition_sleep_epoch_harness.swift",
+      "sha256": "2103fedd32e3f750b68fde61ef666a4f32bd4ff42cb81e58791539339d08153c"
+    },
+    {
+      "bytes": 427,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/apple/scripts/run_composition_sleep_epoch_harness.zsh",
+      "sha256": "18f8446c2589fe01abacdcc77f648f1cbddc2df67dea9f2181825072127b1fbb"
+    },
+    {
+      "bytes": 11889,
+      "path": "/private/tmp/stream-wave10-composition-sleep-tolerance-20261022/.github/workflows/native-composition-attribution.yml",
+      "sha256": "4f4c90bb9f7f5fdb38f291bd909f90a131415c61891a28a8ad1a664c06200cbd"
+    }
+  ]
+}
