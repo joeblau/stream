@@ -1,0 +1,24 @@
+{
+  "scope": "SOURCE-ONLY migration; no native build/runtime, media benchmark, hosted dispatch, qualification or gate relaxation. Native tool compilation pending parent review/integration.",
+  "base": "cead456",
+  "checks": [
+    "original durations/case resolutions/FPS",
+    "original generated desktop/camera/shape/title content",
+    "original PCM generation/timestamps/pacing",
+    "original compositor start/sampling/cadence loop",
+    "original frame/PTS/audio/recording/decode checks and cadence gates",
+    "original media inspection gate",
+    "single actual source/private transaction before writer factory and activation",
+    "prepared exact-bank enqueue without second compatibility copy",
+    "recording Q+5 and original pending2/pending1 domains",
+    "generated healthy/slow labels and original warm image observer retained",
+    "generated diagnostic remains fixed two20s cases",
+    "original sustained workflow byte identity"
+  ],
+  "sha256": {
+    "apple/scripts/studio_performance_harness.swift": "381eb58932abfbe2ff259e14bbec32769f2c5b7071639c78343332d45e80540c",
+    "apple/scripts/prepare_composition_hotpath_profile.py": "ef4b918c20986a3d37259aa22a5f53b24caedd06cbe99f4264f41514b7c54163",
+    ".github/workflows/native-composition-attribution.yml": "6a105ba646d10de2940990fcd906f9f3ec00177991eb454ea09746fcb4ae826f"
+  },
+  "legacyRegistrationAudit": "The only legacy Engine.addSink calls in performance/budget/shared/publisher/sustained/resource scripts were the healthy-recording and deliberate80ms registrations in studio_performance_harness.swift plus their generator transforms. There is no critical publisher/shared-encoder workload in this harness; their independent raw6/shared6 ingress remains the actual production DestinationOutputController path, not a new synthetic workload."
+}

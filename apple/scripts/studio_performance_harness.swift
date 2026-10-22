@@ -18,11 +18,11 @@ private final class ArrivalProbe: @unchecked Sendable {
     private var monotonic = true
     private var accepting = true
     private var sourceEnd: CMTime = .invalid
-    func receive(_ frame: CompositedFrame, warmingFrames: Int, recording: ProgramRecordingSession) {
+    func receive(_ frame: CompositedFrame, warmingFrames: Int, recording: ProgramRecordingSession, bank: RawVideoResourceBank) {
         let arrival = CMClockGetTime(CMClockGetHostTimeClock()).seconds
         lock.lock(); defer { lock.unlock() }
         guard accepting else { return }
-        recording.appendVideo(frame.sampleBuffer)
+        recording.appendPreparedVideo(.init(sample: frame.sampleBuffer, bank: bank))
         sourceEnd = frame.presentationTime + frame.frameDuration
         guard frame.sequence > warmingFrames else { return }
         if let lastPTS, frame.presentationTime.seconds <= lastPTS { monotonic = false }
@@ -64,6 +64,17 @@ private final class RecordingFailureFinalizer: @unchecked Sendable {
     }
 }
 
+private struct PerformanceVideoResourcePolicy: Codable {
+    let sourcePoolThreshold: Int
+    let recordingQueueCapacity: Int
+    let recordingQueueByteBudget: Int
+    let recordingHeadroom: Int
+    let recordingPoolThreshold: Int
+    let recordingBytesPerBuffer: UInt64
+    let recordingQueueCostBytes: UInt64
+    let slowPoolThreshold: Int
+}
+
 private struct WorkloadResult: Codable {
     var width: Int
     var height: Int
@@ -71,6 +82,9 @@ private struct WorkloadResult: Codable {
     var layers: Int
     var seconds: Double
     var compositor: CompositionMetrics
+    var videoResourcePolicy: PerformanceVideoResourcePolicy
+    var recordingVideoDelivery: FrameDeliveryStatistics
+    var slowVideoDelivery: FrameDeliveryStatistics
     var healthySinkFrames: Int
     var hostClockDurationErrorSeconds: Double
     var maxMainActorSchedulingDelayMilliseconds: Double
@@ -170,6 +184,47 @@ private struct PerformanceReport: Codable {
             configuration.frameRate = fps
             if sustained { configuration.minimumSpaceBytes = 512 * 1_024 * 1_024; configuration.lowSpaceWarningBytes = 256 * 1_024 * 1_024 }
             else { configuration.minimumSpaceBytes = 1; configuration.lowSpaceWarningBytes = 1 }
+            // Match shipping Program recording: preserve the original queue
+            // count/byte policy plus pending2, callback1, native1 and copy1.
+            // Admit the actual source4 in the SAME pre-writer transaction.
+            let workspace = UUID(), generation = UUID()
+            let recordingDomain = StableFrameDomainID(workspace: workspace, kind: .recording,
+                outputID: "performance-recording", plane: .program)
+            let slowDomain = StableFrameDomainID(workspace: workspace, kind: .validation,
+                outputID: "deliberate80ms", plane: .program)
+            let sourceRequest = try engine.sourceFrameResourceRequest(canvasSize: CGSize(width: width, height: height))
+            let resources = try RawVideoResourceCoordinator.shared.reserveBatch([
+                sourceRequest,
+                .init(domain: recordingDomain, descriptor: .init(width: width, height: height, capacityPolicy:
+                    .recording(videoCapacity: configuration.videoCapacity,
+                        maxQueuedBytes: UInt64(configuration.maxVideoMemoryBytes), headroom: 5)), sessionGeneration: generation),
+                // This recipient has one pending callback, one active callback
+                // and one incoming copy; it has no downstream native queue.
+                .init(domain: slowDomain, descriptor: .init(width: width, height: height, capacity: 3), sessionGeneration: generation)
+            ])
+            defer { RawVideoResourceCoordinator.shared.rollback(resources) }
+            let sourceResources = try resources.selecting(domain: sourceRequest.domain)
+            defer { RawVideoResourceCoordinator.shared.rollback(sourceResources) }
+            let recordingResources = try resources.selecting(domain: recordingDomain)
+            defer { RawVideoResourceCoordinator.shared.rollback(recordingResources) }
+            let slowResources = try resources.selecting(domain: slowDomain)
+            defer { RawVideoResourceCoordinator.shared.rollback(slowResources) }
+            let sourceBank = sourceResources.banks[0], recordingBank = recordingResources.banks[0], slowBank = slowResources.banks[0]
+            let recordingCancellation = FrameDeliveryCancellation(), slowCancellation = FrameDeliveryCancellation()
+            defer {
+                recordingCancellation.cancel(); slowCancellation.cancel()
+                RawVideoResourceCoordinator.shared.retire(bankID: recordingBank.id)
+                RawVideoResourceCoordinator.shared.retire(bankID: slowBank.id)
+                // Per-child defers release every selected claim, including
+                // partial selection failure. Engine installation MOVES its
+                // source claim, so stale caller rollback cannot revoke it.
+            }
+            configuration.videoBank = recordingBank
+            let videoResourcePolicy = PerformanceVideoResourcePolicy(sourcePoolThreshold: sourceBank.allocationThreshold,
+                recordingQueueCapacity: configuration.videoCapacity, recordingQueueByteBudget: configuration.maxVideoMemoryBytes,
+                recordingHeadroom: 5, recordingPoolThreshold: recordingBank.allocationThreshold,
+                recordingBytesPerBuffer: recordingBank.bytesPerBuffer, recordingQueueCostBytes: recordingBank.queueCostBytes,
+                slowPoolThreshold: slowBank.allocationThreshold)
             let url = directory.appendingPathComponent("case\(caseIndex)-\(width)x\(height)-\(fps).mp4")
             let finalizer = RecordingFailureFinalizer()
             let recordingProbe = PerformanceRecordingProbe()
@@ -178,12 +233,15 @@ private struct PerformanceReport: Codable {
                 if case .failed = event { finalizer.failed() }
             })
             finalizer.install(recording)
-            let token = UUID()
-            await engine.addSink(token: token, capacity: 2) { frame in
-                probe.receive(frame, warmingFrames: fps, recording: recording)
+            let token = UUID(), slowToken = UUID()
+            let recordingLease = try await engine.installFrameDelivery(token: token, domain: recordingDomain, generation: generation,
+                bank: recordingBank, sourceBank: sourceBank, sourceReceipt: sourceResources,
+                capacity: 2, cancellation: recordingCancellation) { frame in
+                probe.receive(frame, warmingFrames: fps, recording: recording, bank: recordingBank)
             }
-            // A deliberately slow consumer exercises isolated drop-oldest fanout.
-            await engine.addSink(token: UUID(), capacity: 1) { _ in Thread.sleep(forTimeInterval: 0.080) }
+            // The original deliberate80ms consumer and pending1 behavior remain.
+            let slowLease = try await engine.installFrameDelivery(token: slowToken, domain: slowDomain, generation: generation,
+                bank: slowBank, capacity: 1, cancellation: slowCancellation) { _ in Thread.sleep(forTimeInterval: 0.080) }
             var before = StudioDiagnosticSnapshot(); before.sampleProcess()
             let clock = ContinuousClock(); let started = clock.now
             let decode: Task<Void, Error>? = replayURL.map { url in Task.detached { try await replay.run(url: url) } }
@@ -224,7 +282,10 @@ private struct PerformanceReport: Codable {
                 }
             }
             await engine.stop()
-            await engine.removeSink(token)
+            recordingCancellation.cancel(); slowCancellation.cancel()
+            let recordingVideoDelivery = await engine.removeFrameDelivery(recordingLease)
+            let slowVideoDelivery = await engine.removeFrameDelivery(slowLease)
+            recording.updateVideoDelivery(.init(recordingVideoDelivery))
             let finalVideoSourceEnd = probe.closeVideo()
             var decodeError: String?
             if let decode {
@@ -238,7 +299,10 @@ private struct PerformanceReport: Codable {
             let audioFrames = try await audio.value
             let sourceAudioTailCoverage: Double? = finalVideoSourceEnd.isNumeric
                 ? (sourceStart + CMTime(value: audioFrames, timescale: 48_000) - finalVideoSourceEnd).seconds : nil
-            let metrics = await engine.metricsSnapshot()
+            var metrics = await engine.metricsSnapshot()
+            // Both registrations are now removed; their frozen receipts keep
+            // truthful aggregate drops after the active-map snapshot is empty.
+            metrics.subscriberDrops = recordingVideoDelivery.drops + slowVideoDelivery.drops
             let kernels = await engine.kernelMetricsSnapshot()
             let result = await withCheckedContinuation { continuation in recording.finish { continuation.resume(returning: $0) } }
             var after = StudioDiagnosticSnapshot(); after.sampleProcess()
@@ -267,6 +331,7 @@ private struct PerformanceReport: Codable {
             let totalSeconds = Double(measured.seconds) + Double(measured.attoseconds) / 1e18
             results.append(.init(width: width, height: height, fps: fps, layers: scene.layers.count,
                 seconds: samplingSeconds, compositor: metrics,
+                videoResourcePolicy: videoResourcePolicy, recordingVideoDelivery: recordingVideoDelivery, slowVideoDelivery: slowVideoDelivery,
                 healthySinkFrames: arrival.count, hostClockDurationErrorSeconds: arrival.error,
                 maxMainActorSchedulingDelayMilliseconds: maxDelay, processCPUSeconds: after.processCPUSeconds - before.processCPUSeconds,
                 peakMemoryBytes: after.peakMemoryBytes, recording: result.progress, recordingComplete: result.completed,
