@@ -1,5 +1,9 @@
 # Owned TCP TURN backend qualification
 
+The subsequent [pinned macOS 14 build closure and relink result](NATIVE_GUEST_TCP_PORTABILITY.md)
+removes the dependency floor limitation for separate optional ARM64/x86_64
+artifacts. The current-host result below remains a distinct measured artifact.
+
 The shipping libdatachannel 0.24.0 archive uses libjuice, whose public backend
 supports TURN over UDP. ICE TCP candidates do not establish TURN-over-TCP
 support. The default `GuestReceive.cpp` guard therefore continues to reject a
