@@ -109,6 +109,8 @@ jobs:
         run: REHEARSAL_BUILD_PATH=build/desktop zsh scripts/run_local_rehearsal_harness.zsh
       - name: Qualify local shortcut window and focus handling
         run: LOCAL_SHORTCUT_BUILD_PATH=build/desktop zsh scripts/run_local_shortcut_harness.zsh
+      - name: Test annotation toolbar native geometry
+        run: python3 scripts/test_annotation_toolbar_layout.py --report build/annotation-toolbar-layout.json --artifacts build/annotation-toolbar-layout
 
       - name: Test private program slate rendering
         run: PRIVACY_BUILD_PATH=build/desktop zsh scripts/run_studio_privacy_harness.zsh
@@ -158,6 +160,8 @@ jobs:
             apple/build/fractional-iso-audio-validation/media-*
             apple/build/abrupt-session-recovery-validation/artifacts-*
             apple/build/studio-deck-native-validation/artifacts-*
+            apple/build/annotation-toolbar-layout.json
+            apple/build/annotation-toolbar-layout
 
   test:
     name: StreamCore tests (iOS Simulator)
