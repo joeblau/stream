@@ -68,6 +68,7 @@ jobs:
           zsh scripts/run_studio_gain_accessibility_harness.zsh
           zsh scripts/run_text_paragraph_style_harness.zsh
           python3 scripts/test_studio_control_rows.py
+          zsh scripts/run_composition_clock_authority_harness.zsh
           zsh scripts/run_ptz_control_authority_harness.zsh
           zsh scripts/run_show_macros_harness.zsh
           zsh scripts/run_studio_local_control_harness.zsh
@@ -117,6 +118,7 @@ jobs:
           REVIEW_ACCOUNTS_BUILD_PATH=build/tests zsh scripts/run_recovery_accounts_harness.zsh
           WORKSPACE_BUILD_PATH=build/desktop zsh scripts/run_studio_workspace_harness.zsh
           WORKSPACE_BUILD_PATH=build/desktop zsh scripts/run_studio_workspace_harness.zsh --scene-reordering
+          WORKSPACE_BUILD_PATH=build/desktop zsh scripts/run_studio_workspace_harness.zsh --layer-geometry
       - name: Qualify recorded public chat timing
         run: |
           CHAT_BUILD_PATH=build/desktop zsh scripts/run_recording_chat_harness.zsh
