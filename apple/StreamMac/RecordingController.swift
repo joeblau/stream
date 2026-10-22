@@ -451,7 +451,7 @@ final class RecordingController: ObservableObject {
             }
         for targetID in unavailableVideoAudioIDs { videoGroup.fail(targetID: targetID, message: "The associated audio source is unavailable or was deleted.") }
         isolatedGroup = group; isolatedVideoGroup = videoGroup; configuration.isolatedFiles = group.files + videoGroup.files
-        return ProgramRecordingSession(outputURL: url, configuration: configuration, timeline: timeline, event: { [weak self] event in
+        return ProgramRecordingSession(outputURL: url, configuration: configuration, timeline: timeline, event: { [weak self, weak stream] event in
             Task { @MainActor in
                 guard let self, self.sessionID == id else { return }
                 switch event {
@@ -605,7 +605,14 @@ final class RecordingController: ObservableObject {
         countdownTask?.cancel(); countdownTask = nil; countdownRemaining = 0
         videoPreflightTask?.cancel(); videoPreflightTask = nil
         guard let session else {
-            if state == .preparing { state = .idle; stream = nil }
+            if state == .preparing {
+                // A canceled actor installation can still be awaiting its
+                // removal receipt. Keep the public lifecycle active until
+                // that task acknowledges teardown; countdown-only cancel is
+                // immediate because it has installed nothing.
+                state = frameDeliveryTask == nil ? .idle : .stopping
+                pendingStopState = .idle; stream = nil
+            }
             completeStopsIfReady(); return
         }
         guard state != .stopping else { return }

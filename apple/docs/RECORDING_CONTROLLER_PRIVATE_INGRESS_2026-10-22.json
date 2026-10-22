@@ -1,0 +1,377 @@
+{
+  "baseRecorderCommit": "170ddeb",
+  "date": "2026-10-22",
+  "finalRun": {
+    "binary": {
+      "bytes": 2938440,
+      "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/RecordingControllerHarness",
+      "sha256": "63126b14efb8a27014ee8b334b38ef1ffef2328adbbfdc4cf0c1378eb5026b0c"
+    },
+    "log": {
+      "bytes": 1211,
+      "path": "/tmp/stream-recording-controller-private-final-20261022.log",
+      "sha256": "ea1a6d4b588665ac87024a92397aef760bf89fec1c860f1c46b6131597f617c8"
+    },
+    "media": {
+      "ProfileA/recording-preferences.json": {
+        "bytes": 292,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/ProfileA/recording-preferences.json",
+        "sha256": "f304309de26e4a579ae94d3fd95f5ce5e4d52601fbb471d4079ef09d38ba2ebb"
+      },
+      "ProfileB/recording-preferences.json": {
+        "bytes": 291,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/ProfileB/recording-preferences.json",
+        "sha256": "7cd4b579f97ab0bac4f9cc76901c8e597f646d88306bb4ca22773121e06bdf0c"
+      },
+      "Stream-2026-10-22-064409-F07AFD92.DisconnectedGuest-A53869B0.wav.isolated.json": {
+        "bytes": 800,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064409-F07AFD92.DisconnectedGuest-A53869B0.wav.isolated.json",
+        "sha256": "edbf4f4a93b8ca6a983f020e57429f4c691ad3e08ddb5fb6678b9c1d2b971b6f"
+      },
+      "Stream-2026-10-22-064409-F07AFD92.Microphone-813B5838.wav": {
+        "bytes": 578816,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064409-F07AFD92.Microphone-813B5838.wav",
+        "sha256": "1eb29b0e7955ad3b50323eab1622ca821fbf7e66c0e68084fe629cb5b80b6bd8"
+      },
+      "Stream-2026-10-22-064409-F07AFD92.Microphone-813B5838.wav.isolated.json": {
+        "bytes": 3732,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064409-F07AFD92.Microphone-813B5838.wav.isolated.json",
+        "sha256": "6665cc5d9f167a6e1ac5584bab38b553ac87b61a606d9909fe6eea38252838a5"
+      },
+      "Stream-2026-10-22-064409-F07AFD92.ProgramBus-2FF864BA.m4a": {
+        "bytes": 63329,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064409-F07AFD92.ProgramBus-2FF864BA.m4a",
+        "sha256": "7397f76aabdbb93c6008d2eec44814f93616737152bd5600b49f5fb448eb3c57"
+      },
+      "Stream-2026-10-22-064409-F07AFD92.ProgramBus-2FF864BA.m4a.isolated.json": {
+        "bytes": 3735,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064409-F07AFD92.ProgramBus-2FF864BA.m4a.isolated.json",
+        "sha256": "e4090ceb91fa6f7eb0eea6bb0d3c40e2a26e34c962786e7065d75dfa6766aa08"
+      },
+      "Stream-2026-10-22-064409-F07AFD92.mp4": {
+        "bytes": 7721,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064409-F07AFD92.mp4",
+        "sha256": "0d616652f59b17f9ac1a147914e4e86cab62fd4847e60c78c914872c4ae2a3f5"
+      },
+      "Stream-2026-10-22-064409-F07AFD92.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064409-F07AFD92.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064409-F07AFD92.mp4.recording.json": {
+        "bytes": 1250,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064409-F07AFD92.mp4.recording.json",
+        "sha256": "b05d7be7607915638b95f774a76f7a7be362d5ab45a397f0e9b93115c32fc34e"
+      },
+      "Stream-2026-10-22-064411-2CE772C3.DisconnectedGuest-F18586C8.wav.isolated.json": {
+        "bytes": 805,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-2CE772C3.DisconnectedGuest-F18586C8.wav.isolated.json",
+        "sha256": "5d38c0d81fc5eac7dfd973d2283aa03083db6005f42a74c786bd7dd4d2e5fa84"
+      },
+      "Stream-2026-10-22-064411-2CE772C3.Microphone-AE93EBF0.wav": {
+        "bytes": 194824,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-2CE772C3.Microphone-AE93EBF0.wav",
+        "sha256": "1fa25a4e2dcc6ddb7b62cf24f31064400329607ffaa3df80752ef6bb089216f8"
+      },
+      "Stream-2026-10-22-064411-2CE772C3.Microphone-AE93EBF0.wav.isolated.json": {
+        "bytes": 1658,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-2CE772C3.Microphone-AE93EBF0.wav.isolated.json",
+        "sha256": "c291fd6679a35d299e94f35d8f194a6429152f442ea352dc8eaf1be480817c9f"
+      },
+      "Stream-2026-10-22-064411-2CE772C3.ProgramBus-01226F7B.m4a": {
+        "bytes": 61596,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-2CE772C3.ProgramBus-01226F7B.m4a",
+        "sha256": "54f6fd11ab2f248039851bbf7f30e6de8c5c53e74f45f71b794ad02e9e5fb5b4"
+      },
+      "Stream-2026-10-22-064411-2CE772C3.ProgramBus-01226F7B.m4a.isolated.json": {
+        "bytes": 1661,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-2CE772C3.ProgramBus-01226F7B.m4a.isolated.json",
+        "sha256": "403207de1098de79d2c846a10f0cef8626f1e9a6fd97df4e70f25f554efb72da"
+      },
+      "Stream-2026-10-22-064411-2CE772C3.mp4": {
+        "bytes": 3996,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-2CE772C3.mp4",
+        "sha256": "0614fa06521836d2001f4c6cf64af97361bdd8fa42d659a74f4011b1556cd9b0"
+      },
+      "Stream-2026-10-22-064411-2CE772C3.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-2CE772C3.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064411-2CE772C3.mp4.recording.json": {
+        "bytes": 1244,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-2CE772C3.mp4.recording.json",
+        "sha256": "94655a50fee4fee86f7553e6adcdb0b63e49f6557bb7c6f794e0257c6b19bfd5"
+      },
+      "Stream-2026-10-22-064411-C9DDEA59.mp4": {
+        "bytes": 4220,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-C9DDEA59.mp4",
+        "sha256": "2a3f207922bd9a7b35c14b17a312eb102f4d4d011451a84a2c741d063f71d4bc"
+      },
+      "Stream-2026-10-22-064411-C9DDEA59.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-C9DDEA59.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064411-C9DDEA59.mp4.recording.json": {
+        "bytes": 937,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064411-C9DDEA59.mp4.recording.json",
+        "sha256": "76acb41748aa9b4e69576a3f59513bfc7e1eae7eba167198e958a15a81638a65"
+      },
+      "Stream-2026-10-22-064412-BDACF667.mp4": {
+        "bytes": 3490,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064412-BDACF667.mp4",
+        "sha256": "17775f48c6c475aaaaf804be6d89615e2c49cc3a23002c03e0bc55c6f3556e4a"
+      },
+      "Stream-2026-10-22-064412-BDACF667.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064412-BDACF667.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064412-BDACF667.mp4.recording.json": {
+        "bytes": 948,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064412-BDACF667.mp4.recording.json",
+        "sha256": "8a4648b6bff51be7469d83b6302f2c1bff5d4ccbabf1f743f81381395d9c1c48"
+      },
+      "Stream-2026-10-22-064413-8DDEB862.mp4": {
+        "bytes": 1265775,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064413-8DDEB862.mp4",
+        "sha256": "b4e0f5b25ae2dfe895ab28cd51f013327212f335f638a9ade52c5fb97d3329e7"
+      },
+      "Stream-2026-10-22-064413-8DDEB862.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064413-8DDEB862.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064413-8DDEB862.mp4.recording.json": {
+        "bytes": 941,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064413-8DDEB862.mp4.recording.json",
+        "sha256": "01db9f12bd475c06a6f0719a69449bd133503c55a55e7145a2f2fcb111140e20"
+      },
+      "Stream-2026-10-22-064416-9C804178.mp4": {
+        "bytes": 1279391,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064416-9C804178.mp4",
+        "sha256": "75e66167c7f7aa1934222ee67c3a2f3698ffcad69416c1b5c7303d7e9f1c3d20"
+      },
+      "Stream-2026-10-22-064416-9C804178.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064416-9C804178.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064416-9C804178.mp4.recording.json": {
+        "bytes": 948,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064416-9C804178.mp4.recording.json",
+        "sha256": "7bfca053dbb913b3b56e7180fc87f1d035da64ea5659e526054650f6e8b28310"
+      },
+      "Stream-2026-10-22-064419-1790A2EF.mp4": {
+        "bytes": 897304,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064419-1790A2EF.mp4",
+        "sha256": "26797d1ee69477998c91a9a544161f05ae130fb01f5d7207e0681cab780da59b"
+      },
+      "Stream-2026-10-22-064419-1790A2EF.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064419-1790A2EF.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064419-1790A2EF.mp4.recording.json": {
+        "bytes": 952,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064419-1790A2EF.mp4.recording.json",
+        "sha256": "b7551c1889234b25eda8649ae70e9ad4b3cdb1ef30c00fe9ca6634c4b9ccd4ee"
+      },
+      "Stream-2026-10-22-064421-24FBD55B.mp4": {
+        "bytes": 3244,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064421-24FBD55B.mp4",
+        "sha256": "2238092fb1434ccf14dfa40865a7377751c58adff2c67792db7a6a22b51b5cb6"
+      },
+      "Stream-2026-10-22-064421-24FBD55B.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064421-24FBD55B.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064421-24FBD55B.mp4.recording.json": {
+        "bytes": 937,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064421-24FBD55B.mp4.recording.json",
+        "sha256": "6a1ba3cb18fe583d2d6aea46df22a581a8ac5012fda818b694f313b4bc6fe28c"
+      },
+      "Stream-2026-10-22-064421-D93F4246.mp4": {
+        "bytes": 3366,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064421-D93F4246.mp4",
+        "sha256": "5c24251adc88ba57f41e460b0d7b5ca6382ead4cc57e710bb1852865512e4ed5"
+      },
+      "Stream-2026-10-22-064421-D93F4246.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064421-D93F4246.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064421-D93F4246.mp4.recording.json": {
+        "bytes": 1027,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064421-D93F4246.mp4.recording.json",
+        "sha256": "de571f9943388e22d8c57631ae3c5aa105b84dba71b9dcc296ae05814f129e24"
+      },
+      "Stream-2026-10-22-064422-3454F70E.mp4": {
+        "bytes": 3244,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064422-3454F70E.mp4",
+        "sha256": "e6ab729f922afff74c1cc8ce564e8d6c19e2a4bd88f4ef3f3d09ba2d7f92afd9"
+      },
+      "Stream-2026-10-22-064422-3454F70E.mp4.complete": {
+        "bytes": 0,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064422-3454F70E.mp4.complete",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Stream-2026-10-22-064422-3454F70E.mp4.recording.json": {
+        "bytes": 947,
+        "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7/Stream-2026-10-22-064422-3454F70E.mp4.recording.json",
+        "sha256": "9a9a28ab3c35d9fce8d3fbeb8ad9737b6a597890e4208ef3692bed4c28ccabd4"
+      }
+    },
+    "result": {
+      "binarySHA256": "63126b14efb8a27014ee8b334b38ef1ffef2328adbbfdc4cf0c1378eb5026b0c",
+      "command": [
+        "swiftc",
+        "-warnings-as-errors",
+        "-j2",
+        "-swift-version",
+        "6",
+        "-strict-concurrency=complete",
+        "-parse-as-library",
+        "-target",
+        "arm64-apple-macos14.0",
+        "-F",
+        "/tmp/stream-raw-video-full-core-products-20261022",
+        "-framework",
+        "StreamCore",
+        "-Xlinker",
+        "-rpath",
+        "-Xlinker",
+        "/tmp/stream-raw-video-full-core-products-20261022",
+        "/tmp/stream-wave17-raw-video-resources-20261022/apple/StreamMac/RawVideoResourceCoordinator.swift",
+        "/tmp/stream-wave17-frame-delivery-broker-20261022/apple/StreamMac/FrameDeliveryBroker.swift",
+        "/tmp/stream-frame-transfer-conversions-20261022/apple/StreamMac/FrameDeliveryConverter.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingChatPaint.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingFrameDelivery.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/IsolatedRecordingTypes.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/IsolatedVideoTypes.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/IsolatedAudioRecorder.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/IsolatedVideoRecorder.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingChatTypes.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingChatArchive.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingChatReader.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingPreferences.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/ProgramRecordingSession.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/SessionState.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/StudioEncoderReservations.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingController.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/scripts/program_recording_fixtures.swift",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/scripts/recording_controller_harness.swift",
+        "-o",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/RecordingControllerHarness"
+      ],
+      "returncode": 0,
+      "runtime": [
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/RecordingControllerHarness",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/media-1828ea16-ac79-4aba-bc43-8e582cc75eb7"
+      ],
+      "scope": "Actual RecordingController, ISOworker, writer/router/admission/broker; inert external source stand-in delegates actual source-bank claims and broker, no shipping Factory or physical capture/Engine graph runtime.",
+      "sourceHashes": {
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/IsolatedAudioRecorder.swift": "890c03dd95b27caf7896d063736fb181d85d382b7d0d413e82cb27e4417ec6c6",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/IsolatedRecordingTypes.swift": "9ad457d29fb7548f0f81a4182a74da3a0a3ac033e92cb96b807e64558dc70372",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/IsolatedVideoRecorder.swift": "5a4b6562410a91ceb977fb903d18cb38e714d29eb1c01f3b1db9b4f98eb4ac8a",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/IsolatedVideoTypes.swift": "3fb8aae74a75ad5db7b2acc4eaf9a2bda616a5e21984d68d68ff28d2970dc3c0",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/ProgramRecordingSession.swift": "63afe8eac41cb01e5fbb14a0cccb642680804a13e834db7f07c478ad7018b11e",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingChatArchive.swift": "0a9c2ef94b3be4b942f2e9d1a43f0b3fba00fb943ac4f5cee2474e3ba3120513",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingChatPaint.swift": "52e77afb8b0ab962d2b87c93afc9e05470f79312e9c29ae0a21e7e58e3ced2ff",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingChatReader.swift": "a59216ebb8d5a140ea49dfa951cd654c8473094b9da0e8cb115dfc805a9b1344",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingChatTypes.swift": "e8de84430ccb16e63b05522f246f0e793dce7a7926f766c6f237aa7046ed6ec5",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingController.swift": "8c2dcd01065243986c4fda3a3f6a1abdaa79d6de18f50eac87945526e330db42",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingFrameDelivery.swift": "6a9b14cfa36103bddebaf0f65e6b73b92775668ac2d46661157f892100894c65",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/RecordingPreferences.swift": "45dfc617028b304bde7a69d4f3947d9f2732fa9c20968d7efd189fcd76ef7f15",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/SessionState.swift": "540aed3521bd6586568bf9f6def849ec51d4373b8c3ca710f53d7dcf25f176c1",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/StreamMac/StudioEncoderReservations.swift": "825bbc6b1f613b045a8001e06b74eef3e40b757812293a2253f098a0ae702e8a",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/scripts/program_recording_fixtures.swift": "24f9e02a8b0a9866a05161e28cc9792a29b3336785550d4cd4a53b3537e1a0b4",
+        "/private/tmp/stream-wave15-recording-delivery-20261022/apple/scripts/recording_controller_harness.swift": "63e4233013ba658db070009b59bc94cbf10efc26518b72074bddc5db928b36b1",
+        "/tmp/stream-frame-transfer-conversions-20261022/apple/StreamMac/FrameDeliveryConverter.swift": "46e9df06e3b2dcf941f48295d2d8841b6a6d1faaf14bdd41978dd5f0ab2a00d8",
+        "/tmp/stream-wave17-frame-delivery-broker-20261022/apple/StreamMac/FrameDeliveryBroker.swift": "e48e46e7706d0637015ab65814c302ea4d27c2b0e02e7b7b69c11f8bbed6b569",
+        "/tmp/stream-wave17-raw-video-resources-20261022/apple/StreamMac/RawVideoResourceCoordinator.swift": "16e4c0314c6f3da380743017bbef82635319ca75c428f318fa433785543f1d90"
+      },
+      "sourceUnchangedAfterRun": true
+    },
+    "resultBinding": {
+      "bytes": 6619,
+      "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/result.json",
+      "sha256": "c2f0a094fa6a06625846b76a78fd128a099aa5a71d3da8f0462d978299718e71"
+    },
+    "runner": {
+      "bytes": 2585,
+      "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/run.py",
+      "sha256": "1168695a74e1319338597178fe6eea94fb40833488b73be908db65d99cc9c25a"
+    },
+    "sourceAndCommand": {
+      "bytes": 6479,
+      "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/source-and-command.json",
+      "sha256": "3f8ff5d8a350fc0f32e8b50e1f5ce8475461f9b3c0f38e8e5c85ed01823c3062"
+    }
+  },
+  "historicalFirstRun": {
+    "log": {
+      "bytes": 3151,
+      "path": "/tmp/stream-recording-controller-private-20261022.log",
+      "sha256": "f9e6bc0fa0cfc7230cf0c6f7fbd632eff70531874518067b1fe4ba6203b78282"
+    },
+    "result": {
+      "bytes": 6574,
+      "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-20261022/result.json",
+      "sha256": "e5c6ec56f5dc616c28995bfa1419c0cfcf304c4e0ee0321c48ed9543a5bb2784"
+    },
+    "scope": "All old+new runtime assertionsPASS before followup. Compiler warning about implicit strong stream capture retained; final source makes weak capture explicit."
+  },
+  "newAssertions": [
+    "Pause requested while rotation install is held remains pending until new writer actual recording/paused acknowledgments; resume and complete both actual files",
+    "Stop before held initial installACK remainsstopping/completionfalse withzero demand; releasing canceled install drains thenidle; freshretry completes actual new privatebank writer"
+  ],
+  "parentCombinedUniversal": {
+    "receipt": {
+      "bytes": 792,
+      "path": "/tmp/stream-wave17-initial-parent-final-results-20261022.json",
+      "sha256": "faf40cbfa458b6dd6c3c6db1c7cb16e5c8816dc1c137e4eec31564ba9a92aad0"
+    },
+    "scope": "Parent actual arm64+x86_64 App and bundlePASS; current Factory/ISOworker/adapter/writer bytes identical. Changed followup Controller still requires new parent universal check.",
+    "source": "fee9ae52b8ff0493e892cbe9558ef8e01c381a88",
+    "unchangedRecorderFilesVerified": [
+      "StreamMac/RecordingFrameDelivery.swift",
+      "StreamMac/ProgramRecordingSession.swift",
+      "StreamMac/RecordingPreferences.swift",
+      "StreamMac/RecordingVideoSourceFactory.swift",
+      "StreamMac/IsolatedVideoRecorder.swift",
+      "StreamMac/IsolatedVideoTypes.swift",
+      "StreamMac/RecordingChatPaint.swift"
+    ]
+  },
+  "retainedOriginalAssertions": [
+    "owned defaults profile migration/persistence",
+    "countdown cancellation, independent pipeline demand",
+    "actual pause/resume/manualrotation synchronized WAV/M4A files; unresolved isolated source fails independently",
+    "automatic sourceclock durationrotation",
+    "automatic actualondisksize rotation and writable storagepreflight"
+  ],
+  "scope": "Actual production RecordingController/ISOworker/writers/router/broker/coordinator; inert generated inlet stand-in delegates real EngineSourceResources+private banks. No production CompositionEngine/SourceFactory runtime, capture, device output, network or performance qualification.",
+  "sourceChanges": [
+    "outer writer event captures stream weakly instead of accidental strong capture",
+    "pending initial installation Stop staysstopping until actor teardown ACK; countdown-only cancellation staysimmediateidle",
+    "existing external inlet stand-in uses actual broker/EngineSourceResources/prepared privatebanks and waits explicit installation ACK, retaining all original media gates"
+  ],
+  "status": "actual controller/ISO-worker compile and runtimePASS; narrow weak-capture+pending-stop lifecycle followup; final combined universal for changed Controller remains required",
+  "version": 1,
+  "weakCaptureCompileOnly": {
+    "log": {
+      "bytes": 218,
+      "path": "/tmp/stream-recording-controller-ownership-compile-20261022.log",
+      "sha256": "7778f8ae310429a23bdf160db2f3cfd4129d5be0346c28883d3f9af913d23246"
+    },
+    "result": {
+      "bytes": 6099,
+      "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-20261022/ownership-compile/result.json",
+      "sha256": "28564e96c90bda866c8186ba20133295c762411a76615285f3159e239cd072b4"
+    },
+    "scope": "Warnings-as-errors compilePASS for explicit weak capture; predates additional stopping-state assertion, not credited for that state."
+  }
+}
