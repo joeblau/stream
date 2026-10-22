@@ -1,0 +1,1049 @@
+{
+  "schemaVersion": 1,
+  "dateUTC": "2026-10-22",
+  "kind": "completed-owned-null-output-rtc-wave12-pre-rtp-diagnostic",
+  "sourceBaseline": "e8033037ee0a5bd51ed9b7b803ea8c34347f265b",
+  "sourceSHA256": {
+    "workers/interviews/test/browser/chrome-fixture.mjs": "663f61da04d376a4006d6882efdd458804f1d5350018c5c546f66b272e9845e5",
+    "workers/interviews/test/browser/native-interview-return-video-browser.mjs": "e79272b035f476410b2c290abf649d9298bc1f1418ba2d02fdad68467b916172",
+    "workers/interviews/test/browser/owned-loopback-failure-snapshot.mjs": "6a8a484a5ad93128849ef3bb77c8f13e326b7171b0dd311cd81af0a43a3ba01b",
+    "workers/interviews/test/browser/owned-loopback-lifecycle.mjs": "dfc33a2327108c7129fe2b9a73ddab4712ee1bde07e94d909d3a196e6f0bd78c",
+    "workers/interviews/test/browser/owned-loopback-signal-journal.mjs": "39af822bee14046a916754ee6a1320e01ddc4ec5cd85216e488318fd4963a5aa",
+    "workers/interviews/test/browser/owned-null-audio-loopback.mjs": "1f21527a66493c17836356ad54e8d1e26f4c958cf45aec7c5c50712937fd23b0",
+    "workers/interviews/test/browser/owned_loopback_process.py": "aaa6889b9d39dd8014140a5193f218f791ca9386594fd02114eb0b76d7097189",
+    "workers/interviews/test/browser/run_owned_null_loopback.py": "7ec7b41cef071e4d9aa13a5a4ca887a13a1d032f86017e718ab1717349b566c4"
+  },
+  "invocation": {
+    "workingDirectory": "/private/tmp/stream-wave12-owned-rtc-source-20261022",
+    "command": [
+      "python3",
+      "/tmp/stream-native-build-slots-20261022.py",
+      "--label",
+      "wave12-owned-RTC-pre-RTP",
+      "--",
+      "python3",
+      "workers/interviews/test/browser/run_owned_null_loopback.py",
+      "--node",
+      "/tmp/stream-native-integration-tools-20261021/node_modules/node/bin/node",
+      "--artifacts",
+      "/tmp/stream-wave12-owned-RTC-20261022"
+    ],
+    "environmentOverrides": {
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "intent": {
+      "sourceCommit": "e8033037ee0a5bd51ed9b7b803ea8c34347f265b",
+      "command": [
+        "python3",
+        "/tmp/stream-native-build-slots-20261022.py",
+        "--label",
+        "wave12-owned-RTC-pre-RTP",
+        "--",
+        "python3",
+        "workers/interviews/test/browser/run_owned_null_loopback.py",
+        "--node",
+        "/tmp/stream-native-integration-tools-20261021/node_modules/node/bin/node",
+        "--artifacts",
+        "/tmp/stream-wave12-owned-RTC-20261022"
+      ],
+      "worktree": "/private/tmp/stream-wave12-owned-rtc-source-20261022",
+      "invocations": 1,
+      "publishedHeadPreflightSHA256": "799cf42f2cde96412d37c975125549665986422e8c889f1a3abd184e9bb32e83",
+      "startedAtUTC": "2026-10-22T11:17:04.413502+00:00"
+    },
+    "count": 1,
+    "wrapperAttemptCount": 1,
+    "terminalExitCode": 77,
+    "retryCount": 0,
+    "preparedPreflightPreserved": true,
+    "publishedHeadPreflightSHA256": "799cf42f2cde96412d37c975125549665986422e8c889f1a3abd184e9bb32e83",
+    "preparedPreflightCounterScope": "invocationsSoFar=0 belongs to the preserved pre-launch snapshot; actual intent and terminal records contain one invocation."
+  },
+  "runtime": {
+    "nodeVersion": "24.15.0",
+    "nodePath": "/tmp/stream-native-integration-tools-20261021/node_modules/node/bin/node",
+    "nodeSHA256": "3200fbd9f7fd4410426dd541e10d1ab829d3472f270d743c7fabd1696c03fe32",
+    "nodeOfficialVerificationManifestSHA256": "5828c15e0f4392f5022a1ff6993a22fdb622e5bd5457717e7dd6016dbf7e9665",
+    "chromeVersion": "155.0.8059.85",
+    "chromePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "chromeSHA256": "6e156f2271cef44afce9db36a5b920e94518857b94a4160f082696f8c3bd1c9d",
+    "wsVersion": "8.21.0",
+    "wsSourceSHA256": {
+      "LICENSE": "2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef",
+      "README.md": "bb979132f3cbff08ce47f36d041e18071f8f534d01f591c0b129ba7abf1e480e",
+      "browser.js": "010da44addea1d88b2b732540c3f1fd0cbcb28926b96623d4c64222e0ead2d0e",
+      "index.js": "924564d5be26d59b9682c4263f68320e48dde7240bd2d1ad17ec305537429dd2",
+      "lib/buffer-util.js": "8b0a45739132f82e25ea13163780abf547ccfe989267f3eb7abb475beec92da3",
+      "lib/constants.js": "391e823142b8b370e55a2fd32b022deaf03b8415c56000009674ebc86a0b4f86",
+      "lib/event-target.js": "c45d3c6e12d170c860c0c3f1a050aa0f864d9806632b609a1e607d675aba128c",
+      "lib/extension.js": "852564f0f6b460287043803eae732666fb5610f676874354fc89f06aa4e986ed",
+      "lib/limiter.js": "e0469d4b83f6ba764b15f80e1766b75c136fbff68f048f4c050f0b1c7f065f69",
+      "lib/permessage-deflate.js": "02c31796f0132a335d4efe7b7adcebadbb69543a1ce65ae04aaccc3530e27ab9",
+      "lib/receiver.js": "4879edbf8e48d04d09783cf9c04b5e25f5a448247bb01279438ded2899747220",
+      "lib/sender.js": "d0791d30c3defd44dcabbddb879a901c757993fea2c00a7ffea01d53b23b4b77",
+      "lib/stream.js": "a56fcb6e2b152097ee820b6f5410b1f71e59819b45d08d9f8bda588fe39070ec",
+      "lib/subprotocol.js": "be3f6323d6f549568577dcba9004c1479d95c65a7abb0fe0c582875b9fac0b7c",
+      "lib/validation.js": "41ce8e83d0d434132e1704895fedb91f6703a701b42d91c80954ab29b2845593",
+      "lib/websocket-server.js": "29029a4d346800c792300df153df2007e9805d9d7b67b0883f9730b64f25b1c8",
+      "lib/websocket.js": "48fdb0f54c1f8ce580d3cfa2908fe7d96fe18f06f9d82306950441cb09b5db26",
+      "package.json": "584ce6e7516587ba249dc910b0c04e2753f6b3f451fc3a5bc324f7735bdacc71",
+      "wrapper.mjs": "fe154662301fd558f935f9c217fccbe7a7dac02ff39e648a000589403ff27c7f"
+    },
+    "slotWrapperSHA256": "fa1e7a7604364c1c60c0cd837972dd505e8509c60a58ba9e35fda247de8d89f2",
+    "sourceAndRuntimeHashesUnchangedAfterRun": true,
+    "historicalWave11ChromeBinaryHashRetained": false,
+    "historicalChromeLimit": "Same default path/version and current browser mtime predates wave11; no historical byte-for-byte claim."
+  },
+  "mediaConfiguration": {
+    "fakeAudioOutputArgument": "--fake-audio-output",
+    "browserOutputArgument": "--disable-audio-output",
+    "browserArgumentsVerifiedBeforeGeneratorNavigation": true,
+    "browserArguments": [
+      "--headless=new",
+      "--remote-debugging-port=0",
+      "--user-data-dir=<exact-fresh-owned-profile>",
+      "--no-first-run",
+      "--disable-background-networking",
+      "--disable-component-update",
+      "--disable-extensions",
+      "--autoplay-policy=no-user-gesture-required",
+      "--use-mock-keychain",
+      "--disable-audio-output",
+      "about:blank"
+    ],
+    "nullContextsVerified": true,
+    "ownedHTMLPlayerMuted": true,
+    "personalProfileUsed": false,
+    "fakeCaptureOrPermissionUIFlagsUsed": false,
+    "inheritedChromeNodeOrLoopbackOverridePresent": false,
+    "gatesSeconds": {
+      "startupIncludingMonitorHandshake": 10,
+      "noProgress": 16,
+      "total": 60,
+      "connection": 10,
+      "measurement": 12
+    },
+    "positivePCMAndRTPAssertionsChanged": false,
+    "signalingOrderAndAwaitBehaviorChanged": false
+  },
+  "receipt": {
+    "schemaVersion": 1,
+    "kind": "owned-chrome-null-audio-loopback-diagnostic",
+    "scope": "Synthetic local RTC only; actual null WebAudio sinks + muted owned HTML. No native SDK, speaker/normal HTML output, AEC, AV or production qualification.",
+    "fakeOutputClockRequested": true,
+    "browser": "Chrome/155.0.8059.85",
+    "initializationFailure": {
+      "name": "OwnedInitializationFailure",
+      "message": "owned-init-deadline",
+      "snapshot": {
+        "phase": "connection-wait",
+        "signaling": {
+          "generation": 1,
+          "sequence": 36,
+          "staleSettlements": 0,
+          "droppedEvents": 0,
+          "active": true,
+          "counts": [
+            {
+              "side": "sender",
+              "operation": "create-offer",
+              "invoked": 1,
+              "started": 1,
+              "completed": 1,
+              "rejected": 0,
+              "inFlight": 0
+            },
+            {
+              "side": "sender",
+              "operation": "create-answer",
+              "invoked": 0,
+              "started": 0,
+              "completed": 0,
+              "rejected": 0,
+              "inFlight": 0
+            },
+            {
+              "side": "sender",
+              "operation": "set-local-description",
+              "invoked": 1,
+              "started": 1,
+              "completed": 1,
+              "rejected": 0,
+              "inFlight": 0
+            },
+            {
+              "side": "sender",
+              "operation": "set-remote-description",
+              "invoked": 1,
+              "started": 1,
+              "completed": 1,
+              "rejected": 0,
+              "inFlight": 0
+            },
+            {
+              "side": "sender",
+              "operation": "add-ice-candidate",
+              "invoked": 2,
+              "started": 2,
+              "completed": 2,
+              "rejected": 0,
+              "inFlight": 0
+            },
+            {
+              "side": "receiver",
+              "operation": "create-offer",
+              "invoked": 0,
+              "started": 0,
+              "completed": 0,
+              "rejected": 0,
+              "inFlight": 0
+            },
+            {
+              "side": "receiver",
+              "operation": "create-answer",
+              "invoked": 1,
+              "started": 1,
+              "completed": 1,
+              "rejected": 0,
+              "inFlight": 0
+            },
+            {
+              "side": "receiver",
+              "operation": "set-local-description",
+              "invoked": 1,
+              "started": 1,
+              "completed": 1,
+              "rejected": 0,
+              "inFlight": 0
+            },
+            {
+              "side": "receiver",
+              "operation": "set-remote-description",
+              "invoked": 1,
+              "started": 1,
+              "completed": 1,
+              "rejected": 0,
+              "inFlight": 0
+            },
+            {
+              "side": "receiver",
+              "operation": "add-ice-candidate",
+              "invoked": 2,
+              "started": 2,
+              "completed": 2,
+              "rejected": 0,
+              "inFlight": 0
+            }
+          ],
+          "events": [
+            {
+              "sequence": 1,
+              "generation": 1,
+              "side": "sender",
+              "kind": "invoke",
+              "phase": "create-offer",
+              "operation": "create-offer"
+            },
+            {
+              "sequence": 2,
+              "generation": 1,
+              "invocation": 1,
+              "side": "sender",
+              "kind": "start",
+              "phase": "create-offer",
+              "operation": "create-offer"
+            },
+            {
+              "sequence": 3,
+              "generation": 1,
+              "invocation": 1,
+              "side": "sender",
+              "kind": "complete",
+              "phase": "create-offer",
+              "operation": "create-offer",
+              "settlementPhase": "create-offer"
+            },
+            {
+              "sequence": 4,
+              "generation": 1,
+              "side": "sender",
+              "kind": "invoke",
+              "phase": "sender-local-description",
+              "operation": "set-local-description"
+            },
+            {
+              "sequence": 5,
+              "generation": 1,
+              "invocation": 4,
+              "side": "sender",
+              "kind": "start",
+              "phase": "sender-local-description",
+              "operation": "set-local-description"
+            },
+            {
+              "sequence": 6,
+              "generation": 1,
+              "invocation": 4,
+              "side": "sender",
+              "kind": "complete",
+              "phase": "sender-local-description",
+              "operation": "set-local-description",
+              "settlementPhase": "sender-local-description"
+            },
+            {
+              "sequence": 7,
+              "generation": 1,
+              "side": "receiver",
+              "kind": "invoke",
+              "phase": "receiver-remote-description",
+              "operation": "set-remote-description"
+            },
+            {
+              "sequence": 8,
+              "generation": 1,
+              "invocation": 7,
+              "side": "receiver",
+              "kind": "start",
+              "phase": "receiver-remote-description",
+              "operation": "set-remote-description"
+            },
+            {
+              "sequence": 9,
+              "generation": 1,
+              "invocation": 7,
+              "side": "receiver",
+              "kind": "complete",
+              "phase": "receiver-remote-description",
+              "operation": "set-remote-description",
+              "settlementPhase": "remote-track-connected"
+            },
+            {
+              "sequence": 10,
+              "generation": 1,
+              "side": "receiver",
+              "kind": "invoke",
+              "phase": "create-answer",
+              "operation": "create-answer"
+            },
+            {
+              "sequence": 11,
+              "generation": 1,
+              "invocation": 10,
+              "side": "receiver",
+              "kind": "start",
+              "phase": "create-answer",
+              "operation": "create-answer"
+            },
+            {
+              "sequence": 12,
+              "generation": 1,
+              "invocation": 10,
+              "side": "receiver",
+              "kind": "complete",
+              "phase": "create-answer",
+              "operation": "create-answer",
+              "settlementPhase": "create-answer"
+            },
+            {
+              "sequence": 13,
+              "generation": 1,
+              "side": "receiver",
+              "kind": "invoke",
+              "phase": "receiver-local-description",
+              "operation": "set-local-description"
+            },
+            {
+              "sequence": 14,
+              "generation": 1,
+              "invocation": 13,
+              "side": "receiver",
+              "kind": "start",
+              "phase": "receiver-local-description",
+              "operation": "set-local-description"
+            },
+            {
+              "sequence": 15,
+              "generation": 1,
+              "invocation": 13,
+              "side": "receiver",
+              "kind": "complete",
+              "phase": "receiver-local-description",
+              "operation": "set-local-description",
+              "settlementPhase": "receiver-local-description"
+            },
+            {
+              "sequence": 16,
+              "generation": 1,
+              "side": "sender",
+              "kind": "invoke",
+              "phase": "sender-remote-description",
+              "operation": "set-remote-description"
+            },
+            {
+              "sequence": 17,
+              "generation": 1,
+              "invocation": 16,
+              "side": "sender",
+              "kind": "start",
+              "phase": "sender-remote-description",
+              "operation": "set-remote-description"
+            },
+            {
+              "sequence": 18,
+              "generation": 1,
+              "invocation": 16,
+              "side": "sender",
+              "kind": "complete",
+              "phase": "sender-remote-description",
+              "operation": "set-remote-description",
+              "settlementPhase": "sender-remote-description"
+            },
+            {
+              "sequence": 19,
+              "generation": 1,
+              "side": "sender",
+              "kind": "candidate-emitted",
+              "phase": "connection-wait"
+            },
+            {
+              "sequence": 20,
+              "generation": 1,
+              "side": "receiver",
+              "kind": "invoke",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate"
+            },
+            {
+              "sequence": 21,
+              "generation": 1,
+              "invocation": 20,
+              "side": "receiver",
+              "kind": "start",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate"
+            },
+            {
+              "sequence": 22,
+              "generation": 1,
+              "side": "sender",
+              "kind": "candidate-emitted",
+              "phase": "connection-wait"
+            },
+            {
+              "sequence": 23,
+              "generation": 1,
+              "side": "receiver",
+              "kind": "invoke",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate"
+            },
+            {
+              "sequence": 24,
+              "generation": 1,
+              "invocation": 23,
+              "side": "receiver",
+              "kind": "start",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate"
+            },
+            {
+              "sequence": 25,
+              "generation": 1,
+              "side": "receiver",
+              "kind": "candidate-emitted",
+              "phase": "connection-wait"
+            },
+            {
+              "sequence": 26,
+              "generation": 1,
+              "side": "sender",
+              "kind": "invoke",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate"
+            },
+            {
+              "sequence": 27,
+              "generation": 1,
+              "invocation": 26,
+              "side": "sender",
+              "kind": "start",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate"
+            },
+            {
+              "sequence": 28,
+              "generation": 1,
+              "side": "receiver",
+              "kind": "candidate-emitted",
+              "phase": "connection-wait"
+            },
+            {
+              "sequence": 29,
+              "generation": 1,
+              "side": "sender",
+              "kind": "invoke",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate"
+            },
+            {
+              "sequence": 30,
+              "generation": 1,
+              "invocation": 29,
+              "side": "sender",
+              "kind": "start",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate"
+            },
+            {
+              "sequence": 31,
+              "generation": 1,
+              "invocation": 20,
+              "side": "receiver",
+              "kind": "complete",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate",
+              "settlementPhase": "connection-wait"
+            },
+            {
+              "sequence": 32,
+              "generation": 1,
+              "invocation": 23,
+              "side": "receiver",
+              "kind": "complete",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate",
+              "settlementPhase": "connection-wait"
+            },
+            {
+              "sequence": 33,
+              "generation": 1,
+              "invocation": 26,
+              "side": "sender",
+              "kind": "complete",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate",
+              "settlementPhase": "connection-wait"
+            },
+            {
+              "sequence": 34,
+              "generation": 1,
+              "invocation": 29,
+              "side": "sender",
+              "kind": "complete",
+              "phase": "connection-wait",
+              "operation": "add-ice-candidate",
+              "settlementPhase": "connection-wait"
+            },
+            {
+              "sequence": 35,
+              "generation": 1,
+              "side": "sender",
+              "kind": "candidate-end",
+              "phase": "connection-wait"
+            },
+            {
+              "sequence": 36,
+              "generation": 1,
+              "side": "receiver",
+              "kind": "candidate-end",
+              "phase": "connection-wait"
+            }
+          ],
+          "inputTruncated": false
+        },
+        "peers": [
+          {
+            "connection": "new",
+            "iceConnection": "new",
+            "iceGathering": "complete",
+            "signaling": "stable",
+            "descriptions": {
+              "local": "offer",
+              "remote": "answer",
+              "currentLocal": "offer",
+              "currentRemote": "answer",
+              "pendingLocal": "absent",
+              "pendingRemote": "absent"
+            },
+            "localCandidateCount": 2,
+            "remoteCandidateCount": 2
+          },
+          {
+            "connection": "new",
+            "iceConnection": "new",
+            "iceGathering": "complete",
+            "signaling": "stable",
+            "descriptions": {
+              "local": "answer",
+              "remote": "offer",
+              "currentLocal": "answer",
+              "currentRemote": "offer",
+              "pendingLocal": "absent",
+              "pendingRemote": "absent"
+            },
+            "localCandidateCount": 2,
+            "remoteCandidateCount": 2
+          }
+        ],
+        "contexts": [
+          {
+            "state": "running",
+            "nullSink": true,
+            "sampleRate": 48000,
+            "currentTime": 10.130666666666666
+          },
+          {
+            "state": "running",
+            "nullSink": true,
+            "sampleRate": 48000,
+            "currentTime": 10.130666666666666
+          }
+        ],
+        "track": {
+          "enabled": true,
+          "muted": true,
+          "readyState": "live"
+        },
+        "html": {
+          "muted": true,
+          "paused": false,
+          "readyState": 4,
+          "currentTime": 10.020608
+        },
+        "senderPCM": {
+          "available": true,
+          "frames": 483328,
+          "rate": 48000,
+          "windows": 236,
+          "channels": [
+            {
+              "rms": 0.28284340023973886,
+              "amplitudes": [
+                0.39999991809053426,
+                2.1466344644139153e-06,
+                3.4197487975643987e-06,
+                0.0003563924665169917
+              ]
+            },
+            {
+              "rms": 0.14142157019503757,
+              "amplitudes": [
+                1.0737413383491199e-06,
+                0.1999999624182822,
+                3.073240223016032e-07,
+                1.4215308049565312e-07
+              ]
+            }
+          ]
+        },
+        "receiverPCM": {
+          "available": true,
+          "frames": 481280,
+          "rate": 48000,
+          "windows": 235,
+          "channels": [
+            {
+              "rms": 0,
+              "amplitudes": [
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "rms": 0,
+              "amplitudes": [
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        },
+        "iceErrors": [],
+        "stats": [
+          {
+            "status": "available",
+            "outbound": [
+              {
+                "codec": "audio/opus",
+                "clockRate": 48000,
+                "channels": 2,
+                "payloadType": 111,
+                "packetsSent": 0,
+                "bytesSent": 0
+              }
+            ],
+            "inbound": [],
+            "playout": [
+              {
+                "kind": "audio",
+                "synthesizedSamplesDuration": 0,
+                "synthesizedSamplesEvents": 0,
+                "totalSamplesDuration": 10.03,
+                "totalPlayoutDelay": 14428.8,
+                "totalSamplesCount": 481440
+              }
+            ],
+            "transport": [
+              {
+                "dtlsState": "new",
+                "iceState": "new",
+                "iceRole": "controlling",
+                "dtlsRole": "server",
+                "selectedCandidatePairReference": false,
+                "selectedPairResolved": false,
+                "packetsSent": 0,
+                "packetsReceived": 0,
+                "bytesSent": 0,
+                "bytesReceived": 0,
+                "selectedCandidatePairChanges": 0
+              }
+            ],
+            "pairs": [],
+            "candidates": {
+              "local": {
+                "count": 4,
+                "types": {
+                  "host": 4,
+                  "srflx": 0,
+                  "prflx": 0,
+                  "relay": 0,
+                  "unknown": 0
+                },
+                "protocols": {
+                  "udp": 2,
+                  "tcp": 2,
+                  "unknown": 0
+                }
+              },
+              "remote": {
+                "count": 0,
+                "types": {
+                  "host": 0,
+                  "srflx": 0,
+                  "prflx": 0,
+                  "relay": 0,
+                  "unknown": 0
+                },
+                "protocols": {
+                  "udp": 0,
+                  "tcp": 0,
+                  "unknown": 0
+                }
+              }
+            },
+            "rowsInspected": 11,
+            "rowsTruncated": false,
+            "countsAreLowerBounds": false,
+            "transportCount": 1,
+            "pairCount": 0,
+            "transportRowsTruncated": false,
+            "pairRowsTruncated": false
+          },
+          {
+            "status": "available",
+            "outbound": [],
+            "inbound": [],
+            "playout": [
+              {
+                "kind": "audio",
+                "synthesizedSamplesDuration": 0,
+                "synthesizedSamplesEvents": 0,
+                "totalSamplesDuration": 10.03,
+                "totalPlayoutDelay": 14428.8,
+                "totalSamplesCount": 481440
+              }
+            ],
+            "transport": [
+              {
+                "dtlsState": "new",
+                "iceState": "new",
+                "iceRole": "controlled",
+                "dtlsRole": "client",
+                "selectedCandidatePairReference": false,
+                "selectedPairResolved": false,
+                "packetsSent": 0,
+                "packetsReceived": 0,
+                "bytesSent": 0,
+                "bytesReceived": 0,
+                "selectedCandidatePairChanges": 0
+              }
+            ],
+            "pairs": [],
+            "candidates": {
+              "local": {
+                "count": 4,
+                "types": {
+                  "host": 4,
+                  "srflx": 0,
+                  "prflx": 0,
+                  "relay": 0,
+                  "unknown": 0
+                },
+                "protocols": {
+                  "udp": 2,
+                  "tcp": 2,
+                  "unknown": 0
+                }
+              },
+              "remote": {
+                "count": 0,
+                "types": {
+                  "host": 0,
+                  "srflx": 0,
+                  "prflx": 0,
+                  "relay": 0,
+                  "unknown": 0
+                },
+                "protocols": {
+                  "udp": 0,
+                  "tcp": 0,
+                  "unknown": 0
+                }
+              }
+            },
+            "rowsInspected": 8,
+            "rowsTruncated": false,
+            "countsAreLowerBounds": false,
+            "transportCount": 1,
+            "pairCount": 0,
+            "transportRowsTruncated": false,
+            "pairRowsTruncated": false
+          }
+        ]
+      }
+    },
+    "result": "UNQUALIFIED",
+    "phase": "connection-wait",
+    "reason": "OwnedInitializationFailure: owned-init-deadline",
+    "traceCounts": {
+      "WebRtcAudioDeviceImpl::RenderData": 611,
+      "VoE::PullRenderData": 611,
+      "WebRtcAudioRenderer::Render": 611,
+      "WebRtcAudioRenderer::SourceCallback": 611,
+      "PeerConnectionRemoteAudioSource::OnData": 611,
+      "WebAudioMediaStreamAudioSink::OnData": 610,
+      "WebAudioMediaStreamAudioSink::ProvideInput": 2290,
+      "WebAudioMediaStreamAudioSink::ProvideInput underrun": 2
+    },
+    "traceEventCount": 24998,
+    "traceBytes": 8424832,
+    "traceComplete": true,
+    "observations": [
+      {
+        "worklet": "sender",
+        "frames": 2048,
+        "channels": [
+          {
+            "rms": 0.2825636126767216,
+            "amplitudes": [
+              0.40000002373927884,
+              2.168669208220186e-06,
+              3.747115053483591e-06,
+              0.0003563030541678739
+            ]
+          },
+          {
+            "rms": 0.1413888025883565,
+            "amplitudes": [
+              1.091806034365574e-06,
+              0.19999996125964484,
+              3.664923941806042e-07,
+              1.4655649476419257e-07
+            ]
+          }
+        ]
+      },
+      {
+        "htmlEvent": {
+          "name": "loadedmetadata",
+          "muted": true,
+          "paused": false,
+          "readyState": 4
+        }
+      },
+      {
+        "htmlEvent": {
+          "name": "play",
+          "muted": true,
+          "paused": false,
+          "readyState": 4
+        }
+      },
+      {
+        "htmlEvent": {
+          "name": "playing",
+          "muted": true,
+          "paused": false,
+          "readyState": 4
+        }
+      },
+      {
+        "worklet": "receiver",
+        "frames": 2048,
+        "channels": [
+          {
+            "rms": 0,
+            "amplitudes": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "rms": 0,
+            "amplitudes": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ],
+    "phases": [
+      {
+        "phase": "sender-context",
+        "milliseconds": 0
+      },
+      {
+        "phase": "sender-constructor",
+        "milliseconds": 1
+      },
+      {
+        "phase": "sender-resume",
+        "milliseconds": 144
+      },
+      {
+        "phase": "sender-ready",
+        "milliseconds": 150
+      },
+      {
+        "phase": "receiver-context",
+        "milliseconds": 150
+      },
+      {
+        "phase": "receiver-constructor",
+        "milliseconds": 150
+      },
+      {
+        "phase": "receiver-resume",
+        "milliseconds": 150
+      },
+      {
+        "phase": "receiver-ready",
+        "milliseconds": 150
+      },
+      {
+        "phase": "create-offer",
+        "milliseconds": 228
+      },
+      {
+        "phase": "sender-local-description",
+        "milliseconds": 229
+      },
+      {
+        "phase": "receiver-remote-description",
+        "milliseconds": 229
+      },
+      {
+        "phase": "remote-track-before-html",
+        "milliseconds": 230
+      },
+      {
+        "phase": "remote-track-before-webaudio",
+        "milliseconds": 230
+      },
+      {
+        "phase": "remote-track-connected",
+        "milliseconds": 230
+      },
+      {
+        "phase": "create-answer",
+        "milliseconds": 230
+      },
+      {
+        "phase": "receiver-local-description",
+        "milliseconds": 240
+      },
+      {
+        "phase": "sender-remote-description",
+        "milliseconds": 241
+      },
+      {
+        "phase": "connection-wait",
+        "milliseconds": 241
+      }
+    ],
+    "processRetirement": "drained",
+    "directoryRetirement": "removed"
+  },
+  "wrapperProcessProof": {
+    "attemptCount": 1,
+    "browserArgumentsVerified": true,
+    "browserRetirement": "absent",
+    "elapsedSeconds": 11.398,
+    "exitCode": 77,
+    "nodeVersion": "24.15.0",
+    "remainingOwnedBrowser": false,
+    "result": "UNQUALIFIED"
+  },
+  "readOnlyEndProof": {
+    "kind": "owned-loopback-read-only-terminal-drain",
+    "checkedAtUTC": "2026-10-22T11:17:38.852777+00:00",
+    "nodeProcessAbsent": true,
+    "originalChromeIdentityAbsent": true,
+    "numericChromeGroupEmpty": true,
+    "ownedDirectoryAbsent": true,
+    "trackedSourceClean": true
+  },
+  "rawArtifactSHA256": {
+    "attempt.log": "e7cccef2fe35fad7550cb542f2602e505d3b707cea16aae6fad2978dfdfd46a7",
+    "end-proof.json": "9744f669fe591c075222aa5fbe5f40e908438a74ccd5a1c9254c7ec4ec8bec19",
+    "monitor-ready.json": "e1d62896f77cbf322b1a155e6d5ff5f4c013aa31fe233ff15a5e128187d374ca",
+    "owned-process.json": "0ca4d455de9b97f27f63bbdbf6121821beef027f55bc8ea8c003f16988d19204",
+    "process-proof.json": "447086bcc080dfb5ae5f53ea4fb4a85f83148b55e48149e419d8bced24d789ee",
+    "receipt.json": "1dd2c3019af7fbe73adf452599172ea245ada9450c71c180e848f3fb2ba77f20",
+    "source-bindings.json": "1b0fcb49deddcf1cdd2a3cb8a6b363864836ce03b59eab79dbb7a681e994255a"
+  },
+  "preflightArtifactSHA256": {
+    "invocation-intent.json": "f31898d677ac40d6707896ac342c47e4229a1bc35d902065342be9e329497e2e",
+    "invocation-result.json": "8240134067fe229b7ad88447c11a43eae9792ea7cb5e7a1ac0d6ba1f993ebab8",
+    "launch-once.py": "e1b4fc1d19df95523ce19c9e82d59808e4aac609d337e471a8b275202762a1c2",
+    "preflight.json": "8c1bc83beba3c32788766f8a1fe3e151d33057c3943259e1ab079e687a60855f",
+    "published-head-preflight.json": "799cf42f2cde96412d37c975125549665986422e8c889f1a3abd184e9bb32e83"
+  },
+  "frozenArtifactHashesSHA256": "5ba4963658aafae7eee0120f0d049384a81d99c6eff1b6051b917d7a5a98d760",
+  "slotLogSHA256": "71aba452926f57931bfb4d28e665b11c1aec00216d2e6b53ca2b84251ae9710c",
+  "scopedReportSHA256": "bb353a3b3fda08134e6203eccd46e5f47cc49e78e7b51e7ce8bbb86c6a372508",
+  "traceInterpretation": {
+    "retainedCountsAreLowerBounds": true,
+    "observedBatchByteCounter": 8424832,
+    "byteBudget": 8388608,
+    "overBudgetBytes": 36224,
+    "counterIncludesDiscardedBatchBytes": true,
+    "retainedEventCount": 24998,
+    "traceCompleteMeans": "Chrome tracing protocol ended; not a complete event inventory or full-duration callback rate.",
+    "separateAudioUtilityArgvOrFakeAudioWorkerProofRetained": false
+  },
+  "measuredConclusions": [
+    "Exactly one intent and one source-owned wrapper attempt ended UNQUALIFIED/77 after 11.398 seconds at the unchanged connection deadline; the 12-second measurement was never reached.",
+    "All ten observed API calls completed: offer, answer, four description calls and four candidate calls. Journal generation1 was active with36 retained events and zero rejected/inFlight/stale/dropped operations or events.",
+    "Both peers retained current offer/answer descriptions and no pending descriptions. Each exposed one unselected transport with ICEnew/DTLSnew, zero pair changes and zero transport packets/bytes.",
+    "Two complete getStats snapshots inspected11/8 rows: each had zero observed candidate-pair and remote-candidate rows, and four local host candidate rows (two UDP/two TCP). API fulfillment does not prove internal remote-candidate resolution or materialization.",
+    "Both running null48k contexts and muted playing HTML were observed; senderPCM483328frames was positive, receiverPCM481280frames was zero. SenderOpus explicitly reported0packets/bytes; receiver inbound RTP had no row.",
+    "Source-owned retirement and subsequent read-only checks confirmed original Node/Chrome absent, numeric Chrome group empty, and owned directory absent. Slot0 released."
+  ],
+  "nextSourceInspectionBoundary": "Fulfilled addIceCandidate versus exposed remote-candidate/pair construction; inspect primary browser/spec evidence before proposing a cause or further discriminator.",
+  "limits": [
+    "No cause assigned to internal candidate resolution, mDNS, network behavior, browser behavior or the earlier native931-packet failure. Pair/check-row absence does not prove zero checks on the wire.",
+    "Journal and stats retention were not truncated; trace callback counts remain retained lower bounds under its byte budget.",
+    "The all-Chromium proxy invokes no native SDK and supplies no native receive-clock, return mix-minus, normal output, physical/browser AEC, AV, mobile, deployed networking or whole issue127 acceptance proof.",
+    "All prior failed/interrupted receipts remain immutable; wave11 artifact hashes were rechecked unchanged. No media/timeout gate relaxation or additional retry followed."
+  ]
+}
