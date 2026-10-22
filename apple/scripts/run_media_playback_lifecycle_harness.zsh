@@ -40,6 +40,10 @@ source = source.replace(boundary, boundary + '\n            await FixtureState.s
 clock = 'CMClockGetTime(CMClockGetHostTimeClock())'
 assert source.count(clock) >= 10
 source = source.replace(clock, 'FixtureClock.shared.now()')
+delivery = '            deliverAudio(audio, handler: handler, generation: generation)\n            if ended'
+assert source.count(delivery) == 1
+source = source.replace(delivery,
+    '            FixtureAudioPullTiming.shared.note(start: now, ready: FixtureClock.shared.now())\n' + delivery)
 source += '''
 extension MediaSourcePlayback {
     func lifecycleHeldDelivery() -> (@Sendable () -> Void)? {
