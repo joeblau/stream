@@ -460,3 +460,52 @@ The exact original 5,214,080-byte log is retained at
 Neither the passing Core/iOS result nor the new local universal checks are a
 whole desktop CI pass. Later cancellation, terminal results or a published fix
 must be recorded as a new receipt without relabelling this failure.
+
+
+### Final publication follow-up
+
+Final shipping source `a5e1728` passes the unsigned universal Release build and
+actual bundle audit after the manual Facebook/LinkedIn persistence repair. This
+follow-up changes shared Core: 27 freshly rebuilt provider/template tests in two
+suites pass, and the actual native Session fixture passes. The earlier
+`28263d3` unchanged-Core statement applies only to that earlier receipt. Manual
+drafts retain the previous Program-following output settings, disabled state,
+empty credentials and no event binding; guidance survives rename, duplication
+and metadata reload. **#169 remains open** for actual API connectors and
+authorized provider acceptance.
+
+The Deck fixture now retains owned receiver/decoder logs and status receipts
+under the always-uploaded `artifacts-*` directory. Its actual modified target
+compiles, and controlled nonzero/Unicode-tail/cleanup regressions pass. Exit-zero
+and strict decode checks remain required. The original Intel receiver cause is
+**unknown**: its stderr/status were deleted, and no runtime transport retry or
+failure-resolution claim is made. The next hosted run must supply new evidence.
+
+The final read-only GitHub refresh at 06:29 UTC still reports **25 closed / 36
+open** original issues and zero open PRs. This publication closes no additional
+task. Final source boundaries, fresh test receipts and exact hashes are in
+`wave6Review.publicationFollowup`; later changes are scripts, CI or documentation
+only. New-source CI and sustained performance remain separate from these local
+passes.
+
+
+### Terminal CI and fractional fixture correction
+
+The `44c078e` run finished **failure**, with no cancellation. All three full Core
+runs passed 586 tests in 82 suites: ARM 118.874 s, Intel 192.316 s and iOS
+291.969 s. ARM passed native Deck transport, simultaneous RTMP/SRT fanout and
+the subsequent rendering/chat/event fixtures through step 22, then failed to
+compile the fractional ISO fixture's old renderer closure at step 23. Intel
+failed its receiver-status check at step 11; iOS completed successfully.
+
+The one-line fixture adaptation in `7eed009` uses the current typed Render
+initializer and six arguments. The original compiler errors were reproduced;
+fixed compilation and the first/only run of all five unchanged synthetic
+AAC/PCM scenarios pass. Zero rational cue difference, best zero lag, identical
+decoded windows/source grid and genuine gap counts remain required and pass.
+This changes no production source and does not qualify the whole hosted run.
+The Intel receiver cause remains unknown.
+
+The 06:38 UTC read-only refresh confirms the same 25 closed / 36 open original
+issues and zero open PRs. The next published source needs fresh hosted CI; all
+old failing logs and exact original hashes remain in the terminal receipt.

@@ -17,8 +17,8 @@
     "signing": "Read-only inventory:3 valid signing identities (1 Developer ID Application, 2 Apple Development); 5 macOS profiles, none authorizing the declared shared browser App Group for host/helper. Two iOS profiles contain that group. No positive provisioned macOS shared-container launch, Developer ID distribution artifact, notarization or extension/driver installation is claimed; no profiles/identities/containers changed."
   },
   "validation": {
-    "sharedCore": "Final combined 9cbe0b9 local Core PASS:563 tests/80 suites in52.689s; exactly ChannelFXProcessorTests and VoicePolishProcessorTests excluded for the known local HAL limitation. /tmp/stream-wave4-parent-final-core-20261022.log. Earlier exact a346f56 hosted ARM, Intel and iOS each pass FULL586/82; that source predates the new routing policy. Both Mac workflows later fail the same fixture pause assertion, now corrected with preserved bounds. No current whole-hosted-CI pass is claimed.",
-    "shippingApp": "Current combined 28263d3 unsigned universal Release and actual bundle audit PASS: arm64/x86_64 app and embedded camera/browser helper, sandbox declarations, six App Intents/three entities and no transport validation hooks. /tmp/stream-wave6-parent-final-{universal,bundle}-20261022.log with exact hashes under wave6Review. This cohort changes no StreamCore/iOS/broadcast/project source from 44c; no new iOS build or unchanged local Core rerun was performed. No Developer ID/notarization or runtime device IO qualification.",
+    "sharedCore": "Final combined 9cbe0b9 local Core PASS:563 tests/80 suites in52.689s; exactly ChannelFXProcessorTests and VoicePolishProcessorTests excluded for the known local HAL limitation. /tmp/stream-wave4-parent-final-core-20261022.log. Earlier exact a346f56 hosted ARM, Intel and iOS each pass FULL586/82; that source predates the new routing policy. Both Mac workflows later fail the same fixture pause assertion, now corrected with preserved bounds. No current whole-hosted-CI pass is claimed. Follow-up d0991ab rebuilds exact Core and passes 27 focused DestinationProviderTemplateTests/ProviderAPITests in 2 suites with zero skipped/failed; combined a5e1728 has identical Core/test trees. Broader earlier results retain named-source scope.",
+    "shippingApp": "Final combined a5e1728 passes unsigned universal macOS Release arm64/x86_64, project generation and actual bundle audit. Exact receipts: wave6Review.publicationFollowup. This source adds manual-provider Core changes after 28263d3; 27 freshly rebuilt provider/template tests in 2 suites and actual DestinationSession checks pass. Later changes are fixtures, CI and documentation only. No new iOS build or whole hosted-CI pass.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -265,7 +265,7 @@
     "wave6BrowserIPC": "Production defaults to sealed bundled same-team Apple-anchored peers, exact executable/hash and kernel audit-token identity on both channels, then shared-container sockets. Prototype policy/tmp/mode exist only under STREAM_NATIVE_VALIDATION. Actual ad hoc socket identity/refusal, negative production compile and silent validation IPC/retirement pass. NoReady helper probes prove fail-closed refusal only: they may return at CGSession preflight and do not prove delivery through every parser branch. Positive provisioned sandbox/group, genuine WebKit audio and acknowledged every-route exclusions remain unqualified.",
     "wave6FontProfile": "Bounded local M3 Max20 s static/replay before/after: all four render601 frames without failed renders or whole-skipped opportunities; original replay decodes 601/601, candidate600/601 (450 due before short allowance). Font construction/lookup span falls4.472/4.628ms to0.054/0.038ms, while static CI render time rises. Candidate lookup counts are not measured misses. Trace predates final nested-retention guard, separately proven by real renderer and negative control. No universal speedup, long-run/hosted pass, waveform sync or resource ceiling is inferred.",
     "wave6GuestWireAudit": "Shipping Opus payloads independently decode through existing libopus 1.6.1:109 packets / 104640 stereo frames,960-step RTP/source framing and matching source identity. No production sender/SDP/transport changes or successful network sends. Exact Chromium source supports a receive-clock hypothesis, not a proven cause of old 931 RTP / zero PCM. Owned all-Chrome and fake-output-clock probes exit 77 before connected measurement; original 105.104 ms and normal output/AEC gates remain open.",
-    "wave6HostedCI": "Intel failed Deck receiver step 11 after full Core 586/82 PASS in 192.316 s; diagnosis pending. ARM remains active; iOS job succeeded. No whole-run pass or current-cohort hosted qualification."
+    "wave6HostedCI": "Previous 44c run completed without cancellation: both Mac jobs failed, iOS passed, all three full 586-test/82-suite Core runs passed. ARM failed the old fractional fixture API at step23; that one-line source adaptation now compiles and passes all five native scenarios locally. Intel receiver nonzero cause remains unknown; durable diagnostics are added. New-source hosted CI remains required; no whole-run PASS."
   },
   "issues": [
     {
@@ -405,7 +405,11 @@
       "githubState": "open",
       "completion": "incomplete implementation and acceptance",
       "remaining": [
-        "Approved Meta and LinkedIn applications/scopes and actual capability-qualified connectors."
+        "Approved Meta and LinkedIn applications/scopes and actual capability-qualified connectors.",
+        "Manual Facebook/LinkedIn guidance identity persists through rename/duplication/metadata reload with disabled empty-credential drafts, no account/event binding and exact prior Program-following output defaults. Actual approved API connectors, selection/event controls and authenticated ingest remain unimplemented or unqualified; no closure."
+      ],
+      "evidence": [
+        "PROVIDER_ACCOUNTS.md"
       ]
     },
     {
@@ -1122,9 +1126,9 @@
     "currentlyOpen": 36,
     "closedSinceInitialInventory": 25
   },
-  "overallStatus": "Incomplete roadmap: 36 of the original 61 issues remain open; 25 are closed, with zero open pull requests. Current combined 28263d3 passes unsigned universal Release, bundle audit and four focused gain/PTZ/socket/font checks. Source/model/native-action repairs do not qualify full accessibility or provisioned browser IPC. The bounded20 s font candidate decodes 600/601 replay frames versus original 601/601; it is not sustained capacity. Published44c hosted Intel fails Deck receiver step 11 after full586/82 Core PASS; ARM remains active and iOS succeeds. No whole-CI pass or issue closure is claimed.",
-  "integratedMain": "28263d3cd4f4f3200948af6205c83f6932b1b4b8",
-  "githubStateRefreshedAt": "2026-10-22T06:12:15.610629+00:00",
+  "overallStatus": "Incomplete roadmap: 25 of 61 original issues closed, 36 open and zero open PRs. Final a5e1728 universal Release and bundle audit pass; focused gain/PTZ/socket/font checks and 27 rebuilt provider Core tests plus actual Session fixture pass. Manual guidance persists without API binding or output policy changes. The old hosted ARM fractional fixture compile failure is locally repaired and its five unchanged media scenarios pass; Intel receiver cause remains unknown with new durable diagnostics. Full accessibility, provisioned browser IPC, guest playback and original performance acceptance remain open. No new closure or whole-CI pass.",
+  "integratedMain": "a5e17281858a979904ba893086190d76b3fadf08",
+  "githubStateRefreshedAt": "2026-10-22T06:38:01.219073+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
   "publishedIntegration": "44c078e2c7434ab416c1a6c56e256bd34059ffb7",
   "pullRequestReconciliation": {
@@ -1146,7 +1150,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "28263d3cd4f4f3200948af6205c83f6932b1b4b8",
+  "currentReviewBase": "7eed009f6064aacb6198cd6ad5e443d1b6ce3eb5",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -1472,7 +1476,8 @@
         "classification": "Deck receiver rejected generated native media; diagnosis pending; no whole-run pass"
       },
       "note": "Intel failed Deck receiver step 11 after full Core 586/82 PASS in 192.316 s; diagnosis pending. ARM remains active; iOS job succeeded. No whole-run pass or current-cohort hosted qualification.",
-      "receipt": "/tmp/stream-wave6-published-ci-readonly-20261022.json"
+      "receipt": "/tmp/stream-wave6-published-ci-readonly-20261022.json",
+      "supersededByTerminalReceipt": "wave6Review.publicationFollowup.terminalPreviousCI"
     },
     "acceptanceAudit": {
       "originalIssueBodiesRead": 61,
@@ -1484,6 +1489,167 @@
         127
       ],
       "note": "All61 original issue bodies/states were refreshed and compared with the ledger. The four cohort-affected original criteria and closed 165 regression scope were reviewed; unrelated acceptance dispositions are retained, not newly requalified. No unsupported closure, extra physical-device prerequisite or GitHub checkbox mutation."
+    },
+    "publicationFollowup": {
+      "recordedAt": "2026-10-22T06:39:12.492507+00:00",
+      "reviewedIntegratedHead": "7eed009f6064aacb6198cd6ad5e443d1b6ce3eb5",
+      "validatedShippingSource": "a5e17281858a979904ba893086190d76b3fadf08",
+      "postValidationShippingSourceIdentical": true,
+      "postValidationChangedPaths": [
+        ".github/workflows/ci.yml",
+        "apple/scripts/fractional_iso_audio_harness.swift",
+        "apple/scripts/run_studio_deck_native_harness.zsh",
+        "apple/scripts/run_studio_deck_process_diagnostics_harness.zsh",
+        "apple/scripts/studio_deck_native_harness.swift",
+        "apple/scripts/studio_deck_process_diagnostics.swift",
+        "apple/scripts/studio_deck_process_diagnostics_harness.swift",
+        "apple/scripts/studio_deck_transport_fixtures.swift"
+      ],
+      "previousPublishedMain": "44c078e2c7434ab416c1a6c56e256bd34059ffb7",
+      "inventory": "/tmp/stream-wave6-publication-final-inventory-20261022.json",
+      "counts": {
+        "total": 61,
+        "closed": 25,
+        "open": 36
+      },
+      "openPullRequests": 0,
+      "newClosures": 0,
+      "nativeChecks": [
+        {
+          "label": "generate",
+          "exit": 0,
+          "log": "/tmp/stream-wave6-reconciled-parent-final-generate-20261022.log",
+          "bytes": 168,
+          "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+        },
+        {
+          "label": "universal",
+          "exit": 0,
+          "log": "/tmp/stream-wave6-reconciled-parent-final-universal-20261022.log",
+          "bytes": 345914,
+          "sha256": "4f1f27fd9ec14aafddc96f805d29ae788600708d2d09e0c8b763469a84aa2159"
+        },
+        {
+          "label": "bundle",
+          "exit": 0,
+          "log": "/tmp/stream-wave6-reconciled-parent-final-bundle-20261022.log",
+          "bytes": 517,
+          "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+        }
+      ],
+      "manualSocial": {
+        "integratedCommit": "9917ebe",
+        "ownerCommit": "d0991ab1ef11b4cc9a55b39845ced7cff3cd110f",
+        "coreTree": "361c12bc58e6aa73b457c1a2833ee3201fd533d6",
+        "coreTests": {
+          "passed": 27,
+          "failed": 0,
+          "skipped": 0,
+          "suites": 2,
+          "scope": "DestinationProviderTemplateTests and ProviderAPITests; exact freshly rebuilt Core",
+          "xcresult": "/tmp/stream-wave6-manual-social-destinations-20261022/apple/build/manual-social-core-tests/derived/Logs/Test/Test-StreamCoreTests-2026.10.21_23-20-51--0700.xcresult"
+        },
+        "session": {
+          "log": "/tmp/stream-wave6-manual-social-destinations-20261022/apple/build/manual-social-destinations-validation/final-session.log",
+          "bytes": 425,
+          "sha256": "28fafe8d4fc4ab490e1153fee2b064a908594a15441142a0fafc4305e5d9ebb4"
+        },
+        "review": "/tmp/stream-wave6-native-quality-manual-social-review.md",
+        "issue169": "open; manual persistence repair, no API connector or authenticated ingest qualification"
+      },
+      "deckDiagnostics": {
+        "integratedCommit": "b307c81",
+        "ownerCommit": "3d8b9591f8de1538b5050d0624fe5e6475c0cc95",
+        "targetCompile": {
+          "log": "/tmp/stream-wave4-deck-diagnostics-target-build-20261022.log",
+          "bytes": 1088160,
+          "sha256": "7726b41a5917b4f009ccdc78a846a30843a6451b8c995a9bb43b518733b0876b"
+        },
+        "focusedProof": {
+          "log": "/tmp/stream-wave4-deck-process-diagnostics-final-20261022.log",
+          "bytes": 922,
+          "sha256": "dcb05eddc42f475332650daca11efff35f914eeb5f6013c3a40e4de518a63469"
+        },
+        "result": "Actual modified target compile PASS; forced nonzero remains rejected, raw status/log retained, bounded redacted Unicode tail and owned TERM-ignore cleanup PASS. Receiver/decode exit0 and -xerror gates retained; decoder completion bounded. No runtime transport retry.",
+        "originalIntelCauseKnown": false,
+        "originalFailureResolved": false,
+        "artifactPattern": "apple/build/studio-deck-native-validation/artifacts-*"
+      },
+      "ci": "Previous 44c run completed without cancellation: both Mac jobs failed, iOS passed, all three full 586-test/82-suite Core runs passed. ARM failed the old fractional fixture API at step23; that one-line source adaptation now compiles and passes all five native scenarios locally. Intel receiver nonzero cause remains unknown; durable diagnostics are added. New-source hosted CI remains required; no whole-run PASS.",
+      "terminalPreviousCI": {
+        "run": 39728335886,
+        "head": "44c078e2c7434ab416c1a6c56e256bd34059ffb7",
+        "conclusion": "failure",
+        "cancelled": false,
+        "report": "/tmp/stream-ci-44c078e-terminal-report-20261022.md",
+        "jobs": [
+          {
+            "id": 119657621592,
+            "name": "Intel macOS",
+            "conclusion": "failure",
+            "core": {
+              "tests": 586,
+              "suites": 82,
+              "conclusion": "passed",
+              "durationSeconds": 192.316
+            },
+            "originalLog": "/tmp/stream-ci-44c078e-119657621592-original.log",
+            "originalLogBytes": 5214080,
+            "originalLogSHA256": "bd50bd7481d39d4cbac75da423ebac3a3dec5d700d7be9d41a90c68479c2e87d"
+          },
+          {
+            "id": 119657621710,
+            "name": "iOS Simulator",
+            "conclusion": "success",
+            "core": {
+              "tests": 586,
+              "suites": 82,
+              "conclusion": "passed",
+              "durationSeconds": 291.969
+            },
+            "originalLog": "/tmp/stream-ci-44c078e-119657621710-original.log",
+            "originalLogBytes": 362937,
+            "originalLogSHA256": "cf95ff4ad5b13362b33b88b05caefd0d9138e5eebcd4149685f228c92cde53d1"
+          },
+          {
+            "id": 119657621755,
+            "name": "ARM macOS",
+            "conclusion": "failure",
+            "core": {
+              "tests": 586,
+              "suites": 82,
+              "conclusion": "passed",
+              "durationSeconds": 118.874
+            },
+            "originalLog": "/tmp/stream-ci-44c078e-119657621755-original.log",
+            "originalLogBytes": 9902139,
+            "originalLogSHA256": "fc3db6b26352cee940693a1c33fa9b377d10d6574888ac307b3d9f7974753aff"
+          }
+        ]
+      },
+      "fractionalISOFixture": {
+        "integratedCommit": "7eed009",
+        "ownerCommit": "5b8bf37af1d91c81a3e63d0dd06ffc2a9cc00ab1",
+        "sourceChange": "One fixture line: explicit typed Render initializer and six arguments; no production changes or assertion changes.",
+        "baselineCompile": {
+          "log": "/tmp/stream-fractional-iso-baseline-compile-20261022.log",
+          "bytes": 1721,
+          "sha256": "4e53fdd7a0cdbcd12f4cd08dc33e1b96a46a410267ac5bea72cbcf0490af2769"
+        },
+        "fixedCompile": {
+          "log": "/tmp/stream-fractional-iso-fixed-compile-20261022.log",
+          "bytes": 201,
+          "sha256": "0344a011e81b7979891007a6c8977b151af5e7070e224c3a4cda0f2afe599053"
+        },
+        "fixedNative": {
+          "log": "/tmp/stream-fractional-iso-fixed-native-20261022.log",
+          "bytes": 2655,
+          "sha256": "e5b7aeb05d16b954307ff8d2efca18f2a0fc518880b28c3c795b87241627869b"
+        },
+        "result": "Baseline reproduces both hosted errors; fixed compile and first/only run of all five unchanged synthetic AAC/PCM scenarios PASS. Zero rational cue difference, best zero lag, identical decoded window/source grid and genuine gaps retained.",
+        "receipt": "/tmp/stream-fractional-iso-render-fixture-receipt-20261022.json",
+        "review": "/tmp/stream-iso-render-fixture-api-audit-20261022.md"
+      }
     }
   }
 }
