@@ -146,6 +146,59 @@ workloads; the measurements were not repeated or relabeled as a later commit.
 
 ## Qualification limits
 
+### Updated hosted ARM measurement, run 39724736435
+
+The fresh [ARM job](https://github.com/joeblau/stream/actions/runs/39724736435/job/119645957686)
+on exact source `b53ae5d23a4b66df65b4974ea5ab90cc461e5267` completed both
+600-second cases and **failed** the unchanged 17,850-frame qualification.
+It used native arm64 Debug on VirtualMac2,1, three logical CPUs, 7 GiB RAM,
+macOS 26.6.2 and the Apple Paravirtual Metal device. This is virtual-machine
+evidence, not physical M1 certification. The original run remains unchanged.
+
+| Observed result | Static source mix | Compressed replay mix |
+|---|---:|---:|
+| Actual compositor cadence | 28.2588 fps | 28.4079 fps |
+| Rendered / required frames | 16,957 / 17,850 | 17,047 / 17,850 |
+| Failed renders / wholly skipped opportunities | 16 / 1,028 | 0 / 955 |
+| Written video frames | 16,956 | 17,046 |
+| Writer-reported audio / video drops | 0 / 0 | 0 / 0 |
+| Mean / maximum render wall time | 13.802 / 1,017.347 ms | 12.624 / 652.024 ms |
+| Sampled actual CI kernel mean / maximum | 4.198 / 20.466 ms | 4.217 / 18.053 ms |
+| Endpoint host-clock duration error | 6.958 ms | 9.593 ms |
+| Maximum main-actor scheduling lag | 695.414 ms | 209.551 ms |
+| Mean CPU fraction of total logical capacity | 13.10% | 15.56% |
+| Peak physical footprint / Metal allocation | 101.1 / 82.4 MB | 238.9 / 193.7 MB |
+
+Both recordings finalized and passed the original media inspection. The replay
+actually decoded all **16,956 available source frames**; its actual-source
+cadence check passed, while its nominal decode requirement failed because the
+source itself supplied fewer than 17,850 frames. Correcting the separate
+source-availability diagnostic boundary cannot turn this result into a pass.
+Written counts remain one below the compositor counters; zero writer-reported
+drops does not assert that every upstream rendered frame reached the file.
+
+Compressed video PTS remained monotonic. Median gaps were 31.667 ms; 95th
+percentiles were 78.333/76.667 ms, and maximum gaps 1.016666/0.653334 seconds.
+There were 74/48 gaps above 100 ms. Attempts plus wholly skipped slots account
+for 18,001/18,002 opportunities over the respective measured windows. Aggregate
+subscriber drops include the deliberately slow sink and are not healthy-writer
+drop counts.
+
+All 590/589 process samples reported nominal thermal state. First/last-quarter
+memory and Metal-allocation means stayed bounded after startup; these data do
+not establish a growing retention problem or a CPU/GPU stall cause. Sampled
+kernel time is not GPU utilization or complete render latency. Endpoint latency,
+recording frontier skew and scheduling lag do not measure waveform A/V drift.
+
+[The exact machine receipt](PERFORMANCE_HOSTED_ARM_39724736435.json) preserves
+source hashes, raw failed checks, job/log/artifact/report/media digests, resource
+summaries and compressed timestamp distributions. Intel job `119645957767` was
+still active when this receipt was made. No additional dispatch, changed
+threshold, smaller canvas, lower target rate or narrower workload was used.
+Issue #92 remains open.
+
+### Earlier failures and remaining scope
+
 The compositor now retains one due render opportunity when a previous frame
 finishes slightly late. Previously it rounded every completion up to another
 future slot: a 33ms render plus 0.5ms wake jitter at 30fps could unnecessarily
