@@ -65,6 +65,8 @@ jobs:
         run: |
           MEDIA_LIFECYCLE_FRAMEWORKS="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_media_playback_lifecycle_harness.zsh
           zsh scripts/run_studio_shortcuts_harness.zsh
+          zsh scripts/run_studio_gain_accessibility_harness.zsh
+          zsh scripts/run_ptz_control_authority_harness.zsh
           zsh scripts/run_show_macros_harness.zsh
           zsh scripts/run_studio_local_control_harness.zsh
           zsh scripts/run_studio_automation_harness.zsh
@@ -83,6 +85,7 @@ jobs:
           STREAM_DECK_VALIDATE_TRANSPORT=1 zsh scripts/run_studio_deck_native_harness.zsh
       - name: Test browser helper protocol and bounded PCM inlet
         run: |
+          BROWSER_SOCKET_HELPER_MODE_PROBES=1 zsh scripts/run_browser_socket_authority_harness.zsh
           BROWSER_AUDIO_BUILD_PATH=build/desktop zsh scripts/run_browser_audio_helper_harness.zsh
           BROWSER_CAPTURE_AUTHORITY_DERIVED="$PWD/build/desktop" zsh scripts/run_browser_capture_authority_harness.zsh
       - name: Test managed event review and shipping publisher gates
