@@ -6,10 +6,13 @@ import plistlib
 import json
 import re
 import subprocess
+import tempfile
+
+from desktop_profile_policy import APP_ID, ProfilePolicyError, validate_decoded_profile
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("app", type=pathlib.Path)
-parser.add_argument("--require-signed", action="store_true", help="Require Developer ID, timestamp, hardened runtime, and actual entitlements")
+parser.add_argument("--require-signed", action="store_true", help="Require Developer ID, timestamp, hardened runtime, actual entitlements and matching profile metadata where required")
 args = parser.parse_args()
 app = args.app
 source = pathlib.Path(__file__).resolve().parents[1]
@@ -78,25 +81,59 @@ if args.require_signed:
     # verifying the complete nested-code seal.
     subprocess.run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)], check=True)
 
-    def expanded(value):
+    def expanded(value, app_prefix):
         if isinstance(value, str):
-            return value.replace("$(DEVELOPMENT_TEAM)", team).replace("$(AppIdentifierPrefix)", team + ".")
+            return value.replace("$(DEVELOPMENT_TEAM)", team).replace("$(AppIdentifierPrefix)", app_prefix)
         if isinstance(value, list):
-            return [expanded(item) for item in value]
+            return [expanded(item, app_prefix) for item in value]
         return value
 
     for bundle, declared in [(app, entitlements), (camera, camera_entitlements), (helper, helper_entitlements)]:
         actual = plistlib.loads(subprocess.check_output(
             ["codesign", "--display", "--entitlements", ":-", str(bundle)], stderr=subprocess.PIPE))
+        with (bundle / "Contents/Info.plist").open("rb") as file:
+            bundle_identifier = plistlib.load(file)["CFBundleIdentifier"]
+        # Historical App ID prefixes can differ from the signing Team ID.
+        # Validate the emitted identifier against the profile below rather than
+        # incorrectly forcing TeamIdentifier into $(AppIdentifierPrefix).
+        app_prefix = ""
+        if "$(AppIdentifierPrefix)" in repr(declared):
+            signed_id = actual.get(APP_ID)
+            suffix = "." + bundle_identifier
+            assert isinstance(signed_id, str) and signed_id.endswith(suffix), f"Signed application identifier mismatch in {bundle}"
+            prefix = signed_id[:-len(suffix)]
+            assert re.fullmatch(r"[A-Z0-9]{10}", prefix), f"Invalid signed App ID prefix in {bundle}"
+            app_prefix = prefix + "."
         assert not actual.get("com.apple.security.get-task-allow"), f"Debug entitlement in {bundle}"
         for key, value in declared.items():
-            assert actual.get(key) == expanded(value), f"Signed entitlement mismatch in {bundle}: {key}"
+            assert actual.get(key) == expanded(value, app_prefix), f"Signed entitlement mismatch in {bundle}: {key}"
         signature = subprocess.run(["codesign", "--display", "--verbose=4", str(bundle)],
                                    check=True, capture_output=True, text=True).stderr
         assert f"TeamIdentifier={team}" in signature, f"Signing team mismatch in {bundle}"
         assert re.search(r"^Authority=Developer ID Application:", signature, re.MULTILINE), f"Developer ID missing in {bundle}"
         assert re.search(r"^CodeDirectory .*flags=.*\bruntime\b", signature, re.MULTILINE), f"Hardened runtime missing in {bundle}"
         assert re.search(r"^Timestamp=.+", signature, re.MULTILINE), f"Secure timestamp missing in {bundle}"
+        profile_path = bundle / "Contents/embedded.provisionprofile"
+        profile = None
+        leaf_certificate = None
+        if profile_path.exists() or profile_path.is_symlink():
+            assert profile_path.is_file() and not profile_path.is_symlink(), f"Embedded profile is not a regular file in {bundle}"
+            assert profile_path.stat().st_size <= 8 * 1024 * 1024, f"Embedded profile exceeds audit limit in {bundle}"
+            decoded = subprocess.check_output(["security", "cms", "-D", "-i", str(profile_path)], stderr=subprocess.PIPE)
+            assert len(decoded) <= 16 * 1024 * 1024, f"Decoded profile exceeds audit limit in {bundle}"
+            profile = plistlib.loads(decoded)
+            # Extract only the public leaf from this bundle's signature. This
+            # neither reads signing keys nor exports any Keychain identity.
+            with tempfile.TemporaryDirectory(prefix="stream-profile-certificate-") as directory:
+                certificate_prefix = str(pathlib.Path(directory) / "certificate")
+                subprocess.run(["codesign", "--display", "--extract-certificates", certificate_prefix, str(bundle)],
+                               check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                leaf_certificate = pathlib.Path(certificate_prefix + "0").read_bytes()
+        try:
+            validate_decoded_profile(profile, bundle_identifier=bundle_identifier,
+                                     team=team, actual=actual, leaf_certificate=leaf_certificate)
+        except ProfilePolicyError as error:
+            raise SystemExit(f"Provisioning profile metadata audit failed in {bundle}: {error}") from error
 architectures = subprocess.check_output(["lipo", "-archs", str(executable)], text=True).strip()
 print("Desktop bundle and sandbox declarations validated:", architectures)
 print("Guest transport validation hooks are absent from the executable payload.")
@@ -105,6 +142,8 @@ print("Embedded CMIO camera, matching team/App Group namespace and sandbox decla
 print("Embedded browser helper and sandbox declarations validated; production audio route remains gated.")
 if args.require_signed:
     print("Developer ID, secure timestamps, hardened runtime, and embedded signed entitlements validated.")
+    print("Embedded provisioning-profile metadata matches actual signing certificates, identifiers and documented claims where required.")
+    print("Decoded metadata checks do not establish Apple CMS/DER profile trust or runtime entitlement acceptance.")
     print("Notarization and Gatekeeper acceptance require the release workflow's subsequent checks.")
 else:
     print("Developer ID signature, hardened runtime and notarization require the release workflow.")
