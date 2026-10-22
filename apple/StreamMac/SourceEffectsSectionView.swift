@@ -58,8 +58,8 @@ struct SourceEffectsSectionView: View {
                 }
             } else {
                 Text("Inheriting the source defaults (identity when unset). Any edit creates a layer override that replaces them wholesale.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .studioTextStyle(.caption)
+                    .foregroundStyle(.studioSecondary)
             }
         }
         .accessibilityElement(children: .contain)
@@ -100,8 +100,8 @@ struct SourceEffectsSectionView: View {
                 }
             }
             Text("Defaults apply to every layer bound to this source, in preview and program alike. A layer's own override replaces them.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .studioTextStyle(.caption)
+                .foregroundStyle(.studioSecondary)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Source defaults for \(source.name)")

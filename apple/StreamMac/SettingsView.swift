@@ -120,13 +120,13 @@ struct SettingsView: View {
     private var header: some View {
         HStack {
             Text("Settings")
-                .font(.callout.weight(.semibold))
+                .studioTextStyle(.callout, weight: .semibold)
             Spacer()
             Button(action: onClose) {
                 Image(systemName: "xmark.circle.fill")
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.studioSecondary)
             .help("Close settings — edits are not applied until you choose Apply")
         }
         .padding(.horizontal, 12)
@@ -139,12 +139,12 @@ struct SettingsView: View {
         HStack(spacing: 12) {
             if session.isDirty {
                 Label("Unsaved changes", systemImage: "circle.fill")
-                    .font(.caption)
+                    .studioTextStyle(.caption)
                     .foregroundStyle(.orange)
             } else {
                 Label("All changes applied", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .studioTextStyle(.caption)
+                    .foregroundStyle(.studioSecondary)
             }
             Spacer()
             Button("Revert") { dispatcher.execute(.revertSettings) }
@@ -249,15 +249,15 @@ struct SettingsView: View {
                     ), format: .number)
                     .frame(maxWidth: 90)
                     Text("×")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.studioSecondary)
                     TextField("Height", value: Binding(
                         get: { session.draft.outputProfile.canvasHeight },
                         set: { setProfile(session.draft.outputProfile.with(canvasHeight: $0)) }
                     ), format: .number)
                     .frame(maxWidth: 90)
                     Text("px, even values only")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .studioTextStyle(.caption)
+                        .foregroundStyle(.studioSecondary)
                 }
             }
 
@@ -278,7 +278,7 @@ struct SettingsView: View {
                     Text("Maximum Bitrate")
                     Spacer()
                     Text(String(format: "%.1f Mbps", Double(session.draft.videoBitrate) / 1_000_000))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.studioSecondary)
                         .monospacedDigit()
                 }
                 Slider(
@@ -343,7 +343,7 @@ struct SettingsView: View {
                         Image(systemName: "minus.circle.fill")
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.studioSecondary)
                     .help("Stop excluding this app by default")
                 }
             }
@@ -392,7 +392,7 @@ struct SettingsView: View {
                     Text(session.draft.micVolume <= 0.0001
                          ? "Muted"
                          : "\(Int((session.draft.micVolume * 100).rounded()))%")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.studioSecondary)
                         .monospacedDigit()
                 }
                 Slider(value: $session.draft.micVolume, in: 0.0...2.0, step: 0.05)
@@ -400,8 +400,8 @@ struct SettingsView: View {
 
             Toggle("Voice Polish", isOn: $session.draft.voicePolishEnabled)
             Text("Broadcast-style EQ, compression and limiting on the mic. Voice Polish is the default chain for every mic channel without its own; per-channel effect chains (high-pass, gate, EQ, compressor, limiter) are edited live from each mixer strip's FX button.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .studioTextStyle(.caption)
+                .foregroundStyle(.studioSecondary)
 
             additionalInputsBlock
 
@@ -433,7 +433,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var monitoringBlock: some View {
         Text("Headphone Monitoring")
-            .font(.callout.weight(.semibold))
+            .studioTextStyle(.callout, weight: .semibold)
         Toggle("Enable Monitoring", isOn: Binding(
             get: { session.activeSettings.monitoringEnabled },
             set: { dispatcher.execute(.setMonitoringEnabled($0)) }
@@ -451,19 +451,19 @@ struct SettingsView: View {
         if controller.monitorOutput.isFallbackActive {
             Label("The selected output is disconnected — monitoring through the System Default until it returns.",
                   systemImage: "cable.connector.slash")
-                .font(.caption)
+                .studioTextStyle(.caption)
                 .foregroundStyle(.orange)
         }
         if let error = controller.monitorOutput.errorMessage {
             Label(error, systemImage: "exclamationmark.triangle.fill")
-                .font(.caption)
+                .studioTextStyle(.caption)
                 .foregroundStyle(.red)
         }
         if let riskUID = controller.monitorFeedbackRiskDeviceUID {
             let name = controller.audio.deviceNamesByUID[riskUID] ?? riskUID
             Label("Feedback risk: \"\(name)\" is both the monitor output and an enabled input — the monitor signal can loop into the program mix. Disable that input or pick another output.",
                   systemImage: "exclamationmark.triangle.fill")
-                .font(.caption)
+                .studioTextStyle(.caption)
                 .foregroundStyle(.orange)
         }
     }
@@ -480,7 +480,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var echoHandlingBlock: some View {
         Text("Echo & Feedback")
-            .font(.callout.weight(.semibold))
+            .studioTextStyle(.callout, weight: .semibold)
         Picker("Echo Handling", selection: Binding(
             get: { session.activeSettings.echoHandlingMode },
             set: { dispatcher.execute(.setEchoHandlingMode($0)) }
@@ -493,35 +493,35 @@ struct SettingsView: View {
         // effect (issue #121), and Stream never stacks a second suppressor
         // on top of the OS processing.
         Text(session.activeSettings.echoHandlingMode.limitationNote)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .studioTextStyle(.caption)
+            .foregroundStyle(.studioSecondary)
         if session.activeSettings.echoHandlingMode == .voiceIsolation {
             switch controller.voiceIsolationActive {
             case .some(true):
                 Label("Voice Isolation is active on the microphone. Stream applies no additional echo suppression on top.",
                       systemImage: "checkmark.shield.fill")
-                    .font(.caption)
+                    .studioTextStyle(.caption)
                     .foregroundStyle(.green)
             case .some(false):
                 Label("Voice Isolation is not active — while the mic is in use, open Control Center → Mic Mode and choose Voice Isolation.",
                       systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .studioTextStyle(.caption)
                     .foregroundStyle(.orange)
             case nil:
                 Label("The Voice Isolation state is read once the mic is running.",
                       systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .studioTextStyle(.caption)
+                    .foregroundStyle(.studioSecondary)
             }
         }
         ForEach(controller.feedbackDiagnostics.routeIssues) { issue in
             VStack(alignment: .leading, spacing: 4) {
                 Label(issue.title, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption.weight(.semibold))
+                    .studioTextStyle(.caption, weight: .semibold)
                     .foregroundStyle(.orange)
                 Text(issue.fix)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .studioTextStyle(.caption)
+                    .foregroundStyle(.studioSecondary)
                 Button(repairTitle(for: issue.repair)) {
                     repairFeedbackRoute(issue.repair)
                 }
@@ -575,7 +575,7 @@ struct SettingsView: View {
         }
         if !listed.isEmpty || !missing.isEmpty {
             Text("Additional Inputs")
-                .font(.callout.weight(.semibold))
+                .studioTextStyle(.callout, weight: .semibold)
             ForEach(listed, id: \.uniqueID) { device in
                 additionalInputRow(
                     device: device,
@@ -619,7 +619,7 @@ struct SettingsView: View {
                 }
                 if let error = controller.audio.additionalInputErrors[uid] {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .studioTextStyle(.caption)
                         .foregroundStyle(.red)
                 }
             }
@@ -636,7 +636,7 @@ struct SettingsView: View {
             ))
             Label("Disconnected — reconnect it, or relink to another input.",
                   systemImage: "cable.connector.slash")
-                .font(.caption)
+                .studioTextStyle(.caption)
                 .foregroundStyle(.orange)
             inputRelinkMenu(for: uid)
         }
@@ -701,7 +701,7 @@ struct SettingsView: View {
                 if case .failed(let message) = chat.status {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
-                        .font(.caption)
+                        .studioTextStyle(.caption)
                 }
             }
         } header: {
@@ -725,7 +725,7 @@ struct SettingsView: View {
                 .foregroundStyle(status == .granted ? .green : .orange)
             if status == .denied {
                 Text("Denied")
-                    .font(.caption.weight(.semibold))
+                    .studioTextStyle(.caption, weight: .semibold)
                     .foregroundStyle(.orange)
             }
             Spacer()
@@ -738,7 +738,7 @@ struct SettingsView: View {
                 permissions.openSystemSettings(for: kind)
             }
         }
-        .font(.callout)
+        .studioTextStyle(.callout)
         .help(permissions.repairAction(for: kind)?.message ?? kind.purpose)
     }
 
@@ -781,7 +781,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var avSyncAndDuckingBlock: some View {
         Text("A/V Sync")
-            .font(.callout.weight(.semibold))
+            .studioTextStyle(.callout, weight: .semibold)
         audioDelayRow(title: "Microphone Delay",
                       channel: .microphone(deviceUID: nil))
         ForEach(session.activeSettings.audioInputs.filter(\.isEnabled), id: \.deviceUID) { selection in
@@ -796,8 +796,8 @@ struct SettingsView: View {
             videoDelayRow(source: source)
         }
         Text("Delay compensates per-source hardware latency: a source that arrives EARLY gets delayed to match the others (a camera's video is usually the late one — delay its audio path's counterparts instead). Changes apply immediately; delays are bounded at \(Int(AVSyncDelay.maxAudioDelayMs)) ms.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .studioTextStyle(.caption)
+            .foregroundStyle(.studioSecondary)
 
         duckingBlock
     }
@@ -827,7 +827,7 @@ struct SettingsView: View {
                 Text(title)
                 Spacer()
                 Text(value <= 0 ? "Off" : "\(Int(value.rounded())) \(unit)")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.studioSecondary)
                     .monospacedDigit()
             }
             Slider(value: Binding(get: { value }, set: onEdit), in: range, step: step)
@@ -841,12 +841,12 @@ struct SettingsView: View {
         let ducking = dispatcher.state.ducking
         Group {
             Text("Music Ducking")
-                .font(.callout.weight(.semibold))
+                .studioTextStyle(.callout, weight: .semibold)
             Toggle("Duck Music While Speaking", isOn: duckingBinding(\.isEnabled))
         if ducking.isEnabled {
             Text("Speech Channels")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .studioTextStyle(.caption, weight: .semibold)
+                .foregroundStyle(.studioSecondary)
             sidechainToggle(title: "Microphone", channel: .microphone(deviceUID: nil))
             ForEach(session.activeSettings.audioInputs.filter(\.isEnabled), id: \.deviceUID) { selection in
                 sidechainToggle(title: controller.audio.deviceNamesByUID[selection.deviceUID] ?? "Input",
@@ -868,28 +868,28 @@ struct SettingsView: View {
                           range: 10...3_000, step: 50,
                           format: { "\(Int($0.rounded())) ms" })
             Text("Duck Targets")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .studioTextStyle(.caption, weight: .semibold)
+                .foregroundStyle(.studioSecondary)
             let targets = duckTargetCandidates
             if targets.isEmpty {
                 Text("No music, media, or app-audio sources yet — add a playlist or source to duck it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .studioTextStyle(.caption)
+                    .foregroundStyle(.studioSecondary)
             } else {
                 ForEach(targets, id: \.channel) { target in
                     HStack {
                         Toggle(target.name, isOn: duckTargetBinding(target.channel))
                         if duckedChannelLabels.contains(target.channel.label) {
                             Text("ducking")
-                                .font(.caption2.weight(.semibold))
+                                .studioTextStyle(.caption2, weight: .semibold)
                                 .foregroundStyle(.orange)
                         }
                     }
                 }
             }
             Text("While any speech channel is above the threshold, the selected channels are attenuated by the reduction (engine-side gain automation on top of the faders — base gain × duck gain — so bypass restores your exact mix). Duck state survives scene changes.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .studioTextStyle(.caption)
+                .foregroundStyle(.studioSecondary)
         }
         }
         .task { await pollDuckState() }
@@ -961,7 +961,7 @@ struct SettingsView: View {
                 Text(title)
                 Spacer()
                 Text(format(dispatcher.state.ducking[keyPath: keyPath]))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.studioSecondary)
                     .monospacedDigit()
             }
             Slider(value: duckingBinding(keyPath), in: range, step: step)

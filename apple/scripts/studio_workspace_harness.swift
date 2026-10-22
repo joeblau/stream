@@ -16,6 +16,12 @@ enum WorkspaceFixtureStorage {
     static let machineDirectory = root.appendingPathComponent("Machine", isDirectory: true)
     static let recordingsDirectory = machineDirectory.appendingPathComponent("Recordings", isDirectory: true)
 }
+@MainActor enum WorkspaceFixtureAudio {
+    static weak var latest: AudioMixEngine?
+    static func makeEngine() -> AudioMixEngine {
+        let engine = AudioMixEngine(); latest = engine; return engine
+    }
+}
 @MainActor enum WorkspaceViewReceipts {
     static var appeared: [ObjectIdentifier: Int] = [:]
     static var disappeared: [ObjectIdentifier: Int] = [:]
@@ -148,7 +154,11 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         window.makeKeyAndOrderFront(nil)
         defer { window.contentView = nil; window.close() }
         try await waitForView(workspace)
-        if CommandLine.arguments.contains("--accessibility") {
+        if CommandLine.arguments.contains("--accessibility-native-controls") {
+            try await StudioAccessibilityHarness.runNativeControls(workspace: workspace, window: window)
+            return
+        }
+        if CommandLine.arguments.contains("--accessibility") || CommandLine.arguments.contains("--accessibility-local") {
             try await StudioAccessibilityHarness.run(workspace: workspace, window: window)
             return
         }

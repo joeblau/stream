@@ -265,7 +265,7 @@ struct StudioCommandPalette: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Command Palette").font(.title2)
+                Text("Command Palette").studioTextStyle(.title2)
                 Spacer()
                 Button("Shortcuts…") { shortcuts.openEditorAfterPalette = true; shortcuts.palettePresented = false }
                 Button("Close") { shortcuts.palettePresented = false }
@@ -280,11 +280,11 @@ struct StudioCommandPalette: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(action.title)
-                            Text(action.unavailableReason ?? action.category).font(.caption).foregroundStyle(.secondary)
+                            Text(action.unavailableReason ?? action.category).studioTextStyle(.caption).foregroundStyle(.studioSecondary)
                         }
                         Spacer()
                         Text(StudioPaletteValues.bindings(shortcuts.document.bindings, commandID: action.id).map { $0.chord.displayName }.joined(separator: " / "))
-                            .font(.caption.monospaced())
+                            .studioTextStyle(.caption).monospaced()
                         Button("Run") { run(action.id) }.disabled(action.unavailableReason != nil)
                     }
                     .tag(action.id)
@@ -292,7 +292,7 @@ struct StudioCommandPalette: View {
                     .accessibilityLabel("\(action.title), \(action.unavailableReason ?? "available")")
                 }
             }
-            Text("Return runs the selected action. Escape closes. ↑/↓ navigate results.").font(.caption).foregroundStyle(.secondary)
+            Text("Return runs the selected action. Escape closes. ↑/↓ navigate results.").studioTextStyle(.caption).foregroundStyle(.studioSecondary)
         }
         .padding(20).frame(minWidth: 460, idealWidth: 580, minHeight: 360, idealHeight: 500)
         .onAppear { searchFocused = true }
@@ -321,14 +321,14 @@ struct StudioShortcutEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Keyboard Shortcuts").font(.title2)
+                Text("Keyboard Shortcuts").studioTextStyle(.title2)
                 Spacer()
                 Button("Done") { shortcuts.cancelRecording(); shortcuts.editorPresented = false }
             }
             Toggle("Enable global shortcuts while other apps are active", isOn: Binding(
                 get: { shortcuts.document.globalEnabled }, set: { shortcuts.setGlobalEnabled($0) }))
             Text("Each global binding also needs its Global switch enabled and Command + Option or Control. macOS reports shortcuts already owned by another app. Text fields in Stream suppress production shortcuts.")
-                .font(.caption).foregroundStyle(.secondary)
+                .studioTextStyle(.caption).foregroundStyle(.studioSecondary)
             TextField("Search actions", text: $search).textFieldStyle(.roundedBorder)
             if let id = shortcuts.recordingCommandID {
                 HStack {
@@ -346,7 +346,7 @@ struct StudioShortcutEditor: View {
                                 Spacer()
                                 Button("Add Shortcut") { shortcuts.record(action.id) }.disabled(action.command == nil)
                             }
-                            if let reason = action.unavailableReason { Text(reason).font(.caption).foregroundStyle(.secondary) }
+                            if let reason = action.unavailableReason { Text(reason).studioTextStyle(.caption).foregroundStyle(.studioSecondary) }
                             ForEach(StudioPaletteValues.bindings(shortcuts.document.bindings, commandID: action.id)) { binding in
                                 bindingRow(binding)
                             }
@@ -355,7 +355,7 @@ struct StudioShortcutEditor: View {
                     }
                     ForEach(StudioPaletteValues.missingBindings(shortcuts.document.bindings, actions: actions)) { binding in
                         VStack(alignment: .leading) {
-                            Text("Missing target — mapping retained").font(.callout)
+                            Text("Missing target — mapping retained").studioTextStyle(.callout)
                             bindingRow(binding)
                         }
                     }
@@ -369,13 +369,13 @@ struct StudioShortcutEditor: View {
     private func bindingRow(_ binding: StudioShortcutBinding) -> some View {
         VStack(alignment: .leading) {
             HStack {
-                Text(binding.chord.displayName).font(.body.monospaced())
+                Text(binding.chord.displayName).studioTextStyle(.body).monospaced()
                 Toggle("Global", isOn: Binding(get: { binding.global }, set: { shortcuts.setGlobal(binding, enabled: $0) }))
                     .disabled(!binding.chord.supportsGlobal)
                 Spacer()
                 Button("Remove") { shortcuts.remove(binding) }
             }
-            if let error = shortcuts.globalErrors[binding.commandID] { Text(error).font(.caption).foregroundStyle(.orange) }
+            if let error = shortcuts.globalErrors[binding.commandID] { Text(error).studioTextStyle(.caption).foregroundStyle(.orange) }
         }
     }
 }

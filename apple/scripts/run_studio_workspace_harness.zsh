@@ -70,6 +70,7 @@ Dir.glob('StreamMac/**/*.swift').each do |path|
     # Keep actual MainWindow onAppear/dispatcher invocation, but stop before
     # allocating real camera/screen/microphone or compositor pipeline demand.
     source.sub!(preview,"    func startPreview() {\n        WorkspaceViewReceipts.previewSuppressed[ObjectIdentifier(self), default: 0] += 1\n        return")
+    source.sub!('audioEngine: AudioMixEngine = AudioMixEngine()', 'audioEngine: AudioMixEngine = WorkspaceFixtureAudio.makeEngine()')
   end
   next if source==original
   name=path.delete_prefix('StreamMac/').tr('/','_')
@@ -94,7 +95,7 @@ abort 'Shipping App window-content boundary changed' unless first && last
 content=app[first...last].strip
 content.sub!('MainWindowView(firstRunCompleted: $hasCompletedFirstRun)', <<'SWIFT'.strip)
 MainWindowView(firstRunCompleted: $hasCompletedFirstRun)
-                .background { if CommandLine.arguments.contains("--accessibility") { WorkspaceAccessibilityProbe() } }
+                .background { if (CommandLine.arguments.contains("--accessibility") || CommandLine.arguments.contains("--accessibility-local") || CommandLine.arguments.contains("--accessibility-native-controls")) { WorkspaceAccessibilityProbe() } }
                 .onAppear { WorkspaceViewReceipts.appeared[ObjectIdentifier(observedRuntime), default: 0] += 1 }
                 .onDisappear { WorkspaceViewReceipts.disappeared[ObjectIdentifier(observedRuntime), default: 0] += 1 }
 SWIFT
@@ -119,6 +120,7 @@ fixture_write(File.join(folder,'fixtures/WorkspaceApplicationRoot.swift'),applic
 h['sources'] << File.join(folder,'fixtures/WorkspaceApplicationRoot.swift')
 h['sources'] << File.join(root,'scripts/studio_workspace_harness.swift')
 h['sources'] << File.join(root,'scripts/studio_accessibility_harness.swift')
+h['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 h['sources'] << File.join(root,'scripts/provider_viewer_ui_fixture.swift')
 spec['targets']['StudioWorkspaceHarness']=h
 spec['schemes']['StudioWorkspaceHarness']={'build'=>{'targets'=>{'StudioWorkspaceHarness'=>'all'}}}
@@ -131,7 +133,7 @@ xcodebuild -resolvePackageDependencies -project "$WORKSPACE_DIR/StudioWorkspaceV
     -scheme StudioWorkspaceHarness -derivedDataPath "$WORKSPACE_BUILD_PATH"
 python3 scripts/repair_desktop_transport_archives.py "$WORKSPACE_BUILD_PATH"
 xcodebuild -project "$WORKSPACE_DIR/StudioWorkspaceValidation.xcodeproj" \
-    -scheme StudioWorkspaceHarness -destination 'platform=macOS' -jobs "${STREAM_XCODE_JOBS:-4}" \
+    -scheme StudioWorkspaceHarness -destination 'platform=macOS' -jobs "${STREAM_XCODE_JOBS:-2}" \
     -derivedDataPath "$WORKSPACE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
 readonly WORKSPACE_PRODUCTS="${WORKSPACE_BUILD_PATH:A}/Build/Products/Debug"
 swiftc scripts/studio_accessibility_client.swift -o "$WORKSPACE_DIR/StudioAccessibilityClient"
