@@ -33,6 +33,20 @@ struct CompositionClockValidationHooks: Sendable {
     var afterIteration: (@Sendable () async -> Void)?
     var onExit: (@Sendable () -> Void)?
 }
+
+/// Holds only the mailbox, never a snapshot of its retained frames. Fixtures
+/// can observe retirement and fence the existing serial queue after releasing
+/// an already-dequeued callback; shipping removal never waits for that queue.
+struct CompositionMailboxValidationProbe: Sendable {
+    struct Snapshot: Equatable, Sendable, Codable {
+        var pendingSequences: [Int64]
+        var drops: Int
+        var closed: Bool
+    }
+    var snapshot: @Sendable () -> Snapshot
+    var barrier: @Sendable () async -> Void
+    var close: @Sendable () -> Void
+}
 #endif
 
 /// The process-wide hand-off of S07 project-level composition state (overlays
@@ -643,14 +657,20 @@ actor CompositionEngine {
         if cancelledTokens.remove(token) != nil { return }
         if canvas == .secondary, let canvasSize { secondaryCanvasSize = canvasSize }
         let mailbox = FrameMailbox(capacity: capacity, token: token, sink: sink)
-        if canvas == .program { subscribers[token] = mailbox }
-        else { secondarySubscribers[token] = mailbox }
+        if canvas == .program {
+            subscribers[token]?.close()
+            subscribers[token] = mailbox
+        } else {
+            secondarySubscribers[token]?.close()
+            secondarySubscribers[token] = mailbox
+        }
     }
 
     /// Clean preserves the Program composition/background and strips only
     /// project overlay nodes and live annotations. It is not a new canvas.
     func addCleanSink(token: UUID, capacity: Int = 1, authorized: @escaping @Sendable () -> Bool = { true }, sink: @escaping FrameSink) {
         if cancelledTokens.remove(token) != nil { return }
+        cleanSubscribers[token]?.close()
         cleanSubscribers[token] = FrameMailbox(capacity: capacity, token: token, sink: sink)
         cleanRenderPermits[token] = authorized
     }
@@ -660,6 +680,9 @@ actor CompositionEngine {
         let secondary = secondarySubscribers.removeValue(forKey: token)
         let clean = cleanSubscribers.removeValue(forKey: token)
         cleanRenderPermits.removeValue(forKey: token)
+        primary?.close()
+        secondary?.close()
+        clean?.close()
         if primary == nil && secondary == nil && clean == nil {
             cancelledTokens.insert(token)
         }
@@ -683,6 +706,11 @@ actor CompositionEngine {
     private var validationClockHooks = CompositionClockValidationHooks()
     func setValidationClockHooks(_ hooks: CompositionClockValidationHooks) {
         validationClockHooks = hooks
+    }
+    func validationMailboxProbe(token: UUID, canvas: OutputCanvas = .program, clean: Bool = false) -> CompositionMailboxValidationProbe? {
+        let mailbox = clean ? cleanSubscribers[token] : canvas == .program ? subscribers[token] : secondarySubscribers[token]
+        guard let mailbox else { return nil }
+        return CompositionMailboxValidationProbe(snapshot: { mailbox.validationSnapshot() }, barrier: { await mailbox.validationBarrier() }, close: { mailbox.close() })
     }
     func prepareValidation(scene: Scene, canvasSize: CGSize, frameRate: Int, at time: CMTime) {
         validationTime = time
@@ -887,6 +915,7 @@ private final class FrameMailbox: @unchecked Sendable {
     private var pending: [CompositedFrame] = []
     private var isDraining = false
     private var drops = 0
+    private var closed = false
 
     func statistics() -> (depth: Int, drops: Int) {
         os_unfair_lock_lock(&lock)
@@ -903,6 +932,7 @@ private final class FrameMailbox: @unchecked Sendable {
 
     func post(_ frame: CompositedFrame) {
         os_unfair_lock_lock(&lock)
+        guard !closed else { os_unfair_lock_unlock(&lock); return }
         if pending.count >= capacity {
             drops += 1
             pending.removeFirst()   // drop-oldest
@@ -916,10 +946,37 @@ private final class FrameMailbox: @unchecked Sendable {
         }
     }
 
+    /// Retire pending ownership immediately. A callback that already dequeued
+    /// a frame may finish, but cannot drain the retired backlog afterwards.
+    /// Detach under the same lock as post/dequeue, then release outside it.
+    func close() {
+        os_unfair_lock_lock(&lock)
+        guard !closed else { os_unfair_lock_unlock(&lock); return }
+        closed = true
+        let retired = pending
+        drops += retired.count
+        pending = []
+        os_unfair_lock_unlock(&lock)
+        withExtendedLifetime(retired) {}
+    }
+
+    #if STREAM_NATIVE_VALIDATION
+    func validationSnapshot() -> CompositionMailboxValidationProbe.Snapshot {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return .init(pendingSequences: pending.map(\.sequence), drops: drops, closed: closed)
+    }
+    func validationBarrier() async {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume() }
+        }
+    }
+    #endif
+
     private func drain() {
         while true {
             os_unfair_lock_lock(&lock)
-            guard !pending.isEmpty else {
+            guard !closed, !pending.isEmpty else {
                 isDraining = false
                 os_unfair_lock_unlock(&lock)
                 return

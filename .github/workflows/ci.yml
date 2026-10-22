@@ -69,7 +69,7 @@ jobs:
           zsh scripts/run_studio_gain_accessibility_harness.zsh
           zsh scripts/run_text_paragraph_style_harness.zsh
           python3 scripts/test_studio_control_rows.py
-          zsh scripts/run_composition_clock_authority_harness.zsh
+          zsh scripts/run_composition_mailbox_retirement_harness.zsh
           zsh scripts/run_ptz_control_authority_harness.zsh
           zsh scripts/run_show_macros_harness.zsh
           zsh scripts/run_studio_local_control_harness.zsh
