@@ -40,12 +40,25 @@ source = source.replace(boundary, boundary + '\n            await FixtureState.s
 clock = 'CMClockGetTime(CMClockGetHostTimeClock())'
 assert source.count(clock) >= 10
 source = source.replace(clock, 'FixtureClock.shared.now()')
-delivery = '            deliverAudio(audio, handler: handler, generation: generation)\n            if ended'
+read = '        try file.read(into: pcm, frameCount: count)'
+assert source.count(read) == 1
+source = source.replace(read, read + '\n        FixtureOfflineDecodeDelay.shared.afterRead()')
+delivery = '            deliverAudio(audio, handler: handler, generation: generation, offlinePCM: true)\n            if ended'
 assert source.count(delivery) == 1
 source = source.replace(delivery,
     '            FixtureAudioPullTiming.shared.note(start: now, ready: FixtureClock.shared.now())\n' + delivery)
 source += '''
 extension MediaSourcePlayback {
+    static func lifecyclePCMAdmission(_ url: URL) throws -> (original: CMSampleBuffer, fresh: CMSampleBuffer?, partial: CMSampleBuffer?, expired: CMSampleBuffer?, invalidClock: CMSampleBuffer?, distantClock: CMSampleBuffer?) {
+        let decoder = try MediaOfflineAudio(url: url)
+        guard let original = try decoder.next(through: CMTime(seconds: 1, preferredTimescale: 48_000), end: decoder.duration) else { throw CocoaError(.fileReadUnknown) }
+        return (original,
+            admittedOfflinePCM(original, at: CMTime(value: 480, timescale: 48_000)),
+            admittedOfflinePCM(original, at: CMTime(value: 2_400, timescale: 48_000)),
+            admittedOfflinePCM(original, at: CMTime(value: 9_600, timescale: 48_000)),
+            admittedOfflinePCM(original, at: .invalid),
+            admittedOfflinePCM(original, at: CMTime(value: Int64.max, timescale: 1)))
+    }
     func lifecycleHeldDelivery() -> (@Sendable () -> Void)? {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
@@ -80,4 +93,4 @@ xcrun swiftc -j2 -swift-version 6 -strict-concurrency=complete -parse-as-library
   "$LIFECYCLE_DIR/MediaValues.swift" "$LIFECYCLE_DIR/MediaSourcePlayback.swift" \
   StreamMac/AnimatedOverlayPlayback.swift scripts/media_playback_lifecycle_harness.swift \
   -o "$LIFECYCLE_DIR/harness"
-env DYLD_FRAMEWORK_PATH="${LIFECYCLE_FRAMEWORKS:A}" "$LIFECYCLE_DIR/harness" "${LIFECYCLE_DIR:A}"
+env DYLD_FRAMEWORK_PATH="${LIFECYCLE_FRAMEWORKS:A}" "$LIFECYCLE_DIR/harness" "${LIFECYCLE_DIR:A}" "$@"

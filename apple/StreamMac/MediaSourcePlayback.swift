@@ -628,7 +628,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             let ended = isPlaying && time >= trimOut
             let handler = onAudioSample, generation = loadGeneration
             os_unfair_lock_unlock(&lock)
-            deliverAudio(audio, handler: handler, generation: generation)
+            deliverAudio(audio, handler: handler, generation: generation, offlinePCM: true)
             if ended { handleOfflineEnd(generation: generation) }
             return nil
         }
@@ -654,13 +654,48 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         return frame
     }
 
-    private func deliverAudio(_ audio: [CMSampleBuffer], handler: (@Sendable (CMSampleBuffer) -> Void)?, generation: UInt64) {
+    /// Keep the original source timeline when decoding or delivery was delayed.
+    /// A sample-range copy retains the native PCM frames and advances PTS by
+    /// exactly the removed frame count; it does not rebase audio onto "now".
+    private static func admittedOfflinePCM(_ sample: CMSampleBuffer, at now: CMTime) -> CMSampleBuffer? {
+        let pts = sample.presentationTimeStamp
+        guard now.isNumeric, pts.isNumeric,
+              let format = sample.formatDescription,
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format),
+              asbd.pointee.mFormatID == kAudioFormatLinearPCM else { return nil }
+        let rate = asbd.pointee.mSampleRate
+        let frames = CMSampleBufferGetNumSamples(sample)
+        guard rate.isFinite, rate > 0, frames > 0 else { return nil }
+        let edge = now - CMTime(seconds: 0.02, preferredTimescale: 1_000_000_000)
+        guard edge.isNumeric else { return nil }
+        guard pts < edge else { return sample }
+        let expired = ((edge - pts).seconds * rate).rounded(.up)
+        // Check the floating-point range before converting to Int. Fully old
+        // samples are discarded; a surviving partial chunk must stay intact.
+        guard expired.isFinite, expired >= 0, expired < Double(frames) else { return nil }
+        let removed = Int(expired)
+        guard removed > 0 else { return sample }
+        var clipped: CMSampleBuffer?
+        guard CMSampleBufferCopySampleBufferForRange(allocator: nil, sampleBuffer: sample,
+            sampleRange: CFRange(location: removed, length: frames - removed), sampleBufferOut: &clipped) == noErr else { return nil }
+        return clipped
+    }
+
+    private func deliverAudio(_ audio: [CMSampleBuffer], handler: (@Sendable (CMSampleBuffer) -> Void)?, generation: UInt64, offlinePCM: Bool = false) {
         audioDelivery.deliver {
             os_unfair_lock_lock(&lock)
             let current = !retired && loadGeneration == generation
             os_unfair_lock_unlock(&lock)
             guard current else { return }
-            for sample in audio { handler?(sample) }
+            for sample in audio {
+                if offlinePCM {
+                    // The predecode admission clock can be stale after file
+                    // I/O or serialized delivery. Check each actual callback.
+                    if let current = Self.admittedOfflinePCM(sample, at: CMClockGetTime(CMClockGetHostTimeClock())) {
+                        handler?(current)
+                    }
+                } else { handler?(sample) }
+            }
         }
     }
 
