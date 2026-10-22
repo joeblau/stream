@@ -1,0 +1,133 @@
+{
+  "baseCommit": "9cb68c901fa620db294436324ab1ba0a723f22dd",
+  "discardedPrototype": {
+    "compressedPickerFrameWidth": 268,
+    "failedLog": {
+      "path": "/tmp/stream-wave13-annotation-native-intrinsic-failure-20261022.log",
+      "sha256": "5a9dfe221f0840718bb57b46f784e81d8ee5d1a5eb43bc437adbc1851278caa8"
+    },
+    "intrinsicFixture": {
+      "path": "/tmp/stream-wave13-annotation-intrinsic-fixture-20261022.py",
+      "sha256": "cc7167c71a374d123a107fbd319d9ca2363ae95c2580aa3cfd8552f0942d0112"
+    },
+    "pickerIntrinsicWidth": 364,
+    "priorIncomplete72CaseLog": {
+      "path": "/tmp/stream-wave13-annotation-fixed-20261022.log",
+      "sha256": "429f68f57607271658401772223f4031dbc2ea1150070a7f8a07f5a7fba26217"
+    },
+    "priorIncompleteBoundsOnlyReport": {
+      "path": "/tmp/stream-wave13-annotation-prior-bounds-only-20261022.json",
+      "sha256": "8b994a23d1e7631425e23df5c806070a369bc4638918b7d043862f997444b9c9"
+    },
+    "result": "NOT QUALIFIED; outer-bounds proof insufficient, native intrinsic gate FAILED",
+    "source": {
+      "path": "/tmp/stream-wave13-annotation-wrap-prototype-20261022.swift",
+      "sha256": "c2960ea3414e8ae6a770eefb86bdade792853c1639331d8d34c637759d3e89d0"
+    }
+  },
+  "externalBoundary": {
+    "AXCalls": false,
+    "actionsInvoked": false,
+    "activationOrOrderFront": false,
+    "documentsOrPreferences": false,
+    "globalInput": false,
+    "network": false,
+    "permissionOrDeviceDiscovery": false,
+    "productionWorkspaceOrStoreConstructed": false,
+    "screenBitmap": false,
+    "screenCapture": false
+  },
+  "finalProof": {
+    "cases": 192,
+    "detailedGeometry": {
+      "path": "/tmp/stream-wave13-annotation-final-geometry-20261022.json",
+      "sha256": "5423e8ff16ff8d57af6e26dd0b4e83cbdf94fdd53ac643373345f992f54172a7"
+    },
+    "executable": {
+      "path": "/private/tmp/stream-wave13-annotation-layout-20261022/apple/build/annotation-toolbar-layout/AnnotationToolbarLayout",
+      "sha256": "35535bf7187caba4620af1d01b1364b86f7d4eab7e03109f826a93787872416d"
+    },
+    "exitCode": 0,
+    "generatedFixture": {
+      "path": "/private/tmp/stream-wave13-annotation-layout-20261022/apple/build/annotation-toolbar-layout/OwnedAnnotationToolbar.swift",
+      "sha256": "8a704ab7315a262beed51a1e62b8ed5b7c0ce70ebeb745e505909e58e7a45ae1"
+    },
+    "log": {
+      "path": "/tmp/stream-wave13-annotation-final-20261022.log",
+      "sha256": "eb99d01e74e26a1988bcc77240a913895fb95d8374190fadb2ecead1136b939a"
+    },
+    "matrix": {
+      "ownedScrollerStyles": [
+        "overlay",
+        "legacy"
+      ],
+      "selectionStates": [
+        "select",
+        "pen",
+        "highlighter",
+        "pointer"
+      ],
+      "stagedScene": [
+        true,
+        false
+      ],
+      "textPoints": [
+        11,
+        16,
+        20
+      ],
+      "widths": [
+        320,
+        640,
+        844,
+        1280
+      ]
+    },
+    "result": "PASS"
+  },
+  "issue": 90,
+  "issueRemainsOpen": true,
+  "originalBaseline": {
+    "exitCode": 1,
+    "initialFixture": {
+      "path": "/tmp/stream-wave13-annotation-baseline-fixture-20261022.py",
+      "sha256": "c2fdb11f932ac71472c01e35503fd3741d2a97b27bfdf9a5f3a038f15f1f46d5"
+    },
+    "initialLog": {
+      "path": "/tmp/stream-wave13-annotation-baseline-20261022.log",
+      "sha256": "435f6321382f6c21fceb461c16d176257df4c0d34718403b7cb5fc3b483eb526"
+    },
+    "measured": {
+      "proposedWidth": 320,
+      "reportedHeight": 208,
+      "reportedWidth": 689,
+      "selection": "select",
+      "textPoints": 11
+    },
+    "result": "EXPECTED FAILURE",
+    "sameFinalFixtureLog": {
+      "path": "/tmp/stream-wave13-annotation-final-fixture-baseline-20261022.log",
+      "sha256": "d02ba86bb3a90ea0c8604a3866ef410162ec723cd720ce1dfd375953da6335ca"
+    },
+    "source": {
+      "path": "/tmp/stream-wave13-annotation-original-9cb-20261022.swift",
+      "sha256": "db632d3e03b7503f0013ba752c6db3da2182bac2cd1dfd88cefb22d44904271e"
+    }
+  },
+  "scope": "Actual annotation toolbar native geometry/intrinsic picker/native scrolling with inert external owners; no operator, whole-window, AX, keyboard, contrast or glyph/pixel qualification",
+  "sourceHashes": {
+    "StreamCore/Annotations.swift": "8739a3ac99a57120551a9d14ae470a45162266aeab0493033e3c64e7b22b13ef",
+    "StreamMac/AnnotationModel.swift": "eea89dddd0966daf2807aa5b1a0ce16e47c9fcb40d9d76104a3f48c774a0403e",
+    "StreamMac/AnnotationToolbarView.swift": "07e84852ba46bd47719575a180d33a9e09c3ba234f2bb75b098e05ba84b212a8",
+    "StreamMac/LayerGraph.swift": "84bf12ec33fbfc61162a26faeec5cfc83262d66ec4820a8ee2110543568845d7",
+    "StreamMac/StudioAccessibility.swift": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c",
+    "StreamMac/StudioControlRow.swift": "581b2013d6b3daa9bcfb4d294fcb6332467979cf2b43b4c78d10de593c5e18be",
+    "docs/ANNOTATION_TOOLBAR_LAYOUT_2026-10-22.md": "0b82cf8fd9ed364e389249d5268129dbd32e3ca9449b769fe22d3bb00b48e395",
+    "scripts/test_annotation_toolbar_layout.py": "95e67e055187637ac58657d6db79958224c98f1c5564d0c7cc4e2a1cf0f3b429"
+  },
+  "supplementalChecks": [
+    "Swift source parse PASS",
+    "Python source compile PASS",
+    "git diff --check PASS"
+  ]
+}
