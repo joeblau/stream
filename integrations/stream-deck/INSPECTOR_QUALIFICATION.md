@@ -62,21 +62,23 @@ contains both x86_64 and arm64 slices. The package is generated under `dist/`.
 
 ## Requirements still open in #152
 
-There are no genuine stream/record/interview `.streamDeckProfile` sample
-exports in this change. Recipes or labels do not satisfy that requirement.
-Elgato's supported creation workflow composes and exports each profile in the
-Stream Deck application. Its SDK switches to already exported bundled profiles;
-the official CLI packages plugins and does not author/export profile archives.
-The installed Stream Deck 7.4.2 app is available, but the macOS session is
-locked. No unlock, external-app input or permission change was attempted.
-Actual sample composition/export/import must be completed in an unlocked
-session, retaining the target device configuration and explicit project
-rebinding. No private archive format or export API was invented.
+Three deterministic stream/record/interview 15-key profile candidates are now
+bundled and registered. Their public MIT template, reproducibility and package
+contents are checked; actual target-app importer acceptance remains pending.
+Manual editor export is an alternative producer, not an original issue
+requirement. See [profile candidates](profiles/README.md).
 
-Physical keypad/Plus/Pedal/Mobile behavior, real signed package install/update/
-uninstall and signed-helper pairing remain separate qualification. Marketplace
-submission remains a separate release action. Passing the software checks does
-not close the entire #152 issue.
+The bundled SDK suite explicitly exercises standard keypad, Plus dial,
+six-key Mobile and three-key Pedal configurations against owned peers. It saves
+stable settings, loses an acknowledgement, stops and relaunches the actual
+plugin process and restarts the owned native TCP listener. Fresh feedback and
+explicit dispatch return without command replay or settings rewrite. These are
+protocol/configuration proofs, not physical device delivery measurements.
+
+Actual package install/update/uninstall remains separate from the existing
+owned development-link lifecycle. Marketplace submission remains a distinct
+release action. No profile import, personal device action, app configuration,
+session unlock or permission change is performed by these software checks.
 
 Official references: [property inspector protocol](https://docs.elgato.com/streamdeck/sdk/references/websocket/ui/),
 [profile creation and bundling](https://docs.elgato.com/streamdeck/sdk/guides/profiles/),

@@ -10,7 +10,10 @@
     "test:browser": "node tests/inspector-browser.mjs",
     "test:install": "node tests/install-lifecycle.mjs",
     "validate": "streamdeck validate com.joeblau.stream-studio.sdPlugin",
-    "package": "npm run build && npm run validate && streamdeck pack com.joeblau.stream-studio.sdPlugin --output dist --force"
+    "package": "npm run build && npm run validate && streamdeck pack com.joeblau.stream-studio.sdPlugin --output dist --force && npm run test:package",
+    "profiles": "python3 scripts/generate-profiles.py",
+    "profiles:check": "python3 scripts/generate-profiles.py --check",
+    "test:package": "python3 scripts/check-profile-package.py"
   },
   "dependencies": {
     "@elgato/streamdeck": "3.0.1",

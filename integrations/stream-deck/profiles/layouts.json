@@ -1,0 +1,193 @@
+[
+  {
+    "id": "stream",
+    "name": "Stream Studio - Stream (15-key starter)",
+    "columns": 5,
+    "rows": 3,
+    "deviceType": 0,
+    "actions": [
+      {
+        "title": "Open Studio",
+        "action": "open"
+      },
+      {
+        "title": "Preview On",
+        "commandID": "output.preview.start"
+      },
+      {
+        "title": "Take",
+        "commandID": "studio.take"
+      },
+      {
+        "title": "Revert",
+        "commandID": "studio.revert"
+      },
+      {
+        "title": "Mic Mute",
+        "commandID": "audio.microphone.mute"
+      },
+      {
+        "title": "Previous Scene",
+        "commandID": "studio.scene.previous"
+      },
+      {
+        "title": "Next Scene",
+        "commandID": "studio.scene.next"
+      },
+      {
+        "title": "Start Stream",
+        "commandID": "output.stream.start"
+      },
+      {
+        "title": "Stop Local Stream",
+        "commandID": "output.stream.stop"
+      },
+      {
+        "title": "Monitor",
+        "commandID": "audio.monitor.toggle"
+      },
+      {
+        "title": "Rundown Play",
+        "commandID": "rundown.play"
+      },
+      {
+        "title": "Rundown Pause",
+        "commandID": "rundown.pause"
+      },
+      {
+        "title": "Rundown Stop",
+        "commandID": "rundown.stop"
+      },
+      {
+        "title": "Rundown Skip",
+        "commandID": "rundown.skip"
+      },
+      {
+        "title": "Preview Off",
+        "commandID": "output.preview.stop"
+      }
+    ]
+  },
+  {
+    "id": "record",
+    "name": "Stream Studio - Record (15-key starter)",
+    "columns": 5,
+    "rows": 3,
+    "deviceType": 0,
+    "actions": [
+      {
+        "title": "Open Studio",
+        "action": "open"
+      },
+      {
+        "title": "Record Start",
+        "commandID": "output.record.start"
+      },
+      {
+        "title": "Record Stop",
+        "commandID": "output.record.stop"
+      },
+      {
+        "title": "Pause",
+        "commandID": "output.record.pause"
+      },
+      {
+        "title": "Resume",
+        "commandID": "output.record.resume"
+      },
+      {
+        "title": "New File",
+        "commandID": "output.record.split"
+      },
+      {
+        "title": "Marker",
+        "commandID": "output.record.marker"
+      },
+      {
+        "title": "Mic Mute",
+        "commandID": "audio.microphone.mute"
+      },
+      {
+        "title": "Monitor",
+        "commandID": "audio.monitor.toggle"
+      },
+      {
+        "title": "Take",
+        "commandID": "studio.take"
+      },
+      {
+        "title": "Revert",
+        "commandID": "studio.revert"
+      }
+    ]
+  },
+  {
+    "id": "interview",
+    "name": "Stream Studio - Interview (15-key starter)",
+    "columns": 5,
+    "rows": 3,
+    "deviceType": 0,
+    "actions": [
+      {
+        "title": "Open Studio",
+        "action": "open"
+      },
+      {
+        "title": "Previous Comment",
+        "commandID": "comments.previous"
+      },
+      {
+        "title": "Next Comment",
+        "commandID": "comments.next"
+      },
+      {
+        "title": "Show Comment",
+        "commandID": "comments.show"
+      },
+      {
+        "title": "Hide Comment",
+        "commandID": "comments.hide"
+      },
+      {
+        "title": "Take",
+        "commandID": "studio.take"
+      },
+      {
+        "title": "Revert",
+        "commandID": "studio.revert"
+      },
+      {
+        "title": "Mic Mute",
+        "commandID": "audio.microphone.mute"
+      },
+      {
+        "title": "Monitor",
+        "commandID": "audio.monitor.toggle"
+      },
+      {
+        "title": "Previous Scene",
+        "commandID": "studio.scene.previous"
+      },
+      {
+        "title": "Next Scene",
+        "commandID": "studio.scene.next"
+      },
+      {
+        "title": "Rundown Play",
+        "commandID": "rundown.play"
+      },
+      {
+        "title": "Rundown Pause",
+        "commandID": "rundown.pause"
+      },
+      {
+        "title": "Rundown Stop",
+        "commandID": "rundown.stop"
+      },
+      {
+        "title": "Rundown Skip",
+        "commandID": "rundown.skip"
+      }
+    ]
+  }
+]
