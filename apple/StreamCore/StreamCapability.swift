@@ -73,4 +73,14 @@ public struct StreamCapability: Equatable, Sendable {
     /// `device(processorCount:physicalMemory:)` with injected values instead so
     /// they never depend on the CI runner's hardware.
     public static let current = device()
+
+    /// A runtime memory guard for optional desktop rasters. This does not
+    /// certify a workload or raise any existing resolution/encoder ceiling.
+    /// Preview sheds work once process footprint reaches a fifth of RAM,
+    /// bounded to 256 MiB–4 GiB across the existing hardware classes.
+    public static func desktopPreviewFootprintBudget(
+        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
+    ) -> UInt64 {
+        max(256 * 1_024 * 1_024, min(physicalMemory / 5, 4 * 1_024 * 1_024 * 1_024))
+    }
 }

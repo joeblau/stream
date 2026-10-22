@@ -694,6 +694,8 @@ actor CompositionEngine {
 
     private func noteMissedDeadlines(_ count: Int) { metrics.missedDeadlines += count }
 
+    func kernelMetricsSnapshot() -> CompositionKernelMetrics { renderer.kernelMetrics }
+
     /// One output frame: pull the latest sample from every source, composite
     /// the scene graph once, stamp it on the shared clock, and broadcast.
     /// Never gated on a fresh source frame (issue #65, criterion 2).

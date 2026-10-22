@@ -23,6 +23,10 @@ struct StatsHUDView: View {
             if let stats, stats.droppedFrames > 0 {
                 metric("Dropped", value: stats.droppedLabel, tint: .orange)
             }
+            if let notice = stream.previewResourceNotice {
+                Label("Preview limited", systemImage: "gauge.with.dots.needle.bottom.50percent")
+                    .font(.caption).foregroundStyle(.orange).help(notice)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
