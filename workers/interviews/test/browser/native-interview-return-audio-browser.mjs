@@ -12,6 +12,13 @@ import {WebSocket} from 'ws';
 import {chromeFixtureExecutable, chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const startup=new ChromeFixtureDiagnostics();
+const slotLifecycle=process.argv.includes('--slot-lifecycle');
+const nullAudioSink=slotLifecycle||process.argv.includes('--null-audio-sink');
+// Explicit software-only route qualification, never an HTML output/AEC oracle.
+// The default invocation keeps its original output consumer and all thresholds.
+const nullAudioSource=nullAudioSink?`const NativeAudioContext=window.AudioContext;window.__fixtureNullSinks=[];
+window.AudioContext=class extends NativeAudioContext{constructor(options={}){console.debug('owned-null-sink','constructor-begin');super({...options,sinkId:{type:'none'}});console.debug('owned-null-sink','constructor-returned');if(this.sinkId?.type!=='none')throw new Error('Owned null audio sink unavailable');window.__fixtureNullSinks.push(this);}};
+document.addEventListener('DOMContentLoaded',()=>{document.getElementById('return').muted=true;},{once:true});`:'';
 async function wait(label,predicate,timeout=15_000){const end=Date.now()+timeout;while(Date.now()<end){const value=await predicate();if(value)return value;await pause(50);}throw new Error(`Bounded fixture timeout: ${label}`);}
 async function port(){const server=net.createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const value=server.address().port;await new Promise(resolve=>server.close(resolve));return value;}
 const workerRoot=fileURLToPath(new URL('../../',import.meta.url));
@@ -33,6 +40,11 @@ class CDP {
       if (pending) { this.pending.delete(value.id); clearTimeout(pending.timer);
         value.error ? pending.reject(new Error(value.error.message)) : pending.resolve(value.result); }
       if (value.method === 'Runtime.exceptionThrown') this.errors.push(value.params.exceptionDetails.text);
+      if(value.method==='Runtime.consoleAPICalled'&&value.params.args?.[0]?.value==='owned-slot-prepare-complete') this.prepareDone=value.params.args[1]?.value;
+      if(value.method==='Runtime.consoleAPICalled'&&value.params.args?.[0]?.value==='owned-null-sink') {
+        const phase=value.params.args[1]?.value;
+        if(['constructor-begin','constructor-returned'].includes(phase))console.error('Owned null AudioContext stage: '+phase);
+      }
       startup.event(value.method);
     });
     socket.on('close', () => { for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Chrome closed')); } this.pending.clear(); });
@@ -44,7 +56,25 @@ class CDP {
     });
   }
   async evaluate(sessionId, expression) {
-    const result = await this.send('Runtime.evaluate', {expression,returnByValue:true,awaitPromise:true,userGesture:true}, sessionId);
+    let result;
+    try { result = await this.send('Runtime.evaluate', {expression,returnByValue:true,awaitPromise:true,userGesture:true}, sessionId); }
+    catch(error) {
+      // Diagnose only this owned Chrome, without changing its media graph.
+      // Distinguish an awaited media promise from a wedged renderer thread.
+      const checks=await Promise.allSettled([
+        this.send('Browser.getVersion'),
+        this.send('Runtime.evaluate',{expression:'1+1',returnByValue:true,awaitPromise:false},sessionId),
+      ]);
+      console.error('Owned Chrome evaluate diagnostic: '+JSON.stringify({
+        expressionSHA256:createHash('sha256').update(expression).digest('hex'),
+        operation:expression==="document.getElementById('prepare').click()"?'prepare-click':
+          expression==='Array.isArray(window.__fixtureCamera)'?'synthetic-capture-installed':
+          expression==="location.hash===''"?'invite-fragment-cleared':'other',
+        browser:checks[0].status==='fulfilled'?checks[0].value.product:'unresponsive',
+        renderer:checks[1].status==='fulfilled'?checks[1].value.result?.value:'unresponsive',
+      }));
+      throw error;
+    }
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
     return result.result.value;
   }
@@ -132,6 +162,9 @@ try {
   });
   function command(value){check();assert(native.stdin.writableLength<16384,'Native command backlog');native.stdin.write(JSON.stringify(value)+'\n');}
   command({type:'create'});await wait('native actual Worker create and host connect',()=>{check();return invite&&state?.phase==='connected';});
+  const prepared={...state.preparedSlot};
+  assert(prepared.id&&prepared.camera!==prepared.screen&&prepared.peer==='','Actual manager exposes prepared independent positions before browser startup');
+  if(nullAudioSink)console.log('Scope: explicit null AudioContext sink and muted owned HTML player; actual stream/decoded PCM routing only, no normal rendered output/AEC qualification');
   const executable=await chromeFixtureExecutable(process.env.CHROME_BIN??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', owned);
   const profile=path.join(owned,'chrome');await fs.mkdir(profile,{mode:0o700});
   startup.phase('launch');
@@ -149,7 +182,7 @@ try {
   await browser.send('Page.enable',{},g);await browser.send('Runtime.enable',{},g);
   startup.phase('page-runtime-enabled');
   const ownedTURNOverride=String.raw`const ownedRelay=${JSON.stringify({ttl:600,iceServers:[{urls:[turnURL],username:turnUsername,credential:turnCredential}]})};const originalFetch=window.fetch.bind(window);window.fetch=(input,init)=>{const url=new URL(typeof input==='string'?input:input.url,location.href);if(url.origin===location.origin&&/^\/v1\/rooms\/[0-9a-f-]+\/turn$/.test(url.pathname))return Promise.resolve(new Response(JSON.stringify(ownedRelay),{headers:{'Content-Type':'application/json'}}));return originalFetch(input,init);};`;
-  await browser.send('Page.addScriptToEvaluateOnNewDocument',{source:syntheticMedia+ownedTURNOverride},g);
+  await browser.send('Page.addScriptToEvaluateOnNewDocument',{source:nullAudioSource+syntheticMedia+ownedTURNOverride},g);
   startup.phase('navigate');
   await browser.send('Page.navigate',{url:invite},g);invite=undefined;
   startup.phase('navigation-accepted');
@@ -157,15 +190,64 @@ try {
   startup.phase('guest-ready');
   assert(browser.errors.length===0&&await browser.evaluate(g,'Array.isArray(window.__fixtureCamera)'),'Generated capture and local TURN override must initialize without script errors');
   assert(await browser.evaluate(g,"location.hash===''")===true,'Guest strips capability fragment');
-  await browser.evaluate(g,"document.getElementById('prepare').click()");await browser.until(g,"!document.getElementById('join').disabled",'generated devices prepared');
+  if(slotLifecycle) {
+    // Some locked-host audio services synchronously stall a genuine context
+    // constructor for >10s even with the null sink. Schedule the real handler
+    // outside the request, observe its actual completion, then inspect the DOM.
+    // Individual CDP deadlines and the default media suite remain unchanged.
+    await browser.evaluate(g,"setTimeout(()=>{Promise.resolve(document.getElementById('prepare').onclick()).then(()=>console.debug('owned-slot-prepare-complete','complete'),()=>console.debug('owned-slot-prepare-complete','failed'));},0);undefined");
+    await wait('real null-sink device preparation completion',()=>{check();return browser.prepareDone;},45_000);
+    assert.equal(browser.prepareDone,'complete');
+  } else await browser.evaluate(g,"document.getElementById('prepare').click()");
+  await browser.until(g,"!document.getElementById('join').disabled",'generated devices prepared');
   await browser.evaluate(g,"document.getElementById('join').click()");
   await wait('native actual Worker waiting roster',()=>{check();return state?.members[0]?.membership==='waiting';});
   assert(await browser.evaluate(g,'window.__fixturePeers.length')===0,'No peer before actual service admission');
 
-  const guest=state.members[0].id;command({type:'admit',id:guest});
+  const guest=state.members[0].id;
+  if(nullAudioSink)assert(await browser.evaluate(g,"window.__fixtureNullSinks.length>=2&&window.__fixtureNullSinks.every(context=>context.sinkId?.type==='none')&&document.getElementById('return').muted"),'Every actual capture/meter AudioContext uses the explicit null sink');
+  command({type:'slot-assign',id:guest});
+  await wait('waiting browser assigned deliberately to second prepared position',()=>{check();return ack==='slot-assign'&&state.preparedSlot?.peer===guest;});
+  command({type:'admit',id:guest});
   await wait('actual default Manager return ready',()=>{check();return state?.members[0]?.media==='ready'&&state?.members[0]?.returnAudio==='ready'&&state?.transport?.local==='relay'&&state?.audioAccepted>=5;},20000);
   await browser.until(g,"document.getElementById('return').srcObject?.getAudioTracks().length===1",'shipping guest return audio track');
 
+  function verifyPreparedSlot(label) {
+    assert.equal(state.lease.slot,prepared.id,`${label}: actual receive lease must use the chosen saved position`);
+    assert.deepEqual(state.preparedSlot,{...prepared,peer:guest},`${label}: slot/source/name/title identity must remain stable`);
+  }
+  verifyPreparedSlot('first actual browser admission');
+  ack=undefined;command({type:'slot-reload-check'});await wait('real project reload preserves browser-assigned position',()=>{check();return ack==='slot-reload-check';});
+
+  if(slotLifecycle) {
+    const relay=await wait('actual browser selected relay evidence',async()=>{
+      check();const value=await browser.evaluate(g,`(async()=>{const stats=await window.__fixturePeers.at(-1).getStats();let value={};for(const record of stats.values()){if(record.type==='inbound-rtp'&&record.kind==='audio')value={...value,packets:record.packetsReceived,samples:record.totalSamplesReceived,codec:stats.get(record.codecId)?.mimeType};if(record.type==='transport'&&record.selectedCandidatePairId){const pair=stats.get(record.selectedCandidatePairId);value={...value,local:stats.get(pair.localCandidateId)?.candidateType,remote:stats.get(pair.remoteCandidateId)?.candidateType};}}return value;})()`);
+      return value.local==='relay'&&value.remote==='relay'?value:undefined;
+    });
+    assert(state.transport.udp,'Focused fixture uses actual default UDP native relay');
+    console.log('Actual focused browser selected-relay receipt (muted HTML; counts are metadata, not PCM qualification): '+JSON.stringify(relay));
+    assert(!state.programAllowed,'First actual admission is private');
+    command({type:'onair',id:guest});
+    await wait('actual SDK decoded guest audio admitted to Program',()=>{check();return state.programAllowed&&state.program?.own440and880[0]>.07&&state.program?.own440and880[1]>.025;});
+    verifyPreparedSlot('actual On Air');
+    command({type:'backstage',id:guest});
+    await wait('actual Backstage acknowledgment excludes received guest from Program',()=>{check();return !state.programAllowed&&state.members[0]?.membership==='backstage'&&state.program?.own440and880?.every(value=>value<.004);});
+    verifyPreparedSlot('actual Backstage');
+    const previousGeneration=state.lease.generation;
+    command({type:'rejoin'});
+    await wait('actual host rejoin returns same browser invite to waiting',()=>{check();return state.phase==='connected'&&state.members[0]?.membership==='waiting'&&!state.lease;});
+    command({type:'admit',id:guest});
+    await wait('same actual browser peer gets fresh native receive lease',()=>{check();return state.lease?.generation>previousGeneration&&state.members[0]?.media==='ready'&&state.members[0]?.returnAudio==='ready'&&state.transport?.local==='relay';},20_000);
+    verifyPreparedSlot('actual browser/native receive replacement');
+    assert(!state.programAllowed,'Stable reconnect assignment never replays Program permission');
+    ack=undefined;command({type:'slot-reload-check'});await wait('on-disk project reload after actual browser rejoin',()=>{check();return ack==='slot-reload-check';});
+    command({type:'remove',id:guest});await wait('actual browser guest removal retires lease',()=>{check();return !state.lease&&!state.members.some(member=>member.id===guest);});
+    command({type:'end'});await wait('actual room ends',()=>{check();return state.phase==='ended';});
+    command({type:'stop'});await wait('native permanent cleanup',()=>{check();return stopped&&closed;},10_000);assert.equal(linesAfterStop,0);
+    assert.equal(browser.errors.length,0);
+    console.log('PASS actual Manager/default SDK/local UDP relay/Chrome slot lifecycle: second pre-arrival position deliberately selected, stable distinct camera/screen IDs and bound name/title metadata, native decoded Program On Air/Backstage exclusion, actual host/browser full-lease rejoin without Program replay, actual project reload, removal/end cleanup');
+    console.log('Scope: explicit verified null AudioContext sinks; actual media/control/native PCM only. No normal HTML output/AEC or return-video sync qualification; existing full audio suite remains separate.');
+  } else {
   const returnAnalyzer=String.raw`(async()=>{
     window.__returnAnalysis?.processor.disconnect();window.__returnAnalysis?.source.disconnect();await window.__returnAnalysis?.context.close();
     const stream=document.getElementById('return').srcObject,track=stream.getAudioTracks()[0];
@@ -259,6 +341,12 @@ try {
   await spectrum('deadline-private-mic-tail-absent',.4,.2);
   command({type:'onair',id:guest});await wait('actual Program guest admission',()=>{check();return state.programAllowed&&state.members[0]?.returnAudio==='ready'&&state.program?.own440and880[0]>.07&&state.program?.own440and880[1]>.025;});
   console.log(`Actual own signal positive in shipping Program before return exclusion: ${JSON.stringify(state.program)}`);await spectrum('onair-own440-880-excluded',.4,.2);
+  command({type:'backstage',id:guest});
+  await wait('acknowledged Backstage removes actual guest from Program',()=>{check();return !state.programAllowed&&state.members[0]?.membership==='backstage'&&state.program?.own440and880?.every(value=>value<.004);});
+  await spectrum('backstage-after-onair-return-remains-independent',.4,.2);
+  verifyPreparedSlot('explicit return to backstage');
+  command({type:'onair',id:guest});
+  await wait('deliberate On Air restores actual guest Program route',()=>{check();return state.programAllowed&&state.program?.own440and880[0]>.07&&state.program?.own440and880[1]>.025;});
   ack=undefined;command({type:'mute'});await wait('actual local mixer mute acknowledged',()=>{check();return ack==='mute';});await pause(400);await spectrum('local-muted',0,0);
   ack=undefined;command({type:'restore'});await wait('actual local mixer nonunity restore acknowledged',()=>{check();return ack==='restore';});await pause(300);await spectrum('local-nonunity-restore',.16,.08);
   ack=undefined;command({type:'talkback-start'});await wait('hold before actual host reconnect',()=>{check();return ack==='talkback-start'&&state.privateTalkback;});
@@ -268,6 +356,10 @@ try {
   assert(await browser.evaluate(g,"window.__returnAnalysis.track.readyState==='ended'")===true,'Actual previous remote return track retires');
   await wait('actual host reconnected awaiting admission',()=>{check();return state.phase==='connected'&&state.members[0]?.membership==='waiting';});
   command({type:'admit',id:guest});await wait('fresh full lease actual return ready',()=>{check();return state.lease?.generation>oldGeneration&&state.members[0]?.returnAudio==='ready'&&state.transport?.local==='relay';},20000);
+  verifyPreparedSlot('actual host rejoin/new receive generation');
+  assert(!state.programAllowed,'Reconnect must preserve assignment without replaying Program permission');
+  ack=undefined;command({type:'slot-reload-check'});await wait('real project reload preserves position after browser rejoin',()=>{check();return ack==='slot-reload-check';});
+  console.log('PASS actual shipping Manager/default SDK/local relay Chrome: deliberately chosen pre-arrival position, stable camera/screen/name/title/reconnect identity through admission, On Air/Backstage, full-lease replacement and real project reload; reconnect never replays Program permission');
   await browser.until(g,"document.getElementById('return').srcObject?.getAudioTracks().length===1",'new shipping return stream');
   await browser.evaluate(g,returnAnalyzer);await spectrum('rejoined-new-fulllease',.16,.08);
   assert(!state.privateTalkback,'Actual rejoin must not replay the prior hold');
@@ -301,9 +393,11 @@ try {
   command({type:'end'});await wait('actual room ended',()=>{check();return state.phase==='ended';});
   command({type:'stop'});await wait('native permanent cleanup receipt',()=>{check();return stopped&&closed;},10000);assert(linesAfterStop===0);
   assert(browser.errors.length===0,'Actual shipping guest page no runtime errors');
+  if(nullAudioSink)assert(await browser.evaluate(g,"window.__fixtureNullSinks.length>=3&&window.__fixtureNullSinks.every(context=>context.sinkId?.type==='none')&&document.getElementById('return').muted"),'Actual decoded return analyzers retained null sinks; HTML output was not qualified');
   console.log(`PASS ${version.product}: actual shipping NativeInterviewManager/default receiver/controller-issued sink→preclamp fulllease return→public native stereo Opus→SDK RTP/RTCP→owned TURN→shipping guest audio track/Chrome decoded48k PCM; own440/880 excluded, local1000/1700 preserved, mute/nonunity restore, new-generation rejoin and remove fence`);
   console.log('PASS actual addressed private microphone: native recipient PCM and real Chrome decoded Opus positive, Program/Monitor/Aux/both ISO exclusion, explicit release, focus notification, ten-second deadline, active rejoin cancellation, retained-context refusal and deliberate fresh hold');
   console.log('Scope: owned local Worker/Coturn/synthetic captures only. Return video, physical capture/operator UI/AEC, mobile/restricted-network/deployed broker remain unqualified.');
+  }
 } finally {
   browserSocket?.close();for(const value of children.reverse())await terminate(value);
   await fs.rm(owned,{recursive:true,force:true,maxRetries:5,retryDelay:100});
