@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Lightweight owned-source provenance regressions; no SDK build or network."""
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -28,6 +29,23 @@ def repository(root):
 
 
 class SourceRefusalTests(unittest.TestCase):
+    def test_owned_archive_receipt_refuses_mutation_and_foreign_target(self):
+        with tempfile.TemporaryDirectory(prefix="stream-owned-archive-refusal-") as directory:
+            prefix = Path(directory)
+            archive = prefix / "libglib.a"
+            archive.write_bytes(b"owned source-build artifact")
+            receipt = {"architecture": "arm64", "target": "14.0", "archives": [{"path": str(archive), "sha256": backend.digest(archive)}]}
+            (prefix / "owned-dependencies.json").write_text(json.dumps(receipt))
+            backend.verify_owned_dependencies(prefix, "arm64", "14.0")
+            with self.assertRaisesRegex(RuntimeError, "architecture or runtime floor"):
+                backend.verify_owned_dependencies(prefix, "x86_64", "14.0")
+            with self.assertRaisesRegex(RuntimeError, "architecture or runtime floor"):
+                backend.verify_owned_dependencies(prefix, "arm64", "13.0")
+            archive.write_bytes(b"owned modified artifact")
+            with self.assertRaisesRegex(RuntimeError, "differs from its source-build receipt"):
+                backend.verify_owned_dependencies(prefix, "arm64", "14.0")
+            self.assertEqual(archive.read_bytes(), b"owned modified artifact")
+
     def test_staged_source_is_refused_and_preserved(self):
         with tempfile.TemporaryDirectory(prefix="stream-nice-source-refusal-") as directory:
             root = Path(directory)
