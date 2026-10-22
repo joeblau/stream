@@ -14,8 +14,15 @@ private final class ProviderEndingIntentLease: @unchecked Sendable {
 
 @MainActor protocol ProviderRestreamBoundary: AnyObject, Sendable {
     var hasProviderAuthorization: Bool { get }
+    var providerAuthorizationGeneration: UUID? { get }
+    var providerGrantedScopes: Set<String>? { get }
     func signOut()
     func authorizedProviderRequest(_ request: URLRequest) async throws -> Data
+}
+extension ProviderRestreamBoundary {
+    // Existing read-only boundaries cannot silently authorize secret discovery.
+    var providerAuthorizationGeneration: UUID? { nil }
+    var providerGrantedScopes: Set<String>? { nil }
 }
 
 struct ProviderAccountSnapshot {
@@ -356,7 +363,7 @@ final class ProviderAccountSession: ObservableObject {
                 if provider == .twitch { try await vault.validateTwitch() }
                 let api = api(), channels = try await api.channels(provider)
                 let events = provider == .twitch ? [] : try await api.upcoming(provider)
-                let scopes = await vault.scopes(provider)
+                let scopes = provider == .restream ? (restream.providerGrantedScopes ?? []).sorted() : await vault.scopes(provider)
                 guard isCurrent(provider, generation) else { return }
                 accounts[provider]?.channels = channels
                 // Eventual consistency or removal from an upcoming list is not
@@ -514,6 +521,38 @@ final class ProviderAccountSession: ObservableObject {
     /// from the authorized API into DestinationSession's Keychain-backed editor.
     func importConnection(provider: ManagedProvider, channel: ProviderChannel, event: ProviderEvent?, endpoint: String) async throws -> DestinationCredentials {
         guard canRequest(provider) else { throw ProviderFailure(.rateLimited) }
+        guard !closed, channel.provider == provider, !Task.isCancelled else { throw ProviderFailure(.authorization) }
+        if provider == .restream {
+            // Relay ingest is account-wide, not an event or downstream-channel
+            // binding. Reject a selected event rather than guessing its key.
+            guard event == nil, restream.hasProviderAuthorization,
+                  let credential = restream.providerAuthorizationGeneration,
+                  let scopes = restream.providerGrantedScopes,
+                  scopes.isSuperset(of: ["channels.read", "stream.read"]) else { throw ProviderFailure(.permission) }
+            let lease = endingIntentLease(.restream)
+            let api = ProviderAPI { [weak self] requested, request in
+                guard let self, requested == .restream else { throw ProviderFailure(.invalidRequest) }
+                return try await self.restreamImportRead(request, credential: credential, lease: lease)
+            }
+            do { return try await api.restreamIngest(channelID: channel.id) }
+            catch {
+                try Task.checkCancellation()
+                guard !closed, lease.isCurrent(), restream.providerAuthorizationGeneration == credential else { throw CancellationError() }
+                if let failure = error as? ProviderFailure {
+                    accounts[.restream]?.failure = failure
+                    if failure.kind == .rateLimited {
+                        let delay = max(1, failure.retryAfter ?? 60)
+                        accounts[.restream]?.retryUntil = Date().addingTimeInterval(delay)
+                        cooldowns[.restream]?.cancel()
+                        cooldowns[.restream] = Task { [weak self] in
+                            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                            self?.accounts[.restream]?.retryUntil = nil; self?.cooldowns[.restream] = nil
+                        }
+                    }
+                }
+                throw error
+            }
+        }
         if provider == .youtube, let event {
             let api = api(), current = try await api.youtubeEvent(id: event.id)
             guard current.channelID == channel.id, [.upcoming, .live].contains(current.state) else { throw ProviderFailure(.invalidRequest) }
@@ -524,6 +563,33 @@ final class ProviderAccountSession: ObservableObject {
             return .init(endpoint: endpoint, streamKey: try await api().twitchStreamKey(channelID: channel.id))
         }
         throw ProviderFailure(.unavailable)
+    }
+    private func restreamImportRead(_ request: URLRequest, credential: UUID, lease: ProviderEndingIntentLease) async throws -> Data {
+        func validate() throws {
+            guard !closed, lease.isCurrent(), restream.hasProviderAuthorization,
+                  restream.providerAuthorizationGeneration == credential,
+                  restream.providerGrantedScopes?.isSuperset(of: ["channels.read", "stream.read"]) == true else { throw ProviderFailure(.authorization) }
+            guard canRequest(.restream) else { throw ProviderFailure(.rateLimited) }
+            try Task.checkCancellation()
+        }
+        try validate()
+        guard request.httpMethod == "GET", request.httpBody == nil, request.httpBodyStream == nil,
+              let url = request.url, url.scheme == "https", url.host == "api.restream.io",
+              url.user == nil, url.password == nil, url.port == nil, url.fragment == nil, url.query == nil,
+              ["/v2/user/channels", "/v2/user/ingest", "/v2/user/streamKey", "/v2/server/all"].contains(url.path) else { throw ProviderFailure(.invalidRequest) }
+        let data: Data
+        if url.path == "/v2/server/all" {
+            // Public discovery never receives the user's bearer credential.
+            var publicRequest = request; publicRequest.setValue(nil, forHTTPHeaderField: "Authorization")
+            let (bytes, response) = try await transport(publicRequest)
+            try validate()
+            try ProviderFailure.check(data: bytes, response: response)
+            data = bytes
+        } else {
+            data = try await restream.authorizedProviderRequest(request)
+        }
+        try validate()
+        return data
     }
     @discardableResult func createYouTube(_ draft: YouTubeEventDraft, channelID: String? = nil) -> UUID? {
         guard pending.canCreate, let channelID = channelID ?? (snapshot(.youtube).channels.count == 1 ? snapshot(.youtube).channels.first?.id : nil) else { return nil }

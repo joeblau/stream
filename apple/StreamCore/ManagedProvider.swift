@@ -96,6 +96,8 @@ public struct ProviderEvent: Codable, Equatable, Identifiable, Sendable {
     public var enableAutoStop: Bool?
     public var latencyPreference: LatencyPreference?
     public var thumbnails: [YouTubeThumbnail]?
+    /// Explicit external link only; never automatically fetched or journaled.
+    public var coverURL: URL?
     /// A receipt is an observation, never a persistent live-state assertion.
     /// Reject future timestamps too, for example after a wall-clock correction.
     public func isFresh(at now: Date = Date()) -> Bool {
@@ -106,12 +108,13 @@ public struct ProviderEvent: Codable, Equatable, Identifiable, Sendable {
                 description: String = "", privacy: String? = nil, scheduledAt: Date? = nil,
                 state: State = .unknown, publicURL: URL? = nil, verifiedAt: Date = Date(),
                 boundStreamID: String? = nil, enableAutoStart: Bool? = nil, enableAutoStop: Bool? = nil,
-                latencyPreference: LatencyPreference? = nil, thumbnails: [YouTubeThumbnail]? = nil) {
+                latencyPreference: LatencyPreference? = nil, thumbnails: [YouTubeThumbnail]? = nil, coverURL: URL? = nil) {
         self.id = id; self.provider = provider; self.channelID = channelID; self.title = String(title.prefix(500))
         self.description = String(description.prefix(5_000)); self.privacy = privacy; self.scheduledAt = scheduledAt
         self.state = state; self.publicURL = ProviderChannel.publicLink(publicURL); self.verifiedAt = verifiedAt
         self.boundStreamID = boundStreamID; self.enableAutoStart = enableAutoStart; self.enableAutoStop = enableAutoStop
         self.latencyPreference = latencyPreference
+        self.coverURL = Self.publicCover(coverURL)
         self.thumbnails = thumbnails.map { values in
             // One descriptor per documented size, in provider size order.
             YouTubeThumbnail.Size.allCases.compactMap { size in values.first { $0.size == size } }
@@ -119,7 +122,7 @@ public struct ProviderEvent: Codable, Equatable, Identifiable, Sendable {
     }
     private enum CodingKeys: String, CodingKey {
         case id, provider, channelID, title, description, privacy, scheduledAt, state, publicURL, verifiedAt
-        case boundStreamID, enableAutoStart, enableAutoStop, latencyPreference, thumbnails
+        case boundStreamID, enableAutoStart, enableAutoStop, latencyPreference, thumbnails, coverURL
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -133,6 +136,7 @@ public struct ProviderEvent: Codable, Equatable, Identifiable, Sendable {
         boundStreamID = try c.decodeIfPresent(String.self, forKey: .boundStreamID)
         enableAutoStart = try c.decodeIfPresent(Bool.self, forKey: .enableAutoStart); enableAutoStop = try c.decodeIfPresent(Bool.self, forKey: .enableAutoStop)
         latencyPreference = try c.decodeIfPresent(LatencyPreference.self, forKey: .latencyPreference)
+        coverURL = Self.publicCover(try c.decodeIfPresent(URL.self, forKey: .coverURL))
         thumbnails = nil
         if c.contains(.thumbnails), try !c.decodeNil(forKey: .thumbnails) {
             var values = try c.nestedUnkeyedContainer(forKey: .thumbnails)
@@ -149,6 +153,13 @@ public struct ProviderEvent: Codable, Equatable, Identifiable, Sendable {
             }
             thumbnails = decoded.sorted { $0.size.order < $1.size.order }
         }
+    }
+    private static func publicCover(_ url: URL?) -> URL? {
+        guard let url, url.absoluteString.utf8.count <= 2_048,
+              let c = URLComponents(url: url, resolvingAgainstBaseURL: false), c.scheme == "https", c.host != nil,
+              c.user == nil, c.password == nil, c.port == nil, c.query == nil, c.fragment == nil,
+              url.absoluteString.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else { return nil }
+        return url
     }
 }
 

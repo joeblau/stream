@@ -127,8 +127,16 @@ final class RestreamChat: NSObject {
     @ObservationIgnored private var clientSecret = RestreamKeychain.get("clientSecret") ?? ""
     @ObservationIgnored private var accessToken = RestreamKeychain.get("accessToken")
     @ObservationIgnored private var refreshToken = RestreamKeychain.get("refreshToken")
+    @ObservationIgnored private var grantedScopes: Set<String>? = RestreamKeychain.get("grantedScopes").flatMap { raw in
+        guard let data = raw.data(using: .utf8), data.count <= 16_384,
+              let scopes = try? JSONDecoder().decode([String].self, from: data), scopes.count <= 100,
+              scopes.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 }) else { return nil }
+        return Set(scopes)
+    }
     #if os(macOS)
     var hasProviderAuthorization: Bool { accessToken != nil }
+    var providerAuthorizationGeneration: UUID? { accessToken == nil ? nil : sessionGeneration }
+    var providerGrantedScopes: Set<String>? { grantedScopes }
 
     /// The account boundary exposes documented REST data, never tokens. A GET
     /// may refresh once after 401; mutations are never replayed automatically.
@@ -140,6 +148,8 @@ final class RestreamChat: NSObject {
         guard let token = accessToken else { throw ProviderFailure(.authorization) }
         var req = request; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         var (data, response) = try await ProviderHTTP.shared.send(req)
+        guard sessionGeneration == generation else { throw CancellationError() }
+        try Task.checkCancellation()
         if response.statusCode == 401 && (request.httpMethod ?? "GET") == "GET" {
             guard await refreshAccessToken(), sessionGeneration == generation, let token = accessToken else { throw ProviderFailure(.authorization) }
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -205,6 +215,7 @@ final class RestreamChat: NSObject {
             webSocket = nil
             accessToken = nil
             refreshToken = nil
+            grantedScopes = nil; RestreamKeychain.set(nil, for: "grantedScopes")
             RestreamKeychain.set(nil, for: "accessToken")
             RestreamKeychain.set(nil, for: "refreshToken")
         }
@@ -243,6 +254,7 @@ final class RestreamChat: NSObject {
         webSocket = nil
         accessToken = nil
         refreshToken = nil
+        grantedScopes = nil; RestreamKeychain.set(nil, for: "grantedScopes")
         RestreamKeychain.set(nil, for: "accessToken")
         RestreamKeychain.set(nil, for: "refreshToken")
         messages.removeAll()
@@ -309,6 +321,7 @@ final class RestreamChat: NSObject {
             let tokens = try await requestTokens(
                 body: ProviderOAuth.form(["grant_type": "authorization_code", "redirect_uri": RestreamAPI.redirectURI, "code": code]))
             guard sessionGeneration == generation else { return }
+            grantedScopes = nil
             store(tokens)
             if let token = tokens.access { openWebSocket(token: token) }
         } catch {
@@ -341,7 +354,7 @@ final class RestreamChat: NSObject {
         }
     }
 
-    private struct Tokens { let access: String?; let refresh: String? }
+    private struct Tokens { let access: String?; let refresh: String?; let scopes: Set<String>? }
 
     private func requestTokens(body: Data) async throws -> Tokens {
         var req = URLRequest(url: RestreamAPI.tokenURL)
@@ -360,13 +373,17 @@ final class RestreamChat: NSObject {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw URLError(.userAuthenticationRequired)
         }
+        let scopes = (obj["scope"] as? String)?.split(separator: " ").map(String.init)
+        guard scopes.map({ $0.count <= 100 && $0.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 }) }) ?? true else { throw URLError(.cannotParseResponse) }
         return Tokens(access: obj["access_token"] as? String,
-                      refresh: obj["refresh_token"] as? String)
+                      refresh: obj["refresh_token"] as? String, scopes: scopes.map(Set.init))
     }
 
     private func store(_ tokens: Tokens) {
         if let a = tokens.access { accessToken = a; RestreamKeychain.set(a, for: "accessToken") }
         if let r = tokens.refresh { refreshToken = r; RestreamKeychain.set(r, for: "refreshToken") }
+        if let scopes = tokens.scopes { grantedScopes = scopes }
+        RestreamKeychain.set(grantedScopes.flatMap { try? String(data: JSONEncoder().encode($0.sorted()), encoding: .utf8) }, for: "grantedScopes")
     }
 
     // MARK: Chat WebSocket
