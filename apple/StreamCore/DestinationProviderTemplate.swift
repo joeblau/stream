@@ -4,10 +4,16 @@ import Foundation
 /// limitations are dated; an operator must obtain access in the provider UI.
 public enum DestinationProviderTemplate: String, CaseIterable, Codable, Sendable, Identifiable {
     case instagram, amazonLive, x, tiktok, restream, switchboard, oneStream
+    case facebookPages, linkedinLive
     public var id: String { rawValue }
     public static let reviewedOn = "2026-10-02"
+    public var guidanceReviewedOn: String {
+        [.facebookPages, .linkedinLive].contains(self) ? "2026-10-22" : Self.reviewedOn
+    }
     public var name: String {
         switch self {
+        case .facebookPages: return "Facebook Pages Manual RTMPS"
+        case .linkedinLive: return "LinkedIn Live Manual RTMPS"
         case .instagram: return "Instagram Live Producer"
         case .amazonLive: return "Amazon Live Creator"
         case .x: return "X Media Studio Producer"
@@ -23,12 +29,15 @@ public enum DestinationProviderTemplate: String, CaseIterable, Codable, Sendable
         case .restream: return [.rtmps, .rtmp, .srt]
         case .switchboard: return [.rtmps, .rtmp, .srt]
         case .oneStream: return [.rtmps, .rtmp, .srt, .whip]
+        case .facebookPages, .linkedinLive: return [.rtmps]
         case .amazonLive: return [.rtmp]
         case .instagram, .x, .tiktok: return [.rtmps, .rtmp]
         }
     }
     public var accountRequirement: String {
         switch self {
+        case .facebookPages: return "Use only an eligible Page whose account UI issues external-encoder RTMPS credentials. Verify the current Page role and access in Live Producer. No approved Meta API connector is configured in Stream."
+        case .linkedinLive: return "Use only an eligible member or organization whose LinkedIn account UI issues external-encoder RTMPS credentials. Account eligibility does not authorize Stream API access; no approved LinkedIn connector is configured."
         case .instagram: return "Use an account that actually exposes Live Producer on instagram.com. Confirm today's account type and LIVE eligibility there; the archived official setup guide does not verify current access rules."
         case .amazonLive: return "Use an approved Amazon Live Creator account and verify your role and market in Amazon's Creator Hub. Amazon Ads lists registered brand owners in supported countries; Creator-app eligibility must be checked separately. Amazon IVS is a separate service."
         case .x: return "X says Media Studio access is for verified subscribers. Sign in, create a Producer source and broadcast, and use the source's own credentials."
@@ -40,6 +49,7 @@ public enum DestinationProviderTemplate: String, CaseIterable, Codable, Sendable
     }
     public var keyLifecycle: String {
         switch self {
+        case .facebookPages, .linkedinLive: return "Copy the selected event's current server URL and key from your authorized provider UI. Key lifetime is not verified; recheck the selected event before every session."
         case .instagram: return "The official archived guide says the key changes each Live Producer use. Copy a fresh key for each session; no fixed expiry duration is verified."
         case .amazonLive: return "Copy the current event's URL/key from External camera in the Creator app. A fixed key expiry is not verified; recheck before each event."
         case .x: return "Producer sources can be reused. A fixed key expiry is not published in the reviewed guide; verify the source and key before starting."
@@ -51,6 +61,7 @@ public enum DestinationProviderTemplate: String, CaseIterable, Codable, Sendable
     }
     public var orientationRequirement: String {
         switch self {
+        case .facebookPages, .linkedinLive: return "Match the actual event's account-issued orientation and encoder requirements. This draft follows the Program output profile; review or override it before sending. No profile is an authenticated ingest qualification."
         case .instagram: return "Archived official guidance recommends 9:16, 720×1280 at 30 fps; landscape is allowed but can be cropped in the viewer. Compose the program for portrait framing when needed."
         case .amazonLive: return "The archived external-camera guide recommends landscape 1280×720 at 30 fps. Confirm current event settings in the Creator app."
         case .x: return "Official examples use landscape 720p at 30/60 fps or 1080p at 30 fps. This starting profile uses 720p30."
@@ -60,6 +71,7 @@ public enum DestinationProviderTemplate: String, CaseIterable, Codable, Sendable
     }
     public var eventControl: String {
         switch self {
+        case .facebookPages, .linkedinLive: return "Select the Page, member or organization, set event metadata and schedule, and start/end the broadcast in the provider UI. Stream sends media only; a local ingest connection does not establish remote event state."
         case .instagram: return "Preview the feed, then start/end the event in Live Producer. The archived guide says to end there before stopping the encoder to avoid a frozen last frame."
         case .amazonLive: return "The external-camera guide requires the Creator app to set up, start and stop the event. Stream sends media only."
         case .x: return "Create and control the broadcast in Producer. A connected source does not establish that a public event is live."
@@ -69,6 +81,8 @@ public enum DestinationProviderTemplate: String, CaseIterable, Codable, Sendable
     }
     public var evidenceNotice: String {
         switch self {
+        case .facebookPages: return "Current Meta Live Video API permissions and app eligibility are unverified here; official API pages were unavailable during review. This is a manual fallback, not API discovery or approval."
+        case .linkedinLive: return "LinkedIn documents separately approved Events APIs. No approved app, broadcaster permissions or authenticated ingest was tested here; this manual guide grants no API capability."
         case .instagram: return "Official setup guidance is archived (2022); current account eligibility and key expiry still require verification."
         case .amazonLive: return "Official external-camera setup PDF is archived (2020); current Creator-app access and expiry require verification."
         case .tiktok: return "Public official help verifies general LIVE eligibility only, not an external-encoder grant, key expiry or orientation."
@@ -81,6 +95,8 @@ public enum DestinationProviderTemplate: String, CaseIterable, Codable, Sendable
     public var sources: [(title: String, url: URL)] {
         let entries: [(String, String)]
         switch self {
+        case .facebookPages: entries = [("Live Producer: verify your Page and event", "https://www.facebook.com/live/producer"), ("Official Live Video API: verify current access", "https://developers.facebook.com/docs/live-video-api/overview/")]
+        case .linkedinLive: entries = [("LinkedIn Live access: verify your account", "https://www.linkedin.com/help/linkedin/answer/a568503"), ("Official versioned Events API and access requirements", "https://learn.microsoft.com/en-us/linkedin/marketing/event-management/events?view=li-lms-2026-09")]
         case .instagram: entries = [("Official archived Live Producer guide", "https://about.instagram.com/pt-br/blog/tips-and-tricks/instagram-live-producer/")]
         case .amazonLive: entries = [("Amazon Ads account/market guidance", "https://advertising.amazon.com/solutions/products/amazon-live"), ("Official archived external-camera guide", "https://m.media-amazon.com/images/G/01/AZL/AL-GSG-V2-3.30.20._CB1585614654_.pdf"), ("Creator Hub: verify access", "https://www.amazon.com/live/creator")]
         case .x: entries = [("Media Studio access", "https://help.x.com/en/using-x/media-studio"), ("Producer ingest specifications", "https://help.x.com/en/using-x/how-to-use-live-producer")]
@@ -95,6 +111,12 @@ public enum DestinationProviderTemplate: String, CaseIterable, Codable, Sendable
     /// grant authorization or start a stream. Limits are editable starting points.
     public func makeDestination(transport: StreamProtocol? = nil) -> StreamDestination {
         let selected = transport.flatMap { transports.contains($0) ? $0 : nil } ?? transports[0]
+        if self == .facebookPages || self == .linkedinLive {
+            // Preserve the existing manual draft's profile/codec/limit defaults.
+            // This identity adds guidance, never an inferred encoder grant.
+            return StreamDestination(name: name, transport: selected, isEnabled: false,
+                                     providerTemplateID: rawValue)
+        }
         let portrait = self == .instagram || self == .tiktok
         let profile = OutputProfile(canvasWidth: portrait ? 720 : 1280, canvasHeight: portrait ? 1280 : 720, frameRate: 30)
         return StreamDestination(name: name, transport: selected, isEnabled: false, followsProgramProfile: false,
