@@ -18,7 +18,7 @@ source = source.replace(needle, needle + '\n            view.wantsLayer = true; 
 source += '\n@MainActor private final class BrowserAlphaPublicView: WKWebView { override var isOpaque: Bool { false } }\n'
 Path(sys.argv[1], 'PublicOpacityCandidate.swift').write_text(source)
 PY
-readonly SHARED=(StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift StreamMac/BrowserWidgetRasterizer.swift)
+readonly SHARED=(StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetLocalContent.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift StreamMac/BrowserWidgetRasterizer.swift)
 swiftc -j2 -DSTREAM_NATIVE_VALIDATION -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
   "${SHARED[@]}" BrowserAudioHelper/BrowserAudioHelperMain.swift -o "$ALPHA_DIR/helper-baseline"
 swiftc -j2 -DSTREAM_NATIVE_VALIDATION -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \

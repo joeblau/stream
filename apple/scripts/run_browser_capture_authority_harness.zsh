@@ -53,7 +53,7 @@ PLIST
   # Exact shipping helper code. Ad hoc signing does not establish distribution
   # provenance/sandbox qualification; this owned prototype uses existing private IPC.
   swiftc -j2 -DSTREAM_NATIVE_VALIDATION -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
-    StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift \
+    StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetLocalContent.swift StreamMac/BrowserWidgetAudioSocket.swift \
     StreamMac/BrowserWidgetVisualProtocol.swift StreamMac/BrowserWidgetRasterizer.swift \
     BrowserAudioHelper/BrowserAudioHelperMain.swift -o "$HELPER_APP/Contents/MacOS/StreamBrowserAudioHelper"
   codesign --force --sign - "$HELPER_APP"

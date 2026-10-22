@@ -13,11 +13,16 @@ struct BrowserWidgetAudioCommand: Codable, Sendable {
     var generation: UUID?
     var interaction: BrowserWidgetInteraction?
     var expression: String?
+    var localPage: BrowserWidgetLocalPage?
 
     static let maximumLineBytes = 96 * 1_024
     static let maximumWidgets = 8
 
     func validate() throws {
+        if let localPage {
+            guard action == .load, html == nil, url == nil, generation != nil else { throw CommandError.invalidContent }
+            try localPage.validate(widget: widgetID, generation: generation)
+        }
         if action == .close {
             guard widgetID == nil, html == nil, url == nil, options == nil, interaction == nil, expression == nil else { throw CommandError.invalidContent }
             return
@@ -40,7 +45,7 @@ struct BrowserWidgetAudioCommand: Codable, Sendable {
             return
         }
         try options?.validate()
-        guard (html == nil) != (url == nil) else { throw CommandError.invalidContent }
+        guard [html != nil, url != nil, localPage != nil].filter({ $0 }).count == 1 else { throw CommandError.invalidContent }
         if let html, html.utf8.count > 64 * 1_024 { throw CommandError.contentTooLarge }
         if let url {
             guard url.absoluteString.utf8.count <= 8 * 1_024,

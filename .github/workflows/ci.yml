@@ -95,6 +95,7 @@ jobs:
           BROWSER_SOCKET_HELPER_MODE_PROBES=1 zsh scripts/run_browser_socket_authority_harness.zsh
           BROWSER_AUDIO_BUILD_PATH=build/desktop zsh scripts/run_browser_audio_helper_harness.zsh
           BROWSER_EXCLUSION_CORE_PRODUCTS="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_browser_exclusion_harness.zsh
+          zsh scripts/run_browser_local_content_harness.zsh
           BROWSER_CAPTURE_AUTHORITY_DERIVED="$PWD/build/desktop" zsh scripts/run_browser_capture_authority_harness.zsh
       - name: Test managed event review and shipping publisher gates
         run: |

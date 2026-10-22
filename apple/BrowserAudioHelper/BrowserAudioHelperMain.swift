@@ -20,13 +20,14 @@ import WebKit
 @MainActor private final class BrowserAudioHelperDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     private struct Widget {
         var view: WKWebView; var window: NSWindow; var command: BrowserWidgetAudioCommand
-        var generation: UUID; var ready = false; var navigationTimeout: Timer?
+        var generation: UUID; var localRoot: URL?; var ready = false; var navigationTimeout: Timer?
     }
     private struct Retirement {
         var generation: UUID
         var completions: [@MainActor @Sendable () -> Void]
     }
     private var widgets: [UUID: Widget] = [:]
+    private var localSession: UUID?
     private var retiring: [UUID: Retirement] = [:]
     private var nativeTone: AVAudioEngine?
     private var nativeWindow: NSWindow?
@@ -124,6 +125,15 @@ import WebKit
                 stop(id) { [weak self] in self?.receive(command) }
                 return
             }
+            let local: (entry: URL, root: URL)?
+            do {
+                if let page = command.localPage {
+                    guard localSession == nil || localSession == page.session else { throw BrowserWidgetLocalContent.Failure.invalid }
+                    local = try BrowserWidgetLocalContent.resolve(page, container: BrowserWidgetLocalContent.container(),
+                        widget: id, generation: command.generation)
+                    localSession = page.session
+                } else { local = nil }
+            } catch { reply(.failed, id: id, failure: "local_asset_unavailable", generation: command.generation); return }
             let config = WKWebViewConfiguration()
             config.websiteDataStore = .nonPersistent()
             config.mediaTypesRequiringUserActionForPlayback = []
@@ -153,10 +163,11 @@ import WebKit
                     self.stop(id); self.reply(.failed, id: id, failure: "navigation_timeout", generation: generation)
                 }
             }
-            widgets[id] = Widget(view: view, window: window, command: command, generation: generation, navigationTimeout: timeout)
+            widgets[id] = Widget(view: view, window: window, command: command, generation: generation, localRoot: local?.root, navigationTimeout: timeout)
             let load: @MainActor @Sendable () -> Void = { [weak self] in
                 guard self?.widgets[id]?.view === view, self?.widgets[id]?.generation == generation else { return }
-                if let html = command.html { view.loadHTMLString(html, baseURL: nil) }
+                if let local { view.loadFileURL(local.entry, allowingReadAccessTo: local.root) }
+                else if let html = command.html { view.loadHTMLString(html, baseURL: nil) }
                 else if let url = command.url { view.load(URLRequest(url: url)) }
             }
             // Establish the WebView media gate before page script can run.
@@ -249,8 +260,12 @@ import WebKit
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         guard action.targetFrame != nil else { decisionHandler(.cancel); return }
-        if action.targetFrame?.isMainFrame == true, let url = action.request.url,
-           url.absoluteString != "about:blank", url.scheme?.lowercased() != "https" {
+        // Applies to every frame. A page cannot navigate into another lease or
+        // the App Group root; WK's file read scope also bounds subresources.
+        guard let widget = widgets.values.first(where: { $0.view === webView }),
+              let url = action.request.url,
+              BrowserWidgetLocalContent.allowsNavigation(url, root: widget.localRoot,
+                isMainFrame: action.targetFrame?.isMainFrame == true) else {
             decisionHandler(.cancel); failed(webView); return
         }
         decisionHandler(.allow)

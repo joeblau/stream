@@ -4,7 +4,7 @@ cd "${0:A:h:h}"
 readonly SOCKET_DIR="${BROWSER_SOCKET_AUTHORITY_DIR:-build/browser-socket-authority}"
 mkdir -p "$SOCKET_DIR"
 swiftc -j2 -swift-version 6 -DSTREAM_NATIVE_VALIDATION -parse-as-library \
-  StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetVisualProtocol.swift \
+  StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetLocalContent.swift StreamMac/BrowserWidgetVisualProtocol.swift \
   StreamMac/BrowserWidgetAudioSocket.swift scripts/browser_socket_authority_harness.swift -o "$SOCKET_DIR/host"
 cp "$SOCKET_DIR/host" "$SOCKET_DIR/peer"
 cp "$SOCKET_DIR/host" "$SOCKET_DIR/other-peer"
@@ -28,7 +28,7 @@ PY
 cat > "$SOCKET_DIR/ProductionPrototypeProbe.swift" <<'SWIFT'
 func forbiddenPrototype(_ value: BrowserWidgetAudioSocket.Policy = .prototypeForQualification) {}
 SWIFT
-if swiftc -j2 -swift-version 6 -typecheck StreamMac/BrowserWidgetAudioProtocol.swift \
+if swiftc -j2 -swift-version 6 -typecheck StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetLocalContent.swift \
   StreamMac/BrowserWidgetVisualProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift \
   "$SOCKET_DIR/ProductionPrototypeProbe.swift" > "$SOCKET_DIR/production-prototype-rejected.log" 2>&1; then
   print 'FAIL: shipping policy accepted a validation-only prototype case'; exit 1
@@ -42,7 +42,7 @@ PY
 if [[ "${BROWSER_SOCKET_HELPER_MODE_PROBES:-0}" == 1 ]]; then
   # No validation flag: exercise the actual shipped parser, not a generated variant.
   swiftc -j2 -swift-version 6 -parse-as-library \
-    StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetVisualProtocol.swift \
+    StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetLocalContent.swift StreamMac/BrowserWidgetVisualProtocol.swift \
     StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetRasterizer.swift \
     BrowserAudioHelper/BrowserAudioHelperMain.swift -o "$SOCKET_DIR/production-helper"
   python3 - "${SOCKET_DIR:A}/production-helper" <<'PY'

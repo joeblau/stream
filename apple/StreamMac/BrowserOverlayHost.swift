@@ -424,11 +424,8 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         helperTask?.cancel()
         let generation = snapshotGeneration
         helperFrameHeader = nil
-        // HTTPS + bounded inline fixtures only. File grants/subresource ownership have not been
-        // qualified across the process boundary; an asset never silently loses its resources.
-        guard configuration.localHTMLAssetIdentifier == nil,
-              helperHTML != nil || configuration.widgetURL?.scheme?.lowercased() == "https" else {
-            loadState = .failed("The qualification helper supports HTTPS widgets and inline fixtures. Local HTML assets remain unavailable.")
+        guard configuration.localHTMLAssetIdentifier != nil || helperHTML != nil || configuration.widgetURL?.scheme?.lowercased() == "https" else {
+            loadState = .failed("Configure an HTTPS widget or a local HTML asset.")
             return
         }
         let options = BrowserWidgetPageOptions(width: configuration.pixelWidth, height: configuration.pixelHeight,
@@ -440,8 +437,21 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
             guard let self, self.isRunning, self.snapshotGeneration == generation,
                   !Task.isCancelled else { return }
             do {
+                let access: ResolvedAssetAccess?
+                if let id = configuration.localHTMLAssetIdentifier {
+                    guard let resolved = BrowserOverlayAssetResolver.access?(id), resolved.isAccessible else {
+                        self.loadState = .failed("The local HTML asset can't be resolved — relink it in the Asset Library."); return
+                    }
+                    access = resolved
+                    BrowserOverlayAssetResolver.noteUsage?(id, "webOverlay/\(storeKey)")
+                } else { access = nil }
+                // The security scope outlives every off-main snapshot read,
+                // even when Stop cancels this host during staging.
+                defer { withExtendedLifetime(access) {} }
                 try await helperSession.loadForQualification(id: helperWidgetID, generation: generation,
-                    html: helperHTML, url: helperHTML == nil ? configuration.widgetURL : nil, options: options,
+                    html: access == nil ? helperHTML : nil,
+                    url: access == nil && helperHTML == nil ? configuration.widgetURL : nil,
+                    localSource: access?.url, options: options,
                     callbacks: .init(state: { [weak self] state in
                         guard let self, self.isRunning, self.snapshotGeneration == generation else { return }
                         self.loadState = state
@@ -480,7 +490,7 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
     }
 
     private func loadLocalHTMLAsset(_ rawID: String) {
-        guard let access = BrowserOverlayAssetResolver.access?(rawID) else {
+        guard let access = BrowserOverlayAssetResolver.access?(rawID), access.isAccessible else {
             loadState = .failed(BrowserOverlayAssetResolver.access == nil
                 ? "The asset library isn't available in this build."
                 : "The local HTML asset can't be resolved — relink it in the Asset Library.")
@@ -490,8 +500,17 @@ final class BrowserOverlayHost: NSObject, ObservableObject {
         BrowserOverlayAssetResolver.noteUsage?(rawID, "webOverlay/\(storeKey)")
         loadState = .loading
         armNavigationTimeout()
-        webView?.loadFileURL(access.url,
-                            allowingReadAccessTo: access.url.deletingLastPathComponent())
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: access.url.path, isDirectory: &isDirectory) else {
+            loadState = .failed("The local HTML asset is unavailable."); return
+        }
+        let entry = isDirectory.boolValue ? access.url.appendingPathComponent("index.html") : access.url
+        guard ["html", "htm"].contains(entry.pathExtension.lowercased()),
+              FileManager.default.isReadableFile(atPath: entry.path) else {
+            loadState = .failed("Select an HTML file or a widget folder containing index.html."); return
+        }
+        // An individual file bookmark never grants its parent/siblings.
+        webView?.loadFileURL(entry, allowingReadAccessTo: access.url)
     }
 
     // MARK: - Snapshot loop (bounded capture)
@@ -650,9 +669,19 @@ extension BrowserOverlayHost: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView,
                              decidePolicyFor navigationAction: WKNavigationAction,
                              decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
-        let urlString = navigationAction.request.url?.absoluteString ?? ""
+        let navigationURL = navigationAction.request.url
+        let urlString = navigationURL?.absoluteString ?? ""
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? false
         Task { @MainActor in
+            if let url = navigationURL, url.isFileURL {
+                guard let access = self.assetAccess else { decisionHandler(.cancel); return }
+                var directory: ObjCBool = false
+                _ = FileManager.default.fileExists(atPath: access.url.path, isDirectory: &directory)
+                guard BrowserWidgetLocalContent.allowsFileNavigation(url, root: access.url,
+                    singleFile: !directory.boolValue) else {
+                    decisionHandler(.cancel); return
+                }
+            }
             // Fail closed on the main frame: a widget page must never
             // navigate the overlay to a javascript:/data: payload.
             if isMainFrame, !urlString.isEmpty, urlString != "about:blank",

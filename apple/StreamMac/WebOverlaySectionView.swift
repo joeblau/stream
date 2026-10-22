@@ -37,6 +37,7 @@ struct WebOverlaySectionView: View {
     @EnvironmentObject private var sceneStore: SceneStore
     @EnvironmentObject private var previewProgram: PreviewProgramModel
     @EnvironmentObject private var capturePool: CaptureSourcePool
+    @EnvironmentObject private var assetLibrary: AssetLibraryStore
 
     /// The single selected layer of the staged scene, when it is a web
     /// layer (the only layers these controls edit).
@@ -74,12 +75,18 @@ struct WebOverlaySectionView: View {
             }
             Picker("Local HTML Asset", selection: config.localHTMLAssetIdentifier) {
                 Text("None (use URL)").tag(String?.none)
-                // P03: HTML assets register in the Asset Library. The store
-                // mounts with the asset panel (see BrowserOverlayAssetResolver
-                // for the runtime wiring hook); until then this lists nothing
-                // and the caption below explains the path.
+                ForEach(assetLibrary.assets.filter {
+                    $0.kind == .folder || ["html", "htm"].contains(($0.fileName as NSString).pathExtension.lowercased())
+                }) { asset in
+                    Text(asset.kind == .folder ? "\(asset.name) (index.html)" : asset.name)
+                        .tag(Optional(asset.id.rawValue.uuidString))
+                }
+                if let selected = config.wrappedValue.localHTMLAssetIdentifier,
+                   !assetLibrary.assets.contains(where: { $0.id.rawValue.uuidString == selected }) {
+                    Text("Missing HTML asset — relink in Asset Library").tag(Optional(selected))
+                }
             }
-            Text("Local HTML assets come from the Asset Library (P03): import an .html file there, then pick it here — the library's sandbox bookmark is the widget's file-access grant.")
+            Text("Import an HTML file in the Asset Library, or link a widget folder containing index.html and its relative resources. A file grants only itself; a linked folder grants its contents.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {

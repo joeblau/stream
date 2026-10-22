@@ -43,7 +43,7 @@ SWIFT
 xcrun swiftc -swift-version 6 -j2 -strict-concurrency=complete -parse-as-library \
   -module-cache-path "$EXCLUSION_BUILD/module-cache" -F "$EXCLUSION_BUILD/frameworks" -framework StreamCore \
   "$EXCLUSION_BUILD/ProductionIdentities.swift" \
-  StreamMac/BrowserCaptureExclusions.swift StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetVisualProtocol.swift \
+  StreamMac/BrowserCaptureExclusions.swift StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetLocalContent.swift StreamMac/BrowserWidgetVisualProtocol.swift \
   StreamMac/AppAudioCapture.swift StreamMac/ScreenSourceCapture.swift StreamMac/ScreenRegionDynamics.swift \
   StreamMac/GuestMediaReceipts.swift StreamMac/IsolatedRecordingTypes.swift StreamMac/IsolatedVideoTypes.swift \
   StreamMac/RecordingChatTypes.swift StreamMac/RecordingChatArchive.swift StreamMac/RecordingChatReader.swift \
@@ -62,7 +62,7 @@ python3 - "$EXCLUSION_BUILD" <<'PY'
 import hashlib,json,pathlib,sys
 p=pathlib.Path(sys.argv[1])
 names=['StreamMac/BrowserCaptureExclusions.swift','StreamMac/AppAudioCapture.swift','StreamMac/ScreenSourceCapture.swift',
-'StreamMac/ScreenRegionDynamics.swift','StreamMac/BrowserWidgetAudioProtocol.swift','StreamMac/BrowserWidgetVisualProtocol.swift',
+'StreamMac/ScreenRegionDynamics.swift','StreamMac/BrowserWidgetAudioProtocol.swift','StreamMac/BrowserWidgetLocalContent.swift','StreamMac/BrowserWidgetVisualProtocol.swift',
 'StreamMac/GuestMediaReceipts.swift','StreamMac/IsolatedRecordingTypes.swift','StreamMac/IsolatedVideoTypes.swift',
 'StreamMac/RecordingChatTypes.swift','StreamMac/RecordingChatArchive.swift','StreamMac/RecordingChatReader.swift',
 'StreamMac/RecordingPreferences.swift','StreamMac/ProgramRecordingSession.swift','StreamMac/AudioMixEngine.swift',

@@ -258,3 +258,16 @@ check establish software ownership and barrier behavior. No live SCK/helper
 launch, device, output, capture or permission operation accompanies this change.
 All remaining live/signing/attribution/A-V and local HTML/subresource gates
 remain; production selection and normal startup stay disabled.
+
+## Local HTML software path (2026-10-22)
+
+[Local HTML and relative resources](../BROWSER_WIDGET_LOCAL_CONTENT.md) now have
+an actual inspector/library entry and helper runtime path: exact-file or
+explicit-folder authority, bounded off-main private App Group snapshots, typed
+session/page leases, narrow public WebKit read scope, acknowledged retirement
+and persistent quarantine/admission. Controlled file-store and actual-session
+checks cover the authority/lifetime boundaries without launching the helper.
+Earlier statements that local helper content was unimplemented describe the
+predecessor source. Actual signed sandbox/App Group/WebKit resource loading and
+same-page audio/media remain unqualified. The production gate remains false;
+this software implementation does not close #124.
