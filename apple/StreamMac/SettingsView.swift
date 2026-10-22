@@ -126,6 +126,7 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.studioSecondary)
+            .accessibilityLabel("Close settings")
             .help("Close settings — edits are not applied until you choose Apply")
         }
         .padding(.horizontal, 12)
@@ -287,7 +288,9 @@ struct SettingsView: View {
                     ),
                     in: 1_000_000...12_000_000,
                     step: 500_000
-                )
+                ) { Text("Maximum Bitrate") }
+                .labelsHidden()
+                .accessibilityValue(Text(String(format: "%.1f megabits per second", Double(session.draft.videoBitrate) / 1_000_000)))
             }
 
             Picker("Codec", selection: Binding(
@@ -394,7 +397,12 @@ struct SettingsView: View {
                         .foregroundStyle(.studioSecondary)
                         .monospacedDigit()
                 }
-                Slider(value: $session.draft.micVolume, in: 0.0...2.0, step: 0.05)
+                Slider(value: $session.draft.micVolume, in: 0.0...2.0, step: 0.05) {
+                    Text("Microphone volume")
+                }
+                .labelsHidden()
+                .accessibilityValue(Text(session.draft.micVolume <= 0.0001
+                    ? "Muted" : StudioGainAccessibility.value(session.draft.micVolume)))
             }
 
             Toggle("Voice Polish", isOn: $session.draft.voicePolishEnabled)
@@ -831,7 +839,12 @@ struct SettingsView: View {
                     .foregroundStyle(.studioSecondary)
                     .monospacedDigit()
             }
-            Slider(value: Binding(get: { value }, set: onEdit), in: range, step: step)
+            Slider(value: Binding(get: { value }, set: onEdit), in: range, step: step) {
+                Text(title)
+            }
+            .labelsHidden()
+            .accessibilityValue(Text(!value.isFinite ? "Delay unavailable"
+                : value <= 0 ? "Off" : String(format: "%.0f %@", value, unit)))
         }
     }
 
@@ -965,7 +978,12 @@ struct SettingsView: View {
                     .foregroundStyle(.studioSecondary)
                     .monospacedDigit()
             }
-            Slider(value: duckingBinding(keyPath), in: range, step: step)
+            Slider(value: duckingBinding(keyPath), in: range, step: step) {
+                Text("Music ducking \(title)")
+            }
+            .labelsHidden()
+            .accessibilityValue(Text(range.contains(dispatcher.state.ducking[keyPath: keyPath])
+                ? format(dispatcher.state.ducking[keyPath: keyPath]) : "Ducking value unavailable"))
         }
     }
 
