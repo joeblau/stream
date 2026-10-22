@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 readonly LIFECYCLE_DIR="${MEDIA_LIFECYCLE_DIR:-build/media-lifecycle-validation}"
-readonly LIFECYCLE_FRAMEWORKS="${MEDIA_LIFECYCLE_FRAMEWORKS:-/tmp/stream-central-shipping-derived-20261021/Build/Products/Debug}"
+readonly LIFECYCLE_FRAMEWORKS="${MEDIA_LIFECYCLE_FRAMEWORKS:-build/desktop/Build/Products/Debug}"
 [[ -d "$LIFECYCLE_FRAMEWORKS/StreamCore.framework" ]] || { print -u2 'Set MEDIA_LIFECYCLE_FRAMEWORKS to built StreamCore products.'; exit 77; }
 mkdir -p "$LIFECYCLE_DIR"
 python3 - "$LIFECYCLE_DIR" <<'PY'

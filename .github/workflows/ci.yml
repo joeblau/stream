@@ -52,6 +52,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
       - name: Test native controller and automation boundaries
         run: |
+          MEDIA_LIFECYCLE_FRAMEWORKS="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_media_playback_lifecycle_harness.zsh
           zsh scripts/run_studio_shortcuts_harness.zsh
           zsh scripts/run_show_macros_harness.zsh
           zsh scripts/run_studio_local_control_harness.zsh
