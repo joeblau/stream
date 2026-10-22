@@ -1,0 +1,454 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-22",
+  "baseCommit": "1ba73513a5d5f29f34a6467ea9ddc07410ff810f",
+  "scope": "Actual owned native production StudioAccessibility styles and exact fixture slices, profile-aware sampling; no Workspace/AX/VoiceOver/key routing/media/capture/device/provider or whole-issue qualification",
+  "productionChanges": false,
+  "actualReceipt": {
+    "scope": "Entire actual production StudioAccessibility styles and exact contrast fixture slices; owned NSApp/window only, no Workspace/media graph/AX or VoiceOver qualification",
+    "baseCommit": "1ba73513a5d5f29f34a6467ea9ddc07410ff810f",
+    "sourceBindings": [
+      {
+        "origin": "/private/tmp/stream-wave18-accessibility-proof-diagnosis-20261022/apple/StreamMac/StudioAccessibility.swift",
+        "snapshot": "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/StudioAccessibility.swift",
+        "sha256": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c"
+      },
+      {
+        "origin": "/private/tmp/stream-wave18-accessibility-proof-diagnosis-20261022/apple/scripts/studio_accessibility_harness.swift",
+        "snapshot": "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/studio_accessibility_harness.swift",
+        "sha256": "aabbf9105b4e9e16aead8151e1827f0e2d557bb8a9934fe5bc1f47651eb172a0"
+      },
+      {
+        "origin": "/private/tmp/stream-wave18-accessibility-proof-diagnosis-20261022/apple/scripts/studio_workspace_harness.swift",
+        "snapshot": "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/studio_workspace_harness.swift",
+        "sha256": "ce3e04fffba8f7cc93381b574f1fa3801d99eae4f9e6347aaaac45783fe8d332"
+      },
+      {
+        "origin": "/private/tmp/stream-wave18-accessibility-proof-diagnosis-20261022/apple/scripts/run_studio_contrast_harness.py",
+        "snapshot": "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/run_studio_contrast_harness.py",
+        "sha256": "fc7bd741348dc05a672ecd1ecf4de30c6107665304deacb292a5d769edb1b6fb"
+      }
+    ],
+    "sliceSHA256": {
+      "isolatedDefaults": "a3503843e0cbd7a75285c1756767dcc90e3631b295028b003de0313f62c6d672",
+      "require": "4bf94fa48e4a077c0c4af38cfeafb9ec64a6ce7f1471d86a876f0e4e33b039a5",
+      "view": "571f8f734305eafce57a0090fab43233a09e768552da4df8804a8f48a1d299a4",
+      "methods": "47bac81434c06151b4ad12065f378f3eb8ea6289550b8922012960e2061c3690"
+    },
+    "generatedSHA256": "b1fa4612ead07789dc95c8fae010d968f7c4c5d1957327c5b79b051d6c6ca2f4",
+    "reference": {
+      "origin": "/private/tmp/stream-wave2-accessibility-20261022/apple/build/studio-workspace-validation/accessibility/interface-contrast-false.png",
+      "snapshot": "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/owned-reference.png",
+      "sha256": "13d1d9f3b013f009be0c3c5eeb44fe4b164997e49e91e5b31b6c7c81d9169b91"
+    },
+    "checks": [
+      {
+        "label": "compile",
+        "command": [
+          "xcrun",
+          "swiftc",
+          "-j2",
+          "-swift-version",
+          "6",
+          "-strict-concurrency=complete",
+          "-parse-as-library",
+          "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/StudioAccessibility.swift",
+          "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/OwnedStudioContrast.swift",
+          "-o",
+          "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/OwnedStudioContrast"
+        ],
+        "exit": 0,
+        "log": "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/compile.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "label": "runtime",
+        "command": [
+          "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/OwnedStudioContrast"
+        ],
+        "exit": 0,
+        "log": "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/runtime.log",
+        "sha256": "91142a4aad146100cb2fbcda358b454022d1605fe6b75c85f1db925153635989"
+      }
+    ],
+    "executableSHA256": "1f9e3ba6f87a4b1c36e1ee0e4897ab93c3f7525b657b5ffe54e77db3ae4b2266",
+    "images": {
+      "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-true-native.png": "d517bfd503e7c13eda07a0ebb2be4b6013acf5b7086b7d2d26836692503dbe49",
+      "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-true-srgb.png": "5befe7276f39560703154534cb5c1663b3c8b90612f355e113e845014e260af9",
+      "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-false-native.png": "2405fe21eee352ea5555e3f690f96c3eb87917e77487614831ebaabded881904",
+      "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-false-srgb.png": "112a077b08ffdb447bb213a5684ae924b3255af1431a1af446c078081605555c"
+    }
+  },
+  "outcomes": [
+    {
+      "folder": "/tmp/stream-wave18-contrast-first-20261022",
+      "outcome": "compile failure; invalid fixture bitmap initializer; no runtime"
+    },
+    {
+      "folder": "/tmp/stream-wave18-contrast-initializer-fixed-20261022",
+      "outcome": "runtime failure before window; profile conversion still sampled through NSBitmap/NSColor"
+    },
+    {
+      "folder": "/tmp/stream-wave18-contrast-byte-diagnostic-20261022",
+      "outcome": "runtime failure before window; diagnostic proves raw sRGB bytes correct while NSBitmap/NSColor reinterpretation fails"
+    },
+    {
+      "folder": "/tmp/stream-wave18-contrast-raw-srgb-20261022",
+      "outcome": "generation boundary failure; no compiler/runtime; earlier snapshots retained"
+    },
+    {
+      "folder": "/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022",
+      "outcome": "compile/runtime PASS; first actual normal/increased view attempt"
+    }
+  ],
+  "historicalFailure": "Previous native red-reference mismatch is preserved. Exact archived profile and actual current paired native sample confirm a numeric sampler/profile reinterpretation problem rather than an inability to render the swatch. No inference about semantic-tree availability follows.",
+  "pixelObservations": {
+    "/tmp/stream-wave2-accessibility-20261022/apple/build/studio-workspace-validation/accessibility/interface-contrast-false.png": {
+      "pixels": [
+        600,
+        200
+      ],
+      "rawRGBAAtReference": [
+        234,
+        51,
+        35,
+        255
+      ],
+      "rawRGBAAtPanel": [
+        30,
+        30,
+        30,
+        255
+      ],
+      "embeddedICC_SHA256": "4c6ae7fac53bb26d948d3f0e567b7284218e971079ecf070d509755e6ab95473"
+    },
+    "/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-false-native.png": {
+      "pixels": [
+        600,
+        200
+      ],
+      "rawRGBAAtReference": [
+        234,
+        51,
+        35,
+        255
+      ],
+      "rawRGBAAtPanel": [
+        30,
+        30,
+        30,
+        255
+      ],
+      "embeddedICC_SHA256": "60ed40dcf2000b43e220b5391e33bdd529350973568926713462f6efea8fcc2c"
+    },
+    "/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-false-srgb.png": {
+      "pixels": [
+        600,
+        200
+      ],
+      "rawRGBAAtReference": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "rawRGBAAtPanel": [
+        30,
+        30,
+        30,
+        255
+      ],
+      "embeddedICC_SHA256": null
+    },
+    "/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-true-native.png": {
+      "pixels": [
+        600,
+        200
+      ],
+      "rawRGBAAtReference": [
+        234,
+        51,
+        35,
+        255
+      ],
+      "rawRGBAAtPanel": [
+        0,
+        0,
+        0,
+        255
+      ],
+      "embeddedICC_SHA256": "60ed40dcf2000b43e220b5391e33bdd529350973568926713462f6efea8fcc2c"
+    },
+    "/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-true-srgb.png": {
+      "pixels": [
+        600,
+        200
+      ],
+      "rawRGBAAtReference": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "rawRGBAAtPanel": [
+        0,
+        0,
+        0,
+        255
+      ],
+      "embeddedICC_SHA256": null
+    }
+  },
+  "unchangedThresholds": {
+    "red": {
+      "alphaAbove": 0.99,
+      "redAbove": 0.95,
+      "greenBelow": 0.05,
+      "blueBelow": 0.05
+    },
+    "black": {
+      "alphaAbove": 0.99,
+      "maximumRGBBelow": 0.03
+    },
+    "white": {
+      "alphaAbove": 0.99,
+      "minimumRGBAbove": 0.95
+    },
+    "whiteIncreaseMoreThan": 20
+  },
+  "whitePixelCounts": [
+    0,
+    3000
+  ],
+  "controls": [
+    "Known opaque sRGB red accepted",
+    "Known opaque sRGB green rejected",
+    "Historical owned ICC reference normalized destination bytes (255, 2, 0, 255) accepted",
+    "Both actual native view red references (255, 0, 0, 255) unchanged",
+    "Increased actual panel is opaque black; actual secondary text white count increases from 0 to 3,000"
+  ],
+  "bounds": {
+    "swiftJobs": 2,
+    "compileSeconds": 120,
+    "runtimeSeconds": 30
+  },
+  "bindings": {
+    "/private/tmp/stream-wave18-contrast-first-20261022.log": {
+      "bytes": 2983,
+      "sha256": "bd613aa2042615e6f7a67b1cc5c8dd4bb345b653d578a351aa1beb40cd09aeb9"
+    },
+    "/private/tmp/stream-wave18-contrast-first-20261022/compile.log": {
+      "bytes": 2798,
+      "sha256": "cc6179e94e69d6c4d8fa92977f41f7fce76cbd3a7984b733ce19169c763a7a38"
+    },
+    "/private/tmp/stream-wave18-contrast-first-20261022/receipt.json": {
+      "bytes": 3143,
+      "sha256": "1d8adbace56a08aedb520ad40efe5c061b6d2f54a70fad42ad8fecd21b82e701"
+    },
+    "/private/tmp/stream-wave18-contrast-first-20261022/sources/run_studio_contrast_harness.py": {
+      "bytes": 5780,
+      "sha256": "53fd80c9fe5baeb7fa3d8f780c57ba208ac1a845f500987421a0f3d0e03d86a4"
+    },
+    "/private/tmp/stream-wave18-contrast-first-20261022/sources/StudioAccessibility.swift": {
+      "bytes": 6476,
+      "sha256": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c"
+    },
+    "/private/tmp/stream-wave18-contrast-first-20261022/sources/studio_accessibility_harness.swift": {
+      "bytes": 57551,
+      "sha256": "bee0537fa8486f498b1b96cdde3b0028f14792c7ab801767f6c86bb22497f5d4"
+    },
+    "/private/tmp/stream-wave18-contrast-first-20261022/sources/studio_workspace_harness.swift": {
+      "bytes": 34171,
+      "sha256": "ce3e04fffba8f7cc93381b574f1fa3801d99eae4f9e6347aaaac45783fe8d332"
+    },
+    "/private/tmp/stream-wave18-contrast-first-20261022/sources/OwnedStudioContrast.swift": {
+      "bytes": 10431,
+      "sha256": "de32478497e8b0f0d152a0e151d203a6564fa396b275ed2f3f43779cea61d5e6"
+    },
+    "/private/tmp/stream-wave18-contrast-first-20261022/sources/owned-reference.png": {
+      "bytes": 11613,
+      "sha256": "13d1d9f3b013f009be0c3c5eeb44fe4b164997e49e91e5b31b6c7c81d9169b91"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022.log": {
+      "bytes": 546,
+      "sha256": "c3d99abe8a17ce2e24428258f7eb1f7dd7fcaadaff071d008389893958b5384e"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/compile.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/runtime.log": {
+      "bytes": 343,
+      "sha256": "79d8abb660a92d0ec83fe6614d30928bbd727c8a4fb1c986de3fa808ab41461b"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/OwnedStudioContrast": {
+      "bytes": 383040,
+      "sha256": "49d9c82a870307b00a51c36a62b946833019d8fd4db4bf60874a2dc0632eaa42"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/receipt.json": {
+      "bytes": 3692,
+      "sha256": "a146c0713cf5c516b6333521af741ec8292ad7ffc65de5b9a585550f76b646fe"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/sources/run_studio_contrast_harness.py": {
+      "bytes": 5780,
+      "sha256": "53fd80c9fe5baeb7fa3d8f780c57ba208ac1a845f500987421a0f3d0e03d86a4"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/sources/StudioAccessibility.swift": {
+      "bytes": 6476,
+      "sha256": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/sources/studio_accessibility_harness.swift": {
+      "bytes": 57585,
+      "sha256": "9da4c71ac1cccb5bee00799bcadac0ede99715fe8961ec0fdfebf5651e0a19ed"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/sources/studio_workspace_harness.swift": {
+      "bytes": 34171,
+      "sha256": "ce3e04fffba8f7cc93381b574f1fa3801d99eae4f9e6347aaaac45783fe8d332"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/sources/OwnedStudioContrast.swift": {
+      "bytes": 10465,
+      "sha256": "93bead6bb873c95a8ac2ee6197436150e30ba1ba4fcc677e91b2263e974cb514"
+    },
+    "/private/tmp/stream-wave18-contrast-initializer-fixed-20261022/sources/owned-reference.png": {
+      "bytes": 11613,
+      "sha256": "13d1d9f3b013f009be0c3c5eeb44fe4b164997e49e91e5b31b6c7c81d9169b91"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022.log": {
+      "bytes": 725,
+      "sha256": "d78c943876b52fff4f105d3aa47d00858bbf05255cf70ab7d1ee4cdb2c845bfd"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/compile.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/runtime.log": {
+      "bytes": 534,
+      "sha256": "6cfd87110e5f25c4dfcec5a487e233694a7d47de993ae891df5af2e381b4cad9"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/OwnedStudioContrast": {
+      "bytes": 384016,
+      "sha256": "b98b34a3ee1b2434d327f80cf222955c8f50641a345a07c15505493d53735c7b"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/receipt.json": {
+      "bytes": 3670,
+      "sha256": "d3894aaf6a344e50ee7d68a34b47643b0402d6193fbfd3dcc38b2d175b677be3"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/sources/run_studio_contrast_harness.py": {
+      "bytes": 5780,
+      "sha256": "53fd80c9fe5baeb7fa3d8f780c57ba208ac1a845f500987421a0f3d0e03d86a4"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/sources/StudioAccessibility.swift": {
+      "bytes": 6476,
+      "sha256": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/sources/studio_accessibility_harness.swift": {
+      "bytes": 57979,
+      "sha256": "5d6369c7ecbeec65dec67b4b5f97dea3d3457ecd5b7e89cbf8c83e22e16f0af0"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/sources/studio_workspace_harness.swift": {
+      "bytes": 34171,
+      "sha256": "ce3e04fffba8f7cc93381b574f1fa3801d99eae4f9e6347aaaac45783fe8d332"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/sources/OwnedStudioContrast.swift": {
+      "bytes": 10859,
+      "sha256": "8bfe73e9c31c2b09fa521ba85ab6f3dfdcac9a7dbdd3f8516be3596b8c6b25c7"
+    },
+    "/private/tmp/stream-wave18-contrast-byte-diagnostic-20261022/sources/owned-reference.png": {
+      "bytes": 11613,
+      "sha256": "13d1d9f3b013f009be0c3c5eeb44fe4b164997e49e91e5b31b6c7c81d9169b91"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-20261022.log": {
+      "bytes": 919,
+      "sha256": "a30bda6d35ae73091a1913b5d1f4e70fe8b2cbcf9647dab6b71474361a47ac16"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-20261022/sources/run_studio_contrast_harness.py": {
+      "bytes": 5780,
+      "sha256": "53fd80c9fe5baeb7fa3d8f780c57ba208ac1a845f500987421a0f3d0e03d86a4"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-20261022/sources/StudioAccessibility.swift": {
+      "bytes": 6476,
+      "sha256": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-20261022/sources/studio_accessibility_harness.swift": {
+      "bytes": 59410,
+      "sha256": "aabbf9105b4e9e16aead8151e1827f0e2d557bb8a9934fe5bc1f47651eb172a0"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-20261022/sources/studio_workspace_harness.swift": {
+      "bytes": 34171,
+      "sha256": "ce3e04fffba8f7cc93381b574f1fa3801d99eae4f9e6347aaaac45783fe8d332"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022.log": {
+      "bytes": 2190,
+      "sha256": "a99e5b6dad82b1c3fb1a28cc703fd0de94e9742db4f940b16c7a5437a901ce74"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/compile.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/runtime.log": {
+      "bytes": 2002,
+      "sha256": "91142a4aad146100cb2fbcda358b454022d1605fe6b75c85f1db925153635989"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/OwnedStudioContrast": {
+      "bytes": 391872,
+      "sha256": "1f9e3ba6f87a4b1c36e1ee0e4897ab93c3f7525b657b5ffe54e77db3ae4b2266"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/receipt.json": {
+      "bytes": 4517,
+      "sha256": "157be9d7bc4f15871e127e2523261527b0222c2cb6c2dd006224ee67f61a018c"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-true-native.png": {
+      "bytes": 12247,
+      "sha256": "d517bfd503e7c13eda07a0ebb2be4b6013acf5b7086b7d2d26836692503dbe49"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-true-srgb.png": {
+      "bytes": 9089,
+      "sha256": "5befe7276f39560703154534cb5c1663b3c8b90612f355e113e845014e260af9"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-false-native.png": {
+      "bytes": 12033,
+      "sha256": "2405fe21eee352ea5555e3f690f96c3eb87917e77487614831ebaabded881904"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/images/interface-contrast-false-srgb.png": {
+      "bytes": 8782,
+      "sha256": "112a077b08ffdb447bb213a5684ae924b3255af1431a1af446c078081605555c"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/run_studio_contrast_harness.py": {
+      "bytes": 5776,
+      "sha256": "fc7bd741348dc05a672ecd1ecf4de30c6107665304deacb292a5d769edb1b6fb"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/StudioAccessibility.swift": {
+      "bytes": 6476,
+      "sha256": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/studio_accessibility_harness.swift": {
+      "bytes": 59410,
+      "sha256": "aabbf9105b4e9e16aead8151e1827f0e2d557bb8a9934fe5bc1f47651eb172a0"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/studio_workspace_harness.swift": {
+      "bytes": 34171,
+      "sha256": "ce3e04fffba8f7cc93381b574f1fa3801d99eae4f9e6347aaaac45783fe8d332"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/OwnedStudioContrast.swift": {
+      "bytes": 12290,
+      "sha256": "b1fa4612ead07789dc95c8fae010d968f7c4c5d1957327c5b79b051d6c6ca2f4"
+    },
+    "/private/tmp/stream-wave18-contrast-raw-srgb-generator-fixed-20261022/sources/owned-reference.png": {
+      "bytes": 11613,
+      "sha256": "13d1d9f3b013f009be0c3c5eeb44fe4b164997e49e91e5b31b6c7c81d9169b91"
+    },
+    "/private/tmp/stream-wave2-accessibility-20261022/apple/build/studio-workspace-validation/accessibility/interface-contrast-false.png": {
+      "bytes": 11613,
+      "sha256": "13d1d9f3b013f009be0c3c5eeb44fe4b164997e49e91e5b31b6c7c81d9169b91"
+    },
+    "/private/tmp/stream-wave2-accessibility-software-native-proof-20261022.log": {
+      "bytes": 48877,
+      "sha256": "578fac96adcecea18c08dcbc57650a56025f139bafb1b4afff29c0621c817a1b"
+    }
+  },
+  "remaining": [
+    "Genuine SwiftUI baseline availability must distinguish bridge/host limits from missing production nodes",
+    "Actual native labels/actions/order/key routing and complete small-window control usability remain to be demonstrated",
+    "No separate human-listening, physical keyboard or universal hardware qualification gate is imposed"
+  ]
+}

@@ -111,6 +111,10 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
             try? FileManager.default.removeItem(at: root)
             WorkspaceFixtureDefaults.value.removePersistentDomain(forName: WorkspaceFixtureDefaults.name)
         }
+        if CommandLine.arguments.contains("--accessibility-contrast") {
+            try await StudioAccessibilityHarness.runContrastOnly()
+            return
+        }
         // Provision only our own catalog/profile before startup so the app's
         // first-launch legacy copy never reads the operator's App Group files.
         let seededCatalog = StudioProjectCatalog()
