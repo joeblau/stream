@@ -237,7 +237,7 @@ public struct ProviderFailure: Error, Equatable, Sendable, LocalizedError {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             let error = object?["error"] as? [String: Any]
             let reasons = (error?["errors"] as? [[String: Any]])?.compactMap { $0["reason"] as? String } ?? []
-            if status == 429 || reasons.contains(where: { ["quotaExceeded", "rateLimitExceeded", "userRateLimitExceeded"].contains($0) }) {
+            if status == 429 || reasons.contains(where: { ["quotaExceeded", "rateLimitExceeded", "userRateLimitExceeded", "userRequestsExceedRateLimit"].contains($0) }) {
                 let delay = response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init).flatMap { $0.isFinite ? min(86_400, max(0, $0)) : nil }
                 throw Self(.rateLimited, retryAfter: delay)
             }
