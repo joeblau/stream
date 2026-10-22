@@ -1,0 +1,669 @@
+{
+  "baseline": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+  "scope": "Actual publisher actor cache ownership with selected SDK media side effects inert; no actual media transport, encoder/device or performance qualification",
+  "host": {
+    "architecture": "arm64",
+    "macOS": "27.2",
+    "build": "26B118"
+  },
+  "sdkCommit": "d9fceedc068994023900b4d69588b8af19136752",
+  "sources": {
+    "apple/StreamBroadcast/RTMPPublisher.swift": "2dc96df3c280555048adfec7a56f7201a745ce3413b98c169f014c4cbe98d976",
+    "apple/StreamBroadcast/SessionPublisher.swift": "dfc55215c254f41b30b6cb5ebf2b7c75c9cd6a6cf7889d7c7de8e02d14f38e52",
+    "apple/StreamBroadcast/Publisher.swift": "ef4d093bd956341f02dee3f4027b60d3f1f6937ac255693326aebd6fafd412f4",
+    "apple/StreamCore/MediaTimelineNormalizer.swift": "8a16a2d7da153d3c7178afb55b783a14975f469b4001833d0dfbacd19b4942be",
+    "apple/StreamCore/VideoFrameAdmission.swift": "12232c459ee1f009b36e2df4f776a5d29ad6a4887d827eddb2864ffebdfb2fbc",
+    "apple/StreamCore/FrameTelemetry.swift": "f60d6f3ae3e23afcb599c8a1e82d1111c610b8e15602ca7cbdb0b38708cc6d2a",
+    "apple/scripts/publisher_repeat_cache_harness.swift": "dd1e08a3dff6d2ef1f9b3aa8512f5bed0d7249a0d4f772b2607e6b8ac252096a",
+    "apple/scripts/prepare_publisher_repeat_cache.py": "708b47489f6a6428bccb6d8ebfed30e8a6d29f9fa52a113199d8568be078fb2d",
+    "apple/scripts/run_publisher_repeat_cache_harness.zsh": "4c560e1fa1a35a7dbbdac1c1b4880f78a9ecfc58a9ba26f7dc8d5501904b51af"
+  },
+  "variants": {
+    "entry-negative": {
+      "manifest": {
+        "mode": "entry-negative",
+        "sourceCommit": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+        "sources": {
+          "StreamBroadcast/RTMPPublisher.swift": "2dc96df3c280555048adfec7a56f7201a745ce3413b98c169f014c4cbe98d976",
+          "StreamBroadcast/SessionPublisher.swift": "dfc55215c254f41b30b6cb5ebf2b7c75c9cd6a6cf7889d7c7de8e02d14f38e52",
+          "StreamBroadcast/Publisher.swift": "ef4d093bd956341f02dee3f4027b60d3f1f6937ac255693326aebd6fafd412f4",
+          "scripts/publisher_repeat_cache_harness.swift": "dd1e08a3dff6d2ef1f9b3aa8512f5bed0d7249a0d4f772b2607e6b8ac252096a"
+        },
+        "generated": {
+          "RTMPPublisher.swift": "c48c3fe828d955d3e5702f78309204689ce12fd13bc419699db43188e6c2f2ba",
+          "SessionPublisher.swift": "4e4eb6c9ec8b4e1a02585fbc8d85b06fda884c6c609758039aaa549d37597768"
+        },
+        "scope": "Actual whole publisher actors and their append/repeat/normalizer/admission code. Generated copies replace only selected mixer media effects, add same-file private setup/inspection, and use an inert Session stream-presence object. No start/network/encoder/device or sustained performance proof."
+      },
+      "results": [
+        {
+          "case": "rtmp",
+          "mode": "entry-negative",
+          "exitCode": -5
+        },
+        {
+          "case": "session",
+          "mode": "entry-negative",
+          "exitCode": -5
+        }
+      ],
+      "observations": {
+        "rtmp-entry-before-config-return": {
+          "events": [
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 10
+            },
+            {
+              "cache": true,
+              "kind": "configuration",
+              "program": true
+            }
+          ],
+          "publisher": "rtmp",
+          "sourcePoolAvailable": false,
+          "state": {
+            "cached": true,
+            "lastPTS": 10,
+            "program": true
+          },
+          "test": "entry-before-config-return"
+        },
+        "session-entry-before-config-return": {
+          "events": [
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 10
+            },
+            {
+              "cache": true,
+              "kind": "configuration",
+              "program": true
+            }
+          ],
+          "publisher": "session",
+          "sourcePoolAvailable": false,
+          "state": {
+            "cached": true,
+            "lastPTS": 10,
+            "program": true
+          },
+          "test": "entry-before-config-return"
+        }
+      }
+    },
+    "future-negative": {
+      "manifest": {
+        "mode": "future-negative",
+        "sourceCommit": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+        "sources": {
+          "StreamBroadcast/RTMPPublisher.swift": "2dc96df3c280555048adfec7a56f7201a745ce3413b98c169f014c4cbe98d976",
+          "StreamBroadcast/SessionPublisher.swift": "dfc55215c254f41b30b6cb5ebf2b7c75c9cd6a6cf7889d7c7de8e02d14f38e52",
+          "StreamBroadcast/Publisher.swift": "ef4d093bd956341f02dee3f4027b60d3f1f6937ac255693326aebd6fafd412f4",
+          "scripts/publisher_repeat_cache_harness.swift": "dd1e08a3dff6d2ef1f9b3aa8512f5bed0d7249a0d4f772b2607e6b8ac252096a"
+        },
+        "generated": {
+          "RTMPPublisher.swift": "e3685121f32e9195841806806ec7428811a1d61b0f9ae89b24269e00bb1a4d57",
+          "SessionPublisher.swift": "26dad694125fcbb476bfacae1254ea4c027354cb61c2968029b1ef41eca2c2c7"
+        },
+        "scope": "Actual whole publisher actors and their append/repeat/normalizer/admission code. Generated copies replace only selected mixer media effects, add same-file private setup/inspection, and use an inert Session stream-presence object. No start/network/encoder/device or sustained performance proof."
+      },
+      "results": [
+        {
+          "case": "rtmp",
+          "mode": "future-negative",
+          "exitCode": -5
+        },
+        {
+          "case": "session",
+          "mode": "future-negative",
+          "exitCode": -5
+        }
+      ],
+      "observations": {
+        "session-future": {
+          "events": [
+            {
+              "cache": false,
+              "kind": "configuration",
+              "program": true
+            },
+            {
+              "frames": 512,
+              "kind": "planar-audio",
+              "pts": 12
+            },
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 13
+            }
+          ],
+          "publisher": "session",
+          "sourcePoolAvailable": false,
+          "state": {
+            "cached": true,
+            "lastPTS": 13,
+            "program": true
+          },
+          "test": "future"
+        },
+        "rtmp-future": {
+          "events": [
+            {
+              "cache": false,
+              "kind": "configuration",
+              "program": true
+            },
+            {
+              "frames": 512,
+              "kind": "planar-audio",
+              "pts": 12
+            },
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 13
+            }
+          ],
+          "publisher": "rtmp",
+          "sourcePoolAvailable": false,
+          "state": {
+            "cached": true,
+            "lastPTS": 13,
+            "program": true
+          },
+          "test": "future"
+        }
+      }
+    },
+    "positive": {
+      "manifest": {
+        "mode": "positive",
+        "sourceCommit": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+        "sources": {
+          "StreamBroadcast/RTMPPublisher.swift": "2dc96df3c280555048adfec7a56f7201a745ce3413b98c169f014c4cbe98d976",
+          "StreamBroadcast/SessionPublisher.swift": "dfc55215c254f41b30b6cb5ebf2b7c75c9cd6a6cf7889d7c7de8e02d14f38e52",
+          "StreamBroadcast/Publisher.swift": "ef4d093bd956341f02dee3f4027b60d3f1f6937ac255693326aebd6fafd412f4",
+          "scripts/publisher_repeat_cache_harness.swift": "dd1e08a3dff6d2ef1f9b3aa8512f5bed0d7249a0d4f772b2607e6b8ac252096a"
+        },
+        "generated": {
+          "RTMPPublisher.swift": "ce166b4fe95f69ebb1c6470415485cdea13a9f5eb41c876ebefa0e1de8e32ea1",
+          "SessionPublisher.swift": "8aef091ea2144e4a0515725fd7f8cc3aff8da6f51bec85ed68da72244c74eced"
+        },
+        "scope": "Actual whole publisher actors and their append/repeat/normalizer/admission code. Generated copies replace only selected mixer media effects, add same-file private setup/inspection, and use an inert Session stream-presence object. No start/network/encoder/device or sustained performance proof."
+      },
+      "results": [
+        {
+          "case": "all",
+          "mode": "positive",
+          "exitCode": 0
+        }
+      ],
+      "observations": {
+        "rtmp-legacy": {
+          "events": [
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 10
+            },
+            {
+              "durationIsNumeric": false,
+              "kind": "video",
+              "pts": 68977.271045458
+            },
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 68978.2710625
+            }
+          ],
+          "publisher": "rtmp",
+          "sourcePoolAvailable": false,
+          "state": {
+            "cached": true,
+            "lastPTS": 68978.2710625,
+            "program": false
+          },
+          "test": "legacy"
+        },
+        "rtmp-entry-before-config-return": {
+          "events": [
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 10
+            },
+            {
+              "cache": false,
+              "kind": "configuration",
+              "program": true
+            }
+          ],
+          "publisher": "rtmp",
+          "sourcePoolAvailable": true,
+          "state": {
+            "cached": false,
+            "lastPTS": 10,
+            "program": true
+          },
+          "test": "entry-before-config-return"
+        },
+        "session-entry-before-config-return": {
+          "events": [
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 10
+            },
+            {
+              "cache": false,
+              "kind": "configuration",
+              "program": true
+            }
+          ],
+          "publisher": "session",
+          "sourcePoolAvailable": true,
+          "state": {
+            "cached": false,
+            "lastPTS": 10,
+            "program": true
+          },
+          "test": "entry-before-config-return"
+        },
+        "session-future": {
+          "events": [
+            {
+              "cache": false,
+              "kind": "configuration",
+              "program": true
+            },
+            {
+              "frames": 512,
+              "kind": "planar-audio",
+              "pts": 12
+            },
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 13
+            }
+          ],
+          "publisher": "session",
+          "sourcePoolAvailable": true,
+          "state": {
+            "cached": false,
+            "lastPTS": 13,
+            "program": true
+          },
+          "test": "future"
+        },
+        "rtmp-future": {
+          "events": [
+            {
+              "cache": false,
+              "kind": "configuration",
+              "program": true
+            },
+            {
+              "frames": 512,
+              "kind": "planar-audio",
+              "pts": 12
+            },
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 13
+            }
+          ],
+          "publisher": "rtmp",
+          "sourcePoolAvailable": true,
+          "state": {
+            "cached": false,
+            "lastPTS": 13,
+            "program": true
+          },
+          "test": "future"
+        },
+        "session-legacy": {
+          "events": [
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 10
+            },
+            {
+              "durationIsNumeric": false,
+              "kind": "video",
+              "pts": 68977.277226041
+            },
+            {
+              "duration": 0.03333333333333333,
+              "durationIsNumeric": true,
+              "kind": "video",
+              "pts": 68978.27722916666
+            }
+          ],
+          "publisher": "session",
+          "sourcePoolAvailable": false,
+          "state": {
+            "cached": true,
+            "lastPTS": 68978.27722916666,
+            "program": false
+          },
+          "test": "legacy"
+        }
+      }
+    }
+  },
+  "artifacts": [
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/RTMPPublisher.swift",
+      "sha256": "c48c3fe828d955d3e5702f78309204689ce12fd13bc419699db43188e6c2f2ba",
+      "bytes": 69886
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/SessionPublisher.swift",
+      "sha256": "4e4eb6c9ec8b4e1a02585fbc8d85b06fda884c6c609758039aaa549d37597768",
+      "bytes": 48090
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/compiled-harness",
+      "sha256": "352e26eeab1f46ca6b42b5633039d0417a14959df69e666ca7b5967aff2ad289",
+      "bytes": 15259160
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/result.json",
+      "sha256": "6a13058d219800366fad210a77b44354867a3c4d9949c9f080067db094f4977e",
+      "bytes": 162
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/rtmp.log",
+      "sha256": "9b5f73af25ae8bdabe881831d2813c4b784145e7cdeb391e09c148a49e06ab8d",
+      "bytes": 174
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/session.log",
+      "sha256": "9b5f73af25ae8bdabe881831d2813c4b784145e7cdeb391e09c148a49e06ab8d",
+      "bytes": 174
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/source.json",
+      "sha256": "f629cc3fea097bc85f2c52cbcdfeb6eba9fbf9343db4d6fcad777e5d346650db",
+      "bytes": 1086
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/observations/rtmp-entry-before-config-return.json",
+      "sha256": "375f14be9fb88dc97c915057e93cb3d44194b4d5821d37d2b948079d5430a3a9",
+      "bytes": 418
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/observations/session-entry-before-config-return.json",
+      "sha256": "728c433b818628938900a98d73b8027b737cd57a93c64f132027654768efbca1",
+      "bytes": 421
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/RTMPPublisher.swift",
+      "sha256": "e3685121f32e9195841806806ec7428811a1d61b0f9ae89b24269e00bb1a4d57",
+      "bytes": 69895
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/SessionPublisher.swift",
+      "sha256": "26dad694125fcbb476bfacae1254ea4c027354cb61c2968029b1ef41eca2c2c7",
+      "bytes": 48099
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/compiled-harness",
+      "sha256": "8c98a282ef167ab7a6fac6ee3c915363c098feb76fa34d6562b00eb68db7741b",
+      "bytes": 15259176
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/result.json",
+      "sha256": "e1e9274a62c3362c59e8645bebce4441d8dbc9298c09216072089e06e7de1d67",
+      "bytes": 164
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/rtmp.log",
+      "sha256": "33fdc885fac5b8868f52f8da666b5aef96338e58850e704f3c250a18521c5940",
+      "bytes": 142
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/session.log",
+      "sha256": "33fdc885fac5b8868f52f8da666b5aef96338e58850e704f3c250a18521c5940",
+      "bytes": 142
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/source.json",
+      "sha256": "4bff47ff78e7d58c68becb09ec229c0fe25f86899052f34ebd17f925239c5ba8",
+      "bytes": 1087
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/observations/rtmp-future.json",
+      "sha256": "f80a708493ac399fea69a677db4a84cd3cf3505e0d96922bbba21c493552a3a8",
+      "bytes": 482
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/observations/session-future.json",
+      "sha256": "41cc9d740f7cbca34e7fda7504a5f5fb2705d3c58c8ae74519fc28b118555291",
+      "bytes": 485
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/RTMPPublisher.swift",
+      "sha256": "ce166b4fe95f69ebb1c6470415485cdea13a9f5eb41c876ebefa0e1de8e32ea1",
+      "bytes": 69920
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/SessionPublisher.swift",
+      "sha256": "8aef091ea2144e4a0515725fd7f8cc3aff8da6f51bec85ed68da72244c74eced",
+      "bytes": 48124
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/all.log",
+      "sha256": "6c6b67925ebb7a3e27ffffa24c98a2932faa2fab725bd0c51bf62369cdf5c2b4",
+      "bytes": 713
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/compiled-harness",
+      "sha256": "5d2ecafc2e966ee4911a6e6c6ac68e1c4ad349cceb50da38ba1a4e819d84d251",
+      "bytes": 15259160
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/result.json",
+      "sha256": "db9d4df07732f70b317caa25f1b9bb51283aaff63aca55d020bf81ebe2e6f585",
+      "bytes": 73
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/source.json",
+      "sha256": "fe2eacd9f83dc117ee6460dea7445e8f40d26c04af7f8c5e76ae00b2ef15b943",
+      "bytes": 1080
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/observations/rtmp-entry-before-config-return.json",
+      "sha256": "4fd7a7ffe3751d6f381e42960975b9a304eb9d5ca3fd3bf5cb0d00dac3768b1d",
+      "bytes": 419
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/observations/rtmp-future.json",
+      "sha256": "4ca3966d56516123dfcc3bcd1fe9d873eb5f73c48792a7fda9f7beebcb9f2c64",
+      "bytes": 482
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/observations/rtmp-legacy.json",
+      "sha256": "3c2a5c19d2b9679ed06ba49f1bc0ba88537eed2fe74b47fb10f33c4ab0c85ee5",
+      "bytes": 561
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/observations/session-entry-before-config-return.json",
+      "sha256": "f7f981bb36a8fb14ae36de9002ad424b2d7eb5a3641a18feea9bed922f0ff550",
+      "bytes": 422
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/observations/session-future.json",
+      "sha256": "719022cfbfd1510277142dec9259b9b33c0d120299fe081ac56fd9e5bf22c037",
+      "bytes": 485
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/observations/session-legacy.json",
+      "sha256": "e31cbb46b64908cfcd6eda80d41e9f1063229cbba74c6bf6f61be1fd8c37b428",
+      "bytes": 572
+    },
+    {
+      "path": "/tmp/stream-wave13-publisher-repeat-cache-native-20261022.log",
+      "sha256": "d82efa2280ca4d632f13c6c783631626c367377941d63240209df7f56c62d7af",
+      "bytes": 521741
+    },
+    {
+      "path": "/tmp/stream-wave13-publisher-repeat-cache-native-corrected-20261022.log",
+      "sha256": "a1ffb2aabfdcc022a46b5d015cec62161a0e026e866e98557ccce284978b2578",
+      "bytes": 834813
+    },
+    {
+      "path": "/tmp/stream-wave13-publisher-repeat-cache-native-final-20261022.log",
+      "sha256": "d0628136231742c6590ccd753ea1eedcb97fab388d1d7ce8d8a0e456385ec88f",
+      "bytes": 1183980
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/entry-negative/RTMPPublisher.swift",
+      "sha256": "c48c3fe828d955d3e5702f78309204689ce12fd13bc419699db43188e6c2f2ba",
+      "bytes": 69886
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/entry-negative/SessionPublisher.swift",
+      "sha256": "4e4eb6c9ec8b4e1a02585fbc8d85b06fda884c6c609758039aaa549d37597768",
+      "bytes": 48090
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/entry-negative/compiled-harness",
+      "sha256": "d8ae103e37a8c82bc19d1d59c764fcc84d08b68267b2ab49fd856a7ff0704a78",
+      "bytes": 15257752
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/entry-negative/rtmp.log",
+      "sha256": "ea11d616277142e94245dbf2c4f8e0b53bfc3df2fa2330ea407fca9a16a89679",
+      "bytes": 174
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/entry-negative/session.log",
+      "sha256": "ea11d616277142e94245dbf2c4f8e0b53bfc3df2fa2330ea407fca9a16a89679",
+      "bytes": 174
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/entry-negative/source.json",
+      "sha256": "5326e15352f1d581255392c3a139e63dcaad887fcd4dfc0f7f23058648196381",
+      "bytes": 1086
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/future-negative/RTMPPublisher.swift",
+      "sha256": "e3685121f32e9195841806806ec7428811a1d61b0f9ae89b24269e00bb1a4d57",
+      "bytes": 69895
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/future-negative/SessionPublisher.swift",
+      "sha256": "26dad694125fcbb476bfacae1254ea4c027354cb61c2968029b1ef41eca2c2c7",
+      "bytes": 48099
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/future-negative/compiled-harness",
+      "sha256": "d3384af54301badedaf1258a182310a4b413f7886e051dd5888aa32957cd5c4f",
+      "bytes": 15257752
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/future-negative/rtmp.log",
+      "sha256": "e96b41da9d1ebe8b6c70b173dab6c3f642a39d2cef37f34bf44dc7c22594b34e",
+      "bytes": 142
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/future-negative/session.log",
+      "sha256": "e96b41da9d1ebe8b6c70b173dab6c3f642a39d2cef37f34bf44dc7c22594b34e",
+      "bytes": 142
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/future-negative/source.json",
+      "sha256": "1e6782388c5ed562a6a28a8c11bf6ec8cafe0098a01aba1706111d2dd4fb9e73",
+      "bytes": 1087
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/positive/RTMPPublisher.swift",
+      "sha256": "ce166b4fe95f69ebb1c6470415485cdea13a9f5eb41c876ebefa0e1de8e32ea1",
+      "bytes": 69920
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/positive/SessionPublisher.swift",
+      "sha256": "8aef091ea2144e4a0515725fd7f8cc3aff8da6f51bec85ed68da72244c74eced",
+      "bytes": 48124
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/positive/all.log",
+      "sha256": "911a6a819b08d4e4fda036da10aea09bf966d2bec9c55969dca3bed9d21bbae7",
+      "bytes": 90
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/positive/compiled-harness",
+      "sha256": "46be7bf0c4f2fb26b06cd62896da3b6971af1cef33d0060372d59aa3e08c2a4f",
+      "bytes": 15257736
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/positive/source.json",
+      "sha256": "7901586fa1e125b506e323ce2505573c8b23479cb2df4e6cbb2ae818dfb30a86",
+      "bytes": 1080
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-before-duration-correction/publisher_repeat_cache_harness.swift",
+      "sha256": "4f0b039b71c8a960bf35e2cdcae803dc6e40ada0ad6e7c6850551038ff4d8e60",
+      "bytes": 14732
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/retained-initial-compile-harness.swift",
+      "sha256": "1f2c2e69f9be0cc6fec07770f1d1d729dca28c6f0063914deec945a453e63629",
+      "bytes": 14708
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/derived/Build/Products/Debug/StreamCore.framework/Versions/A/StreamCore",
+      "sha256": "0fef077d83ed79c5fb30ebcb5cd6a493e924ec70525b75156e74772575c05645",
+      "bytes": 5854840
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/entry-negative/project.json",
+      "sha256": "86091e3165002775b2a324136af01f8ce24e7507a3412887d5ec14c2cfca0de0",
+      "bytes": 3869
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/future-negative/project.json",
+      "sha256": "2f43409e6da5ca78d81bd27d2133a620262e4d0c22a6a1b4b3beebbc88ca7e7e",
+      "bytes": 3871
+    },
+    {
+      "path": "apple/build/publisher-repeat-cache-validation/positive/project.json",
+      "sha256": "6d23a789b68527ca95eae2e3cdef338c51348f5a41c8ffb4d8806bb833dbde48",
+      "bytes": 3857
+    }
+  ],
+  "limitations": [
+    "Clears only unused repeat-cache ownership; other raw/SDK/VideoToolbox owners remain independent and unqualified.",
+    "Generated SDK media receipts preserve actual actor guards, admission, normalization, timing and await positions; they do not exercise SDK mixer/encoder/transport behavior.",
+    "Legacy restamp duration is explicitly invalid in original production helper and remains invalid; ordinary Program frame duration gate remains 1/30.",
+    "First compile-only fixture protocol-isolation failure and first positive legacy-duration-oracle failure retained, with prior negative binaries/observations.",
+    "Parent combined shipping application build pending; #92 and hosted pool/FPS cause not qualified."
+  ],
+  "retainedSourceReconstruction": "Prior shared fixture source files reconstructed by reversing only the documented duration-oracle and two protocol-isolation corrections; bytes match their pre-build source manifest/initial frozen SHA respectively. Prior binaries, observations and logs are original.",
+  "sdkSources": {
+    "HaishinKit/Sources/Mixer/MediaMixer.swift": "78cae9903e606bf6400c08df3662a637e2f50b3e7f56c9d19a929d643d720f4a",
+    "HaishinKit/Sources/Mixer/MediaMixerOutput.swift": "163f00b4b4bf8a6eb17e889f3d24e00d22f62a6a685c48d09f84a277c98cc8ff",
+    "HaishinKit/Sources/Stream/StreamConvertible.swift": "808b79061628f1388fefbc05bd3a8cd4db66e1783c26c85188d92efc0901c2b3"
+  },
+  "sdkClean": true
+}

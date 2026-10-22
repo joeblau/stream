@@ -731,7 +731,9 @@ actor SessionPublisher: Publisher {
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastVideoAppendAt = now
-        lastVideoBuffer = sb
+        // Program owns the static-scene clock, so this repeat cache is unused
+        // there and must not pin its compositor pixel buffer.
+        lastVideoBuffer = usesProgramAudio ? nil : sb
         guard videoAdmission.admit() else {
             telemetry.recordDrop(.admission)
             return
@@ -795,6 +797,7 @@ actor SessionPublisher: Publisher {
         guard !encodedInput, isRunning, !isPaused, stream != nil else { return }
         if !usesProgramAudio {
             usesProgramAudio = true
+            lastVideoBuffer = nil
             await applyAudioMixerSettings()
         }
         let now = DispatchTime.now().uptimeNanoseconds

@@ -912,7 +912,9 @@ actor RTMPPublisher: Publisher {
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastVideoAppendAt = now
-        lastVideoBuffer = sb
+        // Program owns the static-scene clock, so this repeat cache is unused
+        // there and must not pin its compositor pixel buffer.
+        lastVideoBuffer = usesProgramAudio ? nil : sb
         // Under outbound congestion, drop a proportion of video frames (audio is
         // never dropped) so latency stays bounded instead of the queue growing.
         guard videoAdmission.admit() else {
@@ -984,6 +986,7 @@ actor RTMPPublisher: Publisher {
         guard !encodedInput, isRunning, !isPaused, streamAttached else { return }
         if !usesProgramAudio {
             usesProgramAudio = true
+            lastVideoBuffer = nil
             await applyAudioMixerSettings()
         }
         let now = DispatchTime.now().uptimeNanoseconds
