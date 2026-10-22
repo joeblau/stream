@@ -3,7 +3,9 @@
 `NativeInterviewServiceClient` and `NativeInterviewSession` implement the existing
 `workers/interviews` host protocol using public Foundation APIs on macOS 14 or
 later. This foundation has an explicit limit of **one native admitted guest**.
-The backend's capacity of ten is separate from native capacity qualification.
+The backend's configurable ceiling of ten is separate from the
+[bounded tested one-peer native gate](NATIVE_INTERVIEW_CAPACITY_GATE.md), which
+is not a measured maximum or resource-derived budget.
 
 The client accepts an explicit HTTPS service configuration and an injected
 operator credential provider. Room creation, invite creation and operator end
