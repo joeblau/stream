@@ -756,8 +756,8 @@ utilization or a complete async tick. No hosted-like whole skip is reproduced.
 Later generator compatibility preserves the new clock guards without a new
 trace. **#92 stays open**: no sustained capacity, resource ceiling, waveform
 sync or cause/fix for the retained hosted failures is inferred. All original
-failed receipts and remaining acceptance limits are preserved. Pending chat
-diagnostics remain a separate workstream outside this frozen cohort.
+failed receipts and remaining acceptance limits are preserved. Chat diagnostics
+were reviewed separately in the follow-up below.
 
 ### CI queue policy follow-up
 
@@ -768,3 +768,13 @@ still cancel. This promises neither FIFO order nor execution of every commit.
 Parent official-documentation/YAML review passes; production source remains
 identical to validated `873dddd`. The recorded active `a1bb23d` result remains a
 point-in-time snapshot, not a new hosted pass or a publication claim.
+
+### Diagnostic cleanup follow-up
+
+Test/docs-only `7037a30` integrates bounded pre-cleanup failure snapshots and
+source-owned RTC process monitoring, including reviewed fixes for terminal
+abort handling, surviving process groups and replaced temporary directories.
+All 37 portable client tests pass on the combined source; the owned fake-process
+suite passes 13 checks. Shipping app/Core/vendor source remains identical to
+validated `873dddd`. No replacement browser experiment ran, and the original
+interrupted attempt remains unqualified. This does not close #127.
