@@ -24,7 +24,7 @@ public enum ManagedProvider: String, Codable, CaseIterable, Identifiable, Sendab
         switch self {
         case .youtube: return "Register a Google Desktop OAuth client, enable YouTube Data API v3, configure consent/test users and complete any required scope verification. The selected channel must separately enable live streaming."
         case .twitch: return "Register a public Twitch application for device authorization. Twitch public clients can refresh without a client secret; authorization must grant this channel's requested scopes."
-        case .restream: return "Use your own registered Restream application and granted channels.read / stream.read / stream.write scopes. Its client secret stays in this Mac's Keychain; Stream embeds none."
+        case .restream: return "Configure a trusted HTTPS Restream authorization broker whose server owns the registered application secret and provider refresh token. Native clients keep only granted access and opaque broker credentials. Without this service, Restream authorization remains unavailable."
         case .facebookPages: return "An approved Meta app, Live Video API feature, current Page permissions and a permitted Page role are required. Current approval/configuration is unavailable here; Page discovery and event APIs are disabled."
         case .linkedinLive: return "LinkedIn Live Events product approval, eligible broadcaster and member or organization live scopes are required. Member and organization scopes cannot be combined in one authorization request. No approved connector is configured here."
         }
