@@ -1,0 +1,86 @@
+{
+  "base": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+  "scope": "Local file authority, controlled real store/session logic, shipping helper typecheck and whole desktop compile only. No actual WebKit/helper/App Group sandbox/media/capture/device/output/signing or system permission qualification.",
+  "productionRouteQualified": false,
+  "sourceSHA256": {
+    ".github/workflows/ci.yml": "be217c915ac3adec2da285fa96056662272ea0fe62c74ccfda75adfab92e8ffd",
+    "apple/BrowserAudioHelper/BrowserAudioHelperMain.swift": "45198ff2fddc1fefe26f753bad76a48a1a4621ff27431c77729498ef777d78f5",
+    "apple/StreamMac/BrowserOverlayHost.swift": "1335add8104c099ec169fddd936282a172b6064269dee148e04f5fe1522257ac",
+    "apple/StreamMac/BrowserWidgetAudioProtocol.swift": "4f2ea8b524f885075e72398c001b4d8a0f25222bc7083f2587c2761e4f19732c",
+    "apple/StreamMac/BrowserWidgetHelperSession.swift": "c2ef7e4f8b4a78ba31b57d8829655dfff5c0e2e96eb022db3c995ca2d6214ca2",
+    "apple/StreamMac/WebOverlaySectionView.swift": "75e6f8ff57bd19a8fd9004adc5dc289f7d7eaf5be45abdc3d60c5d7485e5b8ff",
+    "apple/project.yml": "70a51a403a7c19f4a2228920204b2d9fb3b013bf8364947ee5e18c51bfe79331",
+    "apple/scripts/browser_helper_lifecycle_checks.swift": "ef6729490b410c24b575e5f80e4781b43d7e5f79ba05067df7c9edc6852458f6",
+    "apple/scripts/build_browser_audio_helper.zsh": "6d0553f71ae96d9d36a7c715e3dd836408c4aa0d191b48bb4815e59d959afc2c",
+    "apple/scripts/run_browser_capture_authority_harness.zsh": "9442b4e48f29034dbdf315be39b64db658e5a516dd1f2b3c6d90632efc88abc1",
+    "apple/scripts/run_browser_exclusion_harness.zsh": "a8ad265a0c9db3fe8fa32934c4c56f76157e202214d50faffd001ba789efbb61",
+    "apple/scripts/run_browser_helper_command_harness.zsh": "980c01d5ccc8f2a8fead651ce912475dcbee2df50f8fdbc251e646e63c44bc5c",
+    "apple/scripts/run_browser_snapshot_alpha_harness.zsh": "0f27f93d198e92e9715ccc57b0fa0e54f97ee76168f9b2f28e1b73848cecd285",
+    "apple/scripts/run_browser_socket_authority_harness.zsh": "202fc04840ed02040829f8339569d0a273db95ac64773aa3eec7ea4c8a1963bf",
+    "apple/scripts/run_browser_widget_lifecycle_harness.zsh": "01e715a1af7c86bd5f9e97a676700f56a94cede4fd11dbfc7ed83b0f6d621148",
+    "apple/StreamMac/BrowserWidgetLocalContent.swift": "a78869ccb94358da9f470e5d617166fe058992f4771da2d52e9ae53d40fdd377",
+    "apple/scripts/browser_local_content_harness.swift": "9768b6d631db98cde7e34eb4d355eaedf07d9020a399f20021fb9cae2b16dea6",
+    "apple/scripts/run_browser_local_content_harness.zsh": "563607658c394f8229e598b765b65a445dd80b5f041e0f17063b4155e2afc1b8"
+  },
+  "logs": {
+    "fileStore": {
+      "path": "/tmp/stream-wave13-browser-local-files-final-20261022.log",
+      "sha256": "1fc10bce9232e5b06c88367d9ff6159b63fc205f87d2c4ceda77808cb3747f40"
+    },
+    "actualSessionInertExternalBoundary": {
+      "path": "/tmp/stream-wave13-browser-local-session-final-20261022.log",
+      "sha256": "796ef6898b2e77dae2d9b76d35aa8e8878fcc99df73a0e35a35735abc7a6fc7c"
+    },
+    "shippingHelperTypecheckOnly": {
+      "path": "/tmp/stream-wave13-browser-local-helper-final-20261022.log",
+      "sha256": "6c8f8ee591f0eb1e3d5dd09137b1247a7febd62ed99ac441009d4215b3f33bd9"
+    },
+    "wholeSourceBuildOnly": {
+      "path": "/tmp/stream-wave13-browser-local-whole-final-20261022.log",
+      "sha256": "78030a87b170a169375cabd63d30a9855076c482bce8313706a75a8c05cbbda6"
+    }
+  },
+  "executablesAndFrameworkSHA256": {
+    "apple/build/browser-local-content-validation/harness": "fdbf4323ec6c55c9090fe5f68e2e568ac483cbee3176e95e49afa4fa02f5fc0a",
+    "apple/build/browser-helper-command-validation/harness": "e0d47471993d397c88477dd08c4c533e030139c19c52aa35f53745add1162bfc",
+    "apple/build/browser-local-whole-source/derived/Build/Products/Debug/BrowserCaptureAuthority": "55f7f4ce08e7cdc475346477cae8d892842843be35bb79d5d51eb6ce0b7f9e6c",
+    "apple/build/browser-local-whole-source/derived/Build/Products/Debug/StreamCore.framework/StreamCore": "b2fabf2bb5f12d6586c0cf60be836024eaa5bb8e2091afe45b6c8543dabde1fb"
+  },
+  "buildOnlyRecipe": {
+    "path": "/tmp/stream-wave13-browser-local-build-only.zsh",
+    "sha256": "5aeabc88a8d5671b0ba1982a59d422cc8ea1cf839b8e7b329494ad23de088ef9",
+    "jobs": 2,
+    "swiftJobs": 2,
+    "vendor": "Owned APFS clone of canonical clean Vendor; no automatic package resolution/updates; CODE_SIGNING_ALLOWED=NO"
+  },
+  "wholeSourceBoundaries": "Existing guest_fixture_boundaries-generated desktop validation target; actual BrowserOverlayHost, BrowserWidgetHelperSession, BrowserWidgetLocalContent and WebOverlaySectionView compile. Binary not executed.",
+  "sessionExternalBoundaries": "Actual shipping session/store/protocol code with inert AudioMixEngine/capture driver and synthetic transport replies; no helper launch or PCM.",
+  "failedAttemptsRetained": {
+    "/tmp/stream-wave13-browser-local-files-20261022.log": {
+      "reason": "New fixture compile failed: throwing expression inside precondition autoclosure; corrected fixture.",
+      "sha256": "a36fc3044db6b95655492f6e815aa89b8d0707ff1fdbf79a251d305f13479b7b"
+    },
+    "/tmp/stream-wave13-browser-local-files-fixed-20261022.log": {
+      "reason": "Fixture URL trailing-slash/alias equality assertion failed after actual negative cases; corrected canonical path comparison.",
+      "sha256": "cd430c23ab95d3484b39201bbe03d3379470af82be4c127315d5dbd142a55d61"
+    },
+    "/tmp/stream-wave13-browser-local-files-bounded-20261022.log": {
+      "reason": "Same fixture URL alias assertion; retained before corrected canonical path comparison.",
+      "sha256": "cda7a005f482ad7ff5ac1d24463ec8a9ca10c0ecc9424329aa9f65787029c753"
+    },
+    "/tmp/stream-wave13-browser-local-files-paths-20261022.log": {
+      "reason": "No source edit occurred due explicit cwd path mismatch; preserved unchanged alias-assertion failure.",
+      "sha256": "b562349a55a0e62d93f67702fafc2216a181ff48530e810a636a68df65eb0fae"
+    },
+    "/tmp/stream-wave13-browser-local-session-20261022.log": {
+      "reason": "Fixture released last demand while testing replacement. Normal shutdown retired injected transport; nonexistent fixture app rejected by signature authority before LaunchServices. Added explicit sibling demand to test intended held-reload path.",
+      "sha256": "2cb75f9a21537aca2d635c62284cf1fc69b7c1c46a0ecb8318d30d9e3e995518"
+    }
+  },
+  "remaining": [
+    "Actual provisioned signed-helper/App Group/sandbox local WebKit resource positive path",
+    "Actual same-page tone/speech A/V and Program/ISO/monitor routing",
+    "All original production helper audio permission/device/exclusion qualification, including explicit unsupported opaque capture conflicts",
+    "#124 remains open; production route remains disabled"
+  ]
+}

@@ -20,11 +20,14 @@ import Foundation
         var onSend: (@MainActor (BrowserWidgetAudioCommand) -> Void)?
         var commands: [BrowserWidgetAudioCommand] = []
         var closed = false
+        var hasTerminated = false
+        var holdStop = false
         var reply: ((BrowserWidgetAudioReply) -> Void)?
         func send(_ value: BrowserWidgetAudioCommand) throws {
             if value.action == rejectedAction { throw BrowserWidgetHelperSession.SessionError.unavailable }
             commands.append(value)
             onSend?(value)
+            if value.action == .stop && holdStop { return }
             let state: BrowserWidgetAudioReply.State
             switch value.action {
             case .load, .resume: state = .loaded
@@ -59,6 +62,62 @@ import Foundation
     }
     static func run() async throws {
         let path = URL(fileURLWithPath: "/unavailable-owned-browser-fixture.app")
+        // Real file staging and session ownership with an inert transport. The
+        // old generation's bundle survives a held Stop; stale receipts cannot
+        // retire its replacement, and terminate-request is not process exit.
+        do {
+            let fm = FileManager.default
+            let root = fm.temporaryDirectory.appendingPathComponent("stream-local-session-" + UUID().uuidString, isDirectory: true)
+            try fm.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            defer { try? fm.removeItem(at: root) }
+            let source = root.appendingPathComponent("index.html")
+            try Data("<html>owned local fixture</html>".utf8).write(to: source)
+            let transport = Transport(), driver = Driver(), states = States()
+            let session = BrowserWidgetHelperSession(applicationURL: path, mixer: AudioMixEngine(),
+                validationAudioDriver: driver, transportForQualification: transport)
+            session.validationLocalContainer = root
+            transport.reply = { [weak session] in session?.validationReceive($0) }
+            let id = UUID(), generation = UUID()
+            try await session.loadForQualification(id: id, generation: generation, localSource: source, options: .init(), callbacks: states.callbacks)
+            let oldPage = transport.commands.last(where: { $0.action == .load })!.localPage!
+            // Keep the injected helper connection owned while this page retires.
+            let sibling = UUID()
+            try await session.loadForQualification(id: sibling, generation: UUID(), html: "sibling", options: .init(), callbacks: states.callbacks)
+            let oldRoot = try BrowserWidgetLocalContent.resolve(oldPage, container: root, widget: id, generation: generation).root
+            transport.holdStop = true
+            session.release(id)
+            let replacement = UUID()
+            let load = Task { try await session.loadForQualification(id: id, generation: replacement,
+                localSource: source, options: .init(), callbacks: states.callbacks) }
+            for _ in 0..<1000 {
+                if transport.commands.contains(where: { $0.action == .stop }) { break }
+                await Task.yield()
+            }
+            guard let stop = transport.commands.last(where: { $0.action == .stop }) else { preconditionFailure("Stop was not requested") }
+            precondition(fm.fileExists(atPath: oldRoot.path), "Held Stop prematurely deleted old local content")
+            precondition(!transport.commands.contains { $0.action == .load && $0.generation == replacement })
+            // A wrong generation cannot release this retirement barrier.
+            session.validationReceive(.init(state: .stopped, widgetID: id, helperPID: 42,
+                requestID: UUID(), generation: replacement))
+            precondition(fm.fileExists(atPath: oldRoot.path))
+            transport.holdStop = false
+            session.validationReceive(.init(state: .stopped, widgetID: id, helperPID: 42,
+                requestID: stop.requestID, generation: generation))
+            try await load.value
+            let fresh = transport.commands.last(where: { $0.action == .load })!.localPage!
+            let freshRoot = try BrowserWidgetLocalContent.resolve(fresh, container: root, widget: id, generation: replacement).root
+            precondition(!fm.fileExists(atPath: oldRoot.path) && fm.fileExists(atPath: freshRoot.path))
+            session.validationReceive(.init(state: .stopped, widgetID: id, helperPID: 42,
+                requestID: stop.requestID, generation: generation))
+            precondition(fm.fileExists(atPath: freshRoot.path), "Old Stop deleted fresh bundle")
+            transport.rejectedAction = .stop
+            session.release(id); await session.waitUntilStopped()
+            precondition(transport.closed && fm.fileExists(atPath: freshRoot.path), "Termination request was treated as process exit")
+            transport.hasTerminated = true
+            BrowserWidgetLocalRetirement.retry()
+            precondition(!fm.fileExists(atPath: freshRoot.path))
+            print("PASS: actual local session stages off-main, holds old files through exact Stop ACK/reload, rejects stale receipt, and quarantines shutdown files until confirmed owned process exit; no helper/capture")
+        }
         // Actual session consumption of a current capture-owner proof. A retired
         // demand while capture start is held must never reach helper Resume.
         do {

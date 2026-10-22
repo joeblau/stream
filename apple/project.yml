@@ -295,6 +295,7 @@ targets:
     sources:
       - BrowserAudioHelper
       - StreamMac/BrowserWidgetAudioProtocol.swift
+      - StreamMac/BrowserWidgetLocalContent.swift
       - StreamMac/BrowserWidgetAudioSocket.swift
       - StreamMac/BrowserWidgetVisualProtocol.swift
       - StreamMac/BrowserWidgetRasterizer.swift

@@ -9,7 +9,10 @@ protocol BrowserWidgetHelperTransport: AnyObject {
     var pid: Int32 { get }
     @MainActor func send(_ value: BrowserWidgetAudioCommand) throws
     @MainActor func close()
+    @MainActor var hasTerminated: Bool { get }
 }
+
+extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { false } }
 
 /// Explicit qualification backend. No app startup or preference enables this session. One
 /// LaunchServices application owns each page's pixels, interaction, and shared audio identity.
@@ -53,6 +56,12 @@ protocol BrowserWidgetHelperTransport: AnyObject {
     private var shutdownTask: Task<Void, Never>?
     private var shutdownID = UUID()
     private var loadClaims: [UUID: UUID] = [:]
+    private let localSession = UUID()
+    private var localPages: [BrowserWidgetPageLease: BrowserWidgetLocalContent.Snapshot] = [:]
+    private var localStaging = 0
+    #if STREAM_NATIVE_VALIDATION
+    var validationLocalContainer: URL?
+    #endif
     private var audioTask: Task<Void, Never>?
     private var audioRevision = UUID()
     private var requestedProgramLeases: Set<BrowserWidgetPageLease> = []
@@ -119,13 +128,15 @@ protocol BrowserWidgetHelperTransport: AnyObject {
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
     }
 
-    func loadForQualification(id: UUID, generation: UUID, html: String? = nil, url: URL? = nil,
+    func loadForQualification(id: UUID, generation: UUID, html: String? = nil, url: URL? = nil, localSource: URL? = nil,
                               options: BrowserWidgetPageOptions, callbacks: Callbacks) async throws {
         var quietOptions = options
         quietOptions.mediaStartsSuspended = true
-        let command = BrowserWidgetAudioCommand(action: .load, widgetID: id, html: html, url: url,
+        var command = BrowserWidgetAudioCommand(action: .load, widgetID: id, html: html, url: url,
                                                options: quietOptions, generation: generation)
-        try command.validate()
+        guard localSource == nil || (html == nil && url == nil) else { throw SessionError.unavailable }
+        if localSource == nil { try command.validate() }
+        guard loadClaims[id] != nil || loadClaims.count < BrowserWidgetAudioCommand.maximumWidgets else { throw SessionError.widgetLimit }
         let claim = UUID()
         loadClaims[id] = claim
         defer { if loadClaims[id] == claim { loadClaims[id] = nil } }
@@ -145,12 +156,45 @@ protocol BrowserWidgetHelperTransport: AnyObject {
         try Task.checkCancellation()
         guard loadClaims[id] == claim else { throw CancellationError() }
         guard demands.count < BrowserWidgetAudioCommand.maximumWidgets else { throw SessionError.widgetLimit }
+        var staged: BrowserWidgetLocalContent.Snapshot?
+        if let localSource {
+            guard localStaging + localPages.count + BrowserWidgetLocalRetirement.retainedCount < BrowserWidgetAudioCommand.maximumWidgets * 2 else {
+                throw SessionError.widgetLimit
+            }
+            localStaging += 1
+            defer { localStaging -= 1 }
+            let container: URL
+            #if STREAM_NATIVE_VALIDATION
+            container = try validationLocalContainer ?? BrowserWidgetLocalContent.container()
+            #else
+            container = try BrowserWidgetLocalContent.container()
+            #endif
+            let session = localSession
+            let copy = Task.detached {
+                try BrowserWidgetLocalContent.stage(source: localSource, container: container,
+                    session: session, widget: id, generation: generation)
+            }
+            staged = try await withTaskCancellationHandler { try await copy.value } onCancel: { copy.cancel() }
+            guard loadClaims[id] == claim, !Task.isCancelled else { try? staged?.retire(); throw CancellationError() }
+            command.localPage = staged?.page
+            do { try command.validate() } catch { try? staged?.retire(); throw error }
+        }
+        // A sibling can start shutdown while the off-main copy is running.
+        // Re-enter the same serialized shutdown barrier before installing it.
+        while let shutdownTask {
+            let retiringShutdown = shutdownID
+            await shutdownTask.value
+            guard loadClaims[id] == claim, !Task.isCancelled else { try? staged?.retire(); throw CancellationError() }
+            if shutdownID == retiringShutdown { self.shutdownTask = nil }
+        }
+        guard demands.count < BrowserWidgetAudioCommand.maximumWidgets else { try? staged?.retire(); throw SessionError.widgetLimit }
         failure = nil
         loadedLeases = loadedLeases.filter { $0.widgetID != id }
         suspendedLeases = suspendedLeases.filter { $0.widgetID != id }
         cancelMedia(for: id)
         closeAudioBoundary()
         demands[id] = Demand(generation: generation, command: command, callbacks: callbacks)
+        if let staged { localPages[.init(widgetID: id, generation: generation)] = staged }
         pools[id] = nil
         cancelSnapshot(for: id)
         callbacks.state(.loading)
@@ -177,6 +221,9 @@ protocol BrowserWidgetHelperTransport: AnyObject {
         guard let demand = demands.removeValue(forKey: id) else { return }
         let lease = BrowserWidgetPageLease(widgetID: id, generation: demand.generation)
         if installedLeases.remove(lease) != nil { retiredLeases.insert(lease) }
+        else if let page = localPages.removeValue(forKey: lease) {
+            BrowserWidgetLocalRetirement.retain([page], until: { true })
+        }
         loadedLeases = loadedLeases.filter { $0.widgetID != id }
         suspendedLeases = suspendedLeases.filter { $0.widgetID != id }
         cancelMedia(for: id)
@@ -278,6 +325,9 @@ protocol BrowserWidgetHelperTransport: AnyObject {
                 for lease in retiredLeases {
                     if await acknowledgeMedia(lease, suspended: true, retiring: true) {
                         retiredLeases.remove(lease)
+                        if let page = localPages.removeValue(forKey: lease) {
+                            BrowserWidgetLocalRetirement.retain([page], until: { true })
+                        }
                         for waiter in retirementWaiters.removeValue(forKey: lease) ?? [] { waiter.resume(returning: true) }
                     } else { retirementFailed = true; break }
                 }
@@ -483,7 +533,10 @@ protocol BrowserWidgetHelperTransport: AnyObject {
         for continuation in evaluations.values { continuation.resume(returning: nil) }; evaluations.removeAll()
         shutdownTask = Task { [self] in
             launchTask?.cancel(); try? await launchTask?.value; launchTask = nil
-            try? connection?.send(.init(action: .close)); connection?.close(); connection = nil
+            let retiringConnection = connection
+            let pages = Array(localPages.values); localPages.removeAll()
+            try? retiringConnection?.send(.init(action: .close)); retiringConnection?.close(); connection = nil
+            BrowserWidgetLocalRetirement.retain(pages, until: { retiringConnection == nil || retiringConnection?.hasTerminated == true })
             audioTask?.cancel(); await audioTask?.value; audioTask = nil
             await audio.stop(); await mixer?.resetCaptureRouteHistory(channel)
             await mixer?.removeChannel(channel)
@@ -594,6 +647,7 @@ private final class BrowserWidgetHelperConnection: BrowserWidgetHelperTransport,
         Darwin.shutdown(command.fileDescriptor, SHUT_RDWR); Darwin.shutdown(frames.fileDescriptor, SHUT_RDWR)
         DispatchQueue.main.async { [self] in onClosed(); application.terminate() }
     }
+    @MainActor var hasTerminated: Bool { application.isTerminated }
     @MainActor func close() {
         lock.withLock { closed = true }
         Darwin.shutdown(command.fileDescriptor, SHUT_RDWR); Darwin.shutdown(frames.fileDescriptor, SHUT_RDWR)
