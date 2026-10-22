@@ -17,7 +17,7 @@
     "signing": "Read-only inventory:3 valid signing identities (1 Developer ID Application, 2 Apple Development); 5 macOS profiles, none authorizing the declared shared browser App Group for host/helper. Two iOS profiles contain that group. No positive provisioned macOS shared-container launch, Developer ID distribution artifact, notarization or extension/driver installation is claimed; no profiles/identities/containers changed."
   },
   "validation": {
-    "sharedCore": "Current shared TextLayout pointer-lifetime fix 617fa81 freshly rebuilds and passes TextLayoutTests: 23 tests in 1 suite, plus strict Swift 6 optimized actual Core Text getter/stack-pressure checks. Published 9881359 iOS full 587 tests/82 suites PASS predates this new Core change; no current-head full Core/iOS pass is inferred. Earlier full/filtered named-source results remain historical evidence.",
+    "sharedCore": "Published 78796d1 full Core: 588 tests / 82 suites PASS on ARM 231.091 s, Intel 158.415 s and iOS 177.642 s. Both actual paragraph probes pass. Both Mac jobs later fail the generated row fixture compile at step 10; no whole native CI or later encoder/Deck pass. Local 181bf6f is fixture-only with identical production/Core/vendor source; original log hashes in wave9FixtureCIReview.",
     "shippingApp": "Exact integrated ec95f20 generation, unsigned arm64/x86_64 Release and actual bundle audit PASS. Root wave8 receipts bind source/vendor/log hashes; local actual Deck localhost transport/recording and production-source fallback regression pass. No signed distribution, hosted Intel repair or whole native CI success is inferred. Shared Core/iOS are unchanged by this vendor/fixture cohort; earlier exact-source evidence keeps its named scope.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
@@ -273,7 +273,8 @@
     "wave7HostedPerformance": "Exact 9881359 run 39735454725 terminal FAIL on both jobs. ARM renders 17252/17306; Intel 17232/16434 versus unchanged 17,850. ARM replay decodes 17251/17252 available; Intel 17232/17232. All writers finish with zero writer A/V drops. ARM both inspections and Intel first pass; Intel second inspection remains PENDING at original 1380 s owned deadline. Endpoint errors pass 80 ms but are not waveform drift. No cause, universal optimization benefit or eventual inspection result is inferred.",
     "wave8EncoderFallback": "Vendor d9fceedc retries exactly once without optional low-latency rate control only after kVTParameterErr and an explicit true request; it preserves other encoder requirements/errors and invalidates failed sessions. Source image attributes use actual format subtype, not media type. Exact ec95 production-source harness passes six refusal cases, actual software create -12902 to ordinary create 0, exact options/preparation, ten H.264/decode pixel checks and actual VideoCodec BGRA derivation. This is a local software-encoder reproduction, not a hosted Intel fix or hardware throughput result.",
     "wave8DeckTransport": "Exact ec95 full-source actual native IPC/controller visual/source tests and real localhost selected destination RTMP H264/AAC decode pass; independent recording countdown cancel/Start/Pause/Resume/New File/Stop finalizes two segments. Original hosted Intel receiver exit 234 / 47 VT -12902 failure remains failed. No hosted retry, physical device or public-service acceptance is inferred.",
-    "wave8HostedCI": "Published 9881359 native CI 39735328975 is terminal FAILURE at the 07:47:11 UTC read-only snapshot: ARM job 119679560262 SUCCESS, Intel 119679560505 FAILURE, iOS 119679560672 SUCCESS. ARM finishes at 07:46:25 UTC. Original Intel receiver exit 234 / 47 VT -12902 failure remains preserved; local ec95 / vendor fallback and Deck passes do not establish a hosted Intel fix. Browser interview 39735328995 remains successful. No newer-head hosted or whole native CI success is inferred."
+    "wave8HostedCI": "Published 9881359 native CI 39735328975 is terminal FAILURE at the 07:47:11 UTC read-only snapshot: ARM job 119679560262 SUCCESS, Intel 119679560505 FAILURE, iOS 119679560672 SUCCESS. ARM finishes at 07:46:25 UTC. Original Intel receiver exit 234 / 47 VT -12902 failure remains preserved; local ec95 / vendor fallback and Deck passes do not establish a hosted Intel fix. Browser interview 39735328995 remains successful. No newer-head hosted or whole native CI success is inferred.",
+    "wave9FixtureCI": "Native run 39744489372 at 78796d1 terminal FAILURE: both Mac builds/Core and paragraph probes pass, then FixtureControlsView synthesized private initializer blocks generated row probe compilation at step 10. Encoder/Deck and later gates are not reached. One explicit init(kind:) line in 181bf6f fixes the local probe; exact 40 cases PASS on local Xcode 27.2, all layout assertions/timeouts unchanged. No hosted 26.6 pass or production change is inferred."
   },
   "issues": [
     {
@@ -1151,11 +1152,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers), zero open PRs at the final read-only refresh. Parent actually closed #125/#130 and checked parent54 I01/I06; the epic remains open. Current local 1967f30 adds only reviewed capacity documentation after exact validated ec95f20. Generation, unsigned universal Release/bundle, actual localhost Deck transport/recording and production-source fallback checks pass at ec95f20. Published 9881359 native CI is terminal FAILURE: ARM/iOS succeed, Intel Deck step 11 fails. No hosted Intel repair or newer-head whole CI success is inferred. Both performance jobs remain failed; Intel second inspection remains pending at unchanged 1380 s. #90/#92/#124/#127 and all other incomplete gates remain open.",
-  "integratedMain": "1967f30db2b31ec06ab7d49a7b7971f79ff1c2e9",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); #125/#130 remain closed and all other open gates remain. Published 78796d1 CI 39744489372 is terminal FAILURE: both Mac jobs fail the generated control-row fixture initializer at step 10; iOS succeeds. Full Core 588/82 passes on ARM/Intel/iOS and both paragraph probes pass, but encoder/Deck are not reached. Local 181bf6f adds only an explicit fixture initializer; all 40 unchanged layout cases pass under local Xcode 27.2, not hosted 26.6 qualification. Production app/source/vendor equal 787; fresh hosted execution remains required. Earlier failures and qualification limits are preserved.",
+  "integratedMain": "181bf6f7fa84ea0f2a6704dce21dfcb9e8da59b5",
   "githubStateRefreshedAt": "2026-10-22T07:56:14.843578+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+  "publishedIntegration": "78796d13dffc193217c6aa6ec3a8ecfb8a562182",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1175,7 +1176,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "1967f30db2b31ec06ab7d49a7b7971f79ff1c2e9",
+  "currentReviewBase": "181bf6f7fa84ea0f2a6704dce21dfcb9e8da59b5",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -2349,5 +2350,78 @@
       125,
       130
     ]
+  },
+  "wave9FixtureCIReview": {
+    "publishedSource": "78796d13dffc193217c6aa6ec3a8ecfb8a562182",
+    "localFixtureFix": "181bf6f7fa84ea0f2a6704dce21dfcb9e8da59b5",
+    "runID": 39744489372,
+    "conclusion": "failure",
+    "checkedAt": "2026-10-22T08:21:37.468079+00:00",
+    "terminalReport": {
+      "path": "/tmp/stream-ci-78796d1-terminal-report-20261022.json",
+      "bytes": 20205,
+      "sha256": "86d5049576d85b1c0b9d669bd811de568db5ef380c9528d7d3b3ea63f34531b6"
+    },
+    "jobs": [
+      {
+        "id": 119709478163,
+        "name": "iOS Simulator",
+        "conclusion": "success",
+        "core": {
+          "tests": 588,
+          "suites": 82,
+          "durationSeconds": 177.642,
+          "conclusion": "passed"
+        },
+        "originalLog": "/tmp/stream-ci-78796d1-119709478163-original.log",
+        "originalLogBytes": 359655,
+        "originalLogSHA256": "8ab3a0f261ee619611bd893d2fb5b15d8bec65a7dc905febfda14a8d332b2688"
+      },
+      {
+        "id": 119709478506,
+        "name": "Intel macOS",
+        "conclusion": "failure",
+        "core": {
+          "tests": 588,
+          "suites": 82,
+          "durationSeconds": 158.415,
+          "conclusion": "passed"
+        },
+        "originalLog": "/tmp/stream-ci-78796d1-119709478506-original.log",
+        "originalLogBytes": 2750842,
+        "originalLogSHA256": "7bc052c4ac02be9475deab6b9075693fa34ffa7ae1ac11dd9b7707b056446e1e"
+      },
+      {
+        "id": 119709479933,
+        "name": "ARM macOS",
+        "conclusion": "failure",
+        "core": {
+          "tests": 588,
+          "suites": 82,
+          "durationSeconds": 231.091,
+          "conclusion": "passed"
+        },
+        "originalLog": "/tmp/stream-ci-78796d1-119709479933-original.log",
+        "originalLogBytes": 2613822,
+        "originalLogSHA256": "970b09d1f680ce95565aa163305825ccb00bc43ca309eef5f72f248fb778f7bc"
+      }
+    ],
+    "failure": "Both Mac step 10 generated FixtureControlsView(kind:) calls cannot access synthesized private init(kind:reduceMotion:); row executable never compiled. Both paragraph probes pass; encoder/Deck and later gates are not reached.",
+    "fix": "One explicit init(kind: String) { self.kind = kind } in generated fixture only. All 40 layout assertions and timeouts unchanged; production app/Core/vendor equal 78796d1.",
+    "localProof": {
+      "source": "181bf6f7fa84ea0f2a6704dce21dfcb9e8da59b5",
+      "exit": 0,
+      "log": "/tmp/stream-wave9-parent-control-rows-20261022.log",
+      "bytes": 8258,
+      "sha256": "28e105f3f154f9c25b494192c4c37fd54356ed51fe2c66155e7d87329b59115d",
+      "scope": "Exact checked-in40case probe; fixture initializer only; original assertions/timeouts unchanged; local Xcode 27.2 does not certify hosted 26.6"
+    },
+    "scope": "Local Xcode 27.2 execution, not hosted 26.6 qualification; a subsequent exact-head hosted run remains required. Earlier 988 Intel/ARM results remain historical.",
+    "originalIssueCounts": {
+      "closed": 27,
+      "open": 34
+    },
+    "githubWritesPerformed": false,
+    "closuresPerformed": []
   }
 }
