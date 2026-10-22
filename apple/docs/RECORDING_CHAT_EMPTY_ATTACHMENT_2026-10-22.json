@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-22",
+  "issue": 92,
+  "result": "PASS: baseline/fixed attachment behavior identical",
+  "baseCommit": "50084bb6ac1e92546fb830dcb8a51078ee121b86",
+  "productionChange": "Move raw value.isEmpty guard before JSONEncoder evaluation. All other RecordingChatPaint bytes identical to baseline.",
+  "behavior": "Empty raw input leaves existing or missing attachment untouched; nonempty-all-invalid still writes encoded []; nonempty validity filtering/order/duplicates/optional fields/prefix32 and ShouldNotPropagate mode preserved.",
+  "scope": "Actual whole RecordingChatPaint source with owned zero-sample CMSampleBuffers only; baseline/fixed semantic comparison, no performance measurement, image/audio/device/UI/network or Core/App build.",
+  "sourceSHA256": {
+    "apple/StreamMac/RecordingChatPaint.swift": "5e706d860bbcbfda1036a398baadb5ee3af1232ca79d443323b28b72ef765132",
+    "apple/scripts/recording_chat_paint_harness.swift": "e2b05c32176f1b2b349f9db320a0e17813c335698b02498faa97385e4a8024c7",
+    "apple/scripts/run_recording_chat_paint_harness.zsh": "7c54ac362511b234a6d847b39e6f5746108d9ee63e9f4f117a9b40a006cc55b7"
+  },
+  "baselineSourceSHA256": "45de6ac9a4f3e83928f10fa6814dc8464b8cf24a12af2cf67e0f6080ec0db93a",
+  "entireSourceExceptGuardIdentical": true,
+  "stages": [
+    {
+      "name": "baseline-compile",
+      "command": [
+        "xcrun",
+        "swiftc",
+        "-swift-version",
+        "6",
+        "-parse-as-library",
+        "-O",
+        "-j2",
+        "-framework",
+        "CoreMedia",
+        "-framework",
+        "CryptoKit",
+        "-framework",
+        "Foundation",
+        "/tmp/stream-recording-chat-empty-fixed-proof-20261022/RecordingChatPaint-baseline.swift",
+        "/tmp/stream-recording-chat-empty-attachment-20261022/apple/scripts/recording_chat_paint_harness.swift",
+        "-o",
+        "/tmp/stream-recording-chat-empty-fixed-proof-20261022/baseline-harness"
+      ],
+      "timeoutSeconds": 120,
+      "exitCode": 0,
+      "elapsedSeconds": 0.8141305839963024,
+      "logSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "baseline-runtime",
+      "command": [
+        "/tmp/stream-recording-chat-empty-fixed-proof-20261022/baseline-harness",
+        "/tmp/stream-recording-chat-empty-fixed-proof-20261022/baseline-result.json"
+      ],
+      "timeoutSeconds": 15,
+      "exitCode": 0,
+      "elapsedSeconds": 0.2326085420063464,
+      "logSHA256": "7eca4f882474bec47f2ad4dc605ded9767828d2de3669158f113a691406f3c11"
+    },
+    {
+      "name": "fixed-runner",
+      "command": [
+        "zsh",
+        "/tmp/stream-recording-chat-empty-attachment-20261022/apple/scripts/run_recording_chat_paint_harness.zsh"
+      ],
+      "timeoutSeconds": 120,
+      "exitCode": 0,
+      "elapsedSeconds": 1.0439252910000505,
+      "logSHA256": "7eca4f882474bec47f2ad4dc605ded9767828d2de3669158f113a691406f3c11"
+    }
+  ],
+  "baselineBinarySHA256": "ac1d1062181f11d756f76d9d7a53f954fbc9a6d04c123d4b07e82589ceb0aaae",
+  "fixedBinarySHA256": "0df8e4896c9a402d4c52c3e08fc96014f9ee6ab713bd94f04b79eacd4098b58f",
+  "semanticResultsIdentical": true,
+  "assertionsPassed": [
+    "empty blank sample has no attachment",
+    "empty preserves existing bytes and propagation mode",
+    "valid optional fields/order/duplicates preserved",
+    "nonempty all-invalid overwrites prior paint with encoded []",
+    "validity behavior retained",
+    "filter-valid then prefix32 retained"
+  ],
+  "initialFailure": {
+    "result": "Compile failure retained; no initial runtime ran.",
+    "reason": "Fixture global stored CFString rejected by Swift6 Sendable checks. Changed only fixture key to computed CFString, matching actual production style; no compiler flags relaxed.",
+    "reconstructedInitialFixture": "Exact initial fixture reconstructed afterward by reversing that one line; hash matches original results.json.",
+    "initialFixtureSHA256": "aaf97e5faca81c86205992ba5f1fa08152b246608ac02bbecece302ce1ec585c"
+  },
+  "proofFiles": {
+    "/tmp/stream-recording-chat-empty-proof-20261022/results.json": {
+      "bytes": 1377,
+      "sha256": "6ca08314ecdf1daf2ce5fc53463dcfb060ee7c9634f3c14cb3896e678e4310a4"
+    },
+    "/tmp/stream-recording-chat-empty-proof-20261022/baseline-compile.log": {
+      "bytes": 1982,
+      "sha256": "285f89e0a962c1bec72e8ab4759ac3f8bb0cc80fae215dfd261def79cf92a96a"
+    },
+    "/tmp/stream-recording-chat-empty-proof-20261022/initial-fixture-reconstructed.swift": {
+      "bytes": 4812,
+      "sha256": "aaf97e5faca81c86205992ba5f1fa08152b246608ac02bbecece302ce1ec585c"
+    },
+    "/tmp/stream-recording-chat-empty-proof-20261022.py": {
+      "bytes": 2585,
+      "sha256": "eed9baf2462725b8ce20764375b586c27b8149731f606dfc8f8dad1e7bd8a8a8"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022.py": {
+      "bytes": 2591,
+      "sha256": "dc7ddf8ef0c4a9cfd0f350a60726ed141fc19afd3f15d0a3b37a4e4df82be54a"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022/results.json": {
+      "bytes": 2669,
+      "sha256": "282ff73f75975262d831e2fc80839098183e66cae2a10edd4a5a7854f63190bf"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022/RecordingChatPaint-baseline.swift": {
+      "bytes": 1948,
+      "sha256": "45de6ac9a4f3e83928f10fa6814dc8464b8cf24a12af2cf67e0f6080ec0db93a"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022/baseline-compile.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022/baseline-runtime.log": {
+      "bytes": 576,
+      "sha256": "7eca4f882474bec47f2ad4dc605ded9767828d2de3669158f113a691406f3c11"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022/baseline-result.json": {
+      "bytes": 575,
+      "sha256": "a40cec1076be7f2ca18d1716513665a833490b19f0a681898a0f74c8b5068e85"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022/baseline-harness": {
+      "bytes": 121312,
+      "sha256": "ac1d1062181f11d756f76d9d7a53f954fbc9a6d04c123d4b07e82589ceb0aaae"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022/fixed-runner.log": {
+      "bytes": 576,
+      "sha256": "7eca4f882474bec47f2ad4dc605ded9767828d2de3669158f113a691406f3c11"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022/fixed/result.json": {
+      "bytes": 575,
+      "sha256": "a40cec1076be7f2ca18d1716513665a833490b19f0a681898a0f74c8b5068e85"
+    },
+    "/tmp/stream-recording-chat-empty-fixed-proof-20261022/fixed/recording-chat-paint-harness": {
+      "bytes": 121328,
+      "sha256": "0df8e4896c9a402d4c52c3e08fc96014f9ee6ab713bd94f04b79eacd4098b58f"
+    }
+  },
+  "remaining": "No measured performance improvement or original600s capacity qualification claimed; #92 remains open. No image rendering, frame clock/PTS, bank/recipient ownership or downstream behavior changed."
+}

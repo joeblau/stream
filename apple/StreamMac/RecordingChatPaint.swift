@@ -26,7 +26,8 @@ struct RecordingChatPaint: Codable, Hashable, Sendable {
     }
     private static var key: CFString { "com.joeblau.Stream.recording.publicChatPaint.v1" as CFString }
     static func attach(_ value: [Self], to sample: CMSampleBuffer) {
-        guard let data = try? JSONEncoder().encode(Array(value.filter(\.isValid).prefix(32))), !value.isEmpty else { return }
+        guard !value.isEmpty else { return }
+        guard let data = try? JSONEncoder().encode(Array(value.filter(\.isValid).prefix(32))) else { return }
         CMSetAttachment(sample, key: key, value: data as CFData, attachmentMode: kCMAttachmentMode_ShouldNotPropagate)
     }
     static func read(_ sample: CMSampleBuffer) -> [Self] {
