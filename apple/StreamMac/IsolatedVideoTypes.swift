@@ -57,7 +57,15 @@ struct IsolatedVideoRenderedFrame: @unchecked Sendable {
 /// A factory-created render closure is confined to one ISO worker queue.
 /// It reads exact source holders and owns its own native renderer.
 struct IsolatedVideoSource: Sendable {
-    typealias Render = @Sendable (CGSize, CMTime, CMTime, Int64, IsolatedVideoProcessing) -> IsolatedVideoRenderedFrame?
+    struct Render: Sendable {
+        typealias Body = @Sendable (CGSize, CMTime, CMTime, Int64, IsolatedVideoProcessing, CMTime) -> IsolatedVideoRenderedFrame?
+        private let body: Body
+        init(_ body: @escaping Body) { self.body = body }
+        func callAsFunction(_ size: CGSize, _ pts: CMTime, _ duration: CMTime, _ sequence: Int64,
+                            _ processing: IsolatedVideoProcessing, sourceTime: CMTime? = nil) -> IsolatedVideoRenderedFrame? {
+            body(size, pts, duration, sequence, processing, sourceTime ?? pts)
+        }
+    }
     let makeRenderer: @Sendable () -> Render
 }
 

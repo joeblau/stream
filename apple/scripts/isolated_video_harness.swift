@@ -259,7 +259,7 @@ final class VideoHarnessSpace: @unchecked Sendable {
         let cameraHolder = LatestCameraFrame(), unrelatedDefault = LatestCameraFrame(), screenHolder = LatestScreenFrame()
         let normal = try pixel(bright: false), flash = try pixel(bright: true), screen = try pixel(bright: false, right: true)
         unrelatedDefault.store(flash, position: .front)
-        cameraHolder.store(normal, position: .front); screenHolder.store(screen)
+        cameraHolder.store(normal, position: .front, presentationTime: CMClockGetTime(CMClockGetHostTimeClock())); screenHolder.store(screen)
         providers.update(screenHolders: [screenHolder], cameraHolders: [unrelatedDefault, cameraHolder])
         providers.updateKeyed(screenHolders: [screenKey: screenHolder], cameraHolders: [cameraKey: cameraHolder, .defaultCamera: unrelatedDefault])
         let cameraSource = SourceDefinition(name: "Isolated Camera", payload: .camera(cameraPayload))
@@ -306,7 +306,8 @@ final class VideoHarnessSpace: @unchecked Sendable {
             let seconds = Double(index) / 100
             try await clock.sleep(until: start.advanced(by: .seconds(seconds)))
             if (2..<3).contains(seconds) { cameraHolder.clear() }
-            else { cameraHolder.store((0.5..<0.6).contains(seconds) ? flash : normal, position: .front) }
+            else { cameraHolder.store((0.5..<0.6).contains(seconds) ? flash : normal, position: .front,
+                                      presentationTime: CMTime(seconds: base+seconds, preferredTimescale: 48_000)) }
             // The screen holder is deliberately static for all seven seconds.
             let audio = try ProgramRecordingFixtures.audio(at: seconds, timestampBase: base)
             program.appendAudio(audio); network.appendAudio(audio); raw.appendAudio(audio)

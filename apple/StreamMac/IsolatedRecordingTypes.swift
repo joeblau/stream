@@ -44,6 +44,19 @@ final class RecordingTimeline: @unchecked Sendable {
         var sourceStart: CMTime = .invalid
         var completedIntervals: [SourceInterval] = []
 
+        /// A video cursor may still belong to the preceding pause interval
+        /// after Program has resumed. Never apply a later interval's offset.
+        func originalSourceTime(for time: CMTime) -> CMTime? {
+            guard time.isNumeric, origin.isNumeric, end.isNumeric else { return nil }
+            for interval in completedIntervals {
+                if time >= interval.start-interval.offset && time < interval.end-interval.offset {
+                    return time+interval.offset
+                }
+            }
+            if sourceStart.isNumeric, time >= sourceStart-offset, time < end { return time+offset }
+            return nil
+        }
+
         /// A late PCM buffer keeps the offset of its original source interval.
         /// nil waits for the active frontier/resume decision; [] is a real
         /// source interval excluded by pause or the recording's origin/end.
