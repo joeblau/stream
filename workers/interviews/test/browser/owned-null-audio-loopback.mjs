@@ -10,6 +10,7 @@ import {fileURLToPath} from 'node:url';
 import {WebSocket} from 'ws';
 import {chromeFixtureExecutable,chromeFixtureCredentialArguments} from './chrome-fixture.mjs';
 import {captureLoopbackFailure} from './owned-loopback-failure-snapshot.mjs';
+import {createLoopbackSignalJournal} from './owned-loopback-signal-journal.mjs';
 import {createLoopbackTerminal,removeOwnedLoopbackDirectory} from './owned-loopback-lifecycle.mjs';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const artifact=process.env.STREAM_LOOPBACK_RECEIPT;
@@ -40,6 +41,7 @@ const meter=meters[0][1];
 const page=`<!doctype html><meta charset=utf-8><video id=return autoplay playsinline muted></video><script type=module src=/app.js></script>`;
 const app=String.raw`
 const captureLoopbackFailure=${captureLoopbackFailure.toString()};
+const createLoopbackSignalJournal=${createLoopbackSignalJournal.toString()};
 const emit=(kind,value)=>console.debug('owned-loopback',JSON.stringify({kind,value}));
 let currentPhase='not-started',lastStageAt=performance.now();const pageBegan=lastStageAt;
 const stage=value=>{currentPhase=value;lastStageAt=performance.now();emit('stage',value);};
@@ -49,9 +51,10 @@ const inPhase=async(name,action,announce=true)=>{
  try{return await Promise.race([Promise.resolve().then(action),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('owned-phase-deadline: '+name)),remaining);})]);}
  finally{clearTimeout(timer);}
 };
+const signaling=createLoopbackSignalJournal(()=>currentPhase);
 const peers=[],contexts=[],tracks=[],htmlEvents=[],iceErrors=[];let senderPCM,receiverPCM,remoteTrack;
 const player=document.getElementById('return');
-window.__ownedLoopbackFailureSnapshot=()=>captureLoopbackFailure({phase:currentPhase,peers,contexts,track:remoteTrack,player,senderPCM,receiverPCM,iceErrors});
+window.__ownedLoopbackFailureSnapshot=()=>captureLoopbackFailure({phase:currentPhase,peers,contexts,track:remoteTrack,player,senderPCM,receiverPCM,iceErrors,signaling:signaling.snapshot()});
 for(const name of ['play','playing','waiting','stalled','loadedmetadata','error'])player.addEventListener(name,()=>{if(htmlEvents.length<16){htmlEvents.push({name,muted:player.muted,paused:player.paused,readyState:player.readyState});emit('observer',{htmlEvent:htmlEvents.at(-1)});}});
 const wait=async(predicate,ms=10000)=>{const end=performance.now()+ms;while(performance.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,25));}throw new Error('owned-init-deadline');};
 const sinkContext=async label=>{
@@ -80,17 +83,17 @@ setTimeout(async()=>{try{
  const destination=a.createMediaStreamDestination(),merge=a.createChannelMerger(2);
  for(const [side,frequency,gain]of [[0,1000,.4],[1,1700,.2]]){const o=a.createOscillator(),g=a.createGain();o.frequency.value=frequency;g.gain.value=gain;o.connect(g).connect(merge,0,side);o.start();}
  merge.connect(destination);meterFor(a,merge,v=>senderPCM=v,'sender');
- const send=new RTCPeerConnection({iceServers:[]}),receive=new RTCPeerConnection({iceServers:[]});peers.push(send,receive);
+ const send=new RTCPeerConnection({iceServers:[]}),receive=new RTCPeerConnection({iceServers:[]});peers.push(send,receive);signaling.begin();
  for(const [peer,side]of [[send,'sender'],[receive,'receiver']])peer.addEventListener('icecandidateerror',event=>{if(iceErrors.length<8)iceErrors.push({side,code:event.errorCode});});
  const pendingSend=[],pendingReceive=[];
- send.onicecandidate=e=>{if(e.candidate){if(receive.remoteDescription)receive.addIceCandidate(e.candidate).catch(error=>{if(iceErrors.length<8)iceErrors.push({side:'receiver',name:error.name});});else pendingReceive.push(e.candidate);}};
- receive.onicecandidate=e=>{if(e.candidate){if(send.remoteDescription)send.addIceCandidate(e.candidate).catch(error=>{if(iceErrors.length<8)iceErrors.push({side:'sender',name:error.name});});else pendingSend.push(e.candidate);}};
+ send.onicecandidate=e=>{signaling.note('sender',e.candidate?'candidate-emitted':'candidate-end');if(e.candidate){if(receive.remoteDescription)signaling.observe('receiver','add-ice-candidate',()=>receive.addIceCandidate(e.candidate)).catch(error=>{if(iceErrors.length<8)iceErrors.push({side:'receiver',name:error.name});});else{signaling.note('receiver','candidate-queued');pendingReceive.push(e.candidate);}}};
+ receive.onicecandidate=e=>{signaling.note('receiver',e.candidate?'candidate-emitted':'candidate-end');if(e.candidate){if(send.remoteDescription)signaling.observe('sender','add-ice-candidate',()=>send.addIceCandidate(e.candidate)).catch(error=>{if(iceErrors.length<8)iceErrors.push({side:'sender',name:error.name});});else{signaling.note('sender','candidate-queued');pendingSend.push(e.candidate);}}};
  receive.ontrack=e=>{stage('remote-track-before-html');remoteTrack=e.track;tracks.push(e.track);const stream=new MediaStream([e.track]);document.getElementById('return').srcObject=stream;stage('remote-track-before-webaudio');meterFor(b,b.createMediaStreamSource(new MediaStream([e.track])),v=>receiverPCM=v,'receiver');stage('remote-track-connected');};
  for(const track of destination.stream.getTracks()){tracks.push(track);send.addTrack(track,destination.stream);}
- const offer=await inPhase('create-offer',()=>send.createOffer());await inPhase('sender-local-description',()=>send.setLocalDescription(offer));await inPhase('receiver-remote-description',()=>receive.setRemoteDescription(send.localDescription));
- await inPhase('receiver-pending-candidates',async()=>{for(const candidate of pendingReceive)await receive.addIceCandidate(candidate);},false);
- const answer=await inPhase('create-answer',()=>receive.createAnswer());await inPhase('receiver-local-description',()=>receive.setLocalDescription(answer));await inPhase('sender-remote-description',()=>send.setRemoteDescription(receive.localDescription));
- await inPhase('sender-pending-candidates',async()=>{for(const candidate of pendingSend)await send.addIceCandidate(candidate);},false);stage('connection-wait');
+ const offer=await inPhase('create-offer',()=>signaling.observe('sender','create-offer',()=>send.createOffer()));await inPhase('sender-local-description',()=>signaling.observe('sender','set-local-description',()=>send.setLocalDescription(offer)));await inPhase('receiver-remote-description',()=>signaling.observe('receiver','set-remote-description',()=>receive.setRemoteDescription(send.localDescription)));
+ await inPhase('receiver-pending-candidates',async()=>{for(const candidate of pendingReceive)await signaling.observe('receiver','add-ice-candidate',()=>receive.addIceCandidate(candidate));},false);
+ const answer=await inPhase('create-answer',()=>signaling.observe('receiver','create-answer',()=>receive.createAnswer()));await inPhase('receiver-local-description',()=>signaling.observe('receiver','set-local-description',()=>receive.setLocalDescription(answer)));await inPhase('sender-remote-description',()=>signaling.observe('sender','set-remote-description',()=>send.setRemoteDescription(receive.localDescription)));
+ await inPhase('sender-pending-candidates',async()=>{for(const candidate of pendingSend)await signaling.observe('sender','add-ice-candidate',()=>send.addIceCandidate(candidate));},false);stage('connection-wait');
  await wait(()=>send.connectionState==='connected'&&receive.connectionState==='connected'&&remoteTrack);
  stage('measuring');const started=performance.now();await new Promise(r=>setTimeout(r,12000));
  currentPhase='collecting-stats';
@@ -100,7 +103,7 @@ setTimeout(async()=>{try{
   const snapshot=await window.__ownedLoopbackFailureSnapshot();
   emit('failure',{name:'OwnedInitializationFailure',message:error.message==='owned-init-deadline'?'owned-init-deadline':error.message?.startsWith('owned-phase-deadline: ')?'owned-phase-deadline':'owned-api-refusal',snapshot});
  }
- finally{tracks.forEach(t=>t.stop());peers.forEach(p=>p.close());for(const c of contexts)c.close().catch(()=>{});}
+ finally{signaling.retire();tracks.forEach(t=>t.stop());peers.forEach(p=>p.close());for(const c of contexts)c.close().catch(()=>{});}
 },0);
 `;
 class CDP{
