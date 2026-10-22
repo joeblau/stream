@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 39 open, 22 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
+  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 37 open, 24 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -91,9 +91,9 @@
     "wave3AudioOnlyPortable": "180169f implements actual production audio-only AVAudioFile decoding without AVPlayer/AVAssetReader or an output device, preserving monotonic host PTS, trim/seek/pause/loop/end and shared generation/drain/grant ownership. Nine actual strict lifecycle/timing/format/zero-trim cases pass. Final whole-source signed sandbox app passes imported copied/repaired pad PCM and nonzero Program mix after original removal, plus existing video/package/remap/private-exclusion/repair/restart assertions. The former full-pad HAL blocker is resolved by this production path; successful native keyboard chooser selection is the sole remaining issue155 gate. See /tmp/stream-wave3-portable-audio-report-20261022.md.",
     "wave3HostedCI": "Run39714685947 at publishedd413aa1 is terminal failure: iOS succeeds; ARM and Intel each pass FULL Core586/82, then both fail step10 generated guest-preparation MediaValues.swift because ResolvedAssetAccess was unintentionally extracted. dfa80f6 fixes the exact production-type extraction boundary; actual local80-layout preparation passes. Later hosted native qualifications were skipped. This fix and later local passes do not relabel the original hosted run green. See /tmp/stream-wave3-published-ci-performance-report-20261022.md.",
     "wave3OwnedControllerSessions": "5efd2cf managed-start,987c04f deck/native-audio/dual-canvas, and8245c3c external-output generated fixtures explicitly construct an owned simulated unlocked session with system observation disabled. Production default/lock gates and shared transport helpers stay unchanged; actual default observation still reports the real locked host. Managed-start and external native suites pass; all three deck generators/source registrations and one full deck-native IPC/512-layer/dispatcher suite pass. The broad deck audio/dual-canvas media graphs were not rerun in this wave. See /tmp/stream-wave3-deck-fixture-session-report-20261022.md.",
-    "wave3GuestSlotsBackstage": "7083f6a passes actual Manager/default native SDK/owned Worker/local UDP TURN/Chrome saved-slot and Backstage lifecycle: deliberately chosen second pre-arrival slot, stable distinct camera/screen IDs, automatic bound metadata, SceneStore disk reload, native decoded Program OnAir positive/Backstage exclusion, full-lease rejoin without admission replay, removal/end cleanup. Browser candidates are relay. Explicit verified null AudioContext sinks and muted HTML scope this to actual media/control/native PCM;133 returned packets are metadata with0 HTML decoded samples, not normal speaker/AEC or return-video sync qualification. Issues128/129 remain open pending final combined proof/publication/independent original-criteria review; no universal browser/network/device requirement is inferred. See GUEST_SLOT_BACKSTAGE_2026-10-22.json.",
+    "wave3GuestSlotsBackstage": "7083f6a passes actual Manager/default native SDK/owned Worker/local UDP TURN/Chrome saved-slot and Backstage lifecycle: deliberately chosen second pre-arrival slot, stable distinct camera/screen IDs, automatic bound metadata, SceneStore disk reload, native decoded Program OnAir positive/Backstage exclusion, full-lease rejoin without admission replay, removal/end cleanup. Browser candidates are relay. Explicit verified null AudioContext sinks and muted HTML scope this to actual media/control/native PCM;133 returned packets are metadata with0 HTML decoded samples, not normal speaker/AEC or return-video sync qualification. Issues128/129 remain open pending final combined proof/publication/independent original-criteria review; no universal browser/network/device requirement is inferred. See GUEST_SLOT_BACKSTAGE_2026-10-22.json. Tasks 128 and 129 are now closed after publication in 4b959de, independent original-criteria review and parent checklist reconciliation; the separately stated playback/return-video limits remain open.",
     "wave3Profiles": "No new author/export path found. Official current SDK/CLI and enterprise docs require app composition/export; official Stream Deck7.4 MCP triggers already configured actions rather than authoring profiles. Current session remains locked, so known blocked AX path was not repeated. All11V2/12V3 profile files,3440 plugin file/symlink records and app preferences hashes remain unchanged. No genuine sample profile artifacts produced; issue152 stays open. See /tmp/stream-wave3-profiles-report-20261022.md.",
-    "wave3FinalCombined": "Frozen046c4c9 final unsigned universal Release and actual bundle audit PASS, logs /tmp/stream-wave3-final-account-{release,bundle}-20261022.log. New local filtered Core PASS563/80 in54.667s, excluding exactly the two known HAL suites; /tmp/stream-wave3-shared-core-20261022.log. The earlier publishedd413 hosted FULL586/82 passes on both ARM/Intel describe different Core source before additive ingest fields. Publication and issue128/129 original-criteria independent review/closure remain parent-owned and pending; current count stays39open/22closed.",
+    "wave3FinalCombined": "Published in 4b959de from validated source 046c4c9: unsigned universal Release and actual bundle audit PASS (/tmp/stream-wave3-final-account-{release,bundle}-20261022.log). Updated local Core PASS: 563 tests in 80 suites, 54.667 seconds, excluding exactly ChannelFXProcessorTests and VoicePolishProcessorTests for the unchanged local HAL limitation (/tmp/stream-wave3-shared-core-20261022.log and matching xcresult). Prior exact d413 hosted full Core passes on ARM/Intel describe different Core source before additive ingest fields; no new full-suite equivalence is claimed. Tasks 128/129 closed with exact API reconciliation. Broker, TLS and isolated-recording work is not counted integrated.",
     "wave3IsolatedRecordingPending": "Issue171 remains open. Owner reproduces originald41310-second ISO audio-end1s/video-end10.006667s failure while Program completes, then passes the same focused regression locally. A local2x60s run retains all four ISO files, no missing camera-handoff frames and three cameraA associated PCM cues within80ms with healthy RTMP. The strict guest gap check exposes a processed-ISO offline placeholder; its factory-only fix/final strict rerun are pending, unmerged and not counted as qualification. Source reports /tmp/stream-wave3-isolated-baseline-contract-20261022.log and /tmp/stream-wave3-isolated-qualified-20261022.log. Enabled Mac class remains the measured Mac15,8/M3Max16CPU boundary.",
     "wave3HostedPerformanceTerminal": "Both native ARM/Intel jobs of run39713883982 are terminalFAIL; no new sustained dispatch. ARM600s profiles render11722/12140 frames (~19.5367/20.2333fps), below original30fps. Intel reports10123/2209 rendered frames and fails original80ms video-PTS versus host-arrival duration comparison at59.192148398s divergence. These observations do not establish decoded waveform A/V drift, resource ceilings or a new sustained pass. Intel original log /tmp/stream-performance-intel119611316368-original.log; atomic failure-report/source-cadence correction c3fda71 is diagnostics only."
   },
@@ -533,38 +533,38 @@
       "code": "I04",
       "title": "[macOS][I04] Add persistent guest slots, layouts, placeholders, and automatic names",
       "url": "https://github.com/joeblau/stream/issues/129",
-      "githubState": "open",
-      "completion": "original-criteria closure candidate; final integration review pending",
-      "remaining": [
-        "Publish combined source and complete independent original-criteria review before closing. Final046c4c9 universal app/bundle and locally filtered Core563/80 pass, while actual saved-slot/Backstage native/browser relay lifecycle proof passes; GitHub state remains open at this ledger snapshot."
-      ],
+      "githubState": "closed",
+      "completion": "completed against original feature criteria within the documented validated-SDK scope",
+      "remaining": [],
       "qualificationLimits": [
-        "Optional TCP backend: arm64 and x86_64 archives and corresponding-source/relink materials are verified at the declared macOS 14 floor; native ARM full media and Rosetta Intel control smoke pass. Shipping still uses UDP-only transport. Actual macOS 14 runtime, native Intel full media, TLS, Internet/mobile/Safari and rendered A/V are not established by these optional artifacts."
+        "Optional TCP backend: arm64 and x86_64 archives and corresponding-source/relink materials are verified at the declared macOS 14 floor; native ARM full media and Rosetta Intel control smoke pass. Shipping still uses UDP-only transport. Actual macOS 14 runtime, native Intel full media, TLS, Internet/mobile/Safari and rendered A/V are not established by these optional artifacts.",
+        "The focused lifecycle run uses verified null WebAudio sinks and muted HTML. Native incoming Program PCM and slot/control lifecycle are verified; zero consumed HTML samples are transport metadata. Normal speaker output, physical AEC and the retained 105.104 ms return-video failure remain unqualified under other interview tasks."
       ],
       "evidence": [
         "NATIVE_GUEST_TCP_PORTABILITY.md",
         "GUEST_SLOT_BACKSTAGE_SOFTWARE_ACCEPTANCE.md",
         "GUEST_SLOT_BACKSTAGE_2026-10-22.json"
-      ]
+      ],
+      "publishedSource": "4b959de551710b505ce211ca8c2529298c8bcf40"
     },
     {
       "number": 128,
       "code": "I03",
       "title": "[macOS][I03] Add an embedded backstage guest panel and private talkback",
       "url": "https://github.com/joeblau/stream/issues/128",
-      "githubState": "open",
-      "completion": "original-criteria closure candidate; final integration review pending",
-      "remaining": [
-        "Publish combined source and complete independent original-criteria review before closing. Final046c4c9 universal app/bundle and locally filtered Core563/80 pass, while actual saved-slot/Backstage native/browser relay lifecycle proof passes; GitHub state remains open at this ledger snapshot."
-      ],
+      "githubState": "closed",
+      "completion": "completed against original feature criteria within the documented validated-SDK scope",
+      "remaining": [],
       "qualificationLimits": [
-        "Optional TCP backend: arm64 and x86_64 archives and corresponding-source/relink materials are verified at the declared macOS 14 floor; native ARM full media and Rosetta Intel control smoke pass. Shipping still uses UDP-only transport. Actual macOS 14 runtime, native Intel full media, TLS, Internet/mobile/Safari and rendered A/V are not established by these optional artifacts."
+        "Optional TCP backend: arm64 and x86_64 archives and corresponding-source/relink materials are verified at the declared macOS 14 floor; native ARM full media and Rosetta Intel control smoke pass. Shipping still uses UDP-only transport. Actual macOS 14 runtime, native Intel full media, TLS, Internet/mobile/Safari and rendered A/V are not established by these optional artifacts.",
+        "The focused lifecycle run uses verified null WebAudio sinks and muted HTML. Native incoming Program PCM and slot/control lifecycle are verified; zero consumed HTML samples are transport metadata. Normal speaker output, physical AEC and the retained 105.104 ms return-video failure remain unqualified under other interview tasks."
       ],
       "evidence": [
         "NATIVE_GUEST_TCP_PORTABILITY.md",
         "GUEST_SLOT_BACKSTAGE_SOFTWARE_ACCEPTANCE.md",
         "GUEST_SLOT_BACKSTAGE_2026-10-22.json"
-      ]
+      ],
+      "publishedSource": "4b959de551710b505ce211ca8c2529298c8bcf40"
     },
     {
       "number": 127,
@@ -915,17 +915,17 @@
   ],
   "scopeCounts": {
     "initialOpenFeatureTasks": 48,
-    "openFeatureTasks": 28,
+    "openFeatureTasks": 26,
     "openEpicsAndRoadmap": 11,
     "total": 61,
-    "currentlyOpen": 39,
-    "closedSinceInitialInventory": 22
+    "currentlyOpen": 37,
+    "closedSinceInitialInventory": 24
   },
-  "overallStatus": "Incomplete roadmap: verified initial inventory remains 39 open / 22 closed, with zero open PRs at the parent API check. No wave3 closures are counted. Combined source046c4c9 contains provider, focus, audio-only playback, fixture and guest-lifecycle follow-ups; final universal app/bundle and locally filtered Core563/80 checks pass; publication is pending. Issues128/129 are original-criteria closure candidates only after publication and independent review. Issue155 now retains only successful native keyboard chooser selection. Hosted d413 desktop CI failed after both full Core suites passed586 tests/82 suites; local fixture correction is not a green hosted run. The actual600-second ARM workload failed original30fps qualification; Intel sustained run also fails its original80ms video-PTS versus host-arrival-duration check; no decoded waveform A/V diagnosis is claimed.",
-  "integratedMain": "d413aa1",
-  "githubStateRefreshedAt": "2026-10-22T03:02:43.301278+00:00",
+  "overallStatus": "Incomplete roadmap: exact initial inventory now 37 open / 24 closed, with zero open PRs. Tasks 128 and 129 closed after independent original-criteria review, actual scoped Manager/SDK/browser evidence, combined universal verification and publication; their parent checklist is reconciled. Source 046c4c9 passes universal Release, bundle audit and 563 filtered local Core tests. Prior exact d413 hosted ARM/Intel sources each pass all 586 Core tests before the same fixture compile failure, now corrected locally. Both original 600-second performance jobs failed their original bounds; diagnostics preserve those results without claiming a throughput fix. Broker, optional TLS and isolated-recording follow-ups remain outside this published batch.",
+  "integratedMain": "4b959de",
+  "githubStateRefreshedAt": "2026-10-22T03:52:14.493741+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "d413aa1c6f24f4454cfc77a8c9d3f2e586593047",
+  "publishedIntegration": "4b959de551710b505ce211ca8c2529298c8bcf40",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -973,21 +973,18 @@
       "c3fda71",
       "7083f6a"
     ],
-    "githubWritesPerformed": false,
-    "closuresPerformed": [],
-    "proposedClosureAfterFinalCombinedBuildAndPublication": [
+    "githubWritesPerformed": true,
+    "closuresPerformed": [
       128,
       129
     ],
-    "pendingFinalVerification": [
-      "Publication of046c4c9 plus ledger",
-      "Independent original-criteria review and parent API reconciliation before128/129 closure"
-    ],
+    "proposedClosureAfterFinalCombinedBuildAndPublication": [],
+    "pendingFinalVerification": [],
     "notIntegrated": [
       "Restream public-client OAuth broker WIP",
       "Optional TLS positive-control/guard-masking WIP",
       "Issue171 strict80ms/alias-repeat work"
     ],
-    "githubCountsNote": "Parent API check still39 open/22 closed in the initial61. This documentation commit does not count proposed closures; root owns final API reconciliation."
+    "githubCountsNote": "Exact paginated API reconciliation of the initial 61 issues verifies 37 open / 24 closed, zero open PRs, and parent54 checked for 128/129 after source publication and closure."
   }
 }

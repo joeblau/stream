@@ -224,20 +224,18 @@ controlled qualification and local builds do not make pending hosted checks gree
 
 ## Wave-three integrated fixes and measured gates — 2026-10-22 UTC
 
-The current review base is frozen combined source `046c4c9`, after published
-`d413aa1`. This section supersedes the earlier snapshots' remaining-gate
-wording. The parent API check still verifies **39 open / 22 closed** in the
-initial 61-issue inventory. **No proposed wave-three closure is counted.**
-Issues #128/#129 remain open until publication and
-independent original-criteria review finish; root owns the final API/count and
-parent-checklist reconciliation.
+Combined source `046c4c9` is published in `4b959de`, after `d413aa1`.
+This section supersedes earlier snapshots' remaining-gate wording. Independent
+original-criteria review and exact paginated GitHub reconciliation close
+**#128 and #129**, check their parent checklist and verify **37 open / 24 closed**
+in the initial 61-issue inventory, with zero open PRs.
 
 | Task or scope | Integrated change and actual evidence | Current disposition |
 | --- | --- | --- |
 | #133 provider accounts | `c85a401` fences delayed Twitch validation against credential refresh/replacement/cancellation. `e78e1f4` adds permitted exact-account Restream relay/key discovery and supported metadata; `0dd847a` adds public Twitch ingest selection and exact-account disabled-draft import. Native account/vault/API/destination fixtures pass; actual public discovery returns 14 Twitch and 19 Restream servers. | **Open.** The accepted Restream public-client OAuth broker boundary is unfinished software, not included in this frozen source. Registered consent and authorized ingest remain unqualified; public server discovery is not a live broadcast. |
 | #90 accessibility | `e2a3fbf` reproduces and fixes six stale queued native-focus races across replacement/detach/reattach, moved controls, newer presentations and missing scope. Actual field-editor/current-owner, live fallback, nested bookmarks and production sheet/attachment positives pass. | **Open.** Remaining semantic SwiftUI AX labels/actions/order, virtual fader/panel/operator qualification and visual contrast are unchanged. Native focus ownership does not substitute for a semantic accessibility tree or contrast proof. |
 | #155 portable shows | `180169f` adds production audio-only AVAudioFile decoding without AVPlayer/AVAssetReader or an output device. Nine actual strict lifecycle/format/timing/zero-trim cases pass. The final full signed sandbox app passes actual imported and repaired sound-pad PCM plus nonzero Program mix after original removal, alongside video/package/remap/private-exclusion/repair/restart assertions. | **Open only for successful native keyboard chooser selection.** The former full-pad HAL blocker is resolved through the production audio-only path. Actual typed drops and LaunchServices remain distinct from physical Finder gestures; distribution signing is not an extra original acceptance gate. |
-| #128 / #129 Backstage and persistent slots | `7083f6a` passes the actual Manager/default native SDK/owned Worker/local UDP TURN/Chrome lifecycle: deliberate second pre-arrival slot, stable camera/screen IDs and bound automatic metadata, SceneStore reload, native decoded OnAir PCM/Backstage exclusion, full-lease rejoin without admission replay, removal/end cleanup and selected relay candidates. | **Original-criteria closure candidates, still open.** Final universal app/bundle and locally filtered Core verification pass; publication/independent review remain pending. Explicit null AudioContext sinks and muted HTML scope this proof to media/control/native PCM. The 133 returned packets with zero HTML decoded samples do not establish normal speaker output/AEC or return-video sync. |
+| #128 / #129 Backstage and persistent slots | `7083f6a` passes the actual Manager/default native SDK/owned Worker/local UDP TURN/Chrome lifecycle: deliberate second pre-arrival slot, stable camera/screen IDs and bound automatic metadata, SceneStore reload, native decoded OnAir PCM/Backstage exclusion, full-lease rejoin without admission replay, removal/end cleanup and selected relay candidates. | **Closed after publication and independent original-criteria review.** Final universal app/bundle and locally filtered Core verification pass; the parent checklist and exact API inventory are reconciled. Explicit null AudioContext sinks and muted HTML scope this proof to media/control/native PCM. The 133 returned packets with zero HTML decoded samples do not establish normal speaker output/AEC or return-video sync. |
 | Owned controller qualifications | `5efd2cf` managed-start, `987c04f` deck/audio/dual-canvas and `8245c3c` external-output generators declare an explicit simulated unlocked session only in their owned controller copies. Managed and external native suites pass; all three deck generators/source registrations and one full native IPC/512-layer/dispatcher suite pass. Production observation still detects the real locked host. | **Fixture correction integrated.** Production session defaults/guards and shared transport helpers are unchanged. Broad deck audio/dual-canvas media graphs were not rerun in this wave; no new HAL/decoder qualification is inferred. |
 | #92 performance | Actual hosted ARM workloads each run 600 seconds and achieve approximately 19.5367/20.2333 rendered fps with 7/0 failed renders. `c3fda71` now preserves atomic failure metrics and separates sparse replay-source inventory from nominal capacity, while retaining the original 30fps gate. Focused tests/smoke qualify diagnostics only. | **Open; original ARM sustained qualification failed.** The diagnostic correction is not a performance fix or new 600-second pass. Intel also fails the original video-PTS versus host-arrival-duration gate. Representative mixes/thermal evidence and measured resource ceilings remain unqualified. |
 | #171 isolated recording | Original `d413aa1` 10-second regression loses ISO audio while Program completes; the focused local correction passes. A local 2×60-second run retains all four ISO files, no missing camera-handoff frames, camera-A associated PCM cues within 80ms and a healthy RTMP output. | **Open; follow-up not counted integrated.** Strict guest lease-gap decoding finds a processed-ISO offline placeholder. Its factory-only fix and final unchanged 80ms/alias-repeat qualification are pending; partial positives do not supersede that gate. The measured enabled Mac class remains explicit. |
@@ -274,8 +272,8 @@ ChannelFXProcessorTests and VoicePolishProcessorTests for the known host HAL
 limitation; `/tmp/stream-wave3-shared-core-20261022.log`. This remains a filtered
 pass. The earlier published `d413aa1` full 586/82 hosted ARM/Intel runs precede
 the new ingest Core fields; no exact-source equivalence or new full-suite pass
-is claimed. Earlier `a5524f2` universal app/bundle also passed. Publication and
-proposed issue closures remain pending; no future GitHub state is assumed here. Optional TLS
+is claimed. Earlier `a5524f2` universal app/bundle also passed. Source publication and
+#128/#129 closure are now verified against the API. Optional TLS
 positive-control/guard-masking work and the Restream broker remain WIP outside
 this frozen source and are not counted as integrated acceptance.
 
