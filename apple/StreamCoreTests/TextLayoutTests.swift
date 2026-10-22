@@ -210,6 +210,35 @@ import StreamCore
 
     // MARK: - Measurement and fit
 
+    @Test("Created paragraph styles retain every alignment and wrapping policy after return")
+    func paragraphStyleValues() {
+        let alignments: [(TextHorizontalAlignment, CTTextAlignment)] = [
+            (.leading, .left), (.center, .center), (.trailing, .right)
+        ]
+        let policies: [(Bool, TextOverflow, CTLineBreakMode)] = [
+            (false, .clip, .byClipping), (true, .clip, .byWordWrapping),
+            (false, .ellipsis, .byTruncatingTail), (true, .ellipsis, .byTruncatingTail),
+            (false, .scaleDown, .byClipping), (true, .scaleDown, .byWordWrapping)
+        ]
+        // The production helper's locals/scoped pointers have left scope before
+        // these actual Core Text value reads; the style owns copied values.
+        let styles = alignments.flatMap { alignment, expectedAlignment in
+            policies.map { wraps, overflow, expectedBreak in
+                (TextMeasurement.paragraphStyle(alignment: alignment, wraps: wraps, overflow: overflow),
+                 expectedAlignment, expectedBreak)
+            }
+        }
+        for (style, expectedAlignment, expectedBreak) in styles {
+            var alignment = CTTextAlignment.natural
+            var lineBreak = CTLineBreakMode.byCharWrapping
+            #expect(CTParagraphStyleGetValueForSpecifier(style, .alignment,
+                MemoryLayout<CTTextAlignment>.size, &alignment))
+            #expect(CTParagraphStyleGetValueForSpecifier(style, .lineBreakMode,
+                MemoryLayout<CTLineBreakMode>.size, &lineBreak))
+            #expect(alignment == expectedAlignment && lineBreak == expectedBreak)
+        }
+    }
+
     @Test("Empty text measures to zero")
     func measureEmpty() {
         let font = TitleFontFallback.makeFont(requested: nil, size: 48)
