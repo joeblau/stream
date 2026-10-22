@@ -8,6 +8,9 @@ import Foundation
         snapshot.streamState = secret
         snapshot.recordingState = "recording"
         snapshot.program.totalRenderMilliseconds = .nan
+        snapshot.resourcePreviewLevel = secret
+        snapshot.programKernel.backend = secret
+        snapshot.programKernel.unavailableReason = secret
         snapshot.sources = (0..<300).map { (index: Int) in
             SourceDiagnosticSnapshot(id: "\(secret)-\(index)", kind: secret, state: secret, deliveredFrames: index)
         }

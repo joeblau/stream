@@ -117,6 +117,9 @@ private actor DesktopResourceReportStore {
         store = reportURL.map(DesktopResourceReportStore.init(url:))
         self.metrics = metrics; self.apply = apply
     }
+    var latestSnapshot: DesktopResourceSnapshot? { samples.last }
+    var hasCPUDelta: Bool { samples.count > 1 }
+    var metalCapabilities: DesktopMetalCapabilities { sampler.metalCapabilities }
     func start() {
         guard task == nil else { return }
         task = Task { [weak self] in

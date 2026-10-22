@@ -12,8 +12,14 @@ measurement is displayed instead of being replaced by the target. A live output
 awaiting its first telemetry snapshot remains labeled live.
 
 CPU is a sampled process CPU-time delta divided by wall time (it may exceed
-100% across cores). Memory is the process peak resident set, not current memory
-or GPU allocation. Encoder count includes active publishers and reserved
+100% across cores). Peak memory is the process peak resident set. Separate runtime collector
+fields expose current resident size, physical footprint, and Metal allocation
+when available, with their sample age; these are distinct measurements. CPU
+also has a logical-machine-capacity percentage, unavailable until a delta
+exists. Optional preview budget, main-actor delay, unified-memory capability,
+recommended Metal working set and counter-set count come from that same
+collector. Sampled completed Core Image Metal kernel time has its own count,
+mean and maximum; it is not process-wide GPU utilization. Encoder count includes active publishers and reserved
 recording capacity, including preflight and finalization; it is not hardware
 encoder utilization. Recording track endpoint difference compares last-written
 timestamps, not perceptual A/V sync or independently measured clock drift.

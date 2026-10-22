@@ -627,6 +627,8 @@ final class StreamController: ObservableObject {
         snapshot.targetFPS = activeProfile.frameRate
         snapshot.program = await engine.metricsSnapshot()
         snapshot.preview = await previewEngine.metricsSnapshot()
+        snapshot.programKernel = await engine.kernelMetricsSnapshot()
+        snapshot.previewKernel = await previewEngine.kernelMetricsSnapshot()
         snapshot.programClock = destinationOutputs.fanout.programClock.snapshot()
         snapshot.secondaryClock = destinationOutputs.fanout.secondaryClock.snapshot()
         snapshot.streamState = switch streamState {
@@ -665,6 +667,20 @@ final class StreamController: ObservableObject {
         snapshot.audioUnderruns = Dictionary(uniqueKeysWithValues: audio.channels.map { ($0.key, $0.value.underrunFrames) })
         snapshot.audioTapDrops = audio.tapDrops
         snapshot.sourceAudioClocks = audioEngine.sourceClockSnapshots(videoReference: destinationOutputs.fanout.programClock)
+        snapshot.resourcePreviewLevel = previewResourceLevel.rawValue
+        if let resource = resourceBudgetCoordinator?.latestSnapshot {
+            snapshot.resourceSampleAgeMilliseconds = max(0, ProcessInfo.processInfo.systemUptime - resource.uptime) * 1_000
+            if resourceBudgetCoordinator?.hasCPUDelta == true { snapshot.resourceCPUCapacityPercent = resource.cpuFraction * 100 }
+            snapshot.currentResidentBytes = resource.residentBytes
+            snapshot.physicalFootprintBytes = resource.physicalFootprintBytes
+            snapshot.metalAllocatedBytes = resource.metalAllocatedBytes
+            snapshot.mainActorDelayMilliseconds = resource.mainActorDelayMilliseconds
+        }
+        if let metal = resourceBudgetCoordinator?.metalCapabilities {
+            snapshot.metalUnifiedMemory = metal.unifiedMemory
+            snapshot.metalRecommendedWorkingSetBytes = metal.recommendedWorkingSetBytes
+            snapshot.metalCounterSetCount = metal.counterSets.count
+        }
         snapshot.sampleProcess()
         return snapshot
     }
