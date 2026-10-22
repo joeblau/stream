@@ -579,3 +579,28 @@ hosted failures and distinguish deliberate slow-sink drops from recorder loss.
 **#92 remains open.** Local source repairs and bounded checks do not replace
 original performance, native accessibility, provisioned browser IPC or the
 other outstanding acceptance requirements.
+
+### Native CI follow-up: retained Intel encoder/receiver failure
+
+The later 07:36:29 UTC read-only snapshot supersedes the earlier two-running-Mac
+status: published `9881359` native run `39735328975` remains active, but **Intel
+job `119679560505` has failed Deck transport step 11**. ARM has passed through
+step 20 and remains active. Browser interview CI and iOS remain successful;
+there is no whole native CI success.
+
+At 07:23:24 UTC, the Intel receiver exits **234** because required mapping
+`0:v:0` has no video stream. Retained diagnostics contain **47** VideoToolbox
+`failedToCreate(status: -12902)` errors. Intel's full **587 Core tests / 82
+suites pass in 248.041 seconds**, and controller step 10 passes before the Deck
+failure. The original 5,239,806-byte log is preserved at
+`/tmp/stream-ci-9881359-119679560505-original.log`, SHA256
+`0ee5b521ddc4d41fa56a18490785258d43c1830febadac6d08e088a247b91722`.
+Uploaded artifact `12408597560` preserves the normal, non-cleanup receiver exit
+and stderr; no received MP4 exists. Exact artifact hashes and the timestamped
+job/step snapshot are under `wave7Review.hostedCI.nativeFollowup`.
+
+Missing encoded video is the observed failure boundary; exact rejected VT
+arguments and the host capability cause are not established. The Deck owner is
+implementing a narrowly reviewed vendor candidate, **not a proven Intel fix**.
+No manual cancellation, rerun or dispatch is counted. All 25 closed / 36 open
+original issue states and their acceptance limits remain unchanged.

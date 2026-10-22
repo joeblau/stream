@@ -269,7 +269,7 @@
     "wave7ParagraphLifetimes": "617fa81 keeps paragraph setting values and their array alive through CTParagraphStyleCreate via nested pointer scopes. Exact returned alignment/line-break values pass all 18 combinations after non-inlined factory return and 256 stack-pressure rounds under -O/-warnings-as-errors. Fresh TextLayoutTests: 23 tests in 1 suite pass. Policies unchanged; no previously observed visual corruption is asserted.",
     "wave7SceneReordering": "5b1d2fe adds per-scene menu and named AX moves plus native Scene menu using complete live sibling order/current stable IDs and runtime authority. Actual workspace/resolver/dispatcher/menu-callback/undo/disk-reload/refile/delete/live-selection/runtime-replacement checks pass; no scene selection/Take/folder/content mutation is introduced by reorder. Actual menu key/AX action delivery remains unqualified.",
     "wave7ControlRows": "2ad4899 retains both original row/control trees in persistent horizontal native scroll containers. Root exact 2ea819a passes 40 static row/text/scroller cases: 2 rows \u00d7 10 configured text sizes \u00d7 2 styles, 320-point narrow/844-point wide viewport, exact realized intrinsic height/full document visibility/trailing-edge programmatic scroll. A 90 s process guard only; no system preference/input/runtime/global capture. This is not full-window readability/AX/focus/contrast qualification.",
-    "wave7HostedCI": "Published 9881359 CI 39735328975 remains active in both macOS jobs at the read-only snapshot; iOS full 587/82 and browser interview 39735328995 succeed. No whole desktop CI pass, terminal result or result for the newer 2ea819a Core/controls is asserted.",
+    "wave7HostedCI": "Published 9881359 CI 39735328975 remains active, with Intel job 119679560505 failed at Deck transport step 11 and ARM passed through step 20 and remains active at the 07:36:29 UTC read-only snapshot. Intel receiver exits 234 at 07:23:24 UTC for missing video stream; 47 VT failedToCreate(status: -12902) errors are retained. Intel full Core 587/82 and controller step 10 pass first. Browser interview CI and iOS 587/82 succeed. No whole native CI success, proven Intel fix or newer 2ea819a hosted qualification is asserted.",
     "wave7HostedPerformance": "Exact 9881359 run 39735454725 terminal FAIL on both jobs. ARM renders 17252/17306; Intel 17232/16434 versus unchanged 17,850. ARM replay decodes 17251/17252 available; Intel 17232/17232. All writers finish with zero writer A/V drops. ARM both inspections and Intel first pass; Intel second inspection remains PENDING at original 1380 s owned deadline. Endpoint errors pass 80 ms but are not waveform drift. No cause, universal optimization benefit or eventual inspection result is inferred."
   },
   "issues": [
@@ -1138,7 +1138,7 @@
     "currentlyOpen": 36,
     "closedSinceInitialInventory": 25
   },
-  "overallStatus": "Incomplete roadmap: 25 of 61 original issues closed, 36 open and zero open PRs; no new closures. Exact integrated 2ea819a unsigned universal Release/bundle and 40-case native row layout pass. Paragraph lifetimes pass 23 focused Core tests plus optimized native getters; scene menu/reorder model/runtime checks pass. These do not qualify full native AX, whole-window layout or contrast. Published 9881359 native CI remains active, while browser CI and iOS 587/82 pass. Performance run 39735454725 fails both unchanged nominal capacity gates; Intel second inspection remains pending at the original 1380s deadline. All other original incomplete tasks remain open.",
+  "overallStatus": "Incomplete roadmap: 25 of 61 original issues closed, 36 open and zero open PRs; no new closures. Exact integrated 2ea819a unsigned universal Release/bundle and 40-case native row layout pass. Paragraph lifetimes pass 23 focused Core tests plus optimized native getters; scene menu/reorder model/runtime checks pass. These do not qualify full native AX, whole-window layout or contrast. Published 9881359 native CI remains active with Intel Deck step 11 failed and ARM through step 20/still active at 07:36:29 UTC; browser CI and iOS 587/82 pass. No proven Intel fix or whole native CI success. Performance run 39735454725 fails both unchanged nominal capacity gates; Intel second inspection remains pending at the original 1380s deadline. All other original incomplete tasks remain open.",
   "integratedMain": "2ea819a574fe2fe475fc8d03caabfd736c402b89",
   "githubStateRefreshedAt": "2026-10-22T07:21:30.649467+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
@@ -1822,8 +1822,127 @@
       },
       "iosTestCount": 587,
       "iosSuites": 82,
-      "note": "Published 9881359 CI 39735328975 remains active in both macOS jobs at the read-only snapshot; iOS full 587/82 and browser interview 39735328995 succeed. No whole desktop CI pass, terminal result or result for the newer 2ea819a Core/controls is asserted.",
-      "publicationDeferredUntilNativeCITerminal": true
+      "note": "Published 9881359 CI 39735328975 remains active, with Intel job 119679560505 failed at Deck transport step 11 and ARM passed through step 20 and remains active at the 07:36:29 UTC read-only snapshot. Intel receiver exits 234 at 07:23:24 UTC for missing video stream; 47 VT failedToCreate(status: -12902) errors are retained. Intel full Core 587/82 and controller step 10 pass first. Browser interview CI and iOS 587/82 succeed. No whole native CI success, proven Intel fix or newer 2ea819a hosted qualification is asserted.",
+      "publicationDeferredUntilNativeCITerminal": true,
+      "nativeFollowup": {
+        "snapshot": {
+          "recordedAt": "2026-10-22T07:36:29.791232+00:00",
+          "run": {
+            "id": 39735328975,
+            "name": "CI",
+            "head_sha": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+            "status": "in_progress",
+            "conclusion": null,
+            "html_url": "https://github.com/joeblau/stream/actions/runs/39735328975"
+          },
+          "jobs": [
+            {
+              "id": 119679560262,
+              "name": "StreamMac build and tests (macos-26)",
+              "status": "in_progress",
+              "conclusion": null,
+              "html_url": "https://github.com/joeblau/stream/actions/runs/39735328975/job/119679560262",
+              "completed_at": null,
+              "steps": [
+                {
+                  "name": "Test saved guest preparation and native controller feedback",
+                  "status": "completed",
+                  "conclusion": "success",
+                  "number": 11,
+                  "started_at": "2026-10-22T06:57:35Z",
+                  "completed_at": "2026-10-22T07:01:42Z"
+                },
+                {
+                  "name": "Test public chat and recovery metadata boundaries",
+                  "status": "completed",
+                  "conclusion": "success",
+                  "number": 19,
+                  "started_at": "2026-10-22T07:27:58Z",
+                  "completed_at": "2026-10-22T07:32:51Z"
+                },
+                {
+                  "name": "Qualify recorded public chat timing",
+                  "status": "completed",
+                  "conclusion": "success",
+                  "number": 20,
+                  "started_at": "2026-10-22T07:32:51Z",
+                  "completed_at": "2026-10-22T07:35:58Z"
+                }
+              ]
+            },
+            {
+              "id": 119679560505,
+              "name": "StreamMac build and tests (macos-26-intel)",
+              "status": "completed",
+              "conclusion": "failure",
+              "html_url": "https://github.com/joeblau/stream/actions/runs/39735328975/job/119679560505",
+              "completed_at": "2026-10-22T07:23:35Z",
+              "steps": [
+                {
+                  "name": "Test saved guest preparation and native controller feedback",
+                  "status": "completed",
+                  "conclusion": "failure",
+                  "number": 11,
+                  "started_at": "2026-10-22T07:06:47Z",
+                  "completed_at": "2026-10-22T07:23:25Z"
+                },
+                {
+                  "name": "Test public chat and recovery metadata boundaries",
+                  "status": "completed",
+                  "conclusion": "skipped",
+                  "number": 19,
+                  "started_at": "2026-10-22T07:23:25Z",
+                  "completed_at": "2026-10-22T07:23:25Z"
+                },
+                {
+                  "name": "Qualify recorded public chat timing",
+                  "status": "completed",
+                  "conclusion": "skipped",
+                  "number": 20,
+                  "started_at": "2026-10-22T07:23:25Z",
+                  "completed_at": "2026-10-22T07:23:25Z"
+                }
+              ]
+            },
+            {
+              "id": 119679560672,
+              "name": "StreamCore tests (iOS Simulator)",
+              "status": "completed",
+              "conclusion": "success",
+              "html_url": "https://github.com/joeblau/stream/actions/runs/39735328975/job/119679560672",
+              "completed_at": "2026-10-22T06:46:48Z",
+              "steps": []
+            }
+          ]
+        },
+        "snapshotFile": "/tmp/stream-wave7-ci-intel-failure-snapshot-20261022.json",
+        "originalIntelLog": {
+          "path": "/tmp/stream-ci-9881359-119679560505-original.log",
+          "bytes": 5239806,
+          "sha256": "0ee5b521ddc4d41fa56a18490785258d43c1830febadac6d08e088a247b91722"
+        },
+        "originalUploadedArtifact": {
+          "artifactID": 12408597560,
+          "path": "/tmp/stream-ci-9881359-intel12408597560-original.zip",
+          "bytes": 1043455,
+          "sha256": "5f1ed670b136ec5e6e8902d361d6d25cd1d07ec55eb9e37a847e16ee67f4ba35"
+        },
+        "firstFailureAt": "2026-10-22T07:23:24Z",
+        "step": 11,
+        "receiverExitCode": 234,
+        "vtFailedToCreateStatus": -12902,
+        "vtFailedToCreateCount": 47,
+        "receiverReason": "Required 0:v:0 mapping has no video stream; receiver-status reports normal exit, not cleanup termination. No received.mp4 exists.",
+        "intelCore": {
+          "tests": 587,
+          "suites": 82,
+          "seconds": 248.041,
+          "conclusion": "success"
+        },
+        "diagnosis": "Missing encoded video is the observed boundary. Exact rejected VT create arguments or host capability root cause are not proven. Deck owner is implementing a narrow vendor candidate; it is not a proven Intel fix or hosted retry result.",
+        "manualCancellationRerunDispatch": false,
+        "noWholeNativeCISuccess": true
+      }
     },
     "hostedPerformance": {
       "run": 39735454725,
