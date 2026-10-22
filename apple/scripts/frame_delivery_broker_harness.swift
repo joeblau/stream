@@ -353,6 +353,7 @@ final class EscapedPrivatePixels: @unchecked Sendable {
         try await cancelledAdmission()
         try await replacementReceipt()
         await restartPublicationIdentity()
+        try await fractionalGeometry()
         // Retain all six actual clock-authority regressions in this same binary.
         await CompositionClockAuthorityHarness.stoppedTick()
         await CompositionClockAuthorityHarness.restartedTick(reconfigure: false)

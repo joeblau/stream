@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
-readonly BROKER_FIXTURE_DIR="${COMPOSITION_BROKER_FIXTURE_DIR:-build/frame-delivery-broker-validation}"
+readonly BROKER_FIXTURE_DIR="${FRAME_DELIVERY_BROKER_FIXTURE_DIR:-build/frame-delivery-broker-validation}"
 readonly BROKER_FIXTURE_BUILD_PATH="${FRAME_DELIVERY_BROKER_BUILD_PATH:-$BROKER_FIXTURE_DIR/derived}"
 python3 scripts/prepare_frame_delivery_broker.py --output "$BROKER_FIXTURE_DIR" "$@"
 xcodegen generate --spec "$BROKER_FIXTURE_DIR/project.json" --project "$BROKER_FIXTURE_DIR"
@@ -11,8 +11,11 @@ python3 scripts/repair_desktop_transport_archives.py "$BROKER_FIXTURE_BUILD_PATH
 xcodebuild -jobs 2 -project "$BROKER_FIXTURE_DIR/FrameDeliveryBroker.xcodeproj" \
     -scheme FrameDeliveryBrokerHarness -destination 'platform=macOS' -derivedDataPath "$BROKER_FIXTURE_BUILD_PATH" \
     CODE_SIGNING_ALLOWED=NO OTHER_SWIFT_FLAGS='$(inherited) -j2 -driver-batch-count 2' build
+# Preserve the exact executable for this source/control case before a later
+# variant reuses the owned derived-data directory.
+cp "$BROKER_FIXTURE_BUILD_PATH/Build/Products/Debug/FrameDeliveryBrokerHarness" "$BROKER_FIXTURE_DIR/FrameDeliveryBrokerHarness"
 env DYLD_FRAMEWORK_PATH="${BROKER_FIXTURE_BUILD_PATH:A}/Build/Products/Debug" \
-    python3 - "${BROKER_FIXTURE_BUILD_PATH:A}/Build/Products/Debug/FrameDeliveryBrokerHarness" "$BROKER_FIXTURE_DIR" "$@" <<'PY'
+    python3 - "${BROKER_FIXTURE_DIR:A}/FrameDeliveryBrokerHarness" "$BROKER_FIXTURE_DIR" "$@" <<'PY'
 import json,pathlib,subprocess,sys,os,signal
 binary=sys.argv[1];folder=pathlib.Path(sys.argv[2]);negative='--negative-control'in sys.argv[3:];sequence_negative='--sequence-negative-control'in sys.argv[3:];fractional='--fractional-geometry'in sys.argv[3:]
 command=[binary]+(['--fractional-geometry'] if fractional else ['--sequence-negative-control'] if sequence_negative else ['--negative-control']if negative else[])
