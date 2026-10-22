@@ -705,3 +705,56 @@ bound under `wave9FixtureCIReview` in [the ledger](MACOS_TASK_STATUS.json).
 Counts remain **27 closed / 34 open**, with #125/#130 closed. No issue state,
 original acceptance gate or earlier failed receipt is changed by this fixture
 correction or local pass.
+
+## Ownership, numeric geometry and candidate artifacts — 2026-10-22 UTC
+
+Counts remain **27 closed / 34 open** (23 features / 11 trackers); no new issue
+closure follows from this cohort. Exact local `873dddd` passes generation,
+unsigned universal arm64/x86_64 Release, the actual bundle audit and all four
+combined numeric-geometry source/pixel/presentation gates. Exact receipts and
+hashes are under `wave10Review` in [the ledger](MACOS_TASK_STATUS.json).
+Shared Core source is unchanged by this cohort; no new full Core/iOS pass is
+claimed. Published `a1bb23d` [native CI 39748453209](https://github.com/joeblau/stream/actions/runs/39748453209)
+is **still active** at the recorded snapshot, with iOS successful. Its Mac jobs
+are not a whole desktop CI pass or hosted validation of the newer local source.
+
+- Provider Forget Authorization immediately retires local account/token
+  authority, uses a separate nonsecret denial marker and reports failed durable
+  cleanup. Controlled storage/refresh/generation and targeted audience
+  invalidation checks do not qualify real OAuth or provider-side revocation.
+- Numeric layer position/size/rotation drafts use existing validated commands,
+  preserve unrelated values and undo, and reject retired/conflicting authority.
+  Explicit recovery creates a new current-target draft; retained old callbacks
+  cannot mutate it. Actual combined model, renderer and presentation checks
+  pass. **#90 stays open** for native keyboard/AX delivery, mounted identity,
+  full-window layout and contrast; see [geometry scope](LAYER_GEOMETRY_ACCESSIBILITY.md).
+- Composition-clock tokens reject retired tick and missed-deadline work after
+  stop/restart/output replacement. Five guard-only negative cases fail and six
+  actual positive cases pass. This is lifecycle correctness, not performance
+  qualification; see [clock authority](COMPOSITION_CLOCK_AUTHORITY.md).
+- **#152 now has three reproducible 15-key stream/record/interview candidate
+  archives**, registered and packaged with public MIT-template provenance.
+  Actual SDK saved-binding/restart and package-metadata checks are scoped
+  software evidence. **Actual target-app importer acceptance and package
+  install/update/uninstall remain unproved.** Manual editor export is an
+  alternative producer, not a required acceptance clause. See [candidate
+  profiles](../../integrations/stream-deck/profiles/README.md).
+- An evaluation-only virtual-microphone Program producer now exercises the
+  actual mixer and dynamically loaded driver PCM/lifecycle through owned HAL
+  syscall boundaries. Its public OS transport is compiled but unexecuted;
+  shipping targets and routing stay disabled. This does not qualify installed
+  IPC/sandbox, another app's input, latency or signed distribution. **#173/#174
+  stay open**; see [producer scope](../prototypes/VirtualMicrophone/README.md).
+
+The [generated-only thread trace](PERFORMANCE_LOCAL_THREAD_TRACE_2026-10-22.json)
+is one invocation of two 20 s workloads based on `78796d1`: static 600/601
+rendered/attempted, replay 601/601; both movies contain 600 writer frames, and
+replay decodes 599/600 available source frames. These counters remain distinct.
+Profiler-only pixel hashing contributes the largest healthy callback peaks;
+synchronous caller CPU and the measured tick-body interval are not total GPU
+utilization or a complete async tick. No hosted-like whole skip is reproduced.
+Later generator compatibility preserves the new clock guards without a new
+trace. **#92 stays open**: no sustained capacity, resource ceiling, waveform
+sync or cause/fix for the retained hosted failures is inferred. All original
+failed receipts and remaining acceptance limits are preserved. Pending chat
+diagnostics remain a separate workstream outside this frozen cohort.
