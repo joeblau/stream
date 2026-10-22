@@ -71,7 +71,8 @@ final class StreamController: ObservableObject {
     /// from streaming/recording.
     @Published private(set) var previewState: PreviewSessionState = .idle
     @Published private(set) var previewResourceLevel: DesktopResourceBudget.PreviewLevel = .normal
-    var previewResourceNotice: String? { previewResourceLevel.notice }
+    @Published private var monitorDeliveryFailures: [String: String] = [:]
+    var previewResourceNotice: String? { monitorDeliveryFailures.values.sorted().first ?? previewResourceLevel.notice }
     /// The latest STAGED composition for the PREVIEW monitor, ~30 fps (W03:
     /// rendered by the preview engine, so staged edits never touch program).
     @Published private(set) var previewImage: CGImage?
@@ -196,10 +197,8 @@ final class StreamController: ObservableObject {
     @Published private(set) var secondaryProgramImage: CGImage?
     @Published private(set) var activeSecondaryProfile = OutputProfile(canvasWidth: 720, canvasHeight: 1280, frameRate: 24)
     private var secondaryMonitorsEnabled = false
-    private var secondaryPreviewSubscription: FrameSubscription?
-    private var secondaryProgramSubscription: FrameSubscription?
-    private let secondaryPreviewConverter = PreviewImageConverter()
-    private let secondaryProgramConverter = PreviewImageConverter()
+    private var secondaryPreviewSubscription: OptionalMonitorDelivery?
+    private var secondaryProgramSubscription: OptionalMonitorDelivery?
     /// The W03 staged/program scene model; the engines follow its snapshots.
     private let previewProgram: PreviewProgramModel
     let destinationOutputs: DestinationOutputController
@@ -336,36 +335,41 @@ final class StreamController: ObservableObject {
     private let externalDisplayScreens: @MainActor () -> [ExternalDisplayDescriptor]
     private let externalDisplaySurface: @MainActor (ExternalDisplayDescriptor) -> (any ExternalDisplaySurface)?
     private var externalDisplayController: ExternalDisplayOutputController?
+    private var externalDisplayRetirement: Task<Void, Never>?
     var externalDisplayOutput: ExternalDisplayOutputController {
         if let existing = externalDisplayController { return existing }
         let output = ExternalDisplayOutputController(screensProvider: externalDisplayScreens, surfaceFactory: externalDisplaySurface, startError: { [weak self] feed in
             guard let self else { return "The studio is unavailable." }
-            return self.externalDisplayStartError(feed)
-        }) { [weak self] profile, sink in
-            guard let self else { return nil }
-            let feed = self.externalDisplayController?.feed ?? .program
-            guard self.externalDisplayStartError(feed) == nil else { return nil }
-            let canvas = self.outputCanvas(for: self.externalDisplayController?.feed, destinationID: self.externalDisplayController?.selectedDestinationID)
-            if canvas == .secondary, !self.secondaryCanvasAvailable { return nil }
-            if canvas == .secondary, self.canvasStartError(destinations: [.init(name: "External Display", canvas: .secondary)]) != nil { return nil }
-            let converter = ExternalProgramImageConverter(profile: profile)
+            return self.externalDisplayStartError(feed, destinationID: self.externalDisplayController?.selectedDestinationID)
+        }) { [weak self] request, sink in
+            guard let self else { throw CancellationError() }
+            await self.externalDisplayRetirement?.value
+            try Task.checkCancellation()
+            let feed = request.feed
+            if let error = self.externalDisplayStartError(feed, destinationID: request.selectedDestinationID) {
+                throw OptionalFrameDeliveryFailure(message: error)
+            }
+            let canvas = self.outputCanvas(for: feed, destinationID: request.selectedDestinationID)
+            let sourceProfile = canvas == .secondary ? self.activeSecondaryProfile : self.activeProfile
+            let targetProfile = request.profile ?? sourceProfile
+            try self.validateExternalDisplayTarget(request)
+            let domain = StableFrameDomainID(workspace: self.rawVideoResourceWorkspaceID, kind: .externalDisplay,
+                outputID: "external-display", plane: feed == .clean ? .clean : canvas == .secondary ? .secondary : .program)
             let cleanPermit = feed == .clean ? ExternalCleanRenderPermit() : nil
+            // Atomic source4 + private5 admission precedes pipeline demand and
+            // the controller's later native surface construction.
+            let delivery = try OptionalFrameDelivery(engine: self.engine, domain: domain,
+                width: targetProfile.canvasWidth, height: targetProfile.canvasHeight,
+                sourceSize: sourceProfile.canvasSize, transfer: .aspectFitBGRA, canvas: canvas,
+                clean: feed == .clean, authorized: { cleanPermit?.isActive ?? true })
+            let converter = ExternalProgramImageConverter()
             self.externalDisplayDemand += 1
             if cleanPermit != nil { self.cleanExternalDisplayDemand += 1 }
             if canvas == .secondary { self.secondaryExternalDisplayDemand += 1 }
-            let receive: @Sendable (CompositedFrame) -> Void = { frame in
-                if let image = converter.image(frame) { sink(image) }
-            }
-            let subscription = cleanPermit != nil
-                ? self.addCleanFrameSink(capacity: 1, authorized: { cleanPermit?.isActive == true }, sink: receive)
-                : self.addFrameSink(capacity: 1, canvas: canvas, sink: receive)
-            self.updatePipelineDemand()
-            return { [weak self] in
-                cleanPermit?.finish()
-                guard let self else { return }
-                let engine = self.engine
-                Task { @MainActor [weak self] in
-                    await engine.removeSink(subscription.token)
+            let cancellation = OptionalOutputCancellation { [weak self] in
+                cleanPermit?.finish(); delivery.finish()
+                let retirement = Task { @MainActor [weak self] in
+                    await delivery.finishAndWait()
                     guard let self else { return }
                     self.externalDisplayDemand = max(0, self.externalDisplayDemand - 1)
                     if cleanPermit != nil { self.cleanExternalDisplayDemand = max(0, self.cleanExternalDisplayDemand - 1) }
@@ -373,6 +377,30 @@ final class StreamController: ObservableObject {
                     self.promoteStagedProfileIfOutputsIdle()
                     self.updatePipelineDemand()
                 }
+                self?.externalDisplayRetirement = retirement
+            }
+            self.updatePipelineDemand()
+            do {
+                return try await withTaskCancellationHandler {
+                    try await self.awaitFrameDeliveryGeometry(canvas: canvas, expectedSize: sourceProfile.canvasSize)
+                    try Task.checkCancellation()
+                    try self.validateExternalDisplayTarget(request)
+                    if let error = self.externalDisplayStartError(feed, destinationID: request.selectedDestinationID) {
+                        throw OptionalFrameDeliveryFailure(message: error)
+                    }
+                    try await delivery.install { frame in
+                        if let image = converter.image(frame) { sink(image) }
+                    }
+                    try Task.checkCancellation()
+                    try self.validateExternalDisplayTarget(request)
+                    return { cancellation.finish() }
+                } onCancel: {
+                    cleanPermit?.finish()
+                    delivery.finish()
+                }
+            } catch {
+                cancellation.finish()
+                throw error
             }
         }
         externalDisplayController = output
@@ -380,15 +408,15 @@ final class StreamController: ObservableObject {
     }
     func stopExternalDisplayOutput() { externalDisplayController?.stop() }
     /// The PREVIEW monitor's preview-engine subscription (staged composition).
-    private var previewMonitorSubscription: FrameSubscription?
+    private var previewMonitorSubscription: OptionalMonitorDelivery?
     /// The PROGRAM monitor's program-engine subscription (registered while the
     /// monitors are visible; the publisher/recording have their own sinks).
-    private var programMonitorSubscription: FrameSubscription?
+    private var programMonitorSubscription: OptionalMonitorDelivery?
     /// Converts staged-composition frames to CGImages, off the main actor.
-    private let previewConverter = PreviewImageConverter()
     /// Converts program-composition frames to CGImages, off the main actor.
-    private let programConverter = PreviewImageConverter()
     private let resourcePreviewThrottle = DesktopPreviewThrottle()
+    private var previewGeometryCommand: Task<Void, Never>?
+    private var previewGeometryGeneration = UUID()
     private var resourceBudgetCoordinator: DesktopResourceBudgetCoordinator?
 
     private var settings: StreamSettings = .default
@@ -1163,21 +1191,135 @@ final class StreamController: ObservableObject {
         await audioEngine.levelsSnapshot()
     }
 
-    /// Same race-safe register/cancel as `addFrameSink`, but addressed at an
-    /// explicit engine — the W03 studio monitors subscribe to BOTH engines
-    /// (PREVIEW on the preview engine, PROGRAM on the program engine), while
-    /// `addFrameSink` stays the program-engine fan-out for real outputs.
-    private func addMonitorSink(to engine: CompositionEngine,
-                                canvas: OutputCanvas = .program,
-                                sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
-        let subscription = FrameSubscription()
-        Task { await engine.addSink(token: subscription.token, capacity: 1, canvas: canvas, sink: sink) }
-        return subscription
+    /// Existing preview-only geometry intents retain their order. A view never
+    /// reconfigures Program to obtain a compatible private bank.
+    @discardableResult
+    private func schedulePreviewGeometry(_ operation: @escaping @Sendable (CompositionEngine) async -> Void) -> Task<Void, Never> {
+        let previous = previewGeometryCommand, engine = previewEngine, generation = UUID()
+        previewGeometryGeneration = generation
+        let task = Task { @MainActor [weak self] in
+            await previous?.value
+            await operation(engine)
+            guard let self, self.previewGeometryGeneration == generation else { return }
+            self.refreshOptionalMonitorsAfterGeometry()
+        }
+        previewGeometryCommand = task
+        return task
+    }
+    private func awaitPreviewFrameDeliveryGeometry(canvas: OutputCanvas, expectedSize: CGSize) async throws {
+        let generation = previewGeometryGeneration, command = previewGeometryCommand
+        await command?.value
+        try Task.checkCancellation()
+        guard previewState == .active, previewGeometryGeneration == generation else { throw CancellationError() }
+        let actual = await previewEngine.frameDeliveryCanvasSize(canvas: canvas)
+        try Task.checkCancellation()
+        guard previewState == .active, previewGeometryGeneration == generation, actual == expectedSize else {
+            throw RawVideoResourceFailure.sessionConflict
+        }
+    }
+    /// Program/secondary command owners call this only after their fenced ACK.
+    func refreshOptionalMonitorsAfterGeometry() {
+        guard previewState == .active else { return }
+        refreshPrimaryMonitors(replacePending: true)
+        refreshSecondaryMonitors(replacePending: true)
     }
 
-    private func removeMonitorSink(_ subscription: FrameSubscription,
-                                   from engine: CompositionEngine) {
-        Task { await engine.removeSink(subscription.token) }
+    private enum MonitorEndpoint: String, Sendable { case preview, program, secondaryPreview, secondaryProgram }
+
+    private func monitorDelivery(_ endpoint: MonitorEndpoint) -> OptionalMonitorDelivery? {
+        switch endpoint {
+        case .preview: previewMonitorSubscription
+        case .program: programMonitorSubscription
+        case .secondaryPreview: secondaryPreviewSubscription
+        case .secondaryProgram: secondaryProgramSubscription
+        }
+    }
+    private func setMonitorDelivery(_ value: OptionalMonitorDelivery?, for endpoint: MonitorEndpoint) {
+        switch endpoint {
+        case .preview: previewMonitorSubscription = value
+        case .program: programMonitorSubscription = value
+        case .secondaryPreview: secondaryPreviewSubscription = value
+        case .secondaryProgram: secondaryProgramSubscription = value
+        }
+    }
+    private func setMonitorImage(_ value: CGImage?, for endpoint: MonitorEndpoint) {
+        switch endpoint {
+        case .preview: previewImage = value
+        case .program: programImage = value
+        case .secondaryPreview: secondaryPreviewImage = value
+        case .secondaryProgram: secondaryProgramImage = value
+        }
+    }
+    private func retireMonitor(_ endpoint: MonitorEndpoint) {
+        monitorDelivery(endpoint)?.finish()
+        setMonitorDelivery(nil, for: endpoint)
+        setMonitorImage(nil, for: endpoint)
+        monitorDeliveryFailures.removeValue(forKey: endpoint.rawValue)
+    }
+    private func configureMonitor(_ endpoint: MonitorEndpoint, engine: CompositionEngine,
+                                  size: CGSize, canvas: OutputCanvas, plane: StableFrameDomainID.Plane,
+                                  replacePending: Bool = false) {
+        let width = Int(size.width.rounded()), height = Int(size.height.rounded())
+        if let existing = monitorDelivery(endpoint), existing.width == width, existing.height == height,
+           !replacePending || existing.installTask == nil { return }
+        let previousDelivery = monitorDelivery(endpoint)?.delivery
+        retireMonitor(endpoint)
+        let identity = UUID()
+        let monitor = OptionalMonitorDelivery(id: identity, width: width, height: height) { [weak self] image in
+            guard let self, self.monitorDelivery(endpoint)?.id == identity else { return }
+            self.setMonitorImage(image, for: endpoint)
+        }
+        setMonitorDelivery(monitor, for: endpoint)
+        let converter = monitor.converter, handoff = monitor.handoff, throttle = resourcePreviewThrottle
+        monitor.installTask = Task { @MainActor [weak self, weak monitor] in
+            guard let monitor else { return }
+            do {
+                await previousDelivery?.finishAndWait()
+                try Task.checkCancellation()
+                guard let self, self.monitorDelivery(endpoint) === monitor else { monitor.finish(); return }
+                if endpoint == .preview || endpoint == .secondaryPreview {
+                    try await self.awaitPreviewFrameDeliveryGeometry(canvas: canvas, expectedSize: size)
+                } else {
+                    try await self.awaitFrameDeliveryGeometry(canvas: canvas, expectedSize: size)
+                }
+                let actualSize = await engine.frameDeliveryCanvasSize(canvas: canvas)
+                try Task.checkCancellation()
+                guard self.monitorDelivery(endpoint) === monitor else { monitor.finish(); return }
+                guard actualSize == size else {
+                    // Known geometry-change callers refresh again after their
+                    // existing engine update ACK. Never change Program for a view.
+                    throw FrameDeliveryFailure.invalidBank
+                }
+                let domain = StableFrameDomainID(workspace: self.rawVideoResourceWorkspaceID, kind: .monitor,
+                    outputID: endpoint.rawValue, plane: plane)
+                let delivery = try OptionalFrameDelivery(engine: engine, domain: domain,
+                    width: width, height: height, sourceSize: actualSize, canvas: canvas)
+                monitor.delivery = delivery
+                try await delivery.install(shouldTransfer: {
+                    converter.admitsFrame(throttleNanoseconds: throttle.nanoseconds)
+                }) { frame in
+                    if let image = converter.makeImage(frame) { handoff.enqueue(image) }
+                }
+                guard self.monitorDelivery(endpoint) === monitor else { monitor.finish(); return }
+                monitor.installTask = nil
+                self.monitorDeliveryFailures.removeValue(forKey: endpoint.rawValue)
+            } catch {
+                monitor.finish()
+                guard let self, self.monitorDelivery(endpoint) === monitor else { return }
+                self.setMonitorDelivery(nil, for: endpoint)
+                self.setMonitorImage(nil, for: endpoint)
+                if !(error is CancellationError), !Task.isCancelled {
+                    self.monitorDeliveryFailures[endpoint.rawValue] = "Studio monitor unavailable: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    private func refreshPrimaryMonitors(replacePending: Bool = false) {
+        guard previewState == .active else { return }
+        configureMonitor(.preview, engine: previewEngine, size: resourcePreviewSize(activeProfile.canvasSize),
+                         canvas: .program, plane: .preview, replacePending: replacePending)
+        configureMonitor(.program, engine: engine, size: activeProfile.canvasSize,
+                         canvas: .program, plane: .program, replacePending: replacePending)
     }
 
     // MARK: - Preview / stream lifecycle
@@ -1187,26 +1329,8 @@ final class StreamController: ObservableObject {
         settings = settingsStore.load()
         applyOutputProfile(settings.outputProfile)
         previewState = .active
+        refreshPrimaryMonitors()
         refreshSecondaryMonitors()
-        // PREVIEW monitor: the staged composition from the preview engine.
-        // PROGRAM monitor: the outgoing composition from the program engine.
-        // Both conversions run on each subscription's serial queue, off-main;
-        // the sinks self-throttle to ~30 fps before hopping to the UI.
-        let previewConverter = self.previewConverter
-        let monitorThrottle = resourcePreviewThrottle
-        previewMonitorSubscription = addMonitorSink(to: previewEngine) { [weak self] frame in
-            guard let image = previewConverter.makeImage(frame, throttleNanoseconds: monitorThrottle.nanoseconds) else { return }
-            Task { @MainActor [weak self] in
-                self?.previewImage = image
-            }
-        }
-        let programConverter = self.programConverter
-        programMonitorSubscription = addMonitorSink(to: engine) { [weak self] frame in
-            guard let image = programConverter.makeImage(frame, throttleNanoseconds: monitorThrottle.nanoseconds) else { return }
-            Task { @MainActor [weak self] in
-                self?.programImage = image
-            }
-        }
         if isPipelineRunning {
             // The pipeline is already up for a stream/recording — join it with
             // the preview engine (startPipeline covers the 0 → 1 case below).
@@ -1220,20 +1344,13 @@ final class StreamController: ObservableObject {
     /// the program engine alive for the outputs still consuming frames.
     func stopPreview() {
         guard previewState == .active else { return }
-        if let previewMonitorSubscription {
-            removeMonitorSink(previewMonitorSubscription, from: previewEngine)
-        }
-        previewMonitorSubscription = nil
-        if let programMonitorSubscription {
-            removeMonitorSink(programMonitorSubscription, from: engine)
-        }
-        programMonitorSubscription = nil
+        retireMonitor(.preview)
+        retireMonitor(.program)
         previewState = .idle
         refreshSecondaryMonitors()
         previewImage = nil
         programImage = nil
-        let previewEngine = self.previewEngine
-        Task { await previewEngine.stop() }
+        schedulePreviewGeometry { await $0.stop() }
         updatePipelineDemand()
     }
 
@@ -1243,7 +1360,7 @@ final class StreamController: ObservableObject {
         let staged = previewProgram.stagedScene
         let canvasSize = resourcePreviewSize(activeProfile.canvasSize)
         let fps = min(encodeFrameRate, previewResourceLevel.maximumFrameRate)
-        Task { await previewEngine.run(scene: staged, canvasSize: canvasSize, frameRate: fps) }
+        schedulePreviewGeometry { await $0.run(scene: staged, canvasSize: canvasSize, frameRate: fps) }
     }
 
     private func resourcePreviewSize(_ size: CGSize) -> CGSize {
@@ -1257,14 +1374,16 @@ final class StreamController: ObservableObject {
     func applyResourcePreviewBudget(_ level: DesktopResourceBudget.PreviewLevel) {
         guard level != previewResourceLevel else { return }
         previewResourceLevel = level; resourcePreviewThrottle.set(level)
-        guard previewState == .active, isPipelineRunning else { return }
+        guard previewState == .active else { return }
+        refreshPrimaryMonitors()
+        refreshSecondaryMonitors()
+        guard isPipelineRunning else { return }
         let canvasSize = resourcePreviewSize(activeProfile.canvasSize)
         let secondarySize = resourcePreviewSize(secondaryStagedProfile.canvasSize)
         let fps = min(encodeFrameRate, level.maximumFrameRate)
-        let previewEngine = self.previewEngine
-        Task {
-            await previewEngine.setOutput(canvasSize: canvasSize, frameRate: fps)
-            await previewEngine.setSecondaryOutput(canvasSize: secondarySize)
+        schedulePreviewGeometry {
+            await $0.setOutput(canvasSize: canvasSize, frameRate: fps)
+            await $0.setSecondaryOutput(canvasSize: secondarySize)
         }
     }
 
@@ -1300,8 +1419,7 @@ final class StreamController: ObservableObject {
         refreshSecondaryMonitors()
         reconcileSourceDemand()
     }
-    private func refreshSecondaryMonitors() {
-        let monitorThrottle = resourcePreviewThrottle
+    private func refreshSecondaryMonitors(replacePending: Bool = false) {
         // New monitor demand takes priority over an optional guest raster.
         // Revocation also disables Clean rendering before its VT drain ends.
         if cleanReturnDemanded, let error = cleanReturnStartError {
@@ -1311,30 +1429,18 @@ final class StreamController: ObservableObject {
             }
         }
         if secondaryMonitorsEnabled, previewState == .active {
-            if secondaryPreviewSubscription == nil {
-                let converter = secondaryPreviewConverter
-                secondaryPreviewSubscription = addMonitorSink(to: previewEngine, canvas: .secondary) { [weak self] frame in
-                    guard let image = converter.makeImage(frame, throttleNanoseconds: monitorThrottle.nanoseconds) else { return }
-                    Task { @MainActor [weak self] in self?.secondaryPreviewImage = image }
-                }
-            }
-            if secondaryProgramSubscription == nil {
-                let converter = secondaryProgramConverter
-                secondaryProgramSubscription = addMonitorSink(to: engine, canvas: .secondary) { [weak self] frame in
-                    guard let image = converter.makeImage(frame, throttleNanoseconds: monitorThrottle.nanoseconds) else { return }
-                    Task { @MainActor [weak self] in self?.secondaryProgramImage = image }
-                }
-            }
+            configureMonitor(.secondaryPreview, engine: previewEngine,
+                size: resourcePreviewSize(secondaryStagedProfile.canvasSize), canvas: .secondary, plane: .secondary, replacePending: replacePending)
+            configureMonitor(.secondaryProgram, engine: engine,
+                size: activeSecondaryProfile.canvasSize, canvas: .secondary, plane: .secondary, replacePending: replacePending)
         } else {
-            if let secondaryPreviewSubscription { removeMonitorSink(secondaryPreviewSubscription, from: previewEngine) }
-            if let secondaryProgramSubscription { removeMonitorSink(secondaryProgramSubscription, from: engine) }
-            secondaryPreviewSubscription = nil; secondaryProgramSubscription = nil
-            secondaryPreviewImage = nil; secondaryProgramImage = nil
+            retireMonitor(.secondaryPreview)
+            retireMonitor(.secondaryProgram)
         }
     }
     private func updateSecondaryGeometryIfIdle() {
         let previewSize = resourcePreviewSize(secondaryStagedProfile.canvasSize)
-        Task { await previewEngine.setSecondaryOutput(canvasSize: previewSize) }
+        schedulePreviewGeometry { await $0.setSecondaryOutput(canvasSize: previewSize) }
         guard !outputsOwnProfile else { return }
         let layout = previewProgram.programScene?.secondaryCanvas
         activeSecondaryProfile = layout?.isValid == true
@@ -1356,7 +1462,7 @@ final class StreamController: ObservableObject {
         stopExternalDisplayOutput()
         stopPreview()
         await scheduleProgramEngineStop().value
-        await previewEngine.stop()
+        await schedulePreviewGeometry { await $0.stop() }.value
         await audioEngine.stop()
         capturePool.stopAll()
         audio.stop()
@@ -1815,10 +1921,25 @@ final class StreamController: ObservableObject {
             secondary: secondaryCanvasDemanded ? activeSecondaryProfile : nil,
             qualified: IsolatedVideoBudget.current.qualified)
     }
-    private func externalDisplayStartError(_ feed: ExternalDisplayFeed) -> String? {
+    private func validateExternalDisplayTarget(_ request: ExternalDisplayFeedRequest) throws {
+        switch request.feed {
+        case .program, .clean:
+            guard request.profile == activeProfile else { throw RawVideoResourceFailure.sessionConflict }
+        case .secondaryCanvas:
+            guard secondaryCanvasAvailable, request.profile == activeSecondaryProfile else {
+                throw RawVideoResourceFailure.sessionConflict
+            }
+        case .selectedCanvas:
+            guard let id = request.selectedDestinationID, let destination = destinations.saved.first(where: { $0.id == id }),
+                  request.profile == profileForOutputDestination(destination) else {
+                throw RawVideoResourceFailure.sessionConflict
+            }
+        }
+    }
+    private func externalDisplayStartError(_ feed: ExternalDisplayFeed, destinationID: UUID?) -> String? {
         guard !resilience.isLocked else { return "Unlock this Mac before starting external output." }
         if feed == .clean { return cleanReturnStartError }
-        if outputCanvas(for: feed, destinationID: externalDisplayController?.selectedDestinationID) == .secondary {
+        if outputCanvas(for: feed, destinationID: destinationID) == .secondary {
             return canvasStartError(destinations: [.init(name: "External Display", canvas: .secondary)])
         }
         return nil
@@ -2175,6 +2296,7 @@ final class StreamController: ObservableObject {
         let changed = profile != activeProfile
         activeProfile = profile
         updateSecondaryGeometryIfIdle()
+        refreshPrimaryMonitors()
         stagedProfile = nil
         // G06 (issue #113): PDF `.fill` framing reads the output canvas off
         // the render tick via the lock-protected snapshot.
@@ -2199,7 +2321,7 @@ final class StreamController: ObservableObject {
         let previewEngine = self.previewEngine
         let previewSize = resourcePreviewSize(canvasSize)
         let previewFPS = min(fps, previewResourceLevel.maximumFrameRate)
-        Task { await previewEngine.setOutput(canvasSize: previewSize, frameRate: previewFPS) }
+        schedulePreviewGeometry { await $0.setOutput(canvasSize: previewSize, frameRate: previewFPS) }
     }
 
     /// Applies a staged profile once no stream/recording owns the geometry.
@@ -2399,8 +2521,7 @@ final class StreamController: ObservableObject {
         failureTracker.resetObservations()
         resilientFrames.clear()
         _ = scheduleProgramEngineStop()
-        let previewEngine = self.previewEngine
-        Task { await previewEngine.stop() }
+        schedulePreviewGeometry { await $0.stop() }
         let audioEngine = self.audioEngine
         Task { await audioEngine.stop() }
         // A09 (issue #121): stop the diagnostics poll and drop the taps with
@@ -2862,24 +2983,6 @@ private final class ChannelFXInsertBox: @unchecked Sendable {
     /// (plugin missing, load failure, or the channel is idle).
     func hostedAudioUnitHandles() -> [UUID: HostedAudioUnitHandle] {
         processor.hostedHandles()
-    }
-}
-
-/// Converts engine frames to throttled CGImages for the SwiftUI preview.
-/// `@unchecked Sendable`: every call arrives on the preview subscription's
-/// single serial delivery queue, so the `CIContext` and throttle state are
-/// never touched concurrently.
-private final class PreviewImageConverter: @unchecked Sendable {
-    private let context = CIContext(options: [.cacheIntermediates: false])
-    private var lastUpdateAt: UInt64 = 0
-
-    func makeImage(_ frame: CompositedFrame, throttleNanoseconds: UInt64) -> CGImage? {
-        let now = DispatchTime.now().uptimeNanoseconds
-        guard now &- lastUpdateAt >= throttleNanoseconds else { return nil }
-        lastUpdateAt = now
-        guard let buffer = frame.pixelBuffer else { return nil }
-        let image = CIImage(cvPixelBuffer: buffer)
-        return context.createCGImage(image, from: image.extent)
     }
 }
 

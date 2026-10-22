@@ -1,0 +1,83 @@
+{
+  "actualScope": [
+    "Five private CV backing slots remain occupied by retained/rendered CGImages; sixth allocation refused; release permits same-session reuse",
+    "Actual sealed selected-canvas letterbox/color/sourcePTS path into admitted private bank",
+    "Actual bounded handoff200offers during owned MainActor stall -> pending1/queued1/peak1; retired image refused",
+    "Actual external controller memory descriptors/surface; no surface before subscriptionACK; old canceledACK/callback refused; admission refusal0factory; surface failure exactcancel"
+  ],
+  "baseCommit": "30f2209199b818cc685a24647a46e5a54263daa3",
+  "currentSourceHashes": {
+    "apple/StreamMac/ExternalDisplayOutputController.swift": "ad7ba390f3a250877d5fa25caa534d483761d8d59cdba9268ee2defc39391542",
+    "apple/StreamMac/ExternalDisplayOutputView.swift": "4bf3157636c13e9aef512b683ac4c6913d106a5c399cee79768cade09cd9f00d",
+    "apple/StreamMac/ExternalProgramImageConverter.swift": "b3780943c71335bed1917306c3725ed2ccfc2ceb368508f99d92ef2b9d6ae118",
+    "apple/StreamMac/OptionalFrameDelivery.swift": "30e397fa961a02c8db4a27f14253c096ab5165816af22924fdd30b596a5ce422",
+    "apple/StreamMac/OptionalMonitorImageHandoff.swift": "10757107e1b11c5adb68db06873e83ff243ac1c2b4f4075947a1ed67983db14c",
+    "apple/StreamMac/PreviewImageConverter.swift": "acd2e29c2619576f871e616cf112822f9835aa938a3db5b57d436f52e699c1b6",
+    "apple/StreamMac/StreamController.swift": "24548cb6548ce029cddb6d7dd4d85e9d8160da2e2cfbd1c2baf07bb72624cc7d",
+    "apple/docs/OPTIONAL_FRAME_IMAGE_DELIVERY.md": "f301c0d0db7e61087ff38ffdcfbe18f11dad0345361e29c89449d9e0e5146069",
+    "apple/scripts/external_display_harness.swift": "fbb741a04dc51b6520df53827f1add5a9d206c9cbff1e20977119695a0d26002",
+    "apple/scripts/optional_frame_images_harness.swift": "a83342bcaceec46b34d1378e70c0f9e09b2567e939396b77c18c7edc51e63a30",
+    "apple/scripts/run_optional_frame_images_harness.py": "e15c7f196392e3a160690a4e2570b42a42d36ab5d4da570a46df3d4bd2583d3f"
+  },
+  "dependencyIntegration": "Canonical3d80197 foundation/sourcebroker/provider geometry/camera source; owner source normalization followup pending. Peer production files not staged in this patch.",
+  "forbiddenBoundaryUsed": {
+    "NSApplication": false,
+    "NSScreen": false,
+    "NSWindow": false,
+    "StreamControllerConstruction": false,
+    "StudioRuntime": false,
+    "cameraOrMixer": false,
+    "globalInputOrAX": false,
+    "network": false,
+    "operatorPreferences": false,
+    "screenCapture": false
+  },
+  "initialFocusedProof": {
+    "coreBinarySHA256": "e55cf959a464ec4342e5b3aec72167f65939c5c0fe202fff807dd037ed7ed845",
+    "exactInputs": {
+      "ExternalDisplayOutputController.swift": "ad7ba390f3a250877d5fa25caa534d483761d8d59cdba9268ee2defc39391542",
+      "ExternalProgramImageConverter.swift": "b3780943c71335bed1917306c3725ed2ccfc2ceb368508f99d92ef2b9d6ae118",
+      "FrameDeliveryBroker.swift": "87d6474c7a9114f7e2b3536e603d6a9a6be8e50075ba3a5622e2df6c53384c39",
+      "FrameDeliveryConverter.swift": "46e9df06e3b2dcf941f48295d2d8841b6a6d1faaf14bdd41978dd5f0ab2a00d8",
+      "OptionalMonitorImageHandoff.swift": "10757107e1b11c5adb68db06873e83ff243ac1c2b4f4075947a1ed67983db14c",
+      "OwnedRecordingChatPaint.swift": "f68f10ed5746548bbcf8f93a51151cb9f493919a5c381929120d5006b26955bc",
+      "PreviewImageConverter.swift": "acd2e29c2619576f871e616cf112822f9835aa938a3db5b57d436f52e699c1b6",
+      "RawVideoResourceCoordinator.swift": "16e4c0314c6f3da380743017bbef82635319ca75c428f318fa433785543f1d90",
+      "RecordingChatTypes.swift": "560f3e1f5e37ebfcb98f92e28215caeafb372721b2e53f88c70c19014fc8cec4",
+      "optional_frame_images_harness.swift": "a83342bcaceec46b34d1378e70c0f9e09b2567e939396b77c18c7edc51e63a30"
+    },
+    "initialFocusedSourceFreeze": {
+      "path": "/tmp/stream-wave17-monitor-focused-freeze-initial-20261022.json",
+      "sha256": "257138f868c7bbfc2190210e0e592b785f0f5f8e821a239e07b0526a0cb43d06"
+    },
+    "log": {
+      "path": "/tmp/stream-wave17-monitor-focused-initial-20261022.log",
+      "sha256": "ddc3a2157221632aeace3ca4ef7173a60b985a88f5229d5f0cc1cf5baff43dbd"
+    },
+    "report": {
+      "path": "/tmp/stream-wave17-monitor-focused-initial-20261022.json",
+      "sha256": "73ae46751551523e072fc96e961be5b78fc3d76c988ca310ecedcbf17d4eceb9"
+    },
+    "result": "PASS",
+    "retainedExecutable": {
+      "path": "/private/tmp/stream-wave17-monitor-private-ingress-20261022/apple/build/optional-frame-images-initial-20261022/OptionalFrameImagesHarness",
+      "sha256": "f45402fd6b9782e77b1b17485281fbd2b235ec77d9404c8d6a6ce7b47fbfc567"
+    },
+    "retainedInputReceipt": {
+      "path": "/private/tmp/stream-wave17-monitor-private-ingress-20261022/apple/build/optional-frame-images-initial-20261022/receipt.json",
+      "sha256": "1c31f93ecfdd625b2739d49570f090f8461b91fc289dae44e70d4fa60daa3883"
+    },
+    "runnerExitCode": 0
+  },
+  "notYetQualified": [
+    "Actual OptionalFrameDelivery and synthetic CompositionEngine registration/lifecycle execution",
+    "Canonical full-source/universal typecheck",
+    "Legacy native/physical external-display harness execution",
+    "Physical display/AX/operator/performance qualification"
+  ],
+  "sourceChecks": [
+    "All owned Swift files parse PASS",
+    "git diff --check PASS",
+    "Initial focused source hashes match frozen/current primitive files"
+  ]
+}
