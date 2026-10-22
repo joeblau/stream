@@ -45,6 +45,16 @@ import Foundation
         // not expose an enduring machine/channel fingerprint.
         precondition(Set((document["audioUnderruns"] as! [String: Any]).keys) == Set((document["audioTapDrops"] as! [String: Any]).keys))
         precondition(Set((document["sourceAudioClocks"] as! [String: Any]).keys) == Set((document["audioUnderruns"] as! [String: Any]).keys))
+        var timers = snapshot
+        timers.outputs = Array(snapshot.outputs.prefix(2))
+        let oldStart = Date(timeIntervalSince1970: 100), liveStart = Date(timeIntervalSince1970: 200)
+        timers.outputs[0].state = "failed"; timers.outputs[0].startedAt = oldStart
+        timers.outputs[1].state = "live"; timers.outputs[1].startedAt = liveStart
+        precondition(timers.liveSessionStartedAt == liveStart, "Historical failure cannot drive the live timer")
+        timers.outputs[1].state = "reconnecting"
+        precondition(timers.liveSessionStartedAt == liveStart, "Reconnect must preserve the acknowledged timer")
+        timers.outputs[1].state = "failed"
+        precondition(timers.liveSessionStartedAt == nil, "No active output means no live timer")
         let second = try JSONSerialization.jsonObject(with: snapshot.redactedExportData()) as! [String: Any]
         precondition((second["outputs"] as! [[String: Any]])[0]["id"] as! String != outputID)
         precondition(snapshot.outputs[0].id == id && snapshot.sources.count == 300, "Export cannot mutate the live inspector snapshot")
