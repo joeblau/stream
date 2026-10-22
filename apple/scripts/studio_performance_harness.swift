@@ -244,6 +244,9 @@ private struct PerformanceReport: Codable {
                 bank: slowBank, capacity: 1, cancellation: slowCancellation) { _ in Thread.sleep(forTimeInterval: 0.080) }
             var before = StudioDiagnosticSnapshot(); before.sampleProcess()
             let clock = ContinuousClock(); let started = clock.now
+            // Discard the baseline so retained CPU deltas cover only this case.
+            sampler.reset()
+            _ = sampler.sample()
             let decode: Task<Void, Error>? = replayURL.map { url in Task.detached { try await replay.run(url: url) } }
             defer { decode?.cancel() }
             let sourceStart = CMTimeConvertScale(CMClockGetTime(CMClockGetHostTimeClock()), timescale: 48_000, method: .roundTowardNegativeInfinity)
