@@ -84,4 +84,33 @@ import StreamCore
         settings = ChromaKeySettings(); settings.softness = .nan; #expect(settings.validationError != nil)
         var lut = LUTSettings(); lut.intensity = .infinity; #expect(lut.validationError != nil)
     }
+    @Test func linearGPUPreparationPreservesCreatorKnotsAndBoundedMemory() throws {
+        for dimension in [2, 3, 17, 32, 64] {
+            var rows: [String] = []
+            for b in 0..<dimension { for g in 0..<dimension { for r in 0..<dimension {
+                let x = Float(r) / Float(dimension-1), y = Float(g) / Float(dimension-1), z = Float(b) / Float(dimension-1)
+                rows.append("\(x*x) \(y*0.6) \(z*0.8+0.1)")
+            } } }
+            let lut = try CubeLUT.parse(Data((["LUT_3D_SIZE \(dimension)"] + rows).joined(separator: "\n").utf8))
+            let prepared = try #require(lut.highPrecisionRGBAData(intensity: 0.4))
+            #expect(prepared.dimension >= 32 && prepared.dimension <= 64)
+            #expect((prepared.dimension-1) % (dimension-1) == 0)
+            #expect(prepared.data.count == prepared.dimension*prepared.dimension*prepared.dimension*16)
+            let values = prepared.data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+            let factor = (prepared.dimension-1)/(dimension-1)
+            let probes = Array(Set(Array(stride(from: 0, to: dimension, by: max(1,dimension/8))) + [dimension-1])).sorted()
+            for b in probes { for g in probes { for r in probes {
+                let original = lut.values[(b*dimension+g)*dimension+r]
+                let identity = SIMD3(Float(r),Float(g),Float(b))/Float(dimension-1)
+                let expected = identity*0.6+original*0.4
+                let index = ((b*factor*prepared.dimension+g*factor)*prepared.dimension+r*factor)*4
+                #expect(abs(values[index]-expected.x) < 0.00001)
+                #expect(abs(values[index+1]-expected.y) < 0.00001)
+                #expect(abs(values[index+2]-expected.z) < 0.00001)
+                #expect(values[index+3] == 1)
+            } } }
+            #expect(lut.highPrecisionRGBAData(intensity: .nan) == nil)
+        }
+    }
+
 }
