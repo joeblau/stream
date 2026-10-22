@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CoreGraphics
 import Foundation
 import StreamCore
 
@@ -8,6 +9,7 @@ import StreamCore
 @MainActor
 final class DesktopResilienceCoordinator: ObservableObject {
     enum Event: Sendable { case sleep, wake, locked, unlocked }
+    enum SessionState: Sendable { case unlocked, locked, unavailable }
     @Published var policy = DesktopResiliencePolicy()
     @Published private(set) var notice: String?
     @Published private(set) var requiresManualRestart = false
@@ -23,14 +25,48 @@ final class DesktopResilienceCoordinator: ObservableObject {
     private nonisolated(unsafe) var workspaceObservers: [NSObjectProtocol] = []
     private nonisolated(unsafe) var distributedObservers: [NSObjectProtocol] = []
 
-    init(url: URL? = nil, observeSystem: Bool = true) {
+    init(url: URL? = nil, observeSystem: Bool = true, initialSessionState: SessionState? = nil) {
         self.url = url
         self.workspaceCenter = NSWorkspace.shared.notificationCenter
         if let url, FileManager.default.fileExists(atPath: url.path) {
             do { policy = try JSONDecoder().decode(DesktopResiliencePolicy.self, from: Data(contentsOf: url)) }
             catch { notice = "The project resilience policy could not be read. Safe defaults are active; the original document is preserved." }
         }
+        // Subscribe before reading the initial state, so a transition during
+        // construction is not lost. A runtime/project created after lock must
+        // not assume that it observed the earlier lock notification.
         if observeSystem { observeLifecycle() }
+        let session = initialSessionState ?? (observeSystem ? Self.currentSessionState() : .unlocked)
+        isLocked = session != .unlocked
+        if isLocked {
+            requiresManualRestart = true
+            if notice == nil {
+                notice = session == .locked
+                    ? "This Mac is locked or its user session is inactive. Unlock before starting public outputs."
+                    : "The unlocked user session could not be verified. Unlock before starting public outputs."
+            }
+        }
+    }
+
+    /// CGSessionCopyCurrentDictionary is public. Its supplemental screen-lock
+    /// marker is not a documented standard session property: use it when
+    /// present, alongside the documented console/login flags. macOS normally
+    /// omits that marker in an unlocked session. Missing GUI/session flags or
+    /// malformed values remain unavailable rather than authorizing publishing.
+    static func currentSessionState() -> SessionState {
+        sessionState(from: CGSessionCopyCurrentDictionary() as? [String: Any])
+    }
+
+    static func sessionState(from session: [String: Any]?) -> SessionState {
+        guard let session,
+              let onConsole = session[kCGSessionOnConsoleKey as String] as? Bool,
+              let loginComplete = session[kCGSessionLoginDoneKey as String] as? Bool else { return .unavailable }
+        guard onConsole, loginComplete else { return .locked }
+        if let marker = session["CGSSessionScreenIsLocked"] {
+            guard let locked = marker as? Bool else { return .unavailable }
+            return locked ? .locked : .unlocked
+        }
+        return .unlocked
     }
     deinit {
         for observer in workspaceObservers { workspaceCenter.removeObserver(observer) }
