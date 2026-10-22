@@ -346,3 +346,45 @@ fails the separate RTMP frame count:3143 over123.9s versus the unchanged>3400
 requirement, despite continuous media and68ms maximum frame spacing. That
 production publisher discrepancy is under investigation. #171 remains open;
 the verified inventory remains **24 closed /37 open**.
+
+
+## Combined native completion follow-up — 2026-10-22
+
+Frozen source `9cbe0b9` passes unsigned universal macOS Release, actual bundle
+audit, a full iOS source build, and **563 Core tests/80 suites in 52.689s**.
+Exactly the two previously documented local DSP suites remain excluded; this is
+not a local full-suite claim. Earlier exact `a346f56` hosted ARM, Intel and iOS
+each pass all **586 tests/82 suites**; both desktop jobs then fail the same old
+playback fixture pause assertion, corrected here without loosening its bounds.
+A fresh hosted run is still required.
+
+The complete ISO test uses an identical source tree (`9cbe0b9`/`dff65bd`) and
+passes both 60-second four-encoder workloads. All four ISO files contain1809
+frames, correct source identity/effects/audio policy, common origins/frontiers,
+marked disconnect gaps and no recording render/audio drops. Maximum planned
+flash/tone error is49.104167ms against the unchanged80ms gate. Actual RTMP
+remains continuous for123.9s with3714 compressed packets (nativeReader3715
+includes a leading edit-gap pixel) and76ms maximum frame spacing; the original
+>3400 gate passes. The fixed raw and shared publisher paths preserve input
+PTS and intentional profile/thermal frame-rate limits. Sourcehistory is bounded
+and opt-in; paused cursor mapping cannot borrow post-pause source pixels.
+Independent review finds all three original #171 criteria satisfied on the sole
+enabled M3 Max class and recommends closure after publication. Physical device
+IO and other Mac classes remain unmeasured. Full receipt: [isolated validation](ISOLATED_VIDEO_SUSTAINED_VALIDATION.md).
+
+The batch also corrects compositor due-tick idling and exact-owned-UID virtual
+microphone feedback routes, adds CI coverage, and produces auditable build-only
+virtual microphone evaluation packages. Actual extracted-driver callbacks and
+20 refusal/preservation cases pass; no driver was installed or activated and no
+Developer ID identity/notary service was used. #173/#174 remain open.
+
+The optional guest return diagnostic proves positive native PCM/Opus and actual
+Chrome RTP receipt, but Chrome emits zero jitter-buffer samples and zero meter
+PCM. Its original positive gate remains failed. Normal playback/AEC, TLS/full
+return qualification and the earlier #127 timing failure remain open. The new
+compositor helper's virtual-clock success is not sustained GPU/Intel capacity;
+#92 and its original failures remain open. #155 still lacks successful native
+keyboard chooser selection in the locked session.
+
+GitHub remains37open/24closed until the verified source is published and #171
+and parent #56 are reconciled; this section does not anticipate closure.

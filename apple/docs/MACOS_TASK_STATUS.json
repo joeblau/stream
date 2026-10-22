@@ -17,8 +17,8 @@
     "signing": "Five installed macOS profiles; zero unexpired app/helper/camera matches. No Developer ID distribution artifact, notarization, or extension/driver installation."
   },
   "validation": {
-    "sharedCore": "Broker source4e32ca6 local Core PASS:563 tests/80 suites in52.366s, excluding exactly ChannelFXProcessorTests and VoicePolishProcessorTests for the known local hostHAL limitation. /tmp/stream-broker-integrated-core-20261022.log. This is not a full-suite pass. TLS862ee7d changes no shared Core or iOS source. Prior b28510a hosted ARM and iOS each pass full586/82 before the new broker source; ARM later fails playback fixture pause-position201.",
-    "shippingApp": "Final source 862ee7d unsigned universal Release and actual bundle audit PASS: arm64/x86_64 app, embedded camera/browser helper, sandbox declarations, six App Intents/three entities and no validation hooks. Logs /tmp/stream-broker-tls-final-release-20261022.log and /tmp/stream-broker-tls-final-bundle-20261022.log. Full iOS device-source build also PASS at equivalent iOS/shared Core source 4e32ca6; TLS changes only optional macOS receiver/tooling. No Developer ID/notarization or physical Intel runtime claim.",
+    "sharedCore": "Final combined 9cbe0b9 local Core PASS:563 tests/80 suites in52.689s; exactly ChannelFXProcessorTests and VoicePolishProcessorTests excluded for the known local HAL limitation. /tmp/stream-wave4-parent-final-core-20261022.log. Earlier exact a346f56 hosted ARM, Intel and iOS each pass FULL586/82; that source predates the new routing policy. Both Mac workflows later fail the same fixture pause assertion, now corrected with preserved bounds. No current whole-hosted-CI pass is claimed.",
+    "shippingApp": "Final combined 9cbe0b9 unsigned universal Release and actual bundle audit PASS (arm64/x86_64 app and embedded camera/browser helper, sandbox declarations, six App Intents/three entities, no validation hooks); full iOS device-source build PASS. Logs /tmp/stream-wave4-parent-final-{universal,bundle,ios}-20261022.log. No Developer ID/notarization or physical Intel/runtime device IO qualification.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -164,7 +164,79 @@
       ],
       "remaining": "Fresh hosted CI required; source-only correction does not claim a previous failed workflow succeeded."
     },
-    "wave4ISOQualificationPending": "Outside main pending recording branch: all4 actual ISO decodes across2x60s pass original80ms pairwise cues (camera16.42/14.88ms, oldleaseguest49.75ms), exact3camera/2guest counts, identity, markedblack/silence, origins/frontiers and zero recording render/audio drops. Whole test remainsFAIL: RTMP123.9s/3143frames does not meet unchanged>3400 frame gate although maxstep68ms and continuity pass. Actual same-rate sharedencoder phase-gate is under investigation; no new fullqualification or issueclosure."
+    "wave4ISOQualificationPending": "Resolved: exact combined9cbe0b9 matches tested dff65bd tree; complete2x60s four-encoder workload, strict80ms/expectedcue counts/network>3400 plus independent consumer/resource checks PASS exit0. All originalfailedlogs remain retained. See wave4ISOQualification and ISOLATED_VIDEO_SUSTAINED_2026-10-22.json.",
+    "wave4CombinedBuild": {
+      "source": "9cbe0b9e45e168c1bb6fdebf51a5508099c8febf",
+      "checks": [
+        {
+          "label": "generate",
+          "exit": 0,
+          "log": "/tmp/stream-wave4-parent-final-generate-20261022.log",
+          "bytes": 168,
+          "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+        },
+        {
+          "label": "universal",
+          "exit": 0,
+          "log": "/tmp/stream-wave4-parent-final-universal-20261022.log",
+          "bytes": 348403,
+          "sha256": "e0e6d3cbdf3a31ed403adef8208dc0e569b33215f246a9f89e10f9f98d8048a0"
+        },
+        {
+          "label": "bundle",
+          "exit": 0,
+          "log": "/tmp/stream-wave4-parent-final-bundle-20261022.log",
+          "bytes": 517,
+          "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+        },
+        {
+          "label": "ios",
+          "exit": 0,
+          "log": "/tmp/stream-wave4-parent-final-ios-20261022.log",
+          "bytes": 71942,
+          "sha256": "a462f345554dcf83ebc0fa868e064ede83e520e4294addcb8c1d9d0a87ea45d8"
+        },
+        {
+          "label": "core",
+          "exit": 0,
+          "log": "/tmp/stream-wave4-parent-final-core-20261022.log",
+          "bytes": 192865,
+          "sha256": "cfd0ddeced435782567896f4865623dad43f319e897fed47010be96ee342bea4"
+        }
+      ]
+    },
+    "wave4ISOQualification": {
+      "source": "9cbe0b9",
+      "testedEquivalentTree": "dff65bd",
+      "status": "PASS",
+      "log": "/tmp/stream-wave3-isolated-combined-cadence-sustained-20261022.log",
+      "receipt": "ISOLATED_VIDEO_SUSTAINED_2026-10-22.json",
+      "scope": "Only enabled Apple M3 Max/Mac15,8/16CPU; generated camera/screen discovery and decoded guest/PCM input boundaries, actual shipping graph/Metal/encoders/writers/loopback RTMP. Physical device IO and other Mac classes remain unmeasured.",
+      "workload": "Two60-second actual4encoder1080p30 workloads; fourISO files each1809samples, zero recording render/audio drops, max associatedcue error49.104167ms versus unchanged80ms; sourceIDs/gaps/lease privacy/budget rejection/independentstop pass.",
+      "network": "123.9s;3714 actual compressed packets,3715 nativeReader frames including opening boundary pixel;maxstep76ms; original>3400 gate passes.",
+      "review": "pro_adapters independently recommends171closure after parentchecks/publication; all3 originalAC satisfied within documented enabled class."
+    },
+    "wave4VirtualAudio": {
+      "feedbackSource": "43ad3dd",
+      "packagingSource": "948997f",
+      "nativeRoutingLog": "/tmp/stream-wave4-root-feedback-routing-20261022.log",
+      "status": "Exact own UID feedback guard and stale device-ID/fallback-state tests PASS with owned discovery/playback boundaries. Evaluation package actualadhoc signing/pkgbuild/expandedpayload/extracteddriver callbacks plus20refusal/preservation cases PASS and independently reviewed.",
+      "receipt": "VIRTUAL_MICROPHONE_PACKAGING.md",
+      "limits": "Only evaluationadhoc+unsignedpkg exercised; no actual DeveloperID identity/notary/install/activation/receivingapp/sandbox IPC proof or supported O07 decision. O08 bus/format/state UI remains gated."
+    },
+    "wave4CompositionCadence": {
+      "source": "cbb2502",
+      "status": "Shipping-helper deterministic virtual-clock regression PASS;33msrender+.5mswakejitter9001\u219218000 frames per virtual600s, original17850minimum retained.40msrender15000 remainsfailed, fastsource18000cap, monotonic/bounded59sbacklog testsPASS. Actualengine hook compiles in finaluniversal app.",
+      "log": "/tmp/stream-wave4-root-composition-schedule-20261022.log",
+      "limits": "Original sustained hosted failures and Intel59s delivery stall remain unresolved qualification; virtualclock is not GPU/native capacity."
+    },
+    "wave4GuestReturnBoundary": {
+      "source": "235d2dc",
+      "receipt": "NATIVE_GUEST_RETURN_AUDIO_DIAGNOSTIC_2026-10-22.json",
+      "status": "Local actual mixer\u2192mailbox\u2192unchangedOpusencoder\u2192independentdecoderPASS. Full controlledTLS browserattempt stillFAILS originalPCM gate:933successful native sends and positive independently decodedOpus, Chrome931RTP/0loss but0jitterbuffer samples and zero workletPCM.",
+      "limits": "No production behavior/permissions/sink/gates changed; consumer/playout cause not proven, no TLS qualification. Recorded single lease; bounded singleton receipt windows aggregate process lifetime."
+    },
+    "wave4HostedCI": "Exact a346f56: ARM/Intel/iOS FULL586/82 Core PASS90.260s/282.945s/180.802s; bothMac appbuildsPASS, both thenFAIL same media_playback_lifecycle_harness.swift201 pause predicate; actualpausedvalues not logged. Broker8/8+browserinterview workflowsPASS. Originalfull logs preserved /tmp/stream-ci-a346f56-*-original.log. Source7898737 now fixes fixture timing without weakening original assertions, parentnative10casesPASS. Fresh finalhead CI remains required."
   },
   "issues": [
     {
@@ -242,7 +314,7 @@
       "githubState": "open",
       "completion": "incomplete implementation and acceptance",
       "remaining": [
-        "O07 supported installed-driver/distribution path remains unqualified. Signed packaging and native main-window bus/format/state controls remain unimplemented behind that decision; shipping microphone routing stays gated."
+        "O07 supported public installed/distributable route remains unqualified. Build-only evaluation packaging and exact-owned-UID feedback protection exist, but native Program/clean bus producer bridge and main-window format/state controls remain gated and unimplemented. Shipping microphone routing stays disabled."
       ]
     },
     {
@@ -253,7 +325,7 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Installed signed AudioServerPlugIn capture by another app, supported install/update/remove and sandbox IPC qualification."
+        "Installed signed AudioServerPlugIn capture by another app, supported install/update/remove and sandbox IPC qualification/supported-route decision remain unproven. Owned build-only evaluation packaging, actual extracted adhoc-signed driver callbacks and refusal cases now pass; no installer was executed."
       ]
     },
     {
@@ -273,10 +345,14 @@
       "title": "[macOS][O04] Record isolated camera, screen, and guest video sources",
       "url": "https://github.com/joeblau/stream/issues/171",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "verified; closure pending publication",
       "remaining": [
-        "Integrate the reviewed physical-camera identity, original-source history/pause mapping, retired-associated PCM silence and processed guest black-gap corrections after complete source/consumer proof. These pending source changes are not published yet.",
-        "All four actual 2x60s ISO files pass the original80ms gates with exact cue counts, origins/frontiers and gaps. Combined workload still FAILS RTMP frame count3143 over123.9s against unchanged>3400. Prove/fix publisher cadence before final acceptance; retain previous failed receipts."
+        "Publish verified combined source and reconcile GitHub issue/parent state. No remaining original171 acceptance gap identified within the documented enabled M3 Max class; other hardware and physical capture IO remain unqualified."
+      ],
+      "evidence": [
+        "ISOLATED_VIDEO_SUSTAINED_VALIDATION.md",
+        "ISOLATED_VIDEO_SUSTAINED_2026-10-22.json",
+        "PUBLISHER_CADENCE_VALIDATION.md"
       ]
     },
     {
@@ -763,7 +839,8 @@
       "remaining": [
         "Original30fps sustained qualification is not met: actual hosted ARM600-second workloads achieve approximately19.5367/20.2333 rendered fps and fail the unchanged nominal gate. c3fda71 preserves failure evidence and separates actual replay-source inventory; it does not repair capacity or qualify the failed run.",
         "Both hosted architecture performance jobs failed. Native Intel reaches10123/2209 rendered frames then fails the original80ms video-PTS versus host-arrival-duration check at59.192148398s divergence; no decoded waveform A/V drift diagnosis is inferred. Representative mixes, independent sustained waveform A/V, thermal evidence and resource ceilings remain unqualified.",
-        "Measured encoder/output counts and storage/uplink ceilings; observed recording write rate is not a maximum."
+        "Measured encoder/output counts and storage/uplink ceilings; observed recording write rate is not a maximum.",
+        "Production due-tick idle cliff is corrected and its actual scheduling helper passes deterministic600s simulation, but no fresh sustained GPU/hardware qualification follows from that virtual-clock result; original resource/performance failures remain failed."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -992,11 +1069,11 @@
     "currentlyOpen": 37,
     "closedSinceInitialInventory": 24
   },
-  "overallStatus": "Incomplete roadmap:37 open /24 closed in the initial61 tasks; no new task closure. Broker and guarded optionalTLS prototype are published, and current iOS full586 Core tests plus broker/interview workflows pass. Playback fixture clock correction7898737 preserves original bounds, passes independent review and parent native runner; fresh hosted CI is required. All4 pending ISO files meet original80ms sync, identities, gaps and commonfrontiers, but combined RTMP frame count3143 fails unchanged>3400. ISO/sharedencoder follow-up remains outside main. Original sustainedperformance qualification and native keyboard chooser remain incomplete.",
-  "integratedMain": "862ee7d",
+  "overallStatus": "Incomplete roadmap: initial61 inventory remains37open/24closed beforepublication. Current9cbe0b9 passes unsigneduniversalMacRelease/bundle/fulliOSsource and563filteredlocalCore tests. Independent original-criteria review recommends171closure afterpublication: complete2x60s fourencoder workload nowpasses all4ISO80ms/cue/gap/resource/independentstop and actualRTMP3714packet/76mscadence gates. Playbackfixture, physicalsourcehistory, jitterpreservingpublishers, compositor due-tick, feedbackguard, evaluationpackaging and boundedreturndiagnostics are integrated. Original sustainedperformance and browserreturnedPCM failures remain unqualified; actualkeyboard chooser and signeddevice path remain open.",
+  "integratedMain": "00ef7e9",
   "githubStateRefreshedAt": "2026-10-22T03:52:14.493741+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "862ee7d28b76e61cc21af58e8193b8675e942762",
+  "publishedIntegration": "00ef7e9",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1016,7 +1093,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "862ee7d",
+  "currentReviewBase": "9cbe0b9",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -1054,9 +1131,41 @@
     ],
     "proposedClosureAfterFinalCombinedBuildAndPublication": [],
     "pendingFinalVerification": [],
-    "notIntegrated": [
-      "Issue171 source-clock/history/pause and retirement fixes: ISO media passes but fullRTMP cadence gate fails; sharedencoder cause under investigation"
-    ],
+    "notIntegrated": [],
     "githubCountsNote": "Exact paginated API reconciliation of the initial 61 issues verifies 37 open / 24 closed, zero open PRs, and parent54 checked for 128/129 after source publication and closure."
+  },
+  "wave4Review": {
+    "sourceBase": "a346f56",
+    "combinedSource": "9cbe0b9",
+    "commits": [
+      "7898737",
+      "43ad3dd",
+      "36e86de",
+      "cbb2502",
+      "235d2dc",
+      "948997f",
+      "9cbe0b9",
+      "00ef7e9",
+      "f5caeb2"
+    ],
+    "proposedClosureAfterPublication": [
+      171
+    ],
+    "closuresPerformed": [],
+    "currentGitHubCounts": {
+      "open": 37,
+      "closed": 24
+    },
+    "pending": [
+      "Publish source, close171/reconcileparent56 and fresh GitHub inventory",
+      "Fresh hosted finalhead CI and sustained performance qualification"
+    ],
+    "noAdditionalClosure": [
+      92,
+      127,
+      155,
+      173,
+      174
+    ]
   }
 }
