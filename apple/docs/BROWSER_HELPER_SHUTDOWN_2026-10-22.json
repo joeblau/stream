@@ -67,5 +67,14 @@
   "recipe": "/tmp/stream-wave18-browser-shutdown-proof-20261022/run.py",
   "runtimeDeadlineSecondsPerVariant": 45,
   "nativeJobs": 2,
-  "independentSourceReview": "guests provisional clear; frozen binding pending"
+  "independentSourceReview": {
+    "result": "CLEAR",
+    "reviewer": "guests",
+    "sourceCommit": "8efd619043b9e15b9cd10b4298bfd4f792ae2528",
+    "historicalFrozenReceiptSHA256": "ce5dfe7f77b7b736bce5d334355956c57968c6681abc3509d5bf9a383de27fa9",
+    "receipt": "/tmp/stream-wave18-browser-helper-final-review-20261022.json",
+    "receiptSHA256": "73a32e7e29c68f90892b6f36d24c809eac1e0e9bb8779ed0c8b66daf50781cee",
+    "verifiedBindings": 38,
+    "reviewerExecutedNativeTests": false
+  }
 }
