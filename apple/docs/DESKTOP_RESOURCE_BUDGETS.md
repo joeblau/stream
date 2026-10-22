@@ -202,13 +202,62 @@ source hashes, unchanged gates, all raw check statuses, logs/archive/media
 digests, resource summaries and the exact incomplete Intel validation state.
 The original earlier failures remain unchanged; issue #92 remains open.
 
-No additional benchmark or dispatch was performed. A future, separately
-authorized 20-second trace could keep this same content and distinguish
+The hosted receipt proposed a separately authorized 20-second trace to distinguish
 deadline-start lateness, thread CPU versus wall time in graph/CI/fanout phases,
-and mailbox lock/drop-release/callback costs. `tick()` is synchronous, while
-its wall metric spans rendering and fanout; the scheduler counts whole elapsed
-opportunities. Those facts justify the proposed discrimination, not a new
-production fix. Local M3 timings would not establish a hosted Intel stall cause.
+and mailbox lock/drop-release/callback costs. The subsequent single local trace
+below implements that plan. The hosted run was not repeated or relabeled.
+
+### Bounded thread CPU, render and mailbox trace
+
+Exact source `78796d13dffc193217c6aa6ec3a8ecfb8a562182` ran once on the local
+Mac15,8 / M3 Max, native arm64, macOS 27.2 (26B118). Generated source copies
+instrumented the existing two 20-second 1080p30, 12-layer static/replay cases,
+with the real recorder, independent PCM and deliberate 80 ms sink. Shipping
+sources, the sustained harness and its original gates remained byte-identical.
+The generated renderer retained the same render calls and existing sampled
+task wait; no extra render or wait was added.
+
+| Mean interval | Static wall / thread CPU | Replay wall / thread CPU |
+|---|---:|---:|
+| Complete tick | 8.968 / 3.997 ms | 6.622 / 3.593 ms |
+| Scene graph preparation | 1.406 / 1.152 ms | 1.324 / 1.031 ms |
+| Regular Core Image call | 6.814 / 2.270 ms | 4.636 / 2.020 ms |
+| Existing sampled task wait | 1.833 / 0.021 ms | 0.923 / 0.023 ms |
+| Subscriber fanout | 0.204 / 0.158 ms | 0.176 / 0.147 ms |
+
+Neither case skipped a whole scheduling opportunity. Maximum tick wall times
+were 29.553/25.633 ms, deadline-start lateness 5.090/7.284 ms and actor-entry
+delay 0.075/0.158 ms. Static rendered 600 of 601 attempts: sequence 5 failed
+the existing pixel-buffer allocation threshold (`-6689`) during a 0.312 ms
+tick. Replay rendered 601 of 601. Both actual recordings finalized and decoded
+600 frames; replay's source decoder consumed 599 of 600 available frames,
+against 449 due. Replay's final sequence 601 posted only to the slow sink;
+healthy posts and deliveries cover sequences 1–600. These distinct counts are
+retained without calling the difference a writer drop.
+
+The deliberate sink completed 233 callbacks per case, averaging 86.074/86.265 ms
+wall despite its nominal 80 ms sleep. Maximum drop-removal/release intervals
+were 0.550/0.270 ms and fanout 2.044/1.570 ms. The measured between-callback
+residual includes release, loop, scheduling and instrumentation; it does not
+isolate destruction. Events are constructed outside mailbox critical locks.
+The trace retained 22,780/22,788 events with no omissions or synchronous thread
+migrations. Mean full-record calibration overhead was about 0.0017 ms per call;
+nested measurements overlap and instrumentation adds cost.
+
+The regular Core Image call's wall/CPU difference does not separate off-thread
+work, host scheduling, driver work and GPU waiting. The existing task wait is
+mostly non-CPU; kernel samples remain execution time, not GPU utilization.
+No hosted-like long stall or whole skip reproduced. These local observations
+establish no cause or production fix for the hosted deficits, historical Intel
+59-second endpoint error or pending inspection at its 1,380-second deadline.
+The local tool's duration-dependent 450-frame check is not the original
+17,850-frame / 600-second qualification. Issue #92 remains open.
+
+[The trace receipt](PERFORMANCE_LOCAL_THREAD_TRACE_2026-10-22.json) retains raw
+case checks, source/generated hashes, event correlations, calibration, resources
+and log/media digests. `run_composition_hotpath_profile.zsh` reproduces the
+generated-copy tool; reserve a quiet host and build first with `--build-only`.
+No additional trace or hosted dispatch followed this measurement.
 
 ### Bounded local title preparation profile
 
