@@ -382,6 +382,19 @@ private final class FailoverAudioProbe: @unchecked Sendable {
         try await ProgramRecordingFixtures.inspect(movie, expectedDuration: nil, checkSync: false)
         controller.resilience.policy.previewAfterWake = true
         controller.resilience.handle(.wake)
+        try await Task.sleep(for: .milliseconds(150))
+        try check(!controller.failoverFixturePipelineRunning && controller.capturePool.activeSources.isEmpty,
+                  "Duplicate wake unexpectedly restarted capture after preview opt-in changed")
+        controller.resilience.handle(.locked)
+        controller.resilience.handle(.sleep)
+        controller.resilience.handle(.wake)
+        controller.resilience.handle(.wake)
+        try await Task.sleep(for: .milliseconds(150))
+        try check(controller.resilience.isLocked && !controller.failoverFixturePipelineRunning
+            && controller.capturePool.activeSources.isEmpty && FailoverOwnedSources.enabled.isEmpty,
+                  "Wake refreshed or restarted owned capture before unlock")
+        controller.resilience.handle(.unlocked)
+        controller.resilience.handle(.unlocked)
         try await wait("Opt-in wake preview did not start the actual pipeline") { controller.failoverFixturePipelineRunning && !controller.capturePool.activeSources.isEmpty }
         try check(!recorder.state.isActive && controller.destinationOutputs.states.isEmpty && controller.reservedRecordingEncoderCount == 0,
                   "Preview opt-in restarted public output or recording")
@@ -397,7 +410,7 @@ private final class FailoverAudioProbe: @unchecked Sendable {
         try JSONEncoder().encode(phases).write(to: root.appendingPathComponent("painted-source-windows.json"), options: .atomic)
         try JSONEncoder().encode(probe.snapshot()).write(to: root.appendingPathComponent("original-live-frame-receipts.json"), options: .atomic)
         print("PASS: shipping source health/configuration→freeze/blank/offline/healthy+missing standby→GPU compositor→real H264/AAC decoded Program pixels; independent healthy source keeps advancing")
-        print("PASS: actual configured standby scene and runtime lifecycle callbacks preserve source clock/manual restore; silent private slate, real sleep writer finalization, opt-in preview only, bounded cache/producer retirement")
+        print("PASS: actual configured standby scene and runtime lifecycle callbacks preserve source clock/manual restore; silent private slate, real sleep writer finalization, duplicate wake stays idle, locked wake defers capture until unlock, opt-in preview only, bounded cache/producer retirement")
         print("LIMIT: owned producer and lifecycle event injection; no physical capture/device removal, TCC revocation, screen lock, sleep/wake or provider/network qualification")
         print("Owned artifacts: \(root.path)")
     }

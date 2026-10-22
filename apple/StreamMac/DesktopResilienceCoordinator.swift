@@ -19,6 +19,7 @@ final class DesktopResilienceCoordinator: ObservableObject {
     private let url: URL?
     private let workspaceCenter: NotificationCenter
     private var isSleeping = false
+    private var previewOnUnlock = false
     private nonisolated(unsafe) var workspaceObservers: [NSObjectProtocol] = []
     private nonisolated(unsafe) var distributedObservers: [NSObjectProtocol] = []
 
@@ -49,16 +50,26 @@ final class DesktopResilienceCoordinator: ObservableObject {
         switch event {
         case .sleep:
             guard !isSleeping else { return }; isSleeping = true
+            previewOnUnlock = false
             requiresManualRestart = true
             notice = "Sleep requested: publishing and recording are stopping. Wake never restarts outputs automatically."
             stopOutputs?()
         case .wake:
+            guard isSleeping else { return }
             isSleeping = false
+            guard !isLocked else {
+                previewOnUnlock = policy.previewAfterWake
+                notice = "Mac woke while locked: source refresh and optional preview wait for unlock. Outputs require a manual restart."
+                return
+            }
             refreshSources?()
             if policy.previewAfterWake { startPreview?() }
             notice = "Mac woke: inspect sources and resume outputs manually. Interrupted recordings may require recovery."
         case .locked:
             guard !isLocked else { return }; isLocked = true
+            // Sleep already retired every output and capture. A delayed lock
+            // notification must not rebuild a slate or repeat that teardown.
+            guard !isSleeping else { return }
             if policy.lockAction == .stopOutputs {
                 requiresManualRestart = true
                 stopOutputs?()
@@ -68,8 +79,14 @@ final class DesktopResilienceCoordinator: ObservableObject {
                 notice = "Screen locked: existing outputs continue on a silent offline slate. Restore program manually after unlock."
             }
         case .unlocked:
+            guard isLocked else { return }
             isLocked = false
+            // The session-active and distributed unlock notifications can
+            // arrive before didWake. Capture stays retired until wake.
+            guard !isSleeping else { return }
             refreshSources?()
+            if previewOnUnlock && policy.previewAfterWake { startPreview?() }
+            previewOnUnlock = false
             notice = "Screen unlocked: inspect source availability and restore program or start outputs manually."
         }
     }

@@ -126,7 +126,7 @@ xcodebuild -resolvePackageDependencies -project "$FAILOVER_NATIVE_DIR/SourceFail
   -scheme SourceFailoverNativeHarness -derivedDataPath "$FAILOVER_NATIVE_BUILD_PATH"
 python3 scripts/repair_desktop_transport_archives.py "$FAILOVER_NATIVE_BUILD_PATH"
 xcodebuild -project "$FAILOVER_NATIVE_DIR/SourceFailoverNativeValidation.xcodeproj" -scheme SourceFailoverNativeHarness \
-  -destination 'platform=macOS' -derivedDataPath "$FAILOVER_NATIVE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -destination 'platform=macOS' -derivedDataPath "$FAILOVER_NATIVE_BUILD_PATH" -jobs 2 CODE_SIGNING_ALLOWED=NO build
 FAILOVER_NATIVE_PRODUCTS="${FAILOVER_NATIVE_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="$FAILOVER_NATIVE_PRODUCTS" python3 - "$FAILOVER_NATIVE_PRODUCTS/SourceFailoverNativeHarness" "${FAILOVER_NATIVE_DIR:A}" <<'PY'
 import pathlib,subprocess,sys,uuid

@@ -36,6 +36,23 @@ must finalize the real writer, release encoder/capture/render demand and clear
 retained failed frames. Wake remains idle unless preview is enabled; that opt-in
 starts preview alone. Actual profile replacement must retire the old runtime.
 
+Wake and unlock are ordered gates: a wake received while locked refreshes no
+sources and starts no preview. The opted-in preview waits for unlock. Unlock
+before wake keeps capture retired until wake, and duplicate wake/unlock signals
+do not repeat either action. A lock delivered after sleep does not rebuild a
+slate or repeat output teardown. These cases matter because public workspace
+and distributed lock notifications can overlap or arrive in either order.
+
+The 2026-10-22 requalification on Mac15,8 / M3 Max, macOS 27.2 (26B118),
+Xcode 27.2 (27B5038j), passes the actual owned-source recording fixture with
+the new locked-wake/duplicate-signal assertions, all original fourteen painted
+windows, nine PCM cases and unchanged strict track endpoint checks. The native
+destination-controller harness also covers reverse unlock-before-wake ordering,
+late lock while asleep, and unchanged publisher allocation. Running its new
+assertions against the original coordinator reproduces the unwanted unmatched
+wake source refresh. Controlled notifications qualify callback behavior; they
+do not establish physical OS notification delivery or TCC revocation behavior.
+
 Measured phases use observed painted-frame host timestamps rather than intent
 timestamps. Live receipts require monotonic original timestamps and sequence;
 decoded media must contain both real tracks and retain the strict 40 ms start /
