@@ -1,5 +1,5 @@
 {
-  "scope": "SOURCE-ONLY migration; no native build/runtime, media benchmark, hosted dispatch, qualification or gate relaxation. Native tool compilation pending parent review/integration.",
+  "scope": "Fixture source migration with actual native tool BUILD-ONLY proof. No executable/runtime, media benchmark, hosted dispatch, qualification or gate relaxation.",
   "base": "cead456",
   "checks": [
     "original durations/case resolutions/FPS",
@@ -16,9 +16,60 @@
     "original sustained workflow byte identity"
   ],
   "sha256": {
-    "apple/scripts/studio_performance_harness.swift": "381eb58932abfbe2ff259e14bbec32769f2c5b7071639c78343332d45e80540c",
+    "apple/scripts/studio_performance_harness.swift": "ce1771c698cd8dea42e341778f2445cfd55f346c311abb6d53d3999614dd23ae",
     "apple/scripts/prepare_composition_hotpath_profile.py": "ef4b918c20986a3d37259aa22a5f53b24caedd06cbe99f4264f41514b7c54163",
-    ".github/workflows/native-composition-attribution.yml": "6a105ba646d10de2940990fcd906f9f3ec00177991eb454ea09746fcb4ae826f"
+    ".github/workflows/native-composition-attribution.yml": "c3982016c950bfa3c5f5c846fad2ebd343dc20cf45ae39b7f4b2471cacd1f8ea"
   },
-  "legacyRegistrationAudit": "The only legacy Engine.addSink calls in performance/budget/shared/publisher/sustained/resource scripts were the healthy-recording and deliberate80ms registrations in studio_performance_harness.swift plus their generator transforms. There is no critical publisher/shared-encoder workload in this harness; their independent raw6/shared6 ingress remains the actual production DestinationOutputController path, not a new synthetic workload."
+  "legacyRegistrationAudit": "The only legacy Engine.addSink calls in performance/budget/shared/publisher/sustained/resource scripts were the healthy-recording and deliberate80ms registrations in studio_performance_harness.swift plus their generator transforms. There is no critical publisher/shared-encoder workload in this harness; their independent raw6/shared6 ingress remains the actual production DestinationOutputController path, not a new synthetic workload.",
+  "nativeCompile": {
+    "status": "passed",
+    "exitCode": 0,
+    "configuration": "Debug arm64, unsigned actual full tool graph, xcodebuild -jobs 2 and Swift -j2",
+    "canonicalSourceCommit": "662930f6c74edf5070d629022f758283f3a04372",
+    "shippingSwiftInputsByteIdentical": 321,
+    "executableInvoked": false,
+    "scope": "The first compile found a new-local-name collision (resources), retained as failure evidence. Corrected only the admission local name and matching approved-workflow pin; the second actual tool build passed. The existing --build-only runner exits immediately after xcodebuild, before any executable/media/workload invocation.",
+    "artifacts": [
+      {
+        "path": "/tmp/stream-performance-frame-admission-build-only-20261022.log",
+        "bytes": 1145635,
+        "sha256": "b81a6e3acfa013e8d8511bc60ee566dfb3fcfa32f65410ba10cdd457f4a3bcf3"
+      },
+      {
+        "path": "/tmp/stream-performance-frame-admission-build-only-fixed-20261022.log",
+        "bytes": 263233,
+        "sha256": "a31cd499b9cd59e2c0463b42b9ad9bf16f58a05b95028891542b225cd99f9d3c"
+      },
+      {
+        "path": "/private/tmp/stream-wave17-frame-delivery-broker-20261022/apple/build/performance-frame-admission-build-only/derived/Build/Products/Debug/StudioPerformanceHarness",
+        "bytes": 77382776,
+        "sha256": "7dbab453cb597706484aefb4177eff6143a9ff88fe0ed12272b2345d2614567c"
+      },
+      {
+        "path": "/private/tmp/stream-wave17-frame-delivery-broker-20261022/apple/build/performance-frame-admission-build-only/project/project.json",
+        "bytes": 7399,
+        "sha256": "fa4725a0154ba12e06b69863c0f30b5c867531a4e05ad3624eec62d193d9421d"
+      },
+      {
+        "path": "/private/tmp/stream-wave17-frame-delivery-broker-20261022/apple/build/performance-frame-admission-build-only/compiler-input-inventory.json",
+        "bytes": 95589,
+        "sha256": "3b7a42e84689c6d80deff1d9572442434deaf4705f4fe8654b7ee39501171187"
+      },
+      {
+        "path": "/private/tmp/stream-wave17-frame-delivery-broker-20261022/apple/build/performance-frame-admission-build-only/snapshot.json",
+        "bytes": 471,
+        "sha256": "7e7e7296f5eb5f3c77db77dec9b8721088740dbfcfb072a63612046f01b0af72"
+      },
+      {
+        "path": "/private/tmp/stream-wave17-frame-delivery-broker-20261022/apple/build/performance-frame-admission-build-only/generated-source-review/profile-source-hashes.json",
+        "bytes": 3350,
+        "sha256": "b88afbc2be31424a40fa86400e43b712fec1d23c2b653713369d23914b13a583"
+      },
+      {
+        "path": "/tmp/stream-performance-admission-generation-20261022.log",
+        "bytes": 228,
+        "sha256": "43042e984330ccfc6d3c57f46317dd9b4668b44f9c065b9ae40c6d68bdb04541"
+      }
+    ]
+  }
 }
