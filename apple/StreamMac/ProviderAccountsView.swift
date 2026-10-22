@@ -34,6 +34,7 @@ struct ProviderAccountsView: View {
     @State private var importJob: Task<Void, Never>?
     @State private var importError: String?
     @State private var importing = false
+    @State private var importID = UUID()
     @State private var thumbnail: ThumbnailSelection?
     @State private var readChat = false
     @State private var writeChat = false
@@ -86,6 +87,10 @@ struct ProviderAccountsView: View {
                             Text("Event ID: \(event.id)").font(.caption).textSelection(.enabled)
                             if let date = event.scheduledAt { Text("Scheduled \(date.formatted()) · \(TimeZone.current.identifier)").font(.caption) }
                             if let url = event.publicURL { Link("Open broadcast", destination: url) }
+                            if let url = event.coverURL { Link("Open public event cover", destination: url).font(.caption) }
+                            if provider == .restream {
+                                Text(event.description).font(.caption).textSelection(.enabled)
+                            }
                             if provider == .youtube {
                                 Text("YouTube latency preference: \((event.latencyPreference ?? .unknown).label)")
                                     .font(.caption)
@@ -112,7 +117,11 @@ struct ProviderAccountsView: View {
                     if provider == .youtube { youtubeControls }
                     if provider == .twitch { twitchControls }
                     if provider == .restream {
+                        Button(importing ? "Discovering relay ingest…" : "Add Account Relay Ingest Draft") { importDestination() }
+                            .disabled(importing || snapshot.isWorking || snapshot.verifiedAt == nil || channel == nil || !accounts.canRequest(.restream))
                         Text("Authorized channels and upcoming encoder events are available. Create/edit/attach/delete/end events in Restream; Stream cannot infer downstream broadcast state or guarantee every platform accepts scheduling.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Imports the account's currently selected RTMP relay and key into a disabled manual draft. It does not attach the selected event or choose downstream channels. Restream must grant channels.read and stream.read; older grants without recorded scopes require Forget Authorization, then reconnecting in Settings → Chat. Review the relay and destination profile before enabling. SRT and RTMPS upgrade discovery are unavailable here.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -128,8 +137,8 @@ struct ProviderAccountsView: View {
         }
         .onAppear { clientID = snapshot.clientID }
         .onChange(of: snapshot.clientID) { _, value in if clientID.isEmpty { clientID = value } }
-        .onChange(of: provider) { _, _ in thumbnail = nil; clientID = snapshot.clientID; channelID = ""; eventID = ""; importError = nil }
-        .onChange(of: channelID) { _, _ in eventID = ""; thumbnail = nil }
+        .onChange(of: provider) { _, _ in importJob?.cancel(); importing = false; thumbnail = nil; clientID = snapshot.clientID; channelID = ""; eventID = ""; importError = nil }
+        .onChange(of: channelID) { _, _ in importJob?.cancel(); importing = false; eventID = ""; thumbnail = nil }
         .onChange(of: eventID) { _, _ in thumbnail = nil }
         .onDisappear { importJob?.cancel(); importJob = nil }
         .sheet(isPresented: $showSchedule) { ProviderShowSchedulingEditor(coordinator: scheduling, destinations: destinations.draft) }
@@ -281,12 +290,14 @@ struct ProviderAccountsView: View {
         let provider = provider, event = event, endpoint = twitchEndpoint
         importing = true; importError = nil
         importJob?.cancel()
+        let attempt = UUID(); importID = attempt
         importJob = Task {
-            defer { importing = false }
+            defer { if importID == attempt { importing = false } }
             do {
-                let connection = try await accounts.importConnection(provider: provider, channel: channel, event: event, endpoint: endpoint)
+                let connection = try await accounts.importConnection(provider: provider, channel: channel, event: provider == .restream ? nil : event, endpoint: endpoint)
                 guard !Task.isCancelled else { return }
-                destinations.createManaged(provider: provider, channel: channel, event: event, connection: connection)
+                if provider == .restream { destinations.createRestreamRelay(connection: connection) }
+                else { destinations.createManaged(provider: provider, channel: channel, event: event, connection: connection) }
             } catch {
                 if !Task.isCancelled { importError = (error as? ProviderFailure ?? ProviderFailure(.unavailable)).localizedDescription }
             }
