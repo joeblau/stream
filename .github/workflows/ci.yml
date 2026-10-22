@@ -81,6 +81,7 @@ jobs:
           OWNED_ENDING_BUILD_PATH=build/tests zsh scripts/run_owned_ending_harness.zsh
       - name: Test saved guest preparation and native controller feedback
         run: |
+          zsh scripts/run_studio_deck_process_diagnostics_harness.zsh
           STREAM_CORE_FRAMEWORK_DIR="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_guest_preparation_harness.zsh
           # Exercise actual owned localhost RTMP and independent recording.
           STREAM_DECK_VALIDATE_TRANSPORT=1 zsh scripts/run_studio_deck_native_harness.zsh
