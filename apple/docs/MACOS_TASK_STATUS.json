@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 37 open, 24 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
+  "scope": "Tracks61 original macOS issues (48feature tasks/13roadmap or epic trackers). Fresh paginated GitHub inventory:36open/25closed, consisting of25openfeatures and11opentrackers. Issue171 closed after originalcriteria review, exactcombinedmedia/parentchecks and publication; parent56 reconciled. Scoped software completion does not claim universal device/provider/release qualification.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -344,15 +344,16 @@
       "code": "O04",
       "title": "[macOS][O04] Record isolated camera, screen, and guest video sources",
       "url": "https://github.com/joeblau/stream/issues/171",
-      "githubState": "open",
-      "completion": "verified; closure pending publication",
-      "remaining": [
-        "Publish verified combined source and reconcile GitHub issue/parent state. No remaining original171 acceptance gap identified within the documented enabled M3 Max class; other hardware and physical capture IO remain unqualified."
-      ],
+      "githubState": "closed",
+      "completion": "complete within documented enabled M3 Max scope",
+      "remaining": [],
       "evidence": [
         "ISOLATED_VIDEO_SUSTAINED_VALIDATION.md",
         "ISOLATED_VIDEO_SUSTAINED_2026-10-22.json",
         "PUBLISHER_CADENCE_VALIDATION.md"
+      ],
+      "qualificationLimits": [
+        "Only Apple M3 Max/Mac15,8/16CPU supports measured two1080p30 ISOs/four total video encoders; other classes remain disabled. Input discovery/decoded guest/PCM are generated boundaries; physical capture IO, native Intel runtime and indefinite endurance are not claimed."
       ]
     },
     {
@@ -1063,17 +1064,17 @@
   ],
   "scopeCounts": {
     "initialOpenFeatureTasks": 48,
-    "openFeatureTasks": 26,
+    "openFeatureTasks": 25,
     "openEpicsAndRoadmap": 11,
     "total": 61,
-    "currentlyOpen": 37,
-    "closedSinceInitialInventory": 24
+    "currentlyOpen": 36,
+    "closedSinceInitialInventory": 25
   },
-  "overallStatus": "Incomplete roadmap: initial61 inventory remains37open/24closed beforepublication. Current9cbe0b9 passes unsigneduniversalMacRelease/bundle/fulliOSsource and563filteredlocalCore tests. Independent original-criteria review recommends171closure afterpublication: complete2x60s fourencoder workload nowpasses all4ISO80ms/cue/gap/resource/independentstop and actualRTMP3714packet/76mscadence gates. Playbackfixture, physicalsourcehistory, jitterpreservingpublishers, compositor due-tick, feedbackguard, evaluationpackaging and boundedreturndiagnostics are integrated. Original sustainedperformance and browserreturnedPCM failures remain unqualified; actualkeyboard chooser and signeddevice path remain open.",
-  "integratedMain": "00ef7e9",
-  "githubStateRefreshedAt": "2026-10-22T03:52:14.493741+00:00",
+  "overallStatus": "Incomplete roadmap: fresh initial61 inventory36open/25closed (25features/11trackers), zeroopenPRs. Issue171 closed after original3AC review, exactcombined4ISO/RTMP/media/resource proof, parentuniversalMac/bundle/fulliOSsource/563filteredCorePASS and sourcepublication; parent56checked. Other Mac classes and physicalcaptureIO remainunqualified. Playbackfixture, sourcehistory, raw/sharedpublishercadence, compositor scheduling, feedbackguard, evaluationpackaging andreturndiagnostics are published. Native sustainedGPU/Intelperformance, browserreturnedPCM/AEC, keyboardchooser and signedinstalleddevice qualification remainopen; finalheadhostedCIstillrequired.",
+  "integratedMain": "1322847",
+  "githubStateRefreshedAt": "2026-10-22T04:50:39.723078+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "00ef7e9",
+  "publishedIntegration": "1322847abd6e9cf06cdabe5f4ca30ed329628b28",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1148,17 +1149,16 @@
       "00ef7e9",
       "f5caeb2"
     ],
-    "proposedClosureAfterPublication": [
+    "proposedClosureAfterPublication": [],
+    "closuresPerformed": [
       171
     ],
-    "closuresPerformed": [],
     "currentGitHubCounts": {
-      "open": 37,
-      "closed": 24
+      "open": 36,
+      "closed": 25
     },
     "pending": [
-      "Publish source, close171/reconcileparent56 and fresh GitHub inventory",
-      "Fresh hosted finalhead CI and sustained performance qualification"
+      "Fresh finalhead hosted CI and sustained performance qualification"
     ],
     "noAdditionalClosure": [
       92,
@@ -1166,6 +1166,8 @@
       155,
       173,
       174
-    ]
+    ],
+    "githubClosureComment": "https://github.com/joeblau/stream/issues/171#issuecomment-6332976567",
+    "parentUpdated": 56
   }
 }

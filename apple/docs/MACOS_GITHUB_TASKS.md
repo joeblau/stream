@@ -388,3 +388,15 @@ keyboard chooser selection in the locked session.
 
 GitHub remains37open/24closed until the verified source is published and #171
 and parent #56 are reconciled; this section does not anticipate closure.
+
+
+## Published issue reconciliation — 2026-10-22
+
+Verified source and its measured ISO receipt are published in `1322847`.
+**#171 is closed**, its three acceptance checkboxes are checked, and parent
+**#56** now checks O04. Fresh paginated GitHub reconciliation of the original61
+issues confirms **25 closed /36 open**:25 feature tasks and11 trackers remain
+open, with zero open pull requests. No other task closes from this batch. The
+source and qualification limits above remain in force; no unmeasured Mac class,
+physical capture, signed installation, browser PCM or sustained GPU result is
+implied by this scoped completion.
