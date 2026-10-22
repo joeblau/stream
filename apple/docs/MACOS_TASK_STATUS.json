@@ -18,7 +18,7 @@
   },
   "validation": {
     "sharedCore": "Current shared TextLayout pointer-lifetime fix 617fa81 freshly rebuilds and passes TextLayoutTests: 23 tests in 1 suite, plus strict Swift 6 optimized actual Core Text getter/stack-pressure checks. Published 9881359 iOS full 587 tests/82 suites PASS predates this new Core change; no current-head full Core/iOS pass is inferred. Earlier full/filtered named-source results remain historical evidence.",
-    "shippingApp": "Exact integrated 2ea819a unsigned arm64/x86_64 Release and actual bundle audit PASS; generation also passes. Root receipts /tmp/stream-wave7-parent-final-results-20261022.json bind source and log hashes. No signed distribution/runtime-device qualification. Shared Core changed in 617fa81; earlier unchanged-Core statements apply only to their named receipts.",
+    "shippingApp": "Exact integrated ec95f20 generation, unsigned arm64/x86_64 Release and actual bundle audit PASS. Root wave8 receipts bind source/vendor/log hashes; local actual Deck localhost transport/recording and production-source fallback regression pass. No signed distribution, hosted Intel repair or whole native CI success is inferred. Shared Core/iOS are unchanged by this vendor/fixture cohort; earlier exact-source evidence keeps its named scope.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -270,7 +270,10 @@
     "wave7SceneReordering": "5b1d2fe adds per-scene menu and named AX moves plus native Scene menu using complete live sibling order/current stable IDs and runtime authority. Actual workspace/resolver/dispatcher/menu-callback/undo/disk-reload/refile/delete/live-selection/runtime-replacement checks pass; no scene selection/Take/folder/content mutation is introduced by reorder. Actual menu key/AX action delivery remains unqualified.",
     "wave7ControlRows": "2ad4899 retains both original row/control trees in persistent horizontal native scroll containers. Root exact 2ea819a passes 40 static row/text/scroller cases: 2 rows \u00d7 10 configured text sizes \u00d7 2 styles, 320-point narrow/844-point wide viewport, exact realized intrinsic height/full document visibility/trailing-edge programmatic scroll. A 90 s process guard only; no system preference/input/runtime/global capture. This is not full-window readability/AX/focus/contrast qualification.",
     "wave7HostedCI": "Published 9881359 CI 39735328975 remains active, with Intel job 119679560505 failed at Deck transport step 11 and ARM passed through step 20 and remains active at the 07:36:29 UTC read-only snapshot. Intel receiver exits 234 at 07:23:24 UTC for missing video stream; 47 VT failedToCreate(status: -12902) errors are retained. Intel full Core 587/82 and controller step 10 pass first. Browser interview CI and iOS 587/82 succeed. No whole native CI success, proven Intel fix or newer 2ea819a hosted qualification is asserted.",
-    "wave7HostedPerformance": "Exact 9881359 run 39735454725 terminal FAIL on both jobs. ARM renders 17252/17306; Intel 17232/16434 versus unchanged 17,850. ARM replay decodes 17251/17252 available; Intel 17232/17232. All writers finish with zero writer A/V drops. ARM both inspections and Intel first pass; Intel second inspection remains PENDING at original 1380 s owned deadline. Endpoint errors pass 80 ms but are not waveform drift. No cause, universal optimization benefit or eventual inspection result is inferred."
+    "wave7HostedPerformance": "Exact 9881359 run 39735454725 terminal FAIL on both jobs. ARM renders 17252/17306; Intel 17232/16434 versus unchanged 17,850. ARM replay decodes 17251/17252 available; Intel 17232/17232. All writers finish with zero writer A/V drops. ARM both inspections and Intel first pass; Intel second inspection remains PENDING at original 1380 s owned deadline. Endpoint errors pass 80 ms but are not waveform drift. No cause, universal optimization benefit or eventual inspection result is inferred.",
+    "wave8EncoderFallback": "Vendor d9fceedc retries exactly once without optional low-latency rate control only after kVTParameterErr and an explicit true request; it preserves other encoder requirements/errors and invalidates failed sessions. Source image attributes use actual format subtype, not media type. Exact ec95 production-source harness passes six refusal cases, actual software create -12902 to ordinary create 0, exact options/preparation, ten H.264/decode pixel checks and actual VideoCodec BGRA derivation. This is a local software-encoder reproduction, not a hosted Intel fix or hardware throughput result.",
+    "wave8DeckTransport": "Exact ec95 full-source actual native IPC/controller visual/source tests and real localhost selected destination RTMP H264/AAC decode pass; independent recording countdown cancel/Start/Pause/Resume/New File/Stop finalizes two segments. Original hosted Intel receiver exit 234 / 47 VT -12902 failure remains failed. No hosted retry, physical device or public-service acceptance is inferred.",
+    "wave8HostedCI": "Published 9881359 native CI 39735328975 is terminal FAILURE at the 07:47:11 UTC read-only snapshot: ARM job 119679560262 SUCCESS, Intel 119679560505 FAILURE, iOS 119679560672 SUCCESS. ARM finishes at 07:46:25 UTC. Original Intel receiver exit 234 / 47 VT -12902 failure remains preserved; local ec95 / vendor fallback and Deck passes do not establish a hosted Intel fix. Browser interview 39735328995 remains successful. No newer-head hosted or whole native CI success is inferred."
   },
   "issues": [
     {
@@ -702,17 +705,21 @@
       "code": "I06",
       "title": "[macOS][I06] Receive remote guest screen shares as independent scene sources",
       "url": "https://github.com/joeblau/stream/issues/130",
-      "githubState": "open",
-      "completion": "remaining acceptance",
-      "remaining": [
-        "Real browser/mobile independent sharing and Internet/restricted-network/endurance qualification."
-      ],
+      "githubState": "closed",
+      "completion": "completed against original criteria within the supported-browser/validated-SDK scope",
+      "remaining": [],
       "qualificationLimits": [
-        "Optional TCP backend: arm64 and x86_64 archives and corresponding-source/relink materials are verified at the declared macOS 14 floor; native ARM full media and Rosetta Intel control smoke pass. Shipping still uses UDP-only transport. Actual macOS 14 runtime, native Intel full media, TLS, Internet/mobile/Safari and rendered A/V are not established by these optional artifacts."
+        "Optional TCP backend: arm64 and x86_64 archives and corresponding-source/relink materials are verified at the declared macOS 14 floor; native ARM full media and Rosetta Intel control smoke pass. Shipping still uses UDP-only transport. Actual macOS 14 runtime, native Intel full media, TLS, Internet/mobile/Safari and rendered A/V are not established by these optional artifacts.",
+        "Separate stable camera/screen identities, explicit approval/admission, denial/retry/revoke/share-end/rejoin and independent framing are qualified through actual browser/Worker/native receiver and Program/ISO plus optional TCP-only local relay evidence. Physical chooser interaction, every browser/mobile network, Internet deployment and endurance are not claimed; #126/#127 retain their separate browser/mobile and return/AEC requirements."
       ],
       "evidence": [
-        "NATIVE_GUEST_TCP_PORTABILITY.md"
-      ]
+        "NATIVE_GUEST_TCP_PORTABILITY.md",
+        "NATIVE_INTERVIEW_RECEIVER.md",
+        "NATIVE_INTERVIEW_PROGRAM_ISO.md",
+        "https://github.com/joeblau/stream/issues/130#issuecomment-6335641886"
+      ],
+      "publishedSource": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+      "githubStateNote": "Verified closed after all three original criteria were checked by parent, independent review and actual parent GitHub closure; parent54 I06 checked while epic stays open."
     },
     {
       "number": 129,
@@ -793,17 +800,22 @@
       "code": "I01",
       "title": "[macOS][I01] Build browser interview sessions, signaling, and NAT traversal",
       "url": "https://github.com/joeblau/stream/issues/125",
-      "githubState": "open",
-      "completion": "remaining acceptance",
-      "remaining": [
-        "Deployed authenticated TURN broker, Internet/mobile/restricted networks, long calls and measured native capacity above one."
-      ],
+      "githubState": "closed",
+      "completion": "completed against original criteria within the published one-peer validated-SDK scope",
+      "remaining": [],
       "qualificationLimits": [
-        "Optional TCP backend: arm64 and x86_64 archives and corresponding-source/relink materials are verified at the declared macOS 14 floor; native ARM full media and Rosetta Intel control smoke pass. Shipping still uses UDP-only transport. Actual macOS 14 runtime, native Intel full media, TLS, Internet/mobile/Safari and rendered A/V are not established by these optional artifacts."
+        "Optional TCP backend: arm64 and x86_64 archives and corresponding-source/relink materials are verified at the declared macOS 14 floor; native ARM full media and Rosetta Intel control smoke pass. Shipping still uses UDP-only transport. Actual macOS 14 runtime, native Intel full media, TLS, Internet/mobile/Safari and rendered A/V are not established by these optional artifacts.",
+        "Published tested gate is one admitted media peer on named M3 Max/OS/Chrome/Node configuration, not a measured maximum or resource-derived budget. Second-peer refusal is an actual Worker/controlled-media-host proof; one-peer codec/rejoin/sync has separate actual native Program/ISO evidence. Higher counts, other hardware, Internet/deployed TURN, mobile/Safari, long-call renewal and physical capture/playout remain unqualified. Shipping remains UDP-only; the separately pinned TCP validated SDK supplies the bounded TCP-restricted local endpoint case. #126/#127 keep their browser/mobile and return/AEC acceptance."
       ],
       "evidence": [
-        "NATIVE_GUEST_TCP_PORTABILITY.md"
-      ]
+        "NATIVE_GUEST_TCP_PORTABILITY.md",
+        "NATIVE_INTERVIEW_CAPACITY_GATE.md",
+        "NATIVE_INTERVIEW_CONTROL.md",
+        "NATIVE_INTERVIEW_PROGRAM_ISO.md",
+        "https://github.com/joeblau/stream/issues/125#issuecomment-6335726529"
+      ],
+      "publishedSource": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+      "githubStateNote": "Verified closed after parent original-criteria review, independent providers/guests review, concrete capacity documentation and actual parent GitHub write; original target permits a conservative tested gate rather than capacity above one or universal ten."
     },
     {
       "number": 124,
@@ -1057,7 +1069,8 @@
       "completion": "epic depends on open feature acceptance",
       "remaining": [
         "Resolve the remaining acceptance of this epic's open child tasks; inspect the linked issue for the complete checklist."
-      ]
+      ],
+      "githubStateNote": "Read-only final body refresh verifies I01 #125 and I06 #130 checked after actual child closure writes. Epic stays open for remaining child/integrated acceptance."
     },
     {
       "number": 53,
@@ -1132,15 +1145,15 @@
   ],
   "scopeCounts": {
     "initialOpenFeatureTasks": 48,
-    "openFeatureTasks": 25,
+    "openFeatureTasks": 23,
     "openEpicsAndRoadmap": 11,
     "total": 61,
-    "currentlyOpen": 36,
-    "closedSinceInitialInventory": 25
+    "currentlyOpen": 34,
+    "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 25 of 61 original issues closed, 36 open and zero open PRs; no new closures. Exact integrated 2ea819a unsigned universal Release/bundle and 40-case native row layout pass. Paragraph lifetimes pass 23 focused Core tests plus optimized native getters; scene menu/reorder model/runtime checks pass. These do not qualify full native AX, whole-window layout or contrast. Published 9881359 native CI remains active with Intel Deck step 11 failed and ARM through step 20/still active at 07:36:29 UTC; browser CI and iOS 587/82 pass. No proven Intel fix or whole native CI success. Performance run 39735454725 fails both unchanged nominal capacity gates; Intel second inspection remains pending at the original 1380s deadline. All other original incomplete tasks remain open.",
-  "integratedMain": "2ea819a574fe2fe475fc8d03caabfd736c402b89",
-  "githubStateRefreshedAt": "2026-10-22T07:21:30.649467+00:00",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers), zero open PRs at the final read-only refresh. Parent actually closed #125/#130 and checked parent54 I01/I06; the epic remains open. Current local 1967f30 adds only reviewed capacity documentation after exact validated ec95f20. Generation, unsigned universal Release/bundle, actual localhost Deck transport/recording and production-source fallback checks pass at ec95f20. Published 9881359 native CI is terminal FAILURE: ARM/iOS succeed, Intel Deck step 11 fails. No hosted Intel repair or newer-head whole CI success is inferred. Both performance jobs remain failed; Intel second inspection remains pending at unchanged 1380 s. #90/#92/#124/#127 and all other incomplete gates remain open.",
+  "integratedMain": "1967f30db2b31ec06ab7d49a7b7971f79ff1c2e9",
+  "githubStateRefreshedAt": "2026-10-22T07:56:14.843578+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
   "publishedIntegration": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
   "pullRequestReconciliation": {
@@ -1162,7 +1175,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "2ea819a574fe2fe475fc8d03caabfd736c402b89",
+  "currentReviewBase": "1967f30db2b31ec06ab7d49a7b7971f79ff1c2e9",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -2096,5 +2109,245 @@
         "sustained representative performance/resource ceilings"
       ]
     }
+  },
+  "wave8Review": {
+    "recordedAt": "2026-10-22T07:48:40.500082+00:00",
+    "validatedIntegratedHead": "ec95f20592f71895782e2d9ef2ddb05ad6b914dc",
+    "baseBeforeVendorCohort": "2ea819a574fe2fe475fc8d03caabfd736c402b89",
+    "integratedCommits": [
+      "bcf42e1",
+      "1c109d2",
+      "ec95f20"
+    ],
+    "vendorCommit": "d9fceedc068994023900b4d69588b8af19136752",
+    "vendorPublication": "Parent reports owned fork branch fix/optional-low-latency-encoder-20261022; this ledger task performs no publication.",
+    "nativeChecks": [
+      {
+        "label": "generate",
+        "exit": 0,
+        "log": "/tmp/stream-wave8-parent-final-generate-20261022.log",
+        "bytes": 168,
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "label": "universal",
+        "exit": 0,
+        "log": "/tmp/stream-wave8-parent-final-universal-20261022.log",
+        "bytes": 677510,
+        "sha256": "be0377a4ce156b2a720f35face518fa9bff28fe05f1bbc4394c56d4935da5864"
+      },
+      {
+        "label": "bundle",
+        "exit": 0,
+        "log": "/tmp/stream-wave8-parent-final-bundle-20261022.log",
+        "bytes": 517,
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ],
+    "encoderFallback": {
+      "source": "ec95f20592f71895782e2d9ef2ddb05ad6b914dc",
+      "vendor": "d9fceedc068994023900b4d69588b8af19136752",
+      "exit": 0,
+      "log": "/tmp/stream-wave8-parent-encoder-fallback-20261022.log",
+      "bytes": 806,
+      "sha256": "493b79292fd17830bf09a5aa73faa78f7355b8752fe5c8341537077960ac4717",
+      "scope": "Vendor d9fceedc retries exactly once without optional low-latency rate control only after kVTParameterErr and an explicit true request; it preserves other encoder requirements/errors and invalidates failed sessions. Source image attributes use actual format subtype, not media type. Exact ec95 production-source harness passes six refusal cases, actual software create -12902 to ordinary create 0, exact options/preparation, ten H.264/decode pixel checks and actual VideoCodec BGRA derivation. This is a local software-encoder reproduction, not a hosted Intel fix or hardware throughput result."
+    },
+    "deckTransport": {
+      "source": "ec95f20592f71895782e2d9ef2ddb05ad6b914dc",
+      "exit": 0,
+      "log": "/tmp/stream-wave8-parent-deck-transport-20261022.log",
+      "bytes": 1024486,
+      "sha256": "2e0477790d16c479bacb00b9fa4cf9a00b5d450c274339bab8bbd78dcd64b51c",
+      "scope": "Exact ec95 full-source actual native IPC/controller visual/source tests and real localhost selected destination RTMP H264/AAC decode pass; independent recording countdown cancel/Start/Pause/Resume/New File/Stop finalizes two segments. Original hosted Intel receiver exit 234 / 47 VT -12902 failure remains failed. No hosted retry, physical device or public-service acceptance is inferred."
+    },
+    "hostedCI": {
+      "recordedAt": "2026-10-22T07:47:11.923567+00:00",
+      "run": {
+        "id": 39735328975,
+        "name": "CI",
+        "head_sha": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/joeblau/stream/actions/runs/39735328975"
+      },
+      "jobs": [
+        {
+          "id": 119679560262,
+          "name": "StreamMac build and tests (macos-26)",
+          "status": "completed",
+          "conclusion": "success",
+          "completed_at": "2026-10-22T07:46:25Z",
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39735328975/job/119679560262",
+          "lastCompletedStep": 57,
+          "activeSteps": []
+        },
+        {
+          "id": 119679560505,
+          "name": "StreamMac build and tests (macos-26-intel)",
+          "status": "completed",
+          "conclusion": "failure",
+          "completed_at": "2026-10-22T07:23:35Z",
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39735328975/job/119679560505",
+          "lastCompletedStep": 57,
+          "activeSteps": []
+        },
+        {
+          "id": 119679560672,
+          "name": "StreamCore tests (iOS Simulator)",
+          "status": "completed",
+          "conclusion": "success",
+          "completed_at": "2026-10-22T06:46:48Z",
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39735328975/job/119679560672",
+          "lastCompletedStep": 13,
+          "activeSteps": []
+        }
+      ]
+    },
+    "originalIntelFailurePreserved": "wave7Review.hostedCI.nativeFollowup",
+    "hostedIntelFixProven": false,
+    "githubWritesPerformed": false,
+    "closuresPerformed": [],
+    "proposedClosures": [],
+    "githubStateBasis": "Fresh read-only original 61 bodies/states at 2026-10-22T07:56:14.843578+00:00",
+    "originalIssueCounts": {
+      "closed": 27,
+      "open": 34
+    },
+    "issue125OriginalCriteriaCorrection": {
+      "state": "closed",
+      "originalReading": "Conditional up-to-ten target permits the published conservative one-peer tested gate; it is not a measured maximum or resource-derived hardware/network budget. Above-one capacity/universal ten and broad Internet/mobile/endurance are not invented mandatory clauses.",
+      "qualificationLimits": "Named configuration and owned local Worker/TURN/generated inputs only; shipping UDP and separately validated optional TCP SDK remain distinct. Higher counts, other hardware/networks and #126/#127 acceptance remain unqualified."
+    },
+    "issue130": "Actually closed by parent after all three original criteria and supported-browser/validated-SDK evidence review; broader chooser/network/endurance and #126/#127 limits stay explicit.",
+    "noNewQualification": [
+      "hosted Intel repair or whole native CI success",
+      "physical device/operator acceptance",
+      "native AX/full-window/contrast",
+      "provisioned browser IPC/audio",
+      "sustained representative performance/resource ceilings"
+    ],
+    "hostedCINote": "Published 9881359 native CI 39735328975 is terminal FAILURE at the 07:47:11 UTC read-only snapshot: ARM job 119679560262 SUCCESS, Intel 119679560505 FAILURE, iOS 119679560672 SUCCESS. ARM finishes at 07:46:25 UTC. Original Intel receiver exit 234 / 47 VT -12902 failure remains preserved; local ec95 / vendor fallback and Deck passes do not establish a hosted Intel fix. Browser interview 39735328995 remains successful. No newer-head hosted or whole native CI success is inferred.",
+    "publicationCondition": "Previously live published 988 run is now terminal; this ledger task performs no publication or closure.",
+    "hostedFullCore": [
+      {
+        "job": 119679560262,
+        "tests": 587,
+        "suites": 82,
+        "seconds": 107.384,
+        "path": "/tmp/stream-ci-9881359-119679560262-original.log",
+        "bytes": 10507841,
+        "sha256": "84989897d73c13adb22f6b3a5375ffa264c68802644562619fc164501160f60a"
+      },
+      {
+        "job": 119679560505,
+        "tests": 587,
+        "suites": 82,
+        "seconds": 248.041,
+        "path": "/tmp/stream-ci-9881359-119679560505-original.log",
+        "bytes": 5239806,
+        "sha256": "0ee5b521ddc4d41fa56a18490785258d43c1830febadac6d08e088a247b91722"
+      },
+      {
+        "job": 119679560672,
+        "tests": 587,
+        "suites": 82,
+        "seconds": 224.605,
+        "path": "/tmp/stream-ci-9881359-119679560672-original.log",
+        "bytes": 362290,
+        "sha256": "f16e1bd5f11f95157208cc0c00a75aec53a8d40fa8b4e49a3010b3f72b3a9e24"
+      }
+    ],
+    "hostedFullCoreScope": "Published 9881359 full ARM/Intel/iOS Core logs each pass 587 tests in 82 suites. These precede the new paragraph pointer-lifetime Core fix; no newer-head whole Core/iOS qualification is inferred.",
+    "currentLocalHead": "1967f30db2b31ec06ab7d49a7b7971f79ff1c2e9",
+    "docsOnlyAfterValidatedSource": true,
+    "githubInventory": {
+      "path": "/tmp/stream-wave8-original61-github-inventory-20261022.json",
+      "recordedAt": "2026-10-22T07:56:14.843578+00:00",
+      "publishedMain": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+      "closed": 27,
+      "open": 34,
+      "openFeatureTasks": 23,
+      "openTrackers": 11,
+      "openPullRequests": 0,
+      "stateChanges": [
+        130,
+        125
+      ]
+    },
+    "parentClosureWrites": [
+      {
+        "issue": 125,
+        "path": "/tmp/stream-wave8-guest-issue-closures-20261022/125-write-results.json",
+        "bytes": 520,
+        "sha256": "f728286adc70a7a45ba0ace01d703705b5bd8b262c633a91658a026fda70cb07",
+        "receipt": {
+          "recordedAt": "2026-10-22T07:55:42.520709+00:00",
+          "qualifiedPublishedSource": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+          "writes": [
+            {
+              "action": "completionComment",
+              "url": "https://github.com/joeblau/stream/issues/125#issuecomment-6335726529"
+            },
+            {
+              "action": "closeIssue",
+              "number": 125,
+              "state": "closed",
+              "url": "https://github.com/joeblau/stream/issues/125"
+            },
+            {
+              "action": "parentChecklist",
+              "number": 54,
+              "state": "open"
+            }
+          ]
+        }
+      },
+      {
+        "issue": 130,
+        "path": "/tmp/stream-wave8-guest-issue-closures-20261022/130-write-results.json",
+        "bytes": 520,
+        "sha256": "492831937f802e29dd13bfe840d159295cf8b5d81f92590bdc19d6c134577f94",
+        "receipt": {
+          "recordedAt": "2026-10-22T07:50:47.685208+00:00",
+          "qualifiedPublishedSource": "98813596d02a58d4eb6538c2b0b538bdeb7008f8",
+          "writes": [
+            {
+              "action": "completionComment",
+              "url": "https://github.com/joeblau/stream/issues/130#issuecomment-6335641886"
+            },
+            {
+              "action": "closeIssue",
+              "number": 130,
+              "state": "closed",
+              "url": "https://github.com/joeblau/stream/issues/130"
+            },
+            {
+              "action": "parentChecklist",
+              "number": 54,
+              "state": "open"
+            }
+          ]
+        }
+      }
+    ],
+    "ledgerAgentGithubWritesPerformed": false,
+    "parentEpic54": {
+      "state": "open",
+      "I01_125": "checked",
+      "I06_130": "checked",
+      "otherAcceptance": "unchanged and incomplete"
+    },
+    "capacityDocument": {
+      "commit": "1967f30db2b31ec06ab7d49a7b7971f79ff1c2e9",
+      "path": "apple/docs/NATIVE_INTERVIEW_CAPACITY_GATE.md",
+      "bytes": 4519,
+      "sha256": "39cead406dc8af1c3d4bbde61cad07e525a6b65af72034d677fc484a19941363"
+    },
+    "closuresPerformedByLedgerAgent": [],
+    "completedOriginalCriteriaByParent": [
+      125,
+      130
+    ]
   }
 }

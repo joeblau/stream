@@ -604,3 +604,83 @@ arguments and the host capability cause are not established. The Deck owner is
 implementing a narrowly reviewed vendor candidate, **not a proven Intel fix**.
 No manual cancellation, rerun or dispatch is counted. All 25 closed / 36 open
 original issue states and their acceptance limits remain unchanged.
+
+## Optional encoder fallback and terminal native CI — 2026-10-22 UTC
+
+Exact integrated source `ec95f20` now passes generation, unsigned universal
+arm64/x86_64 Release, the actual bundle audit, the focused production-source
+encoder fallback regression and the actual native Deck localhost transport
+fixture. Root receipts and all five log hashes are retained under `wave8Review`
+in [the ledger](MACOS_TASK_STATUS.json). This cohort changes the encoder vendor
+and its fixture/CI wiring; it adds no newer-head full Core/iOS qualification.
+
+The owned fork's `d9fceedc` handles an explicitly requested optional
+low-latency encoder setting rejected with `kVTParameterErr`: it retries once
+without that optional setting, preserving all other encoder requirements and
+error behavior. Failed sessions are invalidated. Input pixel attributes use
+the actual format subtype rather than the generic media type. The exact-source
+regression preserves six refusal cases and proves a real software encoder's
+`-12902` first create, successful ordinary create, unchanged options/preparation,
+ten encoded H.264 frames and ten correctly decoded pixels. It separately checks
+the actual codec's BGRA source-format derivation. The fork gitlink and CI
+invocation are integrated; this is a local software-encoder proof, **not a
+proven hosted Intel repair or hardware-throughput result**.
+
+The exact combined native Deck fixture also passes real localhost RTMP
+acknowledgment and H.264/AAC decoding. Independent recording countdown
+cancellation and Start/Pause/Resume/New File/Stop finalize two real segments.
+Native IPC source bindings, bounded visual receipts and controller ownership
+checks pass. No physical controller, public ingest service or operator
+qualification is inferred from this local fixture.
+
+At the frozen **07:47:11 UTC** read-only snapshot, published `9881359` [native
+CI run 39735328975](https://github.com/joeblau/stream/actions/runs/39735328975) is
+**terminal failure**: ARM job `119679560262` succeeds at 07:46:25 UTC, iOS
+succeeds, and Intel job `119679560505` fails as recorded above. The original
+Intel receiver exit 234 and 47 VT `-12902` errors remain failed evidence. The
+new local passes do not relabel that job or establish an Intel hosted fix.
+All three original Core logs pass **587 tests / 82 suites**: ARM 107.384 s,
+Intel 248.041 s and iOS 224.605 s. These published-source tests precede the
+new paragraph fix; exact retained log hashes are in the ledger.
+Browser interview CI remains successful. There is no whole native CI success
+or hosted result for the newer `ec95f20` cohort.
+
+The final **07:56:14 UTC** read-only refresh of all 61 original bodies/states
+confirms **27 closed / 34 open**: 23 open feature tasks and 11 trackers, with
+zero open PRs. The parent actually closed [#125](https://github.com/joeblau/stream/issues/125#issuecomment-6335726529)
+and [#130](https://github.com/joeblau/stream/issues/130#issuecomment-6335641886)
+after original-criteria and independent evidence review. Parent #54 now checks
+I01 and I06 and **remains open**. Exact write receipts are retained in the
+ledger; this documentation agent performs no GitHub writes.
+
+For #125, the original up-to-ten target is conditional on supported budgets.
+The reviewed [capacity document](NATIVE_INTERVIEW_CAPACITY_GATE.md) publishes
+**one admitted media peer** on the named M3 Max/OS/Chrome/Node setup, with a
+second-peer refusal. It is a conservative tested lower bound, **not a measured
+maximum or resource-derived hardware/network budget**. Actual one-peer native
+media/rejoin/Program/ISO synchronization and the separate controlled-media-host
+refusal have distinct receipts. Shipping UDP and the separately pinned optional
+TCP SDK qualification stay distinct. Broader Internet/mobile/deployment/endurance
+coverage is a qualification limit; original validation permits supported
+browsers or the validated SDK across reconnect and restricted-network cases.
+Neither capacity above one nor a universal ten-guest limit is required.
+
+For #130, explicit host approval, independent stable camera/screen identities
+and framing, denial/retry/revoke/share-end and fresh rejoin preserve the guest
+connection. Actual browser/Worker/native receiver, Program/ISO and separately
+validated TCP-only local endpoint evidence satisfy the original supported
+scope. Physical chooser interaction, every browser/mobile network, Internet
+deployment and endurance are not claimed. #126 keeps its browser/mobile
+requirements; #127 keeps its failed raw-return timing and unqualified normal
+playout/AEC. Incoming synchronization does not relabel those failures.
+
+Current local `1967f30` adds only reviewed documentation after validated
+`ec95f20`. The exact new capacity document is 4,519 bytes, SHA256
+`39cead406dc8af1c3d4bbde61cad07e525a6b65af72034d677fc484a19941363`;
+its four retained execution hashes and named scope have independent
+providers/guests review. Published main remains `9881359` at the final refresh.
+No new media run accompanies the documentation or closures.
+
+All other outstanding original requirements retain their previous limits,
+including **#90, #92, #124 and #127**. The separate failed performance receipts,
+Intel pending inspection and prior source-scoped evidence remain unchanged.
