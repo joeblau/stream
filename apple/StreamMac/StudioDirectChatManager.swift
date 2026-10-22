@@ -292,7 +292,7 @@ struct DirectChatSnapshot {
         }
     }
     private func subscribe(_ sessionID: String, account: DirectChatIdentity, generation: UUID) async throws {
-        for type in ["channel.chat.message", "channel.chat.message_delete", "channel.chat.clear", "channel.chat.clear_user_messages"] {
+        for type in ["channel.chat.message", "channel.chat.message_delete", "channel.chat.clear", "channel.chat.clear_user_messages", "channel.chat.notification"] {
             var call = try ProviderAPI.request(.twitch, path: "/helix/eventsub/subscriptions")
             call.httpMethod = "POST"; call.setValue("application/json", forHTTPHeaderField: "Content-Type")
             call.httpBody = try JSONSerialization.data(withJSONObject: ["type": type, "version": "1",
@@ -382,6 +382,7 @@ struct DirectChatSnapshot {
     func moderationAvailabilityError(_ id: String, kind: DirectChatWriteKind) -> String? {
         guard [.delete, .timeout, .ban].contains(kind) else { return "Choose a supported moderation action." }
         guard let route = routes[id] else { return "This message has no current authorized direct-provider route; this feed is read-only." }
+        guard route.allowsMutation else { return "Provider subscription notices are read-only. Choose an ordinary chat message for moderation." }
         if let error = writeAvailabilityError(route.provider, kind: kind) { return error }
         guard let (account, chatID) = active[route.provider], chatID == route.chatID,
               account.channelID == route.channelID else { return "This message belongs to a different chat session." }
@@ -399,7 +400,7 @@ struct DirectChatSnapshot {
         return writeAvailabilityError(.twitch, kind: .reply) == nil
     }
     func targetForMessage(_ id: String) -> DirectChatWriteTarget? {
-        guard let route = routes[id], let target = writeTarget(route.provider),
+        guard let route = routes[id], route.allowsMutation, let target = writeTarget(route.provider),
               target.channelID == route.channelID, target.chatID == route.chatID else { return nil }
         return target
     }

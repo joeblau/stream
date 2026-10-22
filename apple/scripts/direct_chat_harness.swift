@@ -234,7 +234,7 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         precondition(!manager.snapshot(.twitch).isConnected)
         first.push(twitchControl("session_welcome"))
         await until { manager.snapshot(.twitch).isConnected }
-        precondition(http.calls.filter { $0.1.url!.path == "/helix/eventsub/subscriptions" }.count == 4)
+        precondition(http.calls.filter { $0.1.url!.path == "/helix/eventsub/subscriptions" }.count == 5)
         first.push(twitchEvent("twitch-one")); first.push(twitchEvent("twitch-one"))
         await until { stream.queue.messages.contains { $0.platform == "Twitch" } }
         let twitchID = StudioDirectChatDecoder.identity(.twitch, "owner", "twitch-one")
@@ -268,7 +268,7 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         precondition(!first.isClosed && sockets.opened[1].absoluteString == reconnect)
         second.push(twitchControl("session_welcome", session: "session-two"))
         await until { first.isClosed }
-        precondition(http.calls.filter { $0.1.url!.path == "/helix/eventsub/subscriptions" }.count == 4)
+        precondition(http.calls.filter { $0.1.url!.path == "/helix/eventsub/subscriptions" }.count == 5)
         let duringID = StudioDirectChatDecoder.identity(.twitch, "owner", "during-migration")
         precondition(manager.canDelete(duringID))
         manager.delete(duringID); await until { stream.queue.message(duringID) == nil }
