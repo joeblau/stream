@@ -46,7 +46,8 @@ xcrun swiftc -swift-version 6 -j2 -strict-concurrency=complete -parse-as-library
   StreamMac/BrowserCaptureExclusions.swift StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetLocalContent.swift StreamMac/BrowserWidgetVisualProtocol.swift \
   StreamMac/AppAudioCapture.swift StreamMac/ScreenSourceCapture.swift StreamMac/ScreenRegionDynamics.swift \
   StreamMac/GuestMediaReceipts.swift StreamMac/IsolatedRecordingTypes.swift StreamMac/IsolatedVideoTypes.swift \
-  StreamMac/RecordingChatTypes.swift StreamMac/RecordingChatArchive.swift StreamMac/RecordingChatReader.swift \
+  StreamMac/RecordingChatPaint.swift StreamMac/RecordingChatTypes.swift StreamMac/RecordingChatArchive.swift StreamMac/RecordingChatReader.swift \
+  StreamMac/RawVideoResourceCoordinator.swift StreamMac/FrameDeliveryBroker.swift StreamMac/FrameDeliveryConverter.swift StreamMac/RecordingFrameDelivery.swift \
   StreamMac/RecordingPreferences.swift StreamMac/ProgramRecordingSession.swift "$EXCLUSION_BUILD/FixtureAudioMixEngine.swift" \
   scripts/browser_exclusion_harness.swift -o "$EXCLUSION_BUILD/harness"
 # No NSApplication, SCK, helper, audio device, mixer clock, publisher or capture starts.
@@ -64,8 +65,9 @@ p=pathlib.Path(sys.argv[1])
 names=['StreamMac/BrowserCaptureExclusions.swift','StreamMac/AppAudioCapture.swift','StreamMac/ScreenSourceCapture.swift',
 'StreamMac/ScreenRegionDynamics.swift','StreamMac/BrowserWidgetAudioProtocol.swift','StreamMac/BrowserWidgetLocalContent.swift','StreamMac/BrowserWidgetVisualProtocol.swift',
 'StreamMac/GuestMediaReceipts.swift','StreamMac/IsolatedRecordingTypes.swift','StreamMac/IsolatedVideoTypes.swift',
-'StreamMac/RecordingChatTypes.swift','StreamMac/RecordingChatArchive.swift','StreamMac/RecordingChatReader.swift',
-'StreamMac/RecordingPreferences.swift','StreamMac/ProgramRecordingSession.swift','StreamMac/AudioMixEngine.swift',
+'StreamMac/RecordingChatPaint.swift','StreamMac/RecordingChatTypes.swift','StreamMac/RecordingChatArchive.swift','StreamMac/RecordingChatReader.swift',
+'StreamMac/RecordingPreferences.swift','StreamMac/RawVideoResourceCoordinator.swift','StreamMac/FrameDeliveryBroker.swift',
+'StreamMac/FrameDeliveryConverter.swift','StreamMac/RecordingFrameDelivery.swift','StreamMac/ProgramRecordingSession.swift','StreamMac/AudioMixEngine.swift',
 'scripts/browser_exclusion_harness.swift']
 r={'scope':'Controlled no-capture transactions and actual mixer ingestion/reset; no mixer clock/device/UI/helper. Pool and session context are not compiled or executed by this focused target.',
 'compiledSourceSHA256':{n:hashlib.sha256(pathlib.Path(n).read_bytes()).hexdigest() for n in names},

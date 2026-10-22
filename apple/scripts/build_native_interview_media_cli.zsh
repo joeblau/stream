@@ -14,10 +14,12 @@ xcrun swiftc -swift-version 6 -strict-concurrency=complete -parse-as-library \
   -import-objc-header "${APPLE_DIR}/NativeGuestReceivePrototype/GuestReceive.h" \
   "${APPLE_DIR}/StreamMac/GuestMediaReceipts.swift" "${APPLE_DIR}/StreamMac/GuestVideoFrameStore.swift" \
   "${APPLE_DIR}/StreamMac/IsolatedRecordingTypes.swift" "${APPLE_DIR}/StreamMac/IsolatedVideoTypes.swift" \
-  "${APPLE_DIR}/StreamMac/RecordingChatTypes.swift" "${APPLE_DIR}/StreamMac/RecordingChatArchive.swift" \
+  "${APPLE_DIR}/StreamMac/RecordingChatPaint.swift" "${APPLE_DIR}/StreamMac/RecordingChatTypes.swift" "${APPLE_DIR}/StreamMac/RecordingChatArchive.swift" \
   "${APPLE_DIR}/StreamMac/RecordingChatReader.swift" "${APPLE_DIR}/StreamMac/RecordingPreferences.swift" \
+  "${APPLE_DIR}/StreamMac/RawVideoResourceCoordinator.swift" "${APPLE_DIR}/StreamMac/FrameDeliveryBroker.swift" "${APPLE_DIR}/StreamMac/FrameDeliveryConverter.swift" "${APPLE_DIR}/StreamMac/RecordingFrameDelivery.swift" \
   "${APPLE_DIR}/StreamMac/ProgramRecordingSession.swift" "${APPLE_DIR}/StreamMac/AudioMixEngine.swift" \
   "${APPLE_DIR}/StreamMac/NativeGuestReturnAudioEncoder.swift" \
+  "${APPLE_DIR}/StreamMac/GuestReturnVideoResources.swift" \
   "${APPLE_DIR}/StreamMac/NativeGuestReturnVideoEncoder.swift" \
   "${APPLE_DIR}/NativeGuestReceivePrototype/NativeGuestReceiver.swift" \
   "${APPLE_DIR}/StreamMac/NativeGuestReturnVideoBudget.swift" "${APPLE_DIR}/StreamMac/NativeInterviewTypes.swift" "${APPLE_DIR}/StreamMac/NativeGuestMediaSink.swift" \
