@@ -103,20 +103,58 @@ This verifies redaction, collection bounds, correlated fresh pseudonyms and
 preservation of the runtime snapshot. It does not exercise real capture,
 publishing, storage pressure or physical hardware.
 
-## Remaining acceptance gates
+## Named-host evidence and retained limits
 
-R01 #91 native clock and degraded-broadcast qualification is pending the
-combined actual-pipeline run described above. Perceptual A/V sync and hardware
-GPU utilization are not claimed by these timestamp observations. R03 #92 needs named Apple Silicon and Intel sustained physical
-camera/desktop/media mixes, UI scheduling, actual GPU/encoder pressure,
-storage/uplink limits and independently measured A/V sync. The short synthetic
-`run_studio_performance_harness.zsh` baseline is useful for regression but does
-not qualify those workloads. Do not replace prior performance evidence with
-unrelated synthetic timings or infer supported workloads from core/RAM counts.
+[The bounded measurement artifact](AV_CLOCK_PIPELINE_2026-10-22.json) records
+Mac15,8 (M3 Max, 16 logical CPUs, 128 GiB), macOS 27.2 (26B118), the controlled
+source observations, four actual canonical redacted bundles and decoded media
+measurements. `STORAGE_NETWORK_CLOCK_VALIDATION=1` with
+`run_recording_storage_network_harness.zsh` passed using the shipping
+StreamController compositor/mixer, real RecordingController and actual RTMP/SRT
+publishers/owned FFmpeg receivers. No raw media is included in the artifact.
 
-P06 #90 still needs VoiceOver and Full Keyboard Access traversal, focus after
-all native sheets, and compact-display checks described in STUDIO_CONTROLS.md.
-Effects controls now provide named layer/source scopes, explicit numeric units
-and preset deletion targets. E02 #107 / E04 #108 still require representative
-hair/edge footage, physical-camera color inspection and sustained render cost;
-the existing native synthetic color fixture does not establish those results.
+The final run measured the stable source at −0.123 ms/s; the fixed 120 ms offset
+changed timestamp offset by 119.76 ms with rate −0.104 ms/s; injected 1% skew
+measured +9.801 ms/s. Dropped callbacks remained stable; the held callback had
+10.54 ms residual and suppressed numbers. Stop/rejoin, camera-only unavailable,
+actual resource samples, persistent runtime timers and failed-recorder events
+passed. Canonical current resident size was 107.7 MB, physical footprint
+213.8 MB, Metal allocation 0.967 MB, CPU 4.95% of logical capacity; six real
+Core Image Metal kernel samples had mean 0.0165 ms and maximum 0.0222 ms.
+These are observations of this small 320×180/30 fps workload, not capacity limits.
+
+Real recording-path loss released its writer/encoder reservation while both
+network outputs kept all three taken cues. Independently decoded RTMP/SRT
+maximum cue errors were 29.2/46.3 ms, maximum frame steps 68.0/68.6 ms and track
+end differences 81.0/40.1 ms. Existing source <60 ms, decoded cue <80 ms,
+track ends <120 ms and cadence <150 ms assertions were preserved. Program
+geometry remained 320×180 through reduced/minimum optional-preview budgets.
+A separate actual output-controller lifecycle fixture verifies reconnect timer
+continuity, terminal failed-output timer retirement and last-output failure.
+
+Two earlier assertions wrongly assumed every fresh clock must remain stable:
+actual shared codec callbacks had 6–7 ms delivery residual; a fault-time raw
+callback excursion had 7.20 ms video residual. Production correctly reported
+uncertain and suppressed numeric rate/offset. Those failed logs are retained
+in the artifact. The fixture now verifies freshness and that residual above
+5 ms suppresses numbers, keeping initial stable-playback checks and all
+independent decoded media limits unchanged. No estimator threshold, source
+PTS, normalizer, correction or retiming behavior was changed.
+
+Shared H.264/AAC's real callbacks and each publisher ingress were measured,
+with their actual jitter explicitly uncertain. Its independent decoded RTMP
+cue errors were 75.2, 82.2 and 91.2 ms, exceeding this fixture's unchanged
+80 ms limit; the run failed and SRT decode qualification was not reached.
+That publishing/performance gate remains unqualified. The passing normal
+backend failure-isolation result and truthful diagnostic uncertainty do not
+claim shared-backend media health, perceptual sync or device oscillator drift.
+
+Native builds used the shared two-slot scheduler and `xcodebuild -jobs 2`.
+Xcode appended generated `-j16` after requested `OTHER_SWIFT_FLAGS=-j2`;
+Swift driver concurrency was therefore not independently established as two.
+The small terminal-timer fixture compiled directly with `swiftc -j2`.
+
+R03 #92 workload gates and named configuration limits are maintained in
+[DESKTOP_RESOURCE_BUDGETS.md](DESKTOP_RESOURCE_BUDGETS.md). Timestamp observations
+do not broaden those limits. Accessibility qualification remains separate in
+[STUDIO_CONTROLS.md](STUDIO_CONTROLS.md).
