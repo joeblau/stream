@@ -73,6 +73,7 @@ jobs:
           zsh scripts/run_studio_virtual_camera_harness.zsh
           VIRTUAL_AUDIO_ROUTING_BUILD_DIR=build/virtual-audio-routing-validation zsh scripts/run_studio_virtual_audio_routing_harness.zsh
           PROVIDERS_BUILD_PATH=build/tests zsh scripts/run_provider_accounts_harness.zsh
+          zsh scripts/run_manual_social_destinations_harness.zsh
           BROKER_BUILD_PATH=build/restream-broker-ci zsh scripts/run_restream_broker_harness.zsh
           SCHEDULING_BUILD_PATH=build/tests zsh scripts/run_provider_scheduling_harness.zsh
           CHAT_BUILD_PATH=build/tests zsh scripts/run_direct_chat_harness.zsh
