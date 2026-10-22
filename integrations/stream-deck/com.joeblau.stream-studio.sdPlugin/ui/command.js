@@ -62,9 +62,12 @@ function updateOptions() {
   }
   element("source").replaceChildren(...sourceRows); element("source").value = selectedSource;
   element("confirmation").hidden = command?.requiresConfirmation !== true;
+  // Only a fresh descriptor can widen display scope; settings never carry authority.
+  const studioScoped = currentStatus === "Connected" && command?.scope === "studio";
+  const differentProject = settings.projectID && settings.projectID !== currentProject && !studioScoped;
   element("binding").textContent = settings.commandID ? `Binding: ${settings.commandID}` : "No resource is bound.";
   element("availability").textContent = currentStatus !== "Connected" ? "Connect to Stream Studio to check the bound resource."
-    : settings.projectID && settings.projectID !== currentProject ? "This binding cannot run in the current project."
+    : differentProject ? "This binding cannot run in the current project."
     : selected && !command ? "Missing resource — select another resource to rebind explicitly."
     : command?.argument === "source" && !sources.some(source => source.id === selectedSource) ? selectedSource
       ? "Missing or different-kind source — select another configured source to rebind explicitly."
@@ -72,7 +75,8 @@ function updateOptions() {
     : command?.argument === "source" && sources.some(source => source.id === selectedSource && !source.available)
       ? "Source disconnected — reconnect the device or explicitly choose another configured source."
     : command?.unavailableReason ?? (command ? command.kind === "feedback" ? "Display only — pressing refreshes authoritative studio state." : command.available ? "Available" : "Unavailable now" : "Choose a command to bind this control.");
-  element("project").textContent = settings.projectID && settings.projectID !== currentProject ? "This key belongs to a different project. Select a command to rebind explicitly." : `Project: ${currentProject || "not connected"}`;
+  element("project").textContent = studioScoped ? "Current show’s saved profiles — available across profiles in this show."
+    : differentProject ? "This key belongs to a different project. Select a command to rebind explicitly." : `Project: ${currentProject || "not connected"}`;
   for (const id of ["apply-value", "apply-step", "apply-page", "apply-marker", "apply-source"]) {
     element(id).disabled = currentStatus !== "Connected" || !currentProject || !command || command.id.startsWith("unavailable.");
   }
