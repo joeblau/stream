@@ -1,0 +1,212 @@
+{
+  "baseProofCommit": "6264ca8457e2e6740189c8e68eb148c2ae9bf58c",
+  "scope": "Only Python expected-failure oracle tightened; actual Capture/Session/harness production source, commands, binaries and retained native logs unchanged. No native run or build repeated.",
+  "oldRecipeSHA256": "e55ecfa4aecefca786782f44d9f62d0d620d0dda9b06545d1d22f5700bb3945c",
+  "newRecipeSHA256": "2cb1cb0e54d184e7377caba78f660f0956540d0431e8edf3b44bca91a3b4d33e",
+  "extractedOracleSHA256": "859b0c0a0b29520b5a97ab51e1d2efb4dae6d054036963fb770b34f92c2cf49a",
+  "oracleBoundaryCases": [
+    {
+      "variant": "false-confirmation-capture",
+      "runtimeExit": -5,
+      "log": "Unconfirmed native stop discarded its exact producer or holdback",
+      "wanted": true,
+      "actual": true
+    },
+    {
+      "variant": "false-confirmation-capture",
+      "runtimeExit": -4,
+      "log": "Unconfirmed native stop discarded its exact producer or holdback",
+      "wanted": true,
+      "actual": true
+    },
+    {
+      "variant": "false-confirmation-capture",
+      "runtimeExit": -5,
+      "log": "unrelated assertion",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "false-confirmation-capture",
+      "runtimeExit": -5,
+      "log": "dyld: Library not loaded",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "false-confirmation-capture",
+      "runtimeExit": -1,
+      "log": "Unconfirmed native stop discarded its exact producer or holdback",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "false-confirmation-capture",
+      "runtimeExit": 1,
+      "log": "Unconfirmed native stop discarded its exact producer or holdback",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "false-confirmation-capture",
+      "runtimeExit": 0,
+      "log": "Unconfirmed native stop discarded its exact producer or holdback",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "false-confirmation-session",
+      "runtimeExit": -5,
+      "log": "Unconfirmed native retirement lost old helper or local page ownership",
+      "wanted": true,
+      "actual": true
+    },
+    {
+      "variant": "false-confirmation-session",
+      "runtimeExit": -4,
+      "log": "Unconfirmed native retirement lost old helper or local page ownership",
+      "wanted": true,
+      "actual": true
+    },
+    {
+      "variant": "false-confirmation-session",
+      "runtimeExit": -5,
+      "log": "unrelated assertion",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "false-confirmation-session",
+      "runtimeExit": -5,
+      "log": "dyld: Library not loaded",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "false-confirmation-session",
+      "runtimeExit": -1,
+      "log": "Unconfirmed native retirement lost old helper or local page ownership",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "false-confirmation-session",
+      "runtimeExit": 1,
+      "log": "Unconfirmed native retirement lost old helper or local page ownership",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "false-confirmation-session",
+      "runtimeExit": 0,
+      "log": "Unconfirmed native retirement lost old helper or local page ownership",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "old-close-order-session",
+      "runtimeExit": -5,
+      "log": "Helper close preceded actual driver stop completion",
+      "wanted": true,
+      "actual": true
+    },
+    {
+      "variant": "old-close-order-session",
+      "runtimeExit": -4,
+      "log": "Helper close preceded actual driver stop completion",
+      "wanted": true,
+      "actual": true
+    },
+    {
+      "variant": "old-close-order-session",
+      "runtimeExit": -5,
+      "log": "unrelated assertion",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "old-close-order-session",
+      "runtimeExit": -5,
+      "log": "dyld: Library not loaded",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "old-close-order-session",
+      "runtimeExit": -1,
+      "log": "Helper close preceded actual driver stop completion",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "old-close-order-session",
+      "runtimeExit": 1,
+      "log": "Helper close preceded actual driver stop completion",
+      "wanted": false,
+      "actual": false
+    },
+    {
+      "variant": "old-close-order-session",
+      "runtimeExit": 0,
+      "log": "Helper close preceded actual driver stop completion",
+      "wanted": false,
+      "actual": false
+    }
+  ],
+  "additionalChecks": {
+    "compileFailureRejected": true,
+    "timeoutRejected": true,
+    "positivesRequireExactZero": true
+  },
+  "historicalNativeLogRecheck": {
+    "positive-capture": {
+      "originalResult": {
+        "compileExit": 0,
+        "runtimeExit": 0
+      },
+      "expectedOutcomeMatched": true,
+      "runtimeLogPath": "/tmp/stream-wave19-browser-stop-proof-final-20261022/positive-capture/runtime.log",
+      "runtimeLogSHA256": "bf0f7b3f23dc7f22750d09eed1cdf697f3ffa4f305afe7b502aff0bcaf24e654"
+    },
+    "positive-session": {
+      "originalResult": {
+        "compileExit": 0,
+        "runtimeExit": 0
+      },
+      "expectedOutcomeMatched": true,
+      "runtimeLogPath": "/tmp/stream-wave19-browser-stop-proof-final-20261022/positive-session/runtime.log",
+      "runtimeLogSHA256": "1dd8ae5f6a06f7c89e465c03f805a04d8523e7380f73687cdc530e9ed37adc3a"
+    },
+    "false-confirmation-capture": {
+      "originalResult": {
+        "compileExit": 0,
+        "runtimeExit": -5
+      },
+      "expectedOutcomeMatched": true,
+      "runtimeLogPath": "/tmp/stream-wave19-browser-stop-proof-final-20261022/false-confirmation-capture/runtime.log",
+      "runtimeLogSHA256": "be05c6fd2dccf0010d29f8a709b63ccea7ff967254dc2e2496e3d62da5f106cc"
+    },
+    "false-confirmation-session": {
+      "originalResult": {
+        "compileExit": 0,
+        "runtimeExit": -5
+      },
+      "expectedOutcomeMatched": true,
+      "runtimeLogPath": "/tmp/stream-wave19-browser-stop-proof-final-20261022/false-confirmation-session/runtime.log",
+      "runtimeLogSHA256": "8b184e1a9fc3e584cdf81e3bac7b3dd8dc86e7885818663cc51d03d9e18ca028"
+    },
+    "old-close-order-session": {
+      "originalResult": {
+        "compileExit": 0,
+        "runtimeExit": -5
+      },
+      "expectedOutcomeMatched": true,
+      "runtimeLogPath": "/tmp/stream-wave19-browser-stop-proof-final-20261022/old-close-order-session/runtime.log",
+      "runtimeLogSHA256": "2d3dd6c4d8f3ec9757c0ed7149b56de05cd19dfa41afc7381afe2f5b16b928f6"
+    }
+  },
+  "priorTrackedReceipt": {
+    "path": "apple/docs/BROWSER_AUDIO_STOP_CONFIRMATION_2026-10-22.json",
+    "sha256": "839683ceb9db67b6c334be39b131bafdf04f75aedc35175c75df2f9ffba19056"
+  }
+}
