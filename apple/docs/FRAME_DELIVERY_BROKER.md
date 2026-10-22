@@ -44,4 +44,4 @@ Audit the dated machine receipt against the retained files without executing nat
 python3 apple/scripts/verify_frame_delivery_broker_receipt.py
 ```
 
-Before any future performance invocation, its healthy-recording fixture must use the admitted Q+5 recording policy instead of the generic compatibility registration's small recipient bank. That fixture wiring is separate from these ownership regressions; no new performance invocation was made here.
+The separate source-only performance-fixture followup now selects the admitted Q+5 recording policy, with source4 and an explicitly bounded deliberate-slow recipient in one pre-writer transaction. It uses prepared enqueue to avoid the legacy recorder's second copy. Existing content, cadence, PCM and qualification gates remain unchanged. This wiring is separate from the native ownership regressions; no new performance invocation or qualification was made.
