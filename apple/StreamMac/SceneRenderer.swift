@@ -221,7 +221,7 @@ final class SceneRenderer {
     private var generatedCache: [GeneratedKey: CIImage] = [:]
     private let generatedCacheLimit = 64
     private var generatedCacheBytes = 0
-    private let generatedCacheByteLimit = 64 * 1_024 * 1_024
+    static let generatedCacheByteLimit = 64 * 1_024 * 1_024
     private var tickerLines: [String: CTLine] = [:]
     private let titleFonts = TitleRenderFontCache()
     private var titleFontGeneration: UInt64?
@@ -1214,7 +1214,7 @@ final class SceneRenderer {
         if let cached = generatedCache[key] { return cached }
         let rasterBytes = key.width * key.height * 4
         if generatedCache.count >= generatedCacheLimit
-            || generatedCacheBytes + rasterBytes > generatedCacheByteLimit {
+            || generatedCacheBytes + rasterBytes > Self.generatedCacheByteLimit {
             generatedCache.removeAll()
             generatedCacheBytes = 0
         }
@@ -1230,7 +1230,7 @@ final class SceneRenderer {
         draw(context, rect)
         guard let cgImage = context.makeImage() else { return nil }
         let image = CIImage(cgImage: cgImage)
-        if rasterBytes <= generatedCacheByteLimit {
+        if rasterBytes <= Self.generatedCacheByteLimit {
             generatedCache[key] = image
             generatedCacheBytes += rasterBytes
         }

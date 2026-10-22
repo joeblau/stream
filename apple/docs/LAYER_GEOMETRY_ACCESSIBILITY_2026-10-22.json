@@ -1,0 +1,59 @@
+{
+  "baseline": "78796d13dffc193217c6aa6ec3a8ecfb8a562182",
+  "status": "PASS for actual source, model, undo, ownership and synthetic rendering checks; native keyboard and accessibility delivery remain unqualified",
+  "host": {
+    "architecture": "arm64",
+    "macOS": "27.2",
+    "build": "26B118"
+  },
+  "command": "STREAM_VENDOR_ROOT=<owned-vendor> STREAM_XCODE_JOBS=2 zsh apple/scripts/run_studio_workspace_harness.zsh --layer-geometry",
+  "build_isolation": "Fresh owned derived directory, independently cloned pinned HaishinKit d9fceedc068994023900b4d69588b8af19136752, owned Syphon copy, actual fresh Core source. Two-slot wrapper; xcodebuild -jobs 2.",
+  "sources": {
+    "apple/StreamMac/LayerGeometryDraft.swift": "edab2bbcd3517d01e576cec71e67c337450c301df6ed91dde94a042846089b32",
+    "apple/StreamMac/LayerGeometryEditor.swift": "0f24a91ff60c77cbfcb9eef177934812a362d55bd71c8923c511cc4ea916abac",
+    "apple/StreamMac/LayerGeometrySectionView.swift": "e43b89f2e827ac63601b7c5d7025879123075cbfb3416875ed91f99bc3a8998f",
+    "apple/StreamMac/LayerStyleSectionView.swift": "d39afa69c047ddde955fd528b9d519d95bcffb86e3147f64944be81c93b838e1",
+    "apple/StreamMac/StudioCommandDispatcher.swift": "136b4c748c724aa89919e0baf006174d3130e563c6993433b505479646eaa93b",
+    "apple/scripts/layer_geometry_harness.swift": "76d4a16ceee2a8473242f0f2b49f1a78b30622dfb8f7738cbda20b020e4f5d05",
+    "apple/scripts/studio_workspace_harness.swift": "26b418272b7feaf27cb357ea4cb04fe62fbdbefc3a1cd8a6367293d8bcddf3ac",
+    "apple/scripts/run_studio_workspace_harness.zsh": "004645d78d9c4a07630ec804ac48dd5125e8f744cc3ee7a9e325d221ed60cda9",
+    "apple/StreamMac/SceneRenderer.swift": "d4284de75fed1e9d23cf3ead89fca0fe6d452b46d0f5b81dd04d23d31103305e"
+  },
+  "logs": {
+    "qualified": {
+      "path": "/tmp/stream-wave8-layer-geometry-native-qualified-20261022.log",
+      "sha256": "e1fa0e9459db8ba935fecb057d14b426f14bb395f8b13697e8f81f7b68853baf"
+    },
+    "retained_anchor_fixture_failure": {
+      "path": "/tmp/stream-wave8-layer-geometry-native-20261022.log",
+      "sha256": "4677ba08f3be5c1d852d52e21d451ae2d1b152c5eefdea8e381dee03f6ada67c"
+    },
+    "retained_argument_label_compile_failure": {
+      "path": "/tmp/stream-wave8-layer-geometry-native-final-20261022.log",
+      "sha256": "d9450d2de6f3aa3cc4fc18adf3f64182b76f301b2b47f3c8a7078f1f8824a81d"
+    }
+  },
+  "binary": {
+    "path": "apple/build/studio-workspace-validation/derived/Build/Products/Debug/StudioWorkspaceHarness",
+    "sha256": "17dd359f677dea63c6f3662b9e980bab8417a7b6671bff9168d7398550e64824"
+  },
+  "qualified": [
+    "Actual full workspace tool and new SwiftUI view compile, actual fresh Core and renderer",
+    "No mutation while typing; 50 same-scene publications retain draft and authority",
+    "Only edited fields merge; unrelated metadata and transform/style fields survive; same-field conflicts reject until Reload",
+    "Adjacent drag, Apply and Apply produce three independent undo/redo operations",
+    "Current locks and selection, scene, applied-profile and runtime replacement reject stale callbacks",
+    "Finite arithmetic, four-pixel edited-dimension minimum, exact midpoint/product/cache-addition overflow rejection",
+    "Unchanged precision and ordinary off-canvas/enlarged geometry remain valid",
+    "Actual synthetic camera rendering preserves existing PIP and ordinary-box semantics: 96x54 and 160x90, tolerance two pixels, without capture"
+  ],
+  "unqualified": [
+    "Native keyboard, accessibility or VoiceOver delivery to the new SwiftUI controls",
+    "Full-window layout at 1024x640 or operator text-size and contrast verification",
+    "Parent combined universal application integration build"
+  ],
+  "retained_failures": {
+    "anchor_fixture": "First render assertion saw 96x30 because a top-left fixture at the canvas edge was clipped by the existing 24-pixel camera PIP anchor inset. Center anchoring isolates the full rendered extent; expected 96x54 and 160x90 bounds and tolerance were retained, with no renderer behavior change.",
+    "argument_label_compile": "One intermediate compile failed because addingReportingOverflow was called with an invalid by: label. The label was removed in shipping validation and the fixture before the qualified build."
+  }
+}

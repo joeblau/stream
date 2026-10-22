@@ -1593,7 +1593,7 @@ final class StudioCommandDispatcher: ObservableObject {
     /// A rejected command performs no work; its result carries the unchanged
     /// state plus the reason.
     @discardableResult
-    func execute(_ command: StudioCommand) -> StudioCommandResult {
+    func execute(_ command: StudioCommand, coalescing: Bool = true) -> StudioCommandResult {
         if let error = validate(command) {
             postRejection(command: command, error: error)
             return StudioCommandResult(outcome: .rejected(error), state: state)
@@ -1629,7 +1629,7 @@ final class StudioCommandDispatcher: ObservableObject {
         perform(command)
         if let preUndoSnapshot {
             undoStack.record(label: command.label,
-                             coalescingKey: command.undoCoalescingKey,
+                             coalescingKey: coalescing ? command.undoCoalescingKey : nil,
                              pre: preUndoSnapshot,
                              post: captureUndoSnapshot())
         }
