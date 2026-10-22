@@ -729,7 +729,7 @@ struct SettingsView: View {
                     .foregroundStyle(.orange)
             }
             if status == .unavailable {
-                Text("Unavailable").font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                Text("Unavailable").studioTextStyle(.caption, weight: .semibold).foregroundStyle(.orange)
                 Button("Check Again") { Task { await permissions.probeScreenAccess() } }
             }
             Spacer()

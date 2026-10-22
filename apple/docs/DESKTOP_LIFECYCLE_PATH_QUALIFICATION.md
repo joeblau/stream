@@ -100,7 +100,14 @@ The 22-phase recording additionally verifies independent permission-recovery
 ownership and nonblocking diagnostic sampling during a controlled microphone
 history drain, with its original five-second deadline;
 see [the measured source qualification](SOURCE_FAILOVER_NATIVE.md).
-Display-removal and camera-permission callbacks still need focused evidence
-before claiming all of issue #158;
-physical devices or Internet/provider tests are qualification limits, not new
-universal acceptance requirements inferred from this fixture.
+The production coordinator and DeviceMonitor also pass focused current-session
+and raw enumeration regressions: actual locked-host construction remains
+locked, missing/inactive sessions fail closed, and `[A] -> [] -> [A]` delivers
+retirement and same-ID recovery. Failed enumeration remains distinct from an
+empty successful observation. See [desktop observation qualification](DESKTOP_OBSERVATION_QUALIFICATION.md).
+Camera authorization preflight and source-specific retirement/retry paths were
+reviewed; no personal camera or actual TCC settings were changed. Two independent
+original-criteria reviews find no remaining concrete software blocker for #158.
+The combined app build and publication must still precede closure. Physical
+OS/TCC/cable/interface delivery and broad device/provider qualification remain
+unclaimed; they do not add universal certification requirements to this task.

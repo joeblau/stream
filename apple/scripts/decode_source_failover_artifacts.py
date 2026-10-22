@@ -46,11 +46,11 @@ with subprocess.Popen(command, stdout=subprocess.PIPE) as decoder:
         for timing in timings:
             pixels = decoder.stdout.read(width * height * 4)
             assert len(pixels) == width * height * 4, 'Incomplete actual decoded frame'
-    
+
             def rgb(x, y):
                 offset = (y * width + x) * 4
                 return {'red': pixels[offset + 2], 'green': pixels[offset + 1], 'blue': pixels[offset]}
-    
+
             left_white = all_white = 0
             for y in range(0, height, 2):
                 for x in range(0, width, 2):
