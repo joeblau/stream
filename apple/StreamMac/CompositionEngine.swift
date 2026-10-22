@@ -3,26 +3,6 @@ import CoreVideo
 import StreamCore
 import os.lock
 
-/// One composited program frame, stamped on the engine's shared monotonic
-/// media clock. `@unchecked Sendable`: the `CMSampleBuffer` is a retained
-/// CoreFoundation object shared read-only across subscribers, exactly like the
-/// capture pipelines share their buffers.
-struct CompositedFrame: @unchecked Sendable {
-    /// Composited BGRA video, timed on the engine clock (see below).
-    let sampleBuffer: CMSampleBuffer
-    /// Presentation timestamp from the shared timebase (same value as the
-    /// sample buffer's PTS; exposed so sinks needn't unpack the buffer).
-    let presentationTime: CMTime
-    /// Nominal frame duration (1 / output fps).
-    let frameDuration: CMTime
-    /// 1-based tick counter since the engine last (re)started its clock.
-    let sequence: Int64
-
-    var pixelBuffer: CVPixelBuffer? {
-        CMSampleBufferGetImageBuffer(sampleBuffer)
-    }
-}
-
 #if STREAM_NATIVE_VALIDATION
 /// Gates the real clock task at its actor suspension boundaries. Captured per
 /// run so a fixture can release old work after stop/restart without a timer race.
@@ -34,19 +14,6 @@ struct CompositionClockValidationHooks: Sendable {
     var onExit: (@Sendable () -> Void)?
 }
 
-/// Holds only the mailbox, never a snapshot of its retained frames. Fixtures
-/// can observe retirement and fence the existing serial queue after releasing
-/// an already-dequeued callback; shipping removal never waits for that queue.
-struct CompositionMailboxValidationProbe: Sendable {
-    struct Snapshot: Equatable, Sendable, Codable {
-        var pendingSequences: [Int64]
-        var drops: Int
-        var closed: Bool
-    }
-    var snapshot: @Sendable () -> Snapshot
-    var barrier: @Sendable () async -> Void
-    var close: @Sendable () -> Void
-}
 #endif
 
 /// The process-wide hand-off of S07 project-level composition state (overlays
@@ -156,10 +123,10 @@ final class SceneRegistryStore: @unchecked Sendable {
 /// ages out via `LatestCameraFrame`). Missing sources render the documented
 /// fallback (black — see `SceneRenderer`). The tick never gates on a source.
 ///
-/// Fan-out: each subscriber gets a `FrameMailbox` — a bounded (default 2),
-/// drop-oldest queue drained on its own serial dispatch queue. `post` is a
-/// non-blocking O(1) hand-off from the engine, so a slow consumer only ever
-/// drops its own frames and cannot stall the compositor or other outputs.
+/// Fan-out: a sealed broker holds two shared source frames and performs one
+/// trusted transfer at a time. Each logical output owns an admitted private
+/// pool and independent callback queue. Escaped consumer pixels cannot pin
+/// the compositor's four-buffer source pool.
 ///
 /// Concurrency: the engine is an actor; all rendering (CI/Metal) runs on its
 /// executor, never on the main actor. Source frames are pulled through
@@ -178,15 +145,15 @@ actor CompositionEngine {
     func metricsSnapshot() -> CompositionMetrics {
         var snapshot = metrics
         snapshot.sampledAt = ProcessInfo.processInfo.systemUptime
-        for mailbox in Array(subscribers.values) + Array(secondarySubscribers.values) + Array(cleanSubscribers.values) {
-            let health = mailbox.statistics()
+        for broker in [programDelivery, secondaryDelivery, cleanDelivery] {
+            let health = broker.statistics()
             snapshot.subscriberQueueDepth += health.depth
             snapshot.subscriberDrops += health.drops
         }
         return snapshot
     }
     /// Receives composited frames on the subscriber's private serial queue.
-    typealias FrameSink = @Sendable (CompositedFrame) -> Void
+    typealias FrameSink = FrameDeliverySink
 
     private let renderer = SceneRenderer()
     private let secondaryRenderer = SceneRenderer()
@@ -263,14 +230,15 @@ actor CompositionEngine {
     private var clockAuthority = UUID()
     private var frameSequence: Int64 = 0
 
-    private var subscribers: [UUID: FrameMailbox] = [:]
-    private var secondarySubscribers: [UUID: FrameMailbox] = [:]
-    private var cleanSubscribers: [UUID: FrameMailbox] = [:]
+    private let programDelivery = FrameDeliveryBroker()
+    private let secondaryDelivery = FrameDeliveryBroker()
+    private let cleanDelivery = FrameDeliveryBroker()
+    private let resourceWorkspaceID = UUID()
+    private nonisolated let sourceResources = EngineSourceResources()
+    private var subscribers: [UUID: FrameDeliveryLease] = [:]
+    private var secondarySubscribers: [UUID: FrameDeliveryLease] = [:]
+    private var cleanSubscribers: [UUID: FrameDeliveryLease] = [:]
     private var cleanRenderPermits: [UUID: @Sendable () -> Bool] = [:]
-    /// Tokens cancelled before their (asynchronously delivered) registration
-    /// arrived; the late `addSink` is dropped instead of leaking a sink.
-    private var cancelledTokens: Set<UUID> = []
-
     init(screenProvider: @escaping @Sendable () -> CVPixelBuffer?,
          cameraProvider: @escaping @Sendable () -> LatestCameraFrame.Frame?,
          frameLookup: SourceFrameLookup? = nil,
@@ -649,30 +617,107 @@ actor CompositionEngine {
 
     // MARK: - Subscriber fan-out
 
-    /// Registers a frame sink under a caller-chosen token. The caller picks
-    /// the token so subscription and cancellation can be issued from any
-    /// context (e.g. MainActor) without awaiting the engine; a cancel that
-    /// lands before its register is still honored.
-    func addSink(token: UUID, capacity: Int = 2, canvas: OutputCanvas = .program, canvasSize: CGSize? = nil, sink: @escaping FrameSink) {
-        if cancelledTokens.remove(token) != nil { return }
-        if canvas == .secondary, let canvasSize { secondaryCanvasSize = canvasSize }
-        let mailbox = FrameMailbox(capacity: capacity, token: token, sink: sink)
-        if canvas == .program {
-            subscribers[token]?.close()
-            subscribers[token] = mailbox
-        } else {
-            secondarySubscribers[token]?.close()
-            secondarySubscribers[token] = mailbox
-        }
+    /// Admission is complete before this actor ACK. Only independently backed
+    /// frames reach the callback; no legacy original-buffer callback remains.
+    @discardableResult
+    func installFrameDelivery(token: UUID, domain: StableFrameDomainID, generation: UUID,
+                              bank: RawVideoResourceBank, sourceBank: RawVideoResourceBank? = nil,
+                              sourceReceipt: RawVideoResourceReceipt? = nil, transfer: FrameDeliveryTransfer = .copyBGRA,
+                              capacity: Int = 2, cancellation: FrameDeliveryCancellation = FrameDeliveryCancellation(), canvas: OutputCanvas = .program, clean: Bool = false,
+                              authorized: @escaping @Sendable () -> Bool = { true },
+                              shouldTransfer: @escaping @Sendable () -> Bool = { true },
+                              sink: @escaping FrameSink) throws -> FrameDeliveryLease {
+        guard !cancellation.isCancelled else { throw FrameDeliveryFailure.cancelled }
+        let broker = deliveryBroker(canvas: canvas, clean: clean)
+        let lease = try broker.install(token: token, domain: domain, generation: generation, bank: bank,
+            transfer: transfer, capacity: capacity, cancellation: cancellation, authorized: authorized, shouldTransfer: shouldTransfer, sink: sink)
+        do { try ensureSourceBank(canvas: canvas, clean: clean, prepared: sourceBank, receipt: sourceReceipt) }
+        catch { broker.remove(lease); throw error }
+        if clean { cleanSubscribers[token] = lease; cleanRenderPermits[token] = authorized }
+        else if canvas == .program { subscribers[token] = lease }
+        else { secondarySubscribers[token] = lease }
+        return lease
     }
 
-    /// Clean preserves the Program composition/background and strips only
-    /// project overlay nodes and live annotations. It is not a new canvas.
-    func addCleanSink(token: UUID, capacity: Int = 1, authorized: @escaping @Sendable () -> Bool = { true }, sink: @escaping FrameSink) {
-        if cancelledTokens.remove(token) != nil { return }
-        cleanSubscribers[token]?.close()
-        cleanSubscribers[token] = FrameMailbox(capacity: capacity, token: token, sink: sink)
-        cleanRenderPermits[token] = authorized
+    @discardableResult
+    func removeFrameDelivery(_ lease: FrameDeliveryLease) -> FrameDeliveryStatistics {
+        if subscribers[lease.token] == lease { subscribers[lease.token] = nil; return programDelivery.remove(lease) }
+        if secondarySubscribers[lease.token] == lease { secondarySubscribers[lease.token] = nil; return secondaryDelivery.remove(lease) }
+        if cleanSubscribers[lease.token] == lease {
+            cleanSubscribers[lease.token] = nil; cleanRenderPermits[lease.token] = nil; return cleanDelivery.remove(lease)
+        }
+        return lease.finalStatistics ?? FrameDeliveryStatistics()
+    }
+    func cancelFrameDelivery(token: UUID) { removeSink(token) }
+    func frameDeliveryStatistics(_ lease: FrameDeliveryLease) -> FrameDeliveryStatistics {
+        for broker in [programDelivery, secondaryDelivery, cleanDelivery] where broker.isCurrent(lease) {
+            return broker.statistics(for: lease)
+        }
+        return lease.finalStatistics ?? FrameDeliveryStatistics()
+    }
+
+    func frameDeliveryCanvasSize(canvas: OutputCanvas = .program) -> CGSize {
+        canvas == .program ? canvasSize : secondaryCanvasSize
+    }
+
+    private func deliveryBroker(canvas: OutputCanvas, clean: Bool) -> FrameDeliveryBroker {
+        clean ? cleanDelivery : canvas == .program ? programDelivery : secondaryDelivery
+    }
+
+    /// Include this synchronous request in the SAME pre-factory batch as the
+    /// recipient bank. Preparation does not change the active source geometry.
+    nonisolated func sourceFrameResourceRequest(canvasSize: CGSize, canvas: OutputCanvas = .program,
+                                                clean: Bool = false) throws -> RawVideoResourceRequest {
+        try sourceResources.request(size: canvasSize, canvas: canvas, clean: clean)
+    }
+
+    private func ensureSourceBank(canvas: OutputCanvas, clean: Bool, prepared: RawVideoResourceBank? = nil,
+                                  receipt: RawVideoResourceReceipt? = nil) throws {
+        let size = canvas == .program || clean ? canvasSize : secondaryCanvasSize
+        let bank: RawVideoResourceBank
+        if let prepared {
+            guard let receipt else { throw FrameDeliveryFailure.invalidBank }
+            bank = try sourceResources.commit(prepared, receipt: receipt, size: size, canvas: canvas, clean: clean)
+        } else if let current = sourceResources.current(size: size, canvas: canvas, clean: clean) {
+            bank = current
+        } else {
+            let request = try sourceResources.request(size: size, canvas: canvas, clean: clean)
+            let receipt = try RawVideoResourceCoordinator.shared.reserveBatch([request])
+            guard let prepared = receipt.banks.first else { throw FrameDeliveryFailure.invalidBank }
+            do { bank = try sourceResources.commit(prepared, receipt: receipt, size: size, canvas: canvas, clean: clean) }
+            catch { RawVideoResourceCoordinator.shared.rollback(receipt); throw error }
+        }
+        if clean { cleanRenderer.setFrameAllocator(bank) }
+        else if canvas == .program { renderer.setFrameAllocator(bank) }
+        else { secondaryRenderer.setFrameAllocator(bank) }
+    }
+
+    /// Compatibility registration still uses the sealed broker. Critical output
+    /// starts use installFrameDelivery so admission failure is returned before
+    /// their publisher/writer start ACK. This helper never exposes originals.
+    func addSink(token: UUID, capacity: Int = 2, cancellation: FrameDeliveryCancellation = FrameDeliveryCancellation(), canvas: OutputCanvas = .program, canvasSize: CGSize? = nil, sink: @escaping FrameSink) {
+        if canvas == .secondary, let canvasSize { secondaryCanvasSize = canvasSize }
+        addCompatibilitySink(token: token, capacity: capacity, cancellation: cancellation, canvas: canvas, clean: false, authorized: { true }, sink: sink)
+    }
+    func addCleanSink(token: UUID, capacity: Int = 1, cancellation: FrameDeliveryCancellation = FrameDeliveryCancellation(), authorized: @escaping @Sendable () -> Bool = { true }, sink: @escaping FrameSink) {
+        addCompatibilitySink(token: token, capacity: capacity, cancellation: cancellation, canvas: .program, clean: true, authorized: authorized, sink: sink)
+    }
+    private func addCompatibilitySink(token: UUID, capacity: Int, cancellation: FrameDeliveryCancellation, canvas: OutputCanvas, clean: Bool,
+                                      authorized: @escaping @Sendable () -> Bool, sink: @escaping FrameSink) {
+        guard !cancellation.isCancelled else { return }
+        let size = canvas == .program || clean ? canvasSize : secondaryCanvasSize
+        let domain = StableFrameDomainID(workspace: resourceWorkspaceID, kind: .validation,
+            outputID: token.uuidString, plane: clean ? .clean : canvas == .program ? .program : .secondary)
+        let generation = UUID()
+        do {
+            let receipt = try RawVideoResourceCoordinator.shared.reserveBatch([.init(domain: domain,
+                descriptor: .init(width: max(1, Int(size.width)), height: max(1, Int(size.height)), capacity: max(4, min(64, capacity + 2))),
+                sessionGeneration: generation)])
+            guard let bank = receipt.banks.first else { return }
+            do { try installFrameDelivery(token: token, domain: domain, generation: generation, bank: bank,
+                capacity: capacity, cancellation: cancellation, canvas: canvas, clean: clean, authorized: authorized, sink: sink) }
+            catch { RawVideoResourceCoordinator.shared.rollback(receipt) }
+        } catch { /* No unadmitted/original-buffer fallback. */ }
     }
 
     func removeSink(_ token: UUID) {
@@ -680,12 +725,9 @@ actor CompositionEngine {
         let secondary = secondarySubscribers.removeValue(forKey: token)
         let clean = cleanSubscribers.removeValue(forKey: token)
         cleanRenderPermits.removeValue(forKey: token)
-        primary?.close()
-        secondary?.close()
-        clean?.close()
-        if primary == nil && secondary == nil && clean == nil {
-            cancelledTokens.insert(token)
-        }
+        if let primary { programDelivery.remove(primary) }
+        if let secondary { secondaryDelivery.remove(secondary) }
+        if let clean { cleanDelivery.remove(clean) }
     }
 
     var subscriberCount: Int { subscribers.count + secondarySubscribers.count + cleanSubscribers.count }
@@ -708,9 +750,13 @@ actor CompositionEngine {
         validationClockHooks = hooks
     }
     func validationMailboxProbe(token: UUID, canvas: OutputCanvas = .program, clean: Bool = false) -> CompositionMailboxValidationProbe? {
-        let mailbox = clean ? cleanSubscribers[token] : canvas == .program ? subscribers[token] : secondarySubscribers[token]
-        guard let mailbox else { return nil }
-        return CompositionMailboxValidationProbe(snapshot: { mailbox.validationSnapshot() }, barrier: { await mailbox.validationBarrier() }, close: { mailbox.close() })
+        deliveryBroker(canvas: canvas, clean: clean).validationProbe(token: token)
+    }
+    func validationBeforeFrameTransfer(_ hook: (@Sendable () -> Void)?, canvas: OutputCanvas = .program, clean: Bool = false) {
+        deliveryBroker(canvas: canvas, clean: clean).validationBeforeTransfer(hook)
+    }
+    func validationFrameDeliveryBarrier(canvas: OutputCanvas = .program, clean: Bool = false) async {
+        await deliveryBroker(canvas: canvas, clean: clean).validationTransferBarrier()
     }
     func prepareValidation(scene: Scene, canvasSize: CGSize, frameRate: Int, at time: CMTime) {
         validationTime = time
@@ -827,6 +873,7 @@ actor CompositionEngine {
                 sourcePayloads: sourcePayloads, scenes: scenes, pts: pts, duration: duration)
         }
 
+        do { try ensureSourceBank(canvas: .program, clean: false) } catch { return }
         if override == nil, let active = transition {
             if let frame = renderTransitionFrame(active,
                                                  overlayContext: overlayContext,
@@ -836,9 +883,7 @@ actor CompositionEngine {
                                                  frameDuration: duration) {
                 metrics.rendered += 1
                 metrics.lastPresentationSeconds = pts.seconds
-                for mailbox in subscribers.values {
-                    mailbox.post(frame)
-                }
+                programDelivery.offer(frame)
                 return
             }
             transition = nil   // completed this tick → settled render below
@@ -859,9 +904,7 @@ actor CompositionEngine {
                                           annotations: annotations) else { return }
         metrics.rendered += 1
         metrics.lastPresentationSeconds = pts.seconds
-        for mailbox in subscribers.values {
-            mailbox.post(frame)
-        }
+        programDelivery.offer(frame)
     }
 
     private func renderClean(scene: Scene, override: Bool, overlayContext: OverlayContext,
@@ -869,6 +912,7 @@ actor CompositionEngine {
                              pts: CMTime, duration: CMTime) {
         let consumers = cleanSubscribers.filter { cleanRenderPermits[$0.key]?() == true }.values
         guard !consumers.isEmpty else { return }
+        do { try ensureSourceBank(canvas: .program, clean: true) } catch { return }
         var overlays = overlayContext; overlays.overlays = []
         let frame: CompositedFrame?
         if !override, let active = transition {
@@ -881,13 +925,14 @@ actor CompositionEngine {
                 presentationTime: pts, frameDuration: duration, sequence: frameSequence,
                 layerOpacity: fades.opacity, exitingLayers: fades.exiting, annotations: .empty)
         }
-        if let frame { for mailbox in consumers { mailbox.post(frame) } }
+        if let frame { cleanDelivery.offer(frame) }
     }
 
     private func renderSecondary(scene: Scene, override: Bool, overlayContext: OverlayContext,
                                  sourcePayloads: [SourceDefinitionID: LayerPayload], scenes: [SceneID: Scene],
                                  pts: CMTime, duration: CMTime, annotations: AnnotationRenderSnapshot) {
         guard !secondarySubscribers.isEmpty else { return }
+        do { try ensureSourceBank(canvas: .secondary, clean: false) } catch { return }
         let resolved = override ? scene : scene.composition(for: .secondary)
         let overlays: OverlayContext = !override && scene.secondaryCanvas?.isValid != true ? .empty : overlayContext
         let frame: CompositedFrame?
@@ -899,91 +944,7 @@ actor CompositionEngine {
                 canvasSize: secondaryCanvasSize, frames: delayedFrameLookup, sourcePayloads: sourcePayloads,
                 scenes: scenes, presentationTime: pts, frameDuration: duration, sequence: frameSequence, annotations: annotations)
         }
-        if let frame { for mailbox in secondarySubscribers.values { mailbox.post(frame) } }
+        if let frame { secondaryDelivery.offer(frame) }
     }
 }
 
-/// One subscriber's bounded, drop-oldest frame queue. The engine's `post`
-/// never blocks: at capacity the oldest pending frame is dropped. Delivery to
-/// the sink happens on the mailbox's own serial queue, so a slow sink backs up
-/// (and sheds) only its own frames.
-private final class FrameMailbox: @unchecked Sendable {
-    private let capacity: Int
-    private let sink: CompositionEngine.FrameSink
-    private let queue: DispatchQueue
-    private var lock = os_unfair_lock_s()
-    private var pending: [CompositedFrame] = []
-    private var isDraining = false
-    private var drops = 0
-    private var closed = false
-
-    func statistics() -> (depth: Int, drops: Int) {
-        os_unfair_lock_lock(&lock)
-        defer { os_unfair_lock_unlock(&lock) }
-        return (pending.count, drops)
-    }
-
-    init(capacity: Int, token: UUID, sink: @escaping CompositionEngine.FrameSink) {
-        self.capacity = max(1, capacity)
-        self.sink = sink
-        self.queue = DispatchQueue(label: "com.joeblau.StreamMac.engine.sink.\(token.uuidString)",
-                                   qos: .userInitiated)
-    }
-
-    func post(_ frame: CompositedFrame) {
-        os_unfair_lock_lock(&lock)
-        guard !closed else { os_unfair_lock_unlock(&lock); return }
-        if pending.count >= capacity {
-            drops += 1
-            pending.removeFirst()   // drop-oldest
-        }
-        pending.append(frame)
-        let shouldSchedule = !isDraining
-        if shouldSchedule { isDraining = true }
-        os_unfair_lock_unlock(&lock)
-        if shouldSchedule {
-            queue.async { self.drain() }
-        }
-    }
-
-    /// Retire pending ownership immediately. A callback that already dequeued
-    /// a frame may finish, but cannot drain the retired backlog afterwards.
-    /// Detach under the same lock as post/dequeue, then release outside it.
-    func close() {
-        os_unfair_lock_lock(&lock)
-        guard !closed else { os_unfair_lock_unlock(&lock); return }
-        closed = true
-        let retired = pending
-        drops += retired.count
-        pending = []
-        os_unfair_lock_unlock(&lock)
-        withExtendedLifetime(retired) {}
-    }
-
-    #if STREAM_NATIVE_VALIDATION
-    func validationSnapshot() -> CompositionMailboxValidationProbe.Snapshot {
-        os_unfair_lock_lock(&lock)
-        defer { os_unfair_lock_unlock(&lock) }
-        return .init(pendingSequences: pending.map(\.sequence), drops: drops, closed: closed)
-    }
-    func validationBarrier() async {
-        await withCheckedContinuation { continuation in
-            queue.async { continuation.resume() }
-        }
-    }
-    #endif
-
-    private func drain() {
-        while true {
-            os_unfair_lock_lock(&lock)
-            guard !closed, !pending.isEmpty else {
-                isDraining = false
-                os_unfair_lock_unlock(&lock)
-                return
-            }
-            let frame = pending.removeFirst()
-            os_unfair_lock_unlock(&lock)
-            sink(frame)
-        }
-    }
-}
