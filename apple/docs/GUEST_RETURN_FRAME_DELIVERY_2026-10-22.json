@@ -36,8 +36,34 @@
     "result": "CLEAR for actual resource/VT and Sink boundaries; Sender ordering source-reviewed"
   },
   "integrationPending": [
-    "Combined actual StreamController/App compile with providers geometry API and all other output paths",
     "Live guest playback/RTC A/V and sustained representative workload qualification"
   ],
-  "policy": "All exposed banks remain charged after retirement. Only a destroyed never-exposed owned preparation may refund. Source bank receipts transfer into Engine; private/encoder receipts remain endpoint-owned."
+  "policy": "All exposed banks remain charged after retirement. Only a destroyed never-exposed owned preparation may refund. Source bank receipts transfer into Engine; private/encoder receipts remain endpoint-owned.",
+  "combinedIntegrationCompile": {
+    "source": "fee9ae52b8ff0493e892cbe9558ef8e01c381a88",
+    "checks": [
+      {
+        "label": "generate",
+        "exit": 0,
+        "log": "/tmp/stream-wave17-initial-parent-final-generate-20261022.log",
+        "bytes": 168,
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "label": "universal",
+        "exit": 0,
+        "log": "/tmp/stream-wave17-initial-parent-final-universal-20261022.log",
+        "bytes": 358440,
+        "sha256": "ae69b83fb5dc90fa51103c8614e17b2b4102f749998e26add93d12d5763ca6c1"
+      },
+      {
+        "label": "bundle",
+        "exit": 0,
+        "log": "/tmp/stream-wave17-initial-parent-final-bundle-20261022.log",
+        "bytes": 517,
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ],
+    "scope": "Universal arm64+x86_64 Release app compile and desktop bundle validation; no live guest/RTC runtime qualification"
+  }
 }

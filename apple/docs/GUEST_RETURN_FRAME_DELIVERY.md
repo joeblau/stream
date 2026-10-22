@@ -46,8 +46,9 @@ receiver, capture, device or network graph is started in that sink proof.
 
 [The receipt](GUEST_RETURN_FRAME_DELIVERY_2026-10-22.json) binds the five passing
 resource/VT cases and the independent reviews. The sender's serial ordering is
-source reviewed; it is not an executed RTC lifecycle claim. Whole controller
-compilation belongs to the combined integration gate. These bounded generated
+source reviewed; it is not an executed RTC lifecycle claim. The combined app
+compiled for arm64 and x86_64 at `fee9ae5`, and its desktop bundle validation
+passed. The receipt binds those separate compile checks. These bounded generated
 inputs do not qualify live guest A/V, installed devices or sustained workloads.
 
 With matching integrated sources and full Core products, run:
