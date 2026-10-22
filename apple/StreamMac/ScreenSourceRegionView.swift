@@ -335,6 +335,9 @@ struct ScreenSourceRegionView: View {
                 HStack {
                     Text("Zoom")
                     Slider(value: $draftZoom.zoomFactor, in: 1.5 ... 4.0, step: 0.25)
+                        .accessibilityLabel("Follow-cursor zoom for \(source.name)")
+                        .accessibilityValue(draftZoom.zoomFactor.isFinite
+                            ? String(format: "%.2g times", draftZoom.zoomFactor) : "Unavailable")
                     Text("\(draftZoom.zoomFactor, specifier: "%.2g")×")
                         .monospacedDigit()
                         .frame(width: 44, alignment: .trailing)
