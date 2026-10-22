@@ -175,6 +175,7 @@ jobs:
             apple/build/recording-chat-paint-validation/result.json
             apple/build/frame-delivery-conversion-validation/receipt.json
             apple/build/frame-delivery-conversion-validation/conversion-proof.json
+            apple/build/studio-control-rows-validation/artifacts
             apple/build/recording-chat-validation/media-*
             apple/build/audience-events-validation/artifacts-*
             apple/build/fractional-iso-audio-validation/media-*
