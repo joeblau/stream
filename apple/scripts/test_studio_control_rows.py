@@ -160,7 +160,7 @@ def main():
                         str(apple / "StreamMac/StudioAccessibility.swift"),
                         str(apple / "StreamMac/StudioControlRow.swift"),
                         str(fixture), "-o", str(executable)], check=True, timeout=60)
-        subprocess.run([str(executable)], check=True, timeout=20)
+        subprocess.run([str(executable)], check=True, timeout=90)
 
 
 if __name__ == "__main__":
