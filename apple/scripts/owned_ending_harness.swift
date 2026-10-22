@@ -110,6 +110,10 @@ private actor OwnedEndingPublisher: Publisher {
     static let writeScope = "https://www.googleapis.com/auth/youtube"
     static let readScope = "https://www.googleapis.com/auth/youtube.readonly"
     static func check(_ value: Bool, _ reason: String) { precondition(value, reason) }
+    static func phase(_ name: String) {
+        // Bypass buffered print so an uncaught setup error retains its boundary.
+        FileHandle.standardOutput.write(Data("BEGIN owned ending: \(name)\n".utf8))
+    }
     static func until(_ predicate: @Sendable () async -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while !(await predicate()) && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
@@ -123,17 +127,30 @@ private actor OwnedEndingPublisher: Publisher {
                                     expiresAt: expired ? .distantPast : Date().addingTimeInterval(3_600), scopes: scopes), provider: .youtube, generation: generation)
         return value
     }
+    static func replace(_ value: ProviderTokenVault, memory: EndingMemoryCredentials, previous: UUID) async throws {
+        // Model a deliberate same-client OAuth grant. A credential generation
+        // from an already accepted grant is not a new acceptance receipt.
+        phase("replacement/configure")
+        let grant = try await value.configure(.youtube, clientID: "fixture")
+        check(grant != previous, "Replacement did not retire the previous credential generation")
+        phase("replacement/accept")
+        try await value.accept(.init(access: "replacement-fixture", expiresAt: Date().addingTimeInterval(3_600), scopes: [writeScope]), provider: .youtube, generation: grant)
+        check(await value.generation(.youtube) != grant, "Replacement did not consume its acceptance receipt")
+        check(await value.hasToken(.youtube), "Replacement did not install a usable credential")
+        let token = try JSONDecoder().decode(ProviderOAuthToken.self, from: Data(memory.storedToken!.utf8))
+        check(token.access == "replacement-fixture", "Replacement setup retained the prior token")
+    }
     @MainActor static func session(_ value: ProviderTokenVault) -> ProviderAccountSession {
         ProviderAccountSession(restream: OwnedEndingRestream(), vault: value,
             transport: { _ in throw ProviderFailure(.unavailable) }, openBrowser: { _ in preconditionFailure("Fixture opened browser") },
             pendingDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("ending-catalog-\(UUID())"))
     }
     @MainActor static func main() async throws {
-        try await ownedAuthority()
-        try await interruptedReads()
-        try await sessionIntentAtVaultAdmission()
-        try await vaultEntryAndRefresh()
-        try await continuingMedia()
+        phase("ownedAuthority"); try await ownedAuthority()
+        phase("interruptedReads"); try await interruptedReads()
+        phase("sessionIntentAtVaultAdmission"); try await sessionIntentAtVaultAdmission()
+        phase("vaultEntryAndRefresh"); try await vaultEntryAndRefresh()
+        phase("continuingMedia"); try await continuingMedia()
         print("Owned ending: fresh mine/exact owner, one explicit POST, scope/401 no replay, intent/credential/actor-entry/late fences, healthy outputs and decoded independent recording PASS")
     }
     @MainActor static func ownedAuthority() async throws {
@@ -168,8 +185,10 @@ private actor OwnedEndingPublisher: Publisher {
     }
     @MainActor static func interruptedReads() async throws {
         for action in ["authorize", "forget", "shutdown", "replacement", "cancel"] {
+            phase("interruptedReads/\(action)")
             let http = OwnedEndingHTTP(); await http.hold("/youtube/v3/liveBroadcasts")
-            let value = try await vault(http), account = session(value)
+            let memory = EndingMemoryCredentials()
+            let value = try await vault(http, memory: memory), account = session(value)
             let before = await value.generation(.youtube)
             let job = Task { await account.endRemote(binding) }
             try await until { await http.entered }
@@ -178,7 +197,7 @@ private actor OwnedEndingPublisher: Publisher {
             case "forget": account.forget(.youtube)
             case "shutdown": account.shutdown() // intent only; machine credential stays reusable
             case "replacement":
-                try await value.accept(.init(access: "replacement-fixture", expiresAt: Date().addingTimeInterval(3_600), scopes: [writeScope]), provider: .youtube, generation: before)
+                try await replace(value, memory: memory, previous: before)
             default: job.cancel()
             }
             if ["authorize", "shutdown"].contains(action) {
@@ -220,7 +239,7 @@ private actor OwnedEndingPublisher: Publisher {
         gate.revoke(); memory.resume(); _ = await occupied.value
         do { _ = try await queued.value; preconditionFailure("Queued revoked intent reached transport") } catch {}
         check(await http.posts == 0, "Actor-entry gate allowed POST"); check(await value.generation(.youtube) == captured, "Actor-entry fixture changed credential")
-        try await value.accept(.init(access: "replacement-fixture", expiresAt: Date().addingTimeInterval(3_600), scopes: [writeScope]), provider: .youtube, generation: captured)
+        try await replace(value, memory: memory, previous: captured)
         do { _ = try await value.send(.youtube, request: post, expectedGeneration: captured, retryAuthorizedGET: false); preconditionFailure("Stale captured credential entered HTTP under replacement token") }
         catch let failure as ProviderFailure { check(failure.kind == .authorization, "Stale actor-entry generation did not reject authorization") }
         check(await http.posts == 0, "Stale credential generation sent POST")
