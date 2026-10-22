@@ -240,6 +240,9 @@ private final class QueuedISO: @unchecked Sendable {
         let mixer = AudioMixEngine(), driver = SyntheticCapture(mixer: mixer)
         let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver)
         inspectedSession = session
+        // This direct-session fixture owns fixed mixer settings below; the
+        // separate Controller/operator fixture seeds its actual live settings.
+        session.prepareMixerForAudio = { .init(isCurrent: { true }) }
         let channel = session.channel, insert = Insert()
         let program = Trace(), monitor = Trace(), aux = Trace(), pre = Trace(), post = Trace()
         await mixer.run()
@@ -287,6 +290,27 @@ private final class QueuedISO: @unchecked Sendable {
         require(abs(program.mean(from: before, to: hostNow().seconds) - 0.15) < 0.002, "Actual Program fader changed")
         require(abs(aux.mean(from: before, to: hostNow().seconds) - 0.075) < 0.002, "Actual Aux send changed")
         require(abs(pre.mean(from: before, to: hostNow().seconds) - 0.25) < 0.002 && abs(post.mean(from: before, to: hostNow().seconds) - 0.25) < 0.002, "Actual ISO sample path changed")
+        // Withdrawing the runtime's mixer preparer keeps the visual Program
+        // pages but immediately revokes every actual helper audio bus/tap.
+        session.prepareMixerForAudio = nil
+        let unregistered = hostNow().seconds
+        require(!mixer.captureRouteIsAllowed(channel) && session.audibleLeases.isEmpty,
+                "Removing mixer preparation retained synchronous audio authority")
+        await session.waitUntilStopped()
+        try await Task.sleep(for: .milliseconds(250))
+        for trace in [program, monitor, aux, pre, post] {
+            require(trace.maxAbs(after: unregistered + 0.025) == 0, "Unregistered helper escaped into an actual bus/ISO")
+        }
+        require(session.demandCount == 2 && !driver.isCapturing && session.audioUnavailableReason?.contains("preparation") == true,
+                "Missing mixer preparation destroyed visual demand or retained capture")
+        session.prepareMixerForAudio = { .init(isCurrent: { true }) }
+        try await wait("Current mixer registration did not reconcile retained Program lease") { session.audibleLeases == [a] }
+        try await Task.sleep(for: .milliseconds(450))
+        let registered = hostNow().seconds
+        try await Task.sleep(for: .milliseconds(120))
+        require(abs(program.mean(from: registered,to:hostNow().seconds) - 0.15) < 0.002,
+                "Re-registering helper mixer lost the real saved fader/delay")
+        print("PASS: missing/withdrawn mixer preparation preserves visuals, stops capture, silences actual Program/Monitor/Aux/pre/postISO, and resumes only after explicit current registration")
         producer.cancel(); await producer.value
         insert.arm()
         driver.post(pcm(hostNow(), value: 0.9))

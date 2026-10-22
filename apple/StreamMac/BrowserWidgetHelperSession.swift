@@ -62,7 +62,15 @@ protocol BrowserWidgetHelperTransport: AnyObject {
     /// Runtime owner seeds saved mixer intent while the final route gate is closed.
     /// A missing preparation leaves the route unavailable; this callback never starts capture.
     struct MixerPreparation { var isCurrent: @MainActor () -> Bool }
-    var prepareMixerForAudio: (@MainActor () async -> MixerPreparation?)?
+    var prepareMixerForAudio: (@MainActor () async -> MixerPreparation?)? {
+        didSet {
+            // Registration can follow visual demand; withdrawal revokes an
+            // already audible route synchronously. Replacing the same owner's
+            // live preparer during reconciliation does not restart its audio.
+            guard !demands.isEmpty, oldValue == nil || prepareMixerForAudio == nil else { return }
+            closeAudioBoundary(); reconcileAudio()
+        }
+    }
     private var appliedExclusions: Set<String> = []
     private var captureConflict: String?
     private var pendingMedia: [UUID: PendingMedia] = [:]
@@ -285,6 +293,7 @@ protocol BrowserWidgetHelperTransport: AnyObject {
                 else if !appliedExclusions.isSuperset(of: requiredSystemAudioExclusions) {
                     reason = "Independent browser audio is unavailable until other capture routes exclude its helper."
                 } else if mixer == nil { reason = "Independent browser audio requires its owned mixer channel." }
+                else if prepareMixerForAudio == nil { reason = "Independent browser audio requires current mixer preparation." }
                 else { reason = nil }
                 publishAudioState(reason ?? "Independent browser audio is preparing its Program route.")
                 if reason != nil { break }
@@ -300,7 +309,8 @@ protocol BrowserWidgetHelperTransport: AnyObject {
                 guard !Task.isCancelled else { break }
                 if revision != audioRevision { continue }
                 guard allResumed, audio.isCapturing else { failSession("helper_media_resume_failed"); break }
-                if let prepareMixerForAudio {
+                guard let prepareMixerForAudio else { continue }
+                do {
                     let prepared = await prepareMixerForAudio()
                     guard revision == audioRevision, !Task.isCancelled else { continue }
                     guard let prepared else { failSession("helper_mixer_unavailable"); break }
