@@ -19,7 +19,7 @@ readonly EXTERNAL_DISPLAY_PRODUCTS="$STREAM_CORE_FRAMEWORK_DIR"
 xcrun swiftc -swift-version 6 -parse-as-library \
     -F "$EXTERNAL_DISPLAY_PRODUCTS" -framework StreamCore \
     -Xlinker -rpath -Xlinker "${EXTERNAL_DISPLAY_PRODUCTS:A}" \
-    StreamMac/ExternalDisplayOutputController.swift StreamMac/ExternalProgramImageConverter.swift \
+    StreamMac/ExternalDisplayOutputController.swift StreamMac/ExternalProgramImageConverter.swift StreamMac/CompositorWorkloadBudget.swift \
     "$EXTERNAL_DISPLAY_BUILD_PATH/CompositedFrame.swift" scripts/external_display_harness.swift \
     -o "$EXTERNAL_DISPLAY_BUILD_PATH/external-display-harness"
 env DYLD_FRAMEWORK_PATH="${EXTERNAL_DISPLAY_PRODUCTS:A}" "$EXTERNAL_DISPLAY_BUILD_PATH/external-display-harness" "${EXTERNAL_DISPLAY_BUILD_PATH:A}/artifacts-$(uuidgen)"

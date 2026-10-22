@@ -75,11 +75,10 @@ claim about physical panel calibration.
 
 O09 #175's software paths now select a real separate system display, expose the
 required feeds and active state, render the video-only surface, and handle the
-screen lifecycle through the shipping handler. The focused fixture does not
-rebuild the full SwiftUI application or run its live compositor through every
-feed; the small `StreamController` clean-subscription and studio-shell binding
-changes still need the normal integration build. Existing clean composition
-preserves the taken scene and removes global overlay/annotation rendering.
+screen lifecycle through the shipping handler. The focused fixture does not rebuild the full SwiftUI application. The
+subsequent full-source native fixture below compiles the app's source graph and
+runs the shipping controller/compositor/converter/surface route; it does not
+replace the normal release build or claim every physical display is qualified.
 
 The actual consumer-window readback is distinct from the injected topology
 proof. No cable was unplugged, system layout changed, or physical AirPlay
@@ -102,3 +101,75 @@ If existing capture permission or two observable displays are absent, the
 own-window system-display observation is reported unqualified in `report.json`;
 no permission request, unlock, virtual display or system reconfiguration occurs.
 The owned layer/pacing/topology checks remain separate evidence.
+
+## Clean compositor budget follow-up
+
+The independent review of `a98a3a9` found that its new external Clean
+subscription bypassed the existing guest Clean compositor budget. External
+Clean now uses the same measured Mac-class gate and **3840×2160×30 total
+pixels/second** ceiling before allocating a window or subscription. Shared
+Program, Clean and Secondary work is counted by renderer, not by the number of
+subscribers. Later secondary publishing, recording and guest reservations see
+external Clean demand. This preserves the existing limits; it does not qualify
+additional Mac classes or increase their canvas budgets.
+
+Cancellation revokes the clean-render permit synchronously and retains its
+reservation until `CompositionEngine.removeSink` acknowledges teardown. A fast
+stop/restart cannot make in-flight composition disappear from accounting. New
+secondary-monitor demand can revoke the optional external Clean surface, with
+the actual budget reason shown in the outputs inspector.
+
+`CompositorWorkloadBudget` is the shared production preflight policy. Focused
+native tests check the exact ceiling, qualification refusal, later-secondary
+cost, refusal before surface/subscription allocation, and permit revocation.
+The follow-up focused result is `/tmp/stream-175-budget-focused-20261022.log`.
+
+The full-source fixture `run_external_display_program_harness.zsh` compiles all
+StreamMac production sources with isolated credential/default/storage and
+refused permission boundaries. Only descriptor enumeration and native-window
+placement are injected into the shipping controller; the compositor, pixel
+conversion, native surface, subscription, budget and teardown paths are real.
+No screen capture, audio input, publisher or system reconfiguration is needed
+for this owned offscreen-surface proof.
+
+On Mac15,8 / Apple M3 Max / 16 CPUs / macOS 27.2 (26B118), the full native run
+passed in `/tmp/stream-175-clean-program-20261022.log`. Its actual rendered PNGs
+and isolated project inputs are retained under
+`apple/build/external-display-program-validation/artifacts-514427AC-DC78-429A-B251-49EB582D7C6E`.
+It verifies:
+
+- A 4K30 Program requesting an additional Clean renderer fails before a surface
+  or pipeline demand is allocated, with the compositor-budget error intact.
+- Actual Program frames show a green global overlay and red annotation. Actual
+  Clean frames on the same native display-surface path retain a blue scene
+  layer and purple project background and omit both overlay and annotation.
+- Two 1080p60 Program/Clean renderers exactly reach the unchanged ceiling. A
+  later secondary publisher or guest/recording reservation is refused.
+- A real registered guest Clean subscription shares the renderer with the
+  external display and is accepted without double charging. Removing it does
+  not stop the external display. External stop retains demand until the actor
+  acknowledges removal, and final demand reaches zero.
+- Starting secondary monitors at that boundary revokes the optional external
+  Clean surface and reports the budget cause.
+
+The first full native build exposed a duplicate generated permission-boundary
+file, corrected in the fixture generator. Its log remains at
+`/tmp/stream-175-clean-program-fixture-boundary-failure-20261022.log`. A later
+full-source build succeeded, but physical observation exited **77 / UNQUALIFIED**
+because two observable displays were no longer available; that result remains
+at `/tmp/stream-175-clean-program-physical-gate-20261022.log`. The successful
+owned-layer route proof does not erase that gate or substitute for a fresh
+physical readback. The earlier real-display sRGB/SCK result above is separate
+historical evidence. Physical cable unplug and an AirPlay receiver remain
+unexercised; their software availability/removal handlers were tested with
+injected topology, without claiming those hardware events occurred.
+
+Run the full-source fixture with the shared native-build slot wrapper and a
+read-only vendor root. It caps Xcode/Swift at two jobs and bounds the owned tool
+runtime to 90 seconds:
+
+```sh
+python3 /tmp/stream-native-build-slots-20261022.py --label external-clean-program -- \
+  env STREAM_VENDOR_ROOT=/path/to/read-only/vendor \
+  zsh apple/scripts/run_external_display_program_harness.zsh
+```

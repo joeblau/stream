@@ -56,6 +56,7 @@ final class ExternalDisplayOutputController: ObservableObject {
     private let screensProvider: @MainActor () -> [ExternalDisplayDescriptor]
     private let surfaceFactory: @MainActor (ExternalDisplayDescriptor) -> (any ExternalDisplaySurface)?
     private let subscribe: Subscribe
+    private let startError: @MainActor (ExternalDisplayFeed) -> String?
     private var surface: (any ExternalDisplaySurface)?
     private var cancelSubscription: Cancel?
     private var mailbox: ExternalDisplayMailbox?
@@ -84,8 +85,8 @@ final class ExternalDisplayOutputController: ObservableObject {
     private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
     init(screensProvider: @escaping @MainActor () -> [ExternalDisplayDescriptor] = ExternalDisplayOutputController.systemDisplays,
          surfaceFactory: @escaping @MainActor (ExternalDisplayDescriptor) -> (any ExternalDisplaySurface)? = { NativeExternalDisplaySurface(display: $0) },
-         observeSystem: Bool = true, subscribe: @escaping Subscribe) {
-        self.screensProvider = screensProvider; self.surfaceFactory = surfaceFactory; self.subscribe = subscribe
+         observeSystem: Bool = true, startError: @escaping @MainActor (ExternalDisplayFeed) -> String? = { _ in nil }, subscribe: @escaping Subscribe) {
+        self.screensProvider = screensProvider; self.surfaceFactory = surfaceFactory; self.subscribe = subscribe; self.startError = startError
         refreshDisplays()
         if observeSystem {
             for name in [NSApplication.didChangeScreenParametersNotification, Self.studioWindowChanged,
@@ -136,6 +137,7 @@ final class ExternalDisplayOutputController: ObservableObject {
         guard let profile, profile.canvasWidth <= 4096, profile.canvasHeight <= 4096, profile.frameRate <= 60 else {
             state = .failed("Choose an available canvas up to 4096 pixels per dimension and 60 fps."); return
         }
+        if let error = startError(feed) { state = .failed(error); return }
         guard let surface = surfaceFactory(display) else { state = .failed("The video surface could not be allocated."); return }
         let mailbox = ExternalDisplayMailbox()
         // Selected feed converts on the independent subscription queue before
