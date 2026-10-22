@@ -19,11 +19,12 @@ execFileSync("xcrun", ["lipo", "-create", resolve(plugin, "bin/keychain-helper-a
   "-output", resolve(plugin, "bin/keychain-helper")]);
 for (const architecture of ["arm64", "x86_64"]) await rm(resolve(plugin, `bin/keychain-helper-${architecture}`));
 execFileSync("python3", ["scripts/build-icons.py"]);
+execFileSync("python3", ["scripts/generate-profiles.py"]);
 let licenses = "Stream Studio uses the following pinned, permissively licensed runtime packages.\n\n";
 for (const name of ["@elgato/streamdeck", "@elgato/utils", "@elgato/schemas", "ws"]) {
   const pkg = JSON.parse(await readFile(resolve(root, `node_modules/${name}/package.json`), "utf8"));
   const notice = (await readFile(resolve(root, `node_modules/${name}/LICENSE`), "utf8")).replaceAll("\r\n", "\n").trimEnd();
   licenses += `${name} ${pkg.version} (${pkg.license})\n${notice}\n\n`;
 }
-await writeFile(resolve(plugin, "THIRD_PARTY_LICENSES.txt"), licenses.trimEnd() + "\n");
+await writeFile(resolve(plugin, "THIRD_PARTY_LICENSES.txt"), licenses.trimEnd() + "\n\nProfile template notice (Elgato MemoryGame):\n" + await readFile(resolve(root, "profiles/ELGATO_MEMORYGAME_LICENSE.txt"), "utf8"));
 console.log("Built plugin and universal macOS Keychain helper.");

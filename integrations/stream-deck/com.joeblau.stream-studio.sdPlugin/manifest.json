@@ -118,5 +118,28 @@
         }
       ]
     }
+  ],
+  "Profiles": [
+    {
+      "Name": "profiles/stream-15-key",
+      "DeviceType": 0,
+      "Readonly": false,
+      "DontAutoSwitchWhenInstalled": true,
+      "AutoInstall": false
+    },
+    {
+      "Name": "profiles/record-15-key",
+      "DeviceType": 0,
+      "Readonly": false,
+      "DontAutoSwitchWhenInstalled": true,
+      "AutoInstall": false
+    },
+    {
+      "Name": "profiles/interview-15-key",
+      "DeviceType": 0,
+      "Readonly": false,
+      "DontAutoSwitchWhenInstalled": true,
+      "AutoInstall": false
+    }
   ]
 }

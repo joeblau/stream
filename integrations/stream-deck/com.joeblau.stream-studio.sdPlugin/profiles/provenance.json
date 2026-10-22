@@ -1,0 +1,30 @@
+{
+  "format": "Elgato public MemoryGame V1-derived candidate",
+  "importAcceptance": "pending: not imported into Stream Deck",
+  "sourceTemplate": {
+    "repository": "https://github.com/elgatosf/streamdeck-memorygame",
+    "commit": "46e9d9080e352a9d9a1ae2811bbb126e8e0bee95",
+    "archive": "Sources/Profiles/Memory.streamDeckProfile",
+    "sha256": "f26d68efea92002d7cf7219bdf7f281084062475172c39dd2c5457c05188e04a",
+    "license": "MIT, Copyright 2018 Corsair Memory, Inc"
+  },
+  "deviceType": 0,
+  "deviceModel": "20GAA9901",
+  "profiles": [
+    {
+      "file": "interview-15-key.streamDeckProfile",
+      "sha256": "9477a27560f6bf478199c924e205dff8561ad1cceeb41b9427d1deb8c9713548",
+      "bytes": 14580
+    },
+    {
+      "file": "record-15-key.streamDeckProfile",
+      "sha256": "55443f6b189e1d21de9d0a96fb70f48f8d9c2d2152c442745c3bbcd85b097c64",
+      "bytes": 11115
+    },
+    {
+      "file": "stream-15-key.streamDeckProfile",
+      "sha256": "02f07c29fd21c48c5d12d2569bb77595c364b45b2ee962765beb43e518c94144",
+      "bytes": 14593
+    }
+  ]
+}

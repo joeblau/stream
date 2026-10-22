@@ -4,7 +4,7 @@ import net from "node:net";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, copyFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, copyFile, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { createRequire } from "node:module";
@@ -16,7 +16,14 @@ async function waitUntil(check: () => boolean): Promise<void> {
   assert.fail("SDK lifecycle test timed out");
 }
 
-for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${scenario} routes independent device instances, updates tallies, and persists only stable bindings`, async () => {
+const configurations = [
+  { scenario: "scene", label: "15-key", type: 0, columns: 5, rows: 3 },
+  { scenario: "destination", label: "15-key", type: 0, columns: 5, rows: 3 },
+  { scenario: "scene", label: "Mobile free six-key", type: 3, columns: 3, rows: 2 },
+  { scenario: "scene", label: "Pedal three-key", type: 5, columns: 3, rows: 1 },
+] as const;
+for (const configuration of configurations) test(`bundled SDK ${configuration.label} ${configuration.scenario} routes independent instances and preserves bindings across plugin and owned host restarts`, async () => {
+  const { scenario } = configuration;
   const directory = await mkdtemp(resolve(tmpdir(), "stream-deck-test-"));
   const projectID = randomUUID(), sceneID = randomUUID();
   const commandID = scenario === "scene" ? `scene.${sceneID}.select` : `destination.${sceneID}.event.${"e".repeat(64)}.start`;
@@ -27,7 +34,7 @@ for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${sc
   if (scenario === "destination") state.transport = { destinations: [{ id: sceneID, name: "Opening", state: "idle", eventKey: "e".repeat(64), endingPending: false, confirmationPending: false }], confirmationPending: false, endingPending: false };
   const commands: Capability[] = [...new Set([commandID, secondCommandID])].map(id => ({ id, title: "Opening", category: scenario === "scene" ? "Scenes" : "Destinations", available: true, requiresConfirmation: id.endsWith(".endRemote") }));
   const nativePeers = new Map<net.Socket, string>();
-  let connections = 0, executions = 0;
+  let connections = 0, executions = 0, dropNextAcknowledgement = false;
   const mutations: any[] = [];
   const native = net.createServer(socket => {
     ++connections; const sessionID = randomUUID(); nativePeers.set(socket, sessionID);
@@ -44,7 +51,8 @@ for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${sc
         if (request.type === "command") {
           mutations.push(request); ++executions; dispatched.push(request.commandID);
           if (request.commandID.endsWith(".endRemote")) { state.transport!.destinations[0].confirmationPending = true; state.transport!.confirmationPending = true; ++state.revision; }
-          send("result", { result: { succeeded: true }, snapshot: state });
+          if (dropNextAcknowledgement) { dropNextAcknowledgement = false; socket.destroy(); }
+          else send("result", { result: { succeeded: true }, snapshot: state });
         }
       }
     });
@@ -53,7 +61,7 @@ for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${sc
   const pairing = { version: 1, clientID: randomUUID(), token: "a".repeat(64), host: "127.0.0.1", port: (native.address() as net.AddressInfo).port };
   const sd = new WebSocketServer({ port: 0, host: "127.0.0.1" }); await once(sd, "listening");
   const received: any[] = [];
-  const settings = new Map([ ["key-a", { commandID, projectID }], ["key-b", { commandID: secondCommandID, projectID }] ]);
+  const settings = new Map<string, { commandID: string; projectID?: string }>([ ["key-a", { commandID, projectID }], ["key-b", { commandID: secondCommandID, projectID }] ]);
   let sdPeer: any;
   sd.on("connection", (peer: any) => {
     sdPeer = peer;
@@ -78,11 +86,28 @@ for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${sc
     // Fixture credentials replace the helper inside this isolated plugin; tests never touch the user's Keychain.
     await writeFile(resolve(directory, "bin/keychain-helper"), `#!/usr/bin/env node\nif (process.argv[2] === "read") process.stdout.write(${JSON.stringify(JSON.stringify(pairing))});\n`, { mode: 0o755 });
     const info = { application: { version: "7.1.0", platform: "mac", platformVersion: "15.0", language: "en", font: "Arial" },
-      devices: ["device-a", "device-b"].map(id => ({ id, name: id, type: 0, size: { columns: 5, rows: 3 } })), plugin: { version: "0.1.0", uuid: "com.joeblau.stream-studio" } };
-    child = spawn(process.execPath, [resolve(directory, "bin/plugin.js"), "-port", String(sd.address().port), "-pluginUUID", "plugin-instance", "-registerEvent", "registerPlugin", "-info", JSON.stringify(info)],
-      { cwd: directory, stdio: ["ignore", "pipe", "pipe"] });
-    child.stdout?.on("data", data => { childOutput += data.toString(); }); child.stderr?.on("data", data => { childOutput += data.toString(); });
-    await waitUntil(() => received.some(message => message.event === "registerPlugin"));
+      devices: ["device-a", "device-b"].map(id => ({ id, name: id, type: configuration.type, size: { columns: configuration.columns, rows: configuration.rows } })), plugin: { version: "0.1.0", uuid: "com.joeblau.stream-studio" } };
+    async function launch() {
+      const registered = received.filter(message => message.event === "registerPlugin").length;
+      child = spawn(process.execPath, [resolve(directory, "bin/plugin.js"), "-port", String(sd.address().port), "-pluginUUID", "plugin-instance", "-registerEvent", "registerPlugin", "-info", JSON.stringify(info)],
+        { cwd: directory, stdio: ["ignore", "pipe", "pipe"] });
+      child.stdout?.on("data", data => { childOutput += data.toString(); }); child.stderr?.on("data", data => { childOutput += data.toString(); });
+      await waitUntil(() => received.filter(message => message.event === "registerPlugin").length > registered);
+    }
+    await launch();
+    if (configuration.type === 3 || configuration.type === 5) {
+      // Generic starter profiles intentionally contain no projectID. Even a
+      // configured/persisted command cannot run before an explicit live rebind.
+      settings.set("key-a", { commandID });
+      send("willAppear", "key-a"); send("propertyInspectorDidAppear", "key-a");
+      await waitUntil(() => received.some(message => message.event === "sendToPropertyInspector"
+        && message.payload.status === "Connected" && message.payload.commands?.some((item: Capability) => item.id === commandID)));
+      send("keyDown", "key-a");
+      await waitUntil(() => received.some(message => message.event === "showAlert" && message.context === "key-a"));
+      assert.equal(executions, 0, "An unbound starter must not mutate the current project");
+      send("keyUp", "key-a"); send("sendToPlugin", "key-a", undefined, { operation: "bind", commandID });
+      await waitUntil(() => settings.get("key-a")?.projectID === projectID);
+    }
     send("willAppear", "key-a"); send("willAppear", "key-b");
     await waitUntil(() => received.filter(message => message.event === "setTitle" && message.payload.title === "Opening").length >= 2);
     assert.equal(connections, 1, "All devices share one native session");
@@ -107,6 +132,31 @@ for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${sc
     for (const command of commands) command.title = "Renamed Opening"; ++state.revision;
     for (const [peer, sessionID] of nativePeers) peer.write(JSON.stringify({ version: 1, type: "event", sessionID, snapshot: state }) + "\n");
     await waitUntil(() => received.filter(message => message.event === "setTitle" && message.payload.title === "Renamed Opening").length >= 2);
+    // Persist the host-owned JSON settings, lose an acknowledgement, then stop
+    // the real plugin process and restart the owned native TCP listener. A new
+    // SDK process must hydrate the binding without replaying that mutation.
+    await writeFile(resolve(directory, "saved-bindings.json"), JSON.stringify([...settings]));
+    const savedBindings = await readFile(resolve(directory, "saved-bindings.json"), "utf8");
+    const beforeLostAcknowledgement = executions;
+    send("keyUp", "key-a"); dropNextAcknowledgement = true; send("keyDown", "key-a");
+    await waitUntil(() => executions === beforeLostAcknowledgement + 1);
+    child!.kill("SIGTERM"); await once(child!, "exit");
+    await waitUntil(() => nativePeers.size === 0);
+    await new Promise<void>(resolve => native.close(() => resolve()));
+    state.revision = 1; // Fresh host incarnation is permitted to reset revision.
+    native.listen(pairing.port, "127.0.0.1"); await once(native, "listening");
+    settings.clear();
+    for (const [context, binding] of JSON.parse(savedBindings)) settings.set(context, binding);
+    const receivedBeforeRestart = received.length;
+    await launch(); send("willAppear", "key-a"); send("willAppear", "key-b");
+    await waitUntil(() => new Set(received.slice(receivedBeforeRestart).filter(message => message.event === "setTitle"
+      && message.payload.title === "Renamed Opening").map(message => message.context)).size === 2);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(executions, beforeLostAcknowledgement + 1, "Plugin restart replayed an interrupted mutation");
+    assert.equal(JSON.stringify([...settings]), savedBindings, "Relaunch rewrote stable bindings");
+    send("keyDown", "key-a"); await waitUntil(() => executions === beforeLostAcknowledgement + 2);
+    assert.equal(dispatched.at(-1), commandID);
+    send("keyUp", "key-a");
     // The actual bundled SDK routes new interaction IDs through the same
     // shared client; the controlled native peer supplies no live account.
     const slot = randomUUID(), guestID = `guest.slot.${slot}.mute`, profileProject = randomUUID(), profileID = randomUUID();
@@ -151,7 +201,7 @@ for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${sc
     for (const [peer, sessionID] of nativePeers) peer.write(JSON.stringify({ version: 1, type: "event", sessionID, snapshot: state }) + "\n");
     await new Promise(resolve => setTimeout(resolve, 600));
     assert.equal(received.slice(afterDisconnect).some(message => message.event === "setTitle" && message.payload.title === "After Disconnect"), false);
-    assert.equal(child.exitCode, null, childOutput); assert.equal(childOutput.includes(pairing.token), false, "Pairing credentials never reach SDK logs");
+    assert.equal(child!.exitCode, null, childOutput); assert.equal(childOutput.includes(pairing.token), false, "Pairing credentials never reach SDK logs");
   } finally {
     if (child && child.exitCode === null) { child.kill("SIGTERM"); await once(child, "exit"); }
     for (const peer of nativePeers.keys()) peer.destroy();
