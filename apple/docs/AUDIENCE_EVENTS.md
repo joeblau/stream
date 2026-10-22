@@ -7,6 +7,15 @@ emoji; Twitch's Emotes label requires documented emote fragments. YouTube events
 retain their documented public display text. No amount, reaction count, image
 URL or additional subscription is inferred from that text.
 
+The direct Twitch reader additionally accepts ordinary public subscription
+notices: `sub` becomes Membership, `resub` becomes Milestone, and `sub_gift` /
+`community_sub_gift` become Gift. Their bounded literal public text uses the
+same filters, palettes and explicit alert controls. Anonymous notices do not
+retain person identity; shared/unknown notices, additional media and amounts
+remain unsupported. The [dated controlled proof](TWITCH_PUBLIC_NOTICES_2026-10-22.json)
+checks the actual decoder/manager; it does not qualify a live provider feed or
+repeat the earlier Program pixel proof.
+
 Audience Events offers manual alert promotion, off at every session start.
 Choose a separate alert slot and a palette for its event type, then use **Stage
 Alert** on an accepted event. Promotion, page changes and hiding require Direct

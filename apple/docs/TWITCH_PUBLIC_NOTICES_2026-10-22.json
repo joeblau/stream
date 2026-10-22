@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-22",
+  "issue": 143,
+  "result": "PASS",
+  "baseCommit": "e41fa06bae39ba14f3767a7bf3f92537f66b6313",
+  "scope": "Actual native decoder and shared chat manager only, with controlled identity/HTTP/socket inlets. No account, Keychain, preferences, UI, audio, capture/device, media/CDN or live provider/RTC operation.",
+  "eventSubscription": {
+    "type": "channel.chat.notification",
+    "version": "1",
+    "scope": "Existing user:read:chat user-token grant",
+    "condition": "Existing verified own broadcaster and chatting user",
+    "ordinaryNoticeKinds": {
+      "sub": "Membership",
+      "resub": "Milestone",
+      "sub_gift": "Gift",
+      "community_sub_gift": "Gift"
+    },
+    "otherNotices": "Unknown, shared-chat and other unsupported notice types are ignored; source_broadcaster_user_id must be absent/null."
+  },
+  "literalText": "Provider system_message and message.text retained verbatim, joined by a newline only when both are nonempty; combined UTF-8 limit16384. No amount, duration, URL, HTML, image or inferred event fields retained.",
+  "privacy": "Strict boolean chatter_is_anonymous overrides contradictory userID/name/badges; normalized author Anonymous, empty route authorID and roles.",
+  "mutation": "Notice routes explicitly disallow mutation; actual reply, reviewed target, delete, timeout and ban paths refuse before any request. Ordinary chat routes retain current eligibility.",
+  "lifecycle": "Exact fifth subscription ACK includes type/version/channel/user/socket. Migration transfers subscriptions without resubscribe; generation/cancellation fences reject held late socket and fifth ACK completion. Existing provider/message identity dedup and tombstones remain.",
+  "baseline": {
+    "result": "Expected failure",
+    "compileExit": 0,
+    "runtimeExit": 1,
+    "firstCheck": "decoder sub",
+    "reason": "Actual e41 decoder rejects channel.chat.notification before supporting four public notice kinds.",
+    "sourceSHA256": {
+      "StudioChatModel.swift": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7",
+      "StudioChatOutbox.swift": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1",
+      "StudioChatSocket.swift": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19",
+      "StudioDirectChatManager.swift": "bcbac59658d7d5a688d36c2fc6feffcf60e622adfc6b84ebbf2bf63d7fca0c86",
+      "StudioDirectChatModel.swift": "b68ef407344d9f3fcdb96639315d7a8d4abaaf1046206bd7120bdcf252bf8e6c",
+      "twitch_chat_notifications_harness.swift": "7e1502422b7f1b7cf15aff88ecbc1a10e4ccf009188011d8c8cb063642ce6a51"
+    },
+    "binarySHA256": "f7d044d21896238c30249221a7198fce39eb64b690eeeff91a5706385abe6110"
+  },
+  "fixed": {
+    "result": "PASS",
+    "runnerExit": 0,
+    "sourceSHA256": {
+      "apple/StreamMac/StudioChatModel.swift": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7",
+      "apple/StreamMac/StudioDirectChatModel.swift": "ec4c3594408051c36b8ce5d00000567476da49f4db00d5549ddae8a8db3228e1",
+      "apple/StreamMac/StudioChatSocket.swift": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19",
+      "apple/StreamMac/StudioChatOutbox.swift": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1",
+      "apple/StreamMac/StudioDirectChatManager.swift": "9874162a2a6c92fd3e817ebd5180e147045a9e38c035a10326ac368e5c0541a4",
+      "apple/scripts/twitch_chat_notifications_harness.swift": "7e1502422b7f1b7cf15aff88ecbc1a10e4ccf009188011d8c8cb063642ce6a51",
+      "apple/scripts/run_twitch_chat_notifications_harness.zsh": "d0ce99c940831c1980cb938e415a13f19d1328f98dc43cf4079716d9ec37eb67"
+    },
+    "binarySHA256": "6cd7879958b8af6667cff0eb79d1104cea1a48ed90cd728e8079af1672e09a2e",
+    "sourceUnchanged": true
+  },
+  "core": {
+    "binarySHA256": "ed355819476e845e57266ca5992221a1270c505002fc8efde16cf1b304e57d4d",
+    "source": "Copied immutable full76 actual Core from provider regression; e41 allCore byte-equalcf8d891. No Core rebuild or account/credential object instantiation."
+  },
+  "checks": [
+    "4 supported kinds and exact Unicode/braces public text",
+    "strict anonymity despite contradictory identity and moderator badge",
+    "7 unsupported/shared notice types ignored",
+    "8 malformed/shared-source/combined-limit cases ignored",
+    "wrong event owner rejected",
+    "5 exact subscriptions, dedup and existing kind filters/styles",
+    "4 explicit reply/delete/timeout/ban actions refused with notSent receipts and no request",
+    "old socket continues during migration; new welcome retires old without subscriptions replay",
+    "held late notification after Stop discarded",
+    "mismatched fifth subscription ACK refused",
+    "held fifth ACK after Stop cannot reconnect"
+  ],
+  "existingFixtureAdjustment": "Direct-chat and static-emote exact subscription assertions updated4\u21925; old fixtures not rerun and previous emote proof remains historical.",
+  "proofFiles": {
+    "baseline-compile.log": {
+      "path": "/tmp/stream-twitch-public-notices-proof-20261022/baseline-compile.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "baseline-runtime.log": {
+      "path": "/tmp/stream-twitch-public-notices-proof-20261022/baseline-runtime.log",
+      "bytes": 147,
+      "sha256": "aad3219cd820b484e9c0068ae011c45c3c48d4057817510fa530110b49497d62"
+    },
+    "fixed-runner.log": {
+      "path": "/tmp/stream-twitch-public-notices-proof-20261022/fixed-runner.log",
+      "bytes": 458,
+      "sha256": "d294672552815f4845520bdaa5caa4f0674490b89917ba9774cb730def43bf4b"
+    },
+    "results.json": {
+      "path": "/tmp/stream-twitch-public-notices-proof-20261022/results.json",
+      "bytes": 4182,
+      "sha256": "c68bd143bd5f31842947c002eea21916120c916c06eaeed4fb7d62c276ea8efb"
+    },
+    "owned-proof-runner": {
+      "path": "/tmp/stream-twitch-public-notices-proof-20261022.py",
+      "sha256": "38608c2750008500a8bbe3c349096cef39fb368d6472b41bb44ce1eab06b53b9"
+    }
+  },
+  "remaining": "No authorized live feed or provider-side subscription/order/rate acceptance. No new Program/UI runtime proof; notice kinds reuse existing typed queue/filter/style/manual alert paths. No whole issue closure."
+}

@@ -164,7 +164,7 @@ private actor EmoteFixtureLoader {
         precondition(pixels(render(preview.programScene!, renderer: renderer)) == blank)
         _ = runtime.dispatcher.execute(.take)
         let frame = render(preview.programScene!, renderer: renderer), shown = pixels(frame)
-        precondition(shown != blank && http.metadataReads == 3 && http.subscriptions == 4)
+        precondition(shown != blank && http.metadataReads == 3 && http.subscriptions == 5)
         // Use accepted native movie frames and the production feed/archive,
         // so emote classification cannot silently discard the literal caption.
         let binding = chat.recentRecordingBindings.last(where: { $0.message.id == value.id })!

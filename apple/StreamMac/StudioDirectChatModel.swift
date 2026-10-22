@@ -11,6 +11,7 @@ struct DirectChatRoute: Sendable {
     let authorID: String
     let roles: [String]
     let timestamp: Date
+    let allowsMutation: Bool
 }
 struct DirectChatDelivery: Sendable {
     let message: StudioChatMessage
@@ -95,7 +96,7 @@ enum StudioDirectChatDecoder {
                 platform: "YouTube", author: name, roles: roles, text: content, timestamp: time ?? receivedAt,
                 timestampIsReceiptTime: time == nil, kind: kind, avatarURL: avatar)
             deliveries.append(.init(message: message, route: .init(provider: .youtube, channelID: channelID, chatID: chatID,
-                providerMessageID: id, authorID: authorID, roles: roles, timestamp: time ?? receivedAt)))
+                providerMessageID: id, authorID: authorID, roles: roles, timestamp: time ?? receivedAt, allowsMutation: true)))
         }
         return .init(deliveries: deliveries, removedIDs: removed, bannedAuthors: banned, nextPage: page,
                      interval: millis / 1_000, ended: ended)
@@ -126,12 +127,46 @@ enum StudioDirectChatDecoder {
               let subscriptionType = subscription["type"] as? String, subscription["version"] as? String == "1",
               let condition = subscription["condition"] as? [String: Any], condition["broadcaster_user_id"] as? String == channelID,
               condition["user_id"] as? String == userID,
-              ["channel.chat.message", "channel.chat.message_delete", "channel.chat.clear", "channel.chat.clear_user_messages"].contains(subscriptionType) else {
+              ["channel.chat.message", "channel.chat.message_delete", "channel.chat.clear", "channel.chat.clear_user_messages", "channel.chat.notification"].contains(subscriptionType) else {
             throw ProviderFailure(.invalidResponse)
         }
         if type == "revocation" { throw ProviderFailure(.permission) }
         guard let event = payload["event"] as? [String: Any], event["broadcaster_user_id"] as? String == channelID else {
             throw ProviderFailure(.invalidResponse)
+        }
+        if subscriptionType == "channel.chat.notification" {
+            // Only ordinary public subscription notices are supported. Shared
+            // chat and unknown notice types never become inferred local events.
+            let names = ["sub": "Membership", "resub": "Milestone", "sub_gift": "Gift", "community_sub_gift": "Gift"]
+            guard let notice = event["notice_type"] as? String, let kind = names[notice] else { return envelope() }
+            if let source = event["source_broadcaster_user_id"], !(source is NSNull) { return envelope() }
+            guard let id = identifier(event["message_id"]), let system = text(event["system_message"]),
+                  let message = event["message"] as? [String: Any], let body = text(message["text"]),
+                  let anonymous = event["chatter_is_anonymous"] as? NSNumber,
+                  CFGetTypeID(anonymous) == CFBooleanGetTypeID() else { return envelope() }
+            let content = [system, body].filter { !$0.isEmpty }.joined(separator: "\n")
+            guard !content.isEmpty, content.utf8.count <= 16_384 else { return envelope() }
+            let authorID: String, name: String
+            var roles: [String] = []
+            if anonymous.boolValue {
+                // Even contradictory identity fields may not deanonymize a
+                // notice. Anonymous events never retain a person route.
+                authorID = ""; name = "Anonymous"
+            } else {
+                guard let value = identifier(event["chatter_user_id"]),
+                      let label = text(event["chatter_user_name"], limit: 512), !label.isEmpty else { return envelope() }
+                authorID = value; name = label
+                let labels = ["broadcaster": "Owner", "moderator": "Moderator", "subscriber": "Member", "vip": "VIP"]
+                let badges = event["badges"] as? [[String: Any]] ?? []
+                roles = badges.prefix(64).compactMap { ($0["set_id"] as? String).flatMap { labels[$0] } }
+            }
+            let time = date(metadata["message_timestamp"])
+            let normalized = StudioChatMessage(id: identity(.twitch, channelID, id), connectionID: connection(.twitch, channelID),
+                platform: "Twitch", author: name, roles: roles, text: content, timestamp: time ?? receivedAt,
+                timestampIsReceiptTime: time == nil, kind: kind, avatarURL: nil)
+            return envelope(delivery: .init(message: normalized, route: .init(provider: .twitch, channelID: channelID,
+                chatID: channelID, providerMessageID: id, authorID: authorID, roles: roles, timestamp: time ?? receivedAt,
+                allowsMutation: false)))
         }
         if subscriptionType == "channel.chat.clear" { return envelope(clear: true) }
         if subscriptionType == "channel.chat.clear_user_messages", let user = identifier(event["target_user_id"]) { return envelope(author: user) }
@@ -168,7 +203,7 @@ enum StudioDirectChatDecoder {
             platform: "Twitch", author: name, roles: roles, text: content, timestamp: time ?? receivedAt,
             timestampIsReceiptTime: time == nil, kind: hasEmote ? "Emotes" : "Text", avatarURL: nil, staticEmote: staticEmote)
         return envelope(delivery: .init(message: normalized, route: .init(provider: .twitch, channelID: channelID,
-            chatID: channelID, providerMessageID: id, authorID: authorID, roles: roles, timestamp: time ?? receivedAt)))
+            chatID: channelID, providerMessageID: id, authorID: authorID, roles: roles, timestamp: time ?? receivedAt, allowsMutation: true)))
     }
     /// Capabilities and template come from the existing authorized Emote API,
     /// never an event-supplied URL or a guessed format/theme/scale.
