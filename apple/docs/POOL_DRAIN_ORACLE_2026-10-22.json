@@ -1,0 +1,592 @@
+{
+  "artifacts": [
+    {
+      "bytes": 12654,
+      "path": "/private/tmp/stream-wave14-pool-drain-oracle-20261022/apple/build/pool-drain-oracle/pool_drain_oracle.m",
+      "sha256": "9a919fc3e8fc6e464fa4fc0ced73bc40c92ba70fbcd9dc05c9d4f85979d74178"
+    },
+    {
+      "bytes": 2177,
+      "path": "/private/tmp/stream-wave14-pool-drain-oracle-20261022/apple/build/pool-drain-oracle/run_oracle.py",
+      "sha256": "81e318623edaf00110135bea6fcbb2327a6a71ceee7582a7d43db5767933058d"
+    },
+    {
+      "bytes": 1105,
+      "path": "/private/tmp/stream-wave14-pool-drain-oracle-20261022/apple/build/pool-drain-oracle/compile.log",
+      "sha256": "1d6268add916f12f942a69aca9dc6e7af5aa8b90c8384720c11bf3b1bd530afc"
+    },
+    {
+      "bytes": 1217,
+      "path": "/private/tmp/stream-wave14-pool-drain-oracle-20261022/apple/build/pool-drain-oracle/runtime.log",
+      "sha256": "0e35b79fff71850e9e7f36f196251ecbc1f00de32ecb484df74e4858b9a004d9"
+    },
+    {
+      "bytes": 1534,
+      "path": "/private/tmp/stream-wave14-pool-drain-oracle-20261022/apple/build/pool-drain-oracle/experiment-source.json",
+      "sha256": "be71188dcce3a1666ac703d889419dfe823fa04cfc860b4abbaa23466289f066"
+    },
+    {
+      "bytes": 46285,
+      "path": "/private/tmp/stream-wave14-pool-drain-oracle-20261022/apple/build/pool-drain-oracle/pool-drain-oracle.json",
+      "sha256": "368647094a1c2c5444220b23ac2fcd9f8d21c72a3bfd4297aa2e9c8a4ea7ab7b"
+    },
+    {
+      "bytes": 59200,
+      "path": "/private/tmp/stream-wave14-pool-drain-oracle-20261022/apple/build/pool-drain-oracle/pool-drain-oracle",
+      "sha256": "8962abce19577ca1fcc982f28baa1bf9c8d80287cafa217fe15a1b4749e1c89b"
+    },
+    {
+      "bytes": 1402,
+      "path": "/tmp/stream-pool-drain-oracle-20261022.log",
+      "sha256": "b45b11d2a712b6b6e545b4d82550944fe10c1705ad4f40622097a862d7453706"
+    }
+  ],
+  "experiment": {
+    "baseCommit": "30f2209199b818cc685a24647a46e5a54263daa3",
+    "binarySHA256": "8962abce19577ca1fcc982f28baa1bf9c8d80287cafa217fe15a1b4749e1c89b",
+    "clang": "Apple clang version 21.0.0 (clang-2100.4.1.1)\nTarget: arm64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /Applications/Xcode-27.2.0-Beta.3.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+    "compileCommand": [
+      "xcrun",
+      "clang",
+      "-fno-objc-arc",
+      "-fblocks",
+      "-O0",
+      "-g",
+      "/private/tmp/stream-wave14-pool-drain-oracle-20261022/apple/build/pool-drain-oracle/pool_drain_oracle.m",
+      "-o",
+      "/private/tmp/stream-wave14-pool-drain-oracle-20261022/apple/build/pool-drain-oracle/pool-drain-oracle",
+      "-framework",
+      "Foundation",
+      "-framework",
+      "CoreVideo",
+      "-framework",
+      "CoreMedia",
+      "-framework",
+      "IOSurface",
+      "-framework",
+      "Metal",
+      "-framework",
+      "CoreImage",
+      "-framework",
+      "CoreGraphics"
+    ],
+    "model": "Mac15,8",
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2\nBuildVersion:\t\t26B118",
+    "processExit": 0,
+    "resultSHA256": "368647094a1c2c5444220b23ac2fcd9f8d21c72a3bfd4297aa2e9c8a4ea7ab7b",
+    "runtimeLogSHA256": "0e35b79fff71850e9e7f36f196251ecbc1f00de32ecb484df74e4858b9a004d9",
+    "scope": "Single fixed owned16x16synthetic allocation-drain oracle experiment. One compiler process; no Swift compile, fullgraph, capture, codecs, media or capacity measurement.",
+    "sourceSHA256": "9a919fc3e8fc6e464fa4fc0ced73bc40c92ba70fbcd9dc05c9d4f85979d74178"
+  },
+  "interpretation": [
+    "Bare retained IOSurface/direct Metal aliases falsify generic all-four refund: managed wrappers may be reusable while an untracked alias still views backing bytes.",
+    "This is not recommended ownership practice or an API bug. Explicit IOSurface use counts or correctly retained Core Video wrappers prevent the observed reuse in this experiment.",
+    "CMVideoFormatDescription metadata has no pixel ownership claim; its successful checkout does not falsify pixel lifetime semantics.",
+    "Unknown SDK/callback domains cannot refund solely from this oracle; they remain charged/quarantined unless a sealed legal/tracked-storage contract is actually enforced.",
+    "No CF retain count, mutable attachment credit, pool flush, timing retry, capture, media decoder/encoder, or production output was used."
+  ],
+  "originalResult": {
+    "allReleaseControlsPassed": true,
+    "cases": [
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "raw-cvpixelbuffer-stripped",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "allFourAcquired": 0,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 0,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 3,
+          "statuses": [
+            0,
+            0,
+            0,
+            -6689
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "cmsamplebuffer",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "allFourAcquired": 0,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 0,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 3,
+          "statuses": [
+            0,
+            0,
+            0,
+            -6689
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "iosurface-retain-only",
+        "falsifiesGenericRefundOracle": true,
+        "held": {
+          "acquiredHeldAliasBacking": true,
+          "afterVisibleBytesBase64": "pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/w==",
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 1,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "rewrapped-cvpixelbuffer",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "allFourAcquired": 0,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 0,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 3,
+          "statuses": [
+            0,
+            0,
+            0,
+            -6689
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "iosurface-use-count",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "allFourAcquired": 0,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 0,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 3,
+          "statuses": [
+            0,
+            0,
+            0,
+            -6689
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "metal-direct",
+        "falsifiesGenericRefundOracle": true,
+        "held": {
+          "acquiredHeldAliasBacking": true,
+          "afterVisibleBytesBase64": "pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/6WFZf+lhWX/pYVl/w==",
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 1,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "metal-direct-use-count",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "allFourAcquired": 0,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 0,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 3,
+          "statuses": [
+            0,
+            0,
+            0,
+            -6689
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "cvmetaltexture",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "allFourAcquired": 0,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 0,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 3,
+          "statuses": [
+            0,
+            0,
+            0,
+            -6689
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "ciimage",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "allFourAcquired": 0,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 0,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 3,
+          "statuses": [
+            0,
+            0,
+            0,
+            -6689
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "cgimage-deferred",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "allFourAcquired": 0,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 0,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 3,
+          "statuses": [
+            0,
+            0,
+            0,
+            -6689
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "cmvideoformat-metadata-only",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": true,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "metadataOnly": true,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      },
+      {
+        "afterActualOwnerRelease": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": null,
+          "allFourAcquired": 1,
+          "expectedVisibleBytesBase64": null,
+          "heldContentChanged": null,
+          "heldContentComparable": false,
+          "simultaneouslyAcquired": 4,
+          "statuses": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "case": "cvattachment-raw-alias",
+        "falsifiesGenericRefundOracle": false,
+        "held": {
+          "acquiredHeldAliasBacking": false,
+          "afterVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "allFourAcquired": 0,
+          "expectedVisibleBytesBase64": "NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/zVVdf81VXX/NVV1/w==",
+          "heldContentChanged": 0,
+          "heldContentComparable": true,
+          "simultaneouslyAcquired": 3,
+          "statuses": [
+            0,
+            0,
+            0,
+            -6689
+          ]
+        },
+        "metadataOnly": false,
+        "releaseControlPass": true,
+        "setupStatus": 0,
+        "unsupported": false
+      }
+    ],
+    "dimensions": [
+      16,
+      16
+    ],
+    "genericRefundOracleFalsified": true,
+    "poolThreshold": 4,
+    "scope": "Owned16x16BGRA IOSurface CVPoolN4 drain-oracle falsification only; fixed4checkouts before+afteractualownerrelease; no capture/media/timing qualification; no literal backingIDs or retaincounts."
+  },
+  "productionEdits": false,
+  "publicReferences": [
+    {
+      "scope": "Apple describes pool recycling and direct IOSurface/Metal use-count responsibility; CVMetalTextureCache manages that interop when its wrapper is retained through GPU completion.",
+      "url": "https://developer.apple.com/videos/play/wwdc2020/10090/"
+    }
+  ],
+  "qualification": false,
+  "scope": "Decisive synthetic alias falsification. Does not certify arbitrary-domain drain or actual SDK release contracts; sealed/tracked ownership domains require explicit enforcement and further integration proof.",
+  "sdkHeaders": [
+    {
+      "bytes": 4347,
+      "path": "/Applications/Xcode-27.2.0-Beta.3.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/CoreVideo.framework/Versions/A/Headers/CVPixelBufferIOSurface.h",
+      "sha256": "bba23ad9548a0a8622097f7816e537f62dd0b15e5780bfeb7d7e100d8ee608c0"
+    },
+    {
+      "bytes": 27306,
+      "path": "/Applications/Xcode-27.2.0-Beta.3.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/IOSurface.framework/Headers/IOSurfaceRef.h",
+      "sha256": "8ee2890f7a5392ac2040c2e0b3d3cb773cdebe3627ad3452881fc7d20a759bd5"
+    }
+  ],
+  "sourceBase": "30f2209199b818cc685a24647a46e5a54263daa3",
+  "sourceIdentity": {
+    "checkedInExperiment": {
+      "bytes": 12654,
+      "path": "apple/scripts/pool_drain_oracle.m",
+      "sha256": "9a919fc3e8fc6e464fa4fc0ced73bc40c92ba70fbcd9dc05c9d4f85979d74178"
+    },
+    "reproductionRunner": {
+      "path": "apple/scripts/run_pool_drain_oracle.py",
+      "sha256": "09990eb82c3d95f17453ef06029a386e3f6e881a27d34283ed47f8e115b38286"
+    },
+    "runnerScope": "The observed run used retained run_oracle.py in the artifact directory. Checked-in runner differs only in configurable source/output paths and was source-parsed, not executed again."
+  },
+  "verifiedAssertions": 41,
+  "version": 1
+}
