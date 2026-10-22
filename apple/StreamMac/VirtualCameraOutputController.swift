@@ -5,10 +5,26 @@ import Foundation
 import StreamCore
 import SystemExtensions
 
+/// A bank is admitted synchronously before any native CMIO construction.
+/// Installation returns only after the engine has accepted the private-frame
+/// delivery. Cancellation revokes that delivery and retires its exact bank.
+struct VirtualCameraFrameAdmission: Sendable {
+    let bank: RawVideoResourceBank
+    let cadence: FrameDeliveryCameraCadence
+    let install: @MainActor @Sendable (@escaping @Sendable (CMSampleBuffer) -> Void) async throws -> Void
+    let cancel: @MainActor @Sendable () -> Void
+}
+
+@MainActor final class VirtualCameraFrameInstallState {
+    let cancellation = FrameDeliveryCancellation()
+    var lease: FrameDeliveryLease?
+    var cancelled = false
+}
+
 @MainActor
 final class VirtualCameraOutputController: NSObject, ObservableObject, @preconcurrency OSSystemExtensionRequestDelegate {
     typealias Cancel = @MainActor () -> Void
-    typealias Subscribe = @MainActor (@escaping @Sendable (CompositedFrame) -> Void) -> Cancel?
+    typealias Prepare = @MainActor (VirtualCameraFormat, CGSize?) throws -> VirtualCameraFrameAdmission
     enum Activation: Equatable {
         case unknown, requesting, approvalRequired, approved, removed, rebootRequired, failed(String)
         var description: String {
@@ -26,22 +42,33 @@ final class VirtualCameraOutputController: NSObject, ObservableObject, @preconcu
     @Published private(set) var activation: Activation = .unknown
     @Published private(set) var deviceAvailable = false
     @Published private(set) var isActive = false
+    @Published private(set) var isPreparing = false
     @Published private(set) var error: String?
     @Published private(set) var sentFrames: UInt64 = 0
     @Published private(set) var droppedFrames: UInt64 = 0
     @Published var format: VirtualCameraFormat = .hd720
     @Published var feed: ExternalDisplayFeed = .program
     @Published var selectedDestinationID: UUID?
-    private let subscribe: Subscribe
+    private let prepare: Prepare
+    private let producerFactory: @MainActor (VirtualCameraFormat, FrameDeliveryCameraCadence) throws -> VirtualCameraProducer
+    private let deviceProbe: @MainActor () -> Bool
     private var producer: VirtualCameraProducer?
     private var cancelSubscription: Cancel?
     private var request: OSSystemExtensionRequest?
     private var removing = false
+    private var intent = UUID()
+    private var startTask: Task<Void, Never>?
+    private var preparingProducer: VirtualCameraProducer?
+    private var preparingAdmission: VirtualCameraFrameAdmission?
     private nonisolated(unsafe) var timer: Timer?
     private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
-    init(subscribe: @escaping Subscribe) {
-        self.subscribe = subscribe
+    init(observeSystem: Bool = true,
+         deviceProbe: @escaping @MainActor () -> Bool = { VirtualCameraProducer.discover() != nil },
+         producerFactory: @escaping @MainActor (VirtualCameraFormat, FrameDeliveryCameraCadence) throws -> VirtualCameraProducer = { try VirtualCameraProducer(format: $0, cadence: $1) },
+         prepare: @escaping Prepare) {
+        self.prepare = prepare; self.deviceProbe = deviceProbe; self.producerFactory = producerFactory
         super.init()
+        guard observeSystem else { return }
         refresh()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
@@ -57,11 +84,13 @@ final class VirtualCameraOutputController: NSObject, ObservableObject, @preconcu
         timer?.invalidate()
         for observer in observers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         producer?.stop()
+        preparingProducer?.stop(); startTask?.cancel()
         let cancel = cancelSubscription; Task { @MainActor in cancel?() }
+        let pending = preparingAdmission; Task { @MainActor in pending?.cancel() }
     }
     func refresh() {
-        deviceAvailable = VirtualCameraProducer.discover() != nil
-        if isActive, !deviceAvailable { stop(); error = "The virtual camera disconnected. Activate or refresh it before restarting." }
+        deviceAvailable = deviceProbe()
+        if isActive || isPreparing, !deviceAvailable { stop(); error = "The virtual camera disconnected. Activate or refresh it before restarting." }
         if let producer { let stats = producer.statistics; sentFrames = stats.sent; droppedFrames = stats.dropped }
     }
     func activateExtension() { submit(removing: false) }
@@ -102,16 +131,51 @@ final class VirtualCameraOutputController: NSObject, ObservableObject, @preconcu
         return replacement.bundleVersion.compare(existing.bundleVersion, options: .numeric) == .orderedAscending ? .cancel : .replace
     }
     func start(programAvailable: Bool, selectedProfile: OutputProfile? = nil) {
-        guard !isActive else { return }
+        guard !isActive, !isPreparing else { return }
         guard programAvailable else { error = "Start the studio preview or another production output before starting the virtual camera."; return }
         guard feed == .program || selectedProfile != nil else { error = "Choose an available destination canvas or Take a secondary layout to Program."; return }
         do {
-            let producer = try VirtualCameraProducer(format: format, canvas: feed == .selectedCanvas ? selectedProfile?.canvasSize : nil)
-            guard let cancel = subscribe({ producer.append($0) }) else { producer.stop(); error = "The program graph is unavailable."; return }
-            self.producer = producer; cancelSubscription = cancel; isActive = true; error = nil; sentFrames = 0; droppedFrames = 0
+            let selectedFormat = format, selectedFeed = feed, selectedDestination = selectedDestinationID
+            let canvas = feed == .selectedCanvas ? selectedProfile?.canvasSize : nil
+            let admission = try prepare(format, canvas)
+            guard admission.bank.descriptor == RawVideoBankDescriptor(width: format.width, height: format.height, capacity: 4) else {
+                admission.cancel()
+                throw VirtualCameraProducer.Failure(message: "The virtual camera's private video resources no longer match its format.")
+            }
+            let producer: VirtualCameraProducer
+            do { producer = try producerFactory(format, admission.cadence) }
+            catch { admission.cancel(); throw error }
+            let attempt = UUID(); intent = attempt
+            preparingProducer = producer; preparingAdmission = admission
+            isPreparing = true; error = nil
+            startTask = Task { @MainActor [weak self] in
+                do {
+                    try Task.checkCancellation()
+                    try await admission.install { producer.appendPrepared($0) }
+                    try Task.checkCancellation()
+                    guard let self, self.intent == attempt, self.preparingProducer === producer,
+                          self.format == selectedFormat, self.feed == selectedFeed,
+                          self.selectedDestinationID == selectedDestination else { throw CancellationError() }
+                    self.producer = producer; self.cancelSubscription = admission.cancel
+                    self.preparingProducer = nil; self.preparingAdmission = nil; self.startTask = nil
+                    self.isPreparing = false; self.isActive = true
+                    self.error = nil; self.sentFrames = 0; self.droppedFrames = 0
+                } catch {
+                    admission.cancel(); producer.stop()
+                    guard let self, self.intent == attempt else { return }
+                    self.preparingProducer = nil; self.preparingAdmission = nil; self.startTask = nil
+                    self.isPreparing = false; self.isActive = false
+                    if !(error is CancellationError) {
+                        self.error = (error as? VirtualCameraProducer.Failure)?.message ?? error.localizedDescription
+                    }
+                }
+            }
         } catch { self.error = (error as? VirtualCameraProducer.Failure)?.message ?? error.localizedDescription }
     }
     func stop() {
+        intent = UUID(); startTask?.cancel(); startTask = nil
+        preparingAdmission?.cancel(); preparingAdmission = nil
+        preparingProducer?.stop(); preparingProducer = nil; isPreparing = false
         cancelSubscription?(); cancelSubscription = nil
         producer?.stop(); producer = nil; isActive = false
     }

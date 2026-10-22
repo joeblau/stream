@@ -257,23 +257,72 @@ final class StreamController: ObservableObject {
     private var virtualCameraController: VirtualCameraOutputController?
     var virtualCameraOutput: VirtualCameraOutputController {
         if let existing = virtualCameraController { return existing }
-        let output = VirtualCameraOutputController { [weak self] sink in
-            guard let self, !self.resilience.isLocked else { return nil }
+        let output = VirtualCameraOutputController { [weak self] format, referenceCanvas in
+            guard let self, !self.resilience.isLocked else { throw CancellationError() }
             let canvas = self.outputCanvas(for: self.virtualCameraController?.feed, destinationID: self.virtualCameraController?.selectedDestinationID)
-            if canvas == .secondary, !self.secondaryCanvasAvailable { return nil }
-            if canvas == .secondary, self.canvasStartError(destinations: [.init(name: "Virtual Camera", canvas: .secondary)]) != nil { return nil }
+            if canvas == .secondary, !self.secondaryCanvasAvailable { throw CancellationError() }
+            if canvas == .secondary, let error = self.canvasStartError(destinations: [.init(name: "Virtual Camera", canvas: .secondary)]) {
+                throw VirtualCameraProducer.Failure(message: error)
+            }
+            let domain = StableFrameDomainID(workspace: self.rawVideoResourceWorkspaceID, kind: .virtualCamera,
+                outputID: "virtual-camera", plane: canvas == .secondary ? .secondary : .program)
+            let generation = UUID(), token = UUID()
+            let engine = self.engine
+            let sourceRequest = try engine.sourceFrameResourceRequest(
+                canvasSize: canvas == .secondary ? self.activeSecondaryProfile.canvasSize : self.activeProfile.canvasSize, canvas: canvas)
+            let receipt = try RawVideoResourceCoordinator.shared.reserveBatch([sourceRequest, .init(domain: domain,
+                descriptor: .init(width: format.width, height: format.height, capacity: 4), sessionGeneration: generation)])
+            guard let bank = receipt.bank(for: domain), let sourceBank = receipt.bank(for: sourceRequest.domain) else {
+                RawVideoResourceCoordinator.shared.rollback(receipt)
+                throw RawVideoResourceFailure.unknownReservation
+            }
+            let sourceReceipt: RawVideoResourceReceipt
+            do { sourceReceipt = try receipt.selecting(domain: sourceRequest.domain) }
+            catch { RawVideoResourceCoordinator.shared.rollback(receipt); throw error }
+            let privateReceipt: RawVideoResourceReceipt
+            do { privateReceipt = try receipt.selecting(domain: domain) }
+            catch {
+                RawVideoResourceCoordinator.shared.rollback(sourceReceipt)
+                RawVideoResourceCoordinator.shared.rollback(receipt)
+                throw error
+            }
+            let state = VirtualCameraFrameInstallState()
+            let cadence = FrameDeliveryCameraCadence()
             self.virtualCameraDemand += 1
             if canvas == .secondary { self.secondaryVirtualCameraDemand += 1 }
-            let subscription = self.addFrameSink(capacity: 1, canvas: canvas, sink: sink)
             self.updatePipelineDemand()
-            return { [weak self] in
-                guard let self else { return }
-                self.removeFrameSink(subscription)
-                self.virtualCameraDemand = max(0, self.virtualCameraDemand - 1)
-                if canvas == .secondary { self.secondaryVirtualCameraDemand = max(0, self.secondaryVirtualCameraDemand - 1) }
-                self.promoteStagedProfileIfOutputsIdle()
-                self.updatePipelineDemand()
-            }
+            return VirtualCameraFrameAdmission(bank: bank, cadence: cadence, install: { [weak self] sink in
+                guard let self, !self.resilience.isLocked, !state.cancellation.isCancelled, !Task.isCancelled else { throw CancellationError() }
+                let cancellation = state.cancellation
+                let lease = try await engine.installFrameDelivery(token: token, domain: domain, generation: generation,
+                    bank: bank, sourceBank: sourceBank, sourceReceipt: sourceReceipt,
+                    transfer: .virtualCameraBGRA(referenceCanvas: referenceCanvas, cadence: cadence), capacity: 1, cancellation: cancellation,
+                    canvas: canvas, authorized: { !cancellation.isCancelled }) { sink($0.sampleBuffer) }
+                state.lease = lease
+                guard !cancellation.isCancelled, !Task.isCancelled, !self.resilience.isLocked else {
+                    await engine.removeFrameDelivery(lease)
+                    throw CancellationError()
+                }
+            }, cancel: { [weak self] in
+                state.cancellation.cancel()
+                guard !state.cancelled else { return }
+                state.cancelled = true
+                let lease = state.lease
+                Task { @MainActor [weak self] in
+                    if let lease { await engine.removeFrameDelivery(lease) }
+                    else { await engine.cancelFrameDelivery(token: token) }
+                    // Never-exposed preparation can roll back; every escaped
+                    // pixel keeps its complete old-generation reservation.
+                    RawVideoResourceCoordinator.shared.rollback(sourceReceipt)
+                    RawVideoResourceCoordinator.shared.rollback(privateReceipt)
+                    RawVideoResourceCoordinator.shared.rollback(receipt)
+                    guard let self else { return }
+                    self.virtualCameraDemand = max(0, self.virtualCameraDemand - 1)
+                    if canvas == .secondary { self.secondaryVirtualCameraDemand = max(0, self.secondaryVirtualCameraDemand - 1) }
+                    self.promoteStagedProfileIfOutputsIdle()
+                    self.updatePipelineDemand()
+                }
+            })
         }
         virtualCameraController = output
         return output
