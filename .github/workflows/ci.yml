@@ -145,6 +145,7 @@ jobs:
             apple/build/audience-events-validation/artifacts-*
             apple/build/fractional-iso-audio-validation/media-*
             apple/build/abrupt-session-recovery-validation/artifacts-*
+            apple/build/studio-deck-native-validation/artifacts-*
 
   test:
     name: StreamCore tests (iOS Simulator)
