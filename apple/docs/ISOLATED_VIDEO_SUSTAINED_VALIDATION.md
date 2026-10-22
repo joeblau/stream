@@ -122,35 +122,53 @@ endurance claim.
 
 ## Evidence
 
-The strict native run on Apple M3 Max / Mac15,8 / 16 logical CPUs, macOS27.2
-(26B118), Xcode27.2 (27B5038j), produced all four ISO files at1809 frames each
-with zero render drops, dropped audio or missing associated audio frames.
-The two recording durations were60.268746s and60.299083s. All three expected
-camera cue pairs measured16.42ms in the first recording and14.88ms in the
-second; both expected old-lease guest pairs measured49.75ms. All are below the
-unchanged80ms limit. Common origins, audio/video frontiers, controlled camera
-gaps/recovery, old-lease black/silence, holder handoff, selected tracks/effects,
-resource rejection and independent stop checks passed. Independent FFprobe
-metadata validation also passed.
+The final strict combined run **passed** on Apple M3 Max / Mac15,8 /16 logical
+CPUs, macOS27.2(26B118), Xcode27.2(27B5038j). The tested tree `dff65bd` is
+identical in its entirety to integrated `9cbe0b9`, including the other reviewed
+feedback/capture and compositor scheduling fixes. The native runner exited0,
+then its independent FFprobe/resource validator passed. The machine-readable
+receipt is [ISOLATED_VIDEO_SUSTAINED_2026-10-22.json](ISOLATED_VIDEO_SUSTAINED_2026-10-22.json).
 
-**The complete combined workload remains failed.** Its actual RTMP file was
-123.9s /3143 video frames with a68ms maximum video step. It stayed live with
-zero mailbox/congestion drops, but failed the unchanged requirement of more
-than3400 frames. Target FPS remained30 and the compositor reported no missed
-deadlines. The normal publisher's SDK timestamp-admission path is under
-investigation; this receipt does not certify the sustained publishing cadence
-or close issue171. No failing gate is removed.
+| Actual file | Frames | Duration | Every expected flash/tone delta |
+| --- | ---: | ---: | ---: |
+| Raw H.264 camera A |1809|60.270313s|15.77ms, all3pairs|
+| Processed HEVC old-lease guest |1809|60.270313s|49.10ms, both2pairs|
+| Processed HEVC camera A |1809|60.298521s|13.94ms, all3pairs|
+| Processed H.264 screen, video-only |1809|60.298333s|No associated audio selected|
 
-Ten native health samples measured4.004–7.3468% of machine CPU capacity,
-177.49–194.49MB resident,353.75–395.43MB physical footprint and17.09–41.11MB
-Metal allocations. The manifest folder probes measured3.70–4.59GB/s for their
-bounded8MB fsync probe; those values are not a sustained disk benchmark.
+All four ISO files have zero render drops, dropped audio or missing associated
+PCM frames. Their source black-frame counts are63/1208/0/1: the controlled
+camera gap/rebuild, old guest retirement, and one screen startup frame are
+marked honestly. Common origins, audio/video frontiers, source identity,
+selected tracks/effects, lease rejoin privacy, fifth-encoder rejection and
+independent stop checks passed. Three associated files differ at their decoded
+video/audio ends by at most0.313ms.
 
-The retained run log is
-`/tmp/stream-wave3-isolated-final-capture-sustained-20261022.log`; artifacts are
-`media-43c79380-484a-4ff7-83b4-81abb4943eec` below the owned runner build folder,
+The actual normal RTMP recording is123.9s with3715 native decoded video frames
+(3714 real video packets plus a materialized leading empty-edit pixel) and a76ms
+maximum step. It passes the unchanged>115s, >3400frames and<200ms step gates.
+Independent packet metadata reports H.2641080p and AAC48k stereo; the real video
+track starts66ms after the container origin. The publication remained live
+through both recording starts/stops, source failures and resource rejection.
+
+Ten native resource samples measured6.255–7.377% of machine CPU capacity,
+177.78–183.80MB resident,378.19–380.72MB physical footprint and17.09MB Metal
+allocations. Folder probes measured3.53–4.31GB/s for the bounded8MB fsync probe;
+those values are not a sustained disk benchmark.
+
+The final retained log is
+`/tmp/stream-wave3-isolated-combined-cadence-sustained-20261022.log`; artifacts are
+`media-99bcd1d1-8879-494f-9d81-93b6ccb3980b` below the owned runner build folder,
 including `decoded-media.json`, `evidence.json` and `consumer-metadata.json`.
-Earlier failed runs remain retained. The first supplied camera pixels 20 ms before their PTS,
+The earlier complete run remains failed and retained as
+`media-43c79380-484a-4ff7-83b4-81abb4943eec`: all four ISO files passed, but its
+normal RTMP123.9s/3143frames failed the original>3400gate. Actual controlled
+source-jitter probes then reproduced duplicate cadence admission in both raw
+and shared publishers. The correction and original/fixed hardware/software
+media receipts are recorded in
+[PUBLISHER_CADENCE_VALIDATION.md](PUBLISHER_CADENCE_VALIDATION.md); no source
+PTS, expected cue count or acceptance threshold was relaxed. Earlier failed
+runs remain retained. The first supplied camera pixels 20 ms before their PTS,
 failed the unchanged 80 ms gate at 83.27 ms, and exposed a stale alias after a
 same-device holder handoff. Realistic camera arrival then exposed the separate
 ISO latest-frame backdating defect: a later run failed at 81.854 ms, while two

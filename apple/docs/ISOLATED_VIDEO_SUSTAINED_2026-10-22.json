@@ -1,0 +1,407 @@
+{
+  "artifactDirectory": "media-99bcd1d1-8879-494f-9d81-93b6ccb3980b",
+  "assertions": [
+    "exact expected camera3/guest2 cue counts; every associated pair <=80ms",
+    "selected tracks/codecs/effects and common origin/duration/frontiers",
+    "default A to B and same-UID capture-holder handoff preserve ISO A",
+    "two-second camera disconnect/recovery and forty-second retired guest black/silence",
+    "new full lease in same slot cannot replace old ISO video or audio",
+    "fifth encoder rejected while Program+2ISO+realpublisher continue",
+    "two independent recording stops keep real RTMP live; final capture/publisher/encoder demand zero",
+    "actual RTMP >115seconds, >3400decodedframes, maximum frame step <200ms",
+    "independent FFprobe H264/HEVC/1080p/audio policy and native resource samples"
+  ],
+  "bounds": {
+    "maximumIsolatedSources": 2,
+    "maximumNativeEncoderSessions": 4,
+    "maximumProgram": "1080p30",
+    "maximumSilenceFramesPerPump": 4096,
+    "missingAssociatedAudioGraceMilliseconds": 500,
+    "sourceHistoryBytesPerHolder": 100663296,
+    "sourceHistoryEntriesPerHolder": 8,
+    "sourceHistoryNoConsumers": "no retained recording history"
+  },
+  "commits": {
+    "publisherCadence": "a31efb1",
+    "sourceCorrectness": "e3d4718"
+  },
+  "host": {
+    "Xcode": "27.2 (27B5038j)",
+    "logicalCPUs": 16,
+    "macOS": "27.2 (26B118)",
+    "model": "Mac15,8",
+    "processor": "Apple M3 Max"
+  },
+  "inputs": "Owned synthetic physical-camera/screen capture boundaries and decoded guest/PCM receipts; real shipping controller/mixer/compositor/renderers/encoders/writers/RTMP and actual localhost receiver",
+  "isoTracks": [
+    {
+      "absoluteCueDeltaMilliseconds": [
+        15.77083333333329,
+        15.770833333332845,
+        15.770833333334622
+      ],
+      "audioVideoEndDeltaSeconds": 0.0003124999999997158,
+      "budget": {
+        "estimatedDiskMegabytesPerSecond": 5.83936,
+        "machineClass": "Apple M3 Max (Mac15,8, 16 CPUs)",
+        "maximumEncoderSessions": 4,
+        "maximumIsolatedSources": 2,
+        "measuredDiskMegabytesPerSecond": 4306.635404790485,
+        "publishingEncoders": 1,
+        "qualified": true,
+        "selectedEncoders": 2
+      },
+      "droppedAudio": 0,
+      "durationSeconds": 60.270337083,
+      "flashSeconds": [
+        2,
+        12,
+        45
+      ],
+      "gapSummary": {
+        "source-unavailable-black": {
+          "firstStartSeconds": 4.99999995,
+          "firstWindow": {
+            "durationSeconds": 0.06666666666666667,
+            "reason": "source-unavailable-black",
+            "startSeconds": 4.99999995
+          },
+          "lastEndSeconds": 9.999999920333336,
+          "lastWindow": {
+            "durationSeconds": 2.033333333333336,
+            "reason": "source-unavailable-black",
+            "startSeconds": 7.966666587
+          },
+          "totalDurationSeconds": 2.1000000000000028,
+          "windows": 2
+        }
+      },
+      "markedBlackFrames": 63,
+      "missingAssociatedAudioFrames": 0,
+      "name": "Pinned Camera A",
+      "omittedGapEvents": 0,
+      "phase": 0,
+      "renderDrops": 0,
+      "selection": {
+        "audioName": "Selected microphone channel",
+        "audioTargetID": "channel.mic.default",
+        "codec": "h264",
+        "frameRate": 30,
+        "name": "Pinned Camera A",
+        "processing": "raw",
+        "quality": "standard",
+        "resolution": "fullHD1080",
+        "targetID": "source.614B886A-1AA0-41C3-AFBE-9CA85630B177"
+      },
+      "toneSeconds": [
+        1.9842291666666667,
+        11.984229166666667,
+        44.984229166666665
+      ],
+      "videoFrames": 1809
+    },
+    {
+      "absoluteCueDeltaMilliseconds": [
+        49.1041666666665,
+        49.10416666666606
+      ],
+      "audioVideoEndDeltaSeconds": 0.0003124999999997158,
+      "budget": {
+        "estimatedDiskMegabytesPerSecond": 5.83936,
+        "machineClass": "Apple M3 Max (Mac15,8, 16 CPUs)",
+        "maximumEncoderSessions": 4,
+        "maximumIsolatedSources": 2,
+        "measuredDiskMegabytesPerSecond": 4306.635404790485,
+        "publishingEncoders": 1,
+        "qualified": true,
+        "selectedEncoders": 2
+      },
+      "droppedAudio": 0,
+      "durationSeconds": 60.270337083,
+      "flashSeconds": [
+        2.033333333333333,
+        12.033333333333333
+      ],
+      "gapSummary": {
+        "associated-audio-timeline-gap": {
+          "firstStartSeconds": 20.082428417,
+          "firstWindow": {
+            "durationSeconds": 0.0191875,
+            "reason": "associated-audio-timeline-gap",
+            "startSeconds": 20.082428417
+          },
+          "lastEndSeconds": 60.270324239,
+          "lastWindow": {
+            "durationSeconds": 0.5,
+            "reason": "associated-audio-timeline-gap",
+            "startSeconds": 59.770324239
+          },
+          "totalDurationSeconds": 40.187895833333336,
+          "windows": 1122
+        },
+        "source-unavailable-black": {
+          "firstStartSeconds": 20.033333133,
+          "firstWindow": {
+            "durationSeconds": 0.5666666666666667,
+            "reason": "source-unavailable-black",
+            "startSeconds": 20.033333133
+          },
+          "lastEndSeconds": 60.270337083,
+          "lastWindow": {
+            "durationSeconds": 0.003671019,
+            "reason": "source-unavailable-black",
+            "startSeconds": 60.266666064
+          },
+          "totalDurationSeconds": 40.23700435233333,
+          "windows": 1122
+        }
+      },
+      "markedBlackFrames": 1208,
+      "missingAssociatedAudioFrames": 0,
+      "name": "Lease-pinned Guest",
+      "omittedGapEvents": 0,
+      "phase": 0,
+      "renderDrops": 0,
+      "selection": {
+        "audioName": "Admitted guest",
+        "audioTargetID": "source.C8C84940-0BB1-40C3-B61F-EB767202B3F2",
+        "codec": "hevc",
+        "frameRate": 30,
+        "name": "Lease-pinned Guest",
+        "processing": "processed",
+        "quality": "high",
+        "resolution": "fullHD1080",
+        "targetID": "source.C8C84940-0BB1-40C3-B61F-EB767202B3F2"
+      },
+      "toneSeconds": [
+        1.9842291666666667,
+        11.984229166666667
+      ],
+      "videoFrames": 1809
+    },
+    {
+      "absoluteCueDeltaMilliseconds": [
+        13.937499999999936,
+        13.937500000000824,
+        13.937499999997272
+      ],
+      "audioVideoEndDeltaSeconds": 0.00018750000000267164,
+      "budget": {
+        "estimatedDiskMegabytesPerSecond": 5.83936,
+        "machineClass": "Apple M3 Max (Mac15,8, 16 CPUs)",
+        "maximumEncoderSessions": 4,
+        "maximumIsolatedSources": 2,
+        "measuredDiskMegabytesPerSecond": 3525.7980116247722,
+        "publishingEncoders": 1,
+        "qualified": true,
+        "selectedEncoders": 2
+      },
+      "droppedAudio": 0,
+      "durationSeconds": 60.298533208,
+      "flashSeconds": [
+        2,
+        12,
+        45
+      ],
+      "gapSummary": {},
+      "markedBlackFrames": 0,
+      "missingAssociatedAudioFrames": 0,
+      "name": "Pinned Camera A",
+      "omittedGapEvents": 0,
+      "phase": 1,
+      "renderDrops": 0,
+      "selection": {
+        "audioName": "Selected microphone channel",
+        "audioTargetID": "channel.mic.default",
+        "codec": "hevc",
+        "frameRate": 30,
+        "name": "Pinned Camera A",
+        "processing": "processed",
+        "quality": "standard",
+        "resolution": "fullHD1080",
+        "targetID": "source.614B886A-1AA0-41C3-AFBE-9CA85630B177"
+      },
+      "toneSeconds": [
+        1.9860625,
+        11.9860625,
+        44.9860625
+      ],
+      "videoFrames": 1809
+    },
+    {
+      "absoluteCueDeltaMilliseconds": [],
+      "audioVideoEndDeltaSeconds": null,
+      "budget": {
+        "estimatedDiskMegabytesPerSecond": 5.83936,
+        "machineClass": "Apple M3 Max (Mac15,8, 16 CPUs)",
+        "maximumEncoderSessions": 4,
+        "maximumIsolatedSources": 2,
+        "measuredDiskMegabytesPerSecond": 3525.7980116247722,
+        "publishingEncoders": 1,
+        "qualified": true,
+        "selectedEncoders": 2
+      },
+      "droppedAudio": 0,
+      "durationSeconds": 60.298533208,
+      "flashSeconds": [],
+      "gapSummary": {
+        "source-unavailable-black": {
+          "firstStartSeconds": 0,
+          "firstWindow": {
+            "durationSeconds": 0.03333333333333333,
+            "reason": "source-unavailable-black",
+            "startSeconds": 0
+          },
+          "lastEndSeconds": 0.03333333333333333,
+          "lastWindow": {
+            "durationSeconds": 0.03333333333333333,
+            "reason": "source-unavailable-black",
+            "startSeconds": 0
+          },
+          "totalDurationSeconds": 0.03333333333333333,
+          "windows": 1
+        }
+      },
+      "markedBlackFrames": 1,
+      "missingAssociatedAudioFrames": 0,
+      "name": "Processed static screen",
+      "omittedGapEvents": 0,
+      "phase": 1,
+      "renderDrops": 0,
+      "selection": {
+        "codec": "h264",
+        "frameRate": 30,
+        "name": "Processed static screen",
+        "processing": "processed",
+        "quality": "high",
+        "resolution": "fullHD1080",
+        "targetID": "source.FBD2B7F1-45A7-4C77-8FFF-051AFA1BF7E7"
+      },
+      "toneSeconds": [],
+      "videoFrames": 1809
+    }
+  ],
+  "issue": 171,
+  "log": "/tmp/stream-wave3-isolated-combined-cadence-sustained-20261022.log",
+  "logSHA256": "96d904f394874ae740a8457282201086030454c3d546ec46e91f11e0cd7375f6",
+  "nativeArtifactSHA256": {
+    "consumer-metadata.json": "e3c399156bb0db6adec8a297a123fef8cfeee1626c25b963d9dd301558e71237",
+    "decoded-media.json": "da6a0b9c4e381f6e02c10c45409afa958ae291544b6d07d326dbfaa6db6b05ae",
+    "evidence.json": "d43cd7a7557cec07d6b0fe66b6314b52e807f4aff58de52cd22400d9a082c1b4",
+    "network-rtmp.mp4": "f91195e2f9457944c39985a177c187a1a2bbd682f5b6135ee4e812d7ab210ab1",
+    "source-onsets.json": "178a9ce95bc3d575ffae00f5b633dcaee0136f2f575bdb7f9e496e9a0e8fe698"
+  },
+  "nativeResources": {
+    "currentResidentBytes": {
+      "maximum": 183795712,
+      "minimum": 177782784
+    },
+    "metalAllocatedBytes": {
+      "maximum": 17088512,
+      "minimum": 17088512
+    },
+    "nativeResourceSamples": 10,
+    "physicalFootprintBytes": {
+      "maximum": 380716160,
+      "minimum": 378193000
+    },
+    "resourceCPUCapacityPercent": {
+      "maximum": 7.376670932306579,
+      "minimum": 6.255271411954098
+    }
+  },
+  "network": {
+    "audioEnd": 123.818,
+    "audioFrames": 5943264,
+    "audioStart": 0,
+    "duration": 123.9,
+    "flashes": [
+      2.134,
+      65.499,
+      75.5,
+      108.5
+    ],
+    "independentPacketMetadata": [
+      {
+        "codec_name": "h264",
+        "codec_type": "video",
+        "duration": "123.834000",
+        "height": 1080,
+        "nb_frames": "3714",
+        "start_time": "0.066000",
+        "width": 1920
+      },
+      {
+        "channels": 2,
+        "codec_name": "aac",
+        "codec_type": "audio",
+        "duration": "123.817833",
+        "nb_frames": "5804",
+        "sample_rate": "48000",
+        "start_time": "0.000000"
+      }
+    ],
+    "maximumVideoStep": 0.07600000000000051,
+    "name": "network-rtmp.mp4",
+    "tones": [
+      2.095125,
+      12.095125,
+      25.26514583333333,
+      65.46514583333334,
+      75.46514583333334,
+      108.46514583333334
+    ],
+    "videoEnd": 123.9,
+    "videoFrames": 3715,
+    "videoStart": 0
+  },
+  "phasesSeconds": [
+    60.270337083,
+    60.298533208
+  ],
+  "retainedPriorFailure": {
+    "artifactDirectory": "media-43c79380-484a-4ff7-83b4-81abb4943eec",
+    "failure": "Original >3400frame gate; no threshold change. Actual raw/shared bounded jitter regression independently reproduced and fixed duplicate cadence admission.",
+    "log": "/tmp/stream-wave3-isolated-final-capture-sustained-20261022.log",
+    "networkDurationSeconds": 123.9,
+    "networkFrames": 3143
+  },
+  "retainedRegressionLogSHA256": {
+    "/tmp/stream-wave3-isolated-baseline-contract-20261022.log": "885f7d24dcae24053902a1ea595a73000b47671b9025d13d703d87ebac60c8f9",
+    "/tmp/stream-wave3-isolated-cadence-baseline-exact-20261022.log": "f4556a463e23d7b7bd0989a4e425a9d90f4f1ef5b0d110ccce6c6e90607fee5c",
+    "/tmp/stream-wave3-isolated-cadence-fixed-20261022.log": "39522966204bafe129e1eace8b7bfc351f110b6ae18316bb8071d311fc10a2a8",
+    "/tmp/stream-wave3-isolated-cadence-software-fixed-20261022.log": "f569e247bb2deb95b97b5792ceea4168af2748a0dc0073d67a03e4ea790f56f3",
+    "/tmp/stream-wave3-isolated-final-capture-sustained-20261022.log": "2230b0151fb2d62d3c9763f3aa5c3191303d6a2e34e9904f73a6109b80fde45f",
+    "/tmp/stream-wave3-isolated-raw-cadence-baseline-decoder-20261022.log": "6e47e69882afa69f7b416da5845d0d2c01e9dc59498f865338b2e755867899de",
+    "/tmp/stream-wave3-isolated-raw-cadence-grid-final-20261022.log": "2c686171c69a64558c73bacb80cc5714c66739f8a5d88f12cdbe862506186e5f"
+  },
+  "shippingSourceAndFixtureSHA256": {
+    "apple/StreamBroadcast/LatestCameraFrame.swift": "8b835651751afc8cc58fd75c5ebf80c3e5ce5830e47ffa856558b81ef0c92567",
+    "apple/StreamBroadcast/Publisher.swift": "ef4d093bd956341f02dee3f4027b60d3f1f6937ac255693326aebd6fafd412f4",
+    "apple/StreamBroadcast/RTMPPublisher.swift": "8750d56871e756ebbd6109eacba6d84e7e8a75a38e95039896b4690f551ddaf6",
+    "apple/StreamBroadcast/SessionPublisher.swift": "220c6b4fb70195ade7c7a136dc4196d0bc92d3ae4014c4fb4cb1c9097d99f4c6",
+    "apple/StreamMac/CaptureSourcePool.swift": "b212de60dd3e24d9a734fe34c0694912e1b0400c563c4b86b231ee3b1737c8a5",
+    "apple/StreamMac/CompositionEngine.swift": "bd08893be8606a8e22608bbf186f10cb9f297754a88eac5ba463e52f0f942674",
+    "apple/StreamMac/DestinationOutputController.swift": "a08d4aff2659bd845dd4ad22e8cb41b98c6a3f1042ca6fc860fa3f66ba954de9",
+    "apple/StreamMac/DestinationSharedEncoder.swift": "77e6c763ad58e3da68c16c9ef8475370cf7b616999269a2cfb1ad3281f9b5663",
+    "apple/StreamMac/IsolatedRecordingTypes.swift": "9ad457d29fb7548f0f81a4182a74da3a0a3ac033e92cb96b807e64558dc70372",
+    "apple/StreamMac/IsolatedVideoRecorder.swift": "82ae906419de3b5c7f7b9fd445cd5776bc07f36a1281101208154123fa944b00",
+    "apple/StreamMac/IsolatedVideoTypes.swift": "6c37cae3f873416b8b4a437ee2623c35a42514cffdae44fdbdcea8415c31a0f8",
+    "apple/StreamMac/MacAudioInput.swift": "8824ff33f4b5d490523c625caf3727fa9b3ca3407a5e5b48a2af0fc5519b6b11",
+    "apple/StreamMac/RecordingVideoSourceFactory.swift": "7760d251a0a9023b890ea0c16286312de0a0aa76b8754220d7786683a50a9762",
+    "apple/StreamMac/StreamController.swift": "02f6cd8f718c6dfb84acf1eb5470e622d63f631768776b8a67c3709fb2487d61",
+    "apple/scripts/isolated_sustained_harness.swift": "2564ca32b4f558247bb33987466ec54976eae1b60279efd25bd3c93ab15c3537",
+    "apple/scripts/run_isolated_sustained_harness.zsh": "8bdaf30fdd68062cadea18262e6b6d478740b0ad8e8080df7d0fe922b58af193",
+    "apple/scripts/shared_encoder_cadence_harness.swift": "38331dfc3a63ad014c24191e21c6c8c9d5da94331b4df36300335e992fcb64e2"
+  },
+  "testedTree": "9cbe0b9 (entire tree identical to owned dff65bd)",
+  "unmeasured": [
+    "Physical camera/ScreenCaptureKit IO",
+    "Other Mac classes (start rejected, no inferred support)",
+    "Physical/removable volume loss",
+    "Complex processed-effects combinations",
+    "Indefinite duration beyond measured workload",
+    "Separate original AVAssetReader PCM/HAL path"
+  ],
+  "verdict": "PASS for published single enabled Mac class and bounded generated-input workload"
+}
