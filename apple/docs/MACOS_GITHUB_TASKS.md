@@ -1259,3 +1259,78 @@ bodies/states, no overlooked open task and zero open PRs. Each open tracker stil
 has incomplete children. No additional closure is justified. Historical wave
 objects and original failed artifacts remain intact; this update performs no
 GitHub write, native run or publication.
+
+## Confirmed retirement and hosted original workload results — 2026-10-22 UTC
+
+Exact `4e17084` passes generation, unsigned universal arm64/x86_64 Release and
+the actual bundle audit. All **838 source/recipe paths**, hashes and vendor match
+the built Git tree. [The ledger](MACOS_TASK_STATUS.json) binds the final checks,
+component receipts and independent reviews. Each runtime remains scoped to its
+named source; combined compilation is not a repeat of every component test.
+
+- Twitch title validation fixes the UTF8-byte restriction while preserving the
+  submitted bytes. The same four actual Core tests pass after a CJK-only original
+  failure; accepted cases send one unchanged PATCH and empty/141-character cases
+  send none. Official Unicode counting details remain unspecified. This is a
+  focused test run, not a new full-suite or live-account pass.
+- Documented public Twitch subscription notices and YouTube gift events now
+  enter the typed queue with strict anonymity/literal text, bounded payloads,
+  identity/session guards and read-only treatment where mutation IDs are absent.
+  Actual decoder/manager controlled proofs and independent reviews pass; no new
+  authorized live feed or Program/UI qualification follows.
+- Guest device rechecks retain committed camera/microphone choices rather than
+  silently substituting a different default. Exact Node VM controls preserve
+  healthy tracks, peer and invite: original 17 PASS / 6 FAIL becomes 23 PASS, with 35
+  existing client tests also passing. Actual Safari/mobile device flows remain open.
+- Camera unconfirmed Stop retains its exact transport, queue/private storage and
+  admission until an explicit retry confirms cleanup. Controlled native-effects
+  owner tests pass; installed CMIO/discovery/activation/client media are not run.
+- Browser unconfirmed Stop retains the producer/holdback/admission and helper/pages,
+  fencing fresh loads. Two actual-owner positives and three exact policy negatives
+  pass. The strengthened outcome oracle requires the intended trap marker and
+  rechecks retained logs without a native rerun. Actual SCK/helper termination and
+  audible routing/A/V remain unqualified; the production selector stays disabled.
+  CI now invokes the three reviewed chat/browser runners, without claiming that
+  the new cohort has run on hosted CI.
+
+Genuine scene semantic observations remain unqualified: regular policy and
+LaunchServices did not expose the required baselines. The final classifications
+and reusable runner were syntax-checked only. No lock/TCC cause, production AX
+defect or completed keyboard criterion is inferred. The owned style-contrast
+PASS remains separate. One installed Elgato Configure AXpress reached no editor
+or importer; existing profiles/plugins/keys/pairing were unchanged. **#90/#152
+remain open**, without a physical-keyboard, human-listening or manual-export rule.
+
+The former **#155 audio-only HAL blocker is resolved historically**: the full
+signed sandbox imported/repaired pad fixture already passed production AVAudioFile
+PCM and nonzero Program mix after original-file deletion. Later playback-source
+drift and its separate exact PCM/lifecycle proof are explicit; the old full graph
+is not relabelled current. Successful native keyboard chooser selection remains
+unqualified, without an established lock/TCC cause or prescribed decoder API.
+
+Exact published `e41fa06` original performance run **39849236437 fails both jobs**.
+ARM static/replay render 17148/17020 versus 17850; both recording inspections
+complete. Replay decodes all 17147 available frames from the first recording, so
+the failed nominal input/decode checks depend on its sparse source. These are
+not four independent causes. Intel renders 16988/15248; both writers finish and
+actual-source replay decoding passes. Its first inspection completes in 102.311758 s;
+the second remains **incomplete/UNQUALIFIED at the original 1380 s teardown**. Its
+persisted 0.286497 s is preinspection overhead, not inspection time or success.
+
+Final endpoint-duration errors pass on both architectures, but observed writer
+frontier skew reaches 1022.480/612.454 ms on ARM and 779.955/864.685 ms on Intel.
+Endpoint alignment does not establish sustained 80 ms or independent waveform
+sync. The aggregate data does not identify scheduling, allocator, GPU or other
+causality. No original gate/deadline changed and no retry ran. The earlier named
+M3 Max pass remains separate; **#92 stays open**.
+
+At the retained **2026-10-22T21:12:35.867321+00:00** native CI snapshot, `e41fa06` run 39849105419 is still active
+(ARM managed-event/publisher step 13; Intel controller step 10). Both desktop builds passed;
+iOS 609/83 passed in 190.578 s. No whole native CI success is claimed.
+
+The fresh **21:07:34 UTC** full paginated inventory confirms original 61
+**27 closed / 34 open**, all 135 macOS **101 closed / 34 open**, unchanged original
+bodies/states, no outside-inventory open issue and zero open PRs. Every open
+tracker retains incomplete children; no new closure is justified. All earlier
+wave objects and failed receipts remain intact. This ledger work performs no
+GitHub write, native run, benchmark or publication.
