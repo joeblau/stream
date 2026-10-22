@@ -253,10 +253,18 @@ async function acceptSignal(data, epoch) {
     // Native Program return uses an explicit visibility control; reference
     // hosts retain their existing immediately visible negotiated video path.
     let returnVideoTrack, returnVideoAllowed=!/^a=ssrc:\d+ msid:stream-return video-return\r?$/m.test(payload.description.sdp);
+    const attachReturnStream=()=>{
+      const nextStream=returnStream.getTracks().length?returnStream:null;
+      // Reassigning even the same MediaStream invokes the HTML load algorithm
+      // and replaces its normal audio/video renderer. Track membership changes
+      // already notify that renderer; preserve it for this full negotiation.
+      if($('return').srcObject!==nextStream)$('return').srcObject=nextStream;
+    };
     const updateReturnVideo=()=>{
-      for(const track of returnStream.getVideoTracks())returnStream.removeTrack(track);
-      if(returnVideoAllowed&&returnVideoTrack?.readyState==='live')returnStream.addTrack(returnVideoTrack);
-      $('return').srcObject=returnStream.getTracks().length?returnStream:null;
+      const desired=returnVideoAllowed&&returnVideoTrack?.readyState==='live'?returnVideoTrack:undefined;
+      for(const track of returnStream.getVideoTracks())if(track!==desired)returnStream.removeTrack(track);
+      if(desired&&!returnStream.getVideoTracks().includes(desired))returnStream.addTrack(desired);
+      attachReturnStream();
     };
     next.ondatachannel=event=>{
       const channel=event.channel;
@@ -293,7 +301,7 @@ async function acceptSignal(data, epoch) {
         return;
       }
       for(const previous of returnStream.getTracks().filter(track=>track.kind===kind)){returnStream.removeTrack(previous);previous.stop();}
-      returnStream.addTrack(event.track);$('return').srcObject=returnStream;
+      returnStream.addTrack(event.track);attachReturnStream();
       event.track.addEventListener('ended',()=>{if(current() && $('return').srcObject===returnStream){returnStream.removeTrack(event.track);if(!returnStream.getTracks().length)$('return').srcObject=null;}});
       $('return').play().catch(()=>{if(current())status('Press Play on the host return feed to hear the show.');});
     };
