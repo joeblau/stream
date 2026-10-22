@@ -395,6 +395,7 @@ struct StudioShortcutWindowAttachment: NSViewRepresentable {
     func updateNSView(_ nsView: Attachment, context: Context) { attach(nsView.window) }
     private func attach(_ window: NSWindow?) {
         shortcuts.install(window: window)
+        ExternalDisplayOutputController.attachStudioWindow(window)
         let open = openWindow
         StudioAutomationEndpoint.shared.attachStudioWindow(window, reopen: { open(id: "studio") })
     }

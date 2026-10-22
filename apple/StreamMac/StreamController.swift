@@ -292,9 +292,12 @@ final class StreamController: ObservableObject {
             let converter = ExternalProgramImageConverter(profile: profile)
             self.externalDisplayDemand += 1
             if canvas == .secondary { self.secondaryExternalDisplayDemand += 1 }
-            let subscription = self.addFrameSink(capacity: 1, canvas: canvas) { frame in
+            let receive: @Sendable (CompositedFrame) -> Void = { frame in
                 if let image = converter.image(frame) { sink(image) }
             }
+            let subscription = self.externalDisplayController?.feed == .clean
+                ? self.addCleanFrameSink(capacity: 1, sink: receive)
+                : self.addFrameSink(capacity: 1, canvas: canvas, sink: receive)
             self.updatePipelineDemand()
             return { [weak self] in
                 guard let self else { return }
