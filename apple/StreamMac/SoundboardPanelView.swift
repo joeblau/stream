@@ -374,7 +374,7 @@ private struct PadEditorView: View {
             LabeledContent("Volume") {
                 Slider(value: binding(\.volume), in: 0...2)
                     .accessibilityLabel("\(pad.name) pad volume")
-                    .accessibilityValue("\(Int((pad.volume * 100).rounded())) percent")
+                    .accessibilityValue(StudioGainAccessibility.value(pad.volume))
             }
             Button("Relink Audio File…", action: onRelink)
         }
@@ -484,7 +484,7 @@ private struct PlaylistRowView: View {
             HStack(spacing: 8) {
                 Slider(value: volumeBinding, in: 0...2)
                     .accessibilityLabel("\(playlist.name) playlist volume")
-                    .accessibilityValue("\(Int((playlist.volume * 100).rounded())) percent")
+                    .accessibilityValue(StudioGainAccessibility.value(playlist.volume))
                     .frame(maxWidth: 140)
                 Picker("Repeat", selection: repeatBinding) {
                     ForEach(PlaylistRepeatMode.allCases, id: \.self) { mode in
@@ -638,7 +638,7 @@ private struct SceneSoundRowView: View {
                     .lineLimit(1)
                 Slider(value: volumeBinding, in: 0...2)
                     .accessibilityLabel("\(binding.name) scene sound volume")
-                    .accessibilityValue("\(Int((binding.volume * 100).rounded())) percent")
+                    .accessibilityValue(StudioGainAccessibility.value(binding.volume))
                     .frame(maxWidth: 120)
             }
         }
