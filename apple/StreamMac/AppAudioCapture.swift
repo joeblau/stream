@@ -56,6 +56,14 @@ final class AppAudioCapture: ObservableObject {
 
     private var stream: SCStream?
     private var output: AppAudioOutputShim?
+    private var delivery: CaptureSampleLifetime?
+    private var requestGeneration = UUID()
+    private var permissionAvailable = true
+
+    func setPermissionAvailable(_ available: Bool) {
+        permissionAvailable = available
+        if !available { retire() }
+    }
     /// Serial queue for all SCStream sample callbacks.
     private let sampleQueue = DispatchQueue(label: "com.joeblau.StreamMac.app-audio.samples",
                                             qos: .userInitiated)
@@ -67,10 +75,15 @@ final class AppAudioCapture: ObservableObject {
     /// captures NOTHING — never a substitution (fail closed, C02-style).
     func start(with payload: AppAudioSourcePayload,
                excludingBundleIDs: Set<String> = []) async {
-        if stream != nil { await stop() }
+        guard permissionAvailable else { return }
+        let request = UUID(); requestGeneration = request
+        let previous = retireCurrentStream()
+        if let previous { try? await previous.stopCapture() }
+        guard permissionAvailable, requestGeneration == request else { return }
         errorMessage = nil
         do {
             let content = try await SCShareableContent.current
+            guard permissionAvailable, requestGeneration == request else { return }
             switch Self.filter(for: payload, excluding: excludingBundleIDs, in: content) {
             case .filter(let filter):
                 await startStream(with: filter)
@@ -79,21 +92,37 @@ final class AppAudioCapture: ObservableObject {
                 appAudioLog.error("App-audio target unresolvable: \(reason, privacy: .public)")
             }
         } catch {
-            // Most commonly the Screen Recording permission is missing.
-            errorMessage = "Screen Recording permission is required to capture app audio. Enable it for StreamMac in System Settings > Privacy & Security > Screen Recording. (\(error.localizedDescription))"
+            guard permissionAvailable, requestGeneration == request else { return }
+            let failure = error as NSError
+            if failure.domain == SCStreamErrorDomain, failure.code == SCStreamError.Code.userDeclined.rawValue {
+                errorMessage = "Screen Recording permission is required to capture app audio. Enable it for StreamMac in System Settings > Privacy & Security > Screen Recording."
+            } else {
+                errorMessage = "App audio is temporarily unavailable. Unlock this Mac and check that its display and target app are available, then retry. (\(error.localizedDescription))"
+            }
             appAudioLog.error("Shareable content unavailable: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     func stop() async {
+        requestGeneration = UUID()
+        let stream = retireCurrentStream()
+        if let stream { try? await stream.stopCapture() }
+        appAudioLog.info("App-audio stream stopped")
+    }
+
+    func retire() {
+        requestGeneration = UUID()
+        let stream = retireCurrentStream()
+        Task { if let stream { try? await stream.stopCapture() } }
+    }
+
+    private func retireCurrentStream() -> SCStream? {
+        delivery?.invalidate(); delivery = nil
         let stream = self.stream
         self.stream = nil
         self.output = nil
         isCapturing = false
-        if let stream {
-            try? await stream.stopCapture()
-        }
-        appAudioLog.info("App-audio stream stopped")
+        return stream
     }
 
     // MARK: - Filter resolution (fail closed)
@@ -151,6 +180,8 @@ final class AppAudioCapture: ObservableObject {
     // MARK: - Stream lifecycle
 
     private func startStream(with filter: SCContentFilter) async {
+        guard permissionAvailable else { return }
+        let request = requestGeneration
         let configuration = SCStreamConfiguration()
         // Audio-only: the smallest legal video configuration, 2×2 at 1 fps.
         // The screen output is registered (some macOS 14 point releases
@@ -169,12 +200,18 @@ final class AppAudioCapture: ObservableObject {
         configuration.queueDepth = 4
 
         let offMainAudio = onAudioSampleOffMain
+        let lifetime = CaptureSampleLifetime()
+        delivery = lifetime
         let output = AppAudioOutputShim(
             onAudioSample: { sample in
+                guard lifetime.isActive else { return }
                 offMainAudio?(sample.value)
             },
             onStopped: { [weak self] error in
-                Task { @MainActor in self?.captureDidStop(error.value) }
+                Task { @MainActor in
+                    guard lifetime.isActive else { return }
+                    self?.captureDidStop(error.value)
+                }
             }
         )
 
@@ -185,9 +222,16 @@ final class AppAudioCapture: ObservableObject {
             self.stream = stream
             self.output = output
             try await stream.startCapture()
+            guard permissionAvailable, requestGeneration == request, lifetime.isActive, self.stream === stream else {
+                lifetime.invalidate()
+                try? await stream.stopCapture()
+                return
+            }
             isCapturing = true
             appAudioLog.info("App-audio stream started")
         } catch {
+            lifetime.invalidate()
+            guard self.stream === stream else { return }
             self.stream = nil
             self.output = nil
             isCapturing = false
@@ -198,6 +242,7 @@ final class AppAudioCapture: ObservableObject {
     }
 
     private func captureDidStop(_ error: NSError) {
+        delivery?.invalidate(); delivery = nil
         isCapturing = false
         stream = nil
         output = nil

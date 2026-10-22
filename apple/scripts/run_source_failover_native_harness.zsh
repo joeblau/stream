@@ -82,7 +82,7 @@ fixture_replace(target, root, folder, 'ProviderAccountSession.swift') do |source
 end
 fixture_replace(target, root, folder, 'PermissionsManager.swift') do |source|
   replacements = {
-    /    func refresh\(\) \{.*?\n    \}/m => '    func refresh() { statuses = Dictionary(uniqueKeysWithValues: Kind.allCases.map { ($0, .denied) }) }',
+    /    func refresh\(\) \{.*?\n    \}/m => '    func refresh() { statuses = [.camera: .denied, .microphone: .denied, .screenCapture: .granted] }',
     /    func probeScreenAccess\(\) async \{.*?\n    \}/m => '    func probeScreenAccess() async { refresh() }',
     /    func request\(_ kind: Kind\) async -> Status \{.*?\n    \}/m => '    func request(_ kind: Kind) async -> Status { .denied }',
     /    func openSystemSettings\(for kind: Kind\) \{.*?\n    \}/m => '    func openSystemSettings(for kind: Kind) {}'
@@ -91,7 +91,24 @@ fixture_replace(target, root, folder, 'PermissionsManager.swift') do |source|
     abort 'Permission fixture boundary changed' unless source.match?(seam)
     source.sub!(seam, replacement)
   end
-  source
+  source + "\nextension PermissionsManager { func fixtureSet(_ kind: Kind, _ value: Status) { statuses[kind] = value } }\n"
+end
+# Separate probe type runs the exact shipping decision logic against controlled
+# OS results. No TCC/SCShareableContent request reaches the host.
+probe = File.read(File.join(root, 'StreamMac/PermissionsManager.swift'))
+probe.gsub!('PermissionsManager', 'PermissionsProbeValidationManager')
+probe.gsub!('CGPreflightScreenCaptureAccess()', 'OwnedPermissionProbe.preflight')
+probe.gsub!('SCShareableContent.current', 'OwnedPermissionProbe.discover()')
+probe.gsub!('UserDefaults.standard', 'GuestFixtureDefaults.value')
+probe.gsub!('AVCaptureDevice.authorizationStatus(for: .video)', 'AVAuthorizationStatus.denied')
+probe.gsub!('AVCaptureDevice.authorizationStatus(for: .audio)', 'AVAuthorizationStatus.denied')
+probe_copy = File.join(folder, 'fixtures/PermissionsProbeValidationManager.swift')
+File.write(probe_copy, probe); target['sources'] << probe_copy
+['ScreenSourceCapture.swift', 'AppAudioCapture.swift'].each do |name|
+  fixture_replace(target, root, folder, name) do |source|
+    abort 'Capture discovery boundary changed' unless source.include?('SCShareableContent.current')
+    source.gsub('SCShareableContent.current', 'OwnedCaptureDiscovery.current()')
+  end
 end
 fixture_replace(target, root, folder, 'RecordingController.swift') do |source|
   abort 'Recording folder fixture boundary changed' unless source.include?('defaultDirectory: URL? = nil')
@@ -113,6 +130,12 @@ fixture_replace(target, root, folder, 'StreamController.swift') do |source|
 extension StreamController {
     var failoverFixtureRetainedFrames: Int { resilientFrames.failoverFixtureRetainedCount }
     var failoverFixturePipelineRunning: Bool { isPipelineRunning }
+    func failoverFixturePermission(_ kind: PermissionsManager.Kind, _ status: PermissionsManager.Status) { permissions.fixtureSet(kind, status) }
+    func failoverFixtureMicSample(_ sample: CMSampleBuffer) {
+        let callback = audio.onMicSampleOffMain, boxed = OwnedPermissionAudioSample(sample)
+        OwnedPermissionAudioQueue.value.async { callback?(boxed.value) }
+    }
+    func failoverFixtureAudioAllowed(_ channel: AudioChannelID) -> Bool { audioEngine.captureRouteIsAllowed(channel) }
 }
 SWIFT
 end
@@ -142,7 +165,7 @@ support.sub!('@main @MainActor struct SharedEncoderHarness', '@MainActor struct 
 support_copy = File.join(folder, 'fixtures/SharedEncoderNativeSupport.swift')
 File.write(support_copy, support)
 target['sources'] << support_copy
-target['sources'] += ['source_failover_native_harness.swift', 'publisher_path_supervision_harness.swift', 'program_recording_fixtures.swift'].map { |name| File.join(root, 'scripts', name) }
+target['sources'] += ['source_failover_native_harness.swift', 'publisher_path_supervision_harness.swift', 'permission_resilience_harness.swift', 'program_recording_fixtures.swift'].map { |name| File.join(root, 'scripts', name) }
 spec['targets']['SourceFailoverNativeHarness'] = target
 spec['schemes']['SourceFailoverNativeHarness'] = {'build' => {'targets' => {'SourceFailoverNativeHarness' => 'all'}}}
 File.write(File.join(folder, 'project.json'), JSON.pretty_generate(spec))
@@ -157,7 +180,11 @@ FAILOVER_NATIVE_PRODUCTS="${FAILOVER_NATIVE_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="$FAILOVER_NATIVE_PRODUCTS" python3 - "$FAILOVER_NATIVE_PRODUCTS/SourceFailoverNativeHarness" "${FAILOVER_NATIVE_DIR:A}" "$@" <<'PY'
 import pathlib,subprocess,sys,uuid
 root=pathlib.Path(sys.argv[2])/('artifacts-'+str(uuid.uuid4()));root.mkdir()
-try:raise SystemExit(subprocess.run([sys.argv[1],str(root)]+sys.argv[3:],timeout=60).returncode)
+try:
+ result=subprocess.run([sys.argv[1],str(root)]+sys.argv[3:],timeout=60)
+ if result.returncode:raise SystemExit(result.returncode)
+ if '--external-decoder' in sys.argv[3:]:
+  subprocess.run([sys.executable,'scripts/decode_source_failover_artifacts.py',str(root)],timeout=60,check=True)
 except subprocess.TimeoutExpired:
  print('FAIL: source failover native harness exceeded60s; owned artifacts retained at '+str(root),flush=True)
  raise SystemExit(1)

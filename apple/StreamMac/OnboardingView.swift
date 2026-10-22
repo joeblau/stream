@@ -289,6 +289,8 @@ struct PermissionStatusCard: View {
                 case .granted:
                     Label("You're all set.", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
+                case .unavailable:
+                    Button("Check Again") { Task { await permissions.probeScreenAccess() } }
                 }
             }
         }
@@ -300,6 +302,7 @@ struct PermissionStatusCard: View {
         case .granted: (text, color) = ("Granted", .green)
         case .needsRequest: (text, color) = ("Not Set Up", .secondary)
         case .denied: (text, color) = ("Denied", .orange)
+        case .unavailable: (text, color) = ("Unavailable", .orange)
         }
         return Text(text)
             .font(.caption.weight(.semibold))

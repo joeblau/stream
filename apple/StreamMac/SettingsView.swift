@@ -728,6 +728,10 @@ struct SettingsView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
+            if status == .unavailable {
+                Text("Unavailable").font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                Button("Check Again") { Task { await permissions.probeScreenAccess() } }
+            }
             Spacer()
             if status == .needsRequest {
                 Button("Request…") {

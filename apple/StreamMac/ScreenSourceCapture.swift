@@ -78,6 +78,14 @@ final class ScreenSourceCapture: ObservableObject {
     private var pickerPrivacy: EffectiveCapturePrivacy = .standard
     private var stream: SCStream?
     private var output: StreamOutputShim?
+    private var delivery: CaptureSampleLifetime?
+    private var requestGeneration = UUID()
+    private(set) var permissionAvailable = true
+
+    func setPermissionAvailable(_ available: Bool) {
+        permissionAvailable = available
+        if !available { retire() }
+    }
     /// C04: the configuration handed to the running stream, retained so the
     /// region dynamics can re-apply it (with a new `sourceRect`) through
     /// `updateConfiguration`. Nil whenever no stream runs.
@@ -119,7 +127,8 @@ final class ScreenSourceCapture: ObservableObject {
     /// stream; app/window exclusions can't — the picker filter is opaque (see
     /// the type doc).
     func pickAndStart(defaults: StreamSettings = .default) async {
-        guard stream == nil, pickerContinuation == nil else { return }
+        guard permissionAvailable, stream == nil, pickerContinuation == nil else { return }
+        let request = UUID(); requestGeneration = request
         errorMessage = nil
         pickerPrivacy = EffectiveCapturePrivacy(
             showsCursor: defaults.captureShowsCursor,
@@ -137,6 +146,7 @@ final class ScreenSourceCapture: ObservableObject {
             picker.present()
         }
         picker.isActive = false
+        guard permissionAvailable, requestGeneration == request else { return }
         if let selection {
             await start(with: selection.value, privacy: pickerPrivacy)
         } else if pickerStartFailed {
@@ -154,7 +164,10 @@ final class ScreenSourceCapture: ObservableObject {
     func start(with filter: SCContentFilter,
                privacy: EffectiveCapturePrivacy = .standard,
                dynamics: ScreenRegionDynamicsInput? = nil) async {
-        if stream != nil { await stop() }
+        guard permissionAvailable else { return }
+        let request = UUID(); requestGeneration = request
+        if stream != nil { await stopCurrentStream() }
+        guard permissionAvailable, requestGeneration == request else { return }
         errorMessage = nil
         lastFilter = filter
 
@@ -182,16 +195,28 @@ final class ScreenSourceCapture: ObservableObject {
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
 
         let offMainAudio = onAudioSampleOffMain
+        let lifetime = CaptureSampleLifetime()
+        delivery = lifetime
         let output = StreamOutputShim(
             onVideoSample: { [weak self] sample in
-                Task { @MainActor in self?.onVideoSample?(sample.value) }
+                Task { @MainActor in
+                    guard lifetime.isActive else { return }
+                    self?.onVideoSample?(sample.value)
+                }
             },
             onAudioSample: { [weak self] sample in
+                guard lifetime.isActive else { return }
                 offMainAudio?(sample.value)
-                Task { @MainActor in self?.onAudioSample?(sample.value) }
+                Task { @MainActor in
+                    guard lifetime.isActive else { return }
+                    self?.onAudioSample?(sample.value)
+                }
             },
             onStopped: { [weak self] error in
-                Task { @MainActor in self?.captureDidStop(error.value) }
+                Task { @MainActor in
+                    guard lifetime.isActive else { return }
+                    self?.captureDidStop(error.value)
+                }
             }
         )
 
@@ -208,12 +233,19 @@ final class ScreenSourceCapture: ObservableObject {
             self.output = output
             self.activeConfiguration = dynamics != nil ? configuration : nil
             try await stream.startCapture()
+            guard permissionAvailable, requestGeneration == request, lifetime.isActive, self.stream === stream else {
+                lifetime.invalidate()
+                try? await stream.stopCapture()
+                return
+            }
             isCapturing = true
             if let dynamics {
                 startRegionDynamics(dynamics)
             }
             screenSourceLog.info("ScreenCaptureKit stream started")
         } catch {
+            lifetime.invalidate()
+            guard self.stream === stream else { return }
             self.stream = nil
             self.output = nil
             self.activeConfiguration = nil
@@ -253,11 +285,13 @@ final class ScreenSourceCapture: ObservableObject {
     /// privacy exclusion list.
     func start(matching payload: ScreenSourcePayload,
                defaults: StreamSettings = .default) async {
-        guard stream == nil, pickerContinuation == nil else { return }
+        guard permissionAvailable, stream == nil, pickerContinuation == nil else { return }
+        let request = UUID(); requestGeneration = request
         errorMessage = nil
         let privacy = payload.effectivePrivacy(defaults: defaults)
         do {
             let content = try await SCShareableContent.current
+            guard permissionAvailable, requestGeneration == request else { return }
             switch Self.resolve(payload, privacy: privacy, in: content) {
             case .filter(let filter):
                 if let conflict = Self.trackingConflict(payload, privacy: privacy) {
@@ -278,8 +312,13 @@ final class ScreenSourceCapture: ObservableObject {
                 screenSourceLog.error("Pinned screen source unresolvable: \(reason, privacy: .public)")
             }
         } catch {
-            // Most commonly the Screen Recording permission is missing.
-            errorMessage = "Screen Recording permission is required. Enable it for StreamMac in System Settings > Privacy & Security > Screen Recording. (\(error.localizedDescription))"
+            guard permissionAvailable, requestGeneration == request else { return }
+            let failure = error as NSError
+            if failure.domain == SCStreamErrorDomain, failure.code == SCStreamError.Code.userDeclined.rawValue {
+                errorMessage = "Screen Recording permission is required. Enable it for StreamMac in System Settings > Privacy & Security > Screen Recording."
+            } else {
+                errorMessage = "Screen capture is temporarily unavailable. Unlock this Mac and check the selected display or app, then retry. (\(error.localizedDescription))"
+            }
             screenSourceLog.error("Shareable content unavailable: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -358,6 +397,26 @@ final class ScreenSourceCapture: ObservableObject {
     }
 
     func stop() async {
+        requestGeneration = UUID()
+        await stopCurrentStream()
+    }
+
+    /// Synchronously retire callback ownership before an asynchronous drain.
+    /// The drain captures only this stream, never a later replacement.
+    func retire() {
+        requestGeneration = UUID()
+        let stream = retireCurrentStream()
+        Task { if let stream { try? await stream.stopCapture() } }
+    }
+
+    private func stopCurrentStream() async {
+        let stream = retireCurrentStream()
+        if let stream { try? await stream.stopCapture() }
+        screenSourceLog.info("ScreenCaptureKit stream stopped")
+    }
+
+    private func retireCurrentStream() -> SCStream? {
+        delivery?.invalidate(); delivery = nil
         // Dismiss a picker still waiting on this capture (demand dropped
         // mid-presentation), so it can't resume a start nobody wants.
         if let continuation = pickerContinuation {
@@ -372,10 +431,7 @@ final class ScreenSourceCapture: ObservableObject {
         regionDynamics?.stop()
         regionDynamics = nil
         isCapturing = false
-        if let stream {
-            try? await stream.stopCapture()
-        }
-        screenSourceLog.info("ScreenCaptureKit stream stopped")
+        return stream
     }
 
     // MARK: - Region dynamics (C04, issue #104)
@@ -634,6 +690,7 @@ final class ScreenSourceCapture: ObservableObject {
     // MARK: - Stream delegate
 
     private func captureDidStop(_ error: NSError) {
+        delivery?.invalidate(); delivery = nil
         isCapturing = false
         stream = nil
         output = nil
@@ -688,6 +745,14 @@ private final class PickerObserverShim: NSObject, SCContentSharingPickerObserver
     nonisolated func contentSharingPickerStartDidFailWithError(_ error: any Error) {
         onFailure(UncheckedSendableBox(error as NSError))
     }
+}
+
+/// A retired stream cannot deliver queued media or tear down its replacement.
+final class CaptureSampleLifetime: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = true
+    var isActive: Bool { lock.lock(); defer { lock.unlock() }; return active }
+    func invalidate() { lock.lock(); defer { lock.unlock() }; active = false }
 }
 
 /// Receives SCStream sample buffers on the serial sample queue and forwards

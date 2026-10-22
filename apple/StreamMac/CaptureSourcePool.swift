@@ -430,6 +430,7 @@ final class CaptureSourcePool: ObservableObject {
     /// in-flight picker or a user-cancelled picker isn't re-presented until
     /// the source is genuinely unreferenced and re-referenced.
     private var requested: Set<CaptureSourceKey> = []
+    private var screenPermissionAvailable = true
     private var cameras: [CaptureSourceKey: FacecamCapture] = [:]
     private var screens: [CaptureSourceKey: ScreenSourceCapture] = [:]
     private var screenFrames: [CaptureSourceKey: LatestScreenFrame] = [:]
@@ -671,6 +672,7 @@ final class CaptureSourcePool: ObservableObject {
     func screenCapture(for key: CaptureSourceKey) -> ScreenSourceCapture {
         if let existing = screens[key] { return existing }
         let capture = ScreenSourceCapture()
+        capture.setPermissionAvailable(screenPermissionAvailable)
         let holder = LatestScreenFrame()
         screens[key] = capture
         screenFrames[key] = holder
@@ -743,6 +745,10 @@ final class CaptureSourcePool: ObservableObject {
         case .camera(let payload):
             startCamera(key, payload: payload, settings: settings)
         case .screen(let payload):
+            guard screenPermissionAvailable else {
+                sourceErrors[key] = "Screen Recording access is disabled. Repair permission in System Settings."
+                return
+            }
             sourceErrors[key] = nil
             let capture = screenCapture(for: key)
             Task { [weak capture] in
@@ -760,6 +766,10 @@ final class CaptureSourcePool: ObservableObject {
         case .pdf(let id):
             startPDF(key, id: id)
         case .appAudio(let payload):
+            guard screenPermissionAvailable else {
+                sourceErrors[key] = "Screen Recording access is disabled. Repair permission in System Settings."
+                return
+            }
             startAppAudio(key, payload: payload, settings: settings)
         case .web(let payload):
             startWeb(key, payload: payload)
@@ -778,7 +788,7 @@ final class CaptureSourcePool: ObservableObject {
         case .screen:
             screenFrames[key]?.clear()
             if let capture = screens[key] {
-                Task { await capture.stop() }
+                capture.retire()
             }
         case .syphon:
             // Synchronous disconnect; clears its frame holder.
@@ -797,7 +807,7 @@ final class CaptureSourcePool: ObservableObject {
             // pipeline stopped) — stop the capture; the instance and its
             // resolved target survive for the next demand.
             if let capture = appAudioCaptures[key] {
-                Task { await capture.stop() }
+                capture.retire()
             }
         case .web:
             // G08: last reference removed — the widget page unloads with the
@@ -965,17 +975,10 @@ final class CaptureSourcePool: ObservableObject {
             case .camera(let payload):
                 startCamera(key, payload: payload, settings: settings)
             case .screen(let payload):
+                guard screenPermissionAvailable else { continue }
                 missingSources.remove(key)
                 sourceErrors[key] = nil
-                let capture = screenCapture(for: key)
-                Task { [weak capture] in
-                    guard let capture else { return }
-                    if payload.targetIdentifier != nil {
-                        await capture.start(matching: payload, defaults: settings)
-                    } else if screenHadSelection.contains(key) {
-                        await capture.pickAndStart(defaults: settings)
-                    }
-                }
+                if payload.targetIdentifier != nil || screenHadSelection.contains(key) { start(key, settings: settings) }
             case .syphon(let payload):
                 missingSources.remove(key)
                 startSyphon(key, payload: payload)
@@ -984,6 +987,7 @@ final class CaptureSourcePool: ObservableObject {
                 sourceErrors[key] = nil
                 startMedia(key, id: id)
             case .appAudio(let payload):
+                guard screenPermissionAvailable else { continue }
                 missingSources.remove(key)
                 sourceErrors[key] = nil
                 startAppAudio(key, payload: payload, settings: settings)
@@ -1013,6 +1017,29 @@ final class CaptureSourcePool: ObservableObject {
             sourceErrors[key] = "Camera access was revoked. Re-enable it in System Settings > Privacy & Security > Camera — capture resumes automatically."
             cameras[key]?.stop()
         }
+    }
+
+    /// Preserve source demand/identity and output ownership while retiring only
+    /// producers dependent on Screen Recording. A regrant retries these keys.
+    func noteScreenPermissionRevoked() {
+        screenPermissionAvailable = false
+        for capture in screens.values { capture.setPermissionAvailable(false) }
+        for capture in appAudioCaptures.values { capture.setPermissionAvailable(false) }
+        for key in requested {
+            switch key {
+            case .screen, .appAudio:
+                stop(key)
+                requested.insert(key)
+                sourceErrors[key] = "Screen Recording access was revoked. Re-enable it in System Settings > Privacy & Security > Screen Recording."
+            default: break
+            }
+        }
+    }
+
+    func restoreScreenPermission() {
+        screenPermissionAvailable = true
+        for capture in screens.values { capture.setPermissionAvailable(true) }
+        for capture in appAudioCaptures.values { capture.setPermissionAvailable(true) }
     }
 
     /// The per-source health message a layer badge shows (C10): the
@@ -1109,7 +1136,7 @@ final class CaptureSourcePool: ObservableObject {
         case .screen:
             screenFrames[key]?.clear()
             if let capture = screens[key] {
-                Task { await capture.stop() }
+                capture.retire()
             }
         case .syphon:
             syphonCaptures[key]?.stop()
@@ -1121,7 +1148,7 @@ final class CaptureSourcePool: ObservableObject {
             pdfPlaybacks[key]?.pause()
         case .appAudio:
             if let capture = appAudioCaptures[key] {
-                Task { await capture.stop() }
+                capture.retire()
             }
         case .web:
             // G08: no physical device/display ever marks a widget missing,
@@ -1414,6 +1441,7 @@ final class CaptureSourcePool: ObservableObject {
     private func appAudioCapture(for key: CaptureSourceKey) -> AppAudioCapture {
         if let existing = appAudioCaptures[key] { return existing }
         let capture = AppAudioCapture()
+        capture.setPermissionAvailable(screenPermissionAvailable)
         appAudioCaptures[key] = capture
         // The handler value is captured (not the MainActor pool) so the
         // off-main @Sendable closure stays isolation-clean. The controller

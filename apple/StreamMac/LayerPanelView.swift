@@ -301,6 +301,8 @@ struct LayerPanelView: View {
         switch layer.payload {
         case .camera where permissions.status(for: .camera) != .granted:
             return "Camera permission is not granted — this layer renders black."
+        case .screen where permissions.status(for: .screenCapture) == .unavailable:
+            return permissions.repairAction(for: .screenCapture)?.message
         case .screen where permissions.status(for: .screenCapture) != .granted:
             return "Screen recording permission is not granted — this layer renders black."
         case .camera, .screen, .syphon:

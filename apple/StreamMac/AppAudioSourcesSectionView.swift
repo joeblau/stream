@@ -52,14 +52,17 @@ struct AppAudioSourcesSectionView: View {
     var body: some View {
         Section {
             if permissions.status(for: .screenCapture) != .granted {
-                Label("App audio capture needs Screen Recording permission.",
+                Label(permissions.status(for: .screenCapture) == .unavailable
+                        ? "App audio availability could not be checked." : "App audio capture needs Screen Recording permission.",
                       systemImage: "exclamationmark.shield.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
-                Button("Open Screen Recording Settings…") {
-                    permissions.openSystemSettings(for: .screenCapture)
+                if permissions.status(for: .screenCapture) == .unavailable {
+                    Button("Check Again") { Task { await permissions.probeScreenAccess() } }.font(.caption)
+                } else {
+                    Button("Open Screen Recording Settings…") { permissions.openSystemSettings(for: .screenCapture) }
+                        .font(.caption)
                 }
-                .font(.caption)
             }
             if appAudioSources.isEmpty {
                 Text("No app audio sources yet. Add one to capture an application's sound — or the whole-system mix — independently of any screen scene.")

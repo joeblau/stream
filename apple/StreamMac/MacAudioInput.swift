@@ -94,6 +94,18 @@ final class MacAudioInput: ObservableObject {
     /// device connect during an intentional pipeline stop never starts
     /// capture (the same gate `isAwaitingDeviceReturn` gives the default mic).
     private var additionalInputsArmed = false
+    private var permissionAvailable = true
+    private var defaultRequest = UUID()
+    private var additionalRequest = UUID()
+
+    func setPermissionAvailable(_ available: Bool) {
+        permissionAvailable = available
+        if !available {
+            stop()
+            errorMessage = "Microphone access was revoked. Re-enable it in System Settings > Privacy & Security > Microphone."
+            additionalInputErrors = Dictionary(uniqueKeysWithValues: additionalInputs.map { ($0.deviceUID, errorMessage!) })
+        }
+    }
 
     /// Session start/stop off the main actor: `startRunning()` blocks.
     private let sessionQueue = DispatchQueue(label: "com.joeblau.StreamMac.mic-session",
@@ -128,16 +140,20 @@ final class MacAudioInput: ObservableObject {
 
     /// Starts capture from a specific device (one of `devices`).
     func start(device: AVCaptureDevice) {
+        guard permissionAvailable else { return }
         stopDefaultCapture()
+        let request = defaultRequest
         lastRequestedDeviceUID = device.uniqueID
         isAwaitingDeviceReturn = false
         Task { [weak self] in
-            guard await Self.requestMicrophoneAccess() else {
-                self?.errorMessage = "Microphone access is disabled for StreamMac. Enable it in System Settings > Privacy & Security > Microphone."
+            let granted = await Self.requestMicrophoneAccess()
+            guard let self, self.permissionAvailable, self.defaultRequest == request else { return }
+            guard granted else {
+                self.errorMessage = "Microphone access is disabled for StreamMac. Enable it in System Settings > Privacy & Security > Microphone."
                 audioInputLog.error("Microphone permission denied")
                 return
             }
-            self?.configureAndStart(device: device)
+            self.configureAndStart(device: device)
         }
     }
 
@@ -151,6 +167,7 @@ final class MacAudioInput: ObservableObject {
     /// Stops only the default mic's capture — restarting it must not tear
     /// down the additional devices' captures (A05).
     private func stopDefaultCapture() {
+        defaultRequest = UUID()
         isAwaitingDeviceReturn = false
         guard let session else {
             level = 0
@@ -198,7 +215,8 @@ final class MacAudioInput: ObservableObject {
     /// never also open as its own channel.
     func startAdditionalInputs(_ selections: [AudioInputSelection],
                                excludingDeviceUID: String? = nil) {
-        additionalInputsArmed = true
+        additionalRequest = UUID()
+        additionalInputsArmed = permissionAvailable
         additionalInputs = selections.filter {
             $0.isEnabled && $0.deviceUID != excludingDeviceUID
         }
@@ -217,6 +235,7 @@ final class MacAudioInput: ObservableObject {
     /// they are settings state, and the next `startAdditionalInputs`
     /// re-arms them.
     func stopAdditionalInputs() {
+        additionalRequest = UUID()
         additionalInputsArmed = false
         for (uid, capture) in Array(deviceCaptures) {
             let box = UncheckedSendableBox(capture.session)
@@ -277,13 +296,17 @@ final class MacAudioInput: ObservableObject {
     private func startAdditionalCapture(device: AVCaptureDevice,
                                         mapping: AudioInputMapping) {
         let uid = device.uniqueID
+        let request = additionalRequest
         Task { [weak self] in
-            guard await Self.requestMicrophoneAccess() else {
-                self?.additionalInputErrors[uid] = "Microphone access is disabled for StreamMac. Enable it in System Settings > Privacy & Security > Microphone."
+            let granted = await Self.requestMicrophoneAccess()
+            guard let self, self.permissionAvailable, self.additionalInputsArmed,
+                  self.additionalRequest == request, device.isConnected else { return }
+            guard granted else {
+                self.additionalInputErrors[uid] = "Microphone access is disabled for StreamMac. Enable it in System Settings > Privacy & Security > Microphone."
                 audioInputLog.error("Microphone permission denied (additional input)")
                 return
             }
-            self?.configureAndStartAdditional(device: device, mapping: mapping)
+            self.configureAndStartAdditional(device: device, mapping: mapping)
         }
     }
 
