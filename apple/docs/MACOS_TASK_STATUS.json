@@ -83,7 +83,9 @@
     "wave2Profiles": "Existing installed Stream Deck editor exposes no actual author/export window through current public AX grants. Two bounded supported menu actions did not reveal Profiles/Export controls. All 11 ProfilesV2, 12 ProfilesV3 and 8 plugin entries remain byte-identical. No genuine starter exports were fabricated; issue 152 remains open. See /tmp/stream-wave2-profiles-report.md.",
     "wave2PerformanceDispatch": "Workflow timeout now 90 minutes, native architecture checks are explicit, and owned workload process groups receive bounded SIGINT/SIGTERM/final cleanup. Five focused lifecycle tests pass. No 600-second hosted or native Intel sustained result is claimed by this readiness fix. See /tmp/stream-wave2-automation-proof-20261022.md. Actual bounded 600-second/workload native ARM+Intel workflow dispatched at source 0d79056: run39713883982; results pending, no sustained PASS claimed.",
     "wave2HostedCI": "Run 39706795991 exact main 40d0737: iOS success; both macOS jobs fail step 12 from identical headless NSApp nil unwrap in StudioAutomationEndpoint.swift:61, after successful harness builds. Fixed by guarded headless focus with new focused regression and unchanged managed-start harness passing locally. Integrated fix hosted verification remains pending; later old-run qualifications were skipped. See /tmp/stream-wave2-ci-two-failure-classification-20261022.md.",
-    "wave2ShippingApp": "Combined shipping source 33e9bc9 passes unsigned universal Release for arm64/x86_64 and the actual bundle/sandbox/App Intents/transport-hook audit. Logs: /tmp/stream-wave2-composed-release-20261022.log and /tmp/stream-wave2-composed-bundle-20261022.log. No Developer ID/notarization or physical Intel runtime claim."
+    "wave2ShippingApp": "Final combined shipping source 7cfa9b3 passes unsigned universal Release for arm64/x86_64 and actual bundle/sandbox/App Intents/transport-hook audit. It includes all permission, initial-lock/display and scaled-badge fixes. Logs: /tmp/stream-wave2-final-scaled-permission-release-20261022.log and /tmp/stream-wave2-final-scaled-permission-bundle-20261022.log. No Developer ID/notarization or physical Intel runtime claim.",
+    "wave2Recovery": "Two independent original-criteria reviews support closure after final source publication. Real RTMP path recovery preserves the healthy SRT publisher, encoder, session and 392-frame timeline. The final controlled source/lifecycle/permission fixture passes 22 decoded phases and 468 frames, the original 40/80 ms timing limits and five-second ownership barrier. Denied PCM is exactly zero; healthy independent PCM continues during a blocked reset. Root repeats the actual initial-session/empty-display observation and complete native guest/mixer permission regression: PASS. Final combined source 7cfa9b3 passes universal Release and bundle audit. Physical OS/TCC/cable/interface delivery remains unclaimed.",
+    "wave2SharedCore": "Combined Core source is unchanged from 33e9bc9: 563 tests in 80 suites pass, excluding only ChannelFXProcessorTests and VoicePolishProcessorTests because of preserved actual host AudioHAL stalls. HostedAudioUnitTests serialization is included and passes. The full suite remains unqualified. /tmp/stream-wave2-compatible-core-final-20261022.log and matching xcresult."
   },
   "issues": [
     {
@@ -282,9 +284,23 @@
       "title": "[macOS][R02] Apply desktop session resilience and configurable source failover",
       "url": "https://github.com/joeblau/stream/issues/158",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "original software criteria and combined universal build verified; closure proposed after publication",
       "remaining": [
-        "Final recovery and Stream Deck integration fixes and independent acceptance review remain pending. Controlled source failover and lifecycle evidence exists; physical notification/device/TCC and broader sustained output coverage are not claimed."
+        "Publish final combined source and reconcile exact original acceptance criteria and GitHub state. Two independent reviews and final universal build find no remaining concrete software blocker."
+      ],
+      "qualificationLimits": [
+        "Lifecycle, topology and TCC transitions use controlled shipping callbacks/discovery boundaries with actual owned media. Physical OS/TCC/cable/interface delivery and broad hardware/provider coverage were not measured. Initial lock detection uses the public session dictionary plus a supplemental lock marker whose compatibility is explicitly documented."
+      ],
+      "evidence": [
+        "/tmp/stream-wave2-recovery-unlocked-constructor-20261022.log",
+        "/tmp/stream-wave2-recovery-authority-before-20261022.log",
+        "/tmp/stream-wave2-recovery-authority-removal-20261022.log",
+        "/tmp/stream-wave2-permissions-independent-review-20261022.md",
+        "/tmp/stream-wave2-combined-observation-20261022.log",
+        "/tmp/stream-wave2-root-permission-audio-20261022.log",
+        "apple/docs/SOURCE_FAILOVER_NATIVE.md",
+        "apple/docs/DESKTOP_LIFECYCLE_PATH_QUALIFICATION.md",
+        "apple/docs/DESKTOP_OBSERVATION_QUALIFICATION.md"
       ]
     },
     {
