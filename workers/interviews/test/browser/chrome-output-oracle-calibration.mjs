@@ -57,6 +57,16 @@ try{
  socket=new WebSocket(`ws://127.0.0.1:${debug[0]}${debug[1]}`);await new Promise((resolve,reject)=>{socket.once('open',resolve);socket.once('error',reject);});const cdp=new CDP(socket);
  const {targetId}=await cdp.send('Target.createTarget',{url:`http://127.0.0.1:${server.address().port}/`}),{sessionId}=await cdp.send('Target.attachToTarget',{targetId,flatten:true});
  await cdp.send('Page.enable',{},sessionId);await until('Owned media element',()=>cdp.evaluate(sessionId,"Boolean(document.getElementById('element'))"));
+ const processProbe=process.env.STREAM_CHROME_AUDIO_PROCESS_PROBE;
+ if(processProbe){
+  assert(path.isAbsolute(processProbe),'Read-only owned process probe path must be absolute');
+  await cdp.evaluate(sessionId,`(async()=>{const v=document.getElementById('element');v.src='/aligned.mp4';await new Promise((resolve,reject)=>{v.onloadeddata=resolve;v.onerror=reject;v.load();});await v.play();})()`);
+  await pause(500);
+  const identity=spawnSync(processProbe,[String(ownedChromePID)],{encoding:'utf8',timeout:5000,maxBuffer:16384});
+  assert.equal(identity.status,0,'Read-only exact-owned Chrome audio attribution must remain valid');
+  console.log('READONLY owned Chrome audio attribution (no PCM or A/V qualification): '+identity.stdout.trim());
+  await cdp.evaluate(sessionId,"document.getElementById('element').pause()");
+ }
  const capture=path.join(owned,'observer');await fs.mkdir(capture,{mode:0o700});
  observer=spawn(observerPath,['--pid',String(ownedChromePID),'--seconds','20','--out-dir',capture],{stdio:['pipe','pipe','pipe']});
  const client=new Observer(observer),ready=await client.receipt(v=>v.type==='ready');
