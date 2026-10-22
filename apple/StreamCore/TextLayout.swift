@@ -355,15 +355,23 @@ public enum TextMeasurement {
         var lineBreakMode: CTLineBreakMode = overflow == .ellipsis
             ? .byTruncatingTail
             : (wraps ? .byWordWrapping : .byClipping)
-        var settings: [CTParagraphStyleSetting] = [
-            CTParagraphStyleSetting(spec: .alignment,
-                                    valueSize: MemoryLayout<CTTextAlignment>.size,
-                                    value: &ctAlignment),
-            CTParagraphStyleSetting(spec: .lineBreakMode,
-                                    valueSize: MemoryLayout<CTLineBreakMode>.size,
-                                    value: &lineBreakMode)
-        ]
-        return CTParagraphStyleCreate(&settings, settings.count)
+        // Settings retain raw pointers until Core Text copies their values.
+        // Keep both pointees alive through setting construction and creation.
+        return withUnsafePointer(to: &ctAlignment) { alignmentPointer in
+            withUnsafePointer(to: &lineBreakMode) { lineBreakPointer in
+                let settings = [
+                    CTParagraphStyleSetting(spec: .alignment,
+                                            valueSize: MemoryLayout<CTTextAlignment>.size,
+                                            value: alignmentPointer),
+                    CTParagraphStyleSetting(spec: .lineBreakMode,
+                                            valueSize: MemoryLayout<CTLineBreakMode>.size,
+                                            value: lineBreakPointer)
+                ]
+                return settings.withUnsafeBufferPointer {
+                    CTParagraphStyleCreate($0.baseAddress, $0.count)
+                }
+            }
+        }
     }
 
     /// The size the text measures to inside `maxWidth` (pass
