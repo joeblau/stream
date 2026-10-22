@@ -35,7 +35,8 @@ boundary = '            let tracks = try await asset.load(.tracks)'
 assert source.count(boundary) == 1
 source = source.replace(boundary, boundary + '\n            await FixtureState.shared.waitAfterMetadata(url.lastPathComponent)')
 # A single fixture-owned host-time boundary: default is the actual CM clock.
-# Only the exact transport-range case freezes/advances it. Decoder, transport,
+# Only exact transport-range and late-pull cases freeze/advance it after native
+# preparation. The separate real-host case remains unchanged. Decoder, transport,
 # source frames and end callbacks remain the production implementation.
 clock = 'CMClockGetTime(CMClockGetHostTimeClock())'
 assert source.count(clock) >= 10
@@ -73,6 +74,10 @@ extension MediaSourcePlayback {
     func lifecycleItemPosition() -> Double? {
         os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
         return offlineAudio?.time(at: FixtureClock.shared.now(), playing: isPlaying).seconds
+    }
+    func lifecycleItemTime() -> CMTime? {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return offlineAudio?.time(at: FixtureClock.shared.now(), playing: isPlaying)
     }
     func lifecycleAnimatedCallbacks() -> ((@Sendable (SourceDefinitionID, MediaSourceStatus) -> Void)?, (@Sendable (SourceDefinitionID, Double) -> Void)?) {
         os_unfair_lock_lock(&lock)
