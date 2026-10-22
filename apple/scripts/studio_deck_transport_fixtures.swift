@@ -61,16 +61,30 @@ import StreamCore
         let dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: scenes,
             session: SettingsSession(controller: controller), recorder: recorder, previewProgram: preview)
         let port = Int.random(in: 20_000...40_000)
-        let receiver = Process(), receivedFile = folder.appendingPathComponent("received.mp4"), receiverLog = folder.appendingPathComponent("receiver.log")
+        let receiver = Process(), decoder = Process()
+        let receivedFile = folder.appendingPathComponent("received.mp4"), receiverLog = folder.appendingPathComponent("receiver.log")
+        let decoderLog = folder.appendingPathComponent("decoder.log")
         FileManager.default.createFile(atPath: receiverLog.path, contents: nil)
+        FileManager.default.createFile(atPath: decoderLog.path, contents: nil)
         let log = try FileHandle(forWritingTo: receiverLog)
+        let decodeLog = try FileHandle(forWritingTo: decoderLog)
         receiver.executableURL = URL(fileURLWithPath: ffmpeg)
         receiver.arguments = ["-y", "-hide_banner", "-loglevel", "error", "-listen", "1", "-i", "rtmp://127.0.0.1:\(port)/live/fixture", "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", receivedFile.path]
         receiver.standardOutput = log; receiver.standardError = log
         defer {
             recorder.stop(); controller.stopStream(); controller.stopPreview(); scenes.flushPendingWrites()
-            if receiver.isRunning { receiver.terminate() }
-            try? log.close(); defaults.removePersistentDomain(forName: suite)
+            let stoppedReceiver = DeckProcessDiagnostics.stopOwned(receiver)
+            let stoppedDecoder = DeckProcessDiagnostics.stopOwned(decoder)
+            try? log.close(); try? decodeLog.close()
+            if receiver.processIdentifier > 0 {
+                _ = try? DeckProcessDiagnostics.record(receiver, role: .receiver, log: receiverLog, directory: folder,
+                                                       stoppedDuringCleanup: stoppedReceiver)
+            }
+            if decoder.processIdentifier > 0 {
+                _ = try? DeckProcessDiagnostics.record(decoder, role: .decoder, log: decoderLog, directory: folder,
+                                                       stoppedDuringCleanup: stoppedDecoder)
+            }
+            defaults.removePersistentDomain(forName: suite)
         }
         try receiver.run()
         try await until({ listening(receiver, port: port) }, message: "Owned RTMP receiver failed to listen")
@@ -113,7 +127,8 @@ import StreamCore
         try run("output.record.stop")
         try await until({ recorder.state == .idle }, message: "Recording stop did not finalize writer")
         try await until({ !receiver.isRunning }, message: "Owned RTMP receiver did not finish")
-        try check(receiver.terminationStatus == 0, "Owned receiver rejected real native media")
+        try DeckProcessDiagnostics.requireSuccess(receiver, role: .receiver, log: receiverLog, directory: folder,
+                                                   message: "Owned receiver rejected real native media")
         let files = try FileManager.default.contentsOfDirectory(at: recordings, includingPropertiesForKeys: nil).filter { $0.pathExtension == "mp4" }
         try check(files.count == 2, "Native new-file action did not finalize two segments")
         for file in files + [receivedFile] {
@@ -122,12 +137,13 @@ import StreamCore
             let duration = try await asset.load(.duration).seconds
             try check(!video.isEmpty && !audio.isEmpty && duration > 0, "Actual transport/recording media is incomplete: \(file.lastPathComponent)")
         }
-        let decoder = Process()
         decoder.executableURL = URL(fileURLWithPath: ffmpeg)
         decoder.arguments = ["-v", "error", "-xerror", "-i", receivedFile.path, "-f", "null", "-"]
-        decoder.standardOutput = FileHandle.nullDevice; decoder.standardError = log
-        try decoder.run(); decoder.waitUntilExit()
-        try check(decoder.terminationStatus == 0, "Actual RTMP output failed decoding")
+        decoder.standardOutput = FileHandle.nullDevice; decoder.standardError = decodeLog
+        try decoder.run()
+        try await until({ !decoder.isRunning }, message: "Owned FFmpeg decoder did not finish; artifacts: \(folder.path)")
+        try DeckProcessDiagnostics.requireSuccess(decoder, role: .decoder, log: decoderLog, directory: folder,
+                                                   message: "Actual RTMP output failed decoding")
         print("PASS: native selected destination Start/Stop -> actual localhost RTMP acknowledgement and decodable H.264/AAC; independent recording countdown cancellation, Start/Pause/Resume/New File/Stop finalized two real segments")
     }
 }

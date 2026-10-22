@@ -67,6 +67,7 @@ abort 'Wire fixture extraction boundary changed' unless wire_start && wire_end &
 File.write(File.join(folder,'fixtures/VisualWireClient.swift'), "import Foundation\nimport Network\nimport Security\n" + wire[wire_start...wire_end])
 target['sources'] << File.join(root,folder,'fixtures/VisualWireClient.swift')
 target['sources'] << File.join(root,'scripts/studio_deck_transport_fixtures.swift')
+target['sources'] << File.join(root,'scripts/studio_deck_process_diagnostics.swift')
 spec['targets']['StudioDeckNativeHarness']=target
 spec['schemes']['StudioDeckNativeHarness']={'build'=>{'targets'=>{'StudioDeckNativeHarness'=>'all'}}}
 require File.join(root, 'scripts/desktop_transport_fixture')
@@ -81,4 +82,5 @@ xcodebuild -project "$DECK_NATIVE_DIR/StudioDeckNativeValidation.xcodeproj" \
   -scheme StudioDeckNativeHarness -destination 'platform=macOS' \
   -derivedDataPath "$DECK_NATIVE_BUILD_PATH" -jobs 2 SWIFT_MAXIMUM_CONCURRENT_COMPILE_TASKS=2 OTHER_SWIFT_FLAGS='-j2' CODE_SIGNING_ALLOWED=NO build
 readonly DECK_NATIVE_PRODUCTS="${DECK_NATIVE_BUILD_PATH:A}/Build/Products/Debug"
-env DYLD_FRAMEWORK_PATH="$DECK_NATIVE_PRODUCTS" "$DECK_NATIVE_PRODUCTS/StudioDeckNativeHarness"
+env DYLD_FRAMEWORK_PATH="$DECK_NATIVE_PRODUCTS" STREAM_DECK_NATIVE_ARTIFACT_ROOT="${DECK_NATIVE_DIR:A}" \
+  "$DECK_NATIVE_PRODUCTS/StudioDeckNativeHarness"
