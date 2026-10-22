@@ -1,0 +1,99 @@
+{
+  "baseCommit": "99061852457f648a279096ed36fa7b05e4042fb9",
+  "scope": "Diagnostic-only owned offscreen row fixture. No shipping source or layout/admission gates changed. The original Intel cause remains UNKNOWN; this one macOS27.2 invocation did not reproduce it.",
+  "fixtureSHA256": "7969eb51554e03a43431cb638baf19f12d54eda405f130b585bf3d6f44dc009e",
+  "originalFixtureSHA256": "fb9faabf5c1ac95531e743f2ea43083ea3b96d39cefc84683d404380fe3c1837",
+  "originalIntelFailure": {
+    "path": "/tmp/stream-ci-50084bb-120141131932-original.log",
+    "sha256": "902dd987f8265e4e0832a0f10b0570bbe6c58cfda70cc2bd76f140bf0d41ed84",
+    "message": "The owned native style must remain selected",
+    "missingEvidence": "No requested style, kind, point size, native identity or notification was recorded. Unbuffered case diagnostics were absent."
+  },
+  "shippingSourceSHA256": {
+    "apple/StreamMac/StudioControlRow.swift": "581b2013d6b3daa9bcfb4d294fcb6332467979cf2b43b4c78d10de593c5e18be",
+    "apple/StreamMac/StudioAccessibility.swift": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c",
+    "apple/StreamMac/MainWindowView.swift": "ea55a02c769481eb568f9fb025d8896488b7188d052f9e94f3bcbd65f19715f6"
+  },
+  "invariants": {
+    "all11OriginalRequireExpressionsByteIdentical": true,
+    "headerBoundaryStubsUnchanged": true,
+    "matrix": "40 cases: transport/transition \u00d7 overlay/legacy \u00d711...20points",
+    "widths": [
+      320,
+      844
+    ],
+    "settleSeconds": 0.05,
+    "compileTimeoutSeconds": 60,
+    "runtimeTimeoutSeconds": 90,
+    "startupUnchanged": "prohibited policy; no finishLaunching/run/activation",
+    "noRetryOrSkip": true
+  },
+  "actualResult": {
+    "compileExit": 0,
+    "runtimeExit": 0,
+    "compileSeconds": 1.5100877079967177,
+    "runtimeSeconds": 11.630723999987822,
+    "passRows": 40,
+    "layoutObservations": 280,
+    "host": {
+      "activationPolicy": 2,
+      "applicationRunning": false,
+      "event": "host",
+      "os": "Version 27.2 (Build 26B118)",
+      "preferredStyle": 0,
+      "uptimeSeconds": 106711.007868125
+    },
+    "notifications": [],
+    "styleMismatchesAfterAssignment": 0,
+    "staleScrollOrDocumentIdentities": 0,
+    "visibleOrKeyWindowObservations": 0,
+    "sourceInputsUnchanged": true
+  },
+  "artifacts": {
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/2-MainWindowView.swift": {
+      "bytes": 60456,
+      "sha256": "ea55a02c769481eb568f9fb025d8896488b7188d052f9e94f3bcbd65f19715f6"
+    },
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/3-test_studio_control_rows.py": {
+      "bytes": 20318,
+      "sha256": "7969eb51554e03a43431cb638baf19f12d54eda405f130b585bf3d6f44dc009e"
+    },
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/result.json": {
+      "bytes": 3640,
+      "sha256": "69538bf18c62cf42272f60b5fa22dd6b47623bc840cf0f668616ecef7f53822c"
+    },
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/0-StudioAccessibility.swift": {
+      "bytes": 6476,
+      "sha256": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c"
+    },
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/failed-phase.json": {
+      "bytes": 3134,
+      "sha256": "808a29d6fb68f4b560ed07012a68063b3af88a7c2a94ca352221c701ef314ac2"
+    },
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/compile.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/ControlRows": {
+      "bytes": 776840,
+      "sha256": "c77f2a05a88665e31ac7ed1d0e369c1302ef683d89dd42c9cec272f582987fa1"
+    },
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/runtime.log": {
+      "bytes": 343606,
+      "sha256": "f6bc7aa4d680dd5bec03c86b73fb76fc1118815bd852548ee3ca97106dac47e4"
+    },
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/OwnedControlRows.swift": {
+      "bytes": 21008,
+      "sha256": "85fb9e1218afca600f74acd8dec91f4c52a0a5d4bc46673e76cf6e3101880a6f"
+    },
+    "/private/tmp/stream-wave22-control-row-diagnostics-20261022/apple/build/studio-control-rows-validation/artifacts/invocation-c9ea5728-a039-4a91-a5d5-c637b34b4929/1-StudioControlRow.swift": {
+      "bytes": 909,
+      "sha256": "581b2013d6b3daa9bcfb4d294fcb6332467979cf2b43b4c78d10de593c5e18be"
+    }
+  },
+  "outerLog": {
+    "path": "/tmp/stream-wave22-control-row-native-20261022.log",
+    "sha256": "2898ed7f7f56550e26871925f30e2eb332f79fb258fef424dae85b866af992a9"
+  },
+  "pendingGate": "One small hosted Intel/ARM diagnostic invocation should retain the first result. No original Intel style-reset/refusal, stale reference, app-launch or production-layout cause established."
+}
