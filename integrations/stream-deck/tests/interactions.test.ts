@@ -40,12 +40,17 @@ test("configured guest slots, profile requests and provider readings use authori
 test("real IPC client carries current authority, keeps profile scope explicit and only refreshes read-only controls",async()=>{
   const snapshot=state(),session=randomUUID(),slot=randomUUID(),project=randomUUID(),profile=randomUUID();
   const guest=`guest.slot.${slot}.mute`,show=`show.${project}.profile.${profile}.select`;
+  const readings=Array.from({length:65},(_,index)=>({destinationID:randomUUID(),name:`Provider ${index}`,freshness:"unavailable",count:undefined as number|undefined,readAt:undefined as number|undefined}));
+  const last=readings.at(-1)!;last.count=0;last.readAt=Date.now()/1000;last.freshness="current";
+  snapshot.audience={observedAt:Date.now()/1000,health:"idle",readings,presetDelivery:{}};
+  const lastKey=`audience.${last.destinationID}.viewers`;
   let authority="a".repeat(64),calls:any[]=[],connections=0;
   const sockets=new Set<net.Socket>();
   const commands=():Capability[]=>[
     {id:guest,title:"Mute configured Ada",category:"Guests",available:true,authority,bindingIntent:"configuredSlot"},
     {id:show,title:"Select show profile",category:"Show Profiles",available:true,scope:"studio",authority:"runtime-source"},
     {id:"audience.viewers",title:"Viewers",category:"Audience",available:true,kind:"feedback"},
+    {id:lastKey,title:"Final provider",category:"Audience",available:true,kind:"feedback"},
     {id:"audio.microphone.mute",title:"Mic",category:"Audio",available:true,scope:"studio"}
   ];
   const server=net.createServer(socket=>{
@@ -58,7 +63,7 @@ test("real IPC client carries current authority, keeps profile scope explicit an
         const base={version:1,id:request.id,sessionID:session};
         if(request.type==="authenticate")reply({...base,type:"authenticated",snapshot});
         else if(request.type==="subscribe"||request.type==="snapshot")reply({...base,type:"snapshot",snapshot});
-        else if(request.type==="capabilities")reply({...base,type:"capabilities",commands:commands(),totalCommands:4});
+        else if(request.type==="capabilities")reply({...base,type:"capabilities",commands:commands(),totalCommands:commands().length});
         else if(request.type==="command")reply({...base,type:"result",snapshot,result:{succeeded:request.commandID!==guest||request.authority===authority}});
       }
     });
@@ -68,6 +73,13 @@ test("real IPC client carries current authority, keeps profile scope explicit an
   try{
     client.configure({version:1,clientID:randomUUID(),token:"b".repeat(64),port:(server.address() as net.AddressInfo).port});
     await wait(()=>client.status==="Connected");
+    assert.equal(client.snapshot!.audience!.readings.length,65,"complete65-reading snapshot must survive real TCP semantic validation");
+    assert.equal(feedback({commandID:lastKey,projectID:snapshot.projectID},client.status,client.snapshot,client.capabilities).badge,"0 VIEWERS");
+    last.count=undefined;last.freshness="expired";await client.execute(lastKey,snapshot.projectID);
+    assert.equal(feedback({commandID:lastKey,projectID:snapshot.projectID},client.status,client.snapshot,client.capabilities).badge,"EXPIRED");
+    last.freshness="unavailable";await client.execute(lastKey,snapshot.projectID);
+    assert.equal(feedback({commandID:lastKey,projectID:snapshot.projectID},client.status,client.snapshot,client.capabilities).badge,"UNAVAILABLE");
+    assert.equal(client.snapshot!.audience!.readings.at(-1)!.destinationID,last.destinationID,"final configured destination identity must remain stable");
     await Promise.all([client.execute(guest,snapshot.projectID),client.execute(guest,snapshot.projectID)]);
     assert.equal(calls.filter(value=>value.type==="command"&&value.commandID===guest).length,2,"multiple bindings share one session without replay");
     assert(calls.filter(value=>value.commandID===guest).every(value=>value.authority==="a".repeat(64)));
