@@ -45,7 +45,9 @@ boundaries isolate defaults and credentials and refuse device capture. The
 manager media host is controlled; these tests do not qualify browser decoding,
 deployed TURN, Internet/mobile/restricted networks or operator devices.
 
-One native admitted media peer remains the measured limit. Private text is
+One native admitted media peer remains the conservative
+[tested gate](NATIVE_INTERVIEW_CAPACITY_GATE.md), not a measured maximum or
+resource-derived budget. Private text is
 implemented separately in `NATIVE_GUEST_PRIVATE_MESSAGES.md`. Addressed private
 microphone talkback is described below. The original feature/validation mapping
 and separately retained broader scopes are summarized in
