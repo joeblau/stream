@@ -74,3 +74,35 @@ receipt. No unchanged native retry is warranted in the same environment.
 Operator VoiceOver traversal, actions and order, plus actual visual contrast
 and layout checks, remain open acceptance requirements. No additional physical
 device or universal certification gate is added.
+
+## Soundboard and document follow-up
+
+On baseline `44c078e`, source commit `2db81fb` repairs another concrete
+keyboard/action gap: the pad editor's eight color circles used only
+`onTapGesture`. They are now plain SwiftUI buttons, matching the existing
+annotation palette convention. Each identifies the pad and color and reports
+whether it is selected. The existing checkmark, dimensions, color values and
+`updateSoundPad` command are preserved.
+
+Pad, playlist and scene-sound volume sliders now identify their target and
+report percent; 100 percent remains unity gain and the range remains
+0 through 200 percent. Playlist transport and scene-sound relink/remove
+buttons identify their targets. PDF page sliders, previous/next buttons and
+thumbnail buttons identify the document and page; the current thumbnail
+reports “Current page.” All existing bindings, dispatcher commands, identity,
+disabled conditions and playback behavior are preserved.
+
+Both complete changed views passed `swiftc -frontend -parse`, and
+`git diff --check` passed. Exact source hashes and command results are in
+`/tmp/stream-wave6-accessibility-source-checks-20261022.json`. These are source
+checks; the combined app still requires compilation at integration. No new
+native AX or keyboard attempt was made in the locked session, and no
+VoiceOver, traversal, default-action or contrast qualification is inferred.
+Original #90 remains open under the limits above.
+
+The same audit identified additional controls requiring separate work:
+screen-crop geometry can currently be changed only by a marquee drag, and
+PTZ direction controls are drag-only while zoom buttons have empty native
+button actions. A keyboard alternative for PTZ must preserve the existing
+explicit stop and teardown behavior rather than starting indefinite motion.
+Those behaviors are not changed or qualified by `2db81fb`.
