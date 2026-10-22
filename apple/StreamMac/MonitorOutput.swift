@@ -22,6 +22,14 @@ struct MonitorPlaybackStatistics: Equatable, Sendable {
     var queuedDepth: Int = 0
 }
 
+/// Owned fixtures replace only the HAL playback boundary; device selection,
+/// fallback, admission and hot-plug handling remain the production controller.
+protocol MonitorPlaybackBoundary: Sendable {
+    func play(_ sample: CMSampleBuffer)
+    func configure(deviceID: AudioDeviceID?) -> String?
+    func statistics() -> MonitorPlaybackStatistics
+}
+
 /// A07 (issue #119): headphone monitoring — plays the audio engine's MONITOR
 /// bus to a user-selected CoreAudio output device.
 ///
@@ -84,20 +92,33 @@ final class MonitorOutput: ObservableObject {
     /// A07/A09: playback counters (scheduled/played/dropped/queue depth).
     @Published private(set) var statistics = MonitorPlaybackStatistics()
 
-    private let core = MonitorPlayerCore()
+    private let core: any MonitorPlaybackBoundary
+    private let availableOutputs: () -> [MonitorOutputDevice]
+    private let defaultOutputDeviceID: () -> AudioDeviceID?
+    private let deviceUID: (AudioDeviceID) -> String?
     private var hardwareListener: AudioHardwareListener?
     /// The HAL device the output node is currently aimed at (nil = default
     /// resolution), plus whether any configuration has been applied — the
     /// reconfigure short-circuit compares against this.
     private var appliedDeviceID: AudioDeviceID?
+    private var appliedDeviceUID: String?
     private var configurationApplied = false
     private var statsTask: Task<Void, Never>?
 
-    init() {
+    init(availableOutputs: @escaping () -> [MonitorOutputDevice] = MonitorOutputDevices.availableOutputs,
+         defaultOutputDeviceID: @escaping () -> AudioDeviceID? = MonitorOutputDevices.defaultOutputDeviceID,
+         deviceUID: @escaping (AudioDeviceID) -> String? = MonitorOutputDevices.deviceUID,
+         observeHardware: Bool = true, playback: (any MonitorPlaybackBoundary)? = nil) {
+        self.availableOutputs = availableOutputs
+        self.defaultOutputDeviceID = defaultOutputDeviceID
+        self.deviceUID = deviceUID
+        self.core = playback ?? MonitorPlayerCore()
         refreshDevices()
-        hardwareListener = AudioHardwareListener { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.hardwareChanged()
+        if observeHardware {
+            hardwareListener = AudioHardwareListener { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.hardwareChanged()
+                }
             }
         }
     }
@@ -118,6 +139,7 @@ final class MonitorOutput: ObservableObject {
         if !enabled {
             configurationApplied = false
             appliedDeviceID = nil
+            appliedDeviceUID = nil
             isFallbackActive = false
             effectiveDeviceUID = nil
             errorMessage = nil
@@ -131,14 +153,14 @@ final class MonitorOutput: ObservableObject {
     // MARK: - Device resolution + hot-plug
 
     private func refreshDevices() {
-        devices = MonitorOutputDevices.availableOutputs()
+        devices = availableOutputs().filter { StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: $0.uid) }
     }
 
     /// Hardware changed (device list or system default output). Re-enumerate,
     /// then re-apply the effective device — a returned selection re-pins
     /// itself, a vanished one falls back, a changed default re-aims the
     /// default-follow configuration.
-    private func hardwareChanged() {
+    func hardwareChanged() {
         refreshDevices()
         guard isEnabled else { return }
         resolveAndApply()
@@ -148,6 +170,11 @@ final class MonitorOutput: ObservableObject {
     /// when the target actually changed. The reconfigure path restarts the
     /// output engine, so it only runs on real transitions.
     private func resolveAndApply() {
+        if let uid = selectedDeviceUID, !StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: uid) {
+            isFallbackActive = false
+            suspendForRoutingError(StudioAudioDeviceRouting.feedbackRepair)
+            return
+        }
         let targetID: AudioDeviceID?
         if let uid = selectedDeviceUID {
             if let device = devices.first(where: { $0.uid == uid }) {
@@ -166,17 +193,40 @@ final class MonitorOutput: ObservableObject {
         // The "default" resolution pins the CURRENT default device (the HAL
         // re-listener above re-resolves when it changes), so nil reads as
         // the live default output's id here.
-        let resolvedID = targetID ?? MonitorOutputDevices.defaultOutputDeviceID()
-        effectiveDeviceUID = resolvedID.flatMap { MonitorOutputDevices.deviceUID($0) }
-        guard configurationApplied, resolvedID != nil, resolvedID == appliedDeviceID else {
-            configurationApplied = true
-            appliedDeviceID = resolvedID
-            errorMessage = resolvedID == nil
-                ? "No audio output device is available."
-                : core.configure(deviceID: resolvedID)
-            if errorMessage == nil { startStatsPolling() }
+        guard let resolvedID = targetID ?? defaultOutputDeviceID(), let uid = deviceUID(resolvedID) else {
+            suspendForRoutingError("No identifiable audio output device is available.")
             return
         }
+        guard StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: uid) else {
+            suspendForRoutingError(StudioAudioDeviceRouting.feedbackRepair)
+            return
+        }
+        if targetID != nil, let selectedDeviceUID, selectedDeviceUID != uid {
+            suspendForRoutingError("The selected monitor device changed identity. Choose the output device again.")
+            return
+        }
+        guard configurationApplied, resolvedID == appliedDeviceID, uid == appliedDeviceUID else {
+            errorMessage = core.configure(deviceID: resolvedID)
+            configurationApplied = errorMessage == nil
+            appliedDeviceID = configurationApplied ? resolvedID : nil
+            appliedDeviceUID = configurationApplied ? uid : nil
+            effectiveDeviceUID = configurationApplied ? uid : nil
+            if errorMessage == nil { startStatsPolling() } else {
+                isFallbackActive = false
+                stopStatsPolling()
+            }
+            return
+        }
+    }
+
+    private func suspendForRoutingError(_ message: String) {
+        // Stop an already-open ordinary route too: changing the system default
+        // to the loopback must never leave playback running on its old target.
+        _ = core.configure(deviceID: nil)
+        configurationApplied = false; appliedDeviceID = nil; appliedDeviceUID = nil
+        isFallbackActive = false
+        effectiveDeviceUID = nil; errorMessage = message
+        stopStatsPolling()
     }
 
     /// Polls the player core's counters into the published snapshot at a UI
@@ -204,7 +254,7 @@ final class MonitorOutput: ObservableObject {
 /// point is lock-confined; `scheduleBuffer`/completion-handler accounting is
 /// the only cross-thread state. `@unchecked Sendable` is sound for the same
 /// reason as the codebase's other lock-confined boxes (PublisherBox et al.).
-private final class MonitorPlayerCore: @unchecked Sendable {
+private final class MonitorPlayerCore: MonitorPlaybackBoundary, @unchecked Sendable {
     /// Playback queue ceiling: 6 chunks ≈ 64 ms. Past this the player sheds
     /// the INCOMING chunk (drop-new) — latency stays bounded; the listener
     /// hears a momentary gap rather than a growing delay.
