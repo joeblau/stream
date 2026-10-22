@@ -711,7 +711,7 @@ actor CompositionEngine {
         let generation = UUID()
         do {
             let receipt = try RawVideoResourceCoordinator.shared.reserveBatch([.init(domain: domain,
-                descriptor: .init(width: max(1, Int(size.width)), height: max(1, Int(size.height)), capacity: max(4, min(64, capacity + 2))),
+                descriptor: .init(width: max(1, Int(size.width.rounded())), height: max(1, Int(size.height.rounded())), capacity: max(4, min(64, capacity + 2))),
                 sessionGeneration: generation)])
             guard let bank = receipt.banks.first else { return }
             do { try installFrameDelivery(token: token, domain: domain, generation: generation, bank: bank,

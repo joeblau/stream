@@ -106,7 +106,7 @@ final class EngineSourceResources: @unchecked Sendable {
         guard size.width.isFinite, size.height.isFinite, size.width >= 1, size.height >= 1,
               size.width <= 4096, size.height <= 4096 else { throw RawVideoResourceFailure.invalidRequest }
         let key = clean ? "clean" : canvas == .program ? "program" : "secondary"
-        let descriptor = RawVideoBankDescriptor(width: Int(size.width), height: Int(size.height), capacity: 4)
+        let descriptor = RawVideoBankDescriptor(width: Int(size.width.rounded()), height: Int(size.height.rounded()), capacity: 4)
         lock.lock(); defer { lock.unlock() }
         var slot = slots[key] ?? Slot()
         if let bank = slot.current, bank.descriptor == descriptor { return bank.reservation.request }
@@ -120,14 +120,14 @@ final class EngineSourceResources: @unchecked Sendable {
     func current(size: CGSize, canvas: OutputCanvas, clean: Bool) -> RawVideoResourceBank? {
         let key = clean ? "clean" : canvas == .program ? "program" : "secondary"
         lock.lock(); defer { lock.unlock() }
-        guard let bank = slots[key]?.current, CGFloat(bank.descriptor.width) == size.width,
-              CGFloat(bank.descriptor.height) == size.height else { return nil }
+        guard let bank = slots[key]?.current, CGFloat(bank.descriptor.width) == size.width.rounded(),
+              CGFloat(bank.descriptor.height) == size.height.rounded() else { return nil }
         return bank
     }
     func commit(_ bank: RawVideoResourceBank, receipt: RawVideoResourceReceipt,
                 size: CGSize, canvas: OutputCanvas, clean: Bool) throws -> RawVideoResourceBank {
         guard receipt.banks.count == 1, receipt.banks.first?.id == bank.id,
-              CGFloat(bank.descriptor.width) == size.width, CGFloat(bank.descriptor.height) == size.height,
+              CGFloat(bank.descriptor.width) == size.width.rounded(), CGFloat(bank.descriptor.height) == size.height.rounded(),
               bank.allocationThreshold == 4 else { throw FrameDeliveryFailure.invalidBank }
         let key = clean ? "clean" : canvas == .program ? "program" : "secondary"
         lock.lock()

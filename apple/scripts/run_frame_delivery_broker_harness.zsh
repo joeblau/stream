@@ -14,8 +14,8 @@ xcodebuild -jobs 2 -project "$BROKER_FIXTURE_DIR/FrameDeliveryBroker.xcodeproj" 
 env DYLD_FRAMEWORK_PATH="${BROKER_FIXTURE_BUILD_PATH:A}/Build/Products/Debug" \
     python3 - "${BROKER_FIXTURE_BUILD_PATH:A}/Build/Products/Debug/FrameDeliveryBrokerHarness" "$BROKER_FIXTURE_DIR" "$@" <<'PY'
 import json,pathlib,subprocess,sys,os,signal
-binary=sys.argv[1];folder=pathlib.Path(sys.argv[2]);negative='--negative-control'in sys.argv[3:];sequence_negative='--sequence-negative-control'in sys.argv[3:]
-command=[binary]+(['--sequence-negative-control'] if sequence_negative else ['--negative-control']if negative else[])
+binary=sys.argv[1];folder=pathlib.Path(sys.argv[2]);negative='--negative-control'in sys.argv[3:];sequence_negative='--sequence-negative-control'in sys.argv[3:];fractional='--fractional-geometry'in sys.argv[3:]
+command=[binary]+(['--fractional-geometry'] if fractional else ['--sequence-negative-control'] if sequence_negative else ['--negative-control']if negative else[])
 receipts=folder/('sequence-negative-observations' if sequence_negative else 'negative-observations'if negative else'production-observations');receipts.mkdir(exist_ok=True)
 clock=folder/'clock-observations';clock.mkdir(exist_ok=True)
 environment=dict(os.environ,FRAME_DELIVERY_RECEIPT_DIR=str(receipts.resolve()),COMPOSITION_CLOCK_RECEIPT_DIR=str(clock.resolve()))

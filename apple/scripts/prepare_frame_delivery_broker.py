@@ -5,6 +5,7 @@ parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output',type=pathlib.Path)
 parser.add_argument('--negative-control',action='store_true')
 parser.add_argument('--sequence-negative-control',action='store_true')
+parser.add_argument('--fractional-geometry',action='store_true')
 args=parser.parse_args();root=pathlib.Path(__file__).resolve().parents[1]
 folder=(args.output or root/'build/frame-delivery-broker-validation').resolve();folder.mkdir(parents=True,exist_ok=True)
 source=(root/'StreamMac/CompositionEngine.swift').read_text()
