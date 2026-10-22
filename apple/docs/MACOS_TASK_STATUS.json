@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks 61 original macOS issues (48 feature tasks and 13 roadmap or epic trackers). Last full read-only body/state refresh confirms 34 open and 27 closed: 23 open features and 11 open trackers. This cohort adds no closures; already closed PTZ issue 165 is outside this original inventory.",
+  "scope": "Tracks the original 61 macOS issues (48 feature tasks and 13 roadmap/epic trackers): 27 closed / 34 open, comprising 23 open features and 11 open trackers. Fresh complete repository inventory finds 135 macOS issues overall, 101 closed / 34 open; all 74 outside the original inventory are already closed, with no new open task. This cohort adds no closures.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -309,7 +309,18 @@
       ]
     },
     "wave15PublisherCache": "Whole actual publisher actors pass six positive/four exact negative ownership checks with selected SDK media effects inert; independent source/proof review clear. Combined unsigned universal app/bundle source eecaddc PASS. No media transport/VT/performance qualification; #92 open.",
-    "wave15OwnedRTC": "One exact e803 owned all-Chromium attempt completes in 11.398 s, UNQUALIFIED 77. All ten observed API calls fulfill, but no exposed pair/remote-candidate rows and no connection/RTP measurement. Source/raw/cleanup independently reviewed; no retry/native #127 qualification."
+    "wave15OwnedRTC": "One exact e803 owned all-Chromium attempt completes in 11.398 s, UNQUALIFIED 77. All ten observed API calls fulfill, but no exposed pair/remote-candidate rows and no connection/RTP measurement. Source/raw/cleanup independently reviewed; no retry/native #127 qualification.",
+    "wave16CombinedNative": {
+      "source": "e122c91e5222c422ea809e744dddaf893dbb4681",
+      "status": "Generation, unsigned universal Release and bundle audit PASS",
+      "receipt": {
+        "path": "/tmp/stream-wave16-parent-final-results-20261022.json",
+        "bytes": 768,
+        "sha256": "449fbb04ae6b68010ffda37b558e7022356646961b67e9dbe497a1cb0cd4b358"
+      },
+      "manifestPaths": 724
+    },
+    "wave16FocusedEvidence": "Annotation 192-case geometry and retained original-width failure artifacts; Program health 12 Core tests plus exact decision-block probe; recovery baseline133/fixed0; package five actual IO/method phases and three generation tests PASS in named scopes. Independent reviews clear; no whole hosted-CI or new qualification claim."
   },
   "issues": [
     {
@@ -552,11 +563,13 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Successful native keyboard file-chooser selection remains unqualified in the locked session. Actual LaunchServices and typed NSItemProvider intake are verified; neither is relabelled a physical Finder gesture."
+        "Successful native keyboard file-chooser selection remains unqualified in the locked session. Actual LaunchServices and typed NSItemProvider intake are verified; neither is relabelled a physical Finder gesture.",
+        "Fresh-manifest package fixture seam and exact copied Workspace methods now verify five actual IO/read-generation/ownership/catalog/import phases, retaining original condition holds/deadline, plus three generation checks. No full runtime, native chooser, sandbox or LaunchServices qualification is added; prior native keyboard acceptance gap remains."
       ],
       "evidence": [
         "PORTABLE_SHOW_NATIVE_ENTRY.md",
-        "/tmp/stream-wave3-portable-audio-report-20261022.md"
+        "/tmp/stream-wave3-portable-audio-report-20261022.md",
+        "PACKAGE_READ_METHODS_2026-10-22.json"
       ]
     },
     {
@@ -968,7 +981,8 @@
         "New a9 fixed 2x20 s attribution jobs succeed all short raw checks with 450-frame minimum, but do not qualify original 600 s / 17,850-frame capacity. Actual per-architecture renders/writer/postwarm/source-decode counters remain distinct; Intel static writer drops 16audio chunks. Old 600 s Intel final decode inspection is terminally incomplete/UNQUALIFIED at owned 1380 s teardown, not currently running. Clock lifecycle/epoch proofs and independent baseline audits are complete, but no timing-improvement or VM-cause claim follows without a real comparison.",
         "Post-clock a4 ARM two 20 s diagnostic completes with 551/562 frames versus 553/574 baseline and 10/0 audio drops; no observed throughput improvement in these samples. Binding audit and independent review pass, but zero tolerance guarantees neither timely resumption nor kernel/coalescing-cause proof. Intel follow-up remains separately active at the recorded snapshot; original 600 s qualification remains failed/open.",
         "Final independently audited a4 comparison: ARM 551/562 vs 553/574 baseline with 10/0 audio-chunk drops; Intel 553/569 vs 528/565 with 0/0 vs 16/0 drops. All short 450-frame checks pass, but no causal/general or 600 s performance qualification follows. Actual eight-case mailbox retirement plus six clock proofs pass, with a three-call negative control; releasing pending ownership does not revoke active/raw external holders or identify all historical holders.",
-        "Both whole raw publisher actors now release unused repeat-cache ownership at accepted Program audio entry before the existing await and avoid caching later Program video. Actual one-buffer-pool six positive/four exact negative cases pass with selected SDK media effects inert. This does not qualify opaque SDK/VideoToolbox release, historical surface holders, full isolation or sustained performance; original issue remains open."
+        "Both whole raw publisher actors now release unused repeat-cache ownership at accepted Program audio entry before the existing await and avoid caching later Program video. Actual one-buffer-pool six positive/four exact negative cases pass with selected SDK media effects inert. This does not qualify opaque SDK/VideoToolbox release, historical surface holders, full isolation or sustained performance; original issue remains open.",
+        "Actual Program failed/attempt pressure is now separate from scheduler misses, with absent-versus-measured-zero intervals and fresh recovery windows. Twelve Core tests, exact coordinator/report-block probe and combined universal build pass. This optional preview policy correction does not repair render allocation, identify failure cause, qualify active-output isolation or complete original representative sustained/resource measurements."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -1031,7 +1045,8 @@
         "Current source adds native Scene menu and named AX reorder actions with actual no-window callback/model/runtime fencing tests, and stable scrollable transport/transition rows with 40 exact static native layout cases. This repairs concrete software paths but does not qualify actual menu/AX/keyboard delivery, every 1024\u00d7640 panel/live state, contrast, focus or visible operator readability. Original criteria remain open.",
         "Numeric position/size/rotation drafts and explicit fresh-draft recovery now pass actual shipping workspace/model/compiled-view/pixel checks, including exact combined 873. These do not qualify mounted SwiftUI identity, native keyboard/AX delivery, full-window layout or contrast; original issue remains open.",
         "Settings sliders now have native operation names/unit-bearing accessibility values and Close settings is named; exact77 universal compilation passes. Actual mounted AX/keyboard/VoiceOver delivery and full-window/contrast acceptance remain unqualified.",
-        "Latest source names native effect/AU parameters and operations, secondary safe-zone/Follow Program controls and cue-specific rundown actions. Independent source reviews and combined 5c7dbea unsigned universal typecheck pass; actual mounted AX/keyboard/VoiceOver, full-window/contrast acceptance remains unqualified."
+        "Latest source names native effect/AU parameters and operations, secondary safe-zone/Follow Program controls and cue-specific rundown actions. Independent source reviews and combined 5c7dbea unsigned universal typecheck pass; actual mounted AX/keyboard/VoiceOver, full-window/contrast acceptance remains unqualified.",
+        "Annotation toolbar now retains narrow-canvas controls using the existing native scroll row and intrinsic picker width. All 192 actual hidden native geometry cases and separate failure-artifact custody checks pass; actions/owners are inert. Native keyboard/AX/VoiceOver, focus, pixels/contrast and full-window operator acceptance remain unqualified."
       ],
       "evidence": [
         "STUDIO_CONTROLS.md",
@@ -1055,7 +1070,10 @@
         "/tmp/stream-wave10-parent-layer-geometry-results-20261022.json",
         "SETTINGS_SLIDER_ACCESSIBILITY.md",
         "FX_RACK_ACCESSIBILITY.md",
-        "CANVAS_RUNDOWN_ACCESSIBILITY.md"
+        "CANVAS_RUNDOWN_ACCESSIBILITY.md",
+        "ANNOTATION_TOOLBAR_LAYOUT_2026-10-22.md",
+        "ANNOTATION_TOOLBAR_LAYOUT_2026-10-22.json",
+        "ANNOTATION_TOOLBAR_RETENTION_2026-10-22.json"
       ]
     },
     {
@@ -1240,11 +1258,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closure justified. Exact local eecaddc generation, unsigned universal arm64/x86_64 Release and bundle audit PASS, bound to expanded 662 source/recipe paths plus vendor. Whole actual raw-publisher actors pass six positive/four exact negative repeat-cache ownership cases with selected SDK media effects inert; no transport/encoder/device/performance qualification. One exact published e803 owned all-Chromium diagnostic finishes UNQUALIFIED 77 after 11.398 s: ten observed APIs fulfill, but no exposed candidate-pair/remote-candidate rows; no connection is established and the original 12 s positive measurement is unreached. Internal handling/cause remains unknown. Current published e803, c90 native CI active at 11:26:56 UTC with ARM 13 / Intel 10 and iOS 588/82 PASS in 210.314 s. #90/#92/#124/#127 and all other original incomplete gates remain open; earlier source-scoped receipts and failed runs are preserved.",
-  "integratedMain": "eecaddce45d96f852cbf858b73f80337f59a02c2",
-  "githubStateRefreshedAt": "2026-10-22T10:32:53.956174+00:00",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers). Fresh complete repository audit finds 135 macOS issues, 101 closed / 34 open, no outside-inventory open tasks or open PRs; no additional closure justified. Exact local e122c91 generation, unsigned universal arm64+x86_64 Release and bundle PASS with 724-path expanded source/recipe manifest and vendor. Annotation 192-case geometry, Program-health 12 Core tests plus exact block probe, recovery baseline133/fixed0 and package five actual method/IO phases are bounded reviewed evidence, not new operator/device/capture/sustained qualification. Published 9cb; c90 CI ARM step19 recovery failure preserved, Intel live and iOS success; latest9cb pending/zero jobs at recorded snapshots. Earlier issue states, failed gates and receipts remain unchanged.",
+  "integratedMain": "e122c91e5222c422ea809e744dddaf893dbb4681",
+  "githubStateRefreshedAt": "2026-10-22T11:42:59Z",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "e8033037ee0a5bd51ed9b7b803ea8c34347f265b",
+  "publishedIntegration": "9cb68c901fa620db294436324ab1ba0a723f22dd",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1264,7 +1282,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "eecaddce45d96f852cbf858b73f80337f59a02c2",
+  "currentReviewBase": "e122c91e5222c422ea809e744dddaf893dbb4681",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -4115,5 +4133,254 @@
       ],
       "scope": "ARM managed-event step 13 and Intel controller step 10 active; iOS 588/82 PASS in 210.314 s. No whole CI conclusion. Earlier a9 both-Mac ending failures and source-specific success/failure history remain unchanged."
     }
+  },
+  "wave16Review": {
+    "currentLocalHead": "e122c91e5222c422ea809e744dddaf893dbb4681",
+    "publishedMainAtSnapshot": "9cb68c901fa620db294436324ab1ba0a723f22dd",
+    "closureAudit": {
+      "recordedAt": "2026-10-22T11:42:59Z",
+      "inventory": {
+        "path": "/tmp/stream-wave16-macos-closure-inventory-20261022.json",
+        "bytes": 428974,
+        "sha256": "832346464da2eb47b1f51071d5e58d444f78f5ee1c17151f66b89ba2f0dab5ed"
+      },
+      "review": {
+        "path": "/tmp/stream-wave16-macos-closure-audit-20261022.json",
+        "bytes": 33182,
+        "sha256": "da9564d9c744308b55964579a1c48b9f220f3630d0cd3c6db1dac4457492471c"
+      },
+      "allRepositoryRecords": 220,
+      "macOSIssues": 135,
+      "macOSClosed": 101,
+      "macOSOpen": 34,
+      "original61Closed": 27,
+      "original61Open": 34,
+      "outsideOriginal61Open": [],
+      "openPullRequests": [],
+      "additionalClosuresJustified": [],
+      "scope": "Complete paginated read-only GitHub connector inventory; remote main verified before/after exact 9cb. All 11 open trackers have incomplete children. No new acceptance requirement or issue mutation."
+    },
+    "combinedNative": {
+      "source": "e122c91e5222c422ea809e744dddaf893dbb4681",
+      "status": "PASS: generation, unsigned universal arm64/x86_64 Release and actual bundle audit",
+      "receipt": {
+        "path": "/tmp/stream-wave16-parent-final-results-20261022.json",
+        "bytes": 768,
+        "sha256": "449fbb04ae6b68010ffda37b558e7022356646961b67e9dbe497a1cb0cd4b358"
+      },
+      "checks": [
+        {
+          "label": "generate",
+          "exit": 0,
+          "log": "/tmp/stream-wave16-parent-final-generate-20261022.log",
+          "bytes": 168,
+          "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+        },
+        {
+          "label": "universal",
+          "exit": 0,
+          "log": "/tmp/stream-wave16-parent-final-universal-20261022.log",
+          "bytes": 413473,
+          "sha256": "0af9fd8084079008ee4dd86ca04344fe974515287d4a09f7027ed8ce908dd41d"
+        },
+        {
+          "label": "bundle",
+          "exit": 0,
+          "log": "/tmp/stream-wave16-parent-final-bundle-20261022.log",
+          "bytes": 517,
+          "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+        }
+      ],
+      "expandedManifest": {
+        "path": "/tmp/stream-wave16-validated-production-manifest-20261022.json",
+        "bytes": 88234,
+        "sha256": "b2c4b16f65eb410f902b34a3a63bfabc8a3519295971072054014fe8ef47a9c6"
+      },
+      "manifestPaths": 724,
+      "vendor": "d9fceedc068994023900b4d69588b8af19136752",
+      "manifestScope": "Expanded source/recipe set adds actual CI recipe and every Core test to prior native/shared/helper/script prefixes; count differs from earlier scopes.",
+      "independentPathAndHashCheck": {
+        "path": "/tmp/stream-wave16-ledger-source-verification-20261022.json",
+        "bytes": 394,
+        "sha256": "7ce5380b8994abb3dadda13707574b505fafcc63457b65b5c1cf93f0130f6d4a"
+      }
+    },
+    "annotationGeometry": {
+      "originalCommit": "1abae38f6a4f2c8dd41615241ed89b1103edeb7a",
+      "integratedCommit": "ab188b63177e654da968f095816f59a272f3d7cf",
+      "documents": [
+        {
+          "source": "e122c91e5222c422ea809e744dddaf893dbb4681",
+          "path": "apple/docs/ANNOTATION_TOOLBAR_LAYOUT_2026-10-22.md",
+          "bytes": 3724,
+          "sha256": "8729512abf0278b727c5152ce0f78d115548f3976f0f858d7376e9563c477690"
+        },
+        {
+          "source": "e122c91e5222c422ea809e744dddaf893dbb4681",
+          "path": "apple/docs/ANNOTATION_TOOLBAR_LAYOUT_2026-10-22.json",
+          "bytes": 5196,
+          "sha256": "ee191ed8add93abdbc004054721e25207f4e5b217bc9164af59fc2b8ed6760a7"
+        }
+      ],
+      "independentReview": {
+        "path": "/tmp/stream-wave16-annotation-parent-review-20261022.json",
+        "bytes": 441,
+        "sha256": "eda01b5102a82de1041e1489e5dec7060fcc9e4be6a8ccf86dfe9e9c3a4d4ec9"
+      },
+      "proof": "192 actual hidden native geometry cases PASS with inert external owners, native picker intrinsic width and both scroll ends. Original 9cb toolbar fails the first narrow width; existing StudioControlRow and removal of picker cap repair geometry without new input actions.",
+      "artifactRetention": {
+        "originalCommit": "03b74869083ffe2cd2fbb8ea50343e58515c16ee",
+        "integratedCommit": "c0f85cd770e20a79596256677877d21082398d47",
+        "receipt": {
+          "source": "e122c91e5222c422ea809e744dddaf893dbb4681",
+          "path": "apple/docs/ANNOTATION_TOOLBAR_RETENTION_2026-10-22.json",
+          "bytes": 4257,
+          "sha256": "8964682aba82a2013772cf3fa5738eba8bc6dd575bc324a6cd84e5c4d4a2fc8b"
+        },
+        "review": "Recording clears 15 bindings and unchanged fixture HEADER/MAIN AST constants; actual original-width runtime failure retains source/executable/FAIL JSON, fresh 192-case pass retains separate artifacts. Compiler-failure/timeout branches are source-reviewed only."
+      },
+      "scope": "Geometry/programmatic native scrolling only; no visible operator, mounted AX/keyboard/VoiceOver, focus, contrast or full-window qualification. #90 remains open."
+    },
+    "programFailureHealth": {
+      "originalCommit": "0743ec75282cd18d9cc42552c430896920f5ef53",
+      "integratedCommit": "0d7b4b526288602e638fe976d7527306e91f6626",
+      "document": {
+        "source": "e122c91e5222c422ea809e744dddaf893dbb4681",
+        "path": "apple/docs/DESKTOP_RESOURCE_BUDGETS.md",
+        "bytes": 32592,
+        "sha256": "153a71e6afbe53316106fc60c4e3fd0b0af9ce93380731f259095a8fdd6b12c3"
+      },
+      "receipt": {
+        "path": "/tmp/stream-program-render-failure-budget-receipt-20261022.json",
+        "bytes": 2835,
+        "sha256": "b4ac1d1dd8caea46d22ba3df0e76611f2903405d597411dd27f845f59d68e6b2"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-program-render-failure-budget-independent-review-20261022.md",
+        "bytes": 4113,
+        "sha256": "1ab51120e1d957be52d7142ee56e41e6d7ae9bef149437187415f48135e345e2"
+      },
+      "proof": "12 actual freshly built Core tests PASS plus optimized verbatim shipping coordinator/report block probe. Independent 13-binding review clear; parent combined build compiles actual coordinator/App.",
+      "semantics": "Separate failed/attempt and missed/(attempt+missed) fractions; measured zero differs from unavailable nil. Baseline/epoch/rollback/invalid counters reset observation windows; nil interrupts recovery. Maximum pressure uses unchanged thresholds/hysteresis; other measured signals can escalate while rendering is idle.",
+      "scope": "Generic Program outcome pressure and optional preview policy only. No renderer/pool/clock/PTS/source-pull/active-output change, typed cause or media isolation/starvation/sustained-performance qualification. #92 remains open."
+    },
+    "recoveryAccountsFixture": {
+      "originalCommit": "f8826e2223a40844fa957d695e19e450bfa27e7f",
+      "integratedCommit": "d497e94021d7b3f70c776d6c06deae64689fddae",
+      "report": {
+        "path": "/tmp/stream-recovery-accounts-authority-report-20261022.md",
+        "bytes": 4664,
+        "sha256": "47019c70dc953ee5c260d35657d62e6b589c1e97bc54efc27ee9627b5edfa3de"
+      },
+      "proof": {
+        "path": "/tmp/stream-recovery-accounts-authority-proof-20261022/proof.json",
+        "bytes": 6950,
+        "sha256": "6aecfcad13c051e335809a0cc901c6d0aecaf465855992c674602b2e54ebe3f3"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-wave16-recovery-accounts-parent-review-20261022.json",
+        "bytes": 300,
+        "sha256": "116fabe9c85779c1dc6fcb1dea9a56d41ab0df381831601991f4538d6ffbfc13"
+      },
+      "result": "Owned baseline shell133 / corrected full fixture exit0; 21 parent bindings clear.",
+      "scope": "Fresh configure receipts only repair two positive setup accepts. Original captured old generations and stale-credential/no-read/no-POST assertions remain; added invalid-accept probes verify no mutation. Actual vault/account/recovery source with inert HTTP/browser and memory-only credentials; production authority unchanged. Original hosted log has no phase marker; only the owned reproduction locates its replacement accept."
+    },
+    "packageReadFixture": {
+      "originalCommit": "7aea4cfac969c9c12c98ae1436d03cd63bf34cc8",
+      "integratedCommit": "1ab9b4c508dbbe7547325782f16119e9bb2879de",
+      "metadataOnlyCommit": "1bb3eb3724c6f56d762700afd7ad26a7858e6a8f",
+      "receipt": {
+        "source": "e122c91e5222c422ea809e744dddaf893dbb4681",
+        "path": "apple/docs/PACKAGE_READ_METHODS_2026-10-22.json",
+        "bytes": 10389,
+        "sha256": "dbd90552af5d5aa3d3a9992ff57463e7e639203c9c23fc5048c98f71235c2b37"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-wave16-package-read-parent-review-20261022.json",
+        "bytes": 402,
+        "sha256": "82b176edad0c410304fd5a1232b9ce8e6c827f26d7c66e5fbcea2ad430e25c37"
+      },
+      "proof": "Actual ShowPackageIO and exact copied Workspace methods pass all five original read/ownership/catalog/import race phases. Original NSCondition holds and 45 s deadline retained; three generation tests include stale-source refusal and generated-harness equality except explicit final runtime predicate scope print. Parent verifies 24 bindings.",
+      "scope": "Only owned package IO/method transactions with inert external dependencies; no StudioRuntime/controller/recorder construction, application/panels/devices/preferences/network. Fresh-manifest fixture seam does not weaken production validation. No native chooser/full-runtime/sandbox/LaunchServices qualification; #155 remains open.",
+      "metadataBoundary": "Canonical receipt removes only irrelevant local hostname; all other fields equal frozen owner receipt."
+    },
+    "ciWiring": {
+      "commit": "e122c91e5222c422ea809e744dddaf893dbb4681",
+      "scope": "Four lines invoke annotation geometry validation and always retain its proof artifacts. Existing assertions/timeouts remain; this is definition validation, not hosted delivery success."
+    },
+    "hostedCI": {
+      "c90Snapshot": {
+        "receipt": {
+          "path": "/tmp/stream-wave16-ci-39764965913-snapshot-20261022.json",
+          "bytes": 33959,
+          "sha256": "25fd368362d418a9dbf2953186331e2460cb497346ade3ebe305ec00d960aabd"
+        },
+        "checkedAt": "2026-10-22T12:06:44.869954+00:00",
+        "run": 39764965913,
+        "source": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+        "status": "in_progress",
+        "conclusion": null,
+        "jobs": [
+          {
+            "id": 119784721840,
+            "name": "StreamMac build and tests (macos-26)",
+            "status": "completed",
+            "conclusion": "failure",
+            "activeSteps": []
+          },
+          {
+            "id": 119784721962,
+            "name": "StreamCore tests (iOS Simulator)",
+            "status": "completed",
+            "conclusion": "success",
+            "activeSteps": []
+          },
+          {
+            "id": 119784722074,
+            "name": "StreamMac build and tests (macos-26-intel)",
+            "status": "in_progress",
+            "conclusion": null,
+            "activeSteps": [
+              {
+                "number": 16,
+                "name": "Qualify local shortcut window and focus handling"
+              }
+            ]
+          }
+        ]
+      },
+      "latest9cbSnapshot": {
+        "receipt": {
+          "path": "/tmp/stream-wave16-ci-39771035586-snapshot-20261022.json",
+          "bytes": 13380,
+          "sha256": "7a5d621c4577fb93c26d8a2d259a9b29b17176ec1b2daa2c159a00073038ab05"
+        },
+        "checkedAt": "2026-10-22T12:06:50.844667+00:00",
+        "run": 39771035586,
+        "source": "9cb68c901fa620db294436324ab1ba0a723f22dd",
+        "status": "pending",
+        "conclusion": null,
+        "jobs": []
+      },
+      "originalC90ARMFailure": {
+        "report": {
+          "path": "/tmp/stream-ci-c90de17-arm-first-failure-20261022.md",
+          "bytes": 1904,
+          "sha256": "2ea2148eeea36b0dfbe7b77e548daf5a637a190cecbb9374a2742910c70401ca"
+        },
+        "source": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+        "job": 119784721840,
+        "step": 19,
+        "timestamp": "2026-10-22T11:47:49Z",
+        "log": "/tmp/stream-ci-c90de17-119784721840-original.log",
+        "bytes": 8448921,
+        "sha256": "72080c86882f7fdbca09c990e8d5f15b4bc90c2c95fa0bb61d1074f455ad8403",
+        "error": "Top-level Swift.CancellationError in recovery_accounts_harness; original log does not identify exact await.",
+        "Core": "588 tests / 82 suites PASS in 92.940 s",
+        "precedingNativeSteps": "Steps 10\u201318 passed; step 19 studio_chat, session_recovery and recovery_event_review passed before failure; later step-19 workspace variants not reached."
+      },
+      "scope": "C90 ARM failed, Intel remains live, iOS succeeded 588/82 in 210.314 s; latest 9cb pending with zero jobs. Local corrected fixture/build is not new hosted success; all earlier conclusions remain unchanged."
+    },
+    "acceptance": "27 closed /34 open unchanged; all original issue states and earlier wave receipts preserved. Fresh read-only audit finds no additional closure or PR to merge. No mounted AX, live browser/provider/device, real capture or sustained-performance qualification inferred. No issue/API writes, local runtime/build or publication for this ledger update."
   }
 }
