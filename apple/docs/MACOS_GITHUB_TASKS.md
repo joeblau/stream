@@ -125,6 +125,11 @@ current GitHub reconciliation is recorded separately in MACOS_TASK_STATUS.json.
   storage failure. Failed publishers stop their live timers. Resource and
   clock exports are bounded and redacted.
 
+The actual Chrome inspector and reference host/guest WebRTC flows also pass.
+The browser protocol double now models host-only roster generations and exact
+membership targets, including replacement-generation readmission; its earlier
+stale fixture failure is retained in the local validation logs.
+
 Genuine sample Stream Deck profile exports and remaining package/device
 qualification keep #152 open. The two quiet 120-second owned workloads improve
 #92 evidence without qualifying representative physical capture, Intel or

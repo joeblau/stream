@@ -17,6 +17,7 @@ const room = crypto.randomUUID(), hostCap = 'a'.repeat(64), guestCap = 'b'.repea
 const hostID=crypto.randomUUID(),guestID=crypto.randomUUID();
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'stream-reference-chrome-'));
 const connections = [];
+const membershipRequests = [];
 let host, guest, program = false, recording = false, locked = false, ended = false;
 let chrome, browser, deadline;
 
@@ -44,9 +45,11 @@ function emit(peer, data) {
   if (peer?.socket.readyState===WebSocket.OPEN) peer.socket.send(JSON.stringify({...data, delivery:++peer.delivery}));
 }
 function roster() {
-  const peers = [host, guest].filter(peer => peer?.socket.readyState===WebSocket.OPEN)
-    .map(peer => ({id:peer.id, role:peer.role, name:peer.name, state:peer.state}));
-  for (const peer of [host, guest]) emit(peer, {type:'roster', peers, program, recording, locked});
+  const connected = [host, guest].filter(peer => peer?.socket.readyState===WebSocket.OPEN);
+  for (const peer of connected) emit(peer, {type:'roster', peers:connected.map(member => ({
+    id:member.id, role:member.role, name:member.name, state:member.state,
+    ...(peer.role==='host' ? {generation:member.generation} : {})
+  })), program, recording, locked});
 }
 server.on('upgrade', (request, socket, head) => {
   const protocols = (request.headers['sec-websocket-protocol'] ?? '').split(',').map(value => value.trim());
@@ -71,6 +74,10 @@ server.on('upgrade', (request, socket, head) => {
         return;
       }
       if (role!=='host') return;
+      if (['admit','stage','backstage','revoke'].includes(data.type)) {
+        membershipRequests.push({type:data.type, targetGeneration:data.targetGeneration, expectedGeneration:guest?.generation});
+        if (!guest || data.id!==guest.id || data.targetGeneration!==guest.generation) return;
+      }
       if (['admit','stage','backstage'].includes(data.type) && guest && data.id===guest.id) {
         if (data.type==='stage' && guest.state==='waiting') return;
         guest.state = data.type==='stage' ? 'onair' : 'backstage';
@@ -281,6 +288,11 @@ async function run() {
   await browser.wait(g, "document.getElementById('prepare').disabled&&document.getElementById('preview').srcObject===null&&document.getElementById('return').srcObject===null&&window.__fixtureGuestTracks.every(t=>t.readyState==='ended')", 'revoke stops guest tracks and invite');
   await browser.evaluate(h, "document.getElementById('end').click()");
   await browser.wait(h, "document.getElementById('preview').srcObject===null&&document.getElementById('connect').disabled&&window.__fixtureHostTracks.every(t=>t.readyState==='ended')", 'end stops host tracks and invite');
+  assert(membershipRequests.length>=5,'Real browser must exercise admission, stage and revocation across rejoin');
+  assert(membershipRequests.every(request=>request.targetGeneration===request.expectedGeneration),
+    'Every browser membership write must pin the current guest connection generation');
+  assert(new Set(membershipRequests.filter(request=>request.type==='admit').map(request=>request.targetGeneration)).size>=2,
+    'Readmission after guest rejoin must use its replacement generation');
   assert.deepEqual(browser.errors, []);
   console.log('PASS actual headless Chrome: fragment wipe, admission, concurrent independently decoded camera/screen MIDs and stable source identities, explicit host screen approval/removal, late display result cleanup, camera/audio packets continue after screen stop, optional host return, authoritative test stage, guest/host reconnect clears screen tracks and approvals, revoke/end cleanup. Synthetic canvas replaces the display picker; real loopback WebRTC, no real TURN or native/physical qualification.');
 }
