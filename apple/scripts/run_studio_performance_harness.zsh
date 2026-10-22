@@ -27,6 +27,7 @@ h['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.
 h['sources'] << File.join(root,'scripts/studio_performance_harness.swift')
 h['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
 h['sources'] << File.join(root,'scripts/performance_owned_replay.swift')
+h['sources'] << File.join(root,'scripts/performance_workload_evidence.swift')
 spec['targets']['StudioPerformanceHarness']=h
 spec['schemes']['StudioPerformanceHarness']={'build'=>{'targets'=>{'StudioPerformanceHarness'=>'all'}}}
 require File.join(root, 'scripts/desktop_transport_fixture')
@@ -39,7 +40,7 @@ xcodebuild -jobs 2 -resolvePackageDependencies -project "$WORKSPACE_DIR/StudioPe
 python3 scripts/repair_desktop_transport_archives.py "$PERFORMANCE_BUILD_PATH"
 xcodebuild -jobs 2 -project "$WORKSPACE_DIR/StudioPerformanceValidation.xcodeproj" \
     -scheme StudioPerformanceHarness -destination 'platform=macOS' \
-    -derivedDataPath "$PERFORMANCE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+    -derivedDataPath "$PERFORMANCE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO OTHER_SWIFT_FLAGS='$(inherited) -j2' build
 if [[ "${1:-}" == "--build-only" ]]; then exit 0; fi
 sysctl -n hw.model machdep.cpu.brand_string
 sw_vers
