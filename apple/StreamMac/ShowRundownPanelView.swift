@@ -80,8 +80,11 @@ struct ShowRundownPanelView: View {
                 }
                 Spacer(minLength: 0)
                 Button { move(index, by: -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0)
+                    .accessibilityLabel("Move rundown cue \(index + 1), \(name(entry.cue.sceneID)), earlier")
                 Button { move(index, by: 1) } label: { Image(systemName: "arrow.down") }.disabled(index + 1 == runtime.document.entries.count)
+                    .accessibilityLabel("Move rundown cue \(index + 1), \(name(entry.cue.sceneID)), later")
                 Button { update { $0.entries.removeAll { $0.id == entry.id } } } label: { Image(systemName: "minus.circle") }
+                    .accessibilityLabel("Remove rundown cue \(index + 1), \(name(entry.cue.sceneID))")
             }.buttonStyle(.borderless)
             if editingID == entry.id { editor(entry) }
         }.padding(6).background(runtime.playback.current?.id == entry.id ? Color.accentColor.opacity(0.15) : Color.clear,
