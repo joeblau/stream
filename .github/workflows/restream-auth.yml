@@ -1,0 +1,44 @@
+name: Restream authorization broker
+
+on:
+  pull_request:
+    paths:
+      - 'workers/restream-auth/**'
+      - '.github/workflows/restream-auth.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'workers/restream-auth/**'
+      - '.github/workflows/restream-auth.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restream-auth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  broker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: workers/restream-auth
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: workers/restream-auth/package.json
+          cache: npm
+          cache-dependency-path: workers/restream-auth/package-lock.json
+      - name: Install pinned dependencies
+        run: npm ci
+      - name: Verify generated bindings and broker types
+        run: |
+          npm run typegen
+          git diff --exit-code -- worker-configuration.d.ts
+          npm run typecheck
+      - name: Test broker ownership against the local provider fixture
+        run: npm test
