@@ -997,3 +997,48 @@ controller step 10, Intel in Core step 9, and iOS passes 588 / 82 in 210.314 s.
 This is not a whole native CI success. The separate publisher-cache candidate
 is excluded from this validated cohort; no new run, issue write or publication
 was performed for this documentation update.
+
+## Program repeat-cache ownership and one completed RTC diagnostic — 2026-10-22 UTC
+
+Exact `eecaddc` passes generation, unsigned universal arm64/x86_64 Release and
+the actual bundle audit. The expanded source/recipe manifest binds 662 paths
+and vendor; `wave15Review` in [the ledger](MACOS_TASK_STATUS.json) records the
+receipts. Published main remains `e803303` at this snapshot. Counts stay
+**27 closed / 34 open**; no new closure follows.
+
+Both raw publisher actors now clear their unused repeat cache before the first
+accepted Program audio call's existing await, and avoid caching later Program
+video. Rejected calls, legacy repeats, Program duration, admission and PTS
+behavior remain unchanged. Whole actual actors pass six positive cases and four
+expected negative ownership failures, using real one-buffer Core Video pools.
+Selected SDK media effects are inert: no publisher start, transport, encoder,
+device or capture ran. Independent review verifies source/proof bindings. This
+fix does not prove opaque SDK/VideoToolbox release, identify historical surface
+holders or qualify full isolation or sustained performance. **#92 stays open.**
+See [the cache evidence](PUBLISHER_PROGRAM_REPEAT_CACHE.md).
+
+One authorized owned all-Chromium diagnostic at exact `e803303` finishes
+**UNQUALIFIED / exit 77 after 11.398 s**, with no retry. The 10 s connection gate
+fails before the original 12 s positive measurement begins. All ten observed
+description/candidate API calls fulfill; each peer exposes an unselected
+ICE/DTLS-`new` transport, no remote-candidate/pair rows and four local candidate
+rows. Positive sender source PCM coexists with explicit zero outbound Opus
+packets/bytes; receiver inbound rows are absent and measured PCM is zero.
+API fulfillment establishes neither internal candidate handling nor wire checks,
+connectivity or cause. Independent review binds the raw/source evidence and
+owned-process/group/directory cleanup. No native SDK, normal-output/AEC/A/V or
+whole-task acceptance follows; **#127 stays open**. The earlier failed/partial
+attempts retain their original outcomes.
+
+The [reviewed RTC receipt](NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE12_2026-10-22.json)
+and [diagnostic account](NATIVE_GUEST_RETURN_PRE_RTP_DIAGNOSTICS.md) retain the
+bounded originals. In the pinned collector, remote-candidate rows are emitted
+while constructing pair stats; their absence is coupled to missing pairs, not
+independent candidate-resolution evidence. Internal handling remains unknown.
+
+At the frozen **11:26:56 UTC** watcher snapshot, published `c90de17` native run
+`39764965913` remains **active**: ARM managed-event step 13, Intel controller
+step 10; iOS passes 588 tests / 82 suites in 210.314 s. The earlier `a9cfd98`
+both-Mac ending-fixture failures remain failed. Neither local compilation nor
+the owned diagnostic implies whole native CI success, mounted AX delivery,
+real WebKit/capture qualification or sustained performance acceptance.
