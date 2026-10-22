@@ -166,7 +166,7 @@ struct ChannelFXRackView: View {
         section(title: "High-Pass", isOn: chain.highPass.isEnabled,
                 onToggle: { on in update { $0.highPass.isEnabled = on } },
                 onReset: { update { $0.highPass = ChannelFXChain.preset($0.preset).highPass } }) {
-            sliderRow("Frequency", value: chain.highPass.frequency, range: 20...400,
+            sliderRow("Frequency", section: "High-Pass", value: chain.highPass.frequency, range: 20...400,
                       step: 5, format: { "\(Int($0)) Hz" },
                       disabled: !chain.highPass.isEnabled) { value in
                 update { $0.highPass.frequency = value }
@@ -178,7 +178,7 @@ struct ChannelFXRackView: View {
         section(title: "Noise Gate", isOn: chain.noiseGate.isEnabled,
                 onToggle: { on in update { $0.noiseGate.isEnabled = on } },
                 onReset: { update { $0.noiseGate = ChannelFXChain.preset($0.preset).noiseGate } }) {
-            sliderRow("Threshold", value: chain.noiseGate.threshold, range: -80 ... -20,
+            sliderRow("Threshold", section: "Noise Gate", value: chain.noiseGate.threshold, range: -80 ... -20,
                       step: 1, format: { "\(Int($0)) dB" },
                       disabled: !chain.noiseGate.isEnabled) { value in
                 update { $0.noiseGate.threshold = value }
@@ -193,22 +193,22 @@ struct ChannelFXRackView: View {
         section(title: "EQ", isOn: chain.equalizer.isEnabled,
                 onToggle: { on in update { $0.equalizer.isEnabled = on } },
                 onReset: { update { $0.equalizer = ChannelFXChain.preset($0.preset).equalizer } }) {
-            sliderRow("Low (250 Hz)", value: chain.equalizer.lowGain, range: -12...12,
+            sliderRow("Low (250 Hz)", section: "EQ", value: chain.equalizer.lowGain, range: -12...12,
                       step: 0.5, format: Self.decibels,
                       disabled: !chain.equalizer.isEnabled) { value in
                 update { $0.equalizer.lowGain = value }
             }
-            sliderRow("Mid Freq", value: chain.equalizer.midFrequency, range: 200...4_000,
+            sliderRow("Mid Freq", section: "EQ", value: chain.equalizer.midFrequency, range: 200...4_000,
                       step: 50, format: { "\(Int($0)) Hz" },
                       disabled: !chain.equalizer.isEnabled) { value in
                 update { $0.equalizer.midFrequency = value }
             }
-            sliderRow("Mid Gain", value: chain.equalizer.midGain, range: -12...12,
+            sliderRow("Mid Gain", section: "EQ", value: chain.equalizer.midGain, range: -12...12,
                       step: 0.5, format: Self.decibels,
                       disabled: !chain.equalizer.isEnabled) { value in
                 update { $0.equalizer.midGain = value }
             }
-            sliderRow("High (6 kHz)", value: chain.equalizer.highGain, range: -12...12,
+            sliderRow("High (6 kHz)", section: "EQ", value: chain.equalizer.highGain, range: -12...12,
                       step: 0.5, format: Self.decibels,
                       disabled: !chain.equalizer.isEnabled) { value in
                 update { $0.equalizer.highGain = value }
@@ -220,27 +220,27 @@ struct ChannelFXRackView: View {
         section(title: "Compressor", isOn: chain.compressor.isEnabled,
                 onToggle: { on in update { $0.compressor.isEnabled = on } },
                 onReset: { update { $0.compressor = ChannelFXChain.preset($0.preset).compressor } }) {
-            sliderRow("Threshold", value: chain.compressor.threshold, range: -40...0,
+            sliderRow("Threshold", section: "Compressor", value: chain.compressor.threshold, range: -40...0,
                       step: 1, format: { "\(Int($0)) dB" },
                       disabled: !chain.compressor.isEnabled) { value in
                 update { $0.compressor.threshold = value }
             }
-            sliderRow("Ratio", value: chain.compressor.ratio, range: 1...10,
+            sliderRow("Ratio", section: "Compressor", value: chain.compressor.ratio, range: 1...10,
                       step: 0.5, format: { String(format: "%.1f:1", $0) },
                       disabled: !chain.compressor.isEnabled) { value in
                 update { $0.compressor.ratio = value }
             }
-            sliderRow("Attack", value: chain.compressor.attackMs, range: 1...200,
+            sliderRow("Attack", section: "Compressor", value: chain.compressor.attackMs, range: 1...200,
                       step: 1, format: { "\(Int($0)) ms" },
                       disabled: !chain.compressor.isEnabled) { value in
                 update { $0.compressor.attackMs = value }
             }
-            sliderRow("Release", value: chain.compressor.releaseMs, range: 20...2_000,
+            sliderRow("Release", section: "Compressor", value: chain.compressor.releaseMs, range: 20...2_000,
                       step: 10, format: { "\(Int($0)) ms" },
                       disabled: !chain.compressor.isEnabled) { value in
                 update { $0.compressor.releaseMs = value }
             }
-            sliderRow("Makeup", value: chain.compressor.makeupGain, range: 0...24,
+            sliderRow("Makeup", section: "Compressor", value: chain.compressor.makeupGain, range: 0...24,
                       step: 0.5, format: Self.decibels,
                       disabled: !chain.compressor.isEnabled) { value in
                 update { $0.compressor.makeupGain = value }
@@ -303,6 +303,7 @@ struct ChannelFXRackView: View {
     private func audioUnitRow(_ slot: HostedAudioUnitSlot) -> some View {
         let index = chain.audioUnits.firstIndex(where: { $0.id == slot.id }) ?? 0
         let handle = handles[slot.id]
+        let operationTarget = "\(slot.component.displayName), slot \(index + 1), \(title)"
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Toggle(Self.shortName(slot.component.displayName), isOn: Binding(
@@ -312,6 +313,7 @@ struct ChannelFXRackView: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .font(.caption)
+                .accessibilityLabel("Enable \(operationTarget)")
                 Spacer()
                 Button { parameterEditor = ParameterEditorTarget(slotID: slot.id) } label: {
                     Image(systemName: "slider.horizontal.3")
@@ -319,20 +321,24 @@ struct ChannelFXRackView: View {
                 .buttonStyle(.borderless)
                 .controlSize(.mini)
                 .disabled(handle == nil)
+                .accessibilityLabel("Edit parameters for \(operationTarget)")
                 .help(handle == nil ? "Parameters are available once the plugin is loaded" : "Edit plugin parameters")
                 Button { moveAudioUnit(at: index, by: -1) } label: { Image(systemName: "chevron.up") }
                     .buttonStyle(.borderless)
                     .controlSize(.mini)
                     .disabled(index == 0)
+                    .accessibilityLabel("Move \(operationTarget) earlier")
                 Button { moveAudioUnit(at: index, by: 1) } label: { Image(systemName: "chevron.down") }
                     .buttonStyle(.borderless)
                     .controlSize(.mini)
                     .disabled(index == chain.audioUnits.count - 1)
+                    .accessibilityLabel("Move \(operationTarget) later")
                 Button { updateAudioUnits { $0.remove(at: index) } } label: {
                     Image(systemName: "xmark.circle")
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.mini)
+                .accessibilityLabel("Remove \(operationTarget)")
                 .help("Remove from this channel's chain")
             }
             Text(statusLine(for: slot, handle: handle))
@@ -427,7 +433,7 @@ struct ChannelFXRackView: View {
         section(title: "Limiter", isOn: chain.limiter.isEnabled,
                 onToggle: { on in update { $0.limiter.isEnabled = on } },
                 onReset: { update { $0.limiter = ChannelFXChain.preset($0.preset).limiter } }) {
-            sliderRow("Ceiling", value: chain.limiter.ceiling, range: -12...0,
+            sliderRow("Ceiling", section: "Limiter", value: chain.limiter.ceiling, range: -12...0,
                       step: 0.5, format: Self.decibels,
                       disabled: !chain.limiter.isEnabled) { value in
                 update { $0.limiter.ceiling = value }
@@ -449,18 +455,20 @@ struct ChannelFXRackView: View {
                     .toggleStyle(.switch)
                     .controlSize(.mini)
                     .font(.callout.weight(.semibold))
+                    .accessibilityLabel("Enable \(title) for \(self.title)")
                 Spacer()
                 Button("Reset", action: onReset)
                     .buttonStyle(.borderless)
                     .controlSize(.mini)
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("Reset \(title) for \(self.title)")
                     .help("Restore this section's \(chain.preset == .custom ? "default" : "\(chain.preset.displayName) preset") values")
             }
             content()
         }
     }
 
-    private func sliderRow(_ label: String, value: Double, range: ClosedRange<Double>,
+    private func sliderRow(_ label: String, section: String, value: Double, range: ClosedRange<Double>,
                            step: Double, format: (Double) -> String,
                            disabled: Bool,
                            onChange: @escaping (Double) -> Void) -> some View {
@@ -468,7 +476,11 @@ struct ChannelFXRackView: View {
             Text(label)
                 .font(.caption)
                 .frame(width: 90, alignment: .leading)
-            Slider(value: Binding(get: { value }, set: onChange), in: range, step: step)
+            Slider(value: Binding(get: { value }, set: onChange), in: range, step: step) {
+                Text("\(title), \(section), \(label)")
+            }
+            .labelsHidden()
+            .accessibilityValue(Text(range.contains(value) ? format(value) : "Effect value unavailable"))
             Text(format(value))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -578,7 +590,11 @@ private struct HostedAUParameterEditorView: View {
                 Slider(value: Binding(
                     get: { Double(parameter.value) },
                     set: { parameter.setValue(Float($0), originator: nil) }
-                ), in: Double(parameter.minValue)...Double(max(parameter.maxValue, parameter.minValue + 0.001)))
+                ), in: Double(parameter.minValue)...Double(max(parameter.maxValue, parameter.minValue + 0.001))) {
+                    Text("\(title), \(parameter.displayName)")
+                }
+                .labelsHidden()
+                .accessibilityValue(Text(parameterAccessibilityValue(parameter)))
                 Text(formattedValue(parameter))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -589,6 +605,14 @@ private struct HostedAUParameterEditorView: View {
 
     private func formattedValue(_ parameter: AUParameter) -> String {
         let value = String(format: "%.2f", parameter.value)
+        guard let unitName = parameter.unitName, !unitName.isEmpty else { return value }
+        return "\(value) \(unitName)"
+    }
+
+    private func parameterAccessibilityValue(_ parameter: AUParameter) -> String {
+        let snapshot = parameter.value
+        guard snapshot.isFinite else { return "Parameter value unavailable" }
+        let value = String(format: "%.2f", snapshot)
         guard let unitName = parameter.unitName, !unitName.isEmpty else { return value }
         return "\(value) \(unitName)"
     }
