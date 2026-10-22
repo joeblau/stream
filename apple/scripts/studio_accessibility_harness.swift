@@ -1,6 +1,7 @@
 import AppKit
 import CoreMedia
 import Foundation
+import ImageIO
 import SwiftUI
 import StreamCore
 
@@ -347,6 +348,89 @@ private struct StudioContrastPixelProbe: View {
 }
 
 extension StudioAccessibilityHarness {
+    private struct ContrastRGBA: CustomStringConvertible {
+        let redComponent: Double, greenComponent: Double, blueComponent: Double, alphaComponent: Double
+        var description: String { "sRGB RGBA(\(redComponent), \(greenComponent), \(blueComponent), \(alphaComponent))" }
+    }
+    private struct ContrastBitmap {
+        let image: CGImage
+        let bytes: [UInt8]
+        let pixelsWide: Int, pixelsHigh: Int, bytesPerRow: Int
+        func colorAt(x: Int, y: Int) -> ContrastRGBA? {
+            guard x >= 0, x < pixelsWide, y >= 0, y < pixelsHigh else { return nil }
+            let offset = y * bytesPerRow + x * 4
+            return .init(redComponent: Double(bytes[offset]) / 255, greenComponent: Double(bytes[offset + 1]) / 255,
+                blueComponent: Double(bytes[offset + 2]) / 255, alphaComponent: Double(bytes[offset + 3]) / 255)
+        }
+        func png() -> Data? { NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) }
+    }
+    /// A focused owned-view path: no StudioWorkspace, media engine or device
+    /// graph is constructed merely to qualify interface rendering.
+    static func runContrastOnly() async throws {
+        // Match the original large-text/reduced-motion contrast test setup in
+        // this fixture's isolated suite, without changing system preferences.
+        WorkspaceFixtureDefaults.value.set(20.0, forKey: "studio.interface.textSize")
+        WorkspaceFixtureDefaults.value.set(true, forKey: "studio.interface.reduceMotion")
+        try contrastPixelControls()
+        try await contrastPixels()
+    }
+
+    /// Cache-display pixels may use the display's ICC profile. Convert the
+    /// actual tagged CGImage into an explicit sRGB destination before reading
+    /// numeric channels; treating display-encoded bytes as sRGB is not a valid
+    /// opaque-red control. This changes no production pixels or thresholds.
+    private static func sRGBBitmap(_ source: CGImage) throws -> ContrastBitmap {
+        guard source.colorSpace != nil,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: source.width, height: source.height,
+                bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue),
+              source.width > 0, source.height > 0 else { throw CocoaError(.coderInvalidValue) }
+        context.setBlendMode(.copy)
+        context.interpolationQuality = .none
+        context.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height))
+        guard let data = context.data, let converted = context.makeImage() else { throw CocoaError(.coderInvalidValue) }
+        let bytes = Array(UnsafeBufferPointer(start: data.assumingMemoryBound(to: UInt8.self),
+            count: context.bytesPerRow * source.height))
+        let x = source.width > 90 ? 90 : 0, y = source.height / 2, offset = y * context.bytesPerRow + x * 4
+        print("Explicit sRGB destination bytes at \(x),\(y): \(Array(bytes[offset..<(offset + 4)])); source-profile=\(String(describing: source.colorSpace?.name)), destination-profile=\(String(describing: context.colorSpace?.name)), bits=\(context.bitsPerPixel), bitmapInfo=\(context.bitmapInfo.rawValue), stride=\(context.bytesPerRow)")
+        return .init(image: converted, bytes: bytes, pixelsWide: source.width, pixelsHigh: source.height,
+            bytesPerRow: context.bytesPerRow)
+    }
+    private static func opaqueRed(_ color: ContrastRGBA) -> Bool {
+        color.alphaComponent > 0.99 && color.redComponent > 0.95
+            && color.greenComponent < 0.05 && color.blueComponent < 0.05
+    }
+    private static func contrastPixelControls() throws {
+        // The negative oracle is known independent source bytes, not a second
+        // copy of the color-conversion formula or an altered acceptance gate.
+        for (name, bytes, expectedRed) in [("red", [UInt8(255), 0, 0, 255], true), ("green", [UInt8(0), 255, 0, 255], false)] {
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData),
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let image = CGImage(width: 1, height: 1, bitsPerComponent: 8, bitsPerPixel: 32,
+                bytesPerRow: 4, space: space,
+                bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
+              let color = try sRGBBitmap(image).colorAt(x: 0, y: 0) else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        try require(opaqueRed(color) == expectedRed && (expectedRed || color.greenComponent > 0.95),
+            "Independent known-\(name) control failed the unchanged opaque-red gate")
+        print("PASS: explicit sRGB \(name) control \(expectedRed ? "passes" : "is rejected by") the unchanged opaque-red gate")
+        }
+        if let path = ProcessInfo.processInfo.environment["STREAM_ACCESSIBILITY_PROFILE_REFERENCE"] {
+            guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                  image.width == 600, image.height == 200,
+                  let old = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: path)))?.colorAt(x: 90, y: 100)?.usingColorSpace(.sRGB),
+                  let converted = try sRGBBitmap(image).colorAt(x: 90, y: 100) else {
+                throw CocoaError(.coderInvalidValue)
+            }
+            print("Owned archived ICC reference: profile=\(String(describing: image.colorSpace?.name)), old-sampler=\(old), explicit-sRGB=\(converted)")
+            try require(opaqueRed(converted), "Profile-aware archived native red reference failed the unchanged gate")
+            print("PASS: archived owned native ICC red reference satisfies the unchanged gate after explicit sRGB conversion")
+        }
+    }
     private static func contrastPixels() async throws {
         let probe = NSWindow(contentRect: CGRect(x: 100, y: 100, width: 300, height: 100),
             styleMask: [.titled], backing: .buffered, defer: false)
@@ -361,19 +445,32 @@ extension StudioAccessibilityHarness {
             host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
             guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw CocoaError(.coderInvalidValue) }
             host.cacheDisplay(in: host.bounds, to: bitmap)
-            func pixel(_ x: Double, _ y: Double) throws -> NSColor {
-                guard let color = bitmap.colorAt(x: Int(x / 300 * Double(bitmap.pixelsWide)),
-                    y: Int(y / 100 * Double(bitmap.pixelsHigh)))?.usingColorSpace(.sRGB) else { throw CocoaError(.coderInvalidValue) }
+            // Decode the exact retained native PNG so its embedded ICC
+            // profile, not an implicit device-RGB interpretation, is the
+            // source of the explicit color conversion.
+            guard let nativePNG = bitmap.representation(using: .png, properties: [:]),
+                  let nativeSource = CGImageSourceCreateWithData(nativePNG as CFData, nil),
+                  let image = CGImageSourceCreateImageAtIndex(nativeSource, 0, nil) else {
+                throw CocoaError(.coderInvalidValue)
+            }
+            let normalized = try sRGBBitmap(image)
+            func pixel(_ x: Double, _ y: Double) throws -> ContrastRGBA {
+                guard let color = normalized.colorAt(x: Int(x / 300 * Double(normalized.pixelsWide)),
+                    y: Int(y / 100 * Double(normalized.pixelsHigh))) else { throw CocoaError(.coderInvalidValue) }
                 return color
             }
-            if let path = ProcessInfo.processInfo.environment["STREAM_ACCESSIBILITY_ARTIFACTS"],
-               let data = bitmap.representation(using: .png, properties: [:]) {
-                try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("interface-contrast-\(enabled).png"))
+            if let path = ProcessInfo.processInfo.environment["STREAM_ACCESSIBILITY_ARTIFACTS"] {
+                try nativePNG.write(to: URL(fileURLWithPath: path).appendingPathComponent("interface-contrast-\(enabled)-native.png"))
+                guard let data = normalized.png() else { throw CocoaError(.coderInvalidValue) }
+                try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("interface-contrast-\(enabled)-srgb.png"))
             }
             // Real opaque media-color swatch must retain its channels. The
             // contrast implementation acts on interface surfaces, never pixels.
             let red = try pixel(45, 50)
-            try require(red.alphaComponent > 0.99 && red.redComponent > 0.95 && red.greenComponent < 0.05 && red.blueComponent < 0.05,
+            let oldRed = bitmap.colorAt(x: Int(45.0 / 300 * Double(bitmap.pixelsWide)),
+                y: Int(50.0 / 100 * Double(bitmap.pixelsHigh)))?.usingColorSpace(.sRGB)
+            print("Owned contrast mode=\(enabled), native-profile=\(bitmap.colorSpace), CG-profile=\(String(describing: image.colorSpace?.name)), old-sampler=\(String(describing: oldRed)), explicit-sRGB=\(red)")
+            try require(opaqueRed(red),
                 "Native bitmap red reference mismatched before a qualified contrast comparison")
             let background = try pixel(290, 8)
             if enabled {
@@ -381,17 +478,13 @@ extension StudioAccessibilityHarness {
                     "Actual contrast panel did not render an opaque black surface")
             }
             var white = 0
-            for y in 10..<(bitmap.pixelsHigh - 10) {
-                for x in (bitmap.pixelsWide / 3)..<(bitmap.pixelsWide - 10) {
-                    if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), color.alphaComponent > 0.99,
+            for y in 10..<(normalized.pixelsHigh - 10) {
+                for x in (normalized.pixelsWide / 3)..<(normalized.pixelsWide - 10) {
+                    if let color = normalized.colorAt(x: x, y: y), color.alphaComponent > 0.99,
                        min(color.redComponent, color.greenComponent, color.blueComponent) > 0.95 { white += 1 }
                 }
             }
             whiteCounts.append(white)
-            if let path = ProcessInfo.processInfo.environment["STREAM_ACCESSIBILITY_ARTIFACTS"],
-               let data = bitmap.representation(using: .png, properties: [:]) {
-                try data.write(to: URL(fileURLWithPath: path).appendingPathComponent("interface-contrast-\(enabled).png"))
-            }
         }
         try require(whiteCounts[1] > whiteCounts[0] + 20, "Actual secondary text did not become high-contrast white: \(whiteCounts)")
         print("PASS: actual native-hosted production contrast styles render black surfaces and white secondary text (\(whiteCounts)), preserving red media pixels")
