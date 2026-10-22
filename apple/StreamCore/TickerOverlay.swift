@@ -1,7 +1,7 @@
 import Foundation
 
 public enum OverlayTransportAction: String, Codable, CaseIterable, Sendable {
-    case start, pause, reset
+    case start, pause, reset, replay
 }
 
 public enum TickerDirection: String, Codable, CaseIterable, Sendable {

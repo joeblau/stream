@@ -1,9 +1,133 @@
 import Foundation
+import Network
 import StreamCore
 
 @main @MainActor struct DeckNativeHarness {
     static func require(_ value: Bool, _ message: String) throws {
         if !value { throw NSError(domain: "DeckNativeHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
+    }
+    static func visualActions(_ runtime: StudioRuntime, directory: URL) async throws {
+        let dispatcher = runtime.dispatcher
+        let a = runtime.sceneStore.addSource(.init(name: "Screen A", payload: .screen(.init(target: .window))))
+        let b = runtime.sceneStore.addSource(.init(name: "Screen B", payload: .screen(.init(target: .application))))
+        let offline = runtime.sceneStore.addSource(.init(name: "Offline Camera", payload: .camera(.init(deviceID: "missing-visual-fixture-camera"))))
+        let screen = LayerNode(name: "Screen target", sourceID: a.id, payload: a.payload, transform: .fullscreen)
+        let pip = LayerNode.cameraPIP(corner: .bottomRight, scale: 0.28, sourceID: offline.id)
+        let ticker = TickerOverlayConfiguration()
+        let caption = LayerNode(name: "Ticker", payload: .text(.init(text: "Shared clock", ticker: ticker)), transform: .fullscreen)
+        let reusedScreen = LayerNode(name: "Reused screen", sourceID: a.id, payload: a.payload, transform: .fullscreen)
+        let scene = Scene(name: "Visual bindings", layers: [screen, reusedScreen, pip, caption])
+        try require(dispatcher.execute(.insertScene(scene)).error == nil && dispatcher.execute(.take).error == nil, "Install visual scene")
+        let prefix = "scene.\(scene.id.rawValue.uuidString).layer.\(screen.id.rawValue.uuidString)"
+        let pipPrefix = "scene.\(scene.id.rawValue.uuidString).layer.\(pip.id.rawValue.uuidString)"
+        let selector = prefix + ".source.select"
+        let actions = dispatcher.catalogueActions()
+        try require(actions.filter { $0.id.hasPrefix("scene.\(scene.id.rawValue.uuidString).") && $0.id.hasSuffix(".source.select") }.count == 3, "Source selection generated a Cartesian catalog")
+        try require(actions.first { $0.id == selector }?.sourceKind == "screen", "Source selector did not advertise its typed input")
+        try require(dispatcher.execute(.bindLayerSource(screen.id, to: nil, in: scene.id)).error != nil, "Argument-free source selection silently chose a device")
+        let unavailableScreens: [SourceDefinition] = [
+            .init(name: "Invalid window", payload: .screen(.init(target: .window, targetIdentifier: "not-a-window-id"))),
+            .init(name: "Closed window", payload: .screen(.init(target: .window, targetIdentifier: String(UInt32.max)))),
+            .init(name: "Closed app", payload: .screen(.init(target: .application, targetIdentifier: "stream.fixture.missing.\(UUID())"))),
+            .init(name: "Disconnected display", payload: .screen(.init(target: .display, targetIdentifier: String(UInt32.max))))]
+        for source in unavailableScreens {
+            try require(dispatcher.controllerSourceSelectionError(source) != nil, "Unavailable pinned screen target claimed connected: \(source.name)")
+        }
+        try require(dispatcher.controllerSourceSelectionError(a) == nil && dispatcher.controllerSourceSelectionError(b) == nil, "Unpicked screen target was confused with a disappeared pinned resource")
+        let original = runtime.previewProgram.programScene
+        let credentials = MemoryCredentials()
+        let pairings = StudioControlPairingStore(url: directory.appendingPathComponent("visual-clients.json"), credentials: credentials)
+        pairings.pair(name: "Visual SDK boundary")
+        guard let pairing = pairings.pairing else { throw NSError(domain: "VisualDeck", code: 1) }
+        let defaults = UserDefaults(suiteName: "stream.visual.\(UUID())")!
+        let server = StudioLocalControlServer(defaults: defaults, pairingStore: pairings, port: 0)
+        server.bind(to: dispatcher); server.setEnabled(true)
+        defer { server.shutdown() }
+        for _ in 0..<500 { if server.listeningPort != nil { break }; try await Task.sleep(for: .milliseconds(10)) }
+        guard let port = server.listeningPort else { throw NSError(domain: "VisualDeck", code: 2) }
+        let client = WireClient(port: port)
+        defer { client.connection.cancel() }
+        let auth = try await client.request(.init(type: .authenticate, id: UUID(), clientID: pairing.client.id, token: pairing.token))
+        guard let session = auth.sessionID else { throw NSError(domain: "VisualDeck", code: 3) }
+        let changed = try await client.request(.init(type: .command, id: UUID(), sessionID: session, commandID: selector, text: b.id.rawValue.uuidString))
+        try require(changed.result?.succeeded == true && runtime.previewProgram.stagedScene?.layers.first?.sourceID == b.id, "Typed source UUID did not traverse actual local server/shared dispatcher")
+        try require(runtime.previewProgram.programScene == original && runtime.previewProgram.stagedScene?.layers.first?.transform == screen.transform, "Source selection changed Program or geometry")
+        try require(runtime.previewProgram.stagedScene?.layers.first { $0.id == reusedScreen.id }?.sourceID == a.id && runtime.sceneStore.source(withID: a.id)?.payload == a.payload, "Selecting one layer mutated a shared source or its other consumer")
+        let snapshot = changed.snapshot?.visuals?[prefix]
+        try require(snapshot?.sourceID == b.id.rawValue && snapshot?.programSourceID == a.id.rawValue, "Wire feedback conflated Preview and Program source")
+        let wrongKind = try await client.request(.init(type: .command, id: UUID(), sessionID: session, commandID: selector, text: offline.id.rawValue.uuidString))
+        try require(wrongKind.result?.succeeded == false && runtime.previewProgram.stagedScene?.layers.first?.sourceID == b.id, "Camera source could replace a screen target")
+        try require(dispatcher.execute(.bindLayerSource(pip.id, to: offline.id, in: scene.id)).error != nil, "Disconnected camera selection was not unavailable")
+        try require(dispatcher.catalogueActions().first { $0.id == "source.\(offline.id.rawValue.uuidString).effects.bypass" }?.sourceAvailable == false, "Disconnected camera descriptor claimed available media")
+        guard let pipHide = dispatcher.catalogueActions().first(where: { $0.id == pipPrefix + ".pip.off" })?.command else { throw NSError(domain: "VisualDeck", code: 4) }
+        try require(dispatcher.execute(pipHide).error == nil && runtime.previewProgram.stagedScene?.layers.first { $0.id == pip.id }?.isVisible == false, "PIP off did not hide only its explicit staged layer")
+        try require(runtime.previewProgram.programScene?.layers.first { $0.id == pip.id }?.isVisible == true, "PIP off leaked before Take")
+        let bypass = prefix + ".effects.bypass"
+        try require(dispatcher.controllerTargets().first { $0.id == bypass }?.execute(nil) == nil, "Layer effect bypass did not execute")
+        try require(dispatcher.controllerVisualSnapshot()[prefix]?.bypassed == true && dispatcher.controllerVisualSnapshot()[prefix]?.programBypassed == false, "Effect feedback ignored pending Take")
+        let globalBypass = "source.\(a.id.rawValue.uuidString).effects.bypass"
+        try require(dispatcher.controllerTargets().first { $0.id == globalBypass }?.execute(nil) == nil && runtime.sceneStore.source(withID: a.id)?.effectDefaults?.isBypassed == true, "Shared source effect command did not reach the registry")
+        DynamicOverlayStore.shared.perform(.start, id: ticker.runtimeID, at: 1)
+        let replay = "scene.\(scene.id.rawValue.uuidString).layer.\(caption.id.rawValue.uuidString).animation.restart"
+        try require(dispatcher.controllerTargets().first { $0.id == replay }?.execute(nil) == nil && DynamicOverlayStore.shared.state(for: ticker.runtimeID).phase == .running && DynamicOverlayStore.shared.state(for: ticker.runtimeID).elapsed(at: DynamicOverlayStore.hostSeconds) < 1, "Replay reset to idle instead of restarting the shared animation")
+        let globalTicker = TickerOverlayConfiguration()
+        try require(dispatcher.execute(.addOverlay(.text(.init(text: "Global ticker", ticker: globalTicker)))).error == nil, "Insert global animation")
+        guard let global = dispatcher.controllerOverlays().first(where: { if case .text(let t) = $0.payload { return t.ticker?.runtimeID == globalTicker.runtimeID }; return false }) else { throw NSError(domain: "VisualDeck", code: 5) }
+        try require(dispatcher.execute(.setOverlayDynamicTransport(global.id, .replay)).error == nil && DynamicOverlayStore.shared.state(for: globalTicker.runtimeID).phase == .running, "Global animation replay did not run its explicit runtime")
+        runtime.sceneStore.renameSource(b.id, to: "Renamed Screen B")
+        try require(dispatcher.catalogueActions().first { $0.id == "source.\(b.id.rawValue.uuidString).effects.bypass" }?.title.contains("Renamed Screen B") == true, "Source identity failed rename")
+        runtime.sceneStore.removeSource(b.id)
+        let removed = try await client.request(.init(type: .command, id: UUID(), sessionID: session, commandID: selector, text: b.id.rawValue.uuidString))
+        try require(removed.result?.succeeded == false, "Deleted source UUID remained executable")
+        try require(dispatcher.execute(.setLayerLocked(screen.id, locked: true, in: scene.id)).error == nil, "Lock visual target")
+        try require(dispatcher.availabilityError(for: .bindLayerSource(screen.id, to: nil, in: scene.id)) != nil, "Locked target source picker remained enabled")
+        try require(!runtime.controller.outputSessionActive, "Visual actions started capture or publishing")
+        print("PASS: actual native IPC source UUID binding with Preview/Program receipts, type/deletion/lock/disconnected-device fences, bounded catalog, PIP visibility, per-layer/shared effects and running scene/global animation replay; no capture or output started")
+    }
+    static func maximumVisualReceipts(_ runtime: StudioRuntime) throws {
+        let dispatcher = runtime.dispatcher
+        let source = runtime.sceneStore.addSource(.init(name: "Maximum receipt source", payload: .text(.init(text: "Maximum fixture"))))
+        func scene(_ name: String) -> Scene {
+            Scene(name: name, layers: (0..<256).map { index in
+                LayerNode(name: "Layer \(index)", sourceID: source.id, payload: source.payload, transform: .fullscreen)
+            })
+        }
+        let taken = scene("Maximum Program"), staged = scene("Maximum Preview")
+        try require(dispatcher.execute(.insertScene(taken)).error == nil && dispatcher.execute(.take).error == nil, "Install 256-layer Program")
+        try require(dispatcher.execute(.insertScene(staged)).error == nil, "Install distinct 256-layer Preview")
+        let visuals = dispatcher.controllerVisualSnapshot()
+        let programPrefix = "scene.\(taken.id.rawValue.uuidString).layer."
+        let previewPrefix = "scene.\(staged.id.rawValue.uuidString).layer."
+        try require(visuals.filter { $0.key.hasPrefix(programPrefix) && $0.value.programVisible == true && $0.value.previewVisible == nil }.count == 256, "Maximum Program receipts were dropped or confused with Preview")
+        try require(visuals.filter { $0.key.hasPrefix(previewPrefix) && $0.value.previewVisible == true && $0.value.programVisible == nil }.count == 256, "Maximum Preview receipts were dropped or confused with Program")
+        let state = dispatcher.state
+        let snapshot = StudioControlSnapshot(projectID: "maximum-visual-fixture", revision: 101,
+            stream: "idle", recording: "idle", preview: "idle", stagedSceneID: staged.id.rawValue, programSceneID: taken.id.rawValue,
+            pendingStagedEdits: true,
+            layerVisibility: Dictionary(uniqueKeysWithValues: state.layerVisibility.map { ($0.key.rawValue.uuidString, $0.value) }),
+            macroProgress: .init(), programLayerVisibility: dispatcher.controllerProgramVisibility(), visuals: visuals)
+        let response = StudioControlResponse(type: "event", sessionID: UUID(), snapshot: snapshot)
+        let original = try JSONEncoder().encode(response)
+        try require(original.count > StudioControlFrameBuffer.maximumFrameBytes, "Maximum fixture did not exercise chunked response path")
+        let frames = try StudioControlResponseFramer.frames(response, chunking: true)
+        try require(frames.count > 1 && frames.allSatisfy { $0.count <= StudioControlFrameBuffer.maximumFrameBytes }, "Maximum visual response exceeded frame size")
+        var assembled = Data(), transfer: UUID?
+        for (index, frame) in frames.enumerated() {
+            let wrapper = try JSONDecoder().decode(StudioControlResponse.self, from: frame)
+            guard let chunk = wrapper.responseChunk else { throw NSError(domain: "MaximumVisualReceipts", code: 1) }
+            if index == 0 { transfer = chunk.transferID }
+            try require(chunk.index == index && chunk.count == frames.count && chunk.transferID == transfer && chunk.snapshotRevision == 101 && chunk.totalBytes == original.count && wrapper.sessionID == response.sessionID, "Chunk changed receipt revision, session or transfer identity")
+            assembled.append(chunk.body)
+        }
+        let complete = try JSONDecoder().decode(StudioControlResponse.self, from: assembled)
+        try require(complete.snapshot == snapshot, "Maximum response reassembly lost or substituted visual receipts")
+        do {
+            _ = try StudioControlResponseFramer.frames(response, chunking: false)
+            throw NSError(domain: "MaximumVisualReceipts", code: 2, userInfo: [NSLocalizedDescriptionKey: "Legacy controller silently received partial response"])
+        } catch let error as StudioControlProtocolError {
+            try require(error.code == "responseChunksRequired", "Legacy oversized response did not report explicit upgrade requirement")
+        }
+        print("PASS: actual distinct 256-layer Program + 256-layer Preview receipts survive \(original.count)-byte response in \(frames.count) bounded chunks (largest \(frames.map(\.count).max() ?? 0) bytes), exact full-state reassembly and explicit legacy-client rejection")
     }
     static func main() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("stream-deck-native-\(UUID())")
@@ -83,6 +207,8 @@ import StreamCore
         try require(dispatcher.controllerChatSnapshot()?.stagedVisible == false && dispatcher.controllerChatSnapshot()?.programVisible == true, "Hide changed Program before Take")
         try require(dispatcher.availabilityError(for: .selectNextComment) != nil, "Queue boundary did not reject next")
         try require(!runtime.controller.outputSessionActive && !runtime.recorder.state.isActive, "Controller test started an output")
+        try await visualActions(runtime, directory: directory)
+        try maximumVisualReceipts(runtime)
         print("PASS: actual dispatcher stable layer/group/global-overlay catalogue, overlay rename/delete/toggle, preview/program policy, numeric gain/mute, idle recording countdown, comment staging/Take/hide feedback, queue boundary; no output started")
     }
 }

@@ -56,7 +56,7 @@ import Network
             var result: [StudioControlCapability] = dispatcher?.catalogueActions().map { .init(id: $0.id, title: $0.title, category: $0.category,
                                                       available: $0.command != nil && $0.unavailableReason == nil,
                                                       unavailableReason: $0.unavailableReason, kind: "command",
-                                                      argument: $0.id == "output.record.marker" ? "text" : $0.id.hasPrefix("pdf.") && $0.id.hasSuffix(".goto") ? "page" : nil) } ?? []
+                                                      argument: $0.id.hasSuffix(".source.select") ? "source" : $0.id == "output.record.marker" ? "text" : $0.id.hasPrefix("pdf.") && $0.id.hasSuffix(".goto") ? "page" : nil, sourceKind: $0.sourceKind, sourceAvailable: $0.sourceAvailable) } ?? []
             for target in dispatcher?.controllerTargets() ?? [] where target.kind == .value {
                 result.append(.init(id: target.id, title: target.title, category: "Audio Levels", available: target.unavailableReason == nil, unavailableReason: target.unavailableReason, kind: "value"))
             }
@@ -82,7 +82,7 @@ import Network
                                     media: member.media.rawValue, slot: route?.slot, programAllowed: route?.programAllowed ?? false,
                                     monitorAllowed: route?.monitorAllowed ?? false, screenApproved: member.screenApproved, screenSharing: member.screenSharing)
                             }),
-                         recordingCountdown: dispatcher.controllerRecordingCountdown())
+                         recordingCountdown: dispatcher.controllerRecordingCountdown(), visuals: dispatcher.controllerVisualSnapshot())
         }
         execute = { [weak self, weak dispatcher] id, value, delta, page, text in
             guard let self, let dispatcher else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "The studio is unavailable.")) }
@@ -107,8 +107,13 @@ import Network
                 command = .pdfGoToPage(sourceID, page: page)
             }
             if let text {
-                guard id == "output.record.marker", case .addRecordingMarker = command else { return .init(commandID: id, succeeded: false, error: .init(code: "invalidValue", message: "A text argument requires the recording marker command.")) }
-                command = .addRecordingMarker(text)
+                if case .bindLayerSource(let layer, _, let scene) = command {
+                    guard let uuid = UUID(uuidString: text), text.utf8.count == 36 else { return .init(commandID: id, succeeded: false, error: .init(code: "invalidValue", message: "Choose a registered source UUID.")) }
+                    command = .bindLayerSource(layer, to: SourceDefinitionID(uuid), in: scene)
+                } else {
+                    guard id == "output.record.marker", case .addRecordingMarker = command else { return .init(commandID: id, succeeded: false, error: .init(code: "invalidValue", message: "A text argument requires a marker or source-selection command.")) }
+                    command = .addRecordingMarker(text)
+                }
             }
             let result = dispatcher.execute(command)
             if case .rejected(let error) = result.outcome {

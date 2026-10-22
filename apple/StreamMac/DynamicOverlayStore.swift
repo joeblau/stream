@@ -32,6 +32,7 @@ final class DynamicOverlayStore: @unchecked Sendable {
         case .start: state.start(at: seconds)
         case .pause: state.pause(at: seconds)
         case .reset: state.reset()
+        case .replay: state.reset(); state.start(at: seconds)
         }
         states[id] = state
     }

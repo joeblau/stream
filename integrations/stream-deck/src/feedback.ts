@@ -1,5 +1,5 @@
 import type { Capability, Snapshot } from "./studio-client.js";
-export type Binding = { commandID?: string; projectID?: string };
+export type Binding = { commandID?: string; projectID?: string; text?: string };
 export type KeyFeedback = { title: string; badge: string; color: string; unavailable: boolean };
 export function feedback(binding: Binding, status: string, snapshot: Snapshot | undefined,
                          capabilities: Map<string, Capability>): KeyFeedback {
@@ -9,6 +9,7 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
   if (binding.projectID !== snapshot.projectID) return unavailable("Project\nChanged");
   const command = capabilities.get(binding.commandID);
   if (!command) return unavailable("Missing\nResource");
+  let sourceUnavailable = false;
   let badge = command.available ? "READY" : "WAIT";
   let color = command.available ? "#233b4a" : "#5a4828";
   const scene = /^scene\.([0-9a-f-]+)\.select$/i.exec(binding.commandID)?.[1]?.toLowerCase();
@@ -34,6 +35,31 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
   const overlay = /^overlay\.([0-9a-f-]+)\.(visibility|show|hide)$/i.exec(binding.commandID)?.[1];
   const visible = group ? snapshot.groupVisibility?.[group] : overlay ? snapshot.overlayVisibility?.[overlay] : undefined;
   if (visible !== undefined) { badge = visible ? overlay ? "GLOBAL ON" : "PVW ON" : "HIDDEN"; color = visible ? "#266848" : "#233b4a"; }
+  // Scope visual receipts to the actual scene/layer, never the active window.
+  const visualMatch = /^(scene\.[0-9a-f-]+\.(?:layer|group)\.[0-9a-f-]+|overlay\.[0-9a-f-]+|source\.[0-9a-f-]+)\.(.+)$/i.exec(binding.commandID);
+  if (visualMatch && snapshot.receiptsPending) return unavailable("Updating\nVisuals");
+  if (visualMatch) {
+    const visual = Object.entries(snapshot.visuals ?? {}).find(([key]) => key.toLowerCase() === visualMatch[1]!.toLowerCase())?.[1];
+    if (visual) {
+      if (visualMatch[2] === "source.select") {
+        const chosen = binding.text?.toLowerCase();
+        const selectedSource = chosen && [...capabilities.values()].find(value => value.id.toLowerCase() === `source.${chosen}.effects.bypass`);
+        if (!selectedSource) return unavailable("Missing\nSource");
+        sourceUnavailable = selectedSource.sourceAvailable === false;
+        if (chosen && visual.programSourceID?.toLowerCase() === chosen && visual.programVisible) { badge = "PGM"; color = "#983c4a"; }
+        else if (chosen && visual.sourceID?.toLowerCase() === chosen) { badge = visual.previewVisible ? "PVW" : "SELECTED"; color = "#266848"; }
+        else { badge = command.available ? "READY" : "WAIT"; color = command.available ? "#233b4a" : "#5a4828"; }
+      } else if (visualMatch[2] === "effects.bypass") {
+        const bypassed = visual.bypassed ?? visual.programBypassed;
+        badge = bypassed ? "BYPASSED" : "EFFECTS ON";
+        if (visual.bypassed !== undefined && visual.programVisible && visual.programBypassed !== undefined && visual.programBypassed !== visual.bypassed) badge += " PVW";
+        color = bypassed ? "#5a4828" : "#266848";
+      } else if (!visualMatch[1]!.startsWith("source.")) {
+        badge = visual.programVisible ? "PGM" : visual.previewVisible ? "PVW" : "HIDDEN";
+        color = visual.programVisible ? "#983c4a" : visual.previewVisible ? "#266848" : "#233b4a";
+      }
+    }
+  }
   const gainID = binding.commandID.replace(/\.mute(?:\.(?:on|off))?$/, ".gain");
   const muted = snapshot.mutes?.[gainID];
   if (muted !== undefined && binding.commandID.includes(".mute")) { badge = muted ? "MUTED" : "ON"; color = muted ? "#5a4828" : "#266848"; }
@@ -70,7 +96,7 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
     badge = snapshot.macroProgress.phase.toUpperCase();
     if (snapshot.macroProgress.phase === "running") badge = `${snapshot.macroProgress.stepIndex + 1}/${snapshot.macroProgress.totalSteps}`;
   }
-  return { title: command.title, badge, color, unavailable: !command.available };
+  return { title: command.title, badge, color, unavailable: !command.available || sourceUnavailable };
 }
 function escapeXML(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");

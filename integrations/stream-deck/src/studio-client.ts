@@ -3,9 +3,12 @@ import { randomUUID } from "node:crypto";
 import net from "node:net";
 
 export type Pairing = { version: 1; clientID: string; token: string; host?: string; port?: number };
-export type Capability = { id: string; title: string; category: string; available: boolean; unavailableReason?: string; kind?: "command" | "value"; argument?: "text" | "page" };
+export type Capability = { id: string; title: string; category: string; available: boolean; unavailableReason?: string; kind?: "command" | "value"; argument?: "text" | "page" | "source"; sourceKind?: "camera" | "screen"; sourceAvailable?: boolean };
 export type CommandArgument = { value: number } | { delta: number } | { page: number } | { text: string };
+export type VisualState = { previewVisible?: boolean; programVisible?: boolean; bypassed?: boolean; programBypassed?: boolean; sourceID?: string; programSourceID?: string };
 export type Snapshot = {
+  visuals?: Record<string, VisualState>;
+  receiptsPending?: boolean;
   projectID: string; revision: number; stream: string; recording: string; preview: string;
   recordingCountdown?: number;
   stagedSceneID?: string; programSceneID?: string; pendingStagedEdits: boolean;
@@ -40,7 +43,9 @@ function validResponse(value: unknown): value is Response {
       || !value.commands.every(c => object(c) && typeof c.id === "string" && typeof c.title === "string" && typeof c.category === "string"
         && typeof c.available === "boolean" && (c.unavailableReason === undefined || typeof c.unavailableReason === "string")
         && (c.kind === undefined || c.kind === "command" || c.kind === "value")
-        && (c.argument === undefined || c.argument === "text" || c.argument === "page")))) return false;
+        && (c.argument === undefined || c.argument === "text" || c.argument === "page" || c.argument === "source")
+        && (c.sourceKind === undefined || c.sourceKind === "camera" || c.sourceKind === "screen")
+        && (c.sourceAvailable === undefined || typeof c.sourceAvailable === "boolean")))) return false;
   const state = value.snapshot;
   if (["authenticated", "snapshot", "event"].includes(value.type) && !object(state)) return false;
   if (state !== undefined) {
@@ -57,6 +62,9 @@ function validResponse(value: unknown): value is Response {
     for (const key of ["programLayerVisibility", "groupVisibility", "overlayVisibility"]) {
       if (state[key] !== undefined && (!object(state[key]) || !Object.values(state[key]).every(value => typeof value === "boolean"))) return false;
     }
+    if (state.visuals !== undefined && (!object(state.visuals) || !Object.values(state.visuals).every(value =>
+      object(value) && [value.previewVisible, value.programVisible, value.bypassed, value.programBypassed].every(flag => flag === undefined || typeof flag === "boolean")
+      && [value.sourceID, value.programSourceID].every(id => id === undefined || (typeof id === "string" && UUID.test(id)))))) return false;
     if (state.playback !== undefined && (!object(state.playback) || !Object.values(state.playback).every(value => typeof value === "string"))) return false;
     if (state.directLiveEditing !== undefined && typeof state.directLiveEditing !== "boolean") return false;
     if (state.recordingCountdown !== undefined && (!Number.isSafeInteger(state.recordingCountdown) || (state.recordingCountdown as number) < 0 || (state.recordingCountdown as number) > 60)) return false;
@@ -261,8 +269,11 @@ export class StudioClient extends EventEmitter {
         if (capability.kind !== "value" || !Number.isFinite(value) || value < ("value" in argument ? 0 : -1) || value > 1) throw new Error("Choose a supported normalized value target.");
       } else if ("page" in argument) {
         if (capability.argument !== "page" || !Number.isSafeInteger(argument.page) || argument.page < 0 || argument.page > 100000) throw new Error("Choose a valid PDF jump target and page.");
+      } else if (capability.argument === "source") {
+        if (!UUID.test(argument.text)) throw new Error("Choose a registered source UUID.");
       } else if (capability.argument !== "text" || !argument.text.trim() || Buffer.byteLength(argument.text) > 512) throw new Error("Marker text needs 1–512 UTF-8 bytes.");
     } else if (this.capabilities.get(commandID)?.kind === "value") throw new Error("This target requires a numeric value.");
+    else if (this.capabilities.get(commandID)?.argument === "source") throw new Error("Choose a registered source UUID.");
     // Availability is checked authoritatively by the app at execution, since
     // an output may have changed between catalog refreshes.
     const response = await this.request("command", { commandID, ...argument });

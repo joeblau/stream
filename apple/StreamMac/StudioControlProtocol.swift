@@ -30,6 +30,8 @@ struct StudioControlCapability: Codable, Equatable, Sendable {
     var unavailableReason: String?
     var kind: String? = nil
     var argument: String? = nil
+    var sourceKind: String? = nil
+    var sourceAvailable: Bool? = nil
 }
 struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var projectID: String
@@ -52,6 +54,17 @@ struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var chat: StudioControlChatState? = nil
     var interview: StudioControlInterviewState? = nil
     var recordingCountdown: Int? = nil
+    var visuals: [String: StudioControlVisualState]? = nil
+}
+/// Resource-scoped visual intent receipts. Visibility reports the actual
+/// staged/taken compositions, independently of whether its command is enabled.
+struct StudioControlVisualState: Codable, Equatable, Sendable {
+    var previewVisible: Bool? = nil
+    var programVisible: Bool? = nil
+    var bypassed: Bool? = nil
+    var programBypassed: Bool? = nil
+    var sourceID: UUID? = nil
+    var programSourceID: UUID? = nil
 }
 struct StudioControlInterviewState: Codable, Equatable, Sendable {
     struct Member: Codable, Equatable, Sendable {
@@ -94,6 +107,7 @@ struct StudioControlResponse: Codable, Sendable {
     var nextCursor: Int?
     var totalCommands: Int?
     var result: StudioControlCommandResult?
+    var responseChunk: StudioControlResponseChunk?
 }
 struct StudioControlSession {
     private(set) var clientID: UUID?
@@ -157,5 +171,42 @@ struct StudioControlFrameBuffer {
         }
         guard buffer.count <= Self.maximumFrameBytes else { throw StudioControlProtocolError(code: "messageSize", message: "A JSON message exceeded 65536 bytes.") }
         return frames
+    }
+}
+
+/// A negotiated framing extension: reconstruct the complete original response
+/// before interpreting any state. Resource maps/arrays are never truncated.
+struct StudioControlResponseChunk: Codable, Sendable {
+    var transferID: UUID
+    var index: Int
+    var count: Int
+    var totalBytes: Int
+    var responseType: String
+    var snapshotRevision: UInt64?
+    var body: Data
+}
+enum StudioControlResponseFramer {
+    static let chunkBytes = 24 * 1024
+    static let maximumResponseBytes = 16 * 1024 * 1024
+    static func frames(_ response: StudioControlResponse, chunking: Bool) throws -> [Data] {
+        let encoder = JSONEncoder(), data = try JSONEncoder().encode(response)
+        guard data.count <= maximumResponseBytes else {
+            throw StudioControlProtocolError(code: "responseLimit", message: "This response exceeds the 16 MiB local control response limit. Reduce the project's resource data before reconnecting.")
+        }
+        if data.count <= StudioControlFrameBuffer.maximumFrameBytes { return [data] }
+        guard chunking else {
+            throw StudioControlProtocolError(code: "responseChunksRequired", message: "This project needs a controller that supports negotiated bounded response chunks. Update the controller and reconnect.")
+        }
+        let transfer = UUID(), count = (data.count + chunkBytes - 1) / chunkBytes
+        return try (0..<count).map { index in
+            let lower = index * chunkBytes, upper = min(data.count, lower + chunkBytes)
+            let chunk = StudioControlResponseChunk(transferID: transfer, index: index, count: count, totalBytes: data.count,
+                responseType: response.type, snapshotRevision: response.snapshot?.revision, body: data.subdata(in: lower..<upper))
+            let frame = try encoder.encode(StudioControlResponse(type: "responseChunk", id: response.id, sessionID: response.sessionID, responseChunk: chunk))
+            guard frame.count <= StudioControlFrameBuffer.maximumFrameBytes else {
+                throw StudioControlProtocolError(code: "messageSize", message: "The response chunk exceeded the local frame limit.")
+            }
+            return frame
+        }
     }
 }

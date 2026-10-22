@@ -10,6 +10,7 @@ import Security
     static var machineDirectory: URL { projectDirectory }
 }
 struct HarnessID: Hashable { var rawValue = UUID() }
+struct SourceDefinitionID { var rawValue: UUID; init(_ id: UUID) { rawValue = id } }
 /// Real interview snapshot values at the controlled studio boundary. The wire
 /// fixture starts no service/media factory and makes no guest routing claim.
 struct HarnessGuestRoute {
@@ -39,7 +40,7 @@ struct HarnessState {
         ]), routes: [memberID: .init(slot: slotID, monitorAllowed: true)])
     }()
 }
-enum StudioCommand { case action(String), pdfGoToPage(UUID, page: Int), addRecordingMarker(String) }
+enum StudioCommand { case action(String), pdfGoToPage(UUID, page: Int), addRecordingMarker(String), bindLayerSource(HarnessID, to: SourceDefinitionID?, in: HarnessID?) }
 enum StudioCommandError: Error {
     case unavailable(String), invalidTarget(String), invalidValue(String)
     var description: String {
@@ -56,6 +57,8 @@ struct StudioPaletteAction {
     var category = "Scenes"
     var command: StudioCommand?
     var unavailableReason: String?
+    var sourceKind: String? = nil
+    var sourceAvailable: Bool? = nil
 }
 @MainActor final class StudioCommandDispatcher: ObservableObject {
     @Published var state = HarnessState()
@@ -78,9 +81,11 @@ struct StudioPaletteAction {
     func controllerOverlays() -> [HarnessLayer] { [] }
     func controllerChatSnapshot() -> StudioControlChatState? { nil }
     func controllerRecordingCountdown() -> Int { recordingCountdown }
+    func controllerVisualSnapshot() -> [String: StudioControlVisualState] { [:] }
     func catalogueActions() -> [StudioPaletteAction] { actions }
     func execute(_ command: StudioCommand) -> StudioCommandResult {
         switch command {
+        case .bindLayerSource: return .init(outcome: .success)
         case .addRecordingMarker(let text): marker = text; return .init(outcome: .success)
         case .pdfGoToPage(_, let page): self.page = page; return .init(outcome: .success)
         case .action(let id):
