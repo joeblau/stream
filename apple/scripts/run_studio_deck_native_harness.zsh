@@ -1,6 +1,12 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
+# Validate dependencies before the expensive build. Ordinary FFmpeg is enough
+# for this RTMP-only branch; CI separately requires SRT for shared publishing.
+if [[ "${STREAM_DECK_VALIDATE_TRANSPORT:-0}" == "1" ]]; then
+  STREAM_FFMPEG_BIN="$(python3 scripts/ffmpeg_receiver.py)"
+  export STREAM_FFMPEG_BIN
+fi
 readonly DECK_NATIVE_DIR="build/studio-deck-native-validation"
 readonly DECK_NATIVE_BUILD_PATH="${DECK_NATIVE_BUILD_PATH:-$DECK_NATIVE_DIR/derived}"
 mkdir -p "$DECK_NATIVE_DIR/fixtures"
