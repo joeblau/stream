@@ -778,3 +778,43 @@ All 37 portable client tests pass on the combined source; the owned fake-process
 suite passes 13 checks. Shipping app/Core/vendor source remains identical to
 validated `873dddd`. No replacement browser experiment ran, and the original
 interrupted attempt remains unqualified. This does not close #127.
+
+## Settings semantics and bounded diagnostic evidence — 2026-10-22 UTC
+
+Exact `77f5081` passes generation, unsigned universal arm64/x86_64 Release and
+the actual bundle audit. Current local `75fab97` preserves all 316 validated
+shipping files and the vendor gitlink; later changes are diagnostic workflow,
+helper labels and documentation. Root receipts and hashes are in `wave11Review`
+in [the ledger](MACOS_TASK_STATUS.json). Settings' four slider construction
+sites now expose native operation names and unit-bearing values; existing
+bindings/ranges/steps/identity remain unchanged. Independent source review is
+clear. **#90 stays open**: compilation and labels do not prove mounted AX,
+keyboard/VoiceOver delivery, full-window layout or contrast.
+
+One repaired-wrapper owned RTC diagnostic at published `ea3c834` completes
+**exit 77 / UNQUALIFIED in 11.429 s**, before connection or the original 12 s
+measurement. Both null contexts run and sender source PCM is positive, but both
+ICE/connection states remain `new`: sender outbound Opus reports zero packets
+and bytes, while receiver inbound/selected-transport rows are absent. An absent
+row is not an explicit received-packet counter. Receiver PCM remains zero.
+Retained callback counts are capped lower bounds; the byte counter includes
+discarded batches. Independent cleanup evidence confirms the owned process
+group/browser/directory are retired. Reviewed [receipt](NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE11_2026-10-22.json)
+and [wire audit](NATIVE_GUEST_RETURN_WIRE_AUDIT.md) make no native codec,
+receive-clock cause, normal-output/AEC or timing claim. **#127 stays open**;
+this is a completed negative attempt; no further attempt or replacement of old failures is claimed.
+
+The reviewed manual-only `native-composition-attribution.yml` defines fixed
+ARM/Intel jobs with **two 20 s workloads each**, one unchanged trace invocation per job,
+a seven-file tool/workload hash gate, independent noncancelling concurrency,
+90-minute job bounds and seven-day retention of partial evidence. Two neutral
+labels change; production behavior and original 600 s / 17,850-frame / 80 ms /
+1,380 s gates do not. **It has not been dispatched at this snapshot. #92 stays
+open.** Any later run ID/result needs its own receipt.
+
+The 09:36 UTC preflight confirms **27 closed / 34 open**, zero open PRs and
+published main `ea3c834`. Older `a1bb23d` native CI remains active; EA native CI
+is pending. EA browser foundations pass 21 Worker tests, 37 client tests and
+actual synthetic Chrome 156 loopback; the older `3be6110` Deck workflow succeeds.
+These source-scoped passes are not a whole native CI result or native/physical
+media qualification. All original failed receipts and other open gates remain.

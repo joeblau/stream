@@ -18,7 +18,7 @@
   },
   "validation": {
     "sharedCore": "Published 78796d1 full Core: 588 tests / 82 suites PASS on ARM 231.091 s, Intel 158.415 s and iOS 177.642 s. Both actual paragraph probes pass. Both Mac jobs later fail the generated row fixture compile at step 10; no whole native CI or later encoder/Deck pass. Local 181bf6f is fixture-only with identical production/Core/vendor source; original log hashes in wave9FixtureCIReview.",
-    "shippingApp": "Exact 873ddddd generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS. Exact combined geometry source/pixel/presentation suite passes all four gates. Root receipts/log hashes in wave10Review. Shared Core source is unchanged by this cohort; no new Core/iOS qualification or signed distribution is inferred.",
+    "shippingApp": "Exact 77f5081 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS; root wave11 receipts bind log hashes. Settings operation/unit semantic labels compile in that exact source. No mounted native AX delivery or whole desktop CI success is inferred. Shared Core source is unchanged by Settings; earlier exact-source Core/iOS receipts retain their scope.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -276,7 +276,9 @@
     "wave8HostedCI": "Published 9881359 native CI 39735328975 is terminal FAILURE at the 07:47:11 UTC read-only snapshot: ARM job 119679560262 SUCCESS, Intel 119679560505 FAILURE, iOS 119679560672 SUCCESS. ARM finishes at 07:46:25 UTC. Original Intel receiver exit 234 / 47 VT -12902 failure remains preserved; local ec95 / vendor fallback and Deck passes do not establish a hosted Intel fix. Browser interview 39735328995 remains successful. No newer-head hosted or whole native CI success is inferred.",
     "wave9FixtureCI": "Native run 39744489372 at 78796d1 terminal FAILURE: both Mac builds/Core and paragraph probes pass, then FixtureControlsView synthesized private initializer blocks generated row probe compilation at step 10. Encoder/Deck and later gates are not reached. One explicit init(kind:) line in 181bf6f fixes the local probe; exact 40 cases PASS on local Xcode 27.2, all layout assertions/timeouts unchanged. No hosted 26.6 pass or production change is inferred.",
     "wave10Controls": "Provider forgetting retires live credentials before storage work, persists a nonsecret denial marker where possible and keeps failed cleanup explicit. Numeric geometry drafts preserve untouched values, separate undo and reject stale/conflicting authority; explicit recovery creates a new current-target editor without reviving old callbacks. Exact combined 873 source/pixels/presentation checks PASS, not mounted keyboard/AX/full-window/contrast qualification.",
-    "wave10ClockAndTrace": "Actual engine opaque clock tokens reject retired ticks and missed-deadline mutations; negative-control and six positive cases remain lifecycle evidence. The separate generated-only787 one-invocation 20 s trace is not a sustained qualification or cause/fix for hosted deficits; synchronous CPU spans, profiler-only hash peaks, measured tick-body boundaries and four distinct frame counters stay explicit. Later generated compatibility preserves shipping clock guards without a new trace."
+    "wave10ClockAndTrace": "Actual engine opaque clock tokens reject retired ticks and missed-deadline mutations; negative-control and six positive cases remain lifecycle evidence. The separate generated-only787 one-invocation 20 s trace is not a sustained qualification or cause/fix for hosted deficits; synchronous CPU spans, profiler-only hash peaks, measured tick-body boundaries and four distinct frame counters stay explicit. Later generated compatibility preserves shipping clock guards without a new trace.",
+    "wave11Settings": "Four Settings slider construction sites now use native operation names and unit-bearing accessibility values, with unavailable/nonfinite safety and an explicit Close settings label. Existing bindings/ranges/steps/dispatch/identity are unchanged. Actual source parse and parent exact77 universal build pass; parent reports independent pro_adapters source approval. No mounted semantic tree, keyboard/VoiceOver or visual contrast qualification follows.",
+    "wave11OwnedRTC": "One repaired-wrapper owned EA null-output RTC diagnostic completes exit 77/UNQUALIFIED in 11.429 s at connection-wait; both ICE/connection states remain new. Both running 48 kHz null contexts and positive sender PCM do not establish networking: sender outbound Opus 0 packets / 0 bytes, receiver inbound/transport rows absent, receiver PCM zero. Original 12 s measurement is unreached. Retained trace counts are capped lowerbounds, bytecounter includes discarded batches; drained cleanup is independently verified. No retry, cause/native interop/normal output/AEC/timing qualification or relabel of prior failures."
   },
   "issues": [
     {
@@ -782,13 +784,15 @@
       "remaining": [
         "An earlier raw-track A/V run exceeded 100 ms (105.104 ms; contiguous PCM 103.104 ms). Later bounded two-capture-per-source matrices pass but do not establish a fix for that variable failure. Normal rendered PCM/AEC/talkback playback remains unqualified; the recorded locked-session SCK calibration exits 77 with zero shareable displays.",
         "Program/Secondary/Clean selection, conservative feedback-driven bitrate and whole-AU admission, same-lease budget retention and optional-video failure isolation are implemented and locally verified. Multiple simultaneous recipients/capacity, physical AEC, desktop/mobile browsers, deployed/restricted-network and sustained A/V qualification remain. Natural higher-resolution upshift and actual high-to-low resolution impairment have not been qualified.",
-        "Current source/wire audit and independent libopus decode demonstrate non-silent interoperable generated Opus payloads, without production changes or successful network sends. The receive-clock cause remains a source-supported hypothesis. Both owned browser discriminators stop before connected/RTP measurement and are UNQUALIFIED 77, not a repair or a reproduced old 931-packet symptom."
+        "Current source/wire audit and independent libopus decode demonstrate non-silent interoperable generated Opus payloads, without production changes or successful network sends. The receive-clock cause remains a source-supported hypothesis. Both owned browser discriminators stop before connected/RTP measurement and are UNQUALIFIED 77, not a repair or a reproduced old 931-packet symptom.",
+        "One completed repaired owned null-output diagnostic at EA exits77/UNQUALIFIED after 11.429 s before connection or the 12 s measurement. Both ICE/connection states remain new, sender source PCM is positive but its outbound RTP row reports 0 packets/bytes, receiver inbound rows are absent and PCM is zero. Partial callback lowerbounds and verified process-group/browser/directory cleanup do not reproduce the old 931 RTP/zero-emission case, establish its cause, or qualify native return/normal output/AEC/A/V."
       ],
       "evidence": [
         "GUEST_RETURN_AV_ORACLES.md",
         "NATIVE_GUEST_TCP_QUALIFICATION.md",
         "NATIVE_GUEST_RETURN_WIRE_AUDIT.md",
-        "NATIVE_GUEST_RETURN_WIRE_AUDIT_2026-10-22.json"
+        "NATIVE_GUEST_RETURN_WIRE_AUDIT_2026-10-22.json",
+        "NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE11_2026-10-22.json"
       ]
     },
     {
@@ -918,7 +922,8 @@
         "Fresh run 39724736435 on native ARM VirtualMac2,1 improves to about 28.26/28.41 rendered fps but still fails the unchanged 17,850-frame gate with 16,957/17,047 frames. Both writers complete and actual-source replay decodes all 16,956 available frames; this is not nominal 30 fps capacity. Current Intel also fails nominal capacity at 17,366/17,058 rendered frames; replay decodes all 17,366 available frames and both writers complete. The prior long stall did not recur, but the real frame deficit remains.",
         "Registry-aware title font caching and actual native pixel/owned-font/nested-bake regressions pass. Bounded20 s candidate profile renders 601 but decodes 600/601 replay frames versus original 601/601; its trace predates the final nested guard. This does not replace either failed 600-second hosted result, qualify representative physical mixes/Intel/resource ceilings or prove waveform A/V sync.",
         "Latest exact9881359 hosted 600 s run 39735454725 still fails both nominal capacity gates: ARM 17252/17306 and Intel 17232/16434 versus 17,850. ARM decodes 17251/17252 replay frames; Intel 17232/17232. All writers finish with zero A/V drops, but Intel second inspection remains pending at original 1380 s deadline. Endpoint <80 ms is not independent waveform sync; no unresolved inspection success/cause or newer 2ea819a sustained qualification is inferred.",
-        "Opaque composition-clock authority now rejects retired ticks/skips after stop/restart/output changes; deterministic actual engine cases and negative controls prove lifecycle fencing, not sustained throughput. One generated-only 20 s trace from 787 records static 600/601 and replay 601/601 rendered/attempted, two 600-frame writer movies, and 599/600 replay source frames decoded. It does not reproduce hosted whole skips or qualify capacity; generated clock-compatibility changes are not a new trace."
+        "Opaque composition-clock authority now rejects retired ticks/skips after stop/restart/output changes; deterministic actual engine cases and negative controls prove lifecycle fencing, not sustained throughput. One generated-only 20 s trace from 787 records static 600/601 and replay 601/601 rendered/attempted, two 600-frame writer movies, and 599/600 replay source frames decoded. It does not reproduce hosted whole skips or qualify capacity; generated clock-compatibility changes are not a new trace.",
+        "New reviewed manual-only fixed ARM/Intel two 20 s attribution workflow is defined but not dispatched at this snapshot. Source/generation/hash-gate checks do not qualify sustained capacity; original 600 s / 17,850 frames / 80 ms / 1380 s gates and retained failures are unchanged."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -935,7 +940,8 @@
         "PERFORMANCE_HOSTED_39735454725.json",
         "COMPOSITION_CLOCK_AUTHORITY.md",
         "COMPOSITION_CLOCK_AUTHORITY_2026-10-22.json",
-        "PERFORMANCE_LOCAL_THREAD_TRACE_2026-10-22.json"
+        "PERFORMANCE_LOCAL_THREAD_TRACE_2026-10-22.json",
+        "../../.github/workflows/native-composition-attribution.yml"
       ]
     },
     {
@@ -967,7 +973,8 @@
         "Prior exact native focus ownership/restoration and meter/chat owner preservation proofs remain scoped evidence; they do not qualify every virtual control or panel transition.",
         "Current source repairs named pad color/PDF/audio controls, safe gain values, validated numeric crop/steppers, zoom labels and native bounded PTZ actions. Source/model/native target-action checks pass; actual platform keyboard/AX delivery is UNQUALIFIED 77. No physical PTZ stop guarantee is claimed.",
         "Current source adds native Scene menu and named AX reorder actions with actual no-window callback/model/runtime fencing tests, and stable scrollable transport/transition rows with 40 exact static native layout cases. This repairs concrete software paths but does not qualify actual menu/AX/keyboard delivery, every 1024\u00d7640 panel/live state, contrast, focus or visible operator readability. Original criteria remain open.",
-        "Numeric position/size/rotation drafts and explicit fresh-draft recovery now pass actual shipping workspace/model/compiled-view/pixel checks, including exact combined 873. These do not qualify mounted SwiftUI identity, native keyboard/AX delivery, full-window layout or contrast; original issue remains open."
+        "Numeric position/size/rotation drafts and explicit fresh-draft recovery now pass actual shipping workspace/model/compiled-view/pixel checks, including exact combined 873. These do not qualify mounted SwiftUI identity, native keyboard/AX delivery, full-window layout or contrast; original issue remains open.",
+        "Settings sliders now have native operation names/unit-bearing accessibility values and Close settings is named; exact77 universal compilation passes. Actual mounted AX/keyboard/VoiceOver delivery and full-window/contrast acceptance remain unqualified."
       ],
       "evidence": [
         "STUDIO_CONTROLS.md",
@@ -988,7 +995,8 @@
         "LAYER_GEOMETRY_ACCESSIBILITY.md",
         "LAYER_GEOMETRY_ACCESSIBILITY_2026-10-22.json",
         "LAYER_GEOMETRY_RECOVERY_2026-10-22.json",
-        "/tmp/stream-wave10-parent-layer-geometry-results-20261022.json"
+        "/tmp/stream-wave10-parent-layer-geometry-results-20261022.json",
+        "SETTINGS_SLIDER_ACCESSIBILITY.md"
       ]
     },
     {
@@ -1173,11 +1181,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closures. Exact 873 generation, unsigned universal Release/bundle and combined four-gate numeric geometry checks PASS. Provider retirement, clock authority, Deck candidate artifacts and evaluation-only Program mic improve scoped software behavior; actual operator/import/install/distributable/performance gates remain open. Published a1bb native CI 39748453209 is active at the timestamped snapshot, no whole CI success inferred. Original failed receipts and all other acceptance limits remain preserved. Current local 34bea18 changes CI policy only after validated873: main retains active acceptance with pending-run coalescing; PR superseded cancellation stays enabled. No FIFO/every-commit execution is promised.",
-  "integratedMain": "7037a30ce378f6e367c71d66920d9670412d1fae",
-  "githubStateRefreshedAt": "2026-10-22T07:56:14.843578+00:00",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closures. Exact 77 Settings generation, unsigned universal Release/bundle PASS; current 75fab97 has identical 316 shipping files/vendor. One owned EA RTC attempt completes 77/UNQUALIFIED before connection/12s measurement; no positive network/native return acceptance. New manual 2x20 s diagnostic workflow is defined/reviewed but not dispatched. Published EA browser 21+37/Chrome 156 and older 3be Deck succeed; a1bb native CI active and EA pending at timestamped snapshots, no whole/new-source native CI success. #90/#92/#127 and all other incomplete gates remain open; all prior failures preserved.",
+  "integratedMain": "75fab979df28c1d252fcf169b4bc1ce95964f6b1",
+  "githubStateRefreshedAt": "2026-10-22T09:36:15.823207+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "3be61100dffaf02761d1f90f638ddc9b0ab94d33",
+  "publishedIntegration": "ea3c834613ff6b9c85d4383ba1c85d644402ca50",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1197,7 +1205,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "7037a30ce378f6e367c71d66920d9670412d1fae",
+  "currentReviewBase": "75fab979df28c1d252fcf169b4bc1ce95964f6b1",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -2667,5 +2675,240 @@
     "productionSourceBoundary": "Shipping app/Core/vendor identical to validated873; only diagnostic tests/helpers and documentation changed.",
     "realBrowserAttempt": "No replacement attempt; original interrupted monitor result stays UNQUALIFIED. No receive-clock or connected-RTP conclusion.",
     "closuresPerformed": []
+  },
+  "wave11Review": {
+    "recordedAt": "2026-10-22T09:32:54.197099+00:00",
+    "validatedIntegratedHead": "77f50811ddc5b0831947a2d468b1bad2b20b9c39",
+    "nativeChecks": [
+      {
+        "label": "generate",
+        "exit": 0,
+        "log": "/tmp/stream-wave11-parent-final-generate-20261022.log",
+        "bytes": 168,
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "label": "universal",
+        "exit": 0,
+        "log": "/tmp/stream-wave11-parent-final-universal-20261022.log",
+        "bytes": 249227,
+        "sha256": "9ef141722ef0aa0c4267387faa1a30fc6e8f8ae8a7c507ce8c6120737da04e9e"
+      },
+      {
+        "label": "bundle",
+        "exit": 0,
+        "log": "/tmp/stream-wave11-parent-final-bundle-20261022.log",
+        "bytes": 517,
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ],
+    "settings": {
+      "commit": "77f50811ddc5b0831947a2d468b1bad2b20b9c39",
+      "receipt": {
+        "commit": "77f50811ddc5b0831947a2d468b1bad2b20b9c39",
+        "path": "apple/docs/SETTINGS_SLIDER_ACCESSIBILITY.md",
+        "bytes": 2105,
+        "sha256": "78bd1c710a03b21265a0f35090124bc3f89e29dad759fcfd9a8f1455463b7149"
+      },
+      "independentReview": "Parent reports pro_adapters source approval; no native delivery inferred."
+    },
+    "ownedRTC": {
+      "source": "ea3c834613ff6b9c85d4383ba1c85d644402ca50",
+      "documentationCommit": "782989fb1964116ea3c30b485277941c8fa61a91",
+      "receipt": {
+        "commit": "782989fb1964116ea3c30b485277941c8fa61a91",
+        "path": "apple/docs/NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE11_2026-10-22.json",
+        "bytes": 14742,
+        "sha256": "c7edfe897b161f3cca1196e1c89eff156f2140a81333ec987f86338f342e5be2"
+      },
+      "wireAudit": {
+        "commit": "782989fb1964116ea3c30b485277941c8fa61a91",
+        "path": "apple/docs/NATIVE_GUEST_RETURN_WIRE_AUDIT.md",
+        "bytes": 20426,
+        "sha256": "28db1f7ee9c1ccace7bc8dd3de983312ce527677fc36a243af4a6ac780f8e48f"
+      },
+      "wrapper": {
+        "attemptCount": 1,
+        "browserArgumentsVerified": true,
+        "browserRetirement": "absent",
+        "elapsedSeconds": 11.429,
+        "exitCode": 77,
+        "nodeVersion": "24.15.0",
+        "remainingOwnedBrowser": false,
+        "result": "UNQUALIFIED"
+      },
+      "independentEndProof": {
+        "attemptCount": 1,
+        "nodeNumericPIDPresent": false,
+        "numericBrowserGroupPresent": false,
+        "originalBrowserIdentityPresent": false,
+        "ownedDirectoryPresent": false,
+        "sourceCommit": "ea3c834613ff6b9c85d4383ba1c85d644402ca50"
+      },
+      "traceInterpretation": {
+        "retainedCountsAreLowerBounds": true,
+        "traceCompleteMeans": "Chrome tracing protocol ended; not an uncapped event inventory.",
+        "observedBatchByteCounter": 8485314,
+        "byteBudget": 8388608,
+        "counterIncludesDiscardedBatchBytes": true,
+        "separateAudioUtilityArgvOrFakeAudioWorkerProofRetained": false
+      },
+      "scope": "One completed negative diagnostic before connection; no 12 s measurement, no positive RTP control, no native/normal output/AEC/timing acceptance or causal proof. Prior failed/interrupted receipts preserved.",
+      "independentReview": "Frozen 782989f receipt/wire docs approved by recording and integrated by parent as da3bb74; original owned cleanup/read-only end audit separately verified."
+    },
+    "originalIssueCounts": {
+      "closed": 27,
+      "open": 34,
+      "openFeatures": 23,
+      "openTrackers": 11
+    },
+    "githubWritesPerformed": false,
+    "closuresPerformed": [],
+    "keepOpen": [
+      90,
+      92,
+      127
+    ],
+    "diagnosticWorkflow": {
+      "commit": "668921c9b0b67d6209ac508fceab50bb4d88de3f",
+      "integratedAs": "75fab97",
+      "definition": {
+        "commit": "668921c9b0b67d6209ac508fceab50bb4d88de3f",
+        "path": ".github/workflows/native-composition-attribution.yml",
+        "bytes": 11889,
+        "sha256": "6595f2545071b6869add8ecfa82b5d93b574875e3c7df33d1f68a921b4d4ea1c"
+      },
+      "sourceValidationLog": {
+        "path": "/tmp/stream-wave9-attribution-source-validation-20261022.log",
+        "bytes": 1221,
+        "sha256": "fac16a47c1390efe5dada75e9ce895626c0979fd1647e9562523bc780c7c1985"
+      },
+      "scope": "Manual-only ARM and Intel jobs with two fixed 20 s workloads each, one unchanged trace-runner invocation per job, exact seven-file tool/workload hash gate, own noncancelling concurrency, 90 min job bound, 7 day always-retained partial evidence. Two neutral label strings only; no production/runtime/counter/sustained 600 s / 17,850 frames / 80 ms / 1380 s gate change.",
+      "independentReview": "Parent source/actionlint/generation/hash-positive+negative checks pass; frozen recording review approved.",
+      "dispatchedAtSnapshot": false,
+      "qualification": false,
+      "futureRunEvidence": "Any later parent-authorized dispatch/run ID/result is a separate receipt; no advance execution or success claim."
+    },
+    "currentLocalHead": "75fab979df28c1d252fcf169b4bc1ce95964f6b1",
+    "validatedProductionManifest": {
+      "path": "/tmp/stream-wave11-validated-production-manifest-20261022.json",
+      "bytes": 37220,
+      "sha256": "508f2c757a90801e9a6220490d46d9f488fca51f622f48cdce9128a1bd454d08",
+      "files": 316,
+      "source": "77f50811ddc5b0831947a2d468b1bad2b20b9c39",
+      "vendor": "d9fceedc068994023900b4d69588b8af19136752",
+      "currentHeadEqualityVerified": true
+    },
+    "hostedNative": [
+      {
+        "recordedAt": "2026-10-22T09:36:53.985804+00:00",
+        "run": {
+          "id": 39748453209,
+          "head_sha": "a1bb23d0a34e3b2983b70084ffc6192bb992fe38",
+          "status": "in_progress",
+          "conclusion": null,
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39748453209"
+        },
+        "jobs": [
+          {
+            "id": 119722684248,
+            "name": "StreamCore tests (iOS Simulator)",
+            "status": "completed",
+            "conclusion": "success",
+            "completed_at": "2026-10-22T08:39:07Z",
+            "activeSteps": []
+          },
+          {
+            "id": 119722684437,
+            "name": "StreamMac build and tests (macos-26)",
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "activeSteps": [
+              {
+                "number": 23,
+                "name": "Qualify generated program recordings",
+                "status": "in_progress"
+              }
+            ]
+          },
+          {
+            "id": 119722684538,
+            "name": "StreamMac build and tests (macos-26-intel)",
+            "status": "in_progress",
+            "conclusion": null,
+            "completed_at": null,
+            "activeSteps": [
+              {
+                "number": 17,
+                "name": "Test private program slate rendering",
+                "status": "in_progress"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "recordedAt": "2026-10-22T09:36:10.894784+00:00",
+        "run": {
+          "id": 39754112005,
+          "head_sha": "ea3c834613ff6b9c85d4383ba1c85d644402ca50",
+          "status": "pending",
+          "conclusion": null,
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39754112005"
+        },
+        "jobs": []
+      }
+    ],
+    "hostedBrowser": {
+      "source": "ea3c834613ff6b9c85d4383ba1c85d644402ca50",
+      "run": 39754112537,
+      "conclusion": "success",
+      "jobs": [
+        {
+          "id": 119741666478,
+          "name": "signaling",
+          "conclusion": "success",
+          "originalLog": "/tmp/stream-browser-ea3c834-119741666478-original.log",
+          "bytes": 20540,
+          "sha256": "be433ab57b9a0b5e6ce8b720a0cd7c0dd998f6f06453ffdf8e454220667ec7b5"
+        },
+        {
+          "id": 119741666920,
+          "name": "browser",
+          "conclusion": "success",
+          "originalLog": "/tmp/stream-browser-ea3c834-119741666920-original.log",
+          "bytes": 27547,
+          "sha256": "4fd985932b5bd7476738b881ad362c20d018884a75e20e408f9f882d203cd95d"
+        }
+      ],
+      "scope": "21 Worker tests, 37 portable client tests and actual headless Chrome 156.0.8078.47 synthetic loopback lifecycle pass; synthetic canvas replaces picker, no native/TURN/physical/normal-output qualification."
+    },
+    "hostedDeck": {
+      "recordedAt": "2026-10-22T09:35:38.717559+00:00",
+      "run": {
+        "id": 39753657892,
+        "name": "Stream Deck Plugin",
+        "head_sha": "3be61100dffaf02761d1f90f638ddc9b0ab94d33",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/joeblau/stream/actions/runs/39753657892"
+      }
+    },
+    "githubPreflight": {
+      "path": "/tmp/stream-wave11-publication-preflight-20261022.json",
+      "bytes": 651243,
+      "sha256": "b1c20ab73f028743a27469a8f92162157e277bb4a9f7e2dd9e359ccea603e31d",
+      "recordedAt": "2026-10-22T09:36:15.823207+00:00",
+      "localHead": "75fab979df28c1d252fcf169b4bc1ce95964f6b1",
+      "publishedMain": "ea3c834613ff6b9c85d4383ba1c85d644402ca50",
+      "counts": {
+        "open": 34,
+        "closed": 27
+      },
+      "openPullRequests": 0,
+      "productionManifestVerified": true,
+      "vendorUnchanged": true
+    }
   }
 }
