@@ -43,8 +43,9 @@ enum PackageReadProbe {
         completedIO("preview", url)
         return try result.get()
     }
-    static func importFiles(from source: URL, to destination: URL) throws {
-        let result = Result { try ShowPackageIO.importFiles(from: source, to: destination) }
+    static func importFiles(from source: URL, to destination: URL,
+                            previewedManifest: PortableShowManifest) throws {
+        let result = Result { try ShowPackageIO.importFiles(from: source, to: destination, previewedManifest: previewedManifest) }
         completedIO("import", source)
         return try result.get()
     }

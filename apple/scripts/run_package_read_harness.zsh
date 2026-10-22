@@ -46,9 +46,9 @@ replace_source(target, root, folder, 'StudioWorkspace.swift') do |source|
   abort 'Actual preview completion boundary changed' unless preview.match?(/        Task \{[^\n]*\n/)
   preview.sub!(/        Task \{([^\n]*)\n/, "        Task {\\1\n            defer { PackageReadProbe.previewReturned(url) }\n")
   source[first...last] = preview
-  seam = 'ShowPackageIO.importFiles(from: preview.url, to: destination)'
+  seam = 'ShowPackageIO.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)'
   abort 'Actual import IO boundary changed' unless source.include?(seam)
-  source.sub(seam, 'PackageReadProbe.importFiles(from: preview.url, to: destination)')
+  source.sub(seam, 'PackageReadProbe.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)')
 end
 replace_source(target, root, folder, 'ProviderAccountSession.swift') do |source|
   seam = 'transport: @escaping ProviderTokenVault.Transport = ProviderTokenVault.network'

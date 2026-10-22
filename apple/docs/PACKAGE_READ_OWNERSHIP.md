@@ -57,3 +57,45 @@ and defaults are removed on process exit. This fixture qualifies IO ownership;
 native sandbox/LaunchServices/bookmark evidence and the remaining chooser and
 physical interaction gates are described separately in
 [PORTABLE_SHOW_NATIVE_ENTRY.md](PORTABLE_SHOW_NATIVE_ENTRY.md).
+
+## Package-only method qualification (2026-10-22)
+
+The normal runner now recognizes the current manifest-bound import call and
+forwards `previewedManifest` unchanged through its IO probe. A generation-only
+regression rejects the old unbound call instead of silently dropping this
+preview-to-import binding:
+
+```sh
+python3 apple/scripts/test_package_read_generation.py
+```
+
+For a run that does not construct the desktop runtime, use an already-built,
+matching `StreamCore.framework` products directory:
+
+```sh
+PACKAGE_METHODS_CORE_PRODUCTS=/path/to/products \
+zsh apple/scripts/run_package_read_methods_harness.zsh
+```
+
+This runner compiles the real package IO, scene models and migration, plus exact
+production Workspace property/method slices. Its generated manifest records each
+slice's source boundaries and SHA-256. Initialization only reads the seeded
+catalog in the fresh owned fixture directory. The original export busy guard is
+copied verbatim; reaching the following save-panel boundary traps. Thus this
+qualifies rejection of export during an occupied import, not native panel use.
+
+The generated harness preserves every package/race/import/catalog assertion and
+the original bounded `NSCondition` completion holds. Its only omitted assertion
+is the unrelated final runtime output predicate, replaced by the explicit line
+`StudioRuntime/controller/recorder not constructed; their behavior not tested`.
+The normal full-graph harness retains its real output predicate. No dummy runtime
+or output state is supplied.
+
+On the named local Apple Silicon host, the first purposeful package-only run
+passed all five original ownership phases within the unchanged 45-second child
+deadline. Real copied scene data and catalog retained the captured source across
+cancelled import. The generation regression's three cases also passed. Source,
+generated-slice, executable, immutable Core and retained log hashes are recorded
+in [PACKAGE_READ_METHODS_2026-10-22.json](PACKAGE_READ_METHODS_2026-10-22.json).
+This is not a full-runtime, keyboard chooser, sandbox, LaunchServices or UI
+qualification; those original native acceptance requirements remain separate.

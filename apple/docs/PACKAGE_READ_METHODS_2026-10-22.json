@@ -1,0 +1,193 @@
+{
+  "date": "2026-10-22",
+  "baseCommit": "9cb68c901fa620db294436324ab1ba0a723f22dd",
+  "host": {
+    "name": "Joes-MacBook-Pro.local",
+    "architecture": "arm64",
+    "macOS": "27.2",
+    "build": "26B118"
+  },
+  "result": "PASS: focused package-only method/IO proof; no full-runtime/native UI qualification",
+  "scope": "StudioRuntime/controller/recorder not constructed; their behavior not tested. No NSApplication/panels/permissions/devices/preferences/network. Only owned synthetic package file IO and existing Foundation security-scope calls. Original NSCondition holds and 45-second child deadline unchanged.",
+  "compiledSources": {
+    "StreamMac/LayerGraph.swift": "84bf12ec33fbfc61162a26faeec5cfc83262d66ec4820a8ee2110543568845d7",
+    "StreamMac/LayerStyle.swift": "29ffb649f818d455bb93aaaac29514df851a0681a510abcc780df4692be68c2e",
+    "StreamMac/SourceEffects.swift": "0451d9f25a228fd10fecad4f1e8ddafb2c96da9ef285181ebe2602d019a6a144",
+    "StreamMac/TextLayer.swift": "b14ea104cf2609cf878da151202cd4fdc42425eb2fd0544acc52af63588e1fd5",
+    "StreamMac/SecondaryCanvasLayout.swift": "2a576e0b86f9e802d35249d614013dfca5e76bacf216a14f46111db4e650abd0",
+    "StreamMac/SceneMigration.swift": "34b153e244db047ca9e5998677e72151722de6bcac5a2e8bb0baf9de294ab7e9",
+    "StreamMac/SceneDocumentMigration.swift": "f64bb10cdeb9826a58167b9c68f2a56d788efc7c7d8c8fa8ca3c6664cb5023fc",
+    "StreamMac/ShowPackage.swift": "28c54d9859208b7ea950aa291327992c707cf28ec51d937885736ed9ef10e097"
+  },
+  "recipeSources": {
+    "scripts/package_read_harness.swift": "73e38d22259ece79e538fbcbc763c60dd1641752ccb91d88bbde5fe75f1ae881",
+    "scripts/run_package_read_harness.zsh": "a0b5b21b04862f5f7fbde74b0ff2c21f08b5922dff369fc716cf0409f0651919",
+    "scripts/generate_package_read_methods.py": "d57c012f2bb1920913f4e34f667d04a5913b1a1c4bfd81a528f221c955a418ed",
+    "scripts/run_package_read_methods_harness.zsh": "9ec9f3b7e21a992b4e568eb9450df67059595b52a002412cb866c55081bb3581",
+    "scripts/test_package_read_generation.py": "22192843316f60ced606ed27a1718d906476e212fdf59f15866aecb4ea316f69"
+  },
+  "generation": {
+    "scope": "Package IO and copied Workspace transactions only; no StudioRuntime/controller/recorder, UI, permissions, devices, preferences or network",
+    "slices": [
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "start": "    @Published private(set) var catalog: StudioProjectCatalog",
+        "end": "single line",
+        "sha256": "2c65142c5feb12e34057690f99d1912013a00e315a82bbda00a0201b83778b8e"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "start": "    @Published var pending: Selection?",
+        "end": "single line",
+        "sha256": "16c2c94f8e149089cf024c0a651c78e0032a9bf47f9bcc1d2ebda41d1bd08402"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "start": "    @Published var error: String?",
+        "end": "single line",
+        "sha256": "16b59ab060a02c82589139318ca99d0f56aed7329a72e1547e64ec68347e79ae"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "start": "    @Published var showProjects = false",
+        "end": "single line",
+        "sha256": "b9cd1bc06a49cff463a4da4c653bb17a21701ecdb9e2771258ba3033a3a8648d"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "start": "    @Published var recoveryFile: URL?",
+        "end": "single line",
+        "sha256": "bcd3a013327c2cb6071400bf7dd3f6af0bc6f0cdac331d3760e093c8651b33f2"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "firstLine": 80,
+        "start": "    @Published var importPreview:",
+        "end": "    @Published var showRecordingLibrary",
+        "sha256": "29cd9377ebb7b44a3c4b31d57191ee1aa8dce4f8c601dec5dcfdc5e3284004fe"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "firstLine": 96,
+        "start": "    struct Selection: Equatable {",
+        "end": "    var selection: Selection",
+        "sha256": "134daf85f1deb8dac360d5b975cc76ad352f60e59b6e65fbdf51e18464c7ee15"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "firstLine": 152,
+        "start": "    func directory(for selection:",
+        "end": "    func stage(project:",
+        "sha256": "15f6f014e22ee242815d74360c8793a3575841e7e0c54fad59729c53342fe34c"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "firstLine": 249,
+        "start": "    private func saveCatalog()",
+        "end": "    func acceptRecoveredCatalog()",
+        "sha256": "19c12864cec924395df7ced819bc153d0cc3b04fc93d32accb610673f76e6c3c"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "firstLine": 488,
+        "start": "    func previewPackage(_ url:",
+        "end": "    func importPreviewedPackage()",
+        "sha256": "fbc772248736ba4c3f914d2637326d7cf6a1ffd17d9878b8b513721551737ac5"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "firstLine": 522,
+        "start": "    func importPreviewedPackage()",
+        "end": "    func exportPackage(",
+        "sha256": "7e6a9f1ff3e7ecce35bbf07d9531dfc2c2542b60a8e72f24790fac93f20804e8"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "firstLine": 584,
+        "start": "    private func beginPackageWrite()",
+        "end": "    /// Capture retained security grants",
+        "sha256": "9bc77ac567fc6011eb0b41787840839e27474e04afe98dc86855d923d9044b9b"
+      },
+      {
+        "source": "StreamMac/StudioWorkspace.swift",
+        "firstLine": 540,
+        "start": "    func exportPackage(includeMedia:",
+        "end": "        let panel = NSSavePanel()",
+        "sha256": "9a05adb98205e4a94761a33dc20dc2cb3a38102ffdd3edeb6c4d082ce39267fa"
+      },
+      {
+        "source": "StreamMac/AssetLibraryStore.swift",
+        "firstLine": 632,
+        "start": "final class ResolvedAssetAccess:",
+        "end": null,
+        "sha256": "0f5512d1e10480814d5050ce5f30449e7be289f521f6ff681b2535c36ff19c6c"
+      },
+      {
+        "source": "StreamMac/StudioControlPairingStore.swift",
+        "firstLine": 15,
+        "start": "@MainActor protocol StudioControlCredentials",
+        "end": "@MainActor private struct StudioControlKeychainCredentials",
+        "sha256": "f332538cbf8cb9a810f55c37812d93ce891db0f4faab8d27713111e1324b5672"
+      },
+      {
+        "source": "StreamMac/TransitionController.swift",
+        "firstLine": 18,
+        "start": "enum SceneTransitionStyle:",
+        "end": "// MARK: - Take \u2192 program-engine hand-off",
+        "sha256": "ae8ea67fdbcca61d65cbbe1e936148363adb3ea48bbe0af36c579286f0e76677"
+      },
+      {
+        "source": "StreamMac/WebOverlayIntegration.swift",
+        "firstLine": 96,
+        "start": "extension LayerPayload {",
+        "end": "private final class BrowserWidgetIdentity:",
+        "sha256": "e9a9dfcdb3d05ab62597609f0879a9803d9b06192953bb1bd0994f07a9c6c58c"
+      },
+      {
+        "source": "StreamMac/MediaSourcePlayback.swift",
+        "firstLine": 52,
+        "start": "enum MediaSourceFactory {",
+        "end": "/// Serializes only sample delivery.",
+        "sha256": "9f27ec1fab907a0442082957dbe14435c794b92877f4706efbf041914c234cdf"
+      }
+    ],
+    "generated": {
+      "WorkspacePackageMethods.swift": "4f350d0441461a9a595d52ec6c680c91556f156ef92452b726e293105f48e028",
+      "PackageDependencies.swift": "c1a7bca5c03e0dfe60d7e9b6dd775c44a148aa1d72ea613b82c16c6a15d9cc16",
+      "PackageReadHarness.swift": "539ce5862c2832602dcf7b353b20eaa332fe08778f553e2c9f09e36e805d597f"
+    },
+    "harnessOmission": "Only final full-runtime output predicate; original normal harness retains it",
+    "ioProbes": "Actual IO, required previewedManifest forwarded unchanged; original NSCondition holds"
+  },
+  "generatedFiles": {
+    "build/package-read-methods-validation/generated/PackageDependencies.swift": "c1a7bca5c03e0dfe60d7e9b6dd775c44a148aa1d72ea613b82c16c6a15d9cc16",
+    "build/package-read-methods-validation/generated/PackageReadHarness.swift": "539ce5862c2832602dcf7b353b20eaa332fe08778f553e2c9f09e36e805d597f",
+    "build/package-read-methods-validation/generated/WorkspacePackageMethods.swift": "4f350d0441461a9a595d52ec6c680c91556f156ef92452b726e293105f48e028",
+    "build/package-read-methods-validation/generated/generation.json": "cb7e26aa934fde6bdeb5b507971a7be86499d8e1181cd9663f7ea41efd736e6a"
+  },
+  "core": {
+    "path": "/private/tmp/stream-wave16-package-read-fixture-20261022/apple/build/package-read-methods-validation/frameworks/StreamCore.framework/StreamCore",
+    "sha256": "90d9e5d5dbaed2f6a9c7f6277bee9f80aad21834b9bf46c85979c927cb0d64e4",
+    "origin": "Owned copy from /tmp/stream-recovery-accounts-authority-proof-20261022/frameworks; root-approved 9cb Core binary"
+  },
+  "executable": {
+    "path": "/private/tmp/stream-wave16-package-read-fixture-20261022/apple/build/package-read-methods-validation/PackageReadMethodsHarness",
+    "sha256": "19cc7ff19844deb7474f9b7fcd50b890fb0670a9f8a38af9e691c86b20bad055"
+  },
+  "logs": {
+    "/tmp/stream-wave16-package-read-generation-before-20261022.log": "c942cb7a2b8e7348770b952f30d00d0460427361eb0ac2cf290ad1e0ae4fc073",
+    "/tmp/stream-wave16-package-methods-first-20261022.log": "c148bf8a2aae83c766b03099dbf30b70009f97785630d88701d3982c9d4d889e",
+    "/tmp/stream-wave16-package-read-generation-final-20261022.log": "2fa5995d2fc4244f1d2ddf3c741ce5d2a67bc57b5fc6fc453c670b5b88a6fc55",
+    "/tmp/stream-wave16-package-methods-nscondition-20261022.log": "b49ae3b880b9801b5cb0e17e9451d6e0149387ddca4f6dcf37d810ae228fff4a"
+  },
+  "ownedImportedScene": {
+    "path": "/private/tmp/stream-wave16-package-read-fixture-20261022/apple/build/package-read-methods-validation/owned-packages-f9494227-c424-43c3-bdce-2ba5e271a36d/actual-imported-scenes.json",
+    "sha256": "309cf349a299ef62cd0b25bd1abaa31074890841c7aac89f8f5e2bfcebcef3b3"
+  },
+  "limits": [
+    "Not a full StudioWorkspace initializer/runtime graph test",
+    "Native keyboard chooser delivery, panel interactions, sandbox, LaunchServices and bookmark relaunch not exercised",
+    "Initial narrow compile failed before runtime for missing real model declarations; retained log. Three exact production dependency slices added before successful run.",
+    "Original pre-fix Ruby generation failed before compile/runtime; retained log. No asynchronous hold rewrite needed."
+  ]
+}
