@@ -8,6 +8,9 @@ struct StudioPaletteAction: Identifiable {
     let category: String
     let command: StudioCommand?
     var unavailableReason: String?
+    var kind: String? = nil
+    var scope: String? = nil
+    var bindingIntent: String? = nil
 }
 
 extension StudioCommandDispatcher {

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import net from "node:net";
 
 export type Pairing = { version: 1; clientID: string; token: string; host?: string; port?: number };
-export type Capability = { id: string; title: string; category: string; available: boolean; unavailableReason?: string; kind?: "command" | "value"; argument?: "text" | "page" };
+export type Capability = { id: string; title: string; category: string; available: boolean; unavailableReason?: string; kind?: "command" | "value" | "feedback"; argument?: "text" | "page"; authority?: string; scope?: "project" | "studio"; bindingIntent?: "currentConnection" | "configuredSlot" };
 export type CommandArgument = { value: number } | { delta: number } | { page: number } | { text: string };
 export type Snapshot = {
   projectID: string; revision: number; stream: string; recording: string; preview: string;
@@ -18,6 +18,9 @@ export type Snapshot = {
     id: string; name: string; membership: string; media: string; slot?: string;
     programAllowed: boolean; monitorAllowed: boolean; screenApproved: boolean; screenSharing: boolean;
   }[] };
+  guestSlots?: { id: string; name: string; peerID?: string; membership?: string; media?: string; muted?: boolean; solo?: boolean }[];
+  showProfiles?: { projectID: string; profileID: string; canSelect: boolean; requestedProjectID?: string; requestedProfileID?: string };
+  audience?: { observedAt: number; liveSeconds?: number; health: string; readings: { destinationID: string; name: string; count?: number; readAt?: number; freshness: string }[]; presetDelivery: Record<string, string> };
   macroProgress: { phase: string; macroID?: string; runID?: string; stepIndex: number; totalSteps: number; message: string };
 };
 export type Response = { version: 1; type: string; id?: string; sessionID?: string; snapshot?: Snapshot;
@@ -39,7 +42,10 @@ function validResponse(value: unknown): value is Response {
   if (value.type === "capabilities" && (!Array.isArray(value.commands) || value.commands.length > 10000
       || !value.commands.every(c => object(c) && typeof c.id === "string" && typeof c.title === "string" && typeof c.category === "string"
         && typeof c.available === "boolean" && (c.unavailableReason === undefined || typeof c.unavailableReason === "string")
-        && (c.kind === undefined || c.kind === "command" || c.kind === "value")
+        && (c.kind === undefined || c.kind === "command" || c.kind === "value" || c.kind === "feedback")
+        && (c.authority === undefined || typeof c.authority === "string" && c.authority.length > 0 && c.authority.length <= 128)
+        && (c.scope === undefined || c.scope === "project" || c.scope === "studio")
+        && (c.bindingIntent === undefined || c.bindingIntent === "currentConnection" || c.bindingIntent === "configuredSlot")
         && (c.argument === undefined || c.argument === "text" || c.argument === "page")))) return false;
   const state = value.snapshot;
   if (["authenticated", "snapshot", "event"].includes(value.type) && !object(state)) return false;
@@ -63,6 +69,29 @@ function validResponse(value: unknown): value is Response {
     if (state.chat !== undefined && (!object(state.chat) || !Number.isSafeInteger(state.chat.queuedCount) || (state.chat.queuedCount as number) < 0
         || typeof state.chat.ready !== "boolean" || typeof state.chat.stagedVisible !== "boolean" || typeof state.chat.programVisible !== "boolean"
         || [state.chat.selectedID, state.chat.featuredID].some(id => id !== undefined && typeof id !== "string"))) return false;
+    if (state.guestSlots !== undefined && (!Array.isArray(state.guestSlots) || state.guestSlots.length > 16
+        || !state.guestSlots.every(slot => object(slot) && typeof slot.id === "string" && UUID.test(slot.id)
+          && typeof slot.name === "string" && slot.name.length <= 256
+          && (slot.peerID === undefined || typeof slot.peerID === "string" && UUID.test(slot.peerID))
+          && [slot.membership, slot.media].every(value => value === undefined || typeof value === "string")
+          && [slot.muted, slot.solo].every(value => value === undefined || typeof value === "boolean")))) return false;
+    if (state.showProfiles !== undefined) {
+      const profiles = state.showProfiles;
+      if (!object(profiles) || typeof profiles.projectID !== "string" || !UUID.test(profiles.projectID)
+          || typeof profiles.profileID !== "string" || !UUID.test(profiles.profileID) || typeof profiles.canSelect !== "boolean"
+          || [profiles.requestedProjectID, profiles.requestedProfileID].some(value => value !== undefined && (typeof value !== "string" || !UUID.test(value)))) return false;
+    }
+    if (state.audience !== undefined) {
+      const audience = state.audience;
+      if (!object(audience) || typeof audience.observedAt !== "number" || !Number.isFinite(audience.observedAt)
+          || typeof audience.health !== "string" || (audience.liveSeconds !== undefined && (!Number.isSafeInteger(audience.liveSeconds) || (audience.liveSeconds as number) < 0 || (audience.liveSeconds as number) > 31536000))
+          || !Array.isArray(audience.readings) || audience.readings.length > 64 || !object(audience.presetDelivery)
+          || Object.keys(audience.presetDelivery).length > 64 || !Object.values(audience.presetDelivery).every(value => typeof value === "string")) return false;
+      if (!audience.readings.every(reading => object(reading) && typeof reading.destinationID === "string" && UUID.test(reading.destinationID)
+          && typeof reading.name === "string" && reading.name.length <= 512 && typeof reading.freshness === "string"
+          && (reading.count === undefined || Number.isSafeInteger(reading.count) && (reading.count as number) >= 0)
+          && (reading.readAt === undefined || typeof reading.readAt === "number" && Number.isFinite(reading.readAt)))) return false;
+    }
     if (state.interview !== undefined) {
       const interview = state.interview;
       if (!object(interview) || typeof interview.phase !== "string" || typeof interview.locked !== "boolean"
@@ -104,6 +133,7 @@ export class StudioClient extends EventEmitter {
   private generation = 0;
   private reconnectTimer?: NodeJS.Timeout;
   private catalogTimer?: NodeJS.Timeout;
+  private feedbackTimer?: NodeJS.Timeout;
   private retryMilliseconds = 1000;
   private refreshing = false;
   private queueDepth = 0;
@@ -143,6 +173,10 @@ export class StudioClient extends EventEmitter {
         await this.refreshCatalog();
         if (generation !== this.generation) return;
         this.status = "Connected"; this.retryMilliseconds = 1000; this.emit("change");
+        // Age cached audience readings even if the native publisher stalls.
+        // This redraws local feedback only; it never polls providers or replays requests.
+        this.feedbackTimer = setInterval(() => this.emit("change"), 1000);
+        this.feedbackTimer.unref();
       } catch {
         if (generation !== this.generation) return;
         this.socket?.destroy();
@@ -159,7 +193,7 @@ export class StudioClient extends EventEmitter {
   }
   private disconnect(status: string): void {
     ++this.generation;
-    clearTimeout(this.reconnectTimer); clearTimeout(this.catalogTimer);
+    clearTimeout(this.reconnectTimer); clearTimeout(this.catalogTimer); clearInterval(this.feedbackTimer);
     const socket = this.socket; this.socket = undefined; socket?.destroy();
     this.sessionID = undefined; this.snapshot = undefined; this.capabilities.clear(); this.refreshing = false;
     for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error("Stream disconnected; the command will not be retried.")); }
@@ -209,7 +243,7 @@ export class StudioClient extends EventEmitter {
       if (response.id) {
         const pending = this.pending.get(response.id.toLowerCase());
         if (pending) {
-          const types: Record<string, string> = { authenticate: "authenticated", subscribe: "snapshot", capabilities: "capabilities", command: "result", ping: "pong" };
+          const types: Record<string, string> = { authenticate: "authenticated", subscribe: "snapshot", snapshot: "snapshot", capabilities: "capabilities", command: "result", ping: "pong" };
           const expected = types[pending.type];
           if (response.type !== "error" && response.type !== expected) { this.socket?.destroy(); return; }
           clearTimeout(pending.timer); this.pending.delete(response.id.toLowerCase());
@@ -252,8 +286,13 @@ export class StudioClient extends EventEmitter {
   }
   async execute(commandID: string, projectID: string, argument?: CommandArgument): Promise<Response> {
     if (this.status !== "Connected" || !this.snapshot) throw new Error("Stream is disconnected.");
-    if (this.snapshot.projectID !== projectID) throw new Error("The configured project is not open in Stream.");
+    const configured = this.capabilities.get(commandID);
+    if (this.snapshot.projectID !== projectID && !(configured?.scope === "studio" && /^show\.[0-9a-f-]+\.profile\.[0-9a-f-]+\.select$/i.test(commandID))) throw new Error("The configured project is not open in Stream.");
     if (!this.capabilities.has(commandID) || commandID.startsWith("unavailable.")) throw new Error("The bound resource is missing or unsupported.");
+    if (configured?.kind === "feedback") {
+      if (argument) throw new Error("Feedback controls do not accept mutation arguments.");
+      return this.request("snapshot");
+    }
     if (argument) {
       const capability = this.capabilities.get(commandID)!;
       if ("value" in argument || "delta" in argument) {
@@ -265,7 +304,7 @@ export class StudioClient extends EventEmitter {
     } else if (this.capabilities.get(commandID)?.kind === "value") throw new Error("This target requires a numeric value.");
     // Availability is checked authoritatively by the app at execution, since
     // an output may have changed between catalog refreshes.
-    const response = await this.request("command", { commandID, ...argument });
+    const response = await this.request("command", { commandID, ...argument, ...(configured?.authority ? { authority: configured.authority } : {}) });
     if (!response.result?.succeeded) throw new Error(response.result?.error?.message ?? "The command was rejected.");
     this.scheduleCatalogRefresh();
     return response;

@@ -116,7 +116,7 @@ export class InterviewRoom extends DurableObject<Env> {
     catch { socket.close(1011, 'Delivery failed'); }
   }
   private broadcast(value: unknown) { for (const {socket} of this.peers()) this.emit(socket, value); }
-  private roster() { const room = this.room(); this.broadcast({ type: 'roster', peers: this.peers().map(({peer}) => ({ id: peer.id, role: peer.role, name: peer.name, state: peer.state })), program: room?.program ?? false, recording: room?.recording ?? false, locked: room?.locked ?? false }); }
+  private roster() { const room = this.room(); this.broadcast({ type: 'roster', peers: this.peers().map(({peer}) => ({ id: peer.id, role: peer.role, name: peer.name, state: peer.state, generation: peer.generation })), program: room?.program ?? false, recording: room?.recording ?? false, locked: room?.locked ?? false }); }
   private async invite(role: Role) {
     const room = this.room()!;
     const secret = token(); const id = crypto.randomUUID(); const hash = await digest(secret);
@@ -241,7 +241,9 @@ export class InterviewRoom extends DurableObject<Env> {
     if (peer.role !== 'host') { this.emit(socket, { type: 'error', error: 'Host action required' }); return; }
     if (data.type === 'admit' || data.type === 'stage' || data.type === 'backstage' || data.type === 'revoke') {
       const target = this.peers().find(item => item.peer.role === 'guest' && item.peer.id === data.id);
-      if (!target) return;
+      // Membership intent belongs to one observed guest connection, including
+      // waiting guests. Delayed actions must not affect a same-invite rejoin.
+      if (!target || data.targetGeneration !== target.peer.generation) return;
       if (data.type === 'revoke') {
         this.ctx.storage.sql.exec('UPDATE invites SET revoked=1 WHERE id=?', target.peer.id);
         this.ctx.storage.sql.exec('DELETE FROM sessions WHERE id=?', target.peer.id);
@@ -249,7 +251,7 @@ export class InterviewRoom extends DurableObject<Env> {
       }
       if (data.type === 'stage' && target.peer.state === 'waiting') return;
       target.peer.state = data.type === 'stage' ? 'onair' : 'backstage'; target.socket.serializeAttachment(target.peer);
-      // Generations are disclosed only to the paired host/guest after admission.
+      // Admission receipts pin the exact paired host/guest generations.
       this.emit(target.socket, { type: 'admitted', host: peer.id, hostGeneration: peer.generation, state: target.peer.state });
       this.emit(socket, { type: 'admitted', guest: target.peer.id, guestGeneration: target.peer.generation, state: target.peer.state });
       this.roster(); return;

@@ -176,19 +176,19 @@ import Foundation
 
     func canAdmit(_ id: UUID) -> Bool {
         snapshot.phase == .connected && !revoked.contains(id) && pendingAdmission == nil
-            && snapshot.members.contains(where: { $0.id == id && $0.membership == .waiting })
+            && snapshot.members.contains(where: { $0.id == id && $0.membership == .waiting && $0.connectionGeneration != nil })
             && peers.isEmpty
     }
     @discardableResult func admit(_ id: UUID) -> Bool {
-        guard canAdmit(id) else { return false }
-        guard send(["type": "admit", "id": id.uuidString.lowercased()]) else { return false }
+        guard canAdmit(id), let generation = snapshot.members.first(where: { $0.id == id })?.connectionGeneration else { return false }
+        guard send(["type": "admit", "id": id.uuidString.lowercased(), "targetGeneration": generation.uuidString.lowercased()]) else { return false }
         pendingAdmission = id; return true
     }
     @discardableResult func setMembership(_ membership: NativeInterviewMembership, guest id: UUID) -> Bool {
         guard membership != .waiting, snapshot.phase == .connected,
               let generation = admittedGenerations[id], !revoked.contains(id),
               let revision = nextMembershipReceiptRevision(for: id) else { return false }
-        guard send(["type": membership == .onair ? "stage" : "backstage", "id": id.uuidString.lowercased()]) else { return false }
+        guard send(["type": membership == .onair ? "stage" : "backstage", "id": id.uuidString.lowercased(), "targetGeneration": generation.uuidString.lowercased()]) else { return false }
         membershipCommands[id, default: []].append(.init(generation: generation, membership: membership, revision: revision))
         return true
     }
@@ -203,13 +203,13 @@ import Foundation
         return previous < UInt64.max ? previous + 1 : nil
     }
     @discardableResult func remove(_ id: UUID) -> Bool {
-        guard snapshot.phase == .connected, snapshot.members.contains(where: { $0.id == id }) else { return false }
+        guard snapshot.phase == .connected, let generation = snapshot.members.first(where: { $0.id == id })?.connectionGeneration else { return false }
         // Authority closes synchronously even if the server acknowledgment is
         // late or absent. An old admitted/SDP response cannot resurrect it.
         revoked.insert(id); admittedGenerations[id] = nil; membershipCommands[id] = nil
         if pendingAdmission == id { pendingAdmission = nil }
         dropPeer(id)
-        return send(["type": "revoke", "id": id.uuidString.lowercased()])
+        return send(["type": "revoke", "id": id.uuidString.lowercased(), "targetGeneration": generation.uuidString.lowercased()])
     }
     @discardableResult func setLocked(_ value: Bool) -> Bool { send(["type": "lock", "locked": value]) }
     @discardableResult func reportStatus(program: Bool, recording: Bool) -> Bool {
@@ -347,6 +347,11 @@ import Foundation
         pendingPrivateMessages.removeAll(); privateMessages.removeAll()
         privateSendStart = nil; privateSendCount = 0
     }
+    func controllerRosterLease(for guest: UUID) -> NativeInterviewRosterLease? {
+        guard snapshot.phase == .connected, let room = snapshot.room, let hostGeneration,
+              let member = snapshot.members.first(where: { $0.id == guest }), let generation = member.connectionGeneration else { return nil }
+        return .init(room: room, hostGeneration: hostGeneration, guest: guest, guestGeneration: generation)
+    }
     func currentPeerLease(for guest: UUID) -> NativeInterviewPeerLease? {
         guard snapshot.phase == .connected, !revoked.contains(guest) else { return nil }
         return peers[guest]?.context
@@ -427,7 +432,7 @@ import Foundation
                 }
                 if role == "guest" {
                     var member = snapshot.members.first { $0.id == id } ?? .init(id: id, name: name, membership: state)
-                    member = .init(id: id, name: name, membership: state, media: member.media, returnAudio: member.returnAudio, returnVideo: member.returnVideo, returnVideoSource: member.returnVideoSource, returnVideoProfile: member.returnVideoProfile,
+                    member = .init(id: id, name: name, membership: state, connectionGeneration: try value["generation"].map(NativeInterviewWire.id), media: member.media, returnAudio: member.returnAudio, returnVideo: member.returnVideo, returnVideoSource: member.returnVideoSource, returnVideoProfile: member.returnVideoProfile,
                                    publicChat: member.publicChat, publicChatDropped: member.publicChatDropped,
                                    screenApproved: member.screenApproved, screenSharing: member.screenSharing,
                                    membershipRevision: member.membershipRevision)
@@ -442,13 +447,16 @@ import Foundation
                 admittedGenerations[id] = nil
                 membershipCommands[id] = nil
             }
-            if let pendingAdmission, !members.contains(where: { $0.id == pendingAdmission }) { self.pendingAdmission = nil }
+            if let pendingAdmission {
+                let generation = snapshot.members.first(where: { $0.id == pendingAdmission })?.connectionGeneration
+                if !members.contains(where: { $0.id == pendingAdmission && $0.connectionGeneration == generation }) { self.pendingAdmission = nil }
+            }
             snapshot.members = members
             snapshot.locked = locked; snapshot.program = program; snapshot.recording = recording
         case "admitted":
             guard snapshot.phase == .connected else { return }
             let id = try NativeInterviewWire.id(object["guest"]), generation = try NativeInterviewWire.id(object["guestGeneration"])
-            guard !revoked.contains(id), snapshot.members.contains(where: { $0.id == id }),
+            guard !revoked.contains(id), snapshot.members.contains(where: { $0.id == id && $0.connectionGeneration == generation }),
                   let state = object["state"] as? String, let membership = NativeInterviewMembership(rawValue: state),
                   membership != .waiting else { return }
             let revision: UInt64?

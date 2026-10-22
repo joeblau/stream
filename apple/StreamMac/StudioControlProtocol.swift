@@ -17,6 +17,7 @@ struct StudioControlRequest: Codable, Sendable {
     var page: Int?
     var text: String?
     var cursor: Int?
+    var authority: String?
 }
 struct StudioControlProtocolError: Codable, Equatable, Error, Sendable {
     var code: String
@@ -30,6 +31,9 @@ struct StudioControlCapability: Codable, Equatable, Sendable {
     var unavailableReason: String?
     var kind: String? = nil
     var argument: String? = nil
+    var authority: String? = nil
+    var scope: String? = nil
+    var bindingIntent: String? = nil
 }
 struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var projectID: String
@@ -52,6 +56,39 @@ struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var chat: StudioControlChatState? = nil
     var interview: StudioControlInterviewState? = nil
     var recordingCountdown: Int? = nil
+    var guestSlots: [StudioControlGuestSlotState]? = nil
+    var audience: StudioControlAudienceState? = nil
+    var showProfiles: StudioControlShowProfileState? = nil
+}
+struct StudioControlGuestSlotState: Codable, Equatable, Sendable {
+    var id: UUID
+    var name: String
+    var peerID: UUID?
+    var membership: String?
+    var media: String?
+    var muted: Bool?
+    var solo: Bool?
+}
+struct StudioControlShowProfileState: Codable, Equatable, Sendable {
+    var projectID: UUID
+    var profileID: UUID
+    var canSelect: Bool
+    var requestedProjectID: UUID? = nil
+    var requestedProfileID: UUID? = nil
+}
+struct StudioControlAudienceState: Codable, Equatable, Sendable {
+    struct Reading: Codable, Equatable, Sendable {
+        var destinationID: UUID
+        var name: String
+        var count: Int?
+        var readAt: TimeInterval?
+        var freshness: String
+    }
+    var observedAt: TimeInterval
+    var liveSeconds: Int?
+    var health: String
+    var readings: [Reading]
+    var presetDelivery: [String: String]
 }
 struct StudioControlInterviewState: Codable, Equatable, Sendable {
     struct Member: Codable, Equatable, Sendable {
@@ -120,6 +157,9 @@ struct StudioControlSession {
         }
         guard !requests.contains(request.id) else { return .init(code: "duplicateRequest", message: "This request ID was already handled. It will not execute again.") }
         guard requests.count < Self.maxRequests else { return .init(code: "sessionLimit", message: "Reconnect and authenticate for a fresh session; do not replay old commands.") }
+        if let authority = request.authority, request.type != .command || authority.utf8.count > 128 || authority.isEmpty {
+            return .init(code: "invalidRequest", message: "Authority belongs only to a bounded current command.")
+        }
         if request.type == .command {
             guard let id = request.commandID, !id.isEmpty, id.utf8.count <= 512 else { return .init(code: "invalidRequest", message: "A command needs a stable command ID of at most 512 bytes.") }
             let arguments = [request.value != nil, request.delta != nil, request.page != nil, request.text != nil]

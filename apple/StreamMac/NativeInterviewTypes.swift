@@ -217,10 +217,17 @@ enum NativeInterviewReturnVideoSource: String, CaseIterable, Sendable {
 enum NativeInterviewReturnVideoState: String, Sendable { case off, unavailable, preparing, ready, failed, bandwidthLimited }
 enum NativeInterviewPublicChatState: String, Sendable { case off, sharing, unavailable, offUnconfirmed }
 enum NativeInterviewReturnAudioState: String, Sendable { case unavailable, preparing, ready, failed }
+struct NativeInterviewRosterLease: Equatable, Sendable {
+    let room: UUID
+    let hostGeneration: UUID
+    let guest: UUID
+    let guestGeneration: UUID
+}
 struct NativeInterviewMember: Identifiable, Sendable, Equatable {
     let id: UUID
     let name: String
     var membership: NativeInterviewMembership
+    var connectionGeneration: UUID? = nil
     var media: NativeInterviewMediaState = .unavailable
     var returnAudio: NativeInterviewReturnAudioState = .unavailable
     var returnVideo: NativeInterviewReturnVideoState = .unavailable
