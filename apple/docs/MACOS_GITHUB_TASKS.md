@@ -1074,7 +1074,7 @@ Published main remains `9cb68c9` at this snapshot.
   actual account/vault/recovery fixture passes. Production authority is unchanged.
   The original hosted log lacks a phase marker; only the owned reproduction
   locates its replacement acceptance. This is not a new hosted success.
-- The package fixture binds a fresh manifest and executes real `ShowPackageIO`
+- The package fixture forwards the previewed manifest and executes real `ShowPackageIO`
   with exact copied Workspace methods. **Five original race/ownership/catalog/
   import phases** and three generation checks pass with the original condition
   holds and 45 s deadline. External dependencies are inert; no full runtime or

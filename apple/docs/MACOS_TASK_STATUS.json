@@ -564,7 +564,7 @@
       "completion": "remaining acceptance",
       "remaining": [
         "Successful native keyboard file-chooser selection remains unqualified in the locked session. Actual LaunchServices and typed NSItemProvider intake are verified; neither is relabelled a physical Finder gesture.",
-        "Fresh-manifest package fixture seam and exact copied Workspace methods now verify five actual IO/read-generation/ownership/catalog/import phases, retaining original condition holds/deadline, plus three generation checks. No full runtime, native chooser, sandbox or LaunchServices qualification is added; prior native keyboard acceptance gap remains."
+        "Preview-manifest forwarding in the package fixture and exact copied Workspace methods now verify five actual IO/read-generation/ownership/catalog/import phases, retaining original condition holds/deadline, plus three generation checks. No full runtime, native chooser, sandbox or LaunchServices qualification is added; prior native keyboard acceptance gap remains."
       ],
       "evidence": [
         "PORTABLE_SHOW_NATIVE_ENTRY.md",
@@ -4301,7 +4301,7 @@
         "sha256": "82b176edad0c410304fd5a1232b9ce8e6c827f26d7c66e5fbcea2ad430e25c37"
       },
       "proof": "Actual ShowPackageIO and exact copied Workspace methods pass all five original read/ownership/catalog/import race phases. Original NSCondition holds and 45 s deadline retained; three generation tests include stale-source refusal and generated-harness equality except explicit final runtime predicate scope print. Parent verifies 24 bindings.",
-      "scope": "Only owned package IO/method transactions with inert external dependencies; no StudioRuntime/controller/recorder construction, application/panels/devices/preferences/network. Fresh-manifest fixture seam does not weaken production validation. No native chooser/full-runtime/sandbox/LaunchServices qualification; #155 remains open.",
+      "scope": "Only owned package IO/method transactions with inert external dependencies; no StudioRuntime/controller/recorder construction, application/panels/devices/preferences/network. The fixture forwards the previewed manifest without weakening production validation. No native chooser/full-runtime/sandbox/LaunchServices qualification; #155 remains open.",
       "metadataBoundary": "Canonical receipt removes only irrelevant local hostname; all other fields equal frozen owner receipt."
     },
     "ciWiring": {
