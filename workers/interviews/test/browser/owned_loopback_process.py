@@ -60,12 +60,23 @@ def group_members(expected):
             and value['pgid'] == expected['pgid']]
 
 
-def retire(expected, snapshot=identity, send=os.killpg, sleep=time.sleep, clock=time.monotonic, members=group_members):
+def group_exists(group):
+    # Observation only, including when the numeric group may have been reused.
+    # Do not adopt these PIDs as anchors or send even a zero signal to them.
+    result = subprocess.run(['pgrep', '-g', str(group)], stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, timeout=1)
+    if result.returncode not in (0, 1):
+        raise RuntimeError('Owned group emptiness could not be established')
+    return result.returncode == 0
+
+
+def retire(expected, snapshot=identity, send=os.killpg, sleep=time.sleep, clock=time.monotonic,
+           members=group_members, exists=group_exists):
     if expected['uid'] != os.getuid() or expected['pid'] != expected['pgid']:
         raise RuntimeError('Refused unowned process group')
     current = snapshot(expected['pid'])
     if not current:
-        return 'absent'
+        return 'unconfirmed-group' if exists(expected['pgid']) else 'absent'
     if not matches(expected, current):
         return 'replaced'
     # Capture members while the original group leader is still proven. A
@@ -73,24 +84,24 @@ def retire(expected, snapshot=identity, send=os.killpg, sleep=time.sleep, clock=
     captured_members = members(expected)
     current = snapshot(expected['pid'])
     if not current:
-        return 'absent'
+        return 'unconfirmed-group' if exists(expected['pgid']) else 'absent'
     if not matches(expected, current):
         return 'replaced'
     anchors = [expected] + captured_members
     live = lambda: any(matches(anchor, snapshot(anchor['pid'])) for anchor in anchors)
     for operation in (signal.SIGTERM, signal.SIGKILL):
         if not live():
-            return 'drained'
+            return 'unconfirmed-group' if exists(expected['pgid']) else 'drained'
         try:
             send(expected['pgid'], operation)
         except ProcessLookupError:
-            return 'absent'
+            return 'unconfirmed-group' if exists(expected['pgid']) else 'absent'
         deadline = clock() + 2
         while clock() < deadline:
-            if not live():
+            if not live() and not exists(expected['pgid']):
                 return 'drained'
             sleep(.025)
-    return 'still-owned' if live() else 'drained'
+    return 'still-owned' if live() else 'unconfirmed-group' if exists(expected['pgid']) else 'drained'
 
 
 def atomic_private_json(path, value):

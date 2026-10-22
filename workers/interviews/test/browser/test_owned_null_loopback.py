@@ -4,6 +4,7 @@ import os
 import pathlib
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -135,7 +136,7 @@ while True:time.sleep(.05)
             return ticks[0]
 
         result = processes.retire(leader, snapshot=live.get, send=send, sleep=lambda _: None,
-            clock=clock, members=lambda _: [child])
+            clock=clock, members=lambda _: [child], exists=lambda _: bool(live))
         self.assertEqual(result, 'drained')
         self.assertEqual(sent, [(123456, signal.SIGTERM), (123456, signal.SIGKILL)])
 
@@ -151,6 +152,85 @@ while True:time.sleep(.05)
                                  send=lambda *args: sent.append(args))
         self.assertEqual(result, 'replaced')
         self.assertEqual(sent, [])
+
+    def test_absent_leader_with_existing_group_is_unconfirmed_without_adoption_or_signal(self):
+        original = dict(pid=123456, ppid=1, pgid=123456, uid=os.getuid(), birth=[100, 1])
+        sent = []
+        result = processes.retire(original, snapshot=lambda _: None, exists=lambda _: True,
+            members=lambda _: self.fail('Unanchored group members were adopted'), send=lambda *args: sent.append(args))
+        self.assertEqual(result, 'unconfirmed-group')
+        self.assertEqual(sent, [])
+
+    def test_late_group_member_cannot_be_claimed_drained_after_original_anchors_exit(self):
+        original = dict(pid=123456, ppid=1, pgid=123456, uid=os.getuid(), birth=[100, 1])
+        live, sent, ticks = [True], [], [0]
+
+        def send(group, operation):
+            sent.append((group, operation))
+            live[0] = False
+
+        def clock():
+            ticks[0] += .5
+            return ticks[0]
+
+        result = processes.retire(original, snapshot=lambda _: original if live[0] else None,
+            send=send, sleep=lambda _: None, clock=clock, members=lambda _: [], exists=lambda _: True)
+        self.assertEqual(result, 'unconfirmed-group')
+        self.assertEqual(sent, [(123456, signal.SIGTERM)], 'Unknown surviving group was signaled again')
+
+    def test_actual_detached_child_survives_leader_exit_and_is_not_misreported_absent(self):
+        code = """import os,subprocess,sys,time
+child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
+open(sys.argv[1],'w').write(str(child.pid))
+sys.stdin.read(1)
+"""
+        child_file = self.root / 'child-pid'
+        leader = subprocess.Popen([sys.executable, '-c', code, str(child_file)],
+                                  stdin=subprocess.PIPE, start_new_session=True)
+        try:
+            original = processes.capture(leader.pid, os.getpid())
+            deadline = time.monotonic() + 2
+            while not child_file.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            child = processes.identity(int(child_file.read_text()))
+            self.captured = [original, child]
+            leader.stdin.write(b'x')
+            leader.stdin.close()
+            leader.wait(timeout=2)
+            sent = []
+            self.assertEqual(processes.retire(original, send=lambda *args: sent.append(args)), 'unconfirmed-group')
+            self.assertEqual(sent, [])
+            self.assertTrue(processes.matches(child, processes.identity(child['pid'])))
+        finally:
+            if leader.poll() is None:
+                leader.kill()
+                leader.wait(timeout=2)
+
+    def test_actual_launcher_preserves_replacement_directory_during_abort_cleanup(self):
+        artifacts = self.artifacts('replaced-cleanup')
+        replacement = []
+
+        def replace_then_refuse(path, node_pid, owned, owned_identity):
+            expected = wrapper.validate_manifest(path, node_pid, owned, owned_identity)
+            deadline = time.monotonic() + 2
+            while not self.pids.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(self.pids.exists())
+            self.captured = [expected] + processes.group_members(expected)
+            owned.rename(owned.with_name(owned.name + '-retired'))
+            owned.mkdir(mode=0o700)
+            sentinel = owned / 'preserve-unrelated-replacement'
+            sentinel.write_text('preserve')
+            replacement.append(sentinel)
+            raise AssertionError('Deliberate directory replacement')
+
+        proof = wrapper.run(NODE, artifacts, inspect=replace_then_refuse, environment=self.environment)
+        self.assertEqual(proof['result'], 'UNQUALIFIED')
+        self.assertEqual(replacement[0].read_text(), 'preserve')
+        receipt = json.loads((artifacts / 'receipt.json').read_text())
+        self.assertEqual(receipt['directoryRetirement'], 'incarnation-mismatch')
+        self.assertEqual(receipt['result'], 'UNQUALIFIED')
+        self.assertTrue(all(processes.identity(pid) is None for pid in json.loads(self.pids.read_text())))
 
     def test_private_manifest_is_atomic_bounded_and_never_replaces_evidence(self):
         target = self.root / 'manifest.json'

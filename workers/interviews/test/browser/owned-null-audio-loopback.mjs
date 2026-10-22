@@ -5,11 +5,12 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import {spawn,execFileSync} from 'node:child_process';
+import {spawn,execFile,execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {WebSocket} from 'ws';
 import {chromeFixtureExecutable,chromeFixtureCredentialArguments} from './chrome-fixture.mjs';
 import {captureLoopbackFailure} from './owned-loopback-failure-snapshot.mjs';
+import {createLoopbackTerminal,removeOwnedLoopbackDirectory} from './owned-loopback-lifecycle.mjs';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const artifact=process.env.STREAM_LOOPBACK_RECEIPT;
 const fakeOutputClock=process.argv.includes('--fake-audio-output');
@@ -26,9 +27,9 @@ assert(path.dirname(owned)===temporaryRoot&&path.basename(owned).startsWith('str
 if(process.env.STREAM_LOOPBACK_OWNED_IDENTITY)assert.deepEqual(ownedIdentity,JSON.parse(process.env.STREAM_LOOPBACK_OWNED_IDENTITY),'Owned directory incarnation changed');
 let chrome,chromeIdentity,socket,server,cdp,receipt,progress,sessionId,lastProgress=Date.now(),traceEvents=[];
 const processHelper=fileURLToPath(new URL('./owned_loopback_process.py',import.meta.url));
-let abortReason;
-const checkAbort=()=>{if(abortReason)throw new Error(abortReason);};
-const abort=signal=>{abortReason??='owned-signal-'+signal;cdp?.cancelPending(new Error(abortReason));if(!cdp)socket?.terminate();};
+const terminal=createLoopbackTerminal(artifact);
+const checkAbort=()=>{if(terminal.abortReason)throw new Error(terminal.abortReason);};
+const abort=signal=>{terminal.abort(signal);cdp?.cancelPending(new Error(terminal.abortReason));if(!cdp)socket?.terminate();};
 const interrupt=()=>abort('SIGINT'),terminate=()=>abort('SIGTERM');
 process.on('SIGINT',interrupt);process.on('SIGTERM',terminate);
 const phases=[],observations=[];
@@ -109,12 +110,13 @@ class CDP{
   if(x.method==='Tracing.dataCollected'){this.traceBytes+=Buffer.byteLength(raw);if(this.traceBytes>8*1024*1024||traceEvents.length+x.params.value.length>25000)throwFailure={name:'TraceBudget',message:'bounded trace byte/count exceeded'};else traceEvents.push(...x.params.value);}
   if(x.method==='Tracing.tracingComplete')this.traceDone=true;
  });}
- send(method,params={},sessionId,deadline=10000){if(abortReason)return Promise.reject(new Error(abortReason));return new Promise((resolve,reject)=>{const id=++this.id,timer=setTimeout(()=>{this.pending.delete(id);reject(new Error('CDP deadline: '+method));},deadline);this.pending.set(id,{resolve,reject,timer});this.ws.send(JSON.stringify({id,method,params,sessionId}));});}
+ send(method,params={},sessionId,deadline=10000){if(terminal.abortReason)return Promise.reject(new Error(terminal.abortReason));return new Promise((resolve,reject)=>{const id=++this.id,timer=setTimeout(()=>{this.pending.delete(id);reject(new Error('CDP deadline: '+method));},deadline);this.pending.set(id,{resolve,reject,timer});this.ws.send(JSON.stringify({id,method,params,sessionId}));});}
  cancelPending(error){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(error);}this.pending.clear();}
  close(){this.cancelPending(new Error('Owned cleanup'));this.ws.close();}
 }
 let throwFailure,tracing=false;
 const result={schemaVersion:1,kind:'owned-chrome-null-audio-loopback-diagnostic',scope:'Synthetic local RTC only; actual null WebAudio sinks + muted owned HTML. No native SDK, speaker/normal HTML output, AEC, AV or production qualification.',fakeOutputClockRequested:fakeOutputClock};
+terminal.bind(result);
 try{
  server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/meter.js'||req.url==='/app.js'?'application/javascript':'text/html');res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; connect-src 'self'; media-src 'self' blob:");res.end(req.url==='/meter.js'?meter:req.url==='/app.js'?app:page);});await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const profile=path.join(owned,'profile');await fs.mkdir(profile,{mode:0o700});const binary=await chromeFixtureExecutable(process.env.CHROME_BIN??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',owned);
@@ -156,11 +158,11 @@ try{
  assert(receipt.sender.outbound.some(r=>r.codec==='audio/opus'&&r.packetsSent>100),'Actual sender Opus packets positive');
  assert(receipt.receiver.inbound.some(r=>r.codec==='audio/opus'&&r.packetsReceived>100),'Actual receiver Opus RTP positive');
  const audio=receipt.receiver.inbound.find(r=>r.codec==='audio/opus');result.classification=audio.jitterBufferEmittedCount===0&&audio.totalSamplesReceived===0?'same-zero-emission-symptom':audio.totalSamplesReceived>0?'receiver-emitted-samples':'unclassified';
- result.result='DIAGNOSTIC_COMPLETE';console.log(JSON.stringify(result,null,2));
+ terminal.complete();
 }catch(error){
  result.result='UNQUALIFIED';result.phase=progress;result.reason=String(error.message).slice(0,160);process.exitCode=77;
- if(abortReason)result.failureSnapshot={status:'unavailable',reason:'owned-abort'};
- if(!abortReason&&!result.initializationFailure?.snapshot&&cdp&&sessionId){
+ if(terminal.abortReason)result.failureSnapshot={status:'unavailable',reason:'owned-abort'};
+ if(!terminal.abortReason&&!result.initializationFailure?.snapshot&&cdp&&sessionId){
   // Acceptance has already failed. This bounded read runs before CDP/peer
   // cleanup and never extends the original initialization or PCM gates.
   try{
@@ -181,10 +183,17 @@ finally{
  result.observations=observations;
  result.phases=phases.map(({phase,time})=>({phase,milliseconds:time-(phases[0]?.time??time)}));
  if(chromeIdentity){
-  try{result.processRetirement=execFileSync('python3',[processHelper,'retire'],{input:JSON.stringify(chromeIdentity),encoding:'utf8',timeout:5000,maxBuffer:4096}).trim();}
+  try{result.processRetirement=(await new Promise((resolve,reject)=>{
+   const retirement=execFile('python3',[processHelper,'retire'],{encoding:'utf8',timeout:5000,maxBuffer:4096},(error,stdout)=>error?reject(error):resolve(stdout));
+   retirement.stdin.end(JSON.stringify(chromeIdentity));
+  })).trim();}
   catch{result.processRetirement='unconfirmed';process.exitCode=77;result.result='UNQUALIFIED';}
   if(!['absent','drained'].includes(result.processRetirement)){process.exitCode=77;result.result='UNQUALIFIED';}
  }
- if(server){server.closeAllConnections();await new Promise(r=>server.close(r));}await fs.writeFile(artifact,JSON.stringify(result,null,2)+'\n',{mode:0o600});await fs.rm(owned,{recursive:true,force:true,maxRetries:5,retryDelay:100});
- process.removeListener('SIGINT',interrupt);process.removeListener('SIGTERM',terminate);
+ if(server){server.closeAllConnections();await new Promise(r=>server.close(r));}
+ try{result.directoryRetirement=await removeOwnedLoopbackDirectory(owned,ownedIdentity);}
+ catch{result.directoryRetirement='unconfirmed';}
+ if(!['removed','absent'].includes(result.directoryRetirement)){process.exitCode=77;result.result='UNQUALIFIED';}
+ await terminal.publish();
+ console.log(JSON.stringify(result,null,2));
 }
