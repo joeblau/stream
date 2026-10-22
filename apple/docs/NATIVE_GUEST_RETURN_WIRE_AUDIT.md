@@ -163,3 +163,67 @@ Those checks exercise diagnostic code only; they do not establish a browser
 connection, decoder clock, playout or issue127 acceptance. A new browser attempt
 requires a separately scheduled owned null-output run; the old receipts remain
 unchanged.
+
+## Owned monitor interruption and cleanup repair
+
+The subsequent single scheduled attempt at `5fd06be` was interrupted by an
+external monitor assertion. That monitor assumed `/tmp`/`/private/tmp`, while
+the diagnostic creates its fresh directory under Node's actual `os.tmpdir()`.
+The monitor exited before the launcher's final failure snapshot was written.
+The log reaches connection-wait and has generated sender PCM, a zero receiver
+window and muted HTML events; these do not establish connected RTP or a receive
+clock cause. The explicit interrupted/unqualified receipt and cleanup proof
+remain immutable at
+`/tmp/stream-owned-rtc-observability-attempt-20261022/`. Browser PID 34976 and its
+ten observed descendants were stopped and confirmed absent. This interruption
+does not count as a completed receiver discriminator or an exit77 measurement.
+
+The replacement monitor is now source-owned:
+`workers/interviews/test/browser/run_owned_null_loopback.py`. It queries the
+selected Node's canonical temporary root, creates one fresh 0700 directory there,
+and passes its exact canonical path and filesystem device/inode to the launcher.
+The launcher validates that incarnation before use and atomically publishes a
+bounded 0600 process manifest. The monitor checks the captured direct child,
+kernel start identity, process group, exact profile argument and required output
+flags. It does not classify every renderer carrying a headless flag as the
+browser. An atomic monitor-ready receipt gates navigation to the generator page
+within the existing 10-second startup bound, so actual argv verification occurs
+before generation. Neither paths nor PIDs alone confer cleanup authority.
+
+Every monitor assertion, deadline or SIGINT/SIGTERM runs cleanup. The launcher
+also handles SIGINT/SIGTERM through UNQUALIFIED and its existing finally block,
+interrupting startup/CDP/measurement waits without adding positive measurement
+time. Cleanup checks kernel PID/start identity before signaling its captured
+group. A surviving captured member anchors the original group if its leader
+exits; a reused PID is refused. Failure or unconfirmed cleanup cannot report
+diagnostic completion. These are failure-handling changes only: the 60s/16s/10s/
+12s media gates, null contexts, muted HTML, fake-output switch and original
+positive PCM/RTP assertions remain in force.
+
+`test_owned_null_loopback.py` uses the actual Node launcher with a task-owned
+fake executable and detached fake parent/child processes. It covers a canonical
+temporary root reached through a symlink with spaces, monitor assertion,
+deadline and signal cleanup, immutable/private manifests, directory replacement,
+exact-profile/permission-flag refusal, PID reuse and surviving-member ownership.
+It creates no browser, WebRTC connection, GPU workload, capture or device. These
+checks repair the demonstrated monitor failure; another real browser attempt
+requires separate scheduling and authorization.
+
+After that scheduling approval, invoke the monitor with the already verified
+owned runtime and an empty private artifact directory:
+
+```sh
+python3 workers/interviews/test/browser/run_owned_null_loopback.py \
+  --node /absolute/verified/owned/node \
+  --artifacts /absolute/new/private/artifact-directory
+```
+
+The wrapper invokes the discriminator once with `--fake-audio-output`, emits a
+separate process proof, and refuses to overwrite prior artifacts. Its owned
+fake-process checks can run separately without browser authorization:
+
+```sh
+STREAM_TEST_NODE=/absolute/verified/owned/node PYTHONDONTWRITEBYTECODE=1 \
+  python3 -m unittest discover -s workers/interviews/test/browser \
+    -p test_owned_null_loopback.py -v
+```
