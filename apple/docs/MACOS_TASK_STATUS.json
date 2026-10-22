@@ -64,7 +64,10 @@
     "viewerFreshnessPostMerge": "Actual shipping mounted SwiftUI child/public AX passes YouTube zero and Twitch seven current-to-expired and rollback without account publication, finite/zero/unknown distinctions, exact 60-second bound, identity/authority fences, forget/shutdown and no provider polling. Test-only fake HTTP responses include the requested user_id required by the stronger shipping identity validator. All native control suites exit zero; commands/results: /tmp/stream-macos-postmerge-controls-20261021/results.json.",
     "postMergeFinishedAt": "2026-10-21T21:33:22+00:00",
     "guestVideoBudgetFollowup": "The first complete RTCP-accounting matrix passed two fresh captures per source with unchanged native50ms/raw-track100ms limits: Program71.83/44.85ms, Secondary76.75/33.88ms, Clean56.27/23.79ms. These successful recordings do not establish a fix for the earlier105.104ms failure or qualify true element-rendered/physical playback. See NATIVE_GUEST_RETURN_VIDEO.md.",
-    "currentReviewedCore": "Combined follow-up native macOS StreamCore:576tests in80suites passed, preserving the original ChannelFX gain bounds while measuring settled response; /tmp/stream-central-core-20261021.log and matching xcresult."
+    "currentReviewedCore": "Combined follow-up native macOS StreamCore:576tests in80suites passed, preserving the original ChannelFX gain bounds while measuring settled response; /tmp/stream-central-core-20261021.log and matching xcresult.",
+    "currentReviewedUniversal": "Final combined shipping Release app, embedded browser helper and camera extension build successfully for arm64+x86_64 after the scheduling, emote, accessible talkback, RTP/RTCP budget, encoder startup and Program publisher fixes. Actual bundle audit verifies both architectures, all six intents/three entities, sandbox/App Group/embed declarations and no transport validation hooks. Signature/notarization qualification is not claimed. Logs:/tmp/stream-central-app-release-20261021.log and /tmp/stream-central-bundle-20261021.log.",
+    "currentReviewedSharedEncoders": "Actual merged hardware-preference and explicit-software shared encoder graph passes strict initial-frame/container/sync/cadence/overflow/IDR/stop/cancellation assertions and real local RTMP/SRT receiver decode. The merge keeps explicit receiver capability verification and the STREAM_FFMPEG_BIN override. Log:/tmp/stream-central-shared-encoder-20261021.log.",
+    "simultaneousStorageNetwork": "Two same-runtime actual shipping Controller/compositor/mixer/recorder/default-adaptive RTMP+SRT runs pass staged graphics/Revert/Take privacy, three decoded AV cues, real missing-storage detection/per-track failure/recorder cleanup, continuing healthy network outputs and independent stops. Final files:91local/129RTMP/261SRTframes; all original80ms sync/120ms endpoints/150ms cadence limits retained. This required fixing native packed-to-planar Program audio admission and raw-capture repeats racing the studio clock. See RECORDING_STORAGE_NETWORK.md."
   },
   "issues": [
     {
@@ -399,9 +402,9 @@
       "title": "[macOS][T08] Create, schedule, edit, and select upcoming live events",
       "url": "https://github.com/joeblau/stream/issues/134",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "local original criteria verified; publication pending",
       "remaining": [
-        "Authorized live event/ingest and provider-side partial-failure/review acceptance remain. Local destination selection, exact per-operation receipts, one creation per owned YouTube channel, stable-ID repair and independent partial/manual outcomes are implemented and locally verified. Unsupported provider CRUD/scheduling stays explicitly external until approved capability-qualified connectors exist."
+        "Publish the validated combined implementation and reconcile this issue on GitHub. See currentReviewedUniversal, simultaneousStorageNetwork and the focused feature documents for actual proof and scoped limits."
       ]
     },
     {
@@ -545,9 +548,9 @@
       "title": "[macOS][R04] Handle low disk space, external volumes, and interrupted recordings",
       "url": "https://github.com/joeblau/stream/issues/93",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "local original criteria verified; publication pending",
       "remaining": [
-        "Physical removable-volume/power-loss and sustained storage qualification; controlled writer failures and recovery are locally tested."
+        "Publish the validated combined implementation and reconcile this issue on GitHub. See currentReviewedUniversal, simultaneousStorageNetwork and the focused feature documents for actual proof and scoped limits."
       ]
     },
     {
@@ -700,9 +703,9 @@
       "title": "[macOS][EP05] Graphics, titles, presentations, and web overlays",
       "url": "https://github.com/joeblau/stream/issues/52",
       "githubState": "open",
-      "completion": "combined production workflow validation pending",
+      "completion": "local original criteria verified; publication pending",
       "remaining": [
-        "Child implementation tasks are closed. The original simultaneous streaming, recording and staged editing/Take/Revert integration criterion still needs one combined actual-media proof; separate component fixtures do not close this epic."
+        "Publish the validated combined implementation and reconcile this issue on GitHub. See currentReviewedUniversal, simultaneousStorageNetwork and the focused feature documents for actual proof and scoped limits."
       ]
     },
     {
@@ -733,9 +736,9 @@
       "title": "[macOS][EP01] One-window workspace and media foundations",
       "url": "https://github.com/joeblau/stream/issues/48",
       "githubState": "open",
-      "completion": "combined production workflow validation pending",
+      "completion": "local original criteria verified; publication pending",
       "remaining": [
-        "Child implementation tasks are closed. The original simultaneous streaming, recording and staged editing/Take/Revert integration criterion still needs one combined actual-media proof; separate component fixtures do not close this epic."
+        "Publish the validated combined implementation and reconcile this issue on GitHub. See currentReviewedUniversal, simultaneousStorageNetwork and the focused feature documents for actual proof and scoped limits."
       ]
     },
     {
@@ -760,5 +763,6 @@
   },
   "overallStatus": "Incomplete. Locally verified software is integrated on the named branch; remaining implementation, external SDK/service/device/signing and manual acceptance gates are listed per issue.",
   "integratedMain": "07d2fdb",
-  "githubStateRefreshedAt": "2026-10-21T21:17:00Z"
+  "githubStateRefreshedAt": "2026-10-21T21:17:00Z",
+  "reviewedFollowupBranch": "integrate/native-completion-20261021"
 }
