@@ -174,8 +174,8 @@ ARM replay decoded **17,251 of 17,252** available source frames, against 17,110
 due before decoder grace ended. Intel decoded **17,232 of 17,232**, against
 17,090 due. Both actual-source checks passed; both nominal replay input and
 decoding gates still failed. Render failures were 9/0 on ARM and 24/42 on Intel.
-The recorder wrote every reported rendered frame in these cases; all four
-writers completed with zero reported audio/video drops. The healthy recorder
+Writer-reported video sample counts equal the rendered counters in these cases;
+all four writers completed with zero reported audio/video drops. The healthy recorder
 sink is removed before the mailbox metrics snapshot, leaving the deliberate
 80 ms sink's drops/depth. Those counters are not recorder loss or actual UI
 preview drops.
