@@ -85,11 +85,15 @@ final class ReturnSenderDiagnostic: @unchecked Sendable {
         if decode {
             result["emittedOpusDecode"] = Self.decode(compressed)
             result["successfullySentOpusDecode"] = Self.decode(compressed.filter(\.sent))
+            #if STREAM_GUEST_RFC_OPUS_VALIDATION
+            result["referenceOpusDecode"] = OwnedReferenceOpus.decode(compressed.map { ($0.data, $0.pts, $0.rtp) })
+            #endif
         }
         return result
     }
-    /// Independent public AudioCodec decoder: no network, playback device or
-    /// replacement encoder, and no assertion that metadata alone is PCM.
+    /// Separate Apple AudioCodec decoder instance: no network, playback device
+    /// or replacement encoder. This is not cross-implementation RFC proof;
+    /// that optional validation is performed by OwnedReferenceOpus above.
     private static func decode(_ packets: [Packet]) -> [String: Any] {
         var description = AudioComponentDescription(componentType: kAudioDecoderComponentType,
             componentSubType: kAudioFormatOpus, componentManufacturer: 0, componentFlags: 0, componentFlagsMask: 0)

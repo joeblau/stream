@@ -1,0 +1,533 @@
+{
+  "schemaVersion": 1,
+  "dateUTC": "2026-10-22",
+  "sourceBaseline": "44c078e",
+  "productionBehaviorChanged": false,
+  "nativeCrossDecoder": {
+    "result": "PASS",
+    "receipt": {
+      "admittedChunks": 206,
+      "emittedOpusDecode": {
+        "channels": [
+          {
+            "amplitudes1000_1700_440_880": [
+              0.3841662127411859,
+              0.00011220346308473344,
+              7.471139347597162e-05,
+              0.00024327751311503123
+            ],
+            "rms": 0.2772237328169076
+          },
+          {
+            "amplitudes1000_1700_440_880": [
+              6.999435151181638e-05,
+              0.18954764982498837,
+              1.8434082184266323e-05,
+              3.778642300022303e-05
+            ],
+            "rms": 0.1369177545788037
+          }
+        ],
+        "frames": 104640,
+        "packets": 109,
+        "rate": 48000
+      },
+      "encoderErrors": 0,
+      "lastPCMPTSSeconds": 49545.500813292,
+      "maximumAgeSeconds": 0.03424875,
+      "minimumAgeSeconds": 0.018037083,
+      "packetAttempts": 109,
+      "preEncoderPCM": {
+        "channels": [
+          {
+            "amplitudes1000_1700_440_880": [
+              0.39998076027005,
+              0.00012458188382326562,
+              0.0002619630848690517,
+              0.00041972299001680007
+            ],
+            "rms": 0.2828359077413504
+          },
+          {
+            "amplitudes1000_1700_440_880": [
+              7.458217216162351e-05,
+              0.19999426142472754,
+              4.8313600673665955e-05,
+              9.861661670966422e-05
+            ],
+            "rms": 0.14141932728059475
+          }
+        ],
+        "frames": 32768,
+        "rate": 48000
+      },
+      "receivedChunks": 206,
+      "receivedPCM": {
+        "channels": [
+          {
+            "amplitudes1000_1700_440_880": [
+              0.39998076027005,
+              0.00012458188382326562,
+              0.0002619630848690517,
+              0.00041972299001680007
+            ],
+            "rms": 0.2828359077413504
+          },
+          {
+            "amplitudes1000_1700_440_880": [
+              7.458217216162351e-05,
+              0.19999426142472754,
+              4.8313600673665955e-05,
+              9.861661670966422e-05
+            ],
+            "rms": 0.14141932728059475
+          }
+        ],
+        "frames": 32768,
+        "rate": 48000
+      },
+      "referenceOpusDecode": {
+        "channels": [
+          {
+            "amplitudes1000_1700_440_880": [
+              0.38416620201036444,
+              0.0001122032100665313,
+              7.471169619074317e-05,
+              0.00024327773428988025
+            ],
+            "rms": 0.2772237250709091
+          },
+          {
+            "amplitudes1000_1700_440_880": [
+              6.999507843297775e-05,
+              0.1895476314696454,
+              1.8433935217100517e-05,
+              3.778650173414646e-05
+            ],
+            "rms": 0.13691774133372792
+          }
+        ],
+        "firstSourcePTS": 49543.307646625,
+        "frames": 104640,
+        "implementation": "libopus 1.6.1",
+        "lastSourcePTS": 49545.467646625,
+        "libraryPath": "/opt/homebrew/Cellar/opus/1.6.1/lib/libopus.0.dylib",
+        "librarySHA256": "f7df13ab572e991e6bea300c1f5a113d1690de651b8c3a6b0f0e57e54b724453",
+        "malformedTOCRejected": true,
+        "packetChannels": 2,
+        "packetFrames": 960,
+        "packets": 109,
+        "payloadAggregateSHA256": "69ec8ece973962c0c83af4465c7fc1088874a2eaaddd0da0e5dd6f63ce800d26",
+        "rate": 48000,
+        "sourcePTSAll960": true,
+        "sourceRTPAll960": true
+      },
+      "retainedPackets": 109,
+      "routingRevision": 3,
+      "rtpSteps": [
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960,
+        960
+      ],
+      "successfullySentOpusDecode": {
+        "channels": [
+          {
+            "amplitudes1000_1700_440_880": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "rms": 0
+          },
+          {
+            "amplitudes1000_1700_440_880": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "rms": 0
+          }
+        ],
+        "frames": 0,
+        "packets": 0,
+        "rate": 48000
+      },
+      "successfulSends": 0
+    },
+    "defaultCompileWithoutReference": {
+      "result": "PASS",
+      "packetAttempts": 108,
+      "encoderErrors": 0,
+      "successfulSends": 0
+    },
+    "provenance": "Fresh generated stereo from actual shipping mixer/rings/current-recipient mailbox -> shipping NativeGuestReturnAudioEncoder Data/PTS/RTP -> existing libopus raw-payload decoder. No alternate encoder/network/device. This is new local payload evidence, not the old TLS933packets.",
+    "postValidationDelta": "Apple AudioCodec documentation comment clarified separate-instance versus cross-implementation; no compiled behavior changed."
+  },
+  "browserDiscriminators": [
+    {
+      "result": "UNQUALIFIED",
+      "receipt": {
+        "schemaVersion": 1,
+        "kind": "owned-chrome-null-audio-loopback-diagnostic",
+        "scope": "Synthetic local RTC only; actual null WebAudio sinks + muted owned HTML. No native SDK, speaker/normal HTML output, AEC, AV or production qualification.",
+        "browser": "Chrome/155.0.8059.85",
+        "result": "UNQUALIFIED",
+        "phase": "negotiating",
+        "reason": "Bounded initialization/measurement stall: negotiating"
+      },
+      "attemptSourceSHA256": "bfde7e185548bee2c67e6f3277c7c705fcbb0d07c839aaf6650edc84e6ffb016",
+      "meaning": "No connected/RTP/measurement positive control; no same-symptom comparison."
+    },
+    {
+      "result": "UNQUALIFIED",
+      "receipt": {
+        "schemaVersion": 1,
+        "kind": "owned-chrome-null-audio-loopback-diagnostic",
+        "scope": "Synthetic local RTC only; actual null WebAudio sinks + muted owned HTML. No native SDK, speaker/normal HTML output, AEC, AV or production qualification.",
+        "fakeOutputClockRequested": true,
+        "browser": "Chrome/155.0.8059.85",
+        "result": "UNQUALIFIED",
+        "phase": "connection-wait",
+        "reason": "Error: owned-init-deadline",
+        "traceCounts": {
+          "WebRtcAudioDeviceImpl::RenderData": 0,
+          "VoE::PullRenderData": 0,
+          "WebRtcAudioRenderer::Render": 0,
+          "WebRtcAudioRenderer::SourceCallback": 0,
+          "PeerConnectionRemoteAudioSource::OnData": 0,
+          "WebAudioMediaStreamAudioSink::OnData": 0,
+          "WebAudioMediaStreamAudioSink::ProvideInput": 6883,
+          "WebAudioMediaStreamAudioSink::ProvideInput underrun": 0
+        },
+        "traceEventCount": 24989,
+        "traceBytes": 5538996,
+        "traceComplete": true,
+        "observations": [
+          {
+            "worklet": "sender",
+            "frames": 2048,
+            "channels": [
+              {
+                "rms": 0.2825636126767216,
+                "amplitudes": [
+                  0.40000002373927884,
+                  2.168669208220186e-06,
+                  3.747115053483591e-06,
+                  0.0003563030541678739
+                ]
+              },
+              {
+                "rms": 0.1413888025883565,
+                "amplitudes": [
+                  1.091806034365574e-06,
+                  0.19999996125964484,
+                  3.664923941806042e-07,
+                  1.4655649476419257e-07
+                ]
+              }
+            ]
+          },
+          {
+            "worklet": "receiver",
+            "frames": 2048,
+            "channels": [
+              {
+                "rms": 0,
+                "amplitudes": [
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              },
+              {
+                "rms": 0,
+                "amplitudes": [
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              }
+            ]
+          }
+        ],
+        "phases": [
+          {
+            "phase": "sender-context",
+            "milliseconds": 0
+          },
+          {
+            "phase": "sender-constructor",
+            "milliseconds": 1
+          },
+          {
+            "phase": "sender-resume",
+            "milliseconds": 10002
+          },
+          {
+            "phase": "sender-ready",
+            "milliseconds": 10007
+          },
+          {
+            "phase": "receiver-context",
+            "milliseconds": 10007
+          },
+          {
+            "phase": "receiver-constructor",
+            "milliseconds": 10007
+          },
+          {
+            "phase": "receiver-resume",
+            "milliseconds": 20009
+          },
+          {
+            "phase": "receiver-ready",
+            "milliseconds": 20015
+          },
+          {
+            "phase": "create-offer",
+            "milliseconds": 20094
+          },
+          {
+            "phase": "sender-local-description",
+            "milliseconds": 20094
+          },
+          {
+            "phase": "receiver-remote-description",
+            "milliseconds": 20096
+          },
+          {
+            "phase": "remote-track-before-html",
+            "milliseconds": 20096
+          },
+          {
+            "phase": "remote-track-before-webaudio",
+            "milliseconds": 20096
+          },
+          {
+            "phase": "remote-track-connected",
+            "milliseconds": 20096
+          },
+          {
+            "phase": "create-answer",
+            "milliseconds": 20096
+          },
+          {
+            "phase": "receiver-local-description",
+            "milliseconds": 30104
+          },
+          {
+            "phase": "sender-remote-description",
+            "milliseconds": 30106
+          },
+          {
+            "phase": "connection-wait",
+            "milliseconds": 30107
+          }
+        ]
+      },
+      "observedOwnedArgv": {
+        "mainChromeDisableAudioOutput": true,
+        "audioUtilityDisableAudioOutput": true
+      },
+      "meaning": "SDP/ontrack completed; connection-wait failed before RTP/measurement. SourceWorklet positive and receiver zeros do not establish same931RTP symptom."
+    }
+  ],
+  "unrunFinalProbeChange": "Added bounded deidentified ICE error names and candidate-count/state diagnostics after the second attempt; syntax checked only. No further browser attempt authorized or made.",
+  "primarySourcePins": {
+    "chrome": "155.0.8059.85",
+    "webrtc": "5bd86a2f17a35dfc986b87d058f511e45805bd1d",
+    "files": [
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/third_party/blink/renderer/modules/mediastream/webaudio_media_stream_audio_sink.cc",
+        "sha256": "c18aa11188d8a27f0425e473a9cd2feef9e6ab456315a36c6a37a98e261c57d6"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/third_party/blink/renderer/platform/webrtc/peer_connection_remote_audio_source.cc",
+        "sha256": "3d62629782df242aa1fb7e0dfe9143fcb9de16e56dad4a3966c4cfb04903f395"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/third_party/blink/renderer/modules/webrtc/webrtc_audio_renderer.cc",
+        "sha256": "bc6605fa2aa7b1853046b8abdf9a82b75bef8beb92e9f106caaa3aa33d30d6e0"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc",
+        "sha256": "f5b04e90396dd8812d7c9ea70667c08d343e43b3cd2dca1802d737531eb4f2d8"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc",
+        "sha256": "0899983a960be887968f86066ef7925ebbbc1cf9c2bcf4e63780aab1b093defd"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/third_party/blink/renderer/modules/peerconnection/webrtc_media_stream_track_adapter.cc",
+        "sha256": "3e83864300d2a20fc834967b6e8d6e85b0b7aaf88f083b5a42d66e54cc742d51"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/media/audio/audio_manager_base.cc",
+        "sha256": "cb647702811a3d3392481c5ceb8dadce72bf519bc4d23ff0322232400aa9ecd6"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/media/audio/fake_audio_output_stream.cc",
+        "sha256": "850fd29ea0bd837b8d9b190f0179707859da4727d9485e6df4bfd768043f6823"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/media/base/fake_audio_worker.cc",
+        "sha256": "eddbc3edff85e6e5a4617974b148776fa02c4b10ecd71c46ec95bada22381e5b"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/media/base/media_switches.cc",
+        "sha256": "b4257a6257fda102ac3d32fa065bfc0324ca8377cad1961efce17d94e23d47ca"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/content/browser/service_host/utility_process_host.cc",
+        "sha256": "0773373bc176f02d62788e8480ade578d42daf7d23972aad3d58cad2a469507f"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/media/audio/mac/audio_manager_mac.cc",
+        "sha256": "80702539c42550537d2cad524c5c33213b70adf2ccba37ae06ba52e830e21cf8"
+      },
+      {
+        "url": "https://chromium.googlesource.com/chromium/src/+/155.0.8059.85/DEPS",
+        "sha256": "23ef1ed90785da130901961e4f4179b4fc10adac957eee5622d7e67fe4b82ec5"
+      },
+      {
+        "url": "https://webrtc.googlesource.com/src/+/5bd86a2f17a35dfc986b87d058f511e45805bd1d/audio/channel_receive.cc",
+        "sha256": "463e3006c4d3a77cc166e451238d7aa149d9547871c47ca41b1e57c76ff8dfed"
+      },
+      {
+        "url": "https://webrtc.googlesource.com/src/+/5bd86a2f17a35dfc986b87d058f511e45805bd1d/audio/audio_receive_stream.cc",
+        "sha256": "bb2e90781906900c8f9f62cae40454b14491648a29d4d54415c1fc4bf15ec394"
+      },
+      {
+        "url": "https://webrtc.googlesource.com/src/+/5bd86a2f17a35dfc986b87d058f511e45805bd1d/audio/audio_transport_impl.cc",
+        "sha256": "b7cef314cde00583c06556c741e0cf7fe04779055452f2bf9dd7235b13388741"
+      }
+    ]
+  },
+  "sourceSHA256": {
+    "apple/NativeGuestReceivePrototype/GuestReceive.cpp": "3680e2e75535b01e7dce744f1f277450947aed30cbf502c80a21ee6827c07e4e",
+    "apple/NativeGuestReceivePrototype/GuestReturnClock.hpp": "97548a78c2a329a43e0914c3ebb88f2f10be23c51281cd9bf0bb13aab2ff2da6",
+    "apple/StreamMac/NativeGuestReturnAudioEncoder.swift": "5970011dd7bd95528ebb8b4032d7053ee520e4fbab0244d9af09b93ca6eafda4",
+    "apple/StreamMac/NativeInterviewReceiverAdapter.swift": "bcf3603db36bfe60f7a9c82a9c57d7bcd461eb79a0f8106e1509d234188e5a5f",
+    "apple/scripts/guest_return_reference_opus.swift": "92ca20eff5661dbcf7a28c31f35a428cadd8c2c657da3e50ce5bb26c391e6564",
+    "apple/scripts/guest_return_sender_diagnostics.swift": "f7eac2f9c3b28501e1ee8a2c107dd56417cb5535cd6649e9e267b85386087ea0",
+    "apple/scripts/guest_return_sender_local_harness.swift": "edf541bb45bd1f5e7ef6030c81d70c8b8cf1fc8bd22185e90079b194c085c1c5",
+    "apple/scripts/run_guest_return_sender_diagnostics.zsh": "41c9e001f430fa080da1feeed9260ac9395ae7abc7e0c10959679e196d7a1b2d",
+    "workers/interviews/test/browser/owned-null-audio-loopback.mjs": "99168e78c070e153b1d75ecfba2cd66a0c99048e89f2b56d548112aed99cba01"
+  },
+  "logSHA256": {
+    "/tmp/stream-wave4-opus-reference-final-20261022.log": "1a37b65de466cedb066184548866a1f1d38bde07e5c5fbc5e592914c81f39c93",
+    "/tmp/stream-wave4-opus-default-final-20261022.log": "9c9d12219504003d3091e03a7840c02006fff3d1e8e0614e1694f4e3a827aac2",
+    "/tmp/stream-wave4-owned-null-loopback-20261022.log": "a5963c291e8f96a12de176f882770f6f110ff1aeca2761a38f98434d5a08c37f",
+    "/tmp/stream-wave4-owned-fake-output-loopback-20261022.log": "9619b5e38beb2d361417bd293244de261f4a3ffc4dabfe80d5df4f28b0e72e4a"
+  },
+  "remaining": "No native wire mismatch demonstrated. WebRTC platform receive clock versus null WebAudio FIFO is source-supported hypothesis, not proven cause. Original931RTP/zeroemission/PCM failure, normal output/AEC,105.104ms timing and full#127 acceptance remain unqualified."
+}
