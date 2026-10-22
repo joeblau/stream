@@ -193,9 +193,56 @@ recording frontier skew and scheduling lag do not measure waveform A/V drift.
 [The exact machine receipt](PERFORMANCE_HOSTED_ARM_39724736435.json) preserves
 source hashes, raw failed checks, job/log/artifact/report/media digests, resource
 summaries and compressed timestamp distributions. Intel job `119645957767` was
-still active when this receipt was made. No additional dispatch, changed
+still active at that receipt's observation; its terminal result follows below.
+No additional dispatch, changed
 threshold, smaller canvas, lower target rate or narrower workload was used.
 Issue #92 remains open.
+
+### Updated hosted Intel measurement, same run
+
+The [Intel job](https://github.com/joeblau/stream/actions/runs/39724736435/job/119645957767)
+also completed both 600-second cases and **failed** the unchanged 17,850-frame
+qualification on the same exact source. It reported native x86_64 Debug,
+Macmini6,2, four logical CPUs, 14 GiB RAM, macOS 26.6.1 and an Apple Paravirtual
+Metal device. The advertised model does not establish physical Intel hardware
+qualification.
+
+| Observed result | Static source mix | Compressed replay mix |
+|---|---:|---:|
+| Actual compositor cadence | 28.9406 fps | 28.4278 fps |
+| Rendered / required frames | 17,366 / 17,850 | 17,058 / 17,850 |
+| Failed renders / wholly skipped opportunities | 38 / 597 | 50 / 893 |
+| Written video frames | 17,366 | 17,058 |
+| Writer-reported audio / video drops | 0 / 0 | 0 / 0 |
+| Mean / maximum render wall time | 28.213 / 450.280 ms | 31.431 / 363.880 ms |
+| Sampled actual CI kernel mean / maximum | 13.286 / 23.118 ms | 15.849 / 23.432 ms |
+| Endpoint host-clock duration error | 7.074 ms | 25.533 ms |
+| Maximum main-actor scheduling lag | 199.181 ms | 356.543 ms |
+| Mean CPU fraction of total logical capacity | 11.51% | 14.29% |
+| Peak physical footprint / Metal allocation | 186.2 / 79.9 MB | 74.7 / 88.8 MB |
+
+Both recordings finalized and passed the original media inspection. Replay
+decoded all **17,366 available source frames**; the actual-source cadence check
+passed, while both nominal compositor checks and nominal replay decoding failed.
+The source itself remains below the unchanged 17,850-frame requirement, so the
+later source-availability diagnostic correction does not alter this failure.
+
+Compressed video PTS remained monotonic. Median gaps were 33.333 ms; 95th
+percentiles were 60.000/56.667 ms and maximum gaps 450.000/363.333 ms. There were
+70/117 gaps above 100 ms and none above 500 ms. All 590/591 resource samples
+reported nominal thermal state. These measurements do not identify the cause
+of the remaining missed cadence; sampled kernels do not measure GPU utilization.
+
+The original Intel run's 59.192-second endpoint error and ten-second no-video
+abort did not recur in this run. Their underlying cause remains unestablished;
+the original failure evidence is retained. Current endpoint errors passing the
+80 ms gate do not measure independent waveform A/V drift.
+
+[The terminal Intel receipt](PERFORMANCE_HOSTED_INTEL_39724736435.json) retains
+the exact source, failed gates, raw log/archive/report/media hashes, compressed
+timestamp distributions and terminal status of both jobs. Run `39724736435`
+finished **failure**. No additional workload dispatch or qualification change
+was made; issue #92 remains open.
 
 ### Earlier failures and remaining scope
 
