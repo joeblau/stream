@@ -263,7 +263,7 @@ struct LayerPanelView: View {
                        help: group.isLocked ? "Unlock \(group.name)" : "Lock \(group.name)") {
                 dispatcher.execute(.setGroupLocked(group.id, locked: !group.isLocked, in: nil))
             }
-            eyeButton(isVisible: anyVisible, help: anyVisible ? "Hide group" : "Show group") {
+            eyeButton(isVisible: anyVisible, help: "\(anyVisible ? "Hide" : "Show") group \(group.name)") {
                 dispatcher.execute(.setGroupVisibility(group.id, visible: !anyVisible, in: nil))
             }
         }

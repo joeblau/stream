@@ -216,6 +216,8 @@ struct SceneBrowserView: View {
             }
             .buttonStyle(.plain)
             .help(folder.isCollapsed ? "Expand folder" : "Collapse folder")
+            .accessibilityLabel("\(folder.isCollapsed ? "Expand" : "Collapse") scene folder \(folder.name)")
+            .accessibilityValue(folder.isCollapsed ? "Collapsed" : "Expanded")
             Image(systemName: "folder.fill")
                 .foregroundStyle(.studioSecondary)
             Text(folder.name)
@@ -350,36 +352,38 @@ struct SceneBrowserView: View {
     private func gridCard(_ scene: Scene) -> some View {
         let folderID = sceneStore.sceneMembership[scene.id]
         let isSelected = sceneStore.selectedID == scene.id
-        return VStack(spacing: 4) {
-            thumbnailView(for: scene, size: nil)
-                .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                .overlay(alignment: .topTrailing) {
-                    HStack(spacing: 3) {
-                        markers(for: scene)
-                    }
-                    .padding(4)
-                }
-            HStack(spacing: 4) {
-                if sceneStore.isLocked(scene.id) {
-                    Image(systemName: "lock.fill")
-                        .foregroundStyle(.studioSecondary)
-                        .help("Locked — unlock to rename, reorder, edit, or delete")
-                }
-                Text(scene.name)
-                    .lineLimit(1)
-            }
-            .studioTextStyle(.caption)
-        }
-        .padding(5)
-        .background(isSelected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.05),
-                    in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
+        return SceneSelectionButton(name: scene.name, isSelected: isSelected,
+                                    status: sceneAccessibilityStatus(scene), action: {
             dispatcher.execute(.selectScene(scene.id))
+        }) {
+            VStack(spacing: 4) {
+                thumbnailView(for: scene, size: nil)
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .overlay(alignment: .topTrailing) {
+                        HStack(spacing: 3) {
+                            markers(for: scene)
+                        }
+                        .padding(4)
+                    }
+                HStack(spacing: 4) {
+                    if sceneStore.isLocked(scene.id) {
+                        Image(systemName: "lock.fill")
+                            .foregroundStyle(.studioSecondary)
+                            .help("Locked — unlock to rename, reorder, edit, or delete")
+                    }
+                    Text(scene.name)
+                        .lineLimit(1)
+                }
+                .studioTextStyle(.caption)
+            }
+            .padding(5)
+            .background(isSelected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+            }
+            .contentShape(Rectangle())
         }
         .onDrag {
             NSItemProvider(object: scene.id.rawValue.uuidString as NSString)
@@ -392,6 +396,17 @@ struct SceneBrowserView: View {
                     rowHeight: 86,
                     dispatcher: dispatcher))
         .contextMenu { sceneContextMenu(scene) }
+    }
+
+    private func sceneAccessibilityStatus(_ scene: Scene) -> String {
+        var status: [String] = []
+        if dispatcher.state.stagedSceneID == scene.id { status.append("Preview") }
+        if dispatcher.state.programSceneID == scene.id { status.append("Program") }
+        if dispatcher.state.stagedSceneID == scene.id, dispatcher.state.hasPendingStagedEdits {
+            status.append("Unpublished changes")
+        }
+        if sceneStore.isLocked(scene.id) { status.append("Locked") }
+        return status.joined(separator: ", ")
     }
 
     // MARK: - Rows: shared pieces

@@ -320,6 +320,13 @@ struct MixerPanelView: View {
             Text(Self.gainLabel(volume))
                 .studioTextStyle(.caption2).monospacedDigit()
                 .foregroundStyle(.studioSecondary)
+            // The existing clip latch must be readable without color. Keep
+            // one stable, passive row so metering adds no focus stops or live
+            // announcements and never replaces the numeric gain readout.
+            Text(meterLevels?.isClipping == true ? "CLIP" : " ")
+                .studioTextStyle(.caption2, weight: .semibold)
+                .foregroundStyle(.primary)
+                .accessibilityHidden(true)
             HStack(spacing: 4) {
                 stripButton("M", active: isMuted, tint: .orange) { onMute(!isMuted) }
                     .disabled(!controlsEnabled)
@@ -358,6 +365,7 @@ struct MixerPanelView: View {
         .frame(width: 76 * max(1, textScale))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(title) audio channel, \(isActive ? "active" : "inactive")")
+        .accessibilityValue(meterLevels.map { $0.isClipping ? "Clipping" : "Not clipping" } ?? "Level unavailable")
     }
 
     private func stripButton(_ title: String, active: Bool, tint: Color,
