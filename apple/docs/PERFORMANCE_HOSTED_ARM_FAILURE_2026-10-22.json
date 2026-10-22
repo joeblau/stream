@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "qualification": "FAILED: requested sustained 1080p30 owned source/layer/recording workload; diagnostic preservation fixed separately, no throughput improvement or replacement qualification claimed.",
+  "runID": 39713883982,
+  "jobID": 119611316182,
+  "jobURL": "https://github.com/joeblau/stream/actions/runs/39713883982/job/119611316182",
+  "originalLogSHA256": "fd75ec1666934ce99df3d3d43d60a4ad99b715e588cd386996288c7e7263d2fb",
+  "hardwareModel": "VirtualMac2,1",
+  "cpu": "Apple M1 (Virtual)",
+  "os": "macOS 26.6.2 (25G83)",
+  "xcode": "26.6 (17F113)",
+  "architecture": "arm64",
+  "requestedSecondsPerCase": 600,
+  "requestedFPS": 30,
+  "originalMinimumReplayFrames": 17850,
+  "workloads": [
+    {
+      "source": "static owned source/layers",
+      "renderedFrames": 11722,
+      "healthyPostWarmupArrivals": 11699,
+      "monotonic": true,
+      "failedRenders": 7,
+      "approximateRenderedFramesPerRequestedSecond": 19.5366666667
+    },
+    {
+      "source": "owned compressed replay/layers",
+      "renderedFrames": 12140,
+      "healthyPostWarmupArrivals": 12110,
+      "monotonic": true,
+      "failedRenders": 0,
+      "approximateRenderedFramesPerRequestedSecond": 20.2333333333
+    }
+  ],
+  "actualDecodedReplayFrames": null,
+  "actualDecodedReplayFramesNote": "Original log does not report this count. Do not infer it from output renders or fabricate it from a new fixture.",
+  "failure": "studio_performance_harness.swift:228 Owned replay decoder did not sustain its source cadence; precondition exit251 before aggregate performance.json write.",
+  "diagnosis": "The nominal30fps qualification failed. The first sparse recording cannot supply17850 replay frames. Input availability must be measured separately from actual-source decoding, while retaining the nominal gate.",
+  "originalArtifactID": 12399600168,
+  "originalArtifactBytes": 421075783,
+  "originalArtifactZipSHA256": "ac02a3b1432c3efed2805320795920a8988f4663f5c4a09c963b063918253473",
+  "artifactReview": "Original log and artifact upload receipt reviewed; media archive not downloaded or re-decoded by this diagnostic task. Original artifacts remain the source of additional media/resource facts."
+}

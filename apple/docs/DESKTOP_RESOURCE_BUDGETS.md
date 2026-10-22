@@ -82,6 +82,26 @@ bytes and write rate. Original generated recordings and journals remain beside
 the report. A process-group deadline bounds the run. `--build-only` permits
 building first and measuring later without concurrent compiler load.
 
+Each case now writes an atomic `case-N.json` and updates `performance.json`
+before media inspection or qualification gates. Earlier case files survive a
+later failure. Checks distinguish pending inspection, failed qualification and
+completed validation; a decoder stall cannot turn pending work into a pass.
+Failed gates retain the report and exit nonzero after both cases. Recording
+finalization, original host-clock and media inspection bounds remain in force.
+
+Compressed sample timestamps provide a separate replay inventory: total source
+frames, source duration, monotonicity and frames due before the existing
+five-second allowance. Decoding the actual available frames is checked
+independently from the original nominal `fps * Int(seconds - 5)` requirement.
+Both nominal compositor capacity and nominal replay decoding remain required.
+A slow first workload cannot manufacture a 30fps source for its second case;
+successfully decoding its sparse recording does not pass the nominal gate.
+
+`python3 apple/scripts/test_performance_evidence.py -v` checks durable failed
+case receipts and nonzero exit, then writes and actually decodes a one-second
+20fps H.264 source through the same inventory/replay implementation. That
+bounded diagnostic regression does not replace a sustained capacity run.
+
 The manual Native performance budgets workflow runs the same bounded workload
 on ARM and Intel hosted Mac runners and retains original evidence. Intel jobs
 reject translated processes; a Rosetta run cannot qualify Intel hardware.
@@ -125,6 +145,18 @@ The subsequent lifecycle reset does not change these continuously running
 workloads; the measurements were not repeated or relabeled as a later commit.
 
 ## Qualification limits
+
+The hosted ARM job [119611316182](https://github.com/joeblau/stream/actions/runs/39713883982/job/119611316182)
+failed its requested two 600-second 1080p30 workload on VirtualMac2,1 / Apple M1
+(Virtual), macOS 26.6.2, Xcode 26.6. Static and replay cases rendered 11,722 and
+12,140 frames, about 19.5 and 20.2 frames per requested second. The first case
+reported seven failed renders; the second reported none. Both arrival sequences
+were monotonic. The original nominal replay requirement was 17,850 frames.
+Its trap occurred before the old aggregate JSON write, so the original log
+does not contain a decoded replay count or recoverable resource summary. The
+new diagnostics preserve those facts on future runs; they do not change this
+failed 30fps qualification. [The failure receipt](PERFORMANCE_HOSTED_ARM_FAILURE_2026-10-22.json)
+retains original log/artifact hashes and explicitly unknown measurements.
 
 These owned workloads add real decode/encode, sustained scheduling and actual
 resource measurements. They are not representative physical camera/desktop
