@@ -44,9 +44,9 @@ protocol PTZTransport: AnyObject, Sendable {
     /// Completes after the local transport processes the write or its bounded
     /// failure path. This is not a device acknowledgment. Errors use the state callback.
     func send(_ packet: Data) async
-    /// Tears the connection down. The controller always sends a VISCA stop
-    /// BEFORE calling this, so a camera never keeps moving after its
-    /// controls disappear.
+    /// Tears the connection down after the controller's best-effort Stop
+    /// writes finish local processing or fail. This ordering does not prove
+    /// the camera received Stop or that physical motion has ended.
     func disconnect() async
     /// Replaces the state-change callback (one controller per transport).
     func setStateHandler(_ handler: (@Sendable (PTZConnectionState) -> Void)?)
