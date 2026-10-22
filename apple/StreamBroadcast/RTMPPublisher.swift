@@ -192,6 +192,7 @@ actor RTMPPublisher: Publisher {
     /// route update while recovery parks or retries. Only stop cancels this
     /// owner; replacing a debounce must not cancel a live reconnect loop.
     private var recoveryTask: Task<Void, Never>?
+    private var recoveryTaskID: UUID?
     private var currentPath: NetworkPathSnapshot?
     private var lastPathChangeAt: UInt64 = 0
     private var lastPathLostAt: UInt64 = 0
@@ -554,13 +555,18 @@ actor RTMPPublisher: Publisher {
 
     private func launchRecovery(reason: String, immediately: Bool = false) {
         guard !recoveryInProgress, recoveryTask == nil else { return }
+        let owner = UUID()
+        recoveryTaskID = owner
         recoveryTask = Task { [weak self] in
-            await self?.performPathRecovery(reason: reason, immediately: immediately)
+            await self?.performPathRecovery(owner: owner, reason: reason, immediately: immediately)
         }
     }
 
-    private func performPathRecovery(reason: String, immediately: Bool) async {
-        defer { recoveryTask = nil }
+    private func performPathRecovery(owner: UUID, reason: String, immediately: Bool) async {
+        defer {
+            if recoveryTaskID == owner { recoveryTask = nil; recoveryTaskID = nil }
+        }
+        guard recoveryTaskID == owner else { return }
         await requestRecovery(reason: reason, immediately: immediately)
     }
 
@@ -1053,6 +1059,7 @@ actor RTMPPublisher: Publisher {
         pathLossDebounceTask = nil
         recoveryTask?.cancel()
         recoveryTask = nil
+        recoveryTaskID = nil
         // The reconnect loop's backoff sleep and path parking are unstructured;
         // wake both explicitly so the loop observes userInitiatedStop and exits.
         backoffSleepTask?.cancel()
