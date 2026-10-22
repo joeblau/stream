@@ -10,7 +10,8 @@ import SwiftUI
 /// the old capture stops and the new one starts with the resolved crop, so
 /// geometry changes always apply deliberately, never mid-frame.
 ///
-/// - REGION (display targets with a pinned display): drag a marquee over a
+/// - REGION (display targets with a pinned display): edit named point fields
+///   with the keyboard/steppers, or drag a marquee over a
 ///   live `SCScreenshotManager` thumbnail of the captured display (the
 ///   studio's own windows are excluded from the thumbnail, exactly like
 ///   capture). The region is persisted in display points plus the display's
@@ -25,7 +26,7 @@ import SwiftUI
 /// Honest capability states: window/application targets and unpinned
 /// (system-picker) sources get an explanation instead of the region editor;
 /// a disconnected display keeps the zoom/tracking sections editable and
-/// shows the stored region numerically.
+/// allows region editing against honestly labeled stored display geometry.
 struct ScreenSourceRegionView: View {
     let source: SourceDefinition
     /// The screen payload being edited (callers open this sheet only for
@@ -48,6 +49,8 @@ struct ScreenSourceRegionView: View {
     @State private var previewNote: String?
     /// The in-progress marquee drag, normalized 0...1 (top-left origin).
     @State private var marquee: CGRect?
+    @State private var numericRegion: ScreenRegionDraftGeometry?
+    @State private var hasNumericInput = false
 
     init(source: SourceDefinition, payload: ScreenSourcePayload) {
         self.source = source
@@ -55,6 +58,9 @@ struct ScreenSourceRegionView: View {
         _draftRegion = State(initialValue: payload.region)
         _draftZoom = State(initialValue: payload.zoom)
         _draftTracking = State(initialValue: payload.appTracking)
+        _numericRegion = State(initialValue: payload.region.flatMap {
+            ScreenRegionDraftGeometry(rect: $0.rect, displaySize: $0.displaySize)
+        })
     }
 
     /// Region/zoom/tracking crop a DISPLAY; other targets get the honest
@@ -105,13 +111,14 @@ struct ScreenSourceRegionView: View {
                 Button("Apply") { apply() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(!isDirty)
+                    .disabled(!isDirty || !canApplyRegion)
             }
             .padding()
         }
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
         .task { await loadPreview() }
+        .onChange(of: displaySize) { _, _ in updateNumericBasis() }
     }
 
     private var isDirty: Bool {
@@ -120,12 +127,23 @@ struct ScreenSourceRegionView: View {
             || draftTracking != payload.appTracking
     }
 
+    private var canApplyRegion: Bool {
+        // Zoom/tracking remain editable without geometry for a full display.
+        if draftRegion == nil && !hasNumericInput { return true }
+        return numericRegion?.rect != nil
+    }
+
+    private var editingDisplaySize: CGSize? {
+        ScreenRegionDraftGeometry.validDisplaySize(displaySize)
+            ?? ScreenRegionDraftGeometry.validDisplaySize(payload.region?.displaySize)
+    }
+
     // MARK: - Region
 
     @ViewBuilder
     private var regionSection: some View {
         Section {
-            if let thumbnail, let displaySize {
+            if let thumbnail, let displaySize = ScreenRegionDraftGeometry.validDisplaySize(displaySize) {
                 regionEditor(thumbnail: thumbnail, displaySize: displaySize)
             } else {
                 if let note = previewNote {
@@ -133,25 +151,102 @@ struct ScreenSourceRegionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if let region = draftRegion {
-                    LabeledContent("Stored Region") {
-                        Text("\(Int(region.rect.width))×\(Int(region.rect.height)) at (\(Int(region.rect.minX)), \(Int(region.rect.minY)))")
-                            .foregroundStyle(.secondary)
-                    }
-                }
             }
-            if draftRegion != nil {
+            numericRegionEditor
+            if draftRegion != nil || hasNumericInput {
                 Button("Reset to Full Display") {
                     draftRegion = nil
                     marquee = nil
+                    hasNumericInput = false
+                    numericRegion = editingDisplaySize.flatMap { ScreenRegionDraftGeometry(displaySize: $0) }
                 }
             }
         } header: {
             Text("Capture Region")
         } footer: {
             Text(draftRegion == nil
-                 ? "The full display is captured. Drag across the preview to capture only part of it."
+                 ? "The full display is captured. Enter point values or drag across the preview to capture only part of it."
                  : "Only the marked area is captured. The region scales with the display's resolution; if it no longer fits, the source fails closed (black + error) instead of capturing the wrong area.")
+        }
+    }
+
+    @ViewBuilder
+    private var numericRegionEditor: some View {
+        if let geometry = numericRegion {
+            if ScreenRegionDraftGeometry.validDisplaySize(displaySize) != nil {
+                Text("Display: \(geometry.displaySize.width, specifier: "%.2f") × \(geometry.displaySize.height, specifier: "%.2f") points. X and Y start at the top-left.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Label("Using stored display size: \(geometry.displaySize.width, specifier: "%.2f") × \(geometry.displaySize.height, specifier: "%.2f") points. Live geometry is unavailable; capture will rescale and validate the region when the display is available.",
+                      systemImage: "display.trianglebadge.exclamationmark")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(ScreenRegionDraftGeometry.Field.allCases, id: \.self) { field in
+                LabeledContent("\(field.title) (points)") {
+                    HStack {
+                        TextField(field.title, text: Binding(
+                            get: { numericRegion?[field] ?? "" },
+                            set: { updateNumericField(field, text: $0) }))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 130)
+                            .accessibilityLabel("Region \(field.title) in display points")
+                            .accessibilityIdentifier("screenRegion.\(field.title)")
+                        Stepper("Adjust region \(field.title)",
+                                onIncrement: stepAction(field, by: 1),
+                                onDecrement: stepAction(field, by: -1))
+                            .labelsHidden()
+                            .accessibilityLabel("Adjust region \(field.title)")
+                            .accessibilityValue(geometry[field])
+                            .accessibilityHint("Changes by one display point. Apply saves the draft.")
+                    }
+                }
+            }
+            if let message = geometry.validationMessage {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if draftRegion == nil {
+                Button("Use These Region Values") { commitNumericRegion() }
+                    .disabled(geometry.rect == nil)
+            }
+        } else {
+            Text(editingDisplaySize != nil && draftRegion != nil
+                 ? "The stored region's display dimensions are invalid. Reset to Full Display to start a new region using the known display dimensions."
+                 : "Region coordinates are unavailable until valid display dimensions or a stored region's display size are available. Full-display capture, zoom, and tracking can still be selected.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func updateNumericBasis() {
+        guard let size = editingDisplaySize else { numericRegion = nil; return }
+        if let geometry = numericRegion {
+            numericRegion = geometry.rebased(to: size)
+        } else if let draftRegion {
+            numericRegion = ScreenRegionDraftGeometry(rect: draftRegion.rect, displaySize: draftRegion.displaySize)?.rebased(to: size)
+        } else {
+            numericRegion = ScreenRegionDraftGeometry(displaySize: size)
+        }
+    }
+
+    private func updateNumericField(_ field: ScreenRegionDraftGeometry.Field, text: String) {
+        guard numericRegion != nil else { return }
+        hasNumericInput = true
+        numericRegion?[field] = text
+        commitNumericRegion()
+    }
+
+    private func commitNumericRegion() {
+        guard let geometry = numericRegion, let rect = geometry.rect else { return }
+        draftRegion = CaptureRegion(rect: rect, displaySize: geometry.displaySize)
+        marquee = nil
+    }
+
+    private func stepAction(_ field: ScreenRegionDraftGeometry.Field, by delta: CGFloat) -> (() -> Void)? {
+        guard numericRegion?.stepping(field, by: delta) != nil else { return nil }
+        return {
+            guard let next = numericRegion?.stepping(field, by: delta) else { return }
+            numericRegion = next
+            commitNumericRegion()
         }
     }
 
@@ -225,7 +320,9 @@ struct ScreenSourceRegionView: View {
                           width: marquee.width * displaySize.width,
                           height: marquee.height * displaySize.height)
         guard rect.width >= 32, rect.height >= 32 else { return }
+        guard let geometry = ScreenRegionDraftGeometry(rect: rect, displaySize: displaySize), geometry.rect != nil else { return }
         draftRegion = CaptureRegion(rect: rect, displaySize: displaySize)
+        numericRegion = geometry
     }
 
     // MARK: - Zoom
@@ -321,12 +418,13 @@ struct ScreenSourceRegionView: View {
     /// own windows, exactly like the capture filter, so the region is drawn
     /// over what the source will actually capture.
     private func loadPreview() async {
+        defer { updateNumericBasis() }
         guard payload.target == .display,
               let id = payload.targetIdentifier.flatMap({ UInt32($0) }) else { return }
         do {
             let content = try await SCShareableContent.current
             guard let display = content.displays.first(where: { $0.displayID == id }) else {
-                previewNote = "The display is not connected. Zoom and tracking can still be edited; the region shows its stored values."
+                previewNote = "The display is not connected. Region fields can use valid stored display dimensions; zoom and tracking can still be edited."
                 return
             }
             displaySize = display.frame.size
@@ -358,9 +456,13 @@ struct ScreenSourceRegionView: View {
     /// the capture key, so the pool stops the old capture and starts one
     /// with the new crop — deliberate application, no mid-frame crop swaps.
     private func apply() {
+        guard isDirty, canApplyRegion else { return }
         var updated = source
         var payload = payload
-        payload.region = draftRegion
+        if draftRegion != nil {
+            guard let geometry = numericRegion, let rect = geometry.rect else { return }
+            payload.region = CaptureRegion(rect: rect, displaySize: geometry.displaySize)
+        } else { payload.region = nil }
         payload.zoom = draftZoom
         payload.appTracking = draftTracking
         updated.payload = .screen(payload)
