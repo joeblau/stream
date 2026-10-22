@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import StreamCore
 
 /// Only this serial queue touches the writer. Capture callbacks put retained
 /// buffers into two bounded mailboxes; they never enqueue one work item per
@@ -28,6 +29,9 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var videoCapacity: Int = 30
         var maxVideoMemoryBytes: Int = 128_000_000
         var audioCapacity: Int = 128
+        /// Prepared shipping ingress names its exact admitted private bank.
+        /// Legacy raw callers are copied into a lazily admitted Q+2 bank.
+        var videoBank: RawVideoResourceBank?
     }
 
     enum TrackStatus: String, Codable, Sendable { case waiting, writing, stalled, failed, complete, notRequested }
@@ -50,6 +54,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
         var availableBytes: Int64?
         var bytesWritten: Int64 = 0
         var warning: String?
+        var videoTransfer: RecordingVideoTransferProgress?
     }
 
     enum Event: Sendable {
@@ -112,6 +117,12 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private var droppedVideo = 0
     private var firstVideoAccepted = false
     private var droppedAudio = 0
+    private let videoTransferLock = NSLock()
+    private var compatibilityBank: RawVideoResourceBank?
+    private var compatibilityReceipt: RawVideoResourceReceipt?
+    private var adoptedPreparedBank: RawVideoResourceBank?
+    private var videoTransfer = RecordingVideoTransferProgress()
+    private var brokerVideoTransfer = RecordingVideoTransferProgress()
     // Everything below is queue-confined.
     private var writer: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
@@ -145,6 +156,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private var resumePending = false
     private var finishSourceCutoff: CMTime = .invalid
     private var awaitingFinishBoundary = false
+    private var finishBoundaryCancelled = false
     private var videoInputFinished = false
     private var epochSourceStart: CMTime = .invalid
     private var epochVideoPTS: CMTime = .invalid
@@ -174,7 +186,73 @@ final class ProgramRecordingSession: @unchecked Sendable {
         }
     }
 
-    func appendVideo(_ sample: CMSampleBuffer) { enqueue(sample, isVideo: true) }
+    func appendVideo(_ sample: CMSampleBuffer) {
+        // Raw compatibility is a closed transfer, not permission to retain the
+        // caller's source backing in the writer queue or native encoder.
+        videoTransferLock.lock(); defer { videoTransferLock.unlock() }
+        lock.lock(); let open = acceptingVideo && !pausedAtInlet; lock.unlock()
+        guard open else { return }
+        if !sample.presentationTimeStamp.isNumeric {
+            // Preserve the existing inlet timestamp-drop counter. This path
+            // rejects before retaining the sample or allocating private pixels.
+            enqueue(sample, isVideo: true); return
+        }
+        var admissionFailed = false
+        do {
+            let bank: RawVideoResourceBank
+            if let prepared = configuration.videoBank { bank = prepared }
+            else if let adoptedPreparedBank { bank = adoptedPreparedBank }
+            else if let admitted = compatibilityBank { bank = admitted }
+            else {
+                guard let pixels = CMSampleBufferGetImageBuffer(sample) else { throw FrameDeliveryTransferError.invalidFrame }
+                let generation = UUID()
+                let request = RawVideoResourceRequest(domain: .init(workspace: generation, kind: .recording,
+                    outputID: "raw-compatibility", plane: .isolated), descriptor: .init(
+                        width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels), capacityPolicy:
+                            .recording(videoCapacity: configuration.videoCapacity,
+                                       maxQueuedBytes: UInt64(max(1, configuration.maxVideoMemoryBytes)), headroom: 2)),
+                    sessionGeneration: generation)
+                let receipt: RawVideoResourceReceipt
+                do { receipt = try RawVideoResourceCoordinator.shared.reserveBatch([request]) }
+                catch { admissionFailed = true; videoTransfer.admissionFailures += 1; throw error }
+                guard let admitted = receipt.banks.first else { throw RawVideoResourceFailure.invalidRequest }
+                compatibilityBank = admitted; compatibilityReceipt = receipt; bank = admitted
+            }
+            let copied = try FrameDeliveryConverter.copy(source: sample, into: bank)
+            enqueue(copied, isVideo: true)
+        } catch {
+            if !admissionFailed {
+                if (error as? RawVideoResourceFailure) == .capacityOccupied { videoTransfer.privateCapacityDrops += 1 }
+                else { videoTransfer.conversionFailures += 1 }
+            }
+            videoTransfer.lastError = error.localizedDescription
+        }
+    }
+
+    func appendPreparedVideo(_ frame: RecordingPreparedVideoFrame) {
+        videoTransferLock.lock(); defer { videoTransferLock.unlock() }
+        let expected = configuration.videoBank ?? adoptedPreparedBank ?? (compatibilityBank == nil ? frame.bank : nil)
+        // An explicit typed factory result can establish a legacy ISO writer's
+        // bank before its first enqueue. Raw samples never establish provenance.
+        guard let expected, expected === frame.bank,
+              case .recording(let count, let bytes, let headroom) = expected.descriptor.capacityPolicy,
+              count == configuration.videoCapacity, bytes == UInt64(max(1, configuration.maxVideoMemoryBytes)), headroom >= 2,
+              let image = CMSampleBufferGetImageBuffer(frame.sample),
+              CVPixelBufferGetPixelFormatType(image) == kCVPixelFormatType_32BGRA,
+              CVPixelBufferGetWidth(image) == expected.descriptor.width,
+              CVPixelBufferGetHeight(image) == expected.descriptor.height,
+              UInt64(max(1, CVPixelBufferGetDataSize(image))) == expected.queueCostBytes else {
+            videoTransfer.provenanceDrops += 1
+            videoTransfer.lastError = "Recording received a frame from a different admitted bank or format."
+            return
+        }
+        if configuration.videoBank == nil { adoptedPreparedBank = expected }
+        enqueue(frame.sample, isVideo: true)
+    }
+
+    func updateVideoDelivery(_ progress: RecordingVideoTransferProgress) {
+        videoTransferLock.lock(); brokerVideoTransfer = progress; videoTransferLock.unlock()
+    }
     func appendAudio(_ sample: CMSampleBuffer) {
         guard configuration.requiresAudio else { return }
         enqueue(sample, isVideo: false)
@@ -264,7 +342,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
             guard !finishRequested else { return }
             finishRequested = true
             finishDeadline = Date().addingTimeInterval(3)
-            awaitingFinishBoundary = waitingForSourceBoundary && !finishSourceCutoff.isNumeric
+            awaitingFinishBoundary = waitingForSourceBoundary && !finishBoundaryCancelled && !finishSourceCutoff.isNumeric
             pauseDraining = false; paused = false
             lock.lock()
             if !closedAtInlet { acceptingAudio = configuration.requiresAudio; audioTailOpen = configuration.requiresAudio }
@@ -300,6 +378,10 @@ final class ProgramRecordingSession: @unchecked Sendable {
 
     func cancelPendingFinishBoundary() {
         queue.async { [self] in
+            // Terminal broker statistics can be awaiting an actor ACK while
+            // Stop cancels the new segment. Remember that intent even before
+            // the old segment's finish request reaches this serial queue.
+            finishBoundaryCancelled = true
             guard awaitingFinishBoundary, !finishing, result == nil else { return }
             lock.lock(); let finalVideo = video.last; lock.unlock()
             finishSourceCutoff = resolvedSourceEnd(finalVideo: finalVideo)
@@ -608,6 +690,9 @@ final class ProgramRecordingSession: @unchecked Sendable {
         if progress.droppedAudio > 0 || progress.droppedVideo > 0 {
             addWarning("Recording dropped \(progress.droppedVideo) video frames and \(progress.droppedAudio) audio chunks; check disk and encoder load.")
         }
+        if let transfer = progress.videoTransfer, transfer.hasFailure {
+            addWarning("Recording video transfer dropped frames: \(transfer.lastError ?? "private capacity or admission failure")")
+        }
         // The journal write can add a storage warning. Publish afterwards so
         // the studio sees it while media continues, before the next health
         // check clears transient warnings and retries the journal.
@@ -621,6 +706,16 @@ final class ProgramRecordingSession: @unchecked Sendable {
     }
 
     private func updateProgress() {
+        videoTransferLock.lock()
+        var transfer = videoTransfer
+        transfer.broker = brokerVideoTransfer.broker
+        transfer.brokerDrops = brokerVideoTransfer.brokerDrops
+        transfer.sourceUnavailable = brokerVideoTransfer.sourceUnavailable
+        transfer.privateCapacityDrops += brokerVideoTransfer.privateCapacityDrops
+        transfer.conversionFailures += brokerVideoTransfer.conversionFailures
+        transfer.lastError = brokerVideoTransfer.lastError ?? transfer.lastError
+        progress.videoTransfer = transfer.hasFailure ? transfer : nil
+        videoTransferLock.unlock()
         lock.lock()
         progress.droppedAudio = droppedAudio; progress.droppedVideo = droppedVideo
         lock.unlock()
@@ -699,6 +794,11 @@ final class ProgramRecordingSession: @unchecked Sendable {
         // finishWriting. Releasing inputs as well as the writer releases their
         // codec sessions before clients begin another recording workload.
         videoInput = nil; audioInput = nil; writer = nil
+        videoTransferLock.lock()
+        if let compatibilityBank { RawVideoResourceCoordinator.shared.retire(bankID: compatibilityBank.id) }
+        if let compatibilityReceipt { RawVideoResourceCoordinator.shared.rollback(compatibilityReceipt) }
+        compatibilityBank = nil; compatibilityReceipt = nil
+        videoTransferLock.unlock()
         let callbacks = completions; completions.removeAll()
         callbacks.forEach { $0(result) }
     }

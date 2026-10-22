@@ -49,10 +49,13 @@ struct IsolatedVideoProgress: Codable, Identifiable, Sendable {
     var missingAudioFrames: Int64 = 0
     var videoSamples = 0
     var durationSeconds = 0.0
+    var videoTransfer: RecordingVideoTransferProgress?
 }
 struct IsolatedVideoRenderedFrame: @unchecked Sendable {
     let sample: CMSampleBuffer?
     let sourceAvailable: Bool
+    var preparedVideo: RecordingPreparedVideoFrame? = nil
+    var transferFailure: RecordingVideoTransferFailure? = nil
 }
 /// A factory-created render closure is confined to one ISO worker queue.
 /// It reads exact source holders and owns its own native renderer.
