@@ -94,3 +94,15 @@ dispatch** without invoking the post/delete/timeout/ban HTTP request. Once the
 operation has begun, **Stop Waiting** keeps its existing unknown-outcome receipt;
 it cannot undo an external side effect. This distinction does not enqueue or
 replay a canceled action and does not stop the incoming reader.
+
+
+Each workspace pins chat request authority to its successfully verified identity
+and machine-credential generation. Replacing authorization in another workspace
+cannot make a future old-reader request adopt the replacement user's token.
+Reads and mutations fail before HTTP, the old direct reader retires, and a
+fresh deliberate connection/identity verification is required. A normal access-
+token refresh preserves that generation and continues serving both verified
+workspaces. Identity verification is also fenced by workspace intent and an
+attempt token, so a late superseded verification cannot replace a newer pin.
+The two-session fixture uses one controlled vault and transport; it establishes
+no real OAuth grant or authorized audience feed.

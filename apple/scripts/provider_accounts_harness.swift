@@ -17,6 +17,8 @@ actor ProviderHTTPFixture {
     var eventLatency = "low"
     var eventThumbnail = "https://i.ytimg.com/vi/event1/high.jpg?sqp=public&rs=public"
     var viewerEventID = "event1"
+    var channelID = "UC1"
+    func setChannelID(_ id: String) { channelID = id }
     func setViewerEventID(_ id: String) { viewerEventID = id }
     var chatEntered = false
     var chatGate: CheckedContinuation<Void, Never>?
@@ -38,6 +40,8 @@ actor ProviderHTTPFixture {
     var apiStatus = 200
     var tokenStatus = 200
     var apiOnce401 = false
+    var api401Remaining = 0
+    func rejectNextAPIReads(_ count: Int) { api401Remaining = count }
     var devicePending = false
     func configure(hold: Bool = false, status: Int = 200, once401: Bool = false, tokenStatus: Int = 200) {
         holdRefresh = hold; apiStatus = status; apiOnce401 = once401; self.tokenStatus = tokenStatus
@@ -64,7 +68,8 @@ actor ProviderHTTPFixture {
             if holdThumbnail { thumbnailEntered = true; await withCheckedContinuation { thumbnailGate = $0 } }
             body = #"{"kind":"youtube#thumbnailSetResponse","items":[{"default":{"url":"https://i.ytimg.com/vi/event1/default.jpg","width":120,"height":90}}]}"#
         } else if path == "/youtube/v3/channels" {
-            body = #"{"items":[{"id":"UC1","snippet":{"title":"Actual fixture channel"}}]}"#
+            body = String(decoding: try JSONSerialization.data(withJSONObject: ["items": [["id": channelID,
+                "snippet": ["title": "Actual fixture channel"]]]]), as: UTF8.self)
         } else if path == "/youtube/v3/liveBroadcasts", request.httpMethod == "POST" {
             body = #"{"id":"acknowledged-id","snippet":{"channelId":"UC1","title":"Created"},"status":{"lifeCycleStatus":"created","privacyStatus":"private"}}"#
         } else if path == "/youtube/v3/liveBroadcasts" {
@@ -85,7 +90,8 @@ actor ProviderHTTPFixture {
         }
         if host == "www.googleapis.com" || host == "api.twitch.tv" {
             status = apiStatus
-            if apiOnce401 { apiOnce401 = false; status = 401 }
+            if api401Remaining > 0 { api401Remaining -= 1; status = 401 }
+            else if apiOnce401 { apiOnce401 = false; status = 401 }
         }
         return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
@@ -182,6 +188,7 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         try await nativeSession()
         try await nativeChatLateReplies()
         try await nativeChatRevocation()
+        try await nativeCrossWorkspaceChatAuthority()
         try await nativeEnding()
         print("Provider accounts: loopback/state/cancel, refresh coalescing/rotation/late response, safe GET retry, exact viewer identity/receipt freshness, twelve stale chat-reply fences/current revocation repair, native OAuth/discovery/public metadata/portable exclusions/event receipt/shutdown PASS")
     }
@@ -208,6 +215,68 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
             precondition(last.value(forHTTPHeaderField: "Authorization") == "Bearer new-authorization")
         }
     }
+    @MainActor static func nativeCrossWorkspaceChatAuthority() async throws {
+        for replacementClient in ["fixture", "different-client"] {
+            let http = ProviderHTTPFixture()
+            let vault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await http.send($0) })
+            let configuration = try await vault.configure(.youtube, clientID: "fixture")
+            try await vault.accept(.init(access: "first-account", refresh: "first-refresh", expiresAt: Date().addingTimeInterval(3_600),
+                scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: configuration)
+            let first = ProviderAccountSession(restream: FixtureRestream(), vault: vault)
+            let second = ProviderAccountSession(restream: FixtureRestream(), vault: vault)
+            let unverifiedCount = await http.allRequests().count
+            do {
+                _ = try await first.chatRequest(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages"))
+                preconditionFailure("Chat work bypassed explicit identity verification")
+            } catch let failure as ProviderFailure { precondition(failure.kind == .authorization) }
+            check(await http.allRequests().count == unverifiedCount)
+            check(try await first.chatIdentity(.youtube).channelID == "UC1")
+            check(try await second.chatIdentity(.youtube).channelID == "UC1")
+            let initialCredential = await vault.generation(.youtube)
+            // Ordinary access-token refresh is the same credential generation;
+            // both verified readers keep working through the one shared vault.
+            await http.configure(hold: true)
+            await http.rejectNextAPIReads(2)
+            let read = try ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages")
+            async let firstRefresh = first.chatRequest(.youtube, read)
+            async let secondRefresh = second.chatRequest(.youtube, read)
+            await settle {
+                let entered = await http.refreshEntered, requests = await http.allRequests()
+                return entered && requests.filter { $0.url?.path == "/youtube/v3/liveChat/messages" }.count >= 2
+            }
+            await http.release()
+            _ = try await (firstRefresh, secondRefresh)
+            check(await vault.generation(.youtube) == initialCredential)
+            check(await http.count(host: "oauth2.googleapis.com") == 1)
+            // Simulate another workspace's completed OAuth acceptance using
+            // controlled credentials only. No real grant/feed is established.
+            let replacement = try await vault.configure(.youtube, clientID: replacementClient)
+            try await vault.accept(.init(access: "replacement-account", expiresAt: Date().addingTimeInterval(3_600),
+                scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: replacement)
+            await http.setChannelID("UC2")
+            check(try await second.chatIdentity(.youtube).channelID == "UC2")
+            let before = await http.allRequests().count
+            for method in ["GET", "POST", "DELETE"] {
+                var stale = read; stale.httpMethod = method
+                if method == "POST" { stale.httpBody = Data(#"{"snippet":{"liveChatId":"old-chat"}}"#.utf8) }
+                do {
+                    _ = try await first.chatRequest(.youtube, stale)
+                    preconditionFailure("An old workspace sent future chat work with another account's credential")
+                } catch let failure as ProviderFailure { precondition(failure.kind == .authorization) }
+            }
+            check(await http.allRequests().count == before, "Old reader authority reached the replacement account's HTTP transport")
+            precondition(first.snapshot(.youtube).hasCredential && first.snapshot(.youtube).failure == nil,
+                         "Retiring old chat authority incorrectly invalidated reusable machine credentials")
+            // The healthy peer is unaffected. Explicit identity verification is
+            // required before the retired workspace can use the new account.
+            _ = try await second.chatRequest(.youtube, read)
+            check(try await first.chatIdentity(.youtube).channelID == "UC2")
+            _ = try await first.chatRequest(.youtube, read)
+            check(await http.allRequests().last?.value(forHTTPHeaderField: "Authorization") == "Bearer replacement-account")
+            first.shutdown(); second.shutdown()
+        }
+        print("PASS: two actual workspace account sessions share one vault; coalesced refresh preserves both verified readers, unverified calls and same/different-client replacement blocks future old GET/POST/DELETE before HTTP until explicit identity verification")
+    }
     @MainActor static func nativeChatRevocation() async throws {
         let http = ProviderHTTPFixture()
         let vault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await http.send($0) })
@@ -217,6 +286,7 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         let session = ProviderAccountSession(restream: FixtureRestream(), vault: vault)
         session.refresh(.youtube)
         await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
+        _ = try await session.chatIdentity(.youtube)
         await http.configure(once401: true, tokenStatus: 400)
         do {
             _ = try await session.chatRequest(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages"))
@@ -243,6 +313,7 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
                 session.refresh(.youtube)
                 await settle { await MainActor.run { !session.snapshot(.youtube).isWorking } }
                 precondition(session.snapshot(.youtube).hasCredential && session.snapshot(.youtube).failure == nil)
+                _ = try await session.chatIdentity(.youtube)
                 await http.holdNextChat(failure: failure)
                 let oldRead = Task { try await session.chatRequest(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages")) }
                 await settle { await http.chatEntered }

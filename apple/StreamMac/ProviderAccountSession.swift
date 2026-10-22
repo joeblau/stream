@@ -70,6 +70,11 @@ final class ProviderAccountSession: ObservableObject {
     private var endingEpochs: [ManagedProvider: UUID] = [:]
     private var endingIntentLeases: [ManagedProvider: ProviderEndingIntentLease] = [:]
     private var managedReadGenerations: [ManagedProvider: (session: UUID, credential: UUID, token: UUID)] = [:]
+    private struct ChatAuthorization: Equatable {
+        let session: UUID, credential: UUID, identity: UUID
+    }
+    private var chatAuthorizations: [ManagedProvider: ChatAuthorization] = [:]
+    private var chatIdentityAttempts: [ManagedProvider: UUID] = [:]
     private func endingEpoch(_ provider: ManagedProvider) -> UUID {
         if let epoch = endingEpochs[provider] { return epoch }
         let epoch = UUID(); endingEpochs[provider] = epoch; return epoch
@@ -80,6 +85,7 @@ final class ProviderAccountSession: ObservableObject {
         viewerDates = viewerDates.filter { !$0.key.hasPrefix(provider.rawValue + ":") }
         viewers = viewers.filter { !$0.key.hasPrefix(provider.rawValue + ":") }
         endingIntentLeases.removeValue(forKey: provider)?.invalidate()
+        chatAuthorizations[provider] = nil; chatIdentityAttempts[provider] = nil
         endingEpochs[provider] = UUID()
     }
     private func endingIntentLease(_ provider: ManagedProvider) -> ProviderEndingIntentLease {
@@ -267,15 +273,27 @@ final class ProviderAccountSession: ObservableObject {
         if let until = accounts[provider]?.retryUntil, until > Date() {
             throw ProviderFailure(.rateLimited, retryAfter: until.timeIntervalSinceNow)
         }
-        let epoch = endingEpoch(provider), lease = endingIntentLease(provider)
-        let credential = await vault.generation(provider)
-        guard !closed, endingEpoch(provider) == epoch, lease.isCurrent(), !Task.isCancelled else { throw CancellationError() }
+        guard let authorization = chatAuthorizations[provider], authorization.session == endingEpoch(provider) else {
+            throw ProviderFailure(.authorization)
+        }
+        let epoch = authorization.session, credential = authorization.credential, lease = endingIntentLease(provider)
+        let currentCredential = await vault.generation(provider)
+        guard !closed, endingEpoch(provider) == epoch, lease.isCurrent(),
+              chatAuthorizations[provider] == authorization, !Task.isCancelled else { throw CancellationError() }
+        guard currentCredential == credential else {
+            // Another workspace may replace this machine-wide credential after
+            // our identity was verified. Future calls must not adopt its user.
+            chatAuthorizations[provider] = nil
+            directChat?.authorizationDidChange(provider)
+            throw ProviderFailure(.authorization)
+        }
         do {
             let data = try await vault.send(provider, request: request, expectedGeneration: credential,
                                             authorizationIsCurrent: lease.isCurrent)
             let currentCredential = await vault.generation(provider)
             guard !closed, endingEpoch(provider) == epoch, lease.isCurrent(),
-                  currentCredential == credential, !Task.isCancelled else { throw CancellationError() }
+                  currentCredential == credential, chatAuthorizations[provider] == authorization,
+                  !Task.isCancelled else { throw CancellationError() }
             return data
         }
         catch {
@@ -284,8 +302,9 @@ final class ProviderAccountSession: ObservableObject {
             let currentCredential = await vault.generation(provider)
             guard !closed, endingEpoch(provider) == epoch, lease.isCurrent(),
                   currentCredential == credential || currentCredential == revokedGeneration,
-                  !Task.isCancelled else { throw CancellationError() }
+                  chatAuthorizations[provider] == authorization, !Task.isCancelled else { throw CancellationError() }
             if (error as? ProviderFailure)?.kind == .authorization {
+                chatAuthorizations[provider] = nil
                 accounts[provider]?.hasCredential = false; accounts[provider]?.scopes = []; accounts[provider]?.verifiedAt = nil
                 accounts[provider]?.failure = Self.failure(error)
             }
@@ -302,13 +321,30 @@ final class ProviderAccountSession: ObservableObject {
         }
     }
     func chatIdentity(_ provider: ManagedProvider) async throws -> DirectChatIdentity {
-        guard [.youtube, .twitch].contains(provider) else { throw ProviderFailure(.unavailable) }
+        guard !closed, [.youtube, .twitch].contains(provider) else { throw ProviderFailure(.unavailable) }
         guard canRequest(provider) else { throw ProviderFailure(.rateLimited) }
+        try Task.checkCancellation()
+        let attempt = UUID(), epoch = endingEpoch(provider), lease = endingIntentLease(provider)
+        chatIdentityAttempts[provider] = attempt; chatAuthorizations[provider] = nil
+        defer { if chatIdentityAttempts[provider] == attempt { chatIdentityAttempts[provider] = nil } }
         let expected = await vault.generation(provider)
+        guard !closed, endingEpoch(provider) == epoch, lease.isCurrent(),
+              chatIdentityAttempts[provider] == attempt, !Task.isCancelled else { throw CancellationError() }
         if provider == .twitch { try await vault.validateTwitch() }
-        let channels = try await api().channels(provider), scopes = await vault.scopes(provider)
-        guard await vault.generation(provider) == expected, !Task.isCancelled else { throw CancellationError() }
+        let vault = vault
+        let boundary = ProviderAPI { requested, request in
+            guard requested == provider else { throw ProviderFailure(.invalidRequest) }
+            return try await vault.send(provider, request: request, expectedGeneration: expected,
+                                        authorizationIsCurrent: lease.isCurrent)
+        }
+        let channels = try await boundary.channels(provider), scopes = await vault.scopes(provider)
+        let currentCredential = await vault.generation(provider)
+        guard !closed, endingEpoch(provider) == epoch, lease.isCurrent(), currentCredential == expected,
+              chatIdentityAttempts[provider] == attempt, !Task.isCancelled else { throw CancellationError() }
         guard channels.count == 1 else { throw ProviderFailure(.permission) }
+        chatAuthorizations[provider] = .init(session: epoch, credential: expected, identity: attempt)
+        accounts[provider]?.hasCredential = true; accounts[provider]?.scopes = scopes
+        if accounts[provider]?.failure?.kind == .authorization { accounts[provider]?.failure = nil }
         return .init(channelID: channels[0].id, scopes: scopes)
     }
     func refresh(_ provider: ManagedProvider) {
