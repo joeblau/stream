@@ -8,8 +8,17 @@ private final class PortableMediaReceipt: @unchecked Sendable {
     private let lock = NSLock()
     private var value = MediaSourceStatus()
     private var audio = 0
+    private var audibleChunks = 0
     func status(_ next: MediaSourceStatus) { lock.lock(); value = next; lock.unlock() }
     func sample() { lock.lock(); audio += 1; lock.unlock() }
+    func mixed(_ sample: CMSampleBuffer) {
+        guard let data = sample.dataBuffer else { return }
+        let count = CMBlockBufferGetDataLength(data) / MemoryLayout<Float>.size
+        var values = [Float](repeating: 0, count: count)
+        let result = values.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(data, atOffset: 0, dataLength: $0.count, destination: $0.baseAddress!) }
+        if result == noErr, values.contains(where: { abs($0) > 0.02 }) { lock.lock(); audibleChunks += 1; lock.unlock() }
+    }
+    var audible: Int { lock.lock(); defer { lock.unlock() }; return audibleChunks }
     func snapshot() -> (MediaSourceStatus, Int) { lock.lock(); defer { lock.unlock() }; return (value, audio) }
 }
 
@@ -145,7 +154,12 @@ private final class PortableMediaReceipt: @unchecked Sendable {
             return
         }
         stage("playing imported sound pad with original removed")
-        let controller = workspace.runtime.controller, audio = PortableMediaReceipt()
+        let controller = workspace.runtime.controller, audio = PortableMediaReceipt(), mixed = PortableMediaReceipt()
+        // Real mixer actor and existing ingest; no speaker/output device starts.
+        let mixer = controller.portableOwnedMixer, mixToken = UUID()
+        await mixer.run()
+        await mixer.addTap(bus: .program, token: mixToken) { mixed.mixed($0) }
+        defer { Task { await mixer.removeTap(mixToken); await mixer.stop() } }
         let oldAudio = controller.capturePool.onMediaAudioSample
         controller.capturePool.onMediaAudioSample = { id, sample in audio.sample(); oldAudio?(id, sample) }
         let board = SoundboardController(store: SoundboardStore(directory: imported), controller: controller)
@@ -153,10 +167,13 @@ private final class PortableMediaReceipt: @unchecked Sendable {
         board.bindAssetLibrary(library)
         defer { board.shutdown() }
         board.triggerPad(sounds.pads[0])
-        for _ in 0..<300 { if audio.snapshot().1 > 0 { break }; try await Task.sleep(for: .milliseconds(10)) }
-        try require(audio.snapshot().1 > 0, "Imported included sound pad supplied no real PCM after original file removal")
+        for _ in 0..<300 { if audio.snapshot().1 > 0 && mixed.audible > 0 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        try require(audio.snapshot().1 > 0 && mixed.audible > 0, "Imported included sound pad supplied no real PCM/nonzero Program mix after original file removal")
+        let copiedPCM = audio.snapshot().1, copiedProgramChunks = mixed.audible
         stage("checking missing reference and same-ID Assets repair")
         board.stopAllSoundEffects()
+        try await Task.sleep(for: .milliseconds(200)) // drain the bounded pre-read window before observing another pad
+        let mixedBeforeRepair = mixed.audible
         let linkedLibrary = AssetLibraryStore(directory: linkedFolder), linkedAudio = PortableMediaReceipt()
         controller.capturePool.onMediaAudioSample = { id, sample in linkedAudio.sample(); oldAudio?(id, sample) }
         let linkedBoard = SoundboardController(store: SoundboardStore(directory: linkedFolder), controller: controller)
@@ -169,12 +186,16 @@ private final class PortableMediaReceipt: @unchecked Sendable {
         try require(linkedBoard.padStatuses[linkedPad.id]?.phase == .error && linkedAudio.snapshot().1 == 0, "References-only media silently used an original machine grant")
         guard let raw = linkedPad.assetIdentifier, let id = UUID(uuidString: raw) else { throw PortableNativeAppDriver.Failure.message("Repairable pad asset missing") }
         try require(await linkedLibrary.relink(AssetID(id), to: repairWave), "Native library repair rejected the owned replacement")
-        for _ in 0..<300 { if linkedAudio.snapshot().1 > 0 { break }; try await Task.sleep(for: .milliseconds(10)) }
-        try require(linkedAudio.snapshot().1 > 0, "Same-ID Assets repair failed to reload the imported sound pad")
+        for _ in 0..<300 { if linkedAudio.snapshot().1 > 0 && mixed.audible > mixedBeforeRepair { break }; try await Task.sleep(for: .milliseconds(10)) }
+        try require(linkedAudio.snapshot().1 > 0 && mixed.audible > mixedBeforeRepair, "Same-ID Assets repair failed to reload the imported sound pad into real nonzero Program mix")
         try require(workspace.runtime.sceneStore.document == originalScenes && workspace.runtime.dispatcher.assetLibrary.assets == originalAssets,
             "Export promotion mutated the active profile instead of its package snapshot")
+        try JSONSerialization.data(withJSONObject: ["decoder": "production audio-only AVAudioFile", "originalsRemoved": true,
+            "copiedPCMChunks": copiedPCM, "copiedProgramChunks": copiedProgramChunks,
+            "repairedPCMChunks": linkedAudio.snapshot().1, "repairedProgramChunks": mixed.audible - mixedBeforeRepair])
+            .write(to: PortableNativeAppDriver.folder.appendingPathComponent("media-qualification.json"), options: .atomic)
         stage("complete")
-        print("PASS: normal bookmark-backed video/pads/playlists/scene sounds gain portable remapped asset IDs; copied video decodes and sound pad supplies PCM after originals removed; references-only pad stays missing until same-ID Assets relink; active profile unchanged")
+        print("PASS: normal bookmark-backed video/pads/playlists/scene sounds gain portable remapped asset IDs; copied video decodes and production sound pad supplies PCM/nonzero Program mix after originals removed; references-only pad stays missing until same-ID Assets relink; active profile unchanged")
     }
 
     static func audioContent(at url: URL) throws {

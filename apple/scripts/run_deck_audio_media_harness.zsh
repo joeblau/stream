@@ -144,9 +144,14 @@ extension MediaSourcePlayback {
         onAudioSample = { sample in sink(sample); original?(sample) }
         os_unfair_lock_unlock(&lock)
     }
-    func deckFixturePlayerState() -> (seconds: Double, rate: Float, muted: Bool, clock: Int)? {
+    func deckFixturePlayoutState() -> (seconds: Double, rate: Float, deviceOutputSuppressed: Bool, clock: Int)? {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
+        if let offlineAudio {
+            let seconds = min(trimOut, offlineAudio.time(at: CMClockGetTime(CMClockGetHostTimeClock()), playing: isPlaying)).seconds
+            // Actual host-clock state; no AVPlayer or output device exists.
+            return (seconds, isPlaying ? 1 : 0, true, isPlaying ? 2 : 0)
+        }
         guard let player else { return nil }
         return (player.currentTime().seconds, player.rate, player.isMuted, player.timeControlStatus.rawValue)
     }
@@ -157,8 +162,8 @@ fixture_replace(target, root, folder, 'CaptureSourcePool.swift') do |source|
   source + <<'SWIFT'
 
 extension CaptureSourcePool {
-    func deckFixturePlayerState(for id: SourceDefinitionID) -> (seconds: Double, rate: Float, muted: Bool, clock: Int)? {
-        mediaPlaybacks[.media(id)]?.deckFixturePlayerState()
+    func deckFixturePlayoutState(for id: SourceDefinitionID) -> (seconds: Double, rate: Float, deviceOutputSuppressed: Bool, clock: Int)? {
+        mediaPlaybacks[.media(id)]?.deckFixturePlayoutState()
     }
 }
 SWIFT
@@ -167,8 +172,8 @@ fixture_replace(target, root, folder, 'SoundboardController.swift') do |source|
   source + <<'SWIFT'
 
 extension SoundboardController {
-    func deckFixturePlayerState(_ id: SourceDefinitionID) -> (seconds: Double, rate: Float, muted: Bool, clock: Int)? {
-        padEngines[id]?.first?.engine.deckFixturePlayerState()
+    func deckFixturePlayoutState(_ id: SourceDefinitionID) -> (seconds: Double, rate: Float, deviceOutputSuppressed: Bool, clock: Int)? {
+        padEngines[id]?.first?.engine.deckFixturePlayoutState()
     }
     func deckFixtureObserve(_ id: SourceDefinitionID, sink: @escaping @Sendable (CMSampleBuffer) -> Void) {
         for entry in padEngines[id] ?? [] {

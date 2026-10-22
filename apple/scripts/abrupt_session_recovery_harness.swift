@@ -358,19 +358,19 @@ private struct Ready: Codable {
             // and seeks without calling Play; .paused describes a source that
             // had already been playing. Both must remain parked at the saved
             // position, despite the durable source's autoplay=true policy.
-            let player = runtime.controller.capturePool.abruptFixturePlayerState(for: id)
+            let player = runtime.controller.capturePool.abruptFixturePlayoutState(for: id)
             if [.ready, .paused].contains(state.phase) && abs(state.positionSeconds - 1.25) < 0.01,
-                let player, abs(player.seconds - 1.25) < 0.01, player.rate == 0, player.muted {
+                let player, abs(player.seconds - 1.25) < 0.01, player.rate == 0, player.deviceOutputSuppressed {
                 try await Task.sleep(for: .milliseconds(250))
                 let held = runtime.controller.capturePool.mediaStatus(for: id)
                 try require([.ready, .paused].contains(held.phase) && abs(held.positionSeconds - 1.25) < 0.01,
                     "Restored local media auto-played or advanced its saved position")
-                guard let heldPlayer = runtime.controller.capturePool.abruptFixturePlayerState(for: id) else {
+                guard let heldPlayer = runtime.controller.capturePool.abruptFixturePlayoutState(for: id) else {
                     throw NSError(domain: "AbruptSessionRecovery", code: 9, userInfo: [NSLocalizedDescriptionKey: "Actual restored AVPlayer disappeared"])
                 }
-                try require(abs(heldPlayer.seconds - 1.25) < 0.01 && heldPlayer.rate == 0 && heldPlayer.muted,
+                try require(abs(heldPlayer.seconds - 1.25) < 0.01 && heldPlayer.rate == 0 && heldPlayer.deviceOutputSuppressed,
                     "Actual AVPlayer seek failed, advanced or sounded despite the paused recovery policy")
-                print("Actual owned AVPlayer: time=\(heldPlayer.seconds), rate=\(heldPlayer.rate), muted=\(heldPlayer.muted), phase=\(held.phase)")
+                print("Actual owned playout: time=\(heldPlayer.seconds), rate=\(heldPlayer.rate), deviceOutputSuppressed=\(heldPlayer.deviceOutputSuppressed), phase=\(held.phase)")
                 return
             }
             try require(state.phase != .error, "Owned local media failed to load: \(state.errorMessage ?? "unknown")")

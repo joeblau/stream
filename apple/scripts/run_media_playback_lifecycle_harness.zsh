@@ -39,20 +39,27 @@ extension MediaSourcePlayback {
     func lifecycleHeldDelivery() -> (@Sendable () -> Void)? {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
-        guard let sample = audioOutput?.copyNextSampleBuffer() else { return nil }
+        let sample: CMSampleBuffer?
+        if let offlineAudio { sample = try? offlineAudio.next(through: trimOut, end: trimOut) }
+        else { sample = audioOutput?.copyNextSampleBuffer() }
+        guard let sample else { return nil }
         let handler = onAudioSample, generation = loadGeneration
         let held = FixtureSample(sample)
         return { [self] in deliverAudio([held.value], handler: handler, generation: generation) }
+    }
+    func lifecycleItemPosition() -> Double? {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return offlineAudio?.time(at: CMClockGetTime(CMClockGetHostTimeClock()), playing: isPlaying).seconds
     }
     func lifecycleAnimatedCallbacks() -> ((@Sendable (SourceDefinitionID, MediaSourceStatus) -> Void)?, (@Sendable (SourceDefinitionID, Double) -> Void)?) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         return (animated?.onStatus, animated?.onReachedEnd)
     }
-    func lifecycleState() -> (loaded: Bool, player: Bool, reader: Bool, pending: Bool, retired: Bool) {
+    func lifecycleState() -> (loaded: Bool, videoPlayer: Bool, decoder: Bool, pending: Bool, retired: Bool, observing: Bool) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
-        return (didLoad, player != nil, audioReader != nil, loadTask != nil, retired)
+        return (didLoad, player != nil, audioReader != nil || offlineAudio != nil, loadTask != nil, retired, offlinePositionObserver != nil)
     }
 }
 '''
