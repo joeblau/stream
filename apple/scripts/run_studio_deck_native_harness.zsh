@@ -37,6 +37,12 @@ SWIFT
 spec['targets']['StreamCore']['sources']=[{'path'=>File.join(root,'StreamCore'),'excludes'=>['KeychainStore.swift']},File.join(root,folder,'fixtures/KeychainStore.swift')]
 target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
 target['sources'] << File.join(root,'scripts/studio_deck_native_harness.swift')
+wire=File.read('scripts/studio_local_control_harness.swift')
+wire_start=wire.index('@MainActor final class MemoryCredentials:')
+wire_end=wire.index('/// Actual loopback peers')
+abort 'Wire fixture extraction boundary changed' unless wire_start && wire_end && wire_end>wire_start
+File.write(File.join(folder,'fixtures/VisualWireClient.swift'), "import Foundation\nimport Network\nimport Security\n" + wire[wire_start...wire_end])
+target['sources'] << File.join(root,folder,'fixtures/VisualWireClient.swift')
 spec['targets']['StudioDeckNativeHarness']=target
 spec['schemes']['StudioDeckNativeHarness']={'build'=>{'targets'=>{'StudioDeckNativeHarness'=>'all'}}}
 require File.join(root, 'scripts/desktop_transport_fixture')
@@ -45,10 +51,10 @@ File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$DECK_NATIVE_DIR/project.json" --project "$DECK_NATIVE_DIR"
 xcodebuild -resolvePackageDependencies -project "$DECK_NATIVE_DIR/StudioDeckNativeValidation.xcodeproj" \
-  -scheme StudioDeckNativeHarness -derivedDataPath "$DECK_NATIVE_BUILD_PATH"
+  -scheme StudioDeckNativeHarness -derivedDataPath "$DECK_NATIVE_BUILD_PATH" -jobs 2
 python3 scripts/repair_desktop_transport_archives.py "$DECK_NATIVE_BUILD_PATH"
 xcodebuild -project "$DECK_NATIVE_DIR/StudioDeckNativeValidation.xcodeproj" \
   -scheme StudioDeckNativeHarness -destination 'platform=macOS' \
-  -derivedDataPath "$DECK_NATIVE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath "$DECK_NATIVE_BUILD_PATH" -jobs 2 SWIFT_MAXIMUM_CONCURRENT_COMPILE_TASKS=2 OTHER_SWIFT_FLAGS='-j2' CODE_SIGNING_ALLOWED=NO build
 readonly DECK_NATIVE_PRODUCTS="${DECK_NATIVE_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="$DECK_NATIVE_PRODUCTS" "$DECK_NATIVE_PRODUCTS/StudioDeckNativeHarness"

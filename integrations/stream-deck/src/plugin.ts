@@ -67,11 +67,12 @@ class StudioCommandAction extends SingletonAction<Settings> {
         if (command.id.startsWith("unavailable.")) throw new Error(command.unavailableReason ?? "This capability is not supported by the studio.");
         if (command.kind === "value" && (payload.value === undefined || !Number.isFinite(payload.value) || payload.value < 0 || payload.value > 1)) throw new Error("Choose a normalized value from 0 to 1.");
         if (command.argument === "page" && (payload.page === undefined || !Number.isSafeInteger(payload.page) || payload.page < 0 || payload.page > 100000)) throw new Error("Choose a PDF page from 1 to 100001.");
+        if (command.argument === "source" && (!payload.text || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.text))) throw new Error("Choose a registered camera or screen source.");
         if (command.argument === "text" && payload.text && (!payload.text.trim() || Buffer.byteLength(payload.text) > 512)) throw new Error("Marker text needs 1–512 UTF-8 bytes.");
         await ev.action.setSettings({ commandID: payload.commandID, projectID: client.snapshot.projectID,
           ...(command.kind === "value" ? { value: payload.value! } : {}),
           ...(command.argument === "page" ? { page: payload.page! } : {}),
-          ...(command.argument === "text" && payload.text ? { text: payload.text } : {}) });
+          ...(["text", "source"].includes(command.argument ?? "") && payload.text ? { text: payload.text } : {}) });
       }
       await this.inspector();
     } catch (error) {

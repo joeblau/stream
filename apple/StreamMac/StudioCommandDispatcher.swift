@@ -1,3 +1,5 @@
+import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import StreamCore
@@ -118,6 +120,8 @@ enum StudioCommand: Equatable, Sendable {
     // Layer set-value commands (W03: they mutate the STAGED scene; `in: nil`
     // targets it, an explicit ID must name it).
     case setLayerVisibility(LayerID, visible: Bool, in: SceneID?)
+    /// Rebind one staged visual layer without editing the shared source or its other consumers.
+    case bindLayerSource(LayerID, to: SourceDefinitionID?, in: SceneID?)
     case setLayerTransform(LayerID, LayerTransform, in: SceneID?)
     case setLayerEffects(LayerID, [LayerEffect], in: SceneID?)
     case setLayerAudio(LayerID, AudioBinding, in: SceneID?)
@@ -296,6 +300,8 @@ enum StudioCommand: Equatable, Sendable {
     case setLayerMotionIdentity(LayerID, UUID, in: SceneID?)
     /// Session transport: doesn't alter staged content or create undo entries.
     case setDynamicOverlayTransport(LayerID, OverlayTransportAction, in: SceneID?)
+    /// Global dynamic overlays own live transport explicitly, separate from scene edits.
+    case setOverlayDynamicTransport(LayerID, OverlayTransportAction)
     /// Replaces a project text overlay's payload (applies immediately, like
     /// `.setOverlayStyle`). The target must be a text overlay.
     case setOverlayText(LayerID, TextSourcePayload)
@@ -680,6 +686,8 @@ enum StudioCommand: Equatable, Sendable {
         case .setDefaultBackground: return "Set Project Background"
         case .setSceneTransition: return "Set Scene Transition"
         case .setDefaultTransition: return "Set Default Transition"
+        case .bindLayerSource: return "Select Layer Camera / Screen Source"
+        case .setOverlayDynamicTransport(_, let action): return "Global Animation \(action.rawValue)"
         case .setLayerSourceEffects(let id, let effects, _):
             return effects == nil ? "Reset Layer Source Effects" : "Layer \(id) Source Effects"
         case .setSourceEffectDefaults(_, let effects):
@@ -1183,6 +1191,11 @@ final class StudioCommandDispatcher: ObservableObject {
         Publishers.Merge(soundboard.objectWillChange, controller.capturePool.objectWillChange)
             .sink { [weak self] _ in Task { @MainActor [weak self] in self?.refreshState() } }
             .store(in: &cancellables)
+        // Saved source bindings remain visible while capture is idle. Device
+        // hotplug must refresh their selection availability even without frames.
+        controller.deviceMonitor.objectWillChange
+            .sink { [weak self] _ in Task { @MainActor [weak self] in self?.objectWillChange.send() } }
+            .store(in: &cancellables)
     }
 
     func catalogueActions(includeMacros: Bool = true) -> [StudioPaletteAction] {
@@ -1279,6 +1292,79 @@ final class StudioCommandDispatcher: ObservableObject {
         for group in scene.groups { result[group.id.rawValue.uuidString] = scene.layers.contains { $0.groupID == group.id && $0.isVisible } }
         return result
     }
+    func controllerReactionDeviceID(_ source: SourceDefinition) -> String? {
+        guard case .camera(let camera) = source.payload else { return nil }
+        return camera.deviceID ?? AVCaptureDevice.default(for: .video)?.uniqueID
+    }
+    func controllerSourceSelectionError(_ source: SourceDefinition) -> StudioCommandError? {
+        let keys = CaptureSourceKey.demanded(layers: [.init(name: "", sourceID: source.id, payload: source.payload, transform: .fullscreen)], sources: [source])
+        if keys.contains(where: { controller.capturePool.isMissing($0) || controller.capturePool.problem(for: $0) != nil }) {
+            return .unavailable("That capture source reports an availability problem. Repair it in Sources before selecting it.")
+        }
+        if case .camera(let camera) = source.payload {
+            guard let id = camera.deviceID ?? AVCaptureDevice.default(for: .video)?.uniqueID,
+                  controller.deviceMonitor.connectedCameraIDs.contains(id) else { return .unavailable("That camera is disconnected. Reconnect it before selecting this source.") }
+            if controller.deviceMonitor.suspendedCameraIDs.contains(id) { return .unavailable("That camera is suspended. Unlock or resume it before selecting this source.") }
+        }
+        if case .screen(let screen) = source.payload {
+            switch screen.target {
+            case .display:
+                if let raw = screen.targetIdentifier {
+                    guard let display = UInt32(raw) else { return .invalidTarget("That saved display identifier is invalid. Relink the source first.") }
+                    if !controller.deviceMonitor.connectedDisplayIDs.contains(display) { return .unavailable("That display is disconnected. Reconnect it before selecting this source.") }
+                }
+            case .window:
+                if let raw = screen.targetIdentifier {
+                    guard let window = UInt32(raw) else { return .invalidTarget("That saved window identifier is invalid. Relink the source first.") }
+                    if let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]],
+                       !windows.contains(where: { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == window }) {
+                        return .unavailable("That window is no longer available. Reopen or relink it before selecting this source.")
+                    }
+                }
+            case .application:
+                if let bundle = screen.targetIdentifier ?? screen.applicationBundleID,
+                   NSRunningApplication.runningApplications(withBundleIdentifier: bundle).isEmpty {
+                    return .unavailable("That application is not running. Open or relink it before selecting this source.")
+                }
+            }
+        }
+        return nil
+    }
+    func controllerVisualSnapshot() -> [String: StudioControlVisualState] {
+        var result: [String: StudioControlVisualState] = [:]
+        func record(_ scene: Scene?, program: Bool) {
+            guard let scene else { return }
+            let prefix = "scene.\(scene.id.rawValue.uuidString)"
+            for layer in scene.layers {
+                let key = "\(prefix).layer.\(layer.id.rawValue.uuidString)"
+                var value = result[key] ?? .init()
+                let effects = layer.effectOverrides ?? layer.sourceID.flatMap { sceneStore.source(withID: $0)?.effectDefaults } ?? .identity
+                if program {
+                    value.programVisible = layer.isVisible; value.programBypassed = effects.isBypassed; value.programSourceID = layer.sourceID?.rawValue
+                } else {
+                    value.previewVisible = layer.isVisible; value.bypassed = effects.isBypassed; value.sourceID = layer.sourceID?.rawValue
+                }
+                result[key] = value
+            }
+            for group in scene.groups {
+                let key = "\(prefix).group.\(group.id.rawValue.uuidString)"
+                var value = result[key] ?? .init()
+                let visible = scene.layers.contains { $0.groupID == group.id && $0.isVisible }
+                if program { value.programVisible = visible } else { value.previewVisible = visible }
+                result[key] = value
+            }
+        }
+        record(previewProgram.stagedScene, program: false); record(previewProgram.programScene, program: true)
+        for overlay in sceneStore.overlays {
+            result["overlay.\(overlay.id.rawValue.uuidString)"] = .init(
+                previewVisible: overlay.isVisible && !(previewProgram.stagedScene?.hiddenOverlayIDs.contains(overlay.id) ?? false),
+                programVisible: previewProgram.programScene != nil && overlay.isVisible && !(previewProgram.programScene?.hiddenOverlayIDs.contains(overlay.id) ?? false))
+        }
+        for source in sceneStore.sources {
+            result["source.\(source.id.rawValue.uuidString)"] = .init(bypassed: source.effectDefaults?.isBypassed ?? false)
+        }
+        return result
+    }
     func controllerRecordingCountdown() -> Int { recorder.countdownRemaining }
     func controllerChatSnapshot() -> StudioControlChatState? {
         guard let chatCoordinator else { return nil }
@@ -1297,6 +1383,11 @@ final class StudioCommandDispatcher: ObservableObject {
         if case .setLayerVisibility(let id, let visible, let sceneID) = command,
            sceneID == nil || sceneID == staged?.id, let index = staged?.layers.firstIndex(where: { $0.id == id }) {
             staged?.layers[index].isVisible = visible
+        }
+        if case .bindLayerSource(let id, let sourceID, let sceneID) = command,
+           sceneID == nil || sceneID == staged?.id,
+           let index = staged?.layers.firstIndex(where: { $0.id == id }), let sourceID, let source = sceneStore.source(withID: sourceID) {
+            staged?.layers[index].sourceID = source.id; staged?.layers[index].payload = source.payload
         }
         if case .setSecondaryCanvas(let layout, let sceneID) = command,
            sceneID == nil || sceneID == staged?.id { staged?.secondaryCanvas = layout }
@@ -1434,7 +1525,16 @@ final class StudioCommandDispatcher: ObservableObject {
 
     /// Authoritative rejection reason used by palettes and external controllers.
     func availabilityError(for command: StudioCommand) -> StudioCommandError? {
-        validate(command)
+        // A typed source-picker descriptor is available when its layer can be
+        // edited. Execution still requires an explicit, freshly validated UUID.
+        if case .bindLayerSource(let id, nil, let sceneID) = command {
+            if let error = validate(.setLayerSourceEffects(id, nil, in: sceneID)) { return error }
+            guard case .success(let (scene, index)) = resolveLayer(id, in: sceneID) else { return .invalidTarget("That layer no longer exists.") }
+            let payload = scene.layers[index].payload
+            return sceneStore.sources.contains { (payload.isCamera && $0.payload.isCamera) || (payload.isScreen && $0.payload.isScreen) }
+                ? nil : .unavailable("Register a matching camera or screen source first.")
+        }
+        return validate(command)
     }
 
     // MARK: Validation (against current session state, before any execution)
@@ -1856,6 +1956,28 @@ final class StudioCommandDispatcher: ObservableObject {
         // targeting + lock rules as `.setLayerEffects`, plus range
         // validation the value model owns); source defaults address the
         // registry; presets are project-level documents.
+        case .bindLayerSource(let layerID, let sourceID, let sceneID):
+            switch resolveLayer(layerID, in: sceneID) {
+            case .failure(let error): return error
+            case .success(let (scene, index)):
+                let layer = scene.layers[index]
+                if let error = lockError(for: layer, in: scene) { return error }
+                guard let sourceID else { return .invalidValue("Choose an explicit registered source UUID for this layer.") }
+                guard let source = sceneStore.source(withID: sourceID) else { return .invalidTarget("That registered source no longer exists.") }
+                guard (layer.payload.isCamera && source.payload.isCamera) || (layer.payload.isScreen && source.payload.isScreen) else {
+                    return .invalidTarget("Choose a camera for a camera layer or a screen source for a screen layer.")
+                }
+                return controllerSourceSelectionError(source)
+            }
+        case .setOverlayDynamicTransport(let id, _):
+            switch resolveOverlay(id) {
+            case .failure(let error): return error
+            case .success(let layer):
+                guard case .text(let text) = layer.payload, text.ticker != nil || text.timer?.kind.usesTransport == true else {
+                    return .invalidTarget("That global overlay has no elapsed timer or ticker animation.")
+                }
+                return nil
+            }
         case .setLayerSourceEffects(let layerID, let effects, let sceneID):
             switch resolveLayer(layerID, in: sceneID) {
             case .success(let (scene, index)):
@@ -2654,6 +2776,15 @@ final class StudioCommandDispatcher: ObservableObject {
         // defaults and presets write the project registry/documents directly
         // and publish to every engine on the next tick (render-side only —
         // no capture re-key).
+        case .bindLayerSource(let layerID, let sourceID, let sceneID):
+            if let sourceID, let source = sceneStore.source(withID: sourceID) {
+                editLayer(layerID, in: sceneID) { $0.sourceID = source.id; $0.payload = source.payload }
+            }
+        case .setOverlayDynamicTransport(let id, let action):
+            if case .success(let layer) = resolveOverlay(id), case .text(let text) = layer.payload,
+               let runtimeID = text.ticker?.runtimeID ?? text.timer?.runtimeID {
+                DynamicOverlayStore.shared.perform(action, id: runtimeID)
+            }
         case .setLayerSourceEffects(let layerID, let effects, let sceneID):
             editLayer(layerID, in: sceneID) { $0.effectOverrides = effects }
         case .setSourceEffectDefaults(let id, let effects):
@@ -3499,7 +3630,8 @@ final class StudioCommandDispatcher: ObservableObject {
             sceneID = scene.id
         case .setSecondaryCanvas(_, let id):
             sceneID = id ?? previewProgram.stagedScene?.id
-        case .setLayerVisibility(_, _, let id),
+        case .bindLayerSource(_, _, let id),
+             .setLayerVisibility(_, _, let id),
              .setLayerTransform(_, _, let id),
              .setLayerEffects(_, _, let id),
              .setLayerAudio(_, _, let id),
@@ -3918,7 +4050,7 @@ private extension StudioCommand {
              .duplicateScene, .moveScene,
              .addSceneFolder, .renameSceneFolder, .deleteSceneFolder,
              .setSceneLocked,
-             .setLayerVisibility, .setLayerTransform, .setLayerEffects, .setLayerAudio,
+             .bindLayerSource, .setLayerVisibility, .setLayerTransform, .setLayerEffects, .setLayerAudio,
              .addLayer, .removeLayer, .duplicateLayer, .renameLayer, .setLayerLocked,
              .moveLayer, .groupLayers, .ungroupLayers, .renameGroup,
              .setGroupVisibility, .setGroupLocked,
@@ -3951,7 +4083,7 @@ private extension StudioCommand {
              .setCameraControls, .triggerCameraReaction,
              .setChannelAudioDelay, .setSourceVideoDelay, .setDucking,
              .mediaPlay, .mediaPause, .mediaStop, .mediaRestart, .mediaSeek,
-             .setDynamicOverlayTransport,
+             .setDynamicOverlayTransport, .setOverlayDynamicTransport,
              .selectPreviousComment, .selectNextComment, .showSelectedComment, .hideComment,
              .pdfNextPage, .pdfPreviousPage, .pdfGoToPage, .pdfSetFraming,
              .addSoundPad, .updateSoundPad, .removeSoundPad,

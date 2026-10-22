@@ -8,6 +8,8 @@ struct StudioPaletteAction: Identifiable {
     let category: String
     let command: StudioCommand?
     var unavailableReason: String?
+    var sourceKind: String? = nil
+    var sourceAvailable: Bool? = nil
 }
 
 extension StudioCommandDispatcher {
@@ -73,6 +75,9 @@ extension StudioCommandDispatcher {
             add("overlay.\(id).visibility", "\(overlay.isVisible ? "Hide" : "Show") Global Overlay \(overlay.name)", "Global Overlays", .setOverlayVisibility(overlay.id, visible: !overlay.isVisible))
             add("overlay.\(id).show", "Show Global Overlay \(overlay.name)", "Global Overlays", .setOverlayVisibility(overlay.id, visible: true))
             add("overlay.\(id).hide", "Hide Global Overlay \(overlay.name)", "Global Overlays", .setOverlayVisibility(overlay.id, visible: false))
+            if case .text(let text) = overlay.payload, text.ticker != nil || text.timer?.kind.usesTransport == true {
+                add("overlay.\(id).animation.replay", "Replay Global Animation — \(overlay.name)", "Animations", .setOverlayDynamicTransport(overlay.id, .replay))
+            }
         }
         for bus in [AudioBus.program, .monitor, .aux] {
             let muted = state.mixer.mutedBuses.contains(bus.rawValue)
@@ -91,11 +96,22 @@ extension StudioCommandDispatcher {
                     .setLayerVisibility(layer.id, visible: !layer.isVisible, in: scene.id))
                 add("scene.\(sceneID).layer.\(layerID).show", "Show \(layer.name) — \(scene.name)", "Layers", .setLayerVisibility(layer.id, visible: true, in: scene.id))
                 add("scene.\(sceneID).layer.\(layerID).hide", "Hide \(layer.name) — \(scene.name)", "Layers", .setLayerVisibility(layer.id, visible: false, in: scene.id))
+                let prefix = "scene.\(sceneID).layer.\(layerID)"
+                if layer.payload.isCamera || layer.payload.isScreen {
+                    add("\(prefix).source.select", "Select \(layer.payload.isCamera ? "Camera" : "Screen Source") for \(layer.name) — \(scene.name)",
+                        layer.payload.isCamera ? "Camera / PIP" : "Screen Sources", .bindLayerSource(layer.id, to: nil, in: scene.id))
+                    result[result.count - 1].sourceKind = layer.payload.isCamera ? "camera" : "screen"
+                }
+                if layer.payload.isCamera, layer.transform.size.width < 1 {
+                    add("\(prefix).pip.toggle", "\(layer.isVisible ? "Hide" : "Show") PIP \(layer.name) — \(scene.name)", "Camera / PIP", .setLayerVisibility(layer.id, visible: !layer.isVisible, in: scene.id))
+                    add("\(prefix).pip.on", "Show PIP \(layer.name) — \(scene.name)", "Camera / PIP", .setLayerVisibility(layer.id, visible: true, in: scene.id))
+                    add("\(prefix).pip.off", "Hide PIP \(layer.name) — \(scene.name)", "Camera / PIP", .setLayerVisibility(layer.id, visible: false, in: scene.id))
+                }
                 var effects = layer.effectOverrides ?? sources.first(where: { $0.id == layer.sourceID })?.effectDefaults ?? .identity
                 effects.isBypassed.toggle()
                 add("scene.\(sceneID).layer.\(layerID).effects.bypass", "\(effects.isBypassed ? "Bypass" : "Enable") Visual Effects — \(layer.name)", "Visual Effects", .setLayerSourceEffects(layer.id, effects, in: scene.id))
                 if case .text(let text) = layer.payload, text.ticker != nil || text.timer != nil {
-                    add("scene.\(sceneID).layer.\(layerID).animation.restart", "Reset Animation — \(layer.name)", "Layers", .setDynamicOverlayTransport(layer.id, .reset, in: scene.id))
+                    add("scene.\(sceneID).layer.\(layerID).animation.restart", "Replay Shared Animation — \(layer.name) / \(scene.name)", "Animations", .setDynamicOverlayTransport(layer.id, .replay, in: scene.id))
                     add("scene.\(sceneID).layer.\(layerID).animation.start", "Start Animation — \(layer.name)", "Layers", .setDynamicOverlayTransport(layer.id, .start, in: scene.id))
                     add("scene.\(sceneID).layer.\(layerID).animation.pause", "Pause Animation — \(layer.name)", "Layers", .setDynamicOverlayTransport(layer.id, .pause, in: scene.id))
                 }
@@ -132,7 +148,15 @@ extension StudioCommandDispatcher {
             add("pdf.\(id).goto", "Jump to PDF Page — \(source.name)", "PDF", .pdfGoToPage(source.id, page: 0))
         }
         for source in sources {
-            if case .camera(let payload) = source.payload, let deviceID = payload.deviceID {
+            if case .appAudio = source.payload { continue } // An audio-only source has no visual effect path.
+            var effects = source.effectDefaults ?? .identity; effects.isBypassed.toggle()
+            add("source.\(source.id.rawValue.uuidString).effects.bypass", "\(effects.isBypassed ? "Bypass" : "Enable") Shared Source Effects — \(source.name)", "Shared Sources", .setSourceEffectDefaults(source.id, effects))
+            result[result.count - 1].sourceKind = source.payload.isCamera ? "camera" : source.payload.isScreen ? "screen" : nil
+            if result[result.count - 1].sourceKind != nil { result[result.count - 1].sourceAvailable = controllerSourceSelectionError(source) == nil }
+            if source.payload.isMedia {
+                add("source.\(source.id.rawValue.uuidString).animation.replay", "Replay Shared Media / Animation — \(source.name)", "Animations", .mediaRestart(source.id))
+            }
+            if let deviceID = controllerReactionDeviceID(source) {
                 for reaction in CameraReaction.allCases {
                     add("camera.\(source.id.rawValue.uuidString).reaction.\(reaction.rawValue)", "\(reaction.displayName) — \(source.name)", "Camera Reactions", .triggerCameraReaction(deviceID, reaction))
                 }
