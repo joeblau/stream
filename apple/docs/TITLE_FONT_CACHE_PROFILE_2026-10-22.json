@@ -1,0 +1,1315 @@
+{
+  "schemaVersion": 1,
+  "dateUTC": "2026-10-22",
+  "baseCommit": "44c078e2c7434ab416c1a6c56e256bd34059ffb7",
+  "qualification": false,
+  "host": {
+    "model": "Mac15,8",
+    "chip": "Apple M3 Max",
+    "os": "macOS 27.2 (26B118)",
+    "architecture": "arm64",
+    "configuration": "Debug, actual Metal, local bounded 20s/case; not either hosted VM"
+  },
+  "sourceSHA256": {
+    "apple/StreamMac/SceneRenderer.swift": "4bd6e70b51a59fd5bec82129ae0a08dff3e020761b2596b586210f0ebcdbc661",
+    "apple/StreamMac/TitleRenderFontCache.swift": "b5d31b366da19ef7af64a3d28cc80e8603f70ec8721518023a95f7f1d7024862",
+    "apple/scripts/title_font_cache_harness.swift": "c75aadb07c94dac5d78b27c1f3f355504eb6599b056f1b810d2fd1c77357bd91",
+    "apple/scripts/title_render_font_harness.swift": "e938c5fa01dea426cbc365efee093aaa173038ff63ebc15117a6268ef2b0dac6",
+    "apple/scripts/run_title_font_cache_harness.zsh": "9b0b777e57928413538b381940591e6adf067d4896c2a67d1a16896fa47e5ed9",
+    "apple/scripts/run_title_render_font_harness.zsh": "6685922effa995f2197dd22550a5cb7a0c2d78209a9aae1ebb19da58baf39ae8",
+    "apple/scripts/prepare_composition_hotpath_profile.py": "479be88d7af7992f76de24d531ee26c54824245af12c4657d538989827c0cb5a",
+    "apple/scripts/run_composition_hotpath_profile.zsh": "b051da683fd67b9a69cc6f1eca5261ab47607feba19edd27130b8bbc52e27804",
+    "apple/scripts/fixtures/title-font-cache/owned-a.ttf": "9e6de27b79d89feccc2581001f14b3bc9ca7f7725633d7b25a298991f1f2aa2c",
+    "apple/scripts/fixtures/title-font-cache/owned-b.ttf": "c71569a32d0423b5e81b12fc1ae6e208b5c8d1c4c265b05b10e7cd1b5f866c71"
+  },
+  "measuredFontCacheSceneRendererSHA256": "186c5556da696b18fa6600b1d3d4f8baf43f33c1a917333b54ad0d7b1b825497",
+  "originalSceneRendererSHA256": "cf1078ffca8bcb8f7bfe3feb3559c5bf935c63c0c3ff5cbd087496c1ae1207c1",
+  "profileSourceBoundary": "20s candidate trace precedes the final nested-bake epoch-retention guard. Exact retained instrumented source was checked against final source with only that guard removed. Generated workload has no nested scenes. Final guard is separately proven by actual renderer and guard-only negative control; no later 600s result is implied.",
+  "logs": [
+    {
+      "file": "stream-hotpath-profile-run-20261022.log",
+      "bytes": 1604,
+      "sha256": "518317b36a0506ec9cf0ec753c77d5943ac52ceddf9e6661638320c3e3d126c0"
+    },
+    {
+      "file": "stream-hotpath-cached-profile-run-20261022.log",
+      "bytes": 1576,
+      "sha256": "6eec8e4695d59ec2b13982f2b3d00332fd6ddf17dceb2bcb8054215b94a5291e"
+    },
+    {
+      "file": "stream-title-font-cache-owned-run-20261022.log",
+      "bytes": 2575,
+      "sha256": "6c3f146401c1dfa55679e54547dcb8a075c1b3c2ca9d4ebc3f383f2b525c784e"
+    },
+    {
+      "file": "stream-title-font-render-checked-in-20261022.log",
+      "bytes": 859228,
+      "sha256": "840a8657138df414e8894e2d15ec13ef06cb0ac554f1332d0e7712667abdff6e"
+    },
+    {
+      "file": "stream-title-font-render-epoch-order-20261022.log",
+      "bytes": 50281,
+      "sha256": "6d01bac5e1e9c3e7ae1129113b2137bee38c62e245683e5522b959513ea72ad3"
+    },
+    {
+      "file": "stream-title-font-nested-negative-20261022.log",
+      "bytes": 141,
+      "sha256": "8798fa98686a99d11203384dc4c782d9b12949c6403eae3269bda4b48d267a24"
+    },
+    {
+      "file": "stream-title-font-render-final-20261022.log",
+      "bytes": 205590,
+      "sha256": "7593330cf322ff943919dcd0358e97f5d3adaf5e7fa95f0c4b57e5a0cb0500dc"
+    }
+  ],
+  "runs": [
+    {
+      "name": "original",
+      "cases": [
+        {
+          "canvas": "1920x1080",
+          "case": 0,
+          "firstWarmPixelSHA256": "3ff60a27f655eea07a84e321ca0050e51ba1ece466f4effc46452bdf8c0159d9",
+          "fps": 30,
+          "layers": 12,
+          "scope": "Instrumented bounded local attribution only; not sustained capacity qualification. No waveform, physical source or hosted-VM qualification.",
+          "seconds": 20,
+          "spans": {
+            "ciRender.regular": {
+              "count": 580,
+              "maxMilliseconds": 11.874750001879875,
+              "meanMilliseconds": 3.1858025861107184,
+              "medianMilliseconds": 2.5046666705748066,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 5.640541668981314,
+              "p99Milliseconds": 6.107958339271136,
+              "sumMilliseconds": 1847.7654999442166
+            },
+            "ciRender.sampledTaskWait": {
+              "count": 21,
+              "maxMilliseconds": 10.167166670726147,
+              "meanMilliseconds": 3.471676587651018,
+              "medianMilliseconds": 2.7300000001559965,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 5.808958332636394,
+              "p99Milliseconds": 5.808958332636394,
+              "sumMilliseconds": 72.90520834067138
+            },
+            "fixturePCMGenerateAndEnqueue": {
+              "count": 2004,
+              "maxMilliseconds": 3.3821666656876914,
+              "meanMilliseconds": 0.2771673736675664,
+              "medianMilliseconds": 0.24554166884627193,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.5037083319621161,
+              "p99Milliseconds": 0.8162916710716672,
+              "sumMilliseconds": 555.443416829803
+            },
+            "fixtureResourceSample": {
+              "count": 20,
+              "maxMilliseconds": 0.18637500033946708,
+              "meanMilliseconds": 0.06955833341635298,
+              "medianMilliseconds": 0.06254166510188952,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.1152500044554472,
+              "p99Milliseconds": 0.1152500044554472,
+              "sumMilliseconds": 1.3911666683270596
+            },
+            "generatedRasterHit.shape": {
+              "count": 3605,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterHit.title": {
+              "count": 2400,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterMiss.shape": {
+              "count": 1,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterMiss.title": {
+              "count": 4,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "mailboxLockWait.deliberate80ms": {
+              "count": 601,
+              "maxMilliseconds": 0.0005833280738443136,
+              "meanMilliseconds": 8.943437609493038e-05,
+              "medianMilliseconds": 8.333154255524278e-05,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.00016667036106809974,
+              "p99Milliseconds": 0.0002500019036233425,
+              "sumMilliseconds": 0.05375006003305316
+            },
+            "mailboxLockWait.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 0.00012500095181167126,
+              "meanMilliseconds": 5.934555530966493e-05,
+              "medianMilliseconds": 4.166940925642848e-05,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 8.333881851285696e-05,
+              "p99Milliseconds": 8.333881851285696e-05,
+              "sumMilliseconds": 0.035666678741108626
+            },
+            "mailboxPost.deliberate80ms": {
+              "count": 601,
+              "maxMilliseconds": 0.1331249950453639,
+              "meanMilliseconds": 0.01655719634995853,
+              "medianMilliseconds": 0.011791671568062156,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.05891666660318151,
+              "p99Milliseconds": 0.09479166328674182,
+              "sumMilliseconds": 9.950875006325077
+            },
+            "mailboxPost.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 0.3742916669580154,
+              "meanMilliseconds": 0.0019735163487393267,
+              "medianMilliseconds": 0.0012500022421590984,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.0020833394955843687,
+              "p99Milliseconds": 0.002749999111983925,
+              "sumMilliseconds": 1.1860833255923353
+            },
+            "mailboxSink.deliberate80ms": {
+              "count": 232,
+              "maxMilliseconds": 90.71299999777693,
+              "meanMilliseconds": 86.55580046722426,
+              "medianMilliseconds": 87.28391666954849,
+              "over33ms": 232,
+              "over100ms": 0,
+              "p95Milliseconds": 90.04883332818281,
+              "p99Milliseconds": 90.41066666395636,
+              "sumMilliseconds": 20080.94570839603
+            },
+            "mailboxSink.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 7.818374993803445,
+              "meanMilliseconds": 0.019336730208264947,
+              "medianMilliseconds": 0.004083332896698266,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.013124998076818883,
+              "p99Milliseconds": 0.02149999636458233,
+              "sumMilliseconds": 11.621374855167232
+            },
+            "oneTimePixelHash": {
+              "count": 1,
+              "maxMilliseconds": 7.780749998346437,
+              "meanMilliseconds": 7.780749998346437,
+              "medianMilliseconds": 7.780749998346437,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 7.780749998346437,
+              "p99Milliseconds": 7.780749998346437,
+              "sumMilliseconds": 7.780749998346437
+            },
+            "poolAllocation": {
+              "count": 601,
+              "maxMilliseconds": 0.31279166432796046,
+              "meanMilliseconds": 0.031080560248497,
+              "medianMilliseconds": 0.018250000721309334,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.07224999717436731,
+              "p99Milliseconds": 0.09795832738745958,
+              "sumMilliseconds": 18.679416709346697
+            },
+            "rendererTotal": {
+              "count": 601,
+              "maxMilliseconds": 27.60241666692309,
+              "meanMilliseconds": 8.512271630587719,
+              "medianMilliseconds": 8.64249999722233,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 11.58620833302848,
+              "p99Milliseconds": 12.675916666921694,
+              "sumMilliseconds": 5115.875249983219
+            },
+            "sampleWrapAndChat": {
+              "count": 601,
+              "maxMilliseconds": 0.20329166727606207,
+              "meanMilliseconds": 0.035874237490046194,
+              "medianMilliseconds": 0.024000000848900527,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.07741666922811419,
+              "p99Milliseconds": 0.11983333388343453,
+              "sumMilliseconds": 21.560416731517762
+            },
+            "sceneGraphPreparation": {
+              "count": 601,
+              "maxMilliseconds": 16.88641666987678,
+              "meanMilliseconds": 5.236796935843114,
+              "medianMilliseconds": 5.41591666842578,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 7.0248749980237335,
+              "p99Milliseconds": 8.636166669020895,
+              "sumMilliseconds": 3147.3149584417115
+            },
+            "skippedSlotsEquivalentMilliseconds": {
+              "count": 601,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "tickStartDeadlineLateness": {
+              "count": 601,
+              "maxMilliseconds": 4.967679,
+              "meanMilliseconds": 1.7316192612312804,
+              "medianMilliseconds": 1.701962,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 3.493944,
+              "p99Milliseconds": 4.431078,
+              "sumMilliseconds": 1040.7031759999995
+            },
+            "tickTotal": {
+              "count": 601,
+              "maxMilliseconds": 27.756833333114628,
+              "meanMilliseconds": 8.580227259915716,
+              "medianMilliseconds": 8.710541667824145,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 11.754791667044628,
+              "p99Milliseconds": 12.769958331773523,
+              "sumMilliseconds": 5156.716583209345
+            },
+            "titleFontCascade": {
+              "count": 2404,
+              "maxMilliseconds": 11.654124995402526,
+              "meanMilliseconds": 1.1180979790682335,
+              "medianMilliseconds": 1.0260833296342753,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 2.047833339020144,
+              "p99Milliseconds": 2.6845833272091113,
+              "sumMilliseconds": 2687.9075416800333
+            },
+            "titleTotal": {
+              "count": 2404,
+              "maxMilliseconds": 12.939208332682028,
+              "meanMilliseconds": 1.1525242997793888,
+              "medianMilliseconds": 1.0575833293842152,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 2.1364166677813046,
+              "p99Milliseconds": 2.7690833376254886,
+              "sumMilliseconds": 2770.6684166696505
+            }
+          },
+          "compositor": {
+            "attempts": 601,
+            "failed": 0,
+            "lastPresentationSeconds": 49186.675692958,
+            "maxRenderMilliseconds": 27.756541669077706,
+            "missedDeadlines": 0,
+            "rendered": 601,
+            "sampledAt": 49186.71642354167,
+            "startedAt": 49166.67321195834,
+            "subscriberDrops": 369,
+            "subscriberQueueDepth": 0,
+            "totalRenderMilliseconds": 5156.4252915850375
+          },
+          "actualSourceDecodedFrames": 0,
+          "sourceInventory": null,
+          "recordingComplete": true,
+          "validationComplete": true,
+          "writerSamples": {
+            "videoSamples": 601,
+            "audioSamples": 2004,
+            "droppedVideo": 0,
+            "droppedAudio": 0
+          },
+          "rawReportSHA256": "984029a95842f9ad6fed821978724a50254691c251a7f1dac2bbbd04a028ac79",
+          "rawProfileSHA256": "1128fa2add6eb97bfd985302c381cf217016f1b49723db603f4b6dbdce1a1e5e"
+        },
+        {
+          "canvas": "1920x1080",
+          "case": 1,
+          "firstWarmPixelSHA256": "f545398e4972e602f3dc4fdee27d7883df07ccd7d34f77a47cedb1da0ea21d89",
+          "fps": 30,
+          "layers": 12,
+          "scope": "Instrumented bounded local attribution only; not sustained capacity qualification. No waveform, physical source or hosted-VM qualification.",
+          "seconds": 20,
+          "spans": {
+            "ciRender.regular": {
+              "count": 580,
+              "maxMilliseconds": 10.357874998589978,
+              "meanMilliseconds": 3.9568500000941325,
+              "medianMilliseconds": 4.139958327868953,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 6.4132083352888,
+              "p99Milliseconds": 7.643916665983852,
+              "sumMilliseconds": 2294.973000054597
+            },
+            "ciRender.sampledTaskWait": {
+              "count": 21,
+              "maxMilliseconds": 7.219791667012032,
+              "meanMilliseconds": 4.092375000168214,
+              "medianMilliseconds": 4.286374998628162,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 6.0136250031064264,
+              "p99Milliseconds": 6.0136250031064264,
+              "sumMilliseconds": 85.9398750035325
+            },
+            "fixturePCMGenerateAndEnqueue": {
+              "count": 2004,
+              "maxMilliseconds": 1.5420416675624438,
+              "meanMilliseconds": 0.29410133888477813,
+              "medianMilliseconds": 0.2587916678749025,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.56337499700021,
+              "p99Milliseconds": 0.8967499961727299,
+              "sumMilliseconds": 589.3790831250953
+            },
+            "fixtureResourceSample": {
+              "count": 20,
+              "maxMilliseconds": 0.1295000038226135,
+              "meanMilliseconds": 0.08744166698306799,
+              "medianMilliseconds": 0.09195833263220266,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.11887499567819759,
+              "p99Milliseconds": 0.11887499567819759,
+              "sumMilliseconds": 1.7488333396613598
+            },
+            "generatedRasterHit.shape": {
+              "count": 3605,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterHit.title": {
+              "count": 2400,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterMiss.shape": {
+              "count": 1,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterMiss.title": {
+              "count": 4,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "mailboxLockWait.deliberate80ms": {
+              "count": 601,
+              "maxMilliseconds": 0.0007083363016135991,
+              "meanMilliseconds": 0.00016888531510673229,
+              "medianMilliseconds": 0.00016666308511048555,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.00037500285543501377,
+              "p99Milliseconds": 0.00045833439799025655,
+              "sumMilliseconds": 0.1015000743791461
+            },
+            "mailboxLockWait.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 0.005125002644490451,
+              "meanMilliseconds": 0.00017866086076864487,
+              "medianMilliseconds": 0.00012500095181167126,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.00037500285543501377,
+              "p99Milliseconds": 0.00045833439799025655,
+              "sumMilliseconds": 0.10737517732195556
+            },
+            "mailboxPost.deliberate80ms": {
+              "count": 601,
+              "maxMilliseconds": 0.18474999524187297,
+              "meanMilliseconds": 0.02935184434113618,
+              "medianMilliseconds": 0.014583332813344896,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.07129166624508798,
+              "p99Milliseconds": 0.12450000212993473,
+              "sumMilliseconds": 17.640458449022844
+            },
+            "mailboxPost.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 0.20545833103824407,
+              "meanMilliseconds": 0.0028757627197454516,
+              "medianMilliseconds": 0.0022083331714384258,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.003041663148906082,
+              "p99Milliseconds": 0.010666663001757115,
+              "sumMilliseconds": 1.7283333945670165
+            },
+            "mailboxSink.deliberate80ms": {
+              "count": 234,
+              "maxMilliseconds": 90.47591666603694,
+              "meanMilliseconds": 86.00441506427875,
+              "medianMilliseconds": 86.42450000479585,
+              "over33ms": 234,
+              "over100ms": 0,
+              "p95Milliseconds": 90.02229166799225,
+              "p99Milliseconds": 90.06816666078521,
+              "sumMilliseconds": 20125.033125041227
+            },
+            "mailboxSink.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 10.593624996545259,
+              "meanMilliseconds": 0.03325277326611907,
+              "medianMilliseconds": 0.011958334653172642,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.03516666765790433,
+              "p99Milliseconds": 0.1676666724961251,
+              "sumMilliseconds": 19.984916732937563
+            },
+            "oneTimePixelHash": {
+              "count": 1,
+              "maxMilliseconds": 10.564291667833459,
+              "meanMilliseconds": 10.564291667833459,
+              "medianMilliseconds": 10.564291667833459,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 10.564291667833459,
+              "p99Milliseconds": 10.564291667833459,
+              "sumMilliseconds": 10.564291667833459
+            },
+            "poolAllocation": {
+              "count": 601,
+              "maxMilliseconds": 0.2957916658488102,
+              "meanMilliseconds": 0.04073419305176308,
+              "medianMilliseconds": 0.040041668398771435,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.0709583327989094,
+              "p99Milliseconds": 0.15949999942677096,
+              "sumMilliseconds": 24.481250024109613
+            },
+            "rendererTotal": {
+              "count": 601,
+              "maxMilliseconds": 20.60104166594101,
+              "meanMilliseconds": 9.467396214606314,
+              "medianMilliseconds": 9.975208333344199,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 13.121083335136063,
+              "p99Milliseconds": 15.559541665425058,
+              "sumMilliseconds": 5689.905124978395
+            },
+            "sampleWrapAndChat": {
+              "count": 601,
+              "maxMilliseconds": 0.4732916640932672,
+              "meanMilliseconds": 0.06360482524399771,
+              "medianMilliseconds": 0.06416666292352602,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.12199999764561653,
+              "p99Milliseconds": 0.22562500089406967,
+              "sumMilliseconds": 38.226499971642625
+            },
+            "sceneGraphPreparation": {
+              "count": 601,
+              "maxMilliseconds": 11.382541670172941,
+              "meanMilliseconds": 5.382888519261617,
+              "medianMilliseconds": 5.569041670241859,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 7.5280833334545605,
+              "p99Milliseconds": 10.035749997769017,
+              "sumMilliseconds": 3235.116000076232
+            },
+            "skippedSlotsEquivalentMilliseconds": {
+              "count": 601,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "tickStartDeadlineLateness": {
+              "count": 601,
+              "maxMilliseconds": 3.333345,
+              "meanMilliseconds": 1.3739513361064881,
+              "medianMilliseconds": 1.553834,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 2.051383,
+              "p99Milliseconds": 2.151183,
+              "sumMilliseconds": 825.7447529999994
+            },
+            "tickTotal": {
+              "count": 601,
+              "maxMilliseconds": 21.04591667011846,
+              "meanMilliseconds": 9.571669301370271,
+              "medianMilliseconds": 10.086624999530613,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 13.207124997279607,
+              "p99Milliseconds": 15.693083332735114,
+              "sumMilliseconds": 5752.5732501235325
+            },
+            "titleFontCascade": {
+              "count": 2404,
+              "maxMilliseconds": 3.8376250013243407,
+              "meanMilliseconds": 1.1570787054598968,
+              "medianMilliseconds": 1.082791670341976,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 1.9600000014179386,
+              "p99Milliseconds": 2.5951666684704833,
+              "sumMilliseconds": 2781.617207925592
+            },
+            "titleTotal": {
+              "count": 2404,
+              "maxMilliseconds": 3.881000004184898,
+              "meanMilliseconds": 1.1940011958292225,
+              "medianMilliseconds": 1.1160416615894064,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 2.0343333308119327,
+              "p99Milliseconds": 2.649083333380986,
+              "sumMilliseconds": 2870.3788747734507
+            }
+          },
+          "compositor": {
+            "attempts": 601,
+            "failed": 0,
+            "lastPresentationSeconds": 49208.254419875,
+            "maxRenderMilliseconds": 21.044708337285556,
+            "missedDeadlines": 0,
+            "rendered": 601,
+            "sampledAt": 49208.294781375,
+            "startedAt": 49188.253498791666,
+            "subscriberDrops": 367,
+            "subscriberQueueDepth": 1,
+            "totalRenderMilliseconds": 5751.98662490584
+          },
+          "actualSourceDecodedFrames": 601,
+          "sourceInventory": {
+            "availableFrames": 601,
+            "durationSeconds": 20.035,
+            "framesDueBeforeGraceEnd": 450,
+            "monotonic": true
+          },
+          "recordingComplete": true,
+          "validationComplete": true,
+          "writerSamples": {
+            "videoSamples": 601,
+            "audioSamples": 2004,
+            "droppedVideo": 0,
+            "droppedAudio": 0
+          },
+          "rawReportSHA256": "984029a95842f9ad6fed821978724a50254691c251a7f1dac2bbbd04a028ac79",
+          "rawProfileSHA256": "8fa5087c8fc6db5520967a65c1133235d5e55ba5ed3fc19bd4b1d39ae6d232d6"
+        }
+      ]
+    },
+    {
+      "name": "fontCacheBeforeFinalNestedGuard",
+      "cases": [
+        {
+          "canvas": "1920x1080",
+          "case": 0,
+          "firstWarmPixelSHA256": "3ff60a27f655eea07a84e321ca0050e51ba1ece466f4effc46452bdf8c0159d9",
+          "fps": 30,
+          "layers": 12,
+          "scope": "Instrumented bounded local attribution only; not sustained capacity qualification. No waveform, physical source or hosted-VM qualification.",
+          "seconds": 20,
+          "spans": {
+            "ciRender.regular": {
+              "count": 580,
+              "maxMilliseconds": 10.917374995187856,
+              "meanMilliseconds": 5.385672557644409,
+              "medianMilliseconds": 5.6800833335728385,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 7.691708335187286,
+              "p99Milliseconds": 8.907458330213558,
+              "sumMilliseconds": 3123.6900834337575
+            },
+            "ciRender.sampledTaskWait": {
+              "count": 21,
+              "maxMilliseconds": 13.384999998379499,
+              "meanMilliseconds": 5.990763888846795,
+              "medianMilliseconds": 5.738833329814952,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 10.390166666184086,
+              "p99Milliseconds": 10.390166666184086,
+              "sumMilliseconds": 125.80604166578269
+            },
+            "fixturePCMGenerateAndEnqueue": {
+              "count": 2004,
+              "maxMilliseconds": 5.846083331562113,
+              "meanMilliseconds": 0.29878077186944874,
+              "medianMilliseconds": 0.257874999078922,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.5230000024312176,
+              "p99Milliseconds": 0.848333329486195,
+              "sumMilliseconds": 598.7566668263753
+            },
+            "fixtureResourceSample": {
+              "count": 20,
+              "maxMilliseconds": 0.3899583316524513,
+              "meanMilliseconds": 0.1093229166144738,
+              "medianMilliseconds": 0.09729166777106002,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.17079166718758643,
+              "p99Milliseconds": 0.17079166718758643,
+              "sumMilliseconds": 2.186458332289476
+            },
+            "generatedRasterHit.shape": {
+              "count": 3605,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterHit.title": {
+              "count": 2400,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterMiss.shape": {
+              "count": 1,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterMiss.title": {
+              "count": 4,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "mailboxLockWait.deliberate80ms": {
+              "count": 601,
+              "maxMilliseconds": 0.0003333334461785853,
+              "meanMilliseconds": 8.749302711799592e-05,
+              "medianMilliseconds": 8.333154255524278e-05,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.00020833249436691403,
+              "p99Milliseconds": 0.0002500019036233425,
+              "sumMilliseconds": 0.05258330929791555
+            },
+            "mailboxLockWait.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 0.00045833439799025655,
+              "meanMilliseconds": 0.00013893524598572,
+              "medianMilliseconds": 0.00016666308511048555,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.00020833249436691403,
+              "p99Milliseconds": 0.0003333334461785853,
+              "sumMilliseconds": 0.08350008283741772
+            },
+            "mailboxPost.deliberate80ms": {
+              "count": 601,
+              "maxMilliseconds": 0.453541666502133,
+              "meanMilliseconds": 0.030203618895368628,
+              "medianMilliseconds": 0.019708328181877732,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.0772500061430037,
+              "p99Milliseconds": 0.15516666462644935,
+              "sumMilliseconds": 18.152374956116546
+            },
+            "mailboxPost.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 0.8938333339756355,
+              "meanMilliseconds": 0.0064077925913465115,
+              "medianMilliseconds": 0.0044166663428768516,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.005750000127591193,
+              "p99Milliseconds": 0.03916666901204735,
+              "sumMilliseconds": 3.8510833473992534
+            },
+            "mailboxSink.deliberate80ms": {
+              "count": 234,
+              "maxMilliseconds": 91.96354166488163,
+              "meanMilliseconds": 85.90960683786528,
+              "medianMilliseconds": 86.36750000005122,
+              "over33ms": 234,
+              "over100ms": 0,
+              "p95Milliseconds": 90.04362500127172,
+              "p99Milliseconds": 90.09995833184803,
+              "sumMilliseconds": 20102.848000060476
+            },
+            "mailboxSink.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 8.011249999981374,
+              "meanMilliseconds": 0.027018580023496074,
+              "medianMilliseconds": 0.011291667760815471,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.026041663659270853,
+              "p99Milliseconds": 0.08470833563478664,
+              "sumMilliseconds": 16.23816659412114
+            },
+            "oneTimePixelHash": {
+              "count": 1,
+              "maxMilliseconds": 7.986124997842126,
+              "meanMilliseconds": 7.986124997842126,
+              "medianMilliseconds": 7.986124997842126,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 7.986124997842126,
+              "p99Milliseconds": 7.986124997842126,
+              "sumMilliseconds": 7.986124997842126
+            },
+            "poolAllocation": {
+              "count": 601,
+              "maxMilliseconds": 0.6705416672048159,
+              "meanMilliseconds": 0.04647836945929678,
+              "medianMilliseconds": 0.04437499592313543,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.08325000089826062,
+              "p99Milliseconds": 0.13620833487948403,
+              "sumMilliseconds": 27.933500045037363
+            },
+            "rendererTotal": {
+              "count": 601,
+              "maxMilliseconds": 22.7695416615461,
+              "meanMilliseconds": 6.3337215750790845,
+              "medianMilliseconds": 6.691583330393769,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 8.978749996458646,
+              "p99Milliseconds": 11.725500000466127,
+              "sumMilliseconds": 3806.5666666225297
+            },
+            "sampleWrapAndChat": {
+              "count": 601,
+              "maxMilliseconds": 0.8470000029774383,
+              "meanMilliseconds": 0.07511577930203801,
+              "medianMilliseconds": 0.07033333531580865,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.12995833822060376,
+              "p99Milliseconds": 0.2912083291448653,
+              "sumMilliseconds": 45.14458336052485
+            },
+            "sceneGraphPreparation": {
+              "count": 601,
+              "maxMilliseconds": 13.653083333338145,
+              "meanMilliseconds": 0.7824531336297156,
+              "medianMilliseconds": 0.7454166625393555,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 1.245125000423286,
+              "p99Milliseconds": 1.9902916683349758,
+              "sumMilliseconds": 470.25433331145905
+            },
+            "skippedSlotsEquivalentMilliseconds": {
+              "count": 601,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "tickStartDeadlineLateness": {
+              "count": 601,
+              "maxMilliseconds": 6.008961,
+              "meanMilliseconds": 1.8423832795341104,
+              "medianMilliseconds": 1.751281,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 3.744246,
+              "p99Milliseconds": 4.339893,
+              "sumMilliseconds": 1107.2723510000003
+            },
+            "tickTotal": {
+              "count": 601,
+              "maxMilliseconds": 22.978583328949753,
+              "meanMilliseconds": 6.499370701646684,
+              "medianMilliseconds": 6.867458330816589,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 9.3205833400134,
+              "p99Milliseconds": 12.078083331289236,
+              "sumMilliseconds": 3906.1217916896567
+            },
+            "titleFontCascade": {
+              "count": 2404,
+              "maxMilliseconds": 10.782208330056164,
+              "meanMilliseconds": 0.013547698339223072,
+              "medianMilliseconds": 0.006416667019948363,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.015083336620591581,
+              "p99Milliseconds": 0.04600000102072954,
+              "sumMilliseconds": 32.568666807492264
+            },
+            "titleTotal": {
+              "count": 2404,
+              "maxMilliseconds": 11.89229166629957,
+              "meanMilliseconds": 0.05568566286786089,
+              "medianMilliseconds": 0.03341666888445616,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.11949999316129833,
+              "p99Milliseconds": 0.24591666442574933,
+              "sumMilliseconds": 133.86833353433758
+            }
+          },
+          "compositor": {
+            "attempts": 601,
+            "failed": 0,
+            "lastPresentationSeconds": 49831.945534583,
+            "maxRenderMilliseconds": 22.978374996455386,
+            "missedDeadlines": 0,
+            "rendered": 601,
+            "sampledAt": 49831.985263500006,
+            "startedAt": 49811.94240704167,
+            "subscriberDrops": 367,
+            "subscriberQueueDepth": 1,
+            "totalRenderMilliseconds": 3905.6034583773
+          },
+          "actualSourceDecodedFrames": 0,
+          "sourceInventory": null,
+          "recordingComplete": true,
+          "validationComplete": true,
+          "writerSamples": {
+            "videoSamples": 601,
+            "audioSamples": 2004,
+            "droppedVideo": 0,
+            "droppedAudio": 0
+          },
+          "rawReportSHA256": "90142b7946cb01330efab18b0e503652ea12596ab74aeb901b614eef66862751",
+          "rawProfileSHA256": "d66ba42dce0e2611bccc6e335dfc24459eb3e405ed0bcf09e333b1a5636decbc"
+        },
+        {
+          "canvas": "1920x1080",
+          "case": 1,
+          "firstWarmPixelSHA256": "f545398e4972e602f3dc4fdee27d7883df07ccd7d34f77a47cedb1da0ea21d89",
+          "fps": 30,
+          "layers": 12,
+          "scope": "Instrumented bounded local attribution only; not sustained capacity qualification. No waveform, physical source or hosted-VM qualification.",
+          "seconds": 20,
+          "spans": {
+            "ciRender.regular": {
+              "count": 580,
+              "maxMilliseconds": 9.970541672373656,
+              "meanMilliseconds": 3.833864439692316,
+              "medianMilliseconds": 4.169458334217779,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 6.3678333317511715,
+              "p99Milliseconds": 7.7348750055534765,
+              "sumMilliseconds": 2223.6413750215434
+            },
+            "ciRender.sampledTaskWait": {
+              "count": 21,
+              "maxMilliseconds": 7.390958329779096,
+              "meanMilliseconds": 3.6694920639829,
+              "medianMilliseconds": 4.070499999215826,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 6.024750000506174,
+              "p99Milliseconds": 6.024750000506174,
+              "sumMilliseconds": 77.0593333436409
+            },
+            "fixturePCMGenerateAndEnqueue": {
+              "count": 2004,
+              "maxMilliseconds": 2.611291660286952,
+              "meanMilliseconds": 0.2796556054164682,
+              "medianMilliseconds": 0.26237499696435407,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.5301666678860784,
+              "p99Milliseconds": 0.9031666631926782,
+              "sumMilliseconds": 560.4298332546023
+            },
+            "fixtureResourceSample": {
+              "count": 20,
+              "maxMilliseconds": 0.18674999591894448,
+              "meanMilliseconds": 0.08782916629570536,
+              "medianMilliseconds": 0.08883333794074133,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.16537500050617382,
+              "p99Milliseconds": 0.16537500050617382,
+              "sumMilliseconds": 1.7565833259141073
+            },
+            "generatedRasterHit.shape": {
+              "count": 3605,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterHit.title": {
+              "count": 2400,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterMiss.shape": {
+              "count": 1,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "generatedRasterMiss.title": {
+              "count": 4,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "mailboxLockWait.deliberate80ms": {
+              "count": 601,
+              "maxMilliseconds": 0.0003749955794773996,
+              "meanMilliseconds": 7.702446162635568e-05,
+              "medianMilliseconds": 8.333154255524278e-05,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.00016667036106809974,
+              "p99Milliseconds": 0.0002500019036233425,
+              "sumMilliseconds": 0.04629170143743977
+            },
+            "mailboxLockWait.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 0.0004999965312890708,
+              "meanMilliseconds": 0.00013227970600856496,
+              "medianMilliseconds": 8.333881851285696e-05,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.00037500285543501377,
+              "p99Milliseconds": 0.00041667226469144225,
+              "sumMilliseconds": 0.07950010331114754
+            },
+            "mailboxPost.deliberate80ms": {
+              "count": 601,
+              "maxMilliseconds": 0.7851250047679059,
+              "meanMilliseconds": 0.02473481704789708,
+              "medianMilliseconds": 0.009916664566844702,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.08720833284314722,
+              "p99Milliseconds": 0.16754166426835582,
+              "sumMilliseconds": 14.865625045786146
+            },
+            "mailboxPost.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 0.0362083301297389,
+              "meanMilliseconds": 0.0033939268692596484,
+              "medianMilliseconds": 0.0023750035325065255,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.0072499969974160194,
+              "p99Milliseconds": 0.009750001481734216,
+              "sumMilliseconds": 2.0397500484250486
+            },
+            "mailboxSink.deliberate80ms": {
+              "count": 235,
+              "maxMilliseconds": 90.35566666716477,
+              "meanMilliseconds": 85.60687358162312,
+              "medianMilliseconds": 85.73704166337848,
+              "over33ms": 235,
+              "over100ms": 0,
+              "p95Milliseconds": 90.03833333554212,
+              "p99Milliseconds": 90.15825000096811,
+              "sumMilliseconds": 20117.61529168143
+            },
+            "mailboxSink.healthyRecording": {
+              "count": 601,
+              "maxMilliseconds": 6.478166666056495,
+              "meanMilliseconds": 0.026300610172405016,
+              "medianMilliseconds": 0.007708331395406276,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.039500002458225936,
+              "p99Milliseconds": 0.18200000340584666,
+              "sumMilliseconds": 15.806666713615414
+            },
+            "oneTimePixelHash": {
+              "count": 1,
+              "maxMilliseconds": 6.4625833329046145,
+              "meanMilliseconds": 6.4625833329046145,
+              "medianMilliseconds": 6.4625833329046145,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 6.4625833329046145,
+              "p99Milliseconds": 6.4625833329046145,
+              "sumMilliseconds": 6.4625833329046145
+            },
+            "poolAllocation": {
+              "count": 601,
+              "maxMilliseconds": 1.047333331371192,
+              "meanMilliseconds": 0.04805428463938149,
+              "medianMilliseconds": 0.045666667574550956,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.08837499626679346,
+              "p99Milliseconds": 0.24266666878247634,
+              "sumMilliseconds": 28.880625068268273
+            },
+            "rendererTotal": {
+              "count": 601,
+              "maxMilliseconds": 10.84570833336329,
+              "meanMilliseconds": 4.767401414329575,
+              "medianMilliseconds": 5.253791670838837,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 7.709041667112615,
+              "p99Milliseconds": 9.039458331244532,
+              "sumMilliseconds": 2865.208250012074
+            },
+            "sampleWrapAndChat": {
+              "count": 601,
+              "maxMilliseconds": 0.5830000009154901,
+              "meanMilliseconds": 0.053061425438717925,
+              "medianMilliseconds": 0.03375000233063474,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.11358332994859666,
+              "p99Milliseconds": 0.18466666369931772,
+              "sumMilliseconds": 31.889916688669473
+            },
+            "sceneGraphPreparation": {
+              "count": 601,
+              "maxMilliseconds": 2.7189583342988044,
+              "meanMilliseconds": 0.8200340404760398,
+              "medianMilliseconds": 0.8516666639479809,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 1.573208333866205,
+              "p99Milliseconds": 2.115541668899823,
+              "sumMilliseconds": 492.8404583260999
+            },
+            "skippedSlotsEquivalentMilliseconds": {
+              "count": 601,
+              "maxMilliseconds": 0,
+              "meanMilliseconds": 0,
+              "medianMilliseconds": 0,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0,
+              "p99Milliseconds": 0,
+              "sumMilliseconds": 0
+            },
+            "tickStartDeadlineLateness": {
+              "count": 601,
+              "maxMilliseconds": 4.156276,
+              "meanMilliseconds": 1.4114816672212998,
+              "medianMilliseconds": 1.548426,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 2.103174,
+              "p99Milliseconds": 2.296951,
+              "sumMilliseconds": 848.3004820000011
+            },
+            "tickTotal": {
+              "count": 601,
+              "maxMilliseconds": 11.201708337466698,
+              "meanMilliseconds": 4.91336508611056,
+              "medianMilliseconds": 5.40983333485201,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 7.8832500003045425,
+              "p99Milliseconds": 9.257916666683741,
+              "sumMilliseconds": 2952.9324167524464
+            },
+            "titleFontCascade": {
+              "count": 2404,
+              "maxMilliseconds": 0.6609999982174486,
+              "meanMilliseconds": 0.009375693280495449,
+              "medianMilliseconds": 0.0063333354773931205,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.01670833444222808,
+              "p99Milliseconds": 0.07329166692215949,
+              "sumMilliseconds": 22.53916664631106
+            },
+            "titleTotal": {
+              "count": 2404,
+              "maxMilliseconds": 0.8505000005243346,
+              "meanMilliseconds": 0.05109662723076877,
+              "medianMilliseconds": 0.03362499410286546,
+              "over33ms": 0,
+              "over100ms": 0,
+              "p95Milliseconds": 0.1304166653426364,
+              "p99Milliseconds": 0.27441666316008195,
+              "sumMilliseconds": 122.83629186276812
+            }
+          },
+          "compositor": {
+            "attempts": 601,
+            "failed": 0,
+            "lastPresentationSeconds": 49853.417237625,
+            "maxRenderMilliseconds": 11.200875000213273,
+            "missedDeadlines": 0,
+            "rendered": 601,
+            "sampledAt": 49853.45716120834,
+            "startedAt": 49833.41636358334,
+            "subscriberDrops": 366,
+            "subscriberQueueDepth": 1,
+            "totalRenderMilliseconds": 2952.613166766241
+          },
+          "actualSourceDecodedFrames": 600,
+          "sourceInventory": {
+            "availableFrames": 601,
+            "durationSeconds": 20.03666666666667,
+            "framesDueBeforeGraceEnd": 450,
+            "monotonic": true
+          },
+          "recordingComplete": true,
+          "validationComplete": true,
+          "writerSamples": {
+            "videoSamples": 601,
+            "audioSamples": 2004,
+            "droppedVideo": 0,
+            "droppedAudio": 0
+          },
+          "rawReportSHA256": "90142b7946cb01330efab18b0e503652ea12596ab74aeb901b614eef66862751",
+          "rawProfileSHA256": "4ac50bdd8a0754a11fc7f0e57567e73483adc4d66c65b2f6c71e5615caa7d977"
+        }
+      ]
+    }
+  ],
+  "nativePixelHashes": {
+    "autoWrap": "1e29e7a1ef4e4b6ba647dfbfeb9f3d7be77f69d089dab23af5bb0f54f96cfb59",
+    "ellipsis": "6bf6863c2fe11a11f63602eade60bc6ded41cc8f21f91dad7189a882cf92b813",
+    "midBuild.nested": "ff44c043965d94884ce08e195b69835ce862be9a64501a9632aea6b5932a5b0f",
+    "midBuild.transitionNested": "ff44c043965d94884ce08e195b69835ce862be9a64501a9632aea6b5932a5b0f",
+    "missingFont": "d676b5a81ed344fbdff41e3dcf5f3fff8ffb011c5c9d3667fae51c644f6d7533",
+    "replacement.commentLayout": "745fc12eb8f7c8ab6c1e5507756b1a398c83314d9812774d9a15c2fb026e5f8c",
+    "replacement.direct": "28839115838445b1a46e37e336f5b146bdf5c08d57b1ecf3f786b806172c4092",
+    "replacement.nested": "28839115838445b1a46e37e336f5b146bdf5c08d57b1ecf3f786b806172c4092",
+    "replacement.ticker": "27484a38b5efc313b8857b3ed36fdbafdce91aa192ed4b7e8191e98acf5f5dd2",
+    "replacement.transitionNested": "28839115838445b1a46e37e336f5b146bdf5c08d57b1ecf3f786b806172c4092",
+    "scaleDown": "fbb9d7db5a2d91b73225388595f6b90af48b3d0c7063798d552fb6df711a8d34",
+    "sizeStyle": "199a7d8eeb0630dfb5d4c89bb1b65fa6f73a9d5b9c71976c08b9c5ac8f0cba74",
+    "static": "7cb09c85af517cb2f45742dd24fdd2e5aaff2ce7667391e69bc5b98676bcec46",
+    "unicode": "09434062ab1bd8927451310190e0aaead9d056a375e311edb8fe5a870bd5573c"
+  },
+  "scope": [
+    "One 20s static case and one 20s real H264 replay case before/after, same 1920x1080, 30fps, 12 layers, actual recorder and deliberate 80ms subscriber. Source duration and nominal gates in the sustained harness/workflow remain unchanged.",
+    "Baseline titleFontCascade count 2404 represents actual cascade construction. Candidate count 2404 is lookup-or-construction calls; it is not a measured cache-miss or builder count. Times include generated-counter overhead.",
+    "Measured title span/frame 4.4723919163/4.6283148218ms before,0.0541907934/0.0375027731ms after. Whole tick 8.5802272599/9.5716693014ms before,6.4993707016/4.9133650861ms after. Static regularCI render rose 3.1858025861→5.3856725576ms; no universal speedup is inferred.",
+    "All four bounded cases rendered 601 frames with zero render failures and zero whole-skipped slots. Original replay decoded 601 and candidate replay decoded 600 of 601 available source frames; each inventory has 450 frames due before the short fixture allowance. Neither count is a 600s capacity qualification or a claim that candidate consumed every available frame.",
+    "Exact warm-frame visibleBGRA hashes match before/after for both cases. This samples one warm frame/case, not every frame of 20s. Seven focused native cases compare complete original/current frame buffers for static/Unicode/fallback/size/style/autoWrap/scaleDown/ellipsis.",
+    "Actual owned process-font registration/removal/replacement with same PostScript name changes glyph metrics/pixels. Native tests cover title raster, ticker CTLine, comment layout, static nested bake and renderTransition. No global font install, user preferences, camera, mic or TCC grants.",
+    "Mid-build actual fontreplacement waits for observed epoch change before second same-key title; builder count >=2 before outer frame returns. One mixed in-flight frame is allowed; next settled/transition frame and subsequent nested cachehit must equal fresh replacement reference. Removing only the final nested-retention guard fails the exact stale-bake assertion; final restored source passes.",
+    "Initial unordered fixture failure is retained separately. It omitted bounded notification delivery ordering; it was not relabeled a pass.",
+    "Process/distributed font notifications and locale changes advance a synchronized generation; preferredLanguages is also compared. Cache is per renderer, bounded 64 entries; requests and sizes preserve existing Core Text fallback calls on miss. Tests cover bounded eviction and actual background epoch change during font construction.",
+    "Actual hosted run 39724736435 remainsFAILED at source b53ae5d: ARM 16957/17047, Intel 17366/17058 rendered vs 17850. No new 600s dispatch, changed threshold/FPS/dimensions, VM stall explanation, waveform A/V assertion or #92 closure."
+  ]
+}

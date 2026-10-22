@@ -146,6 +146,62 @@ workloads; the measurements were not repeated or relabeled as a later commit.
 
 ## Qualification limits
 
+### Bounded local title preparation profile
+
+A separate 20-second static/replay comparison on Mac15,8 / M3 Max found an
+avoidable CPU preparation cost: each unchanged title rebuilt its Core Text font
+and fallback cascade before consulting the raster cache. The four titles caused
+2,404 cascade constructions per case despite 2,400 raster-cache hits.
+
+| Mean wall time per frame | Original static / replay | Cached static / replay |
+|---|---:|---:|
+| Font construction or cached lookup | 4.472 / 4.628 ms | 0.054 / 0.038 ms |
+| Scene graph preparation | 5.237 / 5.383 ms | 0.782 / 0.820 ms |
+| Complete tick | 8.580 / 9.572 ms | 6.499 / 4.913 ms |
+| Regular Core Image render | 3.186 / 3.957 ms | 5.386 / 3.834 ms |
+
+The local cases kept the same 1080p30 canvas, generated screen/camera content,
+six shapes, four titles, real recorder and deliberately slow subscriber. All
+four cases produced 601 frames without skipped opportunities or failed renders.
+Original replay decoded 601 and candidate replay decoded 600 of 601 available
+source frames; each inventory had 450 due before the short fixture allowance.
+Static Core Image time
+increased in the second measurement; these observations support removing the
+repeated font preparation, not a universal whole-render speedup or an explanation
+for the hosted stalls. Candidate font-span counts measure lookups, not actual
+cache misses or constructions.
+
+Fonts now reuse a renderer-local cache bounded to 64 request/size pairs. Process
+and distributed font-registration notifications, locale notifications and
+preferred-language changes invalidate font-dependent resources. Same-name font
+replacement also refreshes title rasters, ticker lines, comment layouts and
+baked nested scenes. A registry change during a nested bake permits that
+in-flight frame to finish, but prevents retaining the mixed result.
+
+Native complete-buffer comparisons match the original renderer for static,
+Unicode, missing-font fallback, sizes/styles, wrapping, scale-down and ellipsis.
+Owned process-only fonts prove registration/removal, same-PostScript replacement
+and a change between two nested title builds. The next settled/transition frame
+and subsequent cache hit match a fresh replacement reference. Removing only the
+nested retention guard fails this regression; restoring production source passes.
+The benchmark also retains identical before/after visible-pixel hashes for one
+warm frame per case; this does not claim every frame was hashed.
+
+Reproduce the focused font probe with
+`zsh apple/scripts/run_title_font_cache_harness.zsh`; the actual renderer probe is
+`zsh apple/scripts/run_title_render_font_harness.zsh` and requires a checkout
+containing ancestor `44c078e` for the original reference. The optional
+`zsh apple/scripts/run_composition_hotpath_profile.zsh` generates instrumented
+copies, runs exactly 20 seconds per case and retains source hashes/counters.
+Its build uses two jobs; coordinate local GPU profiling with other native work.
+It does not edit the shipping renderer or the sustained harness/gates.
+
+[The source and measurement receipt](TITLE_FONT_CACHE_PROFILE_2026-10-22.json)
+distinguishes the short measured candidate from its later nested-retention guard
+and retains the final native regression, negative control and initial unordered
+fixture failure. This local profile is not sustained or physical-source
+qualification. The real hosted failures below remain failed; issue #92 is open.
+
 ### Updated hosted ARM measurement, run 39724736435
 
 The fresh [ARM job](https://github.com/joeblau/stream/actions/runs/39724736435/job/119645957686)
