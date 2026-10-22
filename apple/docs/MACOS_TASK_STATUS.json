@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks the original 61 macOS issues (48 feature tasks and 13 roadmap/epic trackers): 27 closed / 34 open, comprising 23 open features and 11 open trackers. Fresh complete repository inventory finds 135 macOS issues overall, 101 closed / 34 open; all 74 outside the original inventory are already closed, with no new open task. This cohort adds no closures.",
+  "scope": "Original 61 macOS issues: 27 closed / 34 open (23 features / 11 trackers). Fresh complete paginated inventory at 14:05:53 UTC finds 135 macOS issues, 101 closed / 34 open; all 74 outside the original inventory are closed, with zero open PRs or other open issues. All 61 original body/state hash bindings are unchanged. This cohort adds no closures.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -320,7 +320,18 @@
       },
       "manifestPaths": 724
     },
-    "wave16FocusedEvidence": "Annotation 192-case geometry and retained original-width failure artifacts; Program health 12 Core tests plus exact decision-block probe; recovery baseline133/fixed0; package five actual IO/method phases and three generation tests PASS in named scopes. Independent reviews clear; no whole hosted-CI or new qualification claim."
+    "wave16FocusedEvidence": "Annotation 192-case geometry and retained original-width failure artifacts; Program health 12 Core tests plus exact decision-block probe; recovery baseline133/fixed0; package five actual IO/method phases and three generation tests PASS in named scopes. Independent reviews clear; no whole hosted-CI or new qualification claim.",
+    "wave17CombinedNative": {
+      "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+      "status": "Generation, unsigned universal Release and actual bundle audit PASS",
+      "receipt": {
+        "path": "/tmp/stream-wave17-final-parent-final-results-20261022.json",
+        "bytes": 786,
+        "sha256": "f81a0f585af0f2afe555a1bfb70943905743a323cde3366065e2d646d57090fa"
+      },
+      "manifestPaths": 775
+    },
+    "wave17Isolation": "Reviewed actual owned resource/broker/publisher/converter/recording/optional-image/guest component proofs integrate into final universal App. Exact runtime boundaries, earlier failed controls, compiled-only Factory/ISO paths and no physical/network/sustained qualification are recorded in wave17Review."
   },
   "issues": [
     {
@@ -831,7 +842,8 @@
         "Current source/wire audit and independent libopus decode demonstrate non-silent interoperable generated Opus payloads, without production changes or successful network sends. The receive-clock cause remains a source-supported hypothesis. Both owned browser discriminators stop before connected/RTP measurement and are UNQUALIFIED 77, not a repair or a reproduced old 931-packet symptom.",
         "One completed repaired owned null-output diagnostic at EA exits77/UNQUALIFIED after 11.429 s before connection or the 12 s measurement. Both ICE/connection states remain new, sender source PCM is positive but its outbound RTP row reports 0 packets/bytes, receiver inbound rows are absent and PCM is zero. Partial callback lowerbounds and verified process-group/browser/directory cleanup do not reproduce the old 931 RTP/zero-emission case, establish its cause, or qualify native return/normal output/AEC/A/V.",
         "New bounded pre-RTP failure/signaling diagnostics pass 18 Node and six syntax checks with independent review. These are generated diagnostic/test changes; no new RTC/media attempt, native return repair, normal-output/AEC/A/V or connection qualification is claimed.",
-        "One exact published e803 owned all-Chromium diagnostic ends UNQUALIFIED 77 in 11.398 s before connection / 12 s measurement. All ten observed API calls fulfill; snapshots expose unselected ICE/DTLS-new transports, no remote-candidate/pair rows and four local candidate rows per peer. API fulfillment does not prove internal candidate handling, wire checks, cause or native/normal-output/AEC/A-V acceptance. Source/raw and full owned-process retirement are independently verified; no retry."
+        "One exact published e803 owned all-Chromium diagnostic ends UNQUALIFIED 77 in 11.398 s before connection / 12 s measurement. All ten observed API calls fulfill; snapshots expose unselected ICE/DTLS-new transports, no remote-candidate/pair rows and four local candidate rows per peer. API fulfillment does not prove internal candidate handling, wire checks, cause or native/normal-output/AEC/A-V acceptance. Source/raw and full owned-process retirement are independently verified; no retry.",
+        "Owned guest resource/VT raster tests and actual Sink late-ACK owner cleanup pass, with serial Sender close ordering source-reviewed. These do not execute RTC/Sender drain or normal return PCM/AEC/A-V and do not complete the original issue."
       ],
       "evidence": [
         "GUEST_RETURN_AV_ORACLES.md",
@@ -840,7 +852,9 @@
         "NATIVE_GUEST_RETURN_WIRE_AUDIT_2026-10-22.json",
         "NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE11_2026-10-22.json",
         "NATIVE_GUEST_RETURN_PRE_RTP_DIAGNOSTICS.md",
-        "NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE12_2026-10-22.json"
+        "NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE12_2026-10-22.json",
+        "GUEST_RETURN_FRAME_DELIVERY.md",
+        "GUEST_INSTALLATION_FENCE.md"
       ]
     },
     {
@@ -982,7 +996,8 @@
         "Post-clock a4 ARM two 20 s diagnostic completes with 551/562 frames versus 553/574 baseline and 10/0 audio drops; no observed throughput improvement in these samples. Binding audit and independent review pass, but zero tolerance guarantees neither timely resumption nor kernel/coalescing-cause proof. Intel follow-up remains separately active at the recorded snapshot; original 600 s qualification remains failed/open.",
         "Final independently audited a4 comparison: ARM 551/562 vs 553/574 baseline with 10/0 audio-chunk drops; Intel 553/569 vs 528/565 with 0/0 vs 16/0 drops. All short 450-frame checks pass, but no causal/general or 600 s performance qualification follows. Actual eight-case mailbox retirement plus six clock proofs pass, with a three-call negative control; releasing pending ownership does not revoke active/raw external holders or identify all historical holders.",
         "Both whole raw publisher actors now release unused repeat-cache ownership at accepted Program audio entry before the existing await and avoid caching later Program video. Actual one-buffer-pool six positive/four exact negative cases pass with selected SDK media effects inert. This does not qualify opaque SDK/VideoToolbox release, historical surface holders, full isolation or sustained performance; original issue remains open.",
-        "Actual Program failed/attempt pressure is now separate from scheduler misses, with absent-versus-measured-zero intervals and fresh recovery windows. Twelve Core tests, exact coordinator/report-block probe and combined universal build pass. This optional preview policy correction does not repair render allocation, identify failure cause, qualify active-output isolation or complete original representative sustained/resource measurements."
+        "Actual Program failed/attempt pressure is now separate from scheduler misses, with absent-versus-measured-zero intervals and fresh recovery windows. Twelve Core tests, exact coordinator/report-block probe and combined universal build pass. This optional preview policy correction does not repair render allocation, identify failure cause, qualify active-output isolation or complete original representative sustained/resource measurements.",
+        "Process-wide measured raw-bank admission and independently backed broker/publisher/recorder/camera/optional/guest domains now have reviewed owned component proofs and combined d28 universal compile. Exposed banks remain charged; intentional footprint-plus-ceilings admission is conservative software policy, not hard memory/hardware capacity. Full representative sustained A/V/resource qualification and original 600 s failures remain open; component copies have costs not yet qualified."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -1011,7 +1026,13 @@
         "COMPOSITION_MAILBOX_RETIREMENT.md",
         "COMPOSITION_MAILBOX_RETIREMENT_2026-10-22.json",
         "PUBLISHER_PROGRAM_REPEAT_CACHE.md",
-        "PUBLISHER_PROGRAM_REPEAT_CACHE_2026-10-22.json"
+        "PUBLISHER_PROGRAM_REPEAT_CACHE_2026-10-22.json",
+        "RAW_VIDEO_RESOURCE_ADMISSION.md",
+        "FRAME_DELIVERY_BROKER.md",
+        "PUBLISHER_PRIVATE_FRAME_INGRESS.md",
+        "RECORDING_PRIVATE_VIDEO_INGRESS.md",
+        "OPTIONAL_FRAME_IMAGE_DELIVERY.md",
+        "POOL_DRAIN_ORACLE.md"
       ]
     },
     {
@@ -1046,7 +1067,8 @@
         "Numeric position/size/rotation drafts and explicit fresh-draft recovery now pass actual shipping workspace/model/compiled-view/pixel checks, including exact combined 873. These do not qualify mounted SwiftUI identity, native keyboard/AX delivery, full-window layout or contrast; original issue remains open.",
         "Settings sliders now have native operation names/unit-bearing accessibility values and Close settings is named; exact77 universal compilation passes. Actual mounted AX/keyboard/VoiceOver delivery and full-window/contrast acceptance remain unqualified.",
         "Latest source names native effect/AU parameters and operations, secondary safe-zone/Follow Program controls and cue-specific rundown actions. Independent source reviews and combined 5c7dbea unsigned universal typecheck pass; actual mounted AX/keyboard/VoiceOver, full-window/contrast acceptance remains unqualified.",
-        "Annotation toolbar now retains narrow-canvas controls using the existing native scroll row and intrinsic picker width. All 192 actual hidden native geometry cases and separate failure-artifact custody checks pass; actions/owners are inert. Native keyboard/AX/VoiceOver, focus, pixels/contrast and full-window operator acceptance remain unqualified."
+        "Annotation toolbar now retains narrow-canvas controls using the existing native scroll row and intrinsic picker width. All 192 actual hidden native geometry cases and separate failure-artifact custody checks pass; actions/owners are inert. Native keyboard/AX/VoiceOver, focus, pixels/contrast and full-window operator acceptance remain unqualified.",
+        "The annotation fixture now identifies actual native segmented/switch types, preserving192geometry cases and a missing-picker negative. This repairs fixture matching only; original hosted types/count/case unknown, and complete AX/keyboard/focus/text/contrast/operator validation remains unqualified."
       ],
       "evidence": [
         "STUDIO_CONTROLS.md",
@@ -1258,11 +1280,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers). Fresh complete repository audit finds 135 macOS issues, 101 closed / 34 open, no outside-inventory open tasks or open PRs; no additional closure justified. Exact local e122c91 generation, unsigned universal arm64+x86_64 Release and bundle PASS with 724-path expanded source/recipe manifest and vendor. Annotation 192-case geometry, Program-health 12 Core tests plus exact block probe, recovery baseline133/fixed0 and package five actual method/IO phases are bounded reviewed evidence, not new operator/device/capture/sustained qualification. Published 9cb; c90 CI ARM step19 recovery failure preserved, Intel live and iOS success; latest9cb pending/zero jobs at recorded snapshots. Earlier issue states, failed gates and receipts remain unchanged.",
-  "integratedMain": "e122c91e5222c422ea809e744dddaf893dbb4681",
-  "githubStateRefreshedAt": "2026-10-22T11:42:59Z",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); fresh 14:05:53 audit accounts for all 135 macOS issues, 101 closed / 34 open, with zero PR or closure candidates. Published 30f native CI terminal FAILURE on both Mac jobs / iOS success; Core 596/82 passes separately. Exact local d28 generation, unsigned universal arm64+x86_64 Release and bundle PASS with 775-path expanded source/recipe manifest and vendor. Raw resource admission and independently backed broker, publisher, recorder, camera, optional-image and guest paths have reviewed bounded component proofs. Controlled PCM and annotation fixes retain original numeric gates and unknown hosted causes. Factory/selected ISO-video runtime and performance-fixture migration remain pending/omitted. No new original operator, live-device/provider/capture or sustained qualification. Earlier wave objects, issue states and failed receipts preserved.",
+  "integratedMain": "d28e7269c62a039c19ef36219f1379031838fa9d",
+  "githubStateRefreshedAt": "2026-10-22T14:05:53Z",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "9cb68c901fa620db294436324ab1ba0a723f22dd",
+  "publishedIntegration": "30f2209199b818cc685a24647a46e5a54263daa3",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1282,7 +1304,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "e122c91e5222c422ea809e744dddaf893dbb4681",
+  "currentReviewBase": "d28e7269c62a039c19ef36219f1379031838fa9d",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -4382,5 +4404,451 @@
       "scope": "C90 ARM failed, Intel remains live, iOS succeeded 588/82 in 210.314 s; latest 9cb pending with zero jobs. Local corrected fixture/build is not new hosted success; all earlier conclusions remain unchanged."
     },
     "acceptance": "27 closed /34 open unchanged; all original issue states and earlier wave receipts preserved. Fresh read-only audit finds no additional closure or PR to merge. No mounted AX, live browser/provider/device, real capture or sustained-performance qualification inferred. No issue/API writes, local runtime/build or publication for this ledger update."
+  },
+  "wave17Review": {
+    "currentLocalHead": "d28e7269c62a039c19ef36219f1379031838fa9d",
+    "publishedMainAtSnapshot": "30f2209199b818cc685a24647a46e5a54263daa3",
+    "githubAudit": {
+      "recordedAt": "2026-10-22T14:05:53Z",
+      "inventory": {
+        "path": "/tmp/stream-wave17-final-macos-inventory-20261022.json",
+        "bytes": 466356,
+        "sha256": "f18b130e8bb19257e7cc0c03a0609c66052e810a28cb6ce818586a4137358c88"
+      },
+      "review": {
+        "path": "/tmp/stream-wave17-final-closure-audit-20261022.json",
+        "bytes": 16853,
+        "sha256": "18cdbf5778633e97d2787c44772c461d6c23d9b89683c23f5d998fcd39e6ec4f"
+      },
+      "report": {
+        "path": "/tmp/stream-wave17-final-closure-audit-20261022.md",
+        "bytes": 1142,
+        "sha256": "28220c7b6a282c88b9d91acd002c30e52c1f2501bf34035ee1b446e7747262b7"
+      },
+      "originalCounts": {
+        "closed": 27,
+        "open": 34
+      },
+      "allMacOSCounts": {
+        "closed": 101,
+        "open": 34
+      },
+      "all61BodyAndStateHashesEqual": true,
+      "aggregateBindingsSHA256": "ce8e1661bb0cc3b694bc90fb930f3fe8eb9e7698eadd2187b074b5629b11e246",
+      "outsideOriginal61Open": [],
+      "openPullRequests": [],
+      "additionalClosureCandidates": []
+    },
+    "combinedNative": {
+      "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+      "status": "Generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS",
+      "receipt": {
+        "path": "/tmp/stream-wave17-final-parent-final-results-20261022.json",
+        "bytes": 786,
+        "sha256": "f81a0f585af0f2afe555a1bfb70943905743a323cde3366065e2d646d57090fa"
+      },
+      "checks": [
+        {
+          "label": "generate",
+          "exit": 0,
+          "log": "/tmp/stream-wave17-final-parent-final-generate-20261022.log",
+          "bytes": 168,
+          "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+        },
+        {
+          "label": "universal",
+          "exit": 0,
+          "log": "/tmp/stream-wave17-final-parent-final-universal-20261022.log",
+          "bytes": 252571,
+          "sha256": "3a801b65e75b325859ebd8439782b0721b417a0f2ccdd4601d0d1e6ae81b56f5"
+        },
+        {
+          "label": "bundle",
+          "exit": 0,
+          "log": "/tmp/stream-wave17-final-parent-final-bundle-20261022.log",
+          "bytes": 517,
+          "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+        }
+      ],
+      "expandedManifest": {
+        "path": "/tmp/stream-wave17-built-production-manifest-20261022.json",
+        "bytes": 94484,
+        "sha256": "a25baf242c12761df201568db000a6c89b3f884941fc9c662dec5b37d4bbc093"
+      },
+      "paths": 775,
+      "vendor": "d9fceedc068994023900b4d69588b8af19136752",
+      "scope": "Source/recipe set now includes all workflows; expanded path count is not directly comparable with prior scopes.",
+      "exactSourceVerification": {
+        "path": "/tmp/stream-wave17-ledger-source-verification-20261022.json",
+        "bytes": 312,
+        "sha256": "6f469f01820f2c9f2145dcd7e1f7e534804f37760bb5e6da7a071cd0a59363fc"
+      }
+    },
+    "rawResourceAdmission": {
+      "documents": [
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/POOL_DRAIN_ORACLE.md",
+          "bytes": 5139,
+          "sha256": "de2b1a74978b426cbb392c01c0d034ea3204960aba10abc2144734e69ce06c3a"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/POOL_DRAIN_ORACLE_2026-10-22.json",
+          "bytes": 49445,
+          "sha256": "a3e644edb587bc93d58a304e96713a52bf9e8c285472b98982ff3b162aa566f5"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/RAW_VIDEO_RESOURCE_ADMISSION.md",
+          "bytes": 4619,
+          "sha256": "e143e042d57202c2ba7849f277cd2bdeb7cb6b128de06f6b1c4327cb764e0936"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/RAW_VIDEO_RESOURCE_ADMISSION_2026-10-22.json",
+          "bytes": 8791,
+          "sha256": "9988679df1b177f91825984b3411a998c602bcb27040ecfbbe916918d966c0bc"
+        }
+      ],
+      "independentReviews": [
+        {
+          "path": "/tmp/stream-wave17-pool-oracle-parent-review-20261022.json",
+          "bytes": 2066,
+          "sha256": "e1cd4636bae83415f47d061b4cf62bb20e3819021078594cd15935c95ddcdf19"
+        },
+        {
+          "path": "/tmp/stream-wave17-raw-resources-parent-review-20261022.json",
+          "bytes": 4557,
+          "sha256": "62286a79679f44d832f45bc8d07b5ba716a00a801f2dd07604b2248ea701773b"
+        }
+      ],
+      "proof": "Owned CV/IOSurface/Metal alias controls falsify generic all-N pool-drain refunds. Eleven pure budget tests and native 16px-pool ownership/threshold/rollback/claim/global-lock controls pass.",
+      "policy": "Separate conservative software admission uses fresh process footprint plus all committed bank ceilings plus proposed storage against RAM/5 bounded 256 MiB\u20134 GiB; resident bytes intentionally count again. Actual stride/data/IOSurface backing is measured. Exposed retired generations stay charged; unexposed rollback refunds only after actual pool detachment. Bounded calls/claims/banks and exact ownership moves prevent stale cancellation refunds.",
+      "scope": "No free-RAM/process-hard-cap/codec-scratch or hardware/performance certification. Generic stop ACK, wrapper completion or all-N checkout does not prove opaque aliases gone."
+    },
+    "deliveryBroker": {
+      "documents": [
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/FRAME_DELIVERY_BROKER.md",
+          "bytes": 7508,
+          "sha256": "142d0df0f3db8cdf1ec4bafc58ad7a0d5169182f30419b2cbcd148ab5c697f60"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/FRAME_DELIVERY_BROKER_2026-10-22.json",
+          "bytes": 23427,
+          "sha256": "2d208d3af8d2f9bcdd79171c07fdc64c97832f88864ddf737665e50a6cba4137"
+        }
+      ],
+      "proof": "Actual Engine/SceneRenderer matrix keeps source cap 4: four retained private-buffer/surface consumers each exhaust only their own bank while all 12 renders reach a healthy endpoint. Replacing detached sample with original causes4 renders / 8 failures; public-sequence-only lookup fails restart pixels/PTS. Lifecycle, exact lease receipts, fractional 17\u00d718 geometry and all six clock cases pass. Retained controls/executables are separated from the earlier overwritten-generator-path history.",
+      "semantics": "Ring2 plus one synchronous trusted source borrow and next render; queued work contains publication identity rather than source samples. Synchronous source/private admission precedes factory; async installation ACK and current cancellation/authority checks precede activation. Only detached copies or sealed conversions enter callbacks; engine-owned source claims outlive private endpoint cleanup.",
+      "scope": "Owned synthetic storage/lifecycle evidence, not arbitrary SDK scheduling/progress or sustained capacity. Future performance fixture must migrate to admitted recording capacity; that source-only change is not included as qualified work."
+    },
+    "publisherIngress": {
+      "document": {
+        "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+        "path": "apple/docs/PUBLISHER_PRIVATE_FRAME_INGRESS.md",
+        "bytes": 5226,
+        "sha256": "8914297bdc1ad7f756e3c80f71b67fe5917ab408962be13e8678b31306273ee0"
+      },
+      "finalReview": {
+        "path": "/tmp/stream-wave17-final-publisher-guest-independent-review-20261022.md",
+        "bytes": 4450,
+        "sha256": "12957639a2384f06b8113d0a5184ae2f8e694b32ed514954eaced5bfedbff5dc"
+      },
+      "receipt": {
+        "path": "/tmp/stream-publisher-private-ingress-receipt-20261022.json",
+        "bytes": 9421,
+        "sha256": "498515915587ee4306ac75d84f9c4744407ab2a38e94d80de3ce90d1e53cf568"
+      },
+      "proof": "Actual controller/broker/admission with inert publishers: six-buffer private raw endpoint fills while healthy sibling receives 20 frames; held installation/cancellation/managed revision revoke produce zero starts. Invalid batch crosses no factory; group claim/capability mismatch cleanup, restart storage, distinct-timescale PTS and already-live sibling authority preservation pass. Actual codec-only VT/AAC/file decode proof is separately scoped before managed-only followup; no transport implementations linked and explicit AVAudioFile PCM mode.",
+      "scope": "Independent raw destination/shared encoder group has its own admitted ingress. Shared target conversion uses the same aspect-fit bank, not an extra full copy. Existing cadence/compressed identity/GOP behavior retained. Final review verifies 35 bindings and current controller slices; no provider/network/physical/sustained claim."
+    },
+    "cameraConversion": {
+      "receipt": {
+        "path": "/tmp/stream-frame-transfer-conversions-20261022/apple/build/frame-delivery-conversion-validation/receipt.json",
+        "bytes": 1451,
+        "sha256": "29bbd490d70c3dad274bc2d8f8d1d5c56cbf1e91172d761f51e638efe90fe8a9"
+      },
+      "independentReview": {
+        "path": "/tmp/stream-wave17-camera-converter-review-20261022/review.md",
+        "bytes": 2879,
+        "sha256": "b8d62365ed458a0203c67f01ced88164c94ab49948d78829024e6179302525e8"
+      },
+      "proof": "Actual owned sealed BGRA/fit/camera conversion, source 4 / private 4 admission and real queue full/cadence/drain controls pass with selected CMIO effects inert. Held opaque callback cannot retain original source; pre-factory refusal and old held-ACK restart cancellation pass.",
+      "scope": "Component proof binds the older broker snapshot before publication-ID correction, not the final integrated broker isolation matrix. Actual StreamController/UI routes source-reviewed and now universal-compiled. No installed CMIO extension/device/capture/network qualification."
+    },
+    "recorderIngress": {
+      "documents": [
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/RECORDING_PRIVATE_VIDEO_INGRESS.md",
+          "bytes": 7583,
+          "sha256": "1c2bcdbaf3e4877d9b2e07bdbc1ad2d369cce8ce9bbd2dcb03b74500472c0a19"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/RECORDING_PRIVATE_VIDEO_INGRESS_2026-10-22.json",
+          "bytes": 16486,
+          "sha256": "7d2ccf811d786b98dc9aedae9182b8ef1f012aace3fae9ee1709c762c6e43053"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/RECORDING_CONTROLLER_PRIVATE_INGRESS_2026-10-22.json",
+          "bytes": 30435,
+          "sha256": "18c861b0bce9242751d8fcc806c1f7795f5876de5bf691ddb7e4d8c31fbb9308"
+        }
+      ],
+      "finalReview": {
+        "path": "/tmp/stream-wave17-final-recorder-monitor-integration-review-20261022.md",
+        "bytes": 2988,
+        "sha256": "5f0cdc99e3f3dd2e1331d285bf52f6e7851f641ec57635169157d92ef745a1ef"
+      },
+      "proof": "Actual writers/router/admission/converter produce decoded private pixels/paint/timing, queue-capacity and distinct typed-drop/rotation/stop receipts. Original raw-enqueue negative decodes 24 mutated frames and traps; classifier cannot read optimized assertion text and exits 1, retained as incompletely classified negative. Actual RecordingController fixture passes original Program and isolated-audio WAV/M4A/countdown/pause/rotation/storage plus held-install Pause, Stop stopping-until-ACK and fresh retry.",
+      "policy": "Original decimal-byte queue Q retained; Program private Q+5, direct ISO private Q+2 with source 4. Admission before writers and exact removal receipts before terminal journal; old/new rotation banks coexist, exposed storage stays charged.",
+      "scope": "Independent 52-binding final review; final d28 universal fills the later controller integration compile gate. SourceFactory/CompositionEngine graph and selected ISO-video worker runtime were not executed in these proofs. Factory+ISO worker new runtime proof remains pending and omitted; no capture/network/device/performance claim."
+    },
+    "optionalImages": {
+      "documents": [
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/OPTIONAL_FRAME_IMAGE_DELIVERY.md",
+          "bytes": 5676,
+          "sha256": "919ab7e833c300605a463f24dd06c5202f5a56db4fa9b5d00990123114291101"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/OPTIONAL_FRAME_IMAGE_DELIVERY_2026-10-22.json",
+          "bytes": 5374,
+          "sha256": "8ca585e7e158e1e2506f5ae3f0b39b251247e8ed9b16460f3b9ade30e95e950a"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/OPTIONAL_FRAME_DELIVERY_ENGINE_2026-10-22.json",
+          "bytes": 13093,
+          "sha256": "1e135ad2f2eee074a1fc758670a1e7938cdc1c2199a1d82b6f35c491477c5d20"
+        }
+      ],
+      "independentReviews": [
+        {
+          "path": "/tmp/stream-wave17-optional-engine-independent-review-20261022.json",
+          "bytes": 8374,
+          "sha256": "8e8431daaffae008df58cc0e66a896a3c50438e3dd85605676bf9089739ee401"
+        },
+        {
+          "path": "/tmp/stream-wave17-final-recorder-monitor-integration-review-20261022.md",
+          "bytes": 2988,
+          "sha256": "5f0cdc99e3f3dd2e1331d285bf52f6e7851f641ec57635169157d92ef745a1ef"
+        }
+      ],
+      "proof": "Primitive actual deferred images / private 5, MainActor one-pending handoff and held external subscription controls pass. Separate actual 16px Engine/renderer/OptionalFrameDelivery proof retains five images while all 18 renders succeed at source4, immutable old pixels/fresh replacement bank/healthy sibling/cancel-before-install/concurrent Stop. All 91 independent checks and 35 file bindings clear.",
+      "scope": "Existing throttle precedes source transfer; closed lifetime rejects stale UI publications. Real StreamController/window/display/device graphs are source-reviewed/compiled, not executed. No deliberately held actor-install cancellation or stalled cleanup is claimed; initial mismatched-Core compile failure retained separately."
+    },
+    "guestReturns": {
+      "documents": [
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/GUEST_RETURN_FRAME_DELIVERY.md",
+          "bytes": 3775,
+          "sha256": "8b4f9e92cd0c1fec5c369200b4ecae0d51d30b6a37ca6e024357ea74a0879678"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/GUEST_RETURN_FRAME_DELIVERY_2026-10-22.json",
+          "bytes": 3823,
+          "sha256": "3ceeca380dfd1294c7fee9a53fc9cb26351a72f4bea71054be76f9372f8703b5"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/GUEST_INSTALLATION_FENCE.md",
+          "bytes": 3139,
+          "sha256": "0421218efba7e3091ddf2be0eea6939bd14cb1c3b628ff5a4ae2c0379d468bcd"
+        },
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/GUEST_INSTALLATION_FENCE_2026-10-22.json",
+          "bytes": 13758,
+          "sha256": "ccf56af081bc5456fad9298bca7fbf9623e80f2e152d96058e22ff99f1d4f204"
+        }
+      ],
+      "finalReviews": [
+        {
+          "path": "/tmp/stream-wave17-guest-return-independent-review-20261022.md",
+          "bytes": 6282,
+          "sha256": "8322d6e2f683a411e4a9f1f86f56167b05ba3b6dbac7aaee743088e390964880"
+        },
+        {
+          "path": "/tmp/stream-wave17-final-publisher-guest-independent-review-20261022.md",
+          "bytes": 4450,
+          "sha256": "12957639a2384f06b8113d0a5184ae2f8e694b32ed514954eaced5bfedbff5dc"
+        }
+      ],
+      "proof": "Five owned BGRA/VT resource/low-balanced-high raster/PTS/admission cases pass without RTC. Actual Sink positive 3 preserves late-revoked ACK and explicit exactly-once old-owner cleanup/replacement; restoring only old guard fails. Resource source 4 / private 5 / adaptive-raster 2, typed capacity errors and exact child moves are integrated.",
+      "scope": "Sender serial VT-close-before-source-removal order is source-reviewed, not executed Sender/RTC drain. Sink constructs idle mixer only, no PCM/DSP/codec run there. Current full controller source compiles in final universal; no native return PCM/AEC/A-V or #127 closure."
+    },
+    "pcmAndAnnotation": {
+      "documents": [
+        {
+          "source": "d28e7269c62a039c19ef36219f1379031838fa9d",
+          "path": "apple/docs/PCM_DELIVERY_TIMING_DIAGNOSIS.md",
+          "bytes": 5082,
+          "sha256": "1940fbb1323b4f7a8519a815cdfc8a743b4fbd6e72820aef85f615bc7540b74d"
+        }
+      ],
+      "reviews": [
+        {
+          "path": "/tmp/stream-wave16-pcm-independent-review-20261022.md",
+          "bytes": 2968,
+          "sha256": "ff171487230d197fdd9524a373403dc884660d6f1b58504f504ba6367d165188"
+        },
+        {
+          "path": "/tmp/stream-wave16-annotation-independent-review-20261022/review.md",
+          "bytes": 2680,
+          "sha256": "fc17d49caa15ad60353d4b75cd889729724ac153088cf70e36366b0637423db9"
+        }
+      ],
+      "pcmEvidence": [
+        {
+          "path": "/tmp/stream-wave16-pcm-evidence-20261022/original-baseline/manifest.json",
+          "bytes": 2231,
+          "sha256": "6c72135a191775828bebf6115bd87d074b2e3da37508dd65ebd53a9ffb56eb62"
+        },
+        {
+          "path": "/tmp/stream-wave16-pcm-evidence-20261022/owned-delay-baseline/manifest.json",
+          "bytes": 2260,
+          "sha256": "6137381d4c9fac2ee414c44f0f8a5003c27238360be2b5531b96328c42b8c1be"
+        },
+        {
+          "path": "/tmp/stream-wave16-pcm-evidence-20261022/owned-delay-fixed/manifest.json",
+          "bytes": 2790,
+          "sha256": "9727a128619e741b460b387350e085e011dd8fc6a563d1b2105e293af19ca270"
+        }
+      ],
+      "annotationEvidence": {
+        "path": "/tmp/stream-wave16-annotation-evidence-20261022/manifest.json",
+        "bytes": 6055,
+        "sha256": "9aa422747419ad6608a55b08f8f7b302d6c4e9888b3f56a21f5c408719154d82"
+      },
+      "pcm": "Original ordinary full fixture passes without explaining hosted Intel aggregate. One-shot40ms postdecode stall fails unchanged original lower PTS check; first fixed executed fixture passes. Fresh serialized delivery clock trims only expired native leading frames, preserving source bytes/rate/duration/PTS offset; no timestamp rebase, video/AVPlayer path unchanged.26 bindings independently verified.",
+      "annotation": "Fixture matches exactly 1 actual NSSegmentedControl and 2 NSSwitch with mounted/visibility/enabled checks, retaining all 192 geometry cases/timeouts. Actual missing-picker negative fails.16 retained bindings clear. Original hosted count/types/case remain UNKNOWN; no hosted cause or AX/keyboard/contrast qualification inferred."
+    },
+    "finalReviewSummaries": [
+      {
+        "path": "/tmp/stream-wave17-final-publisher-guest-independent-review-20261022.md",
+        "bytes": 4450,
+        "sha256": "12957639a2384f06b8113d0a5184ae2f8e694b32ed514954eaced5bfedbff5dc"
+      },
+      {
+        "path": "/tmp/stream-wave17-final-recorder-monitor-integration-review-20261022.md",
+        "bytes": 2988,
+        "sha256": "5f0cdc99e3f3dd2e1331d285bf52f6e7851f641ec57635169157d92ef745a1ef"
+      }
+    ],
+    "hostedCI": {
+      "c90de17": {
+        "receipt": {
+          "path": "/tmp/stream-ci-c90de17-terminal-report-20261022.json",
+          "bytes": 22254,
+          "sha256": "ecc49c4d8df6375eff44cdbcc90c5f4753d3d87cd0485e3f989dabd56ed7a488"
+        },
+        "report": {
+          "path": "/tmp/stream-ci-c90de17-terminal-report-20261022.md",
+          "bytes": 3163,
+          "sha256": "bdd8b0729ab07a5dbf576265d316719893eda6fa59e460053359df400e6ec82d"
+        },
+        "source": "c90de17c24bb6265e9796582be39be0e6e350b0b",
+        "run": 39764965913,
+        "conclusion": "failure",
+        "jobs": [
+          {
+            "id": 119784721840,
+            "name": "StreamMac build and tests (macos-26)",
+            "conclusion": "failure",
+            "core": [
+              {
+                "line": 9345,
+                "text": "2026-10-22T11:09:26.7401210Z \u2714 Test run with 588 tests in 82 suites passed after 92.940 seconds."
+              }
+            ]
+          },
+          {
+            "id": 119784721962,
+            "name": "StreamCore tests (iOS Simulator)",
+            "conclusion": "success",
+            "core": [
+              {
+                "line": 2588,
+                "text": "2026-10-22T11:03:46.6456700Z \u2714 Test run with 588 tests in 82 suites passed after 210.314 seconds."
+              }
+            ]
+          },
+          {
+            "id": 119784722074,
+            "name": "StreamMac build and tests (macos-26-intel)",
+            "conclusion": "failure",
+            "core": [
+              {
+                "line": 9532,
+                "text": "2026-10-22T11:12:37.7312850Z \u2714 Test run with 588 tests in 82 suites passed after 189.719 seconds."
+              }
+            ]
+          }
+        ]
+      },
+      "30f2209": {
+        "receipt": {
+          "path": "/tmp/stream-ci-30f2209-terminal-report-20261022.json",
+          "bytes": 22284,
+          "sha256": "c023792b6182d76e89e08e20a8f300461c3d11b7e760039b34de9e51d87e8332"
+        },
+        "report": {
+          "path": "/tmp/stream-ci-30f2209-terminal-report-20261022.md",
+          "bytes": 3275,
+          "sha256": "9f652fa3a0704974b1556242e52842b5b1351fde42555b30aabc1f101512cdff"
+        },
+        "source": "30f2209199b818cc685a24647a46e5a54263daa3",
+        "run": 39776430822,
+        "conclusion": "failure",
+        "jobs": [
+          {
+            "id": 119822293211,
+            "name": "StreamCore tests (iOS Simulator)",
+            "conclusion": "success",
+            "core": [
+              {
+                "line": 2608,
+                "text": "2026-10-22T12:33:21.6316700Z \u2714 Test run with 596 tests in 82 suites passed after 287.452 seconds."
+              }
+            ]
+          },
+          {
+            "id": 119822293539,
+            "name": "StreamMac build and tests (macos-26)",
+            "conclusion": "failure",
+            "core": [
+              {
+                "line": 9370,
+                "text": "2026-10-22T12:39:47.3872830Z \u2714 Test run with 596 tests in 82 suites passed after 96.186 seconds."
+              }
+            ]
+          },
+          {
+            "id": 119822293625,
+            "name": "StreamMac build and tests (macos-26-intel)",
+            "conclusion": "failure",
+            "core": [
+              {
+                "line": 9557,
+                "text": "2026-10-22T12:52:06.0607420Z \u2714 Test run with 596 tests in 82 suites passed after 313.463 seconds."
+              }
+            ]
+          }
+        ]
+      },
+      "scope": "Both c90 and 30f terminal FAILURE on both Mac jobs, iOS success. C90 recovery fixture was later repaired;30f ARM expected-control-count and Intel accumulated-malformed-PCM constituents remain unknown in original logs. Local controlled fixes do not relabel failed jobs or prove their exact hosted causes. No new unpublished-head CI is called pending/successful; any queue/run exists only after publication."
+    },
+    "acceptance": "Original 27 closed / 34 open, all 135 macOS 101 closed / 34 open and zeroPR/closure candidates unchanged. All prior wave objects, original criteria/state hashes and failed qualification receipts preserved. #90/#92/#124/#127/#155 and all other incomplete original tasks remain open. No new API writes/build/runtime or qualification for this ledger update."
   }
 }
