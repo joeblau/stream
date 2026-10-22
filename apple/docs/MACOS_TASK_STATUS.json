@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 40 open, 21 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
+  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 39 open, 22 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -84,7 +84,7 @@
     "wave2PerformanceDispatch": "Workflow timeout now 90 minutes, native architecture checks are explicit, and owned workload process groups receive bounded SIGINT/SIGTERM/final cleanup. Five focused lifecycle tests pass. No 600-second hosted or native Intel sustained result is claimed by this readiness fix. See /tmp/stream-wave2-automation-proof-20261022.md. Actual bounded 600-second/workload native ARM+Intel workflow dispatched at source 0d79056: run39713883982; results pending, no sustained PASS claimed.",
     "wave2HostedCI": "Run 39706795991 exact main 40d0737: iOS success; both macOS jobs fail step 12 from identical headless NSApp nil unwrap in StudioAutomationEndpoint.swift:61, after successful harness builds. Fixed by guarded headless focus with new focused regression and unchanged managed-start harness passing locally. Integrated fix hosted verification remains pending; later old-run qualifications were skipped. See /tmp/stream-wave2-ci-two-failure-classification-20261022.md.",
     "wave2ShippingApp": "Final combined shipping source 7cfa9b3 passes unsigned universal Release for arm64/x86_64 and actual bundle/sandbox/App Intents/transport-hook audit. It includes all permission, initial-lock/display and scaled-badge fixes. Logs: /tmp/stream-wave2-final-scaled-permission-release-20261022.log and /tmp/stream-wave2-final-scaled-permission-bundle-20261022.log. No Developer ID/notarization or physical Intel runtime claim.",
-    "wave2Recovery": "Two independent original-criteria reviews support closure after final source publication. Real RTMP path recovery preserves the healthy SRT publisher, encoder, session and 392-frame timeline. The final controlled source/lifecycle/permission fixture passes 22 decoded phases and 468 frames, the original 40/80 ms timing limits and five-second ownership barrier. Denied PCM is exactly zero; healthy independent PCM continues during a blocked reset. Root repeats the actual initial-session/empty-display observation and complete native guest/mixer permission regression: PASS. Final combined source 7cfa9b3 passes universal Release and bundle audit. Physical OS/TCC/cable/interface delivery remains unclaimed.",
+    "wave2Recovery": "Task 158 closed after publication in 159ea68, two independent original-criteria reviews, actual scoped media proof and final universal validation; parent checklist reconciled. Real RTMP path recovery preserves the healthy SRT publisher, encoder, session and 392-frame timeline. The final controlled source/lifecycle/permission fixture passes 22 decoded phases and 468 frames, the original 40/80 ms timing limits and five-second ownership barrier. Denied PCM is exactly zero; healthy independent PCM continues during a blocked reset. Root repeats the actual initial-session/empty-display observation and complete native guest/mixer permission regression: PASS. Final combined source 7cfa9b3 passes universal Release and bundle audit. Physical OS/TCC/cable/interface delivery remains unclaimed.",
     "wave2SharedCore": "Combined Core source is unchanged from 33e9bc9: 563 tests in 80 suites pass, excluding only ChannelFXProcessorTests and VoicePolishProcessorTests because of preserved actual host AudioHAL stalls. HostedAudioUnitTests serialization is included and passes. The full suite remains unqualified. /tmp/stream-wave2-compatible-core-final-20261022.log and matching xcresult."
   },
   "issues": [
@@ -283,11 +283,9 @@
       "code": "R02",
       "title": "[macOS][R02] Apply desktop session resilience and configurable source failover",
       "url": "https://github.com/joeblau/stream/issues/158",
-      "githubState": "open",
-      "completion": "original software criteria and combined universal build verified; closure proposed after publication",
-      "remaining": [
-        "Publish final combined source and reconcile exact original acceptance criteria and GitHub state. Two independent reviews and final universal build find no remaining concrete software blocker."
-      ],
+      "githubState": "closed",
+      "completion": "completed against original software acceptance criteria",
+      "remaining": [],
       "qualificationLimits": [
         "Lifecycle, topology and TCC transitions use controlled shipping callbacks/discovery boundaries with actual owned media. Physical OS/TCC/cable/interface delivery and broad hardware/provider coverage were not measured. Initial lock detection uses the public session dictionary plus a supplemental lock marker whose compatibility is explicitly documented."
       ],
@@ -300,8 +298,11 @@
         "/tmp/stream-wave2-root-permission-audio-20261022.log",
         "apple/docs/SOURCE_FAILOVER_NATIVE.md",
         "apple/docs/DESKTOP_LIFECYCLE_PATH_QUALIFICATION.md",
-        "apple/docs/DESKTOP_OBSERVATION_QUALIFICATION.md"
-      ]
+        "apple/docs/DESKTOP_OBSERVATION_QUALIFICATION.md",
+        "/tmp/stream-wave2-final-scaled-permission-release-20261022.log",
+        "/tmp/stream-wave2-final-scaled-permission-bundle-20261022.log"
+      ],
+      "publishedSource": "159ea68d865ab0a1cc673178f9f8c52b9d2d0f1e"
     },
     {
       "number": 155,
@@ -890,17 +891,17 @@
   ],
   "scopeCounts": {
     "initialOpenFeatureTasks": 48,
-    "openFeatureTasks": 29,
+    "openFeatureTasks": 28,
     "openEpicsAndRoadmap": 11,
     "total": 61,
-    "currentlyOpen": 40,
-    "closedSinceInitialInventory": 21
+    "currentlyOpen": 39,
+    "closedSinceInitialInventory": 22
   },
-  "overallStatus": "Incomplete roadmap: verified initial inventory now 40 open / 21 closed. Task 175 is closed after original functional acceptance, independent review, combined universal validation and publication. Permission recovery and initial-lock/display-observation follow-ups for 158 await final combined proof/review. Remaining device, provider, release and qualification limits are explicit.",
-  "integratedMain": "0d79056",
-  "githubStateRefreshedAt": "2026-10-22T02:55:25.245884+00:00",
+  "overallStatus": "Incomplete roadmap: exact initial inventory now 39 open / 22 closed, with zero open PRs. Tasks 175 and 158 are closed after original acceptance review, actual scoped media/controller evidence, independent review, combined universal validation and publication. Both parent checklists are reconciled. Remaining device, provider, release and qualification limits are explicit. Hosted CI and sustained native ARM/Intel performance results remain pending.",
+  "integratedMain": "159ea68",
+  "githubStateRefreshedAt": "2026-10-22T03:02:43.301278+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "0d790563590cff75d50bfef0d127b6839e55a8bc",
+  "publishedIntegration": "159ea68d865ab0a1cc673178f9f8c52b9d2d0f1e",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -920,17 +921,16 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "33e9bc9",
+  "currentReviewBase": "7cfa9b3",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
     "closuresPerformed": [
-      175
-    ],
-    "proposedClosureAfterFinalCombinedBuildAndPublication": [],
-    "pendingRecoveryAndDeckAcceptance": [
+      175,
       158
     ],
-    "githubCountsNote": "Exact paginated API reconciliation of the 61 initial issues verifies 40 open / 21 closed and zero open PRs after closing 175 and checking its parent checklist."
+    "proposedClosureAfterFinalCombinedBuildAndPublication": [],
+    "pendingRecoveryAndDeckAcceptance": [],
+    "githubCountsNote": "Exact paginated API reconciliation of the 61 initial issues verifies 39 open / 22 closed and zero open PRs after closing 175 and 158 and checking their parent checklists."
   }
 }
