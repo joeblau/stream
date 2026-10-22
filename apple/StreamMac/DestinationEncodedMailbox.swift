@@ -23,7 +23,7 @@ final class DestinationEncodedMailbox: @unchecked Sendable {
     private var startupVideo: [CMSampleBuffer] = []
     private var startupAudio: [SharedEncodedAudio] = []
     private var bytes = 0, drops = 0
-    private var enabled = false, accepting = true, needsKeyframe = true
+    private var enabled = false, accepting = true, stopped = false, inFlight = false, needsKeyframe = true
     private let maximumPackets: Int, maximumBytes: Int
     private let continuation: AsyncStream<Void>.Continuation
     private var consumer: Task<Void, Never>?
@@ -42,6 +42,7 @@ final class DestinationEncodedMailbox: @unchecked Sendable {
                     case .video(let sample): if await publisher.appendEncodedVideo(sample) { self.requestKeyframe() }
                     case .audio(let sample): if await publisher.appendEncodedAudio(sample) { self.requestKeyframe() }
                     }
+                    self.consumed()
                 }
             }
         }
@@ -52,8 +53,11 @@ final class DestinationEncodedMailbox: @unchecked Sendable {
     }
     private func next() -> Packet? {
         lock.lock(); defer { lock.unlock() }
-        guard accepting, enabled, !packets.isEmpty else { return nil }
-        let packet = packets.removeFirst(); bytes -= packet.bytes; return packet
+        guard !stopped, enabled, !packets.isEmpty else { return nil }
+        let packet = packets.removeFirst(); bytes -= packet.bytes; inFlight = true; return packet
+    }
+    private func consumed() {
+        lock.lock(); inFlight = false; lock.unlock()
     }
     func setPublished(_ published: Bool) {
         lock.lock(); enabled = published; clearLocked(); lock.unlock()
@@ -117,8 +121,25 @@ final class DestinationEncodedMailbox: @unchecked Sendable {
     func statistics() -> (depth: Int, drops: Int, bytes: Int, waitingForKeyframe: Bool) {
         lock.lock(); defer { lock.unlock() }; return (depth, drops, bytes, needsKeyframe)
     }
+    /// The encoder has stopped admitting input and delivered its EOS packets.
+    /// Drain this destination only; a stalled adapter cannot hold other outputs.
+    func finish(timeout: Double = 1) async -> Bool {
+        lock.withLock {
+            accepting = false
+            // Startup/recovery without an IDR has no decodable GOP to drain.
+            if needsKeyframe { drops += depth; clearLocked() }
+        }
+        continuation.yield(())
+        let deadline = ContinuousClock.now.advanced(by: .seconds(max(0, min(2, timeout))))
+        repeat {
+            if lock.withLock({ packets.isEmpty && !inFlight }) { return true }
+            if Task.isCancelled { return false }
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { return false }
+        } while ContinuousClock.now < deadline
+        return false
+    }
     func stop() {
-        lock.lock(); accepting = false; enabled = false; clearLocked(); lock.unlock()
+        lock.lock(); accepting = false; enabled = false; stopped = true; clearLocked(); lock.unlock()
         continuation.finish(); consumer?.cancel()
     }
 }

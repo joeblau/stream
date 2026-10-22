@@ -56,6 +56,34 @@ enum ProgramRecordingFixtures {
         return sample
     }
 
+    /// Explicit independent offline decoder, selected only by fixture callers.
+    /// AVAudioFile avoids AVAssetReader's AudioQueue/HAL PCM conversion path.
+    static var usesAudioFileDecoder: Bool {
+        ProcessInfo.processInfo.environment["STREAM_FIXTURE_AUDIO_DECODER"] == "av-audio-file"
+    }
+    static func audioFileEvents(_ url: URL) throws -> (frames: Int64, onsets: [Double]) {
+        let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+        precondition(file.processingFormat.sampleRate == 48_000 && file.processingFormat.channelCount == 2,
+                     "Actual file must retain canonical48k stereo")
+        let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096)!
+        var onsets: [Double] = []
+        var lastSound: Double?
+        while file.framePosition < file.length {
+            let offset = file.framePosition
+            try file.read(into: buffer)
+            precondition(buffer.frameLength > 0 && file.framePosition > offset, "Offline PCM decoder stopped before EOF")
+            let channels = buffer.floatChannelData!
+            for frame in 0..<Int(buffer.frameLength) {
+                let sound = max(abs(channels[0][frame]), abs(channels[1][frame])) > 0.15
+                if sound {
+                    let time = Double(offset + Int64(frame)) / 48_000
+                    if lastSound.map({ time - $0 > 0.02 }) ?? true { onsets.append(time) }
+                    lastSound = time
+                }
+            }
+        }
+        return (file.framePosition, onsets)
+    }
     static func inspect(_ url: URL, expectedDuration: Double?, checkSync: Bool) async throws {
         let asset = AVURLAsset(url: url)
         let videos = try await asset.loadTracks(withMediaType: .video)
@@ -70,7 +98,8 @@ enum ProgramRecordingFixtures {
         let reader = try AVAssetReader(asset: asset)
         let videoOutput = AVAssetReaderTrackOutput(track: videos[0], outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         let audioOutput = AVAssetReaderTrackOutput(track: audios[0], outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
-        reader.add(videoOutput); reader.add(audioOutput)
+        reader.add(videoOutput)
+        if !usesAudioFileDecoder { reader.add(audioOutput) }
         precondition(reader.startReading())
         var flash: Double?; var tone: Double?; var frameCount = 0
         while let sample = videoOutput.copyNextSampleBuffer() {
@@ -82,7 +111,7 @@ enum ProgramRecordingFixtures {
                 if value > 150 && flash == nil { flash = sample.presentationTimeStamp.seconds }
             }
         }
-        while let sample = audioOutput.copyNextSampleBuffer() {
+        while !usesAudioFileDecoder, let sample = audioOutput.copyNextSampleBuffer() {
             guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
             let length = CMBlockBufferGetDataLength(block)
             var values = [Float](repeating: 0, count: length / 4)
@@ -92,6 +121,7 @@ enum ProgramRecordingFixtures {
             }
         }
         precondition(reader.status == .completed, reader.error?.localizedDescription ?? "Media decode failed")
+        if usesAudioFileDecoder { tone = try audioFileEvents(url).onsets.first }
         if checkSync {
             precondition(flash != nil && tone != nil, "Flash/tone must survive encoding")
             precondition(abs(flash! - tone!) < 0.06, "Decoded audio/video event drift \(flash! - tone!)")

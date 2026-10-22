@@ -103,7 +103,8 @@ private struct StorageNetworkMedia: Codable {
         let reader = try AVAssetReader(asset: asset)
         let video = AVAssetReaderTrackOutput(track: videos[0], outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         let audio = AVAssetReaderTrackOutput(track: audios[0], outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
-        reader.add(video); reader.add(audio)
+        reader.add(video)
+        if !ProgramRecordingFixtures.usesAudioFileDecoder { reader.add(audio) }
         try check(reader.startReading(), "Actual file decoder did not start")
         var frames = 0, audioFrames = 0, flashes: [Double] = [], tones: [Double] = []
         var previousLight = false, previousSound = false, lastVideo: Double?, maximumStep = 0.0
@@ -119,7 +120,7 @@ private struct StorageNetworkMedia: Codable {
                 if light && !previousLight { flashes.append(pts) }; previousLight = light
             }
         }
-        while let sample = audio.copyNextSampleBuffer() {
+        while !ProgramRecordingFixtures.usesAudioFileDecoder, let sample = audio.copyNextSampleBuffer() {
             audioFrames += sample.numSamples
             guard let block = sample.dataBuffer else { continue }
             let bytes = CMBlockBufferGetDataLength(block)
@@ -129,6 +130,10 @@ private struct StorageNetworkMedia: Codable {
             let onset = values.firstIndex { abs($0) > 0.15 }
             if let onset, !previousSound { tones.append(sample.presentationTimeStamp.seconds + Double(onset / 2) / 48_000) }
             previousSound = onset != nil
+        }
+        if ProgramRecordingFixtures.usesAudioFileDecoder {
+            let decoded = try ProgramRecordingFixtures.audioFileEvents(url)
+            audioFrames = Int(decoded.frames); tones = decoded.onsets
         }
         try check(reader.status == .completed && frames > 0 && audioFrames > 0, "Actual media decoding failed: \(String(describing: reader.error))")
         return StorageNetworkMedia(name: url.lastPathComponent, duration: try await asset.load(.duration).seconds,
@@ -141,6 +146,7 @@ private struct StorageNetworkMedia: Codable {
         let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         print("Artifacts: \(root.path)")
+        print("Audio decoder qualification: \(ProgramRecordingFixtures.usesAudioFileDecoder ? "explicit AVAudioFile offline PCM + AVAssetReader H264; original AVAssetReader PCM qualification remains separate" : "original AVAssetReader PCM/H264")")
         let ffmpeg = try receiverExecutable()
         let project = root.appendingPathComponent("Project")
         try DesktopStorage.prepare(project)

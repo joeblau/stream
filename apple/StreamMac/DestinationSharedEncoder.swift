@@ -50,7 +50,10 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.joeblau.StreamMac.sharedEncoder")
     private let lock = NSLock()
     private var video: [CMSampleBuffer] = [], audio: [CMSampleBuffer] = []
-    private var scheduled = false, accepting = true, keyframeRequested = true, failed = false, stopped = false
+    private var scheduled = false, accepting = true, finishing = false, keyframeRequested = true, failed = false, stopped = false
+    private var finishCancelled = false
+    private var didFinish = false
+    private var finishCompletions: [@Sendable (Bool) -> Void] = []
     private var sinks: [UUID: DestinationEncodedMailbox] = [:]
     private var videoSession: VTCompressionSession?
     private let prefersHardwareEncoder: Bool
@@ -123,19 +126,30 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     private func pump() {
         lock.lock()
         let v = video.isEmpty ? nil : video.removeFirst(), a = audio.isEmpty ? nil : audio.removeFirst()
-        let active = accepting
-        if v == nil && a == nil || !active { scheduled = false; video.removeAll(); audio.removeAll(); lock.unlock(); return }
+        let active = accepting || finishing
+        if v == nil && a == nil || !active {
+            scheduled = false; video.removeAll(); audio.removeAll()
+            let shouldFinish = finishing
+            lock.unlock()
+            if shouldFinish { finishOnQueue() }
+            return
+        }
         lock.unlock()
         do {
             if let v { try encodeVideo(v) }
             if let a { try encodeAudio(a) }
-        } catch { fail(); return }
+        } catch {
+            fail()
+            lock.lock(); scheduled = false
+            if finishing { scheduleLocked() }
+            lock.unlock(); return
+        }
         // Give compression callbacks a bounded opportunity to deliver the IDR
         // and release admission slots before another input pair is processed.
         // CompleteFrames emits callbacks, whose bookkeeping uses this queue.
         lock.lock()
         scheduled = false
-        if accepting && (!video.isEmpty || !audio.isEmpty) { scheduleLocked() }
+        if finishing || (accepting && (!video.isEmpty || !audio.isEmpty)) { scheduleLocked() }
         lock.unlock()
     }
     private func recipients() -> [DestinationEncodedMailbox] {
@@ -153,15 +167,40 @@ final class DestinationSharedEncoder: @unchecked Sendable {
             continuation.resume(returning: (encodedVideoCount, encodedAudioCount, inFlight, drops))
         } }
     }
+    /// Finish accepted input and the AAC converter's real end-of-stream tail.
+    /// Called only when the last member leaves; a surviving group is never reset.
+    func finish(_ completion: @escaping @Sendable (Bool) -> Void) {
+        lock.lock()
+        guard !stopped else { let success = didFinish; lock.unlock(); completion(success); return }
+        finishCompletions.append(completion)
+        if !finishing { accepting = false; finishing = true; scheduleLocked() }
+        lock.unlock()
+    }
+    private func finishOnQueue() {
+        do { try finishAudio() } catch { fail() }
+        if let videoSession, VTCompressionSessionCompleteFrames(videoSession, untilPresentationTimeStamp: .invalid) != noErr { fail() }
+        // CompleteFrames invokes the callbacks before returning. Their queue
+        // blocks must deliver the final video before resources/receipts finish.
+        queue.async { [self] in tearDownOnQueue() }
+    }
+    private func tearDownOnQueue() {
+        if let videoSession { VTCompressionSessionInvalidate(videoSession) }
+        videoSession = nil; converter = nil; pool = nil; audioFormat = nil; audioDescription = nil
+        lock.lock()
+        let success = finishing && !failed && !finishCancelled
+        didFinish = success
+        stopped = true; finishing = false; sinks.removeAll()
+        let completions = finishCompletions; finishCompletions.removeAll()
+        lock.unlock()
+        for completion in completions { completion(success) }
+    }
     func stop(_ completion: @escaping @Sendable () -> Void = {}) {
-        lock.lock(); accepting = false; stopped = true; video.removeAll(); audio.removeAll(); sinks.removeAll(); lock.unlock()
+        lock.lock(); accepting = false; finishing = false; stopped = true
+        if !finishCompletions.isEmpty { finishCancelled = true }
+        video.removeAll(); audio.removeAll(); sinks.removeAll(); finishCompletions.append { _ in completion() }; lock.unlock()
         queue.async { [self] in
-            if let videoSession {
-                VTCompressionSessionCompleteFrames(videoSession, untilPresentationTimeStamp: .invalid)
-                VTCompressionSessionInvalidate(videoSession)
-            }
-            videoSession = nil; converter = nil; pool = nil; audioFormat = nil; audioDescription = nil
-            completion()
+            if let videoSession { VTCompressionSessionCompleteFrames(videoSession, untilPresentationTimeStamp: .invalid) }
+            tearDownOnQueue()
         }
     }
     private func makeVideoSession() throws {
@@ -187,6 +226,7 @@ final class DestinationSharedEncoder: @unchecked Sendable {
         completesAcceptedVideo = delayStatus == kVTPropertyNotSupportedErr
         guard delayStatus == noErr || completesAcceptedVideo,
               VTSessionSetProperties(created, propertyDictionary: properties as CFDictionary) == noErr,
+              VTSessionSetProperty(created, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse) == noErr,
               VTCompressionSessionPrepareToEncodeFrames(created) == noErr else { throw CocoaError(.coderInvalidValue) }
         let attributes: [CFString: Any] = [kCVPixelBufferWidthKey: key.width, kCVPixelBufferHeightKey: key.height,
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA, kCVPixelBufferIOSurfacePropertiesKey: [:]]
@@ -232,10 +272,12 @@ final class DestinationSharedEncoder: @unchecked Sendable {
                 queue.async { [self] in
                     inFlight = max(0, inFlight - 1)
                     guard status == noErr, let sample else { fail(); return }
-                    lock.lock(); let active = accepting; lock.unlock()
+                    lock.lock(); let active = accepting || finishing; lock.unlock()
                     guard active else { return }
+                    let ordered: CMSampleBuffer
+                    do { ordered = try presentationOrderedVideo(sample) } catch { fail(); return }
                     encodedVideoCount += 1
-                    for sink in recipients() { sink.enqueueVideo(sample) }
+                    for sink in recipients() { sink.enqueueVideo(ordered) }
                 }
             })
         if result != noErr { inFlight -= 1; throw CocoaError(.coderInvalidValue) }
@@ -243,6 +285,22 @@ final class DestinationSharedEncoder: @unchecked Sendable {
            VTCompressionSessionCompleteFrames(videoSession, untilPresentationTimeStamp: pts) != noErr {
             throw CocoaError(.coderInvalidValue)
         }
+    }
+    private func presentationOrderedVideo(_ sample: CMSampleBuffer) throws -> CMSampleBuffer {
+        // This group forbids frame reordering, so PTS is the decode clock too.
+        // Express that with no separate DTS, as the hardware encoder does.
+        // The pinned RTMP packetizer adds a fixed 66ms composition offset to
+        // every valid DTS, even DTS==PTS; an unnecessary DTS shifts wire video.
+        // Preserve original PTS, duration, attachments and compressed bytes.
+        guard sample.decodeTimeStamp.isValid else { return sample }
+        guard sample.numSamples == 1 else { throw CocoaError(.coderInvalidValue) }
+        var timing = CMSampleTimingInfo()
+        guard CMSampleBufferGetSampleTimingInfo(sample, at: 0, timingInfoOut: &timing) == noErr else { throw CocoaError(.coderInvalidValue) }
+        timing.decodeTimeStamp = .invalid
+        var copy: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sample, sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing, sampleBufferOut: &copy) == noErr, let copy else { throw CocoaError(.coderInvalidValue) }
+        return copy
     }
     private func encodeAudio(_ sample: CMSampleBuffer) throws {
         guard let format = sample.formatDescription, CMFormatDescriptionGetMediaType(format) == kCMMediaType_Audio,
@@ -279,35 +337,60 @@ final class DestinationSharedEncoder: @unchecked Sendable {
             guard error == nil, status != .error else { throw CocoaError(.coderInvalidValue) }
             guard status == .haveData, output.packetCount > 0 else { return }
             guard output.packetCount == 1, output.byteLength > 0, output.byteLength <= 65_536 else { throw CocoaError(.coderInvalidValue) }
-            if audioDescription == nil {
-                var asbd = audioFormat.streamDescription.pointee
-                let cookie = converter.magicCookie ?? Data()
-                var description: CMAudioFormatDescription?
-                let result = cookie.withUnsafeBytes { bytes in CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd,
-                    layoutSize: 0, layout: nil, magicCookieSize: cookie.count, magicCookie: bytes.baseAddress,
-                    extensions: nil, formatDescriptionOut: &description) }
-                guard result == noErr else { throw CocoaError(.coderInvalidValue) }; audioDescription = description
-            }
-            var block: CMBlockBuffer?
-            guard CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: Int(output.byteLength),
-                blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: Int(output.byteLength), flags: 0, blockBufferOut: &block) == noErr,
-                let block, CMBlockBufferReplaceDataBytes(with: output.data, blockBuffer: block, offsetIntoDestination: 0, dataLength: Int(output.byteLength)) == noErr,
-                let audioDescription else { throw CocoaError(.coderInvalidValue) }
-            // AAC output includes the converter's leading (priming) frames,
-            // even with primeMethod.none. Timestamp the content, rather than
-            // adding that codec latency to every audible cue.
-            let pts = audioOrigin + CMTime(value: audioFrames - Int64(converter.primeInfo.leadingFrames), timescale: 48_000)
-            var packet = output.packetDescriptions?.pointee ?? AudioStreamPacketDescription(mStartOffset: 0, mVariableFramesInPacket: 1024, mDataByteSize: output.byteLength)
-            var encoded: CMSampleBuffer?
-            guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block,
-                formatDescription: audioDescription, sampleCount: 1, presentationTimeStamp: pts,
-                packetDescriptions: &packet, sampleBufferOut: &encoded) == noErr, let encoded else { throw CocoaError(.coderInvalidValue) }
-            audioFrames += 1024; encodedAudioCount += 1
-            encodedClock.record(.audio, presentationSeconds: pts.seconds)
-            let audio = SharedEncodedAudio(sample: encoded, buffer: output,
-                when: AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: pts.seconds)))
-            for sink in recipients() { sink.enqueueAudio(audio) }
+            try emitAudio(output, converter: converter, format: audioFormat)
         }
         throw CocoaError(.coderInvalidValue)
     }
+    private func finishAudio() throws {
+        guard let converter, let audioFormat else { return }
+        // Normal conversion fully drains each input chunk. At EOS only codec
+        // priming plus a partial AAC packet remain; bound the drain by those
+        // reported frame counts and two additional packet slots.
+        let pending = UInt64(converter.primeInfo.leadingFrames) + UInt64(converter.primeInfo.trailingFrames)
+        let packetLimit = min(16, Int((pending + 1023) / 1024) + 2)
+        for _ in 0..<packetLimit {
+            let output = AVAudioCompressedBuffer(format: audioFormat, packetCapacity: 1,
+                maximumPacketSize: max(4096, converter.maximumOutputPacketSize))
+            var error: NSError?
+            let status = converter.convert(to: output, error: &error) { _, inputStatus in
+                inputStatus.pointee = .endOfStream; return nil
+            }
+            guard error == nil, status != .error else { throw CocoaError(.coderInvalidValue) }
+            if output.packetCount > 0 { try emitAudio(output, converter: converter, format: audioFormat) }
+            if status == .endOfStream { return }
+        }
+        throw CocoaError(.coderInvalidValue)
+    }
+    private func emitAudio(_ output: AVAudioCompressedBuffer, converter: AVAudioConverter, format: AVAudioFormat) throws {
+        guard output.packetCount == 1, output.byteLength > 0, output.byteLength <= 65_536 else { throw CocoaError(.coderInvalidValue) }
+        if audioDescription == nil {
+            var asbd = format.streamDescription.pointee
+            let cookie = converter.magicCookie ?? Data()
+            var description: CMAudioFormatDescription?
+            let result = cookie.withUnsafeBytes { bytes in CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd,
+                layoutSize: 0, layout: nil, magicCookieSize: cookie.count, magicCookie: bytes.baseAddress,
+                extensions: nil, formatDescriptionOut: &description) }
+            guard result == noErr else { throw CocoaError(.coderInvalidValue) }; audioDescription = description
+        }
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: Int(output.byteLength),
+            blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: Int(output.byteLength), flags: 0, blockBufferOut: &block) == noErr,
+            let block, CMBlockBufferReplaceDataBytes(with: output.data, blockBuffer: block, offsetIntoDestination: 0, dataLength: Int(output.byteLength)) == noErr,
+            let audioDescription else { throw CocoaError(.coderInvalidValue) }
+        // AAC output includes the converter's leading (priming) frames,
+        // even with primeMethod.none. Timestamp the content, rather than
+        // adding that codec latency to every audible cue.
+        let pts = audioOrigin + CMTime(value: audioFrames - Int64(converter.primeInfo.leadingFrames), timescale: 48_000)
+        var packet = output.packetDescriptions?.pointee ?? AudioStreamPacketDescription(mStartOffset: 0, mVariableFramesInPacket: 1024, mDataByteSize: output.byteLength)
+        var encoded: CMSampleBuffer?
+        guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block,
+            formatDescription: audioDescription, sampleCount: 1, presentationTimeStamp: pts,
+            packetDescriptions: &packet, sampleBufferOut: &encoded) == noErr, let encoded else { throw CocoaError(.coderInvalidValue) }
+        audioFrames += 1024; encodedAudioCount += 1
+        encodedClock.record(.audio, presentationSeconds: pts.seconds)
+        let audio = SharedEncodedAudio(sample: encoded, buffer: output,
+            when: AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: pts.seconds)))
+        for sink in recipients() { sink.enqueueAudio(audio) }
+    }
+
 }
