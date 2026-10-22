@@ -37,6 +37,10 @@ extension BrowserAudioHelperHarness {
         let session = BrowserWidgetHelperSession(applicationURL: build.appendingPathComponent("StreamBrowserAudioHelper.app"), mixer: mixer) {
             raw.append($0); mixer.enqueue(channel, $0)
         }
+        session.prepareMixerForAudio = {
+            guard await mixer.prepareClosedApplicationMixer(channel, mixer: .init()) else { return nil }
+            return .init(isCurrent: { true }) // Fixture owns an unchanged unity mixer.
+        }
         let programURL = artifacts.appendingPathComponent("same-page-program.mp4")
         var writerConfig = ProgramRecordingSession.Configuration(); writerConfig.frameRate = 15
         let writer = ProgramRecordingSession(outputURL: programURL, configuration: writerConfig, spaceProbe: { _ in 8_000_000_000 })
