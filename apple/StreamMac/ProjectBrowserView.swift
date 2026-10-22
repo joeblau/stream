@@ -89,7 +89,7 @@ struct ProjectBrowserView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Import \(preview.name)").font(.headline)
                 Text("\(preview.fileCount) files · \(preview.includedMedia ? "Media included" : "Relink media after importing")")
-                List(preview.sceneNames, id: \.self) { Text($0) }
+                List(preview.sceneNames.indices, id: \.self) { Text(preview.sceneNames[$0]) }
                 Text("Import creates a separate show and remaps resource IDs. Apply the staged show when outputs are stopped; review source and destination settings before production.")
                 HStack {
                     Button("Cancel") { workspace.importPreview = nil }

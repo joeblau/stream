@@ -56,7 +56,9 @@ keeps repairable asset entries. Stream keys, credentials, remote widget URLs,
 machine device selections, and sandbox bookmarks are omitted. Account and PTZ
 configuration are not included. Finder opening, a package dropped onto Shows and Profiles, and the Import Show button show
 a preview; import creates a separate show, remaps IDs, then stages it for Apply.
-Relink missing sources/assets and configure destinations before production.
+Mixed drops select the single package; multiple packages show an error. A delayed
+drop cannot replace a newer selection. Import refuses a package changed since
+its preview. Relink missing sources/assets and configure destinations before production.
 Raw legacy media bookmarks without library registrations need importing into
 Assets before transfer. Copied HTML/media can contain the producer's own content.
 Native file delivery and sandbox/restart evidence, including the remaining

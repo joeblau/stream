@@ -83,6 +83,7 @@ final class StudioWorkspace: ObservableObject {
             // A canceled IO worker retains its capacity until it returns.
             if importPreview == nil {
                 latestPackageRead = nil
+                pendingPackageDrop = nil
                 refreshPackageBusy()
             }
         }
@@ -103,6 +104,14 @@ final class StudioWorkspace: ObservableObject {
     private var latestPackageRead: UUID?
     private var packageWrite: UUID?
     private let maximumPackageReads = 4
+    private struct PackageDropRead {
+        let id: UUID
+        var remaining: Int
+        var urls: [URL] = []
+        var failed = false
+    }
+    private var pendingPackageDrop: PackageDropRead?
+    private let maximumPackageDropFiles = 8
     var selection: Selection { Selection(project: catalog.selectedProjectID, profile: catalog.selectedProfileID) }
     var currentProject: StudioProject { catalog.projects.first { $0.id == catalog.selectedProjectID }! }
     var currentProfile: StudioProfile { currentProject.profiles.first { $0.id == catalog.selectedProfileID }! }
@@ -398,6 +407,9 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func choosePackage() {
+        pendingPackageDrop = nil
+        latestPackageRead = nil
+        refreshPackageBusy()
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.streamShow]
         panel.canChooseDirectories = true
@@ -406,19 +418,66 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func acceptPackageDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier("public.file-url") }) else { return false }
-        provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { [weak self] item, _ in
-            let url: URL?
-            if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
-            else { url = item as? URL }
-            guard let url, url.pathExtension.lowercased() == "streamshow" else { return }
-            Task { @MainActor [weak self] in self?.previewPackage(url) }
+        let files = providers.filter { $0.hasItemConformingToTypeIdentifier("public.file-url") }
+        guard !files.isEmpty else { return false }
+        pendingPackageDrop = nil
+        guard files.count <= maximumPackageDropFiles else {
+            error = "Open one show package at a time."
+            showProjects = true
+            return true
+        }
+        guard packageWrite == nil else {
+            error = "Wait for the current package import or export to finish before opening another package."
+            return true
+        }
+        let request = UUID()
+        latestPackageRead = nil
+        refreshPackageBusy()
+        pendingPackageDrop = PackageDropRead(id: request, remaining: files.count)
+        for provider in files {
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { [weak self] item, _ in
+                let url: URL?
+                if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
+                else { url = item as? URL }
+                Task { @MainActor [weak self] in self?.receivePackageDrop(url, request: request) }
+            }
+        }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self, self.pendingPackageDrop?.id == request else { return }
+            self.pendingPackageDrop = nil
+            self.error = "The dropped files could not be read. Try Import Show instead."
+            self.showProjects = true
         }
         return true
     }
 
+    private func receivePackageDrop(_ url: URL?, request: UUID) {
+        guard var read = pendingPackageDrop, read.id == request else { return }
+        read.remaining -= 1
+        if let url, url.isFileURL { read.urls.append(url) }
+        else { read.failed = true }
+        pendingPackageDrop = read
+        guard read.remaining == 0 else { return }
+        pendingPackageDrop = nil
+        let packages = read.urls.filter { $0.pathExtension.lowercased() == "streamshow" }
+        guard !read.failed else {
+            error = "The dropped files could not be read. Try Import Show instead."
+            showProjects = true
+            return
+        }
+        guard packages.count == 1 else {
+            error = packages.isEmpty ? "Drop a .streamshow package, or use Import Show." : "Open one show package at a time."
+            showProjects = true
+            return
+        }
+        previewPackage(packages[0])
+    }
+
     func previewPackage(_ url: URL) {
         guard url.isFileURL, url.pathExtension.lowercased() == "streamshow" else { return }
+        // A delayed drop must never replace a newer explicit file selection.
+        pendingPackageDrop = nil
         showProjects = true
         guard packageWrite == nil else {
             error = "Wait for the current package import or export to finish before opening another package."
@@ -439,7 +498,7 @@ final class StudioWorkspace: ObservableObject {
             guard self.latestPackageRead == request else { return }
             self.latestPackageRead = nil
             switch result {
-            case .success(let preview): self.importPreview = preview
+            case .success(let preview): self.importPreview = preview; self.error = nil
             case .failure(let failure):
                 self.importPreview = nil
                 self.error = String(describing: failure)
@@ -458,7 +517,7 @@ final class StudioWorkspace: ObservableObject {
         let target = Selection(project: project.id, profile: project.profiles[0].id)
         let destination = directory(for: target)
         do {
-            try await Task.detached { try ShowPackageIO.importFiles(from: preview.url, to: destination) }.value
+            try await Task.detached { try ShowPackageIO.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest) }.value
             catalog.projects.append(project)
             pending = target
             importPreview = nil
@@ -517,6 +576,7 @@ final class StudioWorkspace: ObservableObject {
             return nil
         }
         let operation = UUID()
+        pendingPackageDrop = nil
         packageWrite = operation
         refreshPackageBusy()
         return operation

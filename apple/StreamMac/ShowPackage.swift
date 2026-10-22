@@ -14,6 +14,7 @@ struct ShowPackagePreview: Identifiable, Sendable {
     let sceneNames: [String]
     let includedMedia: Bool
     let fileCount: Int
+    let manifest: PortableShowManifest
 }
 
 enum ShowPackageIO {
@@ -90,13 +91,16 @@ enum ShowPackageIO {
             throw PortableShow.Failure.invalid("The package contains invalid or duplicate scene/source IDs.")
         }
         return ShowPackagePreview(url: url, name: manifest.name, sceneNames: document.scenes.map(\.name),
-            includedMedia: manifest.includesMedia, fileCount: manifest.files.count)
+            includedMedia: manifest.includesMedia, fileCount: manifest.files.count, manifest: manifest)
     }
 
-    static func importFiles(from source: URL, to destination: URL) throws {
+    static func importFiles(from source: URL, to destination: URL, previewedManifest: PortableShowManifest? = nil) throws {
         let grant = source.startAccessingSecurityScopedResource()
         defer { if grant { source.stopAccessingSecurityScopedResource() } }
         let manifest = try PortableShow.validate(at: source)
+        guard previewedManifest == nil || manifest == previewedManifest else {
+            throw PortableShow.Failure.invalid("The package changed after its preview. Open it again before importing.")
+        }
         let manager = FileManager.default
         let staging = destination.deletingLastPathComponent().appendingPathComponent(".stream-import-\(UUID().uuidString)", isDirectory: true)
         defer { try? manager.removeItem(at: staging) }

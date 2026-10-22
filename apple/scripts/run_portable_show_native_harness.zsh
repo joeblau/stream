@@ -108,7 +108,7 @@ xcodebuild -resolvePackageDependencies -project "$PORTABLE_NATIVE_DIR/PortableSh
   -scheme PortableShowNative -derivedDataPath "$PORTABLE_NATIVE_BUILD_PATH"
 python3 scripts/repair_desktop_transport_archives.py "$PORTABLE_NATIVE_BUILD_PATH"
 xcodebuild -project "$PORTABLE_NATIVE_DIR/PortableShowNativeValidation.xcodeproj" -scheme PortableShowNative \
-  -destination 'platform=macOS' -derivedDataPath "$PORTABLE_NATIVE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -destination 'platform=macOS' -derivedDataPath "$PORTABLE_NATIVE_BUILD_PATH" -jobs 2 CODE_SIGNING_ALLOWED=NO build
 PORTABLE_PRODUCTS="${PORTABLE_NATIVE_BUILD_PATH:A}/Build/Products/Debug"
 PORTABLE_APP="$PORTABLE_PRODUCTS/PortableShowNativeFixture.app"
 python3 - "$PORTABLE_NATIVE_DIR" <<'PY'
