@@ -145,6 +145,7 @@ private actor RestreamPublicFixture {
         let count = quota.calls.count
         await failure(.rateLimited) { _ = try await quotaSession.importConnection(provider: .restream, channel: channel, event: nil, endpoint: "") }
         require(quota.calls.count == count, "Cooldown must suppress repeated GETs"); quotaSession.shutdown()
+        try await TwitchProviderFixture.run(root: root)
         print("PASS: actual Restream AccountSession/API selected relay discovery, secret-last/rechecked ownership, scope/unknown-grant gates, public no-bearer servers, metadata/cover and persistence exclusion, disabled manual draft, malformed/foreign/changed metadata refusal, replacement/cancel/shutdown/late-key fences and rate cooldown; no live auth, provider writes or Keychain access")
     }
 }

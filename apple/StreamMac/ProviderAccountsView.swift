@@ -28,6 +28,8 @@ struct ProviderAccountsView: View {
     @State private var channelID = ""
     @State private var eventID = ""
     @State private var twitchEndpoint = ""
+    @State private var twitchIngestID: Int? = nil
+    @StateObject private var twitchIngest = TwitchIngestDiscovery()
     @State private var twitchTitle = ""
     @State private var edit: EventEditorSelection?
     @State private var deleteEvent: ProviderEvent?
@@ -137,10 +139,10 @@ struct ProviderAccountsView: View {
         }
         .onAppear { clientID = snapshot.clientID }
         .onChange(of: snapshot.clientID) { _, value in if clientID.isEmpty { clientID = value } }
-        .onChange(of: provider) { _, _ in importJob?.cancel(); importing = false; thumbnail = nil; clientID = snapshot.clientID; channelID = ""; eventID = ""; importError = nil }
-        .onChange(of: channelID) { _, _ in importJob?.cancel(); importing = false; eventID = ""; thumbnail = nil }
+        .onChange(of: provider) { _, _ in twitchIngest.cancel(); twitchIngestID = nil; twitchEndpoint = ""; importJob?.cancel(); importing = false; thumbnail = nil; clientID = snapshot.clientID; channelID = ""; eventID = ""; importError = nil }
+        .onChange(of: channelID) { _, _ in twitchIngest.cancel(); twitchIngestID = nil; twitchEndpoint = ""; importJob?.cancel(); importing = false; eventID = ""; thumbnail = nil }
         .onChange(of: eventID) { _, _ in thumbnail = nil }
-        .onDisappear { importJob?.cancel(); importJob = nil }
+        .onDisappear { twitchIngest.cancel(); importJob?.cancel(); importJob = nil }
         .sheet(isPresented: $showSchedule) { ProviderShowSchedulingEditor(coordinator: scheduling, destinations: destinations.draft) }
         .sheet(item: $edit) { selection in
             YouTubeEventEditor(selection: selection) { draft in
@@ -248,7 +250,29 @@ struct ProviderAccountsView: View {
     }
     private var twitchControls: some View {
         VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button(twitchIngest.isWorking ? "Discovering Twitch ingest…" : "Discover Twitch Ingest Servers") {
+                    twitchIngestID = nil
+                    twitchIngest.load(for: "twitch:\(channelID)")
+                }.disabled(importing || twitchIngest.isWorking || twitchIngest.retryUntil != nil)
+                if twitchIngest.isWorking { Button("Cancel Discovery") { twitchIngest.cancel() } }
+            }
+            if !twitchIngest.endpoints.isEmpty {
+                Picker("Returned Twitch ingest", selection: $twitchIngestID) {
+                    Text("Choose an ingest…").tag(nil as Int?)
+                    ForEach(twitchIngest.endpoints) { Text($0.name).tag(Optional($0.id)) }
+                }.disabled(importing).onChange(of: twitchIngestID) { _, id in
+                    if let id, let endpoint = twitchIngest.endpoint(id: id, for: "twitch:\(channelID)") { twitchEndpoint = endpoint }
+                }
+                Text("Public endpoint list; no latency or availability is measured. Select a returned endpoint or enter one issued by Twitch below.").font(.caption)
+            }
+            if let failure = twitchIngest.failure { Text(failure.localizedDescription).font(.caption).foregroundStyle(.orange) }
+            if let until = twitchIngest.retryUntil { Text("Ingest discovery cooldown until \(until.formatted(date: .omitted, time: .standard)).").font(.caption) }
             TextField("Twitch ingest endpoint from your broadcaster settings", text: $twitchEndpoint)
+                .disabled(importing)
+                .onChange(of: twitchEndpoint) { _, value in
+                    if let id = twitchIngestID, twitchIngest.endpoints.first(where: { $0.id == id })?.endpoint != value { twitchIngestID = nil }
+                }
             Button(importing ? "Importing…" : "Add Twitch Ingest Draft") { importDestination() }
                 .disabled(importing || snapshot.isWorking || snapshot.verifiedAt == nil || channel == nil || twitchEndpoint.isEmpty || !snapshot.scopes.contains("channel:read:stream_key"))
             TextField("Twitch channel title", text: $twitchTitle)
@@ -295,11 +319,15 @@ struct ProviderAccountsView: View {
             defer { if importID == attempt { importing = false } }
             do {
                 let connection = try await accounts.importConnection(provider: provider, channel: channel, event: provider == .restream ? nil : event, endpoint: endpoint)
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, importID == attempt, self.provider == provider, channelID == channel.id,
+                      provider != .twitch || twitchEndpoint == endpoint else { return }
                 if provider == .restream { destinations.createRestreamRelay(connection: connection) }
                 else { destinations.createManaged(provider: provider, channel: channel, event: event, connection: connection) }
             } catch {
-                if !Task.isCancelled { importError = (error as? ProviderFailure ?? ProviderFailure(.unavailable)).localizedDescription }
+                if !Task.isCancelled, !(error is CancellationError), importID == attempt, self.provider == provider,
+                   channelID == channel.id, provider != .twitch || twitchEndpoint == endpoint {
+                    importError = (error as? ProviderFailure ?? ProviderFailure(.unavailable)).localizedDescription
+                }
             }
         }
     }
