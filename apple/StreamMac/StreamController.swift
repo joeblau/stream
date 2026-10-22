@@ -937,6 +937,7 @@ final class StreamController: ObservableObject {
     private var channelFXBoxes: [AudioChannelID: ChannelFXInsertBox] = [:]
     private var soundboardAudioReferences: [AudioChannelID: Int] = [:]
     private var mediaAudioChannelIDs: Set<AudioChannelID> = []
+    private let mediaAudioDemand = MediaAudioChannelDemand()
 
     func retainSoundboardAudioChannel(_ id: SourceDefinitionID) {
         let channel = AudioChannelID.media(id)
@@ -950,7 +951,9 @@ final class StreamController: ObservableObject {
         if isPipelineRunning { reconcileSourceDemand() }
         else if soundboardAudioReferences[channel] == nil {
             channelFXBoxes[channel] = nil; mediaAudioChannelIDs.remove(channel)
-            Task { await audioEngine.removeChannel(channel) }
+            updateMediaAudioDemand()
+            let demand = mediaAudioDemand
+            Task { await audioEngine.removeChannel(channel, ifCurrent: { demand.matches(channel, identity: nil) }) }
         }
     }
     func applySoundboardChannelGain(_ id: AudioChannelID, volume: Float) {
@@ -967,14 +970,21 @@ final class StreamController: ObservableObject {
         mediaAudioChannelIDs = wanted
         for id in removed { channelFXBoxes[id] = nil }
         for id in added { channelFXBoxes[id] = ChannelFXInsertBox(chain: settings.channelFX[id.label] ?? .preset(.off)) }
-        let boxes = channelFXBoxes, audioEngine = self.audioEngine
+        updateMediaAudioDemand()
+        let boxes = channelFXBoxes, audioEngine = self.audioEngine, demand = mediaAudioDemand
         Task {
-            for id in removed { await audioEngine.removeChannel(id) }
+            for id in removed { await audioEngine.removeChannel(id, ifCurrent: { demand.matches(id, identity: nil) }) }
             for id in added {
                 guard let box = boxes[id] else { continue }
-                await audioEngine.addChannel(id, resetInsert: { box.reset() }, insert: { box.process($0) })
+                await audioEngine.addChannel(id, ifCurrent: { demand.matches(id, identity: box.demandID) },
+                    resetInsert: { box.reset() }, insert: { box.process($0) })
             }
         }
+    }
+    private func updateMediaAudioDemand() {
+        mediaAudioDemand.replace(Dictionary(uniqueKeysWithValues: mediaAudioChannelIDs.compactMap { id in
+            channelFXBoxes[id].map { (id, $0.demandID) }
+        }))
     }
 
     /// Live mixer channel gain (ramped). The dispatcher owns mixer state;
@@ -2003,7 +2013,7 @@ final class StreamController: ObservableObject {
         // A08: the engine (re)start wiped every channel, so all insert boxes
         // are rebuilt fresh from settings.
         channelFXBoxes = [micID: ChannelFXInsertBox(chain: settings.fxChain(forChannelLabel: micID.label))]
-        mediaAudioChannelIDs = []
+        mediaAudioChannelIDs = []; mediaAudioDemand.replace([:])
         let micBox = channelFXBoxes[micID]!
         Task {
             await audioEngine.run()
@@ -2123,6 +2133,8 @@ final class StreamController: ObservableObject {
 
     private func stopPipeline() {
         resourceBudgetCoordinator?.stop()
+        mediaAudioChannelIDs = []; mediaAudioDemand.replace([:])
+        channelFXBoxes = channelFXBoxes.filter { if case .media = $0.key { return false }; return true }
         audioEngine.cancelGuestTalkback()
         guestProgramReturnAuthority.change(active: false)
         guestReturnVideoSink?.stopProgramReturn()
@@ -2283,7 +2295,8 @@ final class StreamController: ObservableObject {
             .union(capturePool.browserAudioChannels)
             .union(mediaAudioChannelIDs)
         let audioEngine = self.audioEngine
-        Task { await audioEngine.pruneChannels(keeping: keep) }
+        let demandFence = mediaAudioDemand, revision = mediaAudioDemand.currentRevision()
+        Task { await audioEngine.pruneChannels(keeping: keep, ifCurrent: { demandFence.matches(revision: revision) }) }
     }
 
     private func key(for source: SourceDefinition) -> CaptureSourceKey? {
@@ -2530,6 +2543,7 @@ final class StreamController: ObservableObject {
 /// re-applies a changed chain onto its running graph itself, so updates are
 /// lock-free for the audio path apart from the tiny value hand-off.
 private final class ChannelFXInsertBox: @unchecked Sendable {
+    let demandID = UUID()
     private let processor = ChannelFXProcessor()
     private var lock = os_unfair_lock_s()
     private var chain: ChannelFXChain

@@ -290,23 +290,29 @@ actor AudioMixEngine {
     /// sample-buffer transformer run on the capture thread BEFORE format
     /// normalization. The mic's `VoicePolishProcessor` lives here; A08/A11 FX
     /// racks insert through the same seam. Safe to call before `run`.
+    /// Admission executes on this actor immediately before mutation, without
+    /// suspension, so a delayed source reconciliation cannot replace a new insert.
     func addChannel(_ id: AudioChannelID,
+                    ifCurrent: @Sendable () -> Bool = { true },
                     resetInsert: (@Sendable () -> Void)? = nil,
                     insert: (@Sendable (CMSampleBuffer) -> CMSampleBuffer)? = nil) {
+        guard ifCurrent() else { return }
         registry.addChannel(id, insert: insert, resetInsert: resetInsert, gain: pendingGains[id])
     }
 
     /// Removes a channel (its capture left demand). Late buffers for the ID
     /// simply recreate it via `enqueue`'s auto-registration at the pending
     /// gain — never a leak, never a crash.
-    func removeChannel(_ id: AudioChannelID) {
+    func removeChannel(_ id: AudioChannelID, ifCurrent: @Sendable () -> Bool = { true }) {
+        guard ifCurrent() else { return }
         registry.removeChannel(id)
     }
 
     /// Removes every channel not in `keeping` (the controller passes the mic
     /// plus the union of demanded capture keys, mirroring the S05 pool).
     /// Pending gains survive, so a re-created channel keeps its mix state.
-    func pruneChannels(keeping ids: Set<AudioChannelID>) {
+    func pruneChannels(keeping ids: Set<AudioChannelID>, ifCurrent: @Sendable () -> Bool = { true }) {
+        guard ifCurrent() else { return }
         registry.prune(keeping: ids.union(taps.values.compactMap(\.isolatedChannel)))
     }
 
