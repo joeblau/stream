@@ -20,6 +20,7 @@ import CoreGraphics
 /// exactly and an unrelated device never substitutes for it.
 @MainActor
 final class DeviceMonitor: ObservableObject {
+    typealias DisplayEnumeration = (UInt32, UnsafeMutablePointer<CGDirectDisplayID>?, UnsafeMutablePointer<UInt32>?) -> CGError
     /// `uniqueID`s of the currently connected video capture devices.
     @Published private(set) var connectedCameraIDs: Set<String> = []
     /// `uniqueID`s of the currently connected audio input devices.
@@ -60,10 +61,14 @@ final class DeviceMonitor: ObservableObject {
     /// Notification tokens. `nonisolated(unsafe)` so `deinit` (nonisolated on
     /// a @MainActor type) can remove them; tokens are safe to touch there.
     private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
+    private let displayList: () -> Set<CGDirectDisplayID>?
 
-    init() {
-        refreshDevices()
+    init(observeSystem: Bool = true,
+         displayEnumeration: @escaping DisplayEnumeration = CGGetActiveDisplayList) {
+        self.displayList = { Self.activeDisplayIDs(using: displayEnumeration) }
+        if observeSystem { refreshDevices() }
         refreshDisplays()
+        guard observeSystem else { return }
         let center = NotificationCenter.default
         observers.append(center.addObserver(
             forName: AVCaptureDevice.wasConnectedNotification,
@@ -187,14 +192,21 @@ final class DeviceMonitor: ObservableObject {
 
     /// Re-reads the active display list. With `notify`, fires
     /// `onDisplaysChanged` only on a real membership change.
-    private func refreshDisplays(notify: Bool = false) {
-        var count: UInt32 = 0
-        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return }
-        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return }
-        let current = Set(ids.prefix(Int(count)))
+    func refreshDisplays(notify: Bool = false) {
+        guard let current = displayList() else { return }
         guard current != connectedDisplayIDs else { return }
         connectedDisplayIDs = current
         if notify { onDisplaysChanged?(current) }
+    }
+
+    /// nil means enumeration failed; an empty set is a successful observation
+    /// that the last display disappeared and must retire its pinned captures.
+    private static func activeDisplayIDs(using enumerate: DisplayEnumeration) -> Set<CGDirectDisplayID>? {
+        var count: UInt32 = 0
+        guard enumerate(0, nil, &count) == .success else { return nil }
+        guard count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard enumerate(count, &ids, &count) == .success else { return nil }
+        return Set(ids.prefix(Int(count)))
     }
 }
