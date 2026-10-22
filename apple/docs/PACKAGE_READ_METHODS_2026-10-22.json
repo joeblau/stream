@@ -2,7 +2,6 @@
   "date": "2026-10-22",
   "baseCommit": "9cb68c901fa620db294436324ab1ba0a723f22dd",
   "host": {
-    "name": "Joes-MacBook-Pro.local",
     "architecture": "arm64",
     "macOS": "27.2",
     "build": "26B118"
