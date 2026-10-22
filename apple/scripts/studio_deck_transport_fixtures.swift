@@ -24,9 +24,25 @@ import StreamCore
         process.waitUntilExit()
         return process.terminationStatus == 0 && !pipe.fileHandleForReading.readDataToEndOfFile().isEmpty
     }
+    static func receiverExecutable() throws -> String {
+        let environment = ProcessInfo.processInfo.environment
+        let candidates = environment["STREAM_FFMPEG_BIN"].map { [$0] } ??
+            (environment["PATH"] ?? "").split(separator: ":", omittingEmptySubsequences: false)
+                .map { URL(fileURLWithPath: $0.isEmpty ? "." : String($0)).appendingPathComponent("ffmpeg").path }
+            + ["/opt/homebrew/opt/ffmpeg/bin/ffmpeg", "/usr/local/opt/ffmpeg/bin/ffmpeg",
+               "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg", "/usr/local/opt/ffmpeg-full/bin/ffmpeg"]
+        guard let executable = candidates.first(where: { path in
+            var directory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &directory)
+                && !directory.boolValue && FileManager.default.isExecutableFile(atPath: path)
+        }) else {
+            throw NSError(domain: "DeckTransportFixtures", code: 3, userInfo: [NSLocalizedDescriptionKey:
+                "Select an executable receiver with STREAM_FFMPEG_BIN or PATH; explicit overrides never fall back. Run scripts/ffmpeg_receiver.py to validate RTMP/listen, H.264/AAC and MP4 capabilities."])
+        }
+        return executable
+    }
     static func run(directory: URL) async throws {
-        let ffmpeg = ProcessInfo.processInfo.environment["STREAM_FFMPEG_BIN"] ?? "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
-        try check(FileManager.default.isExecutableFile(atPath: ffmpeg), "Select an installed FFmpeg receiver with STREAM_FFMPEG_BIN")
+        let ffmpeg = try receiverExecutable()
         let folder = directory.appendingPathComponent("actual-transport")
         try DesktopStorage.prepare(folder)
         let scene = Scene(name: "Local transport fixture", layers: [], background: .solid(colorHex: "#174A69"))
