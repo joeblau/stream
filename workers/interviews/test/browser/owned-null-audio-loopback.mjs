@@ -5,17 +5,32 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import {spawn} from 'node:child_process';
+import {spawn,execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {WebSocket} from 'ws';
 import {chromeFixtureExecutable,chromeFixtureCredentialArguments} from './chrome-fixture.mjs';
 import {captureLoopbackFailure} from './owned-loopback-failure-snapshot.mjs';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const owned=await fs.mkdtemp(path.join(os.tmpdir(),'stream-owned-null-loopback-'));
 const artifact=process.env.STREAM_LOOPBACK_RECEIPT;
 const fakeOutputClock=process.argv.includes('--fake-audio-output');
 assert(artifact&&path.isAbsolute(artifact),'Set an absolute owned receipt path');
-let chrome,socket,server,cdp,receipt,progress,sessionId,lastProgress=Date.now(),traceEvents=[];
+const temporaryRoot=await fs.realpath(os.tmpdir());
+const owned=process.env.STREAM_LOOPBACK_OWNED_DIRECTORY
+ ?await fs.realpath(process.env.STREAM_LOOPBACK_OWNED_DIRECTORY)
+ :await fs.mkdtemp(path.join(temporaryRoot,'stream-owned-null-loopback-'));
+const ownedInfo=await fs.lstat(owned,{bigint:true});
+const ownedIdentity={device:ownedInfo.dev.toString(),inode:ownedInfo.ino.toString()};
+assert(path.dirname(owned)===temporaryRoot&&path.basename(owned).startsWith('stream-owned-null-loopback-')&&
+ ownedInfo.isDirectory()&&ownedInfo.uid===BigInt(process.getuid())&&(ownedInfo.mode&0o777n)===0o700n&&
+ (await fs.readdir(owned)).length===0,'Use one fresh owned temporary directory');
+if(process.env.STREAM_LOOPBACK_OWNED_IDENTITY)assert.deepEqual(ownedIdentity,JSON.parse(process.env.STREAM_LOOPBACK_OWNED_IDENTITY),'Owned directory incarnation changed');
+let chrome,chromeIdentity,socket,server,cdp,receipt,progress,sessionId,lastProgress=Date.now(),traceEvents=[];
+const processHelper=fileURLToPath(new URL('./owned_loopback_process.py',import.meta.url));
+let abortReason;
+const checkAbort=()=>{if(abortReason)throw new Error(abortReason);};
+const abort=signal=>{abortReason??='owned-signal-'+signal;cdp?.cancelPending(new Error(abortReason));if(!cdp)socket?.terminate();};
+const interrupt=()=>abort('SIGINT'),terminate=()=>abort('SIGTERM');
+process.on('SIGINT',interrupt);process.on('SIGTERM',terminate);
 const phases=[],observations=[];
 const source=await fs.readFile(fileURLToPath(new URL('./native-interview-return-video-browser.mjs',import.meta.url)),'utf8');
 const meters=[...source.matchAll(/const returnMeterModule = `([\s\S]*?)`;/g)];
@@ -58,6 +73,7 @@ const stats=async pc=>{
  return result;
 };
 setTimeout(async()=>{try{
+ if(!player.muted)throw new Error('owned-player-not-muted');
  stage('sender-context');const a=await sinkContext('sender');
  stage('receiver-context');const b=await sinkContext('receiver');
  const destination=a.createMediaStreamDestination(),merge=a.createChannelMerger(2);
@@ -93,22 +109,44 @@ class CDP{
   if(x.method==='Tracing.dataCollected'){this.traceBytes+=Buffer.byteLength(raw);if(this.traceBytes>8*1024*1024||traceEvents.length+x.params.value.length>25000)throwFailure={name:'TraceBudget',message:'bounded trace byte/count exceeded'};else traceEvents.push(...x.params.value);}
   if(x.method==='Tracing.tracingComplete')this.traceDone=true;
  });}
- send(method,params={},sessionId,deadline=10000){return new Promise((resolve,reject)=>{const id=++this.id,timer=setTimeout(()=>{this.pending.delete(id);reject(new Error('CDP deadline: '+method));},deadline);this.pending.set(id,{resolve,reject,timer});this.ws.send(JSON.stringify({id,method,params,sessionId}));});}
- close(){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('Owned cleanup'));}this.pending.clear();this.ws.close();}
+ send(method,params={},sessionId,deadline=10000){if(abortReason)return Promise.reject(new Error(abortReason));return new Promise((resolve,reject)=>{const id=++this.id,timer=setTimeout(()=>{this.pending.delete(id);reject(new Error('CDP deadline: '+method));},deadline);this.pending.set(id,{resolve,reject,timer});this.ws.send(JSON.stringify({id,method,params,sessionId}));});}
+ cancelPending(error){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(error);}this.pending.clear();}
+ close(){this.cancelPending(new Error('Owned cleanup'));this.ws.close();}
 }
 let throwFailure,tracing=false;
 const result={schemaVersion:1,kind:'owned-chrome-null-audio-loopback-diagnostic',scope:'Synthetic local RTC only; actual null WebAudio sinks + muted owned HTML. No native SDK, speaker/normal HTML output, AEC, AV or production qualification.',fakeOutputClockRequested:fakeOutputClock};
 try{
  server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/meter.js'||req.url==='/app.js'?'application/javascript':'text/html');res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; connect-src 'self'; media-src 'self' blob:");res.end(req.url==='/meter.js'?meter:req.url==='/app.js'?app:page);});await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const profile=path.join(owned,'profile');await fs.mkdir(profile,{mode:0o700});const binary=await chromeFixtureExecutable(process.env.CHROME_BIN??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',owned);
+ checkAbort();
+ const started=Date.now();
  chrome=spawn(binary,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--no-first-run','--disable-background-networking','--disable-component-update','--disable-extensions','--autoplay-policy=no-user-gesture-required',...chromeFixtureCredentialArguments(),...(fakeOutputClock?['--disable-audio-output']:[]),'about:blank'],{detached:true,stdio:['ignore','ignore','pipe']});let stderr=0;chrome.stderr.on('data',b=>{stderr+=b.length;});
- const started=Date.now();let endpoint;while(!endpoint&&Date.now()-started<10000){try{endpoint=(await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).trim().split('\n');}catch{await pause(50);}}assert(endpoint,'Owned Chrome startup deadline');
+ chrome.on('error',()=>{throwFailure={name:'OwnedSpawnFailure',message:'owned-browser-spawn-refused'};});
+ if(chrome.pid)chromeIdentity=JSON.parse(execFileSync('python3',[processHelper,'capture',String(chrome.pid),String(process.pid)],{encoding:'utf8',timeout:1000,maxBuffer:4096}));
+ if(process.env.STREAM_LOOPBACK_PROCESS_MANIFEST){
+  const target=process.env.STREAM_LOOPBACK_PROCESS_MANIFEST,temporary=target+'.new-'+process.pid;
+  const encoded=JSON.stringify({nodePID:process.pid,chrome:chromeIdentity,ownedDirectory:owned,ownedIdentity,profile})+'\n';
+  assert(Buffer.byteLength(encoded)<=4096,'Owned manifest exceeds budget');
+  try{await fs.writeFile(temporary,encoded,{mode:0o600,flag:'wx'});await fs.link(temporary,target);}
+  finally{await fs.rm(temporary,{force:true});}
+ }
+ let endpoint,monitorReady=!process.env.STREAM_LOOPBACK_MONITOR_READY;
+ while((!endpoint||!monitorReady)&&Date.now()-started<10000){
+  checkAbort();if(throwFailure)throw new Error(throwFailure.message);
+  try{endpoint=(await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).trim().split('\n');}catch{}
+  if(!monitorReady){try{
+   const encoded=await fs.readFile(process.env.STREAM_LOOPBACK_MONITOR_READY);assert(encoded.length<=4096,'Owned monitor receipt exceeds budget');
+   const approval=JSON.parse(encoded);assert.equal(approval.nodePID,process.pid);assert.deepEqual(approval.chrome,chromeIdentity);assert.deepEqual(approval.ownedIdentity,ownedIdentity);monitorReady=true;
+  }catch(error){if(error.code!=='ENOENT')throw error;}}
+  if(!endpoint||!monitorReady)await pause(50);
+ }
+ assert(endpoint&&monitorReady,'Owned Chrome startup deadline');checkAbort();
  socket=new WebSocket(`ws://127.0.0.1:${endpoint[0]}${endpoint[1]}`,{handshakeTimeout:10000});await new Promise((r,j)=>{socket.once('open',r);socket.once('error',j);});cdp=new CDP(socket);
  result.browser=(await cdp.send('Browser.getVersion')).product;
  try{await cdp.send('Tracing.start',{categories:'audio,mediastream,disabled-by-default-mediastream',transferMode:'ReportEvents'});tracing=true;}catch{result.tracing='unavailable';}
  const {targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});({sessionId}=await cdp.send('Target.attachToTarget',{targetId,flatten:true}));await cdp.send('Runtime.enable',{},sessionId);await cdp.send('Page.enable',{},sessionId);
  await cdp.send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`},sessionId);const began=Date.now();
- while(!receipt&&!throwFailure){if(Date.now()-began>60000||Date.now()-lastProgress>16000)throw new Error('Bounded initialization/measurement stall: '+progress);await pause(50);}
+ while(!receipt&&!throwFailure){checkAbort();if(Date.now()-began>60000||Date.now()-lastProgress>16000)throw new Error('Bounded initialization/measurement stall: '+progress);await pause(50);}checkAbort();
  if(throwFailure){result.initializationFailure=throwFailure;throw new Error(throwFailure.name+': '+throwFailure.message);}
  if(tracing){await cdp.send('Tracing.end');const end=Date.now()+5000;while(!cdp.traceDone&&Date.now()<end)await pause(25);assert(cdp.traceDone,'Trace completion deadline');}
  const names=['WebRtcAudioDeviceImpl::RenderData','VoE::PullRenderData','WebRtcAudioRenderer::Render','WebRtcAudioRenderer::SourceCallback','PeerConnectionRemoteAudioSource::OnData','WebAudioMediaStreamAudioSink::OnData','WebAudioMediaStreamAudioSink::ProvideInput','WebAudioMediaStreamAudioSink::ProvideInput underrun'];
@@ -121,7 +159,8 @@ try{
  result.result='DIAGNOSTIC_COMPLETE';console.log(JSON.stringify(result,null,2));
 }catch(error){
  result.result='UNQUALIFIED';result.phase=progress;result.reason=String(error.message).slice(0,160);process.exitCode=77;
- if(!result.initializationFailure?.snapshot&&cdp&&sessionId){
+ if(abortReason)result.failureSnapshot={status:'unavailable',reason:'owned-abort'};
+ if(!abortReason&&!result.initializationFailure?.snapshot&&cdp&&sessionId){
   // Acceptance has already failed. This bounded read runs before CDP/peer
   // cleanup and never extends the original initialization or PCM gates.
   try{
@@ -141,6 +180,11 @@ finally{
  }
  result.observations=observations;
  result.phases=phases.map(({phase,time})=>({phase,milliseconds:time-(phases[0]?.time??time)}));
- if(chrome?.exitCode===null){try{process.kill(-chrome.pid,'SIGTERM');}catch{}await Promise.race([new Promise(r=>chrome.once('close',r)),pause(2000)]);if(chrome.exitCode===null){try{process.kill(-chrome.pid,'SIGKILL');}catch{}}}
- if(server)await new Promise(r=>server.close(r));await fs.writeFile(artifact,JSON.stringify(result,null,2)+'\n',{mode:0o600});await fs.rm(owned,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+ if(chromeIdentity){
+  try{result.processRetirement=execFileSync('python3',[processHelper,'retire'],{input:JSON.stringify(chromeIdentity),encoding:'utf8',timeout:5000,maxBuffer:4096}).trim();}
+  catch{result.processRetirement='unconfirmed';process.exitCode=77;result.result='UNQUALIFIED';}
+  if(!['absent','drained'].includes(result.processRetirement)){process.exitCode=77;result.result='UNQUALIFIED';}
+ }
+ if(server){server.closeAllConnections();await new Promise(r=>server.close(r));}await fs.writeFile(artifact,JSON.stringify(result,null,2)+'\n',{mode:0o600});await fs.rm(owned,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+ process.removeListener('SIGINT',interrupt);process.removeListener('SIGTERM',terminate);
 }
