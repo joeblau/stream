@@ -11,6 +11,7 @@ let signalQueue = {pending:0};
 let candidateQueue = [], signalChain = Promise.resolve(), left = false, name = 'Guest';
 let relayTimer, deviceEpoch = 0, activeNegotiation, cachedRelay;
 let deviceCommit = Promise.resolve();
+let committedDevices = {}; // Page-memory device intent changes only with a committed capture.
 const deviceTracks = new Set();
 let control, mediaSenders = {}, screenApproved = false, shareEpoch = 0, pendingDisplay = false;
 const MEDIA_CONTROL = 'stream-interview-control-v1';
@@ -111,9 +112,14 @@ function signal(kind, payload) { send({type:'signal', to:host, targetGeneration:
 async function enumerate() {
   const devices = await navigator.mediaDevices.enumerateDevices();
   for (const [id, kind] of [['camera','videoinput'],['microphone','audioinput']]) {
-    const select = $(id), selected = local?.getTracks().find(t => t.kind === (kind === 'videoinput' ? 'video' : 'audio'))?.getSettings().deviceId;
+    const trackKind = kind==='videoinput'?'video':'audio';
+    const select = $(id), selected = committedDevices[trackKind] ?? local?.getTracks().find(t => t.kind===trackKind)?.getSettings().deviceId;
     select.replaceChildren();
     for (const device of devices.filter(d => d.kind === kind)) { const option = document.createElement('option'); option.value = device.deviceId; option.textContent = device.label || `Device ${select.length + 1}`; select.append(option); }
+    if (selected && !devices.some(device => device.kind===kind && device.deviceId===selected)) {
+      const missing=document.createElement('option');missing.value=selected;missing.disabled=true;
+      missing.textContent='Selected device unavailable — choose another device';select.append(missing);
+    }
     if (selected) select.value = selected;
   }
 }
@@ -137,7 +143,7 @@ async function startMeter() {
 // Capture permission dialogs may finish after Leave, a new check, or a media
 // restart. Serialize sender writes, then publish the complete local stream only
 // after every replacement succeeds. Failed changes retain the previous devices.
-async function installDevices(fresh, epoch, kind) {
+async function installDevices(fresh, epoch, kind, requestedDevices={}) {
   if (left || epoch !== deviceEpoch) return false;
   fresh.getTracks().forEach(track => deviceTracks.add(track));
   const install = async () => {
@@ -158,7 +164,15 @@ async function installDevices(fresh, epoch, kind) {
       }
       if (!current() || !devicesReady(fresh, kind)) throw new Error('Device change superseded or access ended');
       fresh.getTracks().forEach(track => { track.enabled = track.kind === 'audio' ? microphoneEnabled : cameraEnabled; });
-      local = kind ? new MediaStream([...previous.getTracks().filter(track => track.kind !== kind), ...fresh.getTracks()]) : fresh;
+      const nextDevices = {...committedDevices};
+      for (const track of fresh.getTracks()) {
+        const id = requestedDevices[track.kind] ?? track.getSettings().deviceId;
+        if (typeof id==='string' && id) nextDevices[track.kind]=id;
+      }
+      const nextLocal = kind ? new MediaStream([...previous.getTracks().filter(track => track.kind !== kind), ...fresh.getTracks()]) : fresh;
+      // A failed, cancelled or superseded replacement never commits selection
+      // intent. Enumeration and browser defaults cannot choose new hardware.
+      local = nextLocal; committedDevices = nextDevices;
       watchTracks(fresh); $('preview').srcObject = local;
       previous?.getTracks().filter(track => !kind || track.kind === kind).forEach(track => track.stop());
       return true;
@@ -183,14 +197,19 @@ async function installDevices(fresh, epoch, kind) {
   finally { fresh.getTracks().forEach(track => deviceTracks.delete(track)); }
 }
 async function prepare() {
-  const epoch = ++deviceEpoch;
+  const epoch = ++deviceEpoch, requestedDevices = {...committedDevices};
   $('prepare').disabled = true;
   let fresh, installed = false;
   try {
     // Resume during the explicit click, before a permission dialog or await.
     audio ??= new AudioContext(); audio.resume().catch(()=>{});
-    fresh = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:{width:{ideal:1280},height:{ideal:720}}});
-    installed = await installDevices(fresh, epoch);
+    // Rechecking permission must not silently replace a chosen device with a
+    // browser default. A missing exact choice requires deliberate reselection.
+    fresh = await navigator.mediaDevices.getUserMedia({
+      audio:{echoCancellation:true,noiseSuppression:true,...(requestedDevices.audio?{deviceId:{exact:requestedDevices.audio}}:{})},
+      video:{width:{ideal:1280},height:{ideal:720},...(requestedDevices.video?{deviceId:{exact:requestedDevices.video}}:{})}
+    });
+    installed = await installDevices(fresh, epoch, undefined, requestedDevices);
     if (!installed || epoch !== deviceEpoch || left) return;
     controls(true);
     await enumerate();
@@ -198,7 +217,11 @@ async function prepare() {
     await startMeter();
     if (epoch === deviceEpoch && !left) status(admitted ? 'Devices restored. Your host connection remains active.' : 'Device check ready. Join the waiting room when you are ready.');
   } catch (error) {
-    if (epoch === deviceEpoch && !left) status(error.name === 'NotAllowedError' ? 'Camera or microphone permission was denied. Allow access in site settings, then check again.' : devicesReady() ? 'Device check failed. Any previous devices and your invite remain active. Check connections and try again.' : 'Device check failed. Restore camera and microphone access, then check again with this invite.');
+    if (epoch === deviceEpoch && !left) {
+      if (error.name==='NotAllowedError') status('Camera or microphone permission was denied. Allow access in site settings, then check again. Your selected devices will be retried.');
+      else if ((requestedDevices.audio || requestedDevices.video) && ['NotFoundError','OverconstrainedError'].includes(error.name)) status('A selected device is unavailable. Restore it or choose another device. Your previous devices and invite are preserved.');
+      else status(devicesReady() ? 'Device check failed. Any previous devices and your invite remain active. Check connections and try again.' : 'Device check failed. Restore camera and microphone access, then check again with this invite.');
+    }
   } finally {
     if (!installed) fresh?.getTracks().forEach(track => track.stop());
     updateJoinReadiness();
@@ -207,16 +230,20 @@ async function prepare() {
 }
 async function switchDevice(kind, id) {
   if (!local || left) return;
+  if (!['audio','video'].includes(kind) || typeof id!=='string' || !id) { status('Choose an available camera or microphone.'); return; }
   const epoch = ++deviceEpoch;
   let fresh, installed = false;
   try {
     fresh = await navigator.mediaDevices.getUserMedia(kind==='video' ? {video:{deviceId:{exact:id}},audio:false} : {audio:{deviceId:{exact:id},echoCancellation:true},video:false});
-    installed = await installDevices(fresh, epoch, kind);
+    installed = await installDevices(fresh, epoch, kind, {[kind]:id});
     if (!installed || epoch !== deviceEpoch || left) return;
     updateJoinReadiness();
     if (kind==='audio') await startMeter(); await enumerate();
   } catch {
-    if (epoch === deviceEpoch && !left) status(devicesReady() ? 'Device change failed. Your previous device and invite remain active.' : 'Device change failed. Restore the missing device and check again with this invite.');
+    if (epoch === deviceEpoch && !left) {
+      const selected=committedDevices[kind];if(selected)$(kind==='video'?'camera':'microphone').value=selected;
+      status(devicesReady() ? 'Device change failed. Your previous device and invite remain active.' : 'Device change failed. Restore the missing device and check again with this invite.');
+    }
   } finally {
     if (!installed) fresh?.getTracks().forEach(track => track.stop());
     updateJoinReadiness();

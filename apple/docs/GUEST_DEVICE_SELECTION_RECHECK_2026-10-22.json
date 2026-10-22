@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "e41fa06bae39ba14f3767a7bf3f92537f66b6313",
+  "issue": 126,
+  "scope": "Shipping guest JavaScript executed in existing Node VM fixtures with controlled UA device selection, tracks, promises, audio objects and signaling. No actual browser, RTC, media/device capture, native app, audio output or network run.",
+  "finding": "Rechecking previously selected camera and microphone omitted deviceId constraints, allowing a UA-valid different default to replace current tracks. Failed switches could also leave a selector displaying uncommitted hardware.",
+  "behavior": "Page-memory per-kind choices commit only with a successful current capture transaction. Rechecks request exact committed IDs. Missing/revoked choices preserve healthy old tracks, current peer and invite without unconstrained fallback; deliberate successful replacement updates only its kind. Enumeration retains an unavailable selected option. Failed/superseded requests do not commit choice intent.",
+  "node": {
+    "version": "24.15.0",
+    "path": "/private/tmp/stream-macos-tools-20261021/node_modules/node/bin/node",
+    "sha256": "3200fbd9f7fd4410426dd541e10d1ab829d3472f270d743c7fabd1696c03fe32"
+  },
+  "sourceAndFixtureSHA256": {
+    "workers/interviews/test/browser/guest-device-client.mjs": "4357faff6936baae2bb3d968a945150c911471175d238ff235615f87ac4605ed",
+    "workers/interviews/test/browser/owned-loopback-failure-snapshot-client.mjs": "0cab759aff8a90100c1424baaacfc722a6ed2b57850abbf01e5bc4aeeb959358",
+    "workers/interviews/test/browser/owned-loopback-lifecycle-client.mjs": "87c8649876c292870337064954ae37057844372ceac97c440c49bed1d4da9476",
+    "workers/interviews/test/browser/owned-loopback-signal-journal-client.mjs": "2e7392ac31a426e43b62e104cc8262e6dc5ab02cb08da4826f8aefc528d36292",
+    "workers/interviews/test/browser/reference-host-client.mjs": "bab2d7126c32769ace748ceda7239c8f48f7493d2b006202dfba414e87b30cc7",
+    "workers/interviews/test/browser/guest-public-chat.mjs": "f075215c47d3424af0f0429d86c83cdd323ef1379ee1fc51a21d7fd56672b467",
+    "workers/interviews/test/browser/owned-loopback-failure-snapshot.mjs": "6a8a484a5ad93128849ef3bb77c8f13e326b7171b0dd311cd81af0a43a3ba01b",
+    "workers/interviews/test/browser/owned-loopback-lifecycle.mjs": "dfc33a2327108c7129fe2b9a73ddab4712ee1bde07e94d909d3a196e6f0bd78c",
+    "workers/interviews/test/browser/owned-loopback-signal-journal.mjs": "39af822bee14046a916754ee6a1320e01ddc4ec5cd85216e488318fd4963a5aa",
+    "workers/interviews/test/browser/owned-null-audio-loopback.mjs": "1f21527a66493c17836356ad54e8d1e26f4c958cf45aec7c5c50712937fd23b0",
+    "workers/interviews/public/guest.js": "a4ee41b7a21e013779208086c4c2eb543614ceccc97c722119407e6cbefa7d2c",
+    "workers/interviews/public/host.js": "05ad3e6d7da7d41a0b1bc20c2b6829f79ea5a1f9b4028bc0e44c3eb84850822a",
+    "workers/interviews/public/public-chat.js": "f9e008950d9e706e8f3a30b3a1523d2338b5ef95cc1ecb922d1b3a1ac9ab3d05"
+  },
+  "documentationSHA256": {
+    "workers/interviews/test/browser/README.md": "417ee709c2a1d357afdd8be8681d256ce9b68a3ed1ddc2bfe1fd657aa5b37c35"
+  },
+  "originalSource": {
+    "gitPath": "e41fa06bae39ba14f3767a7bf3f92537f66b6313:workers/interviews/public/guest.js",
+    "path": "/tmp/stream-wave19-guest-e41fa06-original.js",
+    "sha256": "93b98ec7071dd52b25b61950e02a11ae5e88bb0f2c93ca9e7d057fb90f224fc4"
+  },
+  "logs": {
+    "original": {
+      "path": "/tmp/stream-wave19-device-choice-original-20261022.log",
+      "sha256": "939c82efe01174b6650e7b6ecb210ebf631140e34d8460d49a82785f8906ac3f"
+    },
+    "fixed": {
+      "path": "/tmp/stream-wave19-device-choice-fixed-20261022.log",
+      "sha256": "450697ffe8e9da01cbb7e429da0ca3716f3186e5812e8938bb6eeae6c2664606"
+    },
+    "existingClients": {
+      "path": "/tmp/stream-wave19-device-choice-existing-clients-20261022.log",
+      "sha256": "768fdba3a83c7729e80663c2a606afa44991703d2b6be0f00b2853e96a7c9c3d"
+    }
+  },
+  "results": {
+    "originalGuest": {
+      "exit": 1,
+      "pass": 17,
+      "fail": 6
+    },
+    "fixedGuest": {
+      "exit": 0,
+      "pass": 23,
+      "fail": 0
+    },
+    "remainingExistingClients": {
+      "exit": 0,
+      "pass": 35,
+      "fail": 0
+    },
+    "fixedTotalPass": 58
+  },
+  "commands": {
+    "cwd": "workers/interviews",
+    "original": [
+      "/private/tmp/stream-macos-tools-20261021/node_modules/node/bin/node",
+      "--test",
+      "test/browser/guest-device-client.mjs"
+    ],
+    "originalEnvironment": {
+      "GUEST_DEVICE_CLIENT_SOURCE": "/tmp/stream-wave19-guest-e41fa06-original.js"
+    },
+    "fixed": [
+      "/private/tmp/stream-macos-tools-20261021/node_modules/node/bin/node",
+      "--test",
+      "test/browser/guest-device-client.mjs"
+    ],
+    "existing": [
+      "/private/tmp/stream-macos-tools-20261021/node_modules/node/bin/node",
+      "--test",
+      "test/browser/owned-loopback-failure-snapshot-client.mjs",
+      "test/browser/owned-loopback-lifecycle-client.mjs",
+      "test/browser/owned-loopback-signal-journal-client.mjs",
+      "test/browser/reference-host-client.mjs",
+      "test/browser/guest-public-chat.mjs"
+    ]
+  },
+  "newCases": [
+    "Explicit chosen camera and microphone survive recheck even when unconstrained UA defaults differ; mute, peer and invite retained",
+    "Missing exact camera refuses default fallback, preserves healthy microphone/peer/invite, and deliberate replacement recovers",
+    "Permission refusal retains chosen devices and healthy tracks for next recheck",
+    "Failed sender replacement does not commit choice or misleading selector",
+    "Late superseded selection cannot overwrite the latest committed choice",
+    "Enumeration keeps unavailable committed choice visible rather than selecting another source"
+  ],
+  "counterfactual": "The exact base shipping source and fixed source run the same current test fixture. The controlled UA resolves exact IDs or rejects an unavailable exact ID, while unconstrained requests choose a different valid default. All six new assertions fail against base source; existing17 remain passing.",
+  "checks": [
+    "Pinned Node syntax check for changed production and fixture JS passed",
+    "git diff --check passed"
+  ],
+  "independentSourceReview": "Pending separate read-only canvases source/evidence attestation; no reviewer rerun requested.",
+  "remainingOriginalAcceptance": "Current stable Safari and mobile-browser device preparation/permission/device-switch/reconnect support remains unqualified by these controlled cases. Issue126 remains open. Existing scoped browser/native/validated-SDK routing receipts remain separate; no rendered-return PCM, physical-device, AEC or issue127 qualification claim."
+}

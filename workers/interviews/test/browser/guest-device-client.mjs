@@ -13,15 +13,15 @@ const source = await readFile(process.env.GUEST_DEVICE_CLIENT_SOURCE ?? new URL(
 const publicChatImport = "import {GuestPublicChatView} from './public-chat.js';";
 assert(source.includes(publicChatImport), 'Guest public-chat module boundary changed');
 const executableSource = source.replace(publicChatImport, '');
-const deferred = () => {let resolve; const promise = new Promise(value => {resolve=value;}); return {promise, resolve};};
+const deferred = () => {let resolve,reject; const promise = new Promise((yes,no) => {resolve=yes;reject=no;}); return {promise,resolve,reject};};
 const settle = () => new Promise(resolve => setImmediate(resolve));
 function fixture() {
   const elements = new Map(), captures = [], contexts = [];
   class Track {
-    constructor(kind) {this.kind=kind; this.enabled=true; this.readyState='live'; this.listeners={};}
+    constructor(kind,deviceId=`fixture-${kind}`) {this.kind=kind;this.deviceId=deviceId; this.enabled=true; this.readyState='live'; this.listeners={};}
     stop() {this.readyState='ended';}
     endExternally() {this.readyState='ended';this.listeners.ended?.();}
-    getSettings() {return {deviceId:`fixture-${this.kind}`};}
+    getSettings() {return {deviceId:this.deviceId};}
     addEventListener(type, callback) {this.listeners[type]=callback;}
   }
   class Stream {
@@ -39,7 +39,7 @@ function fixture() {
   }
   const element = id => {
     if (!elements.has(id)) elements.set(id, {value:'', disabled:false, textContent:'', dataset:{},
-      replaceChildren(){}, append(){}, get length(){return 0;}});
+      children:[],replaceChildren(...values){this.children=[...values];},append(...values){this.children.push(...values);},get length(){return this.children.length;}});
     return elements.get(id);
   };
   const sandbox = {URLSearchParams, TextEncoder, AbortSignal, MediaStream:Stream, GuestPublicChatView, performance, crypto,
@@ -52,13 +52,14 @@ function fixture() {
     setTimeout:(callback,ms)=>{const timer=setTimeout(callback,ms);timer.unref();return timer;}, clearTimeout,
     setInterval:(callback,ms)=>{const timer=setInterval(callback,ms);timer.unref();return timer;}, clearInterval, window:{addEventListener(){}}, WebSocket:{OPEN:1}};
   vm.createContext(sandbox);
-  vm.runInContext(executableSource+`;globalThis.guest={prepare,switchDevice,join,leave,resetPeer,acceptSignal,
+  vm.runInContext(executableSource+`;globalThis.guest={prepare,switchDevice,enumerate,join,leave,resetPeer,acceptSignal,
     setAdmission:()=>{admitted=true;generation="guest-generation";host="host-id";hostGeneration="host-generation";},
     setPeer:value=>{pc=value;},
     snapshot:()=>({local,senders:mediaSenders,left,secret}),setSenders:value=>{mediaSenders=value;},
     setSocket:value=>{socket=value;}};`,sandbox);
   const f={...sandbox.guest,element,captures,contexts,sandbox,
-    stream:(...kinds)=>new Stream(kinds.map(kind=>new Track(kind)))};
+    stream:(...kinds)=>new Stream(kinds.map(kind=>new Track(kind))),
+    streamWithDevices:devices=>new Stream(Object.entries(devices).map(([kind,id])=>new Track(kind,id)))};
   f.prepareDevices=async()=>{
     const pending=f.prepare(),stream=f.stream('audio','video');captures.at(-1).resolve(stream);await pending;return stream;
   };
@@ -258,4 +259,105 @@ test('signaling disconnect cannot re-enable Join or Reconnect with an ended micr
   f.element('rejoin').onclick();assert.equal(sockets.length,1,'Reconnect must check the same live-device readiness');
   assert.equal(old.getVideoTracks()[0].readyState,'live');assert.equal(f.snapshot().secret,'a'.repeat(64));
   assert.match(f.element('status').textContent,/check devices again.*invite/);
+});
+
+
+// Standards-valid getUserMedia selection: an exact ID either resolves that
+// device or refuses. Without an exact ID the UA may choose a different default.
+function finishDeviceCapture(f, capture, {unavailable=[],defaultPrefix='default'}={}) {
+  const selected={};
+  for(const kind of ['audio','video'])if(capture.constraints[kind]) {
+    const exact=capture.constraints[kind].deviceId?.exact;
+    if(unavailable.includes(exact)) {
+      capture.reject(Object.assign(new Error('Controlled missing exact device'),{name:'OverconstrainedError'}));return;
+    }
+    selected[kind]=exact??`${defaultPrefix}-${kind}`;
+  }
+  const stream=f.streamWithDevices(selected);capture.resolve(stream);return stream;
+}
+async function chooseDevice(f, kind, id) {
+  f.element(kind==='video'?'camera':'microphone').value=id;
+  const pending=f.switchDevice(kind,id),fresh=finishDeviceCapture(f,f.captures.at(-1));await pending;return fresh;
+}
+async function prepareDefaultDevices(f) {
+  const pending=f.prepare(),stream=finishDeviceCapture(f,f.captures.at(-1));await pending;return stream;
+}
+
+test('rechecking devices retains explicitly selected camera and microphone instead of UA defaults',async()=>{
+  const f=fixture();await prepareDefaultDevices(f);
+  await chooseDevice(f,'video','usb-camera');await chooseDevice(f,'audio','usb-microphone');
+  const previous=f.snapshot().local,peer={closed:false,close(){this.closed=true;}};
+  f.setPeer(peer);f.setAdmission();f.setSocket({readyState:1});f.setSenders({camera:f.sender(previous.getVideoTracks()[0]),audio:f.sender(previous.getAudioTracks()[0])});
+  f.element('mute').onclick();
+  const pending=f.prepare(),fresh=finishDeviceCapture(f,f.captures.at(-1));await pending;
+  assert.equal(f.snapshot().local.getVideoTracks()[0].getSettings().deviceId,'usb-camera');
+  assert.equal(f.snapshot().local.getAudioTracks()[0].getSettings().deviceId,'usb-microphone');
+  assert.equal(fresh.getAudioTracks()[0].enabled,false);assert.equal(peer.closed,false);
+  assert.equal(f.element('camera').value,'usb-camera');assert.equal(f.element('microphone').value,'usb-microphone');
+  assert.equal(f.snapshot().secret,'a'.repeat(64));
+});
+
+test('a missing exact device refuses default fallback and deliberate replacement recovers the same invite',async()=>{
+  const f=fixture();await prepareDefaultDevices(f);await chooseDevice(f,'video','usb-camera');
+  const old=f.snapshot().local,microphone=old.getAudioTracks()[0],peer={closed:false,close(){this.closed=true;}};
+  f.setPeer(peer);f.setAdmission();f.setSocket({readyState:1});f.setSenders({camera:f.sender(old.getVideoTracks()[0]),audio:f.sender(microphone)});
+  old.getVideoTracks()[0].endExternally();
+  const count=f.captures.length,pending=f.prepare();
+  finishDeviceCapture(f,f.captures.at(-1),{unavailable:['usb-camera']});await pending;
+  assert.equal(f.captures.length,count+1,'A missing selected device must not trigger a second unconstrained capture');
+  assert.equal(f.snapshot().local,old);assert.equal(microphone.readyState,'live');assert.equal(peer.closed,false);
+  assert.match(f.element('status').textContent,/selected device is unavailable/i);assert.equal(f.snapshot().secret,'a'.repeat(64));
+  await chooseDevice(f,'video','replacement-camera');
+  assert.equal(f.snapshot().local.getAudioTracks()[0],microphone);assert.equal(f.element('join').disabled,true,'Existing signaling/host ownership must stay independent of device recovery');
+  const recheck=f.prepare();finishDeviceCapture(f,f.captures.at(-1));await recheck;
+  assert.equal(f.snapshot().local.getVideoTracks()[0].getSettings().deviceId,'replacement-camera');
+  assert.equal(peer.closed,false);assert.equal(f.snapshot().secret,'a'.repeat(64));
+});
+
+test('permission refusal preserves committed choices and healthy tracks for the next explicit recheck',async()=>{
+  const f=fixture();await prepareDefaultDevices(f);await chooseDevice(f,'video','private-camera');
+  const old=f.snapshot().local,pending=f.prepare();
+  f.captures.at(-1).reject(Object.assign(new Error('Controlled revoked permission'),{name:'NotAllowedError'}));await pending;
+  assert.equal(f.snapshot().local,old);assert(old.getTracks().every(track=>track.readyState==='live'));
+  assert.match(f.element('status').textContent,/permission was denied/);
+  const retry=f.prepare();finishDeviceCapture(f,f.captures.at(-1));await retry;
+  assert.equal(f.snapshot().local.getVideoTracks()[0].getSettings().deviceId,'private-camera');
+  assert.equal(f.snapshot().secret,'a'.repeat(64));
+});
+
+test('a failed sender replacement does not commit the requested device choice or selector label',async()=>{
+  const f=fixture();await prepareDefaultDevices(f);await chooseDevice(f,'video','committed-camera');
+  const old=f.snapshot().local,sender=f.sender(old.getVideoTracks()[0]);
+  sender.replaceTrack=async function(track){if(track?.getSettings().deviceId==='rejected-camera')throw new Error('Controlled renegotiation required');this.track=track;};
+  f.setSenders({camera:sender});
+  const failed=await chooseDevice(f,'video','rejected-camera');
+  assert(failed.getTracks().every(track=>track.readyState==='ended'));assert.equal(f.snapshot().local,old);
+  assert.equal(f.element('camera').value,'committed-camera','A failed deliberate replacement must show its retained source');
+  const pending=f.prepare();finishDeviceCapture(f,f.captures.at(-1));await pending;
+  assert.equal(f.snapshot().local.getVideoTracks()[0].getSettings().deviceId,'committed-camera');
+});
+
+test('a late superseded selection cannot overwrite the latest committed choice used by recheck',async()=>{
+  const f=fixture();await prepareDefaultDevices(f);
+  const late=f.switchDevice('video','late-camera'),lateCapture=f.captures.at(-1);
+  const current=f.switchDevice('video','current-camera');finishDeviceCapture(f,f.captures.at(-1));await current;
+  const stale=finishDeviceCapture(f,lateCapture);await late;
+  assert(stale.getTracks().every(track=>track.readyState==='ended'));
+  const pending=f.prepare();finishDeviceCapture(f,f.captures.at(-1));await pending;
+  assert.equal(f.snapshot().local.getVideoTracks()[0].getSettings().deviceId,'current-camera');
+  assert.equal(f.snapshot().secret,'a'.repeat(64));
+});
+
+test('device enumeration retains an unavailable committed choice without selecting another source',async()=>{
+  const f=fixture();await prepareDefaultDevices(f);await chooseDevice(f,'video','unplugged-camera');
+  f.sandbox.navigator.mediaDevices.enumerateDevices=async()=>[
+    {kind:'videoinput',deviceId:'other-camera',label:'Other camera'},
+    {kind:'audioinput',deviceId:'default-audio',label:'Microphone'}
+  ];
+  await f.enumerate();
+  assert(f.element('camera').children.some(option=>option.value==='unplugged-camera' && option.disabled),
+    'A missing committed choice must stay visible instead of the first listed camera becoming selected');
+  assert.equal(f.element('camera').value,'unplugged-camera');
+  const pending=f.prepare();finishDeviceCapture(f,f.captures.at(-1),{unavailable:['unplugged-camera']});await pending;
+  assert.equal(f.snapshot().local.getVideoTracks()[0].getSettings().deviceId,'unplugged-camera');
 });
