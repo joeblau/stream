@@ -101,3 +101,34 @@ The next independently scheduled discriminator, if authorized, must bind this
 new journal's source hash as well as the launcher/snapshot/lifecycle/process
 helpers. The retained wave11 artifacts and earlier failed/interrupted receipts
 remain immutable; this change does not supply their missing observations.
+
+## Measured wave12: completed calls without observed candidate pairs
+
+The one separately authorized attempt at published
+`e8033037ee0a5bd51ed9b7b803ea8c34347f265b` ended UNQUALIFIED/77 after 11.398 s
+at the unchanged connection deadline. Its [bounded receipt](NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE12_2026-10-22.json)
+binds all eight source files, Node/Chrome/ws bytes, one invocation intent,
+preflight and process/drain proofs. No retry followed; the twelve-second
+measurement never began.
+
+All ten observed API calls completed: offer, answer, four description calls and
+four candidate calls. All 36 journal events remained retained in active
+generation 1, with zero rejections, in-flight calls, stale settlements or drops.
+Current offer/answer descriptions were present and pending descriptions absent.
+Each peer exposed one unselected transport, ICE/DTLS both `new`, zero selected-pair
+changes and zero transport packets/bytes. Complete 11/8-row stats snapshots
+exposed zero candidate-pair and remote-candidate rows, versus four local host
+candidate rows per peer (two UDP/two TCP). Fulfilled candidate API promises do
+not establish internal resolution/materialization; no network or mDNS cause is
+assigned by those absent rows.
+
+Both null contexts ran; generated sender PCM was positive across 483328 frames,
+while receiver PCM was zero across 481280 frames. Sender Opus explicitly reported
+zero packets/bytes; receiver inbound RTP had no row. The retained trace has
+24998 events and an observed byte counter 36224 bytes over the 8 MiB cap, so its
+callback counts remain lower bounds despite protocol trace completion. Cleanup
+and a subsequent read-only check confirmed the owned process group and profile
+were gone. This all-Chromium result does not reproduce or explain the older
+native 931-packet symptom, qualify a receive-clock fix or close #127. The next
+source boundary is fulfilled candidate calls versus exposed remote candidates
+and pair construction. All older receipts remain unchanged.
