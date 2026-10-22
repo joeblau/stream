@@ -29,7 +29,7 @@ RUBY
 xcodegen generate --spec "$CAPTURE_DIR/project.json" --project "$CAPTURE_DIR"
 xcodebuild -resolvePackageDependencies -project "$CAPTURE_DIR/BrowserCaptureAuthority.xcodeproj" -scheme BrowserCaptureAuthority -derivedDataPath "$CAPTURE_DERIVED"
 python3 scripts/repair_desktop_transport_archives.py "$CAPTURE_DERIVED"
-xcodebuild -project "$CAPTURE_DIR/BrowserCaptureAuthority.xcodeproj" -scheme BrowserCaptureAuthority -configuration Debug -destination 'platform=macOS' -derivedDataPath "$CAPTURE_DERIVED" -jobs 2 CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project "$CAPTURE_DIR/BrowserCaptureAuthority.xcodeproj" -scheme BrowserCaptureAuthority -configuration Debug -destination 'platform=macOS' -derivedDataPath "$CAPTURE_DERIVED" -jobs 2 'OTHER_SWIFT_FLAGS=$(inherited) -j2' CODE_SIGNING_ALLOWED=NO build
 if [[ "${BROWSER_CAPTURE_AUTHORITY_BUILD_ONLY:-0}" == 1 ]]; then
   print 'Built the actual capture owner/mixer; no capture or helper qualification ran.'
   exit 0
@@ -52,7 +52,7 @@ if [[ "${1:-all}" == ipc ]]; then
 PLIST
   # Exact shipping helper code. Ad hoc signing does not establish distribution
   # provenance/sandbox qualification; this owned prototype uses existing private IPC.
-  swiftc -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
+  swiftc -j2 -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
     StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift \
     StreamMac/BrowserWidgetVisualProtocol.swift StreamMac/BrowserWidgetRasterizer.swift \
     BrowserAudioHelper/BrowserAudioHelperMain.swift -o "$HELPER_APP/Contents/MacOS/StreamBrowserAudioHelper"
