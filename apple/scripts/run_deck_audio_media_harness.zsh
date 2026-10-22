@@ -126,17 +126,20 @@ fixture_replace(target, root, folder, 'MediaSourcePlayback.swift') do |source|
                               relativeTo: nil,
                               bookmarkDataIsStale: &isStale)
             guard url.startAccessingSecurityScopedResource() else {
-                fail("macOS denied access to \"\(url.lastPathComponent)\". Relink the file to restore access.")
+                fail("macOS denied access to \"\(url.lastPathComponent)\". Relink the file to restore access.", generation: generation)
                 return
             }
-            // Access is held for the rest of the session (one startAccessing
-            // per load; a relink resolves the new bookmark the same way).
+            // One successful scope acquisition has exactly one owner. A stale
+            // or failed load releases locally; accepted playback holds it until
+            // relink, terminal retirement, or deinitialization.
+            let access = MediaFileAccess(url: url)
 SWIFT
   abort 'Owned internal-media fixture boundary changed' unless source.include?(boundary)
   source.sub!(boundary, <<'SWIFT')
             // Generated validation only: exact owned internal media, no scope
             // grant claimed. Real asset load and player stay below.
             let url = try DeckFixtureOwnedMedia.resolve(bookmark)
+            let access: MediaFileAccess? = nil
 SWIFT
   source + <<'SWIFT'
 

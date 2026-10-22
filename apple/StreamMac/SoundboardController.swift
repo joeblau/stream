@@ -565,7 +565,7 @@ final class SoundboardController: ObservableObject {
     }
 
     private func retire(_ engine: MediaSourcePlayback, instanceID: UUID) {
-        engine.pause()
+        engine.shutdown()
         engineList.remove(instanceID)
         controller.releaseSoundboardAudioChannel(engine.sourceID)
         playingEngines.remove(instanceID)
