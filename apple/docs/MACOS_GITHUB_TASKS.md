@@ -96,7 +96,7 @@ The roadmap also contains unfinished software, beyond external qualification. Na
 
 The local SDK probe found no NDI runtime/SDK, DeckLink runtime/SDK or Zoom Meeting SDK. The installed Zoom application is not the Meeting SDK. These tasks also need real media bridge implementations; a prerequisite diagnostic cannot substitute for one. A Developer ID certificate exists, but matching StreamMac/camera/helper provisioning profiles were not found. The read-only HAL probe did not find an installed Stream virtual microphone. No driver installation, extension activation, system-default changes, credential updates, signing submissions, public broadcasts or GitHub issue edits were performed.
 
-## Native controls and diagnostics follow-up — 2026-10-22 UTC
+## Published native controls and diagnostics follow-up — 2026-10-22 UTC
 
 A further wave used up to ten concurrent subagents, independent acceptance
 review and combined validation. Original issue criteria for #91 and #147–#150
@@ -130,6 +130,10 @@ The browser protocol double now models host-only roster generations and exact
 membership targets, including replacement-generation readmission; its earlier
 stale fixture failure is retained in the local validation logs.
 
+The following paragraph records the published `40d0737` snapshot before the
+final-wave fixes documented below. Its media failures and optional backend
+limits are retained as historical evidence, rather than current remaining gates.
+
 Genuine sample Stream Deck profile exports and remaining package/device
 qualification keep #152 open. The two quiet 120-second owned workloads improve
 #92 evidence without qualifying representative physical capture, Intel or
@@ -142,3 +146,60 @@ owned newer-macOS backend; the shipping UDP-only backend and unsupported TLS
 remain explicit. See STUDIO_DIAGNOSTICS.md, DECK_AUDIO_MEDIA_VALIDATION.md,
 DESKTOP_RESOURCE_BUDGETS.md, GUEST_RETURN_AV_ORACLES.md and
 NATIVE_GUEST_TCP_QUALIFICATION.md for evidence and reproducible boundaries.
+## Final-wave implementation and acceptance review — 2026-10-22 UTC
+
+This review starts from combined central source `33e9bc9`. It performs no GitHub
+closures. The previously verified inventory remains **41 open and 20 closed**;
+anticipated closures are not counted. The parent must refresh the exact API
+inventory after publication and any deliberate closure. Earlier sections retain
+their historical source snapshots, failures and test counts. The current
+remaining gates below supersede outdated remaining-gate wording in those
+snapshots without relabelling a failed run as passing.
+
+| Task | New verified evidence | Current disposition |
+| --- | --- | --- |
+| #175 external display output | All three original functional criteria pass independent review. An actual external display receives the borderless, non-key video surface with sRGB primaries, black letterboxing and Fit/Fill readback. Actual StreamController/Clean compositor/native-layer tests cover overlay/annotation exclusion, shared 4K30 budgeting and independent teardown. Universal Release at `230c` containing this feature and its bundle audit passed. | **Proposed closure after the final combined universal build and publication**, since later integrated source still requires that build. GitHub remains open here. Physical cable unplug, negotiated AirPlay and broad display/scanout coverage remain disclosed limits; they are not invented additional closure criteria. |
+| #158 resilience | Controlled source failover, locked/wake ordering and output continuity have native evidence. Final recovery and Stream Deck fixes and independent review are still in progress. | **Keep open pending those fixes and final acceptance review.** Do not infer physical notification/device/TCC coverage from injected lifecycle events. |
+| #107 / #108 keying and LUTs | The actual linear-LUT color-space bug is fixed, including small-table shadow preservation. Seven focused Core tests and actual Metal controls pass. All 48 photographed green-screen motion plates pass measured edge/temporal checks. Reserved combined 1080p30 key/mask/picture/64³ LUT work completes 1,800 frames in 60 seconds with no render-budget or cadence misses. | **Keep open for physical hardware-source qualification.** Representative photographed footage and this sustained render-cost workload are now completed evidence. The bypassed baseline's two budget/five cadence misses remain recorded; this is not all-hardware or long-broadcast capacity proof. |
+| #92 performance | Actual AAC priming, startup alignment, software RTMP presentation timestamps and bounded final codec/publisher drains are corrected. Hardware and software shared-media suites pass unchanged limits. Final actual storage-failure/network integration passes all three original 80 ms cues per transport: RTMP 7.500/1.500/5.500 ms and SRT 8.278/1.900/5.522 ms. | **Keep open for representative sustained Apple Silicon/native Intel workloads, thermal evidence and measured encoder/storage/uplink ceilings.** Earlier 82/91 ms media failures are retained and now have a concrete fix with passing media evidence. These small-profile checks do not establish resource ceilings. |
+| #125 / #126 / #128 / #129 / #130 interviews | Optional ARM and x86 TCP dependency/backend archives verify minOS 14.0, source hashes and retained-object replacement relinking. Native ARM full Manager/Chrome TCP media and Rosetta x86 control smoke pass; universal packaging preserves matching slices. Independent provenance review found no remaining must-fix. | **Keep open for each issue's remaining browser/network/device acceptance.** Shipping still uses UDP-only transport; the optional TCP backend is not adopted. Declared macOS 14 floors are not old-OS runtime proof; Rosetta is not native Intel full media. TLS, Internet/mobile/Safari and rendered A/V are not established by this optional artifact work. |
+| #90 accessibility | Actual native palette/Escape, settings and attached-sheet dismissal restore the exact field editor/owner. Real chat and mixer updates preserve native-search focus. Actual interface fonts/caption geometry grow under the preference at 1024×640. | **Keep open for virtual SwiftUI semantic AX actions/order, virtual fader and panel-removal focus, remaining layout/operator checks and visual contrast.** Locked-session AX exposes no owned semantic window; the normal-render red reference fails before contrast comparison. Source contrast styles and root preferences alone do not qualify visual contrast. |
+| #155 portable shows | Final signed sandbox content fixture passes bookmark-only video/pad/playlist/scene-sound/stinger promotion, verified preview/import bytes, private-grant exclusion, original-file removal, actual copied-video decoding and copied/repaired WAV through AVAudioFile. Twelve production-source package tests and five playback lifecycle regressions pass. | **Keep open for native keyboard chooser selection and the full imported/repaired sound-pad AVAssetReader/PCM path.** Chooser attempts cancel; the full pad decoder stalls in host AudioQueue/HAL XPC. The passing content-only mode is explicitly scoped. Signed distribution is not an additional acceptance gate for this task. |
+| #124 browser audio | Missing mixer preparation now refuses capture/Resume. The actual helper/WebKit/native PCM suite verifies late registration, synchronous withdrawal, saved gain/Aux/delay restoration, all-bus/ISO silence and retained visual demand. | **Keep production disabled and the issue open.** Signed shared-container IPC, live WebKit attribution/tails, every-route exclusion, fresh live A/V and endurance remain unqualified. |
+| #139 / #142 / #143 chat | Actual provider/vault/HTTP and native renderer/recording suites pass queued write cancellation before HTTP, exact historical targets, reader health after outgoing refusal and shared-vault identity pinning. | **Keep open for original authorized live-provider validation.** Controlled responses and owned artwork are not live feed, delivery or moderation evidence. |
+| #152 Stream Deck profiles | Bounded supported actions in the installed editor reveal no actual author/export surface through existing public AX grants. All 11 ProfilesV2 files, 12 ProfilesV3 files and eight plugin entries remain byte-identical. | **Keep open for genuine starter-profile exports/imports and remaining target-runtime package/configuration acceptance.** Recipes do not substitute for exports; release signing or physical hardware is not invented as a prerequisite for authoring them. |
+
+Current combined `33e9bc9` compatible Core verification passes **563 tests in
+80 suites**, including HostedAudioUnitTests serialization. It excludes exactly
+ChannelFXProcessorTests and VoicePolishProcessorTests because of reproduced host
+HAL stalls. This is a scoped pass, **not a full-suite pass**; two earlier aborted
+runs remain preserved. Log and matching xcresult use
+`/tmp/stream-wave2-compatible-core-final-20261022`. The new final combined
+universal Release is still running at this ledger snapshot.
+
+The final AAC fixtures explicitly use AVAudioFile for original PCM decoding and
+AVAssetReader for video, retaining all original media limits and adding a
+stricter 4 ms source pulse/tail check. The original AVAssetReader PCM path remains
+host HAL/XPC gated. The separate guest raw-track 105.104 ms failure and normal
+rendered PCM/AEC limits under #127 are unchanged by this publishing fix.
+
+The performance workflow is ready for a bounded longer dispatch: its timeout is
+90 minutes, native architecture checks are explicit, and five tests verify
+owned-process interrupt/termination cleanup. No 600-second or native Intel
+sustained result is claimed from workflow readiness alone.
+
+Hosted CI run [39706795991](https://github.com/joeblau/stream/actions/runs/39706795991)
+on exact published `40d0737` completed with iOS success and both macOS jobs
+failing at the same headless `NSApp` nil unwrap in
+`StudioAutomationEndpoint.swift:61`, after successful harness builds. The guarded
+headless-focus fix and the unchanged managed-start harness pass locally. This
+is distinct from AAC timing. Later old-run qualifications were skipped; hosted
+verification of the integrated fix and the final combined source remains pending.
+No old failure is represented as a green hosted run.
+
+Current source/evidence references: [color qualification](research/color-transforms.md),
+[shared media](ENCODED_SHARING.md), [storage/network integration](RECORDING_STORAGE_NETWORK.md),
+[TCP portability](NATIVE_GUEST_TCP_PORTABILITY.md),
+[native controls](STUDIO_CONTROLS.md),
+[portable package evidence](PORTABLE_SHOW_NATIVE_ENTRY.md) and the per-issue
+records and local report paths in [MACOS_TASK_STATUS.json](MACOS_TASK_STATUS.json).
