@@ -1192,3 +1192,70 @@ pass; workload content, PCM, FPS, 17,850-frame, 80ms and 600-second gates remain
 unchanged. No benchmark ran and #92 stays open. The ledger separately binds this
 source-only migration and the bounded actual guest ISO proof. This documentation
 performs no API write, native run or publication.
+
+## Durable transfer and named ARM sustained evidence — 2026-10-22 UTC
+
+Exact local `d09da50` passes generation, unsigned universal arm64/x86_64 Release
+and the actual bundle audit. The expanded **827-path** source/recipe manifest
+now includes interview workers; every path/hash and vendor binding matches that
+built source. Current `4f76e76` adds validation recipes/documentation only;
+shipping sources match the build. `wave18Review` in the [ledger](MACOS_TASK_STATUS.json)
+binds the execution, source, independent reviews and original logs.
+
+- [YouTube throttling](YOUTUBE_RATE_LIMIT_ERRORS.md) now maps the documented HTTP
+  403 live-request reason to the existing cooldown. Fresh local **609 Core tests
+  / 83 suites** and the focused actual account-session fixture pass; no real
+  account/provider request occurred. The distribution audit also checks decoded
+  profile authorization against signing claims. Its 18 policy/mocked-bundle
+  tests pass, without establishing CMS trust or a signed/provisioned artifact.
+- [Helper retirement](BROWSER_HELPER_SHUTDOWN.md) joins owned audio preparation,
+  stop and cleanup before closing. The actual session passes controlled owner
+  cases and its close-order negative fails; real capture, mixer/transport
+  termination and audible routing remain unqualified. Guest joining rejects
+  ended devices before new offers: 17 guest and 35 existing controlled Node cases
+  pass, without qualifying current Safari/mobile device and permission flows.
+- [Portable import](PORTABLE_IMPORT_DURABILITY.md) persists and confirms its
+  candidate catalog before publication/staging. Actual owned filesystem controls
+  verify recovery refusal, precommit rollback/retry, postcommit history failure,
+  concurrent edits, cancellation, uncertain readback and safe restart. Five actual
+  read-race phases and four generation tests pass; the exact original import-method
+  control fails recovery refusal. Independent review verifies 109 bindings.
+  **#155 remains open** for native keyboard chooser selection; no full runtime,
+  Finder or sandbox interaction is inferred.
+
+The [controlled native chat emote proof](NATIVE_CHAT_STATIC_EMOTE_2026-10-22.json)
+passes with 550 actual compiler inputs and 29 artifacts; 1015 independent review
+checks pass. It exercises coordinator, renderer and recording components without
+a native UI launch or authorized live feed. Original #139/#143 remain open.
+
+One actual [named M3 Max ARM invocation](PERFORMANCE_OWNED_ARM_1BA7351.md) now
+passes **both original 600-second cases**, all 7+11 checks and the original
+1380 s deadline, with no retry. Static/replay renders are 18001/17978 versus 17850
+required, writer frames 18000/17977, skips 0/23, decoded input 18000/18000 and
+writer A/V drops 0/0. Endpoint errors 9.500/1.785 ms are below 80 ms; they are not
+independent waveform drift. All 789 independent evidence checks pass. This named
+ARM workload does not qualify Intel, physical capture, all representative mixes
+or resource ceilings. Earlier hosted 600 s failures remain failures; **#92 stays open**.
+
+The [actual native contrast style view](STUDIO_CONTRAST_PIXELS.md) passes the
+original standard/increased red/black/white gates after correcting the fixture's
+ICC/NSBitmap sampler through normalized sRGB bytes. The archived reference was
+rendered red; the old environment-gap diagnosis was incorrect. Increased contrast
+changes white secondary-text pixels from 0 to 3000. Production styles and thresholds
+are unchanged; 91 independent checks pass. This qualifies that style boundary,
+not complete native AX/actions/order, keyboard traversal, focus or smaller-panel
+flows. **#90 remains open**; no human-listening or physical-keyboard criterion is
+added. Ongoing CAX diagnostics are not completed original-criteria qualification.
+
+Published `1ba7351` [CI 39841833992](https://github.com/joeblau/stream/actions/runs/39841833992)
+is terminal **FAILURE**: both Mac jobs fail step 8 at the same ingress capture
+circular reference and reach no Core/native fixtures. iOS passes 607/83 in
+176.242 s. The narrow source repair is included in the local build; corrected-source
+hosted Xcode 26.6 verification is not yet available. No older failure is relabeled passed.
+
+The fresh **20:20:13 UTC** complete read-only inventory confirms original 61
+**27 closed / 34 open**, all 135 macOS **101 closed / 34 open**, unchanged original
+bodies/states, no overlooked open task and zero open PRs. Each open tracker still
+has incomplete children. No additional closure is justified. Historical wave
+objects and original failed artifacts remain intact; this update performs no
+GitHub write, native run or publication.
