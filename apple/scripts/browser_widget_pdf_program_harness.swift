@@ -26,7 +26,7 @@ private final class Frames: @unchecked Sendable {
     var onFailure: (@MainActor (String) -> Void)?
     func start(helperPID: Int32) async throws { preconditionFailure("Visual proof must never start audio capture") }
     func invalidateInput() {}
-    func stop() async {}
+    func stop() async -> BrowserWidgetAudioStopResult { .confirmed }
 }
 @main @MainActor struct BrowserWidgetPDFProgramHarness {
     static func wait(_ label: String, _ predicate: () -> Bool) async throws {

@@ -10,12 +10,19 @@ import Foundation
         var beforeStart: (@MainActor () async -> Void)?
         var beforeStop: (@MainActor () async -> Void)?
         var stops = 0
+        var stopResult: BrowserWidgetAudioStopResult = .confirmed
+        var stopResults: [BrowserWidgetAudioStopResult] = []
         var invalidations = 0
         let requiresScreenCaptureAccess = false
         var onFailure: (@MainActor (String) -> Void)?
         func start(helperPID: Int32) async throws { precondition(helperPID == 42); await beforeStart?(); starts += 1; isCapturing = true }
         func invalidateInput() { invalidations += 1 }
-        func stop() async { await beforeStop?(); isCapturing = false; stops += 1 }
+        func stop() async -> BrowserWidgetAudioStopResult {
+            await beforeStop?(); stops += 1
+            let result = stopResults.isEmpty ? stopResult : stopResults.removeFirst()
+            if result == .confirmed { isCapturing = false }
+            return result
+        }
     }
     @MainActor private final class Transport: BrowserWidgetHelperTransport {
         let pid: Int32 = 42
@@ -178,6 +185,127 @@ import Foundation
             await session.waitUntilStopped(); await replacement.value
             precondition(transport.closeCount == 1 && !driver.isCapturing && session.demandCount == 0)
             print("PASS: actual session failure retains old helper through held capture \(holdStart ? "start join" : "stop"), fences replacement demand and closes once after cleanup; inert transport/driver only")
+        }
+        do {
+            let fm = FileManager.default
+            let root = fm.temporaryDirectory.appendingPathComponent("stream-unconfirmed-files-" + UUID().uuidString, isDirectory: true)
+            try fm.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            defer { try? fm.removeItem(at: root) }
+            let source = root.appendingPathComponent("index.html")
+            try Data("<html>retained helper reader</html>".utf8).write(to: source)
+            let transport = Transport(), driver = Driver(), states = States()
+            var session: BrowserWidgetHelperSession? = BrowserWidgetHelperSession(applicationURL: path, mixer: AudioMixEngine(),
+                validationAudioDriver: driver, transportForQualification: transport)
+            weak var retained = session
+            session!.validationLocalContainer = root
+            transport.reply = { [weak owner = session!] in owner?.validationReceive($0) }
+            let id = UUID(), generation = UUID()
+            try await session!.loadForQualification(id: id, generation: generation, localSource: source, options: .init(), callbacks: states.callbacks)
+            await session!.waitUntilStopped()
+            let page = transport.commands.last(where: { $0.action == .load })!.localPage!
+            let oldRoot = try BrowserWidgetLocalContent.resolve(page, container: root, widget: id, generation: generation).root
+            driver.stopResult = .unconfirmed; driver.onFailure?("owned_stop_unconfirmed")
+            await session!.waitUntilStopped()
+            session = nil
+            precondition(retained?.captureRetirementPending == true && !transport.closed && fm.fileExists(atPath: oldRoot.path),
+                         "Unconfirmed native retirement lost old helper or local page ownership")
+            driver.stopResult = .confirmed
+            let result = await BrowserWidgetHelperSession.retryRetainedShutdowns()
+            precondition(result == .confirmed && transport.closeCount == 1 && fm.fileExists(atPath: oldRoot.path),
+                         "Confirmed capture stop was mistaken for helper process exit")
+            transport.hasTerminated = true; BrowserWidgetLocalRetirement.retry()
+            precondition(!fm.fileExists(atPath: oldRoot.path))
+            print("PASS: unconfirmed native shutdown retains exact old local files/helper beyond external owner; confirmed retry closes helper but deletion still waits owned process exit")
+        }
+        // A failed native stop is not terminal cleanup. Retain the exact
+        // helper/files beyond external references, and allow one explicit retry.
+        do {
+            let fm = FileManager.default
+            let root = fm.temporaryDirectory.appendingPathComponent("stream-unconfirmed-session-" + UUID().uuidString, isDirectory: true)
+            try fm.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            defer { try? fm.removeItem(at: root) }
+            let source = root.appendingPathComponent("index.html")
+            try Data("<html>owned pending capture</html>".utf8).write(to: source)
+            let transport = Transport(), driver = Driver(), states = States(), held = HeldStart()
+            let baseline = BrowserWidgetHelperSession.admittedHelperCount
+            var session: BrowserWidgetHelperSession? = BrowserWidgetHelperSession(applicationURL: path, mixer: AudioMixEngine(),
+                validationAudioDriver: driver, transportForQualification: transport)
+            weak var retained = session
+            session!.validationLocalContainer = root
+            transport.reply = { [weak owner = session!] in owner?.validationReceive($0) }
+            let id = UUID(), generation = UUID()
+            try await session!.loadForQualification(id: id, generation: generation, localSource: source, options: .init(), callbacks: states.callbacks)
+            await session!.waitUntilStopped()
+            let page = transport.commands.last(where: { $0.action == .load })!.localPage!
+            let oldRoot = try BrowserWidgetLocalContent.resolve(page, container: root, widget: id, generation: generation).root
+            var stagedRoot: URL?
+            session!.validationAfterLocalStaging = { staged in stagedRoot = staged.root; await held.wait() }
+            let replacing = Task { [owner = session!] in
+                do {
+                    try await owner.loadForQualification(id: UUID(), generation: UUID(), localSource: source, options: .init(), callbacks: states.callbacks)
+                    preconditionFailure("Staged load bypassed unconfirmed shutdown")
+                } catch BrowserWidgetHelperSession.SessionError.captureRetirementPending {} catch {
+                    preconditionFailure("Unexpected staged barrier result: \(error)")
+                }
+            }
+            await held.untilEntered()
+            // First stop retires the last page; the final shutdown stop fails.
+            // This controlled edge targets the post-copy shutdown barrier.
+            driver.stopResults = [.confirmed, .unconfirmed]
+            session!.release(id); await session!.waitUntilStopped()
+            precondition(session!.captureRetirementPending && !transport.closed && session!.helperPID == 42)
+            precondition(fm.fileExists(atPath: oldRoot.path) == false, "ACKed old page was not retired")
+            precondition(stagedRoot.map { fm.fileExists(atPath: $0.path) } == true)
+            held.release(); await replacing.value
+            precondition(stagedRoot.map { fm.fileExists(atPath: $0.path) } == false,
+                         "Post-copy unconfirmed shutdown leaked a never-installed page")
+            driver.stopResult = .unconfirmed
+            let stillUnconfirmed = await session!.retryPendingShutdown()
+            precondition(stillUnconfirmed == .unconfirmed && !transport.closed)
+            precondition(BrowserWidgetHelperSession.retainedShutdownCount == 1 && BrowserWidgetHelperSession.admittedHelperCount == baseline + 1)
+            // A new load cannot clear the completed-but-unconfirmed barrier.
+            do {
+                try await session!.loadForQualification(id: UUID(), generation: UUID(), html: "blocked", options: .init(), callbacks: states.callbacks)
+                preconditionFailure("Unconfirmed shutdown admitted a fresh helper load")
+            } catch BrowserWidgetHelperSession.SessionError.captureRetirementPending {}
+            session = nil
+            precondition(retained != nil, "Failed shutdown lost its process-rooted owner")
+            driver.stopResult = .confirmed
+            let confirmed = await BrowserWidgetHelperSession.retryRetainedShutdowns()
+            precondition(confirmed == .confirmed)
+            precondition(transport.closeCount == 1 && BrowserWidgetHelperSession.retainedShutdownCount == 0 && BrowserWidgetHelperSession.admittedHelperCount == baseline)
+            print("PASS: actual session retains unconfirmed capture shutdown/helper beyond external owner, blocks fresh load, cleans staged race and closes only after explicit confirmed retry")
+        }
+        do {
+            let baseline = BrowserWidgetHelperSession.admittedHelperCount
+            var drivers: [Driver] = [], transports: [Transport] = []
+            for _ in 0..<BrowserWidgetHelperSession.maximumAdmittedHelpers {
+                let transport = Transport(), driver = Driver(), states = States()
+                let session = BrowserWidgetHelperSession(applicationURL: path, mixer: AudioMixEngine(),
+                    validationAudioDriver: driver, transportForQualification: transport)
+                transport.reply = { [weak session] in session?.validationReceive($0) }
+                try await session.loadForQualification(id: UUID(), generation: UUID(), html: "bounded", options: .init(), callbacks: states.callbacks)
+                await session.waitUntilStopped()
+                driver.stopResult = .unconfirmed; driver.onFailure?("owned_stop_unconfirmed")
+                await session.waitUntilStopped()
+                drivers.append(driver); transports.append(transport)
+            }
+            precondition(BrowserWidgetHelperSession.admittedHelperCount == baseline + BrowserWidgetHelperSession.maximumAdmittedHelpers)
+            let transport = Transport(), driver = Driver(), states = States()
+            let refused = BrowserWidgetHelperSession(applicationURL: path, mixer: AudioMixEngine(),
+                validationAudioDriver: driver, transportForQualification: transport)
+            do {
+                try await refused.loadForQualification(id: UUID(), generation: UUID(), html: "over-cap", options: .init(), callbacks: states.callbacks)
+                preconditionFailure("Quarantined helper owners bypassed global admission")
+            } catch BrowserWidgetHelperSession.SessionError.widgetLimit {}
+            await refused.waitUntilStopped()
+            precondition(!transport.commands.contains { $0.action == .load }, "Over-cap owner installed content before admission")
+            precondition(transports.allSatisfy { !$0.closed }, "Admission pressure evicted an unconfirmed helper owner")
+            for driver in drivers { driver.stopResult = .confirmed }
+            let result = await BrowserWidgetHelperSession.retryRetainedShutdowns()
+            precondition(result == .confirmed && BrowserWidgetHelperSession.admittedHelperCount == baseline &&
+                         BrowserWidgetHelperSession.retainedShutdownCount == 0 && transports.allSatisfy { $0.closeCount == 1 })
+            print("PASS: global helper-owner admission refuses over-cap content without evicting any unconfirmed shutdown; explicit retries release every admission exactly once")
         }
         // Actual session consumption of a current capture-owner proof. A retired
         // demand while capture start is held must never reach helper Resume.

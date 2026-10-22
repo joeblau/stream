@@ -2,27 +2,29 @@ import AppKit
 import CoreMedia
 import ScreenCaptureKit
 
+enum BrowserWidgetAudioStopResult: Equatable, Sendable { case confirmed, unconfirmed }
+
 @MainActor protocol BrowserWidgetAudioDriver: AnyObject {
     var isCapturing: Bool { get }
     var requiresScreenCaptureAccess: Bool { get }
     var onFailure: (@MainActor (String) -> Void)? { get set }
     func start(helperPID: Int32) async throws
     func invalidateInput()
-    func stop() async
+    @discardableResult func stop() async -> BrowserWidgetAudioStopResult
 }
 
 /// The external SCK operation boundary. The production implementation owns
 /// the real stream/output; capture-free fixtures hold only these async edges.
 @MainActor protocol BrowserWidgetAudioProducer: AnyObject, Sendable {
     func start() async throws
-    func stop() async
+    @discardableResult func stop() async -> BrowserWidgetAudioStopResult
 }
 
 /// A12 qualification seam only. Production helper selection stays disabled. This capture
 /// requests the helper's exact application + PID; media ownership still needs measured proof.
 /// Never connect these unqualified samples to a product mixer. There is no system/global branch.
 @MainActor final class BrowserWidgetAudioCapture: BrowserWidgetAudioDriver {
-    enum CaptureError: Error { case permissionUnavailable, helperMissing, ambiguousHelper, displayMissing, windowMissing, holdbackUnavailable }
+    enum CaptureError: Error { case permissionUnavailable, helperMissing, ambiguousHelper, displayMissing, windowMissing, holdbackUnavailable, retirementUnconfirmed, resourceLimit }
     enum FilterStyle: String, Codable, Sendable { case application, independentWindow }
     struct FilterIdentity: Codable, Sendable { var style: FilterStyle; var helperPID: Int32; var bundleID: String; var windowID: UInt32? }
     let channel = AudioChannelID.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID)
@@ -42,21 +44,39 @@ import ScreenCaptureKit
     /// Intent is established before any await, including retiring a previous run.
     private var operation = UUID()
     @MainActor private final class Run {
-        let id = UUID()
+        let id: UUID
         let inlet: BrowserWidgetPCMInlet
         let generation: UUID
         var producer: (any BrowserWidgetAudioProducer)?
         var preparation: Task<PreparedCapture, Error>?
         var starting: Task<Void, Error>?
         var reservation: (token: UUID, task: Task<Bool, Never>)?
-        var retirement: Task<Void, Never>?
-        init(sink: @escaping @Sendable (CMSampleBuffer) -> Void) {
-            inlet = BrowserWidgetPCMInlet(sink: sink); generation = inlet.begin()
+        var retirement: Task<BrowserWidgetAudioStopResult, Never>?
+        var retired = false
+        init(id: UUID, sink: @escaping @Sendable (CMSampleBuffer) -> Void) {
+            self.id = id; inlet = BrowserWidgetPCMInlet(sink: sink); generation = inlet.begin()
         }
     }
     private var active: Run?
     private var lastInlet: BrowserWidgetPCMInlet?
-    private var retirements: [UUID: Task<Void, Never>] = [:]
+    // Process-wide admission includes pending discovery, active and unconfirmed
+    // runs. Unknown native owners are never evicted to make room for another.
+    static let maximumAdmittedRuns = BrowserWidgetAudioCommand.maximumWidgets * 2
+    private static var admittedRuns: Set<UUID> = []
+    private static var quarantinedRuns: [UUID: BrowserWidgetAudioCapture] = [:]
+    private var retiringRuns: [UUID: Run] = [:]
+    static var admittedRunCount: Int { admittedRuns.count }
+    static var unconfirmedRunCount: Int { quarantinedRuns.count }
+    /// One explicit retry per retained run. Do not stop a different active run.
+    @discardableResult static func retryQuarantinedRetirements() async -> BrowserWidgetAudioStopResult {
+        let pending = quarantinedRuns
+        var confirmed = true
+        for (id, owner) in pending {
+            guard let run = owner.retiringRuns[id] else { continue }
+            if await owner.retire(run) == .unconfirmed { confirmed = false }
+        }
+        return confirmed ? .confirmed : .unconfirmed
+    }
     private let mixer: AudioMixEngine?
     /// Measured local SCK transport can exceed 40 ms; this is an explicit opt-in 80 ms lease,
     /// preserving host PTS on every bus. It is not a per-widget A/V sync qualification.
@@ -85,10 +105,13 @@ import ScreenCaptureKit
         let request = UUID()
         operation = request
         let old = detachActive()
-        await retire(old)
+        let stopped = await retire(old)
         guard operation == request, !Task.isCancelled else { throw CancellationError() }
+        guard stopped == .confirmed, Self.quarantinedRuns.isEmpty else { throw CaptureError.retirementUnconfirmed }
+        guard Self.admittedRuns.count < Self.maximumAdmittedRuns else { throw CaptureError.resourceLimit }
+        let id = UUID(); Self.admittedRuns.insert(id)
         failure = nil
-        let run = Run(sink: sink)
+        let run = Run(id: id, sink: sink)
         active = run; lastInlet = run.inlet
         let preparation = Task { @MainActor in
             guard owns(run, request: request), !Task.isCancelled else { throw CancellationError() }
@@ -131,6 +154,7 @@ import ScreenCaptureKit
             run.starting = starting
             try await starting.value
             guard owns(run, request: request), !Task.isCancelled else { throw CancellationError() }
+            run.starting = nil
             isCapturing = true
         } catch {
             if owns(run, request: request) {
@@ -153,35 +177,43 @@ import ScreenCaptureKit
         old?.inlet.invalidate()
         return old
     }
-    private func retire(_ run: Run?) async {
-        guard let run else { return }
-        if let retirement = run.retirement { await retirement.value; return }
+    @discardableResult private func retire(_ run: Run?) async -> BrowserWidgetAudioStopResult {
+        guard let run, !run.retired else { return .confirmed }
+        if let retirement = run.retirement { return await retirement.value }
         run.inlet.invalidate()
-        let producer = run.producer, preparation = run.preparation, starting = run.starting
-        let reservation = run.reservation, mixer = mixer
-        run.producer = nil; run.preparation = nil; run.starting = nil; run.reservation = nil
-        let task = Task {
+        retiringRuns[run.id] = run
+        // Keep the run's native owner and lease until confirmed. The task is
+        // coalesced, while a later explicit call may retry an unconfirmed stop.
+        let task = Task { @MainActor [self] in
             await run.inlet.waitUntilDrained()
-            // A discovery already in flight may return an allocated stream after Stop.
-            // Waiting this exact task also keeps the helper alive through final cleanup.
-            let prepared = await preparation?.result
-            let ownedProducer: (any BrowserWidgetAudioProducer)?
-            if let producer { ownedProducer = producer }
-            else if case .success(let value) = prepared { ownedProducer = value.producer }
-            else { ownedProducer = nil }
-            await ownedProducer?.stop()
-            if let starting {
-                _ = await starting.result
-                // stopCapture may complete before pending startCapture unwinds.
-                await ownedProducer?.stop()
+            let prepared = await run.preparation?.result
+            if run.producer == nil, case .success(let value) = prepared { run.producer = value.producer }
+            var stopped = await run.producer?.stop() ?? .confirmed
+            // A failed first stop is already unknown ownership even while an
+            // earlier native start is still unwinding. Fence new preparation now.
+            if stopped == .unconfirmed { Self.quarantinedRuns[run.id] = self }
+            if let starting = run.starting {
+                let result = await starting.result
+                // A late successful start needs a stop after its completion.
+                if case .success = result { stopped = await run.producer?.stop() ?? .confirmed }
+                run.starting = nil
             }
-            if let reservation, await reservation.task.value {
-                await mixer?.releaseCaptureHoldback(reservation.token)
+            if stopped == .confirmed {
+                if let reservation = run.reservation, await reservation.task.value {
+                    await mixer?.releaseCaptureHoldback(reservation.token)
+                }
+                run.producer = nil; run.preparation = nil; run.reservation = nil
+                run.retired = true; retiringRuns[run.id] = nil
+                Self.quarantinedRuns[run.id] = nil; Self.admittedRuns.remove(run.id)
+            } else {
+                // Strong process root survives loss of external references.
+                Self.quarantinedRuns[run.id] = self
             }
+            run.retirement = nil
+            return stopped
         }
-        run.retirement = task; retirements[run.id] = task
-        await task.value
-        retirements[run.id] = nil
+        run.retirement = task
+        return await task.value
     }
 
     private static func prepareScreenCapture(helperPID: Int32, style: FilterStyle, inlet: BrowserWidgetPCMInlet,
@@ -224,13 +256,14 @@ import ScreenCaptureKit
         return PreparedCapture(producer: BrowserWidgetScreenAudioProducer(stream: stream, output: output), identity: identity)
     }
 
-    func stop() async {
+    @discardableResult func stop() async -> BrowserWidgetAudioStopResult {
         operation = UUID()
         let old = detachActive()
         // Snapshot prior cleanup only: this Stop cannot acquire a future run's resources.
-        let pending = Array(retirements.values)
-        await retire(old)
-        for task in pending { await task.value }
+        let pending = Array(retiringRuns.values)
+        var confirmed = await retire(old) == .confirmed
+        for run in pending { if await retire(run) == .unconfirmed { confirmed = false } }
+        return confirmed ? .confirmed : .unconfirmed
     }
     func start(helperPID: Int32) async throws { try await startForQualification(helperPID: helperPID) }
     func invalidateInput() { active?.inlet.invalidate() }
@@ -241,9 +274,28 @@ import ScreenCaptureKit
 @MainActor private final class BrowserWidgetScreenAudioProducer: BrowserWidgetAudioProducer {
     private let stream: SCStream
     private let output: BrowserWidgetAudioOutput
+    private var startAttempted = false
+    private var startCompleted = false
+    private var confirmedAfterStart = false
     init(stream: SCStream, output: BrowserWidgetAudioOutput) { self.stream = stream; self.output = output }
-    func start() async throws { try await stream.startCapture() }
-    func stop() async { try? await stream.stopCapture() }
+    func start() async throws {
+        startAttempted = true
+        defer { startCompleted = true }
+        try await stream.startCapture()
+    }
+    func stop() async -> BrowserWidgetAudioStopResult {
+        // A prepared-but-never-started stream has no native capture to stop.
+        if !startAttempted || output.hasStopped || confirmedAfterStart { return .confirmed }
+        do {
+            try await stream.stopCapture()
+            // A successful stop after start completion is terminal for this
+            // one-shot stream. Do not call stop again and turn success into
+            // an invalid-state error. A still-pending start needs its own stop.
+            if startCompleted { confirmedAfterStart = true }
+            return .confirmed
+        }
+        catch { return output.hasStopped ? .confirmed : .unconfirmed }
+    }
 }
 
 /// Retains at most 200 ms / 256 KiB of PCM and drains off the SCStream queue. Shed is local;
@@ -340,11 +392,18 @@ private final class BrowserWidgetAudioOutput: NSObject, SCStreamOutput, SCStream
     let inlet: BrowserWidgetPCMInlet
     let generation: UUID
     let onStopped: @Sendable () -> Void
+    private let stopLock = NSLock()
+    private var observedStop = false
+    var hasStopped: Bool { stopLock.withLock { observedStop } }
     init(inlet: BrowserWidgetPCMInlet, generation: UUID, onStopped: @escaping @Sendable () -> Void) {
         self.inlet = inlet; self.generation = generation; self.onStopped = onStopped
     }
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         if type == .audio { inlet.post(sampleBuffer, generation: generation) }
     }
-    func stream(_ stream: SCStream, didStopWithError error: any Error) { onStopped() }
+    func stream(_ stream: SCStream, didStopWithError error: any Error) {
+        // This delegate observation belongs to this one-shot stream. Fence
+        // callbacks before notifying its MainActor owner of the confirmed end.
+        inlet.invalidate(); stopLock.withLock { observedStop = true }; onStopped()
+    }
 }

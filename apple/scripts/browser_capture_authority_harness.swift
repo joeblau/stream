@@ -19,15 +19,19 @@ import StreamCore
     var active = false
     var startGate: Gate?, stopGate: Gate?
     var failsStart = false
+    var stopResults: [BrowserWidgetAudioStopResult] = []
     func start() async throws {
         starts += 1
         if let startGate { await startGate.wait() }
         if failsStart { throw CocoaError(.fileReadUnknown) }
         active = true
     }
-    func stop() async {
-        stops += 1; active = false
+    func stop() async -> BrowserWidgetAudioStopResult {
+        stops += 1
         if let stopGate { self.stopGate = nil; await stopGate.wait() }
+        let result = stopResults.isEmpty ? BrowserWidgetAudioStopResult.confirmed : stopResults.removeFirst()
+        if result == .confirmed { active = false }
+        return result
     }
 }
 
@@ -166,6 +170,105 @@ import StreamCore
             precondition(inputs[0].0.statistics().rejected == 2 && inputs[1].0.statistics().delivered == 2)
             await capture.stop()
             print("PASS exact retired callback generation rejects both late sentinels; replacement inlet survives old cleanup")
+        }
+        if selected == "confirmed-stop" || selected == "all" {
+            let mixer = AudioMixEngine(), producer = Producer()
+            producer.stopResults = [.confirmed, .unconfirmed]
+            let capture = BrowserWidgetAudioCapture(mixer: mixer, validationPreparation: { pid, _, _, _ in prepared(producer, pid: pid) },
+                sink: { _ in preconditionFailure("No PCM in stop confirmation case") })
+            try await capture.start(helperPID: 42)
+            let stopped = await capture.stop()
+            precondition(stopped == .confirmed && producer.stops == 1 && BrowserWidgetAudioCapture.unconfirmedRunCount == 0,
+                         "A completed start was stopped twice, replacing real confirmation with a second failure")
+            print("PASS completed start consumes one confirmed stop; no redundant second stop or false quarantine")
+        }
+        if selected == "unconfirmed-stop" || selected == "all" {
+            let mixer = AudioMixEngine(), producer = Producer()
+            producer.stopResults = [.unconfirmed, .confirmed]
+            var inputs: [(BrowserWidgetPCMInlet, UUID)] = []
+            let receipts = PCMReceipts()
+            var capture: BrowserWidgetAudioCapture? = BrowserWidgetAudioCapture(mixer: mixer, validationPreparation: { pid, _, inlet, generation in
+                inputs.append((inlet, generation)); return prepared(producer, pid: pid)
+            }, sink: { receipts.append($0) })
+            weak var retained = capture
+            let baseline = BrowserWidgetAudioCapture.admittedRunCount
+            try await capture!.start(helperPID: 42)
+            let result = await capture!.stop()
+            let leases = await mixer.captureTimingSnapshot().leaseCount
+            precondition(result == .unconfirmed && producer.active && !capture!.isCapturing && producer.stops == 1 && leases == 1,
+                         "Unconfirmed native stop discarded its exact producer or holdback")
+            inputs[0].0.post(try sentinel(7), generation: inputs[0].1); await inputs[0].0.waitUntilDrained()
+            precondition(receipts.values.isEmpty && inputs[0].0.statistics().rejected == 1, "Failed native stop reopened its old input")
+            capture = nil
+            precondition(retained != nil && BrowserWidgetAudioCapture.unconfirmedRunCount == 1 && BrowserWidgetAudioCapture.admittedRunCount == baseline + 1)
+            var preparations = 0
+            let replacement = BrowserWidgetAudioCapture(mixer: mixer, validationPreparation: { pid, _, _, _ in
+                preparations += 1; return prepared(Producer(), pid: pid)
+            }, sink: { _ in preconditionFailure("No PCM in refused replacement") })
+            do { try await replacement.start(helperPID: 43); preconditionFailure("Unconfirmed old producer admitted a replacement") }
+            catch BrowserWidgetAudioCapture.CaptureError.retirementUnconfirmed {}
+            precondition(preparations == 0)
+            let retried = await BrowserWidgetAudioCapture.retryQuarantinedRetirements()
+            let finalLeases = await mixer.captureTimingSnapshot().leaseCount
+            precondition(retried == .confirmed && !producer.active && producer.stops == 2 && finalLeases == 0 &&
+                         BrowserWidgetAudioCapture.unconfirmedRunCount == 0 && BrowserWidgetAudioCapture.admittedRunCount == baseline)
+            let duplicate = await BrowserWidgetAudioCapture.retryQuarantinedRetirements()
+            precondition(duplicate == .confirmed && producer.stops == 2, "Duplicate retry stopped a retired producer")
+            print("PASS unconfirmed native stop keeps exact producer/lease/process-root and rejects stale PCM/new preparation; explicit retry confirms once without double release")
+        }
+        if selected == "pending-unconfirmed" || selected == "all" {
+            let mixer = AudioMixEngine(), producer = Producer(), gate = Gate()
+            producer.startGate = gate; producer.stopResults = [.unconfirmed, .confirmed]
+            let baseline = BrowserWidgetAudioCapture.admittedRunCount
+            let capture = BrowserWidgetAudioCapture(mixer: mixer, validationPreparation: { pid, _, _, _ in prepared(producer, pid: pid) },
+                sink: { _ in preconditionFailure("No PCM in pending unconfirmed case") })
+            let starting = Task { try await capture.start(helperPID: 42) }
+            try await until("held start before failed stop") { gate.entered }
+            let stopping = Task { await capture.stop() }
+            try await until("first failed stop quarantined before pending start finishes") {
+                producer.stops == 1 && BrowserWidgetAudioCapture.unconfirmedRunCount == 1
+            }
+            var preparedReplacement = false
+            let replacement = BrowserWidgetAudioCapture(mixer: mixer, validationPreparation: { pid, _, _, _ in
+                preparedReplacement = true; return prepared(Producer(), pid: pid)
+            }, sink: { _ in preconditionFailure("No PCM in blocked pending replacement") })
+            do { try await replacement.start(helperPID: 43); preconditionFailure("Failed stop admitted replacement during held native start") }
+            catch BrowserWidgetAudioCapture.CaptureError.retirementUnconfirmed {}
+            precondition(!preparedReplacement)
+            gate.release()
+            let stopped = await stopping.value; _ = await starting.result
+            let leases = await mixer.captureTimingSnapshot().leaseCount
+            precondition(stopped == .confirmed && producer.stops == 2 && !producer.active && leases == 0 &&
+                         BrowserWidgetAudioCapture.unconfirmedRunCount == 0 && BrowserWidgetAudioCapture.admittedRunCount == baseline)
+            print("PASS failed first stop closes new-preparation authority while old native start is held; final post-start confirmation retires only that old run")
+        }
+        if selected == "admission" || selected == "all" {
+            let mixer = AudioMixEngine()
+            let baseline = BrowserWidgetAudioCapture.admittedRunCount
+            var captures: [BrowserWidgetAudioCapture] = [], gates: [Gate] = [], pending: [Task<Void, Error>] = []
+            for _ in 0..<BrowserWidgetAudioCapture.maximumAdmittedRuns {
+                let gate = Gate(), producer = Producer()
+                let capture = BrowserWidgetAudioCapture(mixer: mixer, validationPreparation: { pid, _, _, _ in
+                    await gate.wait(); return prepared(producer, pid: pid)
+                }, sink: { _ in preconditionFailure("No PCM in admission case") })
+                captures.append(capture); gates.append(gate)
+                pending.append(Task { try await capture.start(helperPID: 42) })
+            }
+            try await until("all admitted preparations") { gates.allSatisfy { $0.entered } }
+            var overCapPreparations = 0
+            let refused = BrowserWidgetAudioCapture(mixer: mixer, validationPreparation: { pid, _, _, _ in
+                overCapPreparations += 1; return prepared(Producer(), pid: pid)
+            }, sink: { _ in preconditionFailure("No PCM in over-cap case") })
+            do { try await refused.start(helperPID: 43); preconditionFailure("Global preparation cap was ignored") }
+            catch BrowserWidgetAudioCapture.CaptureError.resourceLimit {}
+            precondition(overCapPreparations == 0 && BrowserWidgetAudioCapture.admittedRunCount == baseline + BrowserWidgetAudioCapture.maximumAdmittedRuns)
+            let stops = captures.map { capture in Task { await capture.stop() } }
+            for _ in 0..<100 { await Task.yield() }
+            for gate in gates { gate.release() }
+            for stop in stops { let result = await stop.value; precondition(result == .confirmed) }
+            for task in pending { _ = await task.result }
+            precondition(BrowserWidgetAudioCapture.admittedRunCount == baseline && BrowserWidgetAudioCapture.unconfirmedRunCount == 0)
+            print("PASS bounded process-wide run admission rejects before external preparation and releases canceled/prepared owners exactly once")
         }
         if selected == "ipc" {
             precondition(CommandLine.arguments.count == 3, "ipc requires the exact owned helper app path")
