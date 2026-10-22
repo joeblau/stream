@@ -74,6 +74,11 @@ struct StudioDiagnosticSnapshot: Codable, Sendable {
     var events: [Event] = []
     struct Event: Codable, Sendable { let time: Date; let state: String }
 
+    var liveSessionStartedAt: Date? {
+        outputs.filter { ["connecting", "live", "reconnecting", "stopping"].contains($0.state) }
+            .compactMap(\.startedAt).min()
+    }
+
     static func machineModel() -> String {
         var bytes = [CChar](repeating: 0, count: 128)
         var size = bytes.count
@@ -304,7 +309,7 @@ private struct StudioDiagnosticsContent: View {
                 Text(String(format: "Program %.1f / %d fps · Render %.2f ms", snapshot.program.achievedFPS, snapshot.targetFPS, snapshot.program.meanRenderMilliseconds))
                 Text("Queues \(snapshot.program.subscriberQueueDepth) · Shed \(snapshot.program.subscriberDrops) · Late ticks \(snapshot.program.missedDeadlines) · Render failures \(snapshot.program.failed)")
             }
-            if let start = snapshot.outputs.compactMap(\.startedAt).min() {
+            if let start = snapshot.liveSessionStartedAt {
                 Text(start, style: .timer).accessibilityLabel("Live session elapsed time")
             }
             if workspace.runtime.recorder.state.isActive {

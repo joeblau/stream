@@ -83,6 +83,10 @@ actor FakeDestinationPublisher: Publisher {
         slow.emit(.failed(message: "rtmps://secret.invalid/key"))
         await settle { if case .failed = outputs.states[a.id] { return true }; return false }
         precondition(outputs.states[b.id] == .live && outputs.partialSuccess)
+        precondition(outputs.acknowledgedStarts[a.id] == nil, "Terminal failure retained a ticking live timer")
+        let failedDiagnostics = await outputs.diagnosticsSnapshot()
+        precondition(failedDiagnostics.first { $0.id == a.id.uuidString }?.startedAt == nil)
+        precondition(failedDiagnostics.first { $0.id == b.id.uuidString }?.startedAt != nil)
         if case .failed(let message) = outputs.states[a.id] { precondition(!message.contains("secret")) }
         outputs.start(a, settings: .default)
         slow.emit(.published) // Obsolete session must never acknowledge this retry.
@@ -95,6 +99,11 @@ actor FakeDestinationPublisher: Publisher {
         retry.emit(.published) // A late acknowledgment cannot reanimate Stop.
         await settle { outputs.states[a.id] == .idle }
         precondition(outputs.states[b.id] == .live)
+        healthy.emit(.failed(message: "last live destination failed"))
+        await settle { if case .failed = outputs.states[b.id] { return true }; return false }
+        precondition(outputs.acknowledgedStarts.isEmpty, "Last terminal output failure retained a live elapsed timer")
+        let finalDiagnostics = await outputs.diagnosticsSnapshot()
+        precondition(finalDiagnostics.allSatisfy { $0.startedAt == nil })
         outputs.stopAll()
         await settle { outputs.activeCount == 0 }
         precondition(outputs.aggregateState == .idle)

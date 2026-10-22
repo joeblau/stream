@@ -286,6 +286,7 @@ final class DestinationOutputController: ObservableObject {
     }
 
     private func fail(id: UUID, message: String) {
+        acknowledgedStarts[id] = nil
         if let runtime = runtimes.removeValue(forKey: id) {
             fanout.remove(id: id)
             runtime.startTask.cancel()
