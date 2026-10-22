@@ -35,6 +35,7 @@ struct ProviderAccountSnapshot {
     var events: [ProviderEvent] = []
     var verifiedAt: Date?
     var failure: ProviderFailure?
+    var localCredentialFailure: String?
     var retryUntil: Date?
     var devicePrompt: TwitchDevicePrompt?
 }
@@ -169,6 +170,11 @@ final class ProviderAccountSession: ObservableObject {
         accounts[provider]?.isWorking = false; accounts[provider]?.devicePrompt = nil
         if let error {
             let failure = Self.failure(error)
+            if error is ProviderCredentialPersistenceFailure {
+                accounts[provider]?.localCredentialFailure = "Local authorization storage could not be updated. Repair local storage, then retry Forget Authorization or deliberately reconnect. Durable cleanup was not confirmed."
+                accounts[provider]?.hasCredential = false; accounts[provider]?.scopes = []
+                directChat?.stop(provider)
+            }
             accounts[provider]?.failure = failure; accounts[provider]?.verifiedAt = nil
             if failure.kind == .authorization { accounts[provider]?.hasCredential = false; directChat?.stop(provider) }
             if failure.kind == .rateLimited {
@@ -213,12 +219,24 @@ final class ProviderAccountSession: ObservableObject {
         if provider == .youtube { managedReadRevision = UUID() }
         directChat?.stop(provider)
         let generation = begin(provider, action: "Forgetting local authorization")
+        // Forget is an immediate local intent. Canceling the wait must not
+        // restore the old verified account while the vault retires its token.
+        accounts[provider]?.hasCredential = false; accounts[provider]?.scopes = []
+        accounts[provider]?.channels = []; accounts[provider]?.events = []
+        accounts[provider]?.verifiedAt = nil
+        if provider != .restream {
+            accounts[provider]?.localCredentialFailure = "Local authorization cleanup has not been confirmed. Authorization is disabled in this session. Retry Forget Authorization if confirmation is canceled."
+        }
         jobs[provider] = Task { [weak self] in
             guard let self else { return }
-            if provider == .restream { restream.signOut() } else { await vault.disconnect(provider) }
+            let cleaned: Bool
+            if provider == .restream { restream.signOut(); cleaned = true }
+            else { cleaned = await vault.disconnect(provider) }
             guard isCurrent(provider, generation) else { return }
-            accounts[provider]?.hasCredential = false; accounts[provider]?.channels = []; accounts[provider]?.events = []
+            accounts[provider]?.hasCredential = false; accounts[provider]?.scopes = []
+            accounts[provider]?.channels = []; accounts[provider]?.events = []
             accounts[provider]?.verifiedAt = nil
+            accounts[provider]?.localCredentialFailure = cleaned ? nil : "Local authorization cleanup failed. Authorization is disabled in this session, but durable cleanup was not confirmed. Repair local storage and retry Forget Authorization."
             viewers = viewers.filter { !$0.key.hasPrefix(provider.rawValue + ":") }
             viewerDates = viewerDates.filter { !$0.key.hasPrefix(provider.rawValue + ":") }
             finish(provider, generation)
@@ -268,6 +286,7 @@ final class ProviderAccountSession: ObservableObject {
                 let scopes = await vault.scopes(provider)
                 guard isCurrent(provider, generation) else { return }
                 accounts[provider]?.hasCredential = true; accounts[provider]?.scopes = scopes
+                accounts[provider]?.localCredentialFailure = nil
                 finish(provider, generation)
                 refresh(provider)
             } catch { finish(provider, generation, error: error) }
@@ -842,7 +861,9 @@ final class ProviderAccountSession: ObservableObject {
         }
         return result
     }
-    func canRequest(_ provider: ManagedProvider) -> Bool { !closed && (accounts[provider]?.retryUntil ?? .distantPast) <= Date() }
+    func canRequest(_ provider: ManagedProvider) -> Bool {
+        !closed && accounts[provider]?.localCredentialFailure == nil && (accounts[provider]?.retryUntil ?? .distantPast) <= Date()
+    }
     private func mutateYouTube(_ operation: @escaping @Sendable (ProviderAPI) async throws -> ProviderEvent) {
         guard canRequest(.youtube) else { return }
         let generation = begin(.youtube, action: "Saving a YouTube event change")

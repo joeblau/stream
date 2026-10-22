@@ -72,7 +72,9 @@ struct ProviderAccountsView: View {
                     Link("Open Twitch authorization", destination: prompt.verificationURL)
                     Text("Code expires \(prompt.expiresAt.formatted(date: .omitted, time: .shortened)).").font(.caption)
                 }
-                if let failure = snapshot.failure { Text(failure.localizedDescription).font(.caption).foregroundStyle(.orange) }
+                if let failure = snapshot.localCredentialFailure {
+                    Text(failure).font(.caption).foregroundStyle(.orange)
+                } else if let failure = snapshot.failure { Text(failure.localizedDescription).font(.caption).foregroundStyle(.orange) }
                 if let until = snapshot.retryUntil { Text("API cooldown until \(until.formatted(date: .omitted, time: .standard)).").font(.caption) }
                 if let date = snapshot.verifiedAt { Text("Metadata verified \(date.formatted(date: .omitted, time: .standard)). Remote state can change; refresh before acting.").font(.caption).foregroundStyle(.secondary) }
                 if !snapshot.channels.isEmpty {
