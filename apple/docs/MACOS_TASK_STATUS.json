@@ -18,7 +18,7 @@
   },
   "validation": {
     "sharedCore": "Published 78796d1 full Core: 588 tests / 82 suites PASS on ARM 231.091 s, Intel 158.415 s and iOS 177.642 s. Both actual paragraph probes pass. Both Mac jobs later fail the generated row fixture compile at step 10; no whole native CI or later encoder/Deck pass. Local 181bf6f is fixture-only with identical production/Core/vendor source; original log hashes in wave9FixtureCIReview.",
-    "shippingApp": "Exact integrated ec95f20 generation, unsigned arm64/x86_64 Release and actual bundle audit PASS. Root wave8 receipts bind source/vendor/log hashes; local actual Deck localhost transport/recording and production-source fallback regression pass. No signed distribution, hosted Intel repair or whole native CI success is inferred. Shared Core/iOS are unchanged by this vendor/fixture cohort; earlier exact-source evidence keeps its named scope.",
+    "shippingApp": "Exact 873ddddd generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS. Exact combined geometry source/pixel/presentation suite passes all four gates. Root receipts/log hashes in wave10Review. Shared Core source is unchanged by this cohort; no new Core/iOS qualification or signed distribution is inferred.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -274,7 +274,9 @@
     "wave8EncoderFallback": "Vendor d9fceedc retries exactly once without optional low-latency rate control only after kVTParameterErr and an explicit true request; it preserves other encoder requirements/errors and invalidates failed sessions. Source image attributes use actual format subtype, not media type. Exact ec95 production-source harness passes six refusal cases, actual software create -12902 to ordinary create 0, exact options/preparation, ten H.264/decode pixel checks and actual VideoCodec BGRA derivation. This is a local software-encoder reproduction, not a hosted Intel fix or hardware throughput result.",
     "wave8DeckTransport": "Exact ec95 full-source actual native IPC/controller visual/source tests and real localhost selected destination RTMP H264/AAC decode pass; independent recording countdown cancel/Start/Pause/Resume/New File/Stop finalizes two segments. Original hosted Intel receiver exit 234 / 47 VT -12902 failure remains failed. No hosted retry, physical device or public-service acceptance is inferred.",
     "wave8HostedCI": "Published 9881359 native CI 39735328975 is terminal FAILURE at the 07:47:11 UTC read-only snapshot: ARM job 119679560262 SUCCESS, Intel 119679560505 FAILURE, iOS 119679560672 SUCCESS. ARM finishes at 07:46:25 UTC. Original Intel receiver exit 234 / 47 VT -12902 failure remains preserved; local ec95 / vendor fallback and Deck passes do not establish a hosted Intel fix. Browser interview 39735328995 remains successful. No newer-head hosted or whole native CI success is inferred.",
-    "wave9FixtureCI": "Native run 39744489372 at 78796d1 terminal FAILURE: both Mac builds/Core and paragraph probes pass, then FixtureControlsView synthesized private initializer blocks generated row probe compilation at step 10. Encoder/Deck and later gates are not reached. One explicit init(kind:) line in 181bf6f fixes the local probe; exact 40 cases PASS on local Xcode 27.2, all layout assertions/timeouts unchanged. No hosted 26.6 pass or production change is inferred."
+    "wave9FixtureCI": "Native run 39744489372 at 78796d1 terminal FAILURE: both Mac builds/Core and paragraph probes pass, then FixtureControlsView synthesized private initializer blocks generated row probe compilation at step 10. Encoder/Deck and later gates are not reached. One explicit init(kind:) line in 181bf6f fixes the local probe; exact 40 cases PASS on local Xcode 27.2, all layout assertions/timeouts unchanged. No hosted 26.6 pass or production change is inferred.",
+    "wave10Controls": "Provider forgetting retires live credentials before storage work, persists a nonsecret denial marker where possible and keeps failed cleanup explicit. Numeric geometry drafts preserve untouched values, separate undo and reject stale/conflicting authority; explicit recovery creates a new current-target editor without reviving old callbacks. Exact combined 873 source/pixels/presentation checks PASS, not mounted keyboard/AX/full-window/contrast qualification.",
+    "wave10ClockAndTrace": "Actual engine opaque clock tokens reject retired ticks and missed-deadline mutations; negative-control and six positive cases remain lifecycle evidence. The separate generated-only787 one-invocation 20 s trace is not a sustained qualification or cause/fix for hosted deficits; synchronous CPU spans, profiler-only hash peaks, measured tick-body boundaries and four distinct frame counters stay explicit. Later generated compatibility preserves shipping clock guards without a new trace."
   },
   "issues": [
     {
@@ -352,7 +354,10 @@
       "githubState": "open",
       "completion": "incomplete implementation and acceptance",
       "remaining": [
-        "O07 supported public installed/distributable route remains unqualified. Build-only evaluation packaging and exact-owned-UID feedback protection exist, but native Program/clean bus producer bridge and main-window format/state controls remain gated and unimplemented. Shipping microphone routing stays disabled."
+        "O07 installed/distributable route and supported-path decision remain unqualified. An evaluation-only actual Program-bus producer now exists and passes owned in-process mixer/driver PCM/lifecycle tests, with HAL syscalls replaced. Its public OS transport is compiled but not executed; installed IPC/sandbox/other-app capture, real device lifecycle and signed install/update/remove remain unproved. Shipping bus/format/state controls and microphone routing remain gated and disabled."
+      ],
+      "evidence": [
+        "../prototypes/VirtualMicrophone/README.md"
       ]
     },
     {
@@ -364,6 +369,9 @@
       "completion": "remaining acceptance",
       "remaining": [
         "Installed signed AudioServerPlugIn capture by another app, supported install/update/remove and sandbox IPC qualification/supported-route decision remain unproven. Owned build-only evaluation packaging, actual extracted adhoc-signed driver callbacks and refusal cases now pass; no installer was executed."
+      ],
+      "evidence": [
+        "../prototypes/VirtualMicrophone/README.md"
       ]
     },
     {
@@ -524,14 +532,18 @@
       "title": "[macOS][D09] Build Stream Deck configuration, dynamic feedback, profiles, and release packaging",
       "url": "https://github.com/joeblau/stream/issues/152",
       "githubState": "open",
-      "completion": "remaining sample profiles and package/configuration acceptance",
+      "completion": "remaining actual profile-import and package lifecycle acceptance",
       "remaining": [
-        "Genuine stream/record/interview sample-profile exports/imports remain absent; the recorded locked-session run could not compose/export them. Recipes do not satisfy this artifact requirement.",
-        "Complete remaining package/configuration lifecycle acceptance through the target runtime. Official package validation and an owned development link/update/unlink lifecycle pass."
+        "Three reproducible 15-key stream/record/interview candidate archives now exist, are registered and included in packaging, with public MIT-template provenance. Actual Stream Deck application importer acceptance remains unproved. Manual editor export is not a required producer; candidate byte/schema/package checks do not establish importer acceptance.",
+        "Actual package install/update/uninstall remains unproved. The existing owned development link/update/unlink and actual SDK configuration/restart tests are scoped evidence, not application package-install lifecycle or physical delivery qualification."
       ],
       "evidence": [
         "../../integrations/stream-deck/INSPECTOR_QUALIFICATION.md",
-        "/tmp/stream-wave3-profiles-report-20261022.md"
+        "/tmp/stream-wave3-profiles-report-20261022.md",
+        "../../integrations/stream-deck/profiles/README.md",
+        "../../integrations/stream-deck/com.joeblau.stream-studio.sdPlugin/profiles/provenance.json",
+        "../../integrations/stream-deck/tests/lifecycle.test.ts",
+        "../../integrations/stream-deck/tests/profile-package-refusals.py"
       ]
     },
     {
@@ -905,7 +917,8 @@
         "Production due-tick idle cliff is corrected and its actual scheduling helper passes deterministic600s simulation, but no fresh sustained GPU/hardware qualification follows from that virtual-clock result; original resource/performance failures remain failed.",
         "Fresh run 39724736435 on native ARM VirtualMac2,1 improves to about 28.26/28.41 rendered fps but still fails the unchanged 17,850-frame gate with 16,957/17,047 frames. Both writers complete and actual-source replay decodes all 16,956 available frames; this is not nominal 30 fps capacity. Current Intel also fails nominal capacity at 17,366/17,058 rendered frames; replay decodes all 17,366 available frames and both writers complete. The prior long stall did not recur, but the real frame deficit remains.",
         "Registry-aware title font caching and actual native pixel/owned-font/nested-bake regressions pass. Bounded20 s candidate profile renders 601 but decodes 600/601 replay frames versus original 601/601; its trace predates the final nested guard. This does not replace either failed 600-second hosted result, qualify representative physical mixes/Intel/resource ceilings or prove waveform A/V sync.",
-        "Latest exact9881359 hosted 600 s run 39735454725 still fails both nominal capacity gates: ARM 17252/17306 and Intel 17232/16434 versus 17,850. ARM decodes 17251/17252 replay frames; Intel 17232/17232. All writers finish with zero A/V drops, but Intel second inspection remains pending at original 1380 s deadline. Endpoint <80 ms is not independent waveform sync; no unresolved inspection success/cause or newer 2ea819a sustained qualification is inferred."
+        "Latest exact9881359 hosted 600 s run 39735454725 still fails both nominal capacity gates: ARM 17252/17306 and Intel 17232/16434 versus 17,850. ARM decodes 17251/17252 replay frames; Intel 17232/17232. All writers finish with zero A/V drops, but Intel second inspection remains pending at original 1380 s deadline. Endpoint <80 ms is not independent waveform sync; no unresolved inspection success/cause or newer 2ea819a sustained qualification is inferred.",
+        "Opaque composition-clock authority now rejects retired ticks/skips after stop/restart/output changes; deterministic actual engine cases and negative controls prove lifecycle fencing, not sustained throughput. One generated-only 20 s trace from 787 records static 600/601 and replay 601/601 rendered/attempted, two 600-frame writer movies, and 599/600 replay source frames decoded. It does not reproduce hosted whole skips or qualify capacity; generated clock-compatibility changes are not a new trace."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -919,7 +932,10 @@
         "PERFORMANCE_HOSTED_ARM_39724736435.json",
         "PERFORMANCE_HOSTED_INTEL_39724736435.json",
         "TITLE_FONT_CACHE_PROFILE_2026-10-22.json",
-        "PERFORMANCE_HOSTED_39735454725.json"
+        "PERFORMANCE_HOSTED_39735454725.json",
+        "COMPOSITION_CLOCK_AUTHORITY.md",
+        "COMPOSITION_CLOCK_AUTHORITY_2026-10-22.json",
+        "PERFORMANCE_LOCAL_THREAD_TRACE_2026-10-22.json"
       ]
     },
     {
@@ -950,7 +966,8 @@
         "Full VoiceOver labels/actions/order, keyboard traversal, virtual fader/table/layer actions, complete smaller-display layouts and actual visual contrast remain unqualified. The locked/offscreen semantic AX limitation is not a passed operator check.",
         "Prior exact native focus ownership/restoration and meter/chat owner preservation proofs remain scoped evidence; they do not qualify every virtual control or panel transition.",
         "Current source repairs named pad color/PDF/audio controls, safe gain values, validated numeric crop/steppers, zoom labels and native bounded PTZ actions. Source/model/native target-action checks pass; actual platform keyboard/AX delivery is UNQUALIFIED 77. No physical PTZ stop guarantee is claimed.",
-        "Current source adds native Scene menu and named AX reorder actions with actual no-window callback/model/runtime fencing tests, and stable scrollable transport/transition rows with 40 exact static native layout cases. This repairs concrete software paths but does not qualify actual menu/AX/keyboard delivery, every 1024\u00d7640 panel/live state, contrast, focus or visible operator readability. Original criteria remain open."
+        "Current source adds native Scene menu and named AX reorder actions with actual no-window callback/model/runtime fencing tests, and stable scrollable transport/transition rows with 40 exact static native layout cases. This repairs concrete software paths but does not qualify actual menu/AX/keyboard delivery, every 1024\u00d7640 panel/live state, contrast, focus or visible operator readability. Original criteria remain open.",
+        "Numeric position/size/rotation drafts and explicit fresh-draft recovery now pass actual shipping workspace/model/compiled-view/pixel checks, including exact combined 873. These do not qualify mounted SwiftUI identity, native keyboard/AX delivery, full-window layout or contrast; original issue remains open."
       ],
       "evidence": [
         "STUDIO_CONTROLS.md",
@@ -967,7 +984,11 @@
         "SCENE_BROWSER_REORDERING.md",
         "STUDIO_CONTROL_ROW_LAYOUT_2026-10-22.md",
         "/tmp/stream-wave7-parent-layout-results-20261022.json",
-        "/tmp/stream-wave7-providers-small-layout-review.md"
+        "/tmp/stream-wave7-providers-small-layout-review.md",
+        "LAYER_GEOMETRY_ACCESSIBILITY.md",
+        "LAYER_GEOMETRY_ACCESSIBILITY_2026-10-22.json",
+        "LAYER_GEOMETRY_RECOVERY_2026-10-22.json",
+        "/tmp/stream-wave10-parent-layer-geometry-results-20261022.json"
       ]
     },
     {
@@ -1152,11 +1173,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); #125/#130 remain closed and all other open gates remain. Published 78796d1 CI 39744489372 is terminal FAILURE: both Mac jobs fail the generated control-row fixture initializer at step 10; iOS succeeds. Full Core 588/82 passes on ARM/Intel/iOS and both paragraph probes pass, but encoder/Deck are not reached. Local 181bf6f adds only an explicit fixture initializer; all 40 unchanged layout cases pass under local Xcode 27.2, not hosted 26.6 qualification. Production app/source/vendor equal 787; fresh hosted execution remains required. Earlier failures and qualification limits are preserved.",
-  "integratedMain": "181bf6f7fa84ea0f2a6704dce21dfcb9e8da59b5",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closures. Exact 873 generation, unsigned universal Release/bundle and combined four-gate numeric geometry checks PASS. Provider retirement, clock authority, Deck candidate artifacts and evaluation-only Program mic improve scoped software behavior; actual operator/import/install/distributable/performance gates remain open. Published a1bb native CI 39748453209 is active at the timestamped snapshot, no whole CI success inferred. Original failed receipts and all other acceptance limits remain preserved.",
+  "integratedMain": "873ddddd16c72fe0df543bf7b259d3f84f71b82f",
   "githubStateRefreshedAt": "2026-10-22T07:56:14.843578+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "78796d13dffc193217c6aa6ec3a8ecfb8a562182",
+  "publishedIntegration": "a1bb23d0a34e3b2983b70084ffc6192bb992fe38",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1176,7 +1197,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "181bf6f7fa84ea0f2a6704dce21dfcb9e8da59b5",
+  "currentReviewBase": "873ddddd16c72fe0df543bf7b259d3f84f71b82f",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -2423,5 +2444,190 @@
     },
     "githubWritesPerformed": false,
     "closuresPerformed": []
+  },
+  "wave10Review": {
+    "recordedAt": "2026-10-22T09:08:13.414795+00:00",
+    "validatedIntegratedHead": "873ddddd16c72fe0df543bf7b259d3f84f71b82f",
+    "nativeChecks": [
+      {
+        "label": "generate",
+        "exit": 0,
+        "log": "/tmp/stream-wave10-parent-final-generate-20261022.log",
+        "bytes": 168,
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "label": "universal",
+        "exit": 0,
+        "log": "/tmp/stream-wave10-parent-final-universal-20261022.log",
+        "bytes": 251843,
+        "sha256": "b2cd95bfeda4cc716a86b6d63f7d38617237f281f9d921c428054a1ead243b20"
+      },
+      {
+        "label": "bundle",
+        "exit": 0,
+        "log": "/tmp/stream-wave10-parent-final-bundle-20261022.log",
+        "bytes": 517,
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ],
+    "combinedGeometry": {
+      "source": "873ddddd16c72fe0df543bf7b259d3f84f71b82f",
+      "exit": 0,
+      "log": "/tmp/stream-wave10-parent-layer-geometry-20261022.log",
+      "bytes": 1014085,
+      "sha256": "d58d10f27125374a81490f25304704ec3e7acedf29d7dfa91b122f4432e3e7fc"
+    },
+    "hostedCI": {
+      "recordedAt": "2026-10-22T09:09:23.743854+00:00",
+      "run": {
+        "id": 39748453209,
+        "head_sha": "a1bb23d0a34e3b2983b70084ffc6192bb992fe38",
+        "status": "in_progress",
+        "conclusion": null,
+        "html_url": "https://github.com/joeblau/stream/actions/runs/39748453209"
+      },
+      "jobs": [
+        {
+          "id": 119722684248,
+          "name": "StreamCore tests (iOS Simulator)",
+          "status": "completed",
+          "conclusion": "success",
+          "completed_at": "2026-10-22T08:39:07Z",
+          "activeSteps": []
+        },
+        {
+          "id": 119722684437,
+          "name": "StreamMac build and tests (macos-26)",
+          "status": "in_progress",
+          "conclusion": null,
+          "completed_at": null,
+          "activeSteps": [
+            {
+              "number": 14,
+              "name": "Qualify shared publishing encoders and bounded transport fanout",
+              "status": "in_progress"
+            }
+          ]
+        },
+        {
+          "id": 119722684538,
+          "name": "StreamMac build and tests (macos-26-intel)",
+          "status": "in_progress",
+          "conclusion": null,
+          "completed_at": null,
+          "activeSteps": [
+            {
+              "number": 11,
+              "name": "Test saved guest preparation and native controller feedback",
+              "status": "in_progress"
+            }
+          ]
+        }
+      ]
+    },
+    "originalIssueCounts": {
+      "closed": 27,
+      "open": 34,
+      "openFeatures": 23,
+      "openTrackers": 11
+    },
+    "githubWritesPerformed": false,
+    "closuresPerformed": [],
+    "providerRetirement": {
+      "commits": [
+        "648cd41",
+        "4aaeecf"
+      ],
+      "receipt": {
+        "path": "apple/docs/PROVIDER_ACCOUNTS.md",
+        "bytes": 34424,
+        "sha256": "29f0ea1ac79214a1ed33fc192a71d752a481db563fc975bf6939cdaef3682ea4"
+      },
+      "scope": "Synthetic owned storage/credential lifecycle; targeted provider audience invalidation, durable marker versus failed writes, no provider-side revocation or real registered authorization qualification."
+    },
+    "geometry": {
+      "commits": [
+        "6efde6d",
+        "5202467"
+      ],
+      "receipts": [
+        {
+          "path": "apple/docs/LAYER_GEOMETRY_ACCESSIBILITY_2026-10-22.json",
+          "bytes": 4276,
+          "sha256": "35b746eabf434c5d534a9885a5d9797e9cc426733d1799fed114e100d5556b43"
+        },
+        {
+          "path": "apple/docs/LAYER_GEOMETRY_RECOVERY_2026-10-22.json",
+          "bytes": 4673,
+          "sha256": "cca9651a42d63880e0e5cdde72255cc21b99c582d5d34a9bc6b965ce95645361"
+        }
+      ],
+      "scope": "Actual compiled shipping model/callback/renderer and explicit presentation recovery; no mounted SwiftUI/native event/AX/full-window/contrast claim."
+    },
+    "clockAuthority": {
+      "commit": "06d76e2",
+      "receipt": {
+        "path": "apple/docs/COMPOSITION_CLOCK_AUTHORITY_2026-10-22.json",
+        "bytes": 30764,
+        "sha256": "8c69da13987aab606aceb570d78a9b994ebc0fbe24da2385d404fd71fe597d21"
+      },
+      "scope": "Five guard-only negatives fail exact invariants, six actual positives pass. No scheduler/PTS/path change or sustained throughput qualification."
+    },
+    "deckCandidates": {
+      "commits": [
+        "82e41af",
+        "b2fbd3c"
+      ],
+      "receipt": {
+        "path": "integrations/stream-deck/com.joeblau.stream-studio.sdPlugin/profiles/provenance.json",
+        "bytes": 1056,
+        "sha256": "d1872beb2fc7b5416979cf96e8a1a9f92ae24d47dcad3199af1eaa281c2116e2"
+      },
+      "profiles": [
+        {
+          "file": "interview-15-key.streamDeckProfile",
+          "sha256": "9477a27560f6bf478199c924e205dff8561ad1cceeb41b9427d1deb8c9713548",
+          "bytes": 14580
+        },
+        {
+          "file": "record-15-key.streamDeckProfile",
+          "sha256": "55443f6b189e1d21de9d0a96fb70f48f8d9c2d2152c442745c3bbcd85b097c64",
+          "bytes": 11115
+        },
+        {
+          "file": "stream-15-key.streamDeckProfile",
+          "sha256": "02f07c29fd21c48c5d12d2569bb77595c364b45b2ee962765beb43e518c94144",
+          "bytes": 14593
+        }
+      ],
+      "scope": "Public MIT V1-derived 15-key candidates, deterministic bytes/registration/package metadata checks and owned SDK saved-binding/restart proof; importer and package install/update/uninstall remain pending."
+    },
+    "programMicrophone": {
+      "commit": "03d494f",
+      "receipt": {
+        "path": "apple/prototypes/VirtualMicrophone/README.md",
+        "bytes": 13025,
+        "sha256": "aab30e80d053401268cd3f14db3d42a815d6602dc28ca2ff1456c2213456d3e3"
+      },
+      "scope": "Evaluation-only Program tap with actual mixer and dynamically loaded driver PCM, owned HAL syscall boundaries. OS transport compiled only; no installed IPC/sandbox/receivingapp/latency/distribution proof, no shipping enablement."
+    },
+    "generatedTrace": {
+      "receipt": {
+        "path": "apple/docs/PERFORMANCE_LOCAL_THREAD_TRACE_2026-10-22.json",
+        "bytes": 105656,
+        "sha256": "076a45386f19e7f6778df7ea9c9e4d8576e3dab2c78932dc8bcc4fa27077ae65"
+      },
+      "source": "78796d13dffc193217c6aa6ec3a8ecfb8a562182",
+      "scope": "One generated-copy invocation, two 20 s workloads; static600renders/601attempts,replay 601/601; both writer movies 600 frames, replay decoder 599/600 available. Zero whole scheduler skips; generated compatibility 3037247 preserves clock authority, no new trace. Not original 600 s / 17,850 frames / 80 ms / 1380 s qualification or proven hosted cause."
+    },
+    "keepOpen": [
+      90,
+      92,
+      152,
+      173,
+      174
+    ],
+    "unintegratedWorkExcluded": "Pending chat diagnostics are not part of source 873 or this draft."
   }
 }
