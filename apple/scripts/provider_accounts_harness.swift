@@ -43,6 +43,11 @@ actor ProviderHTTPFixture {
     var api401Remaining = 0
     func rejectNextAPIReads(_ count: Int) { api401Remaining = count }
     var devicePending = false
+    var validationEntered = false
+    var validationGate: CheckedContinuation<Void, Never>?
+    var heldValidationStatus: Int?
+    func holdNextValidation(status: Int) { validationEntered = false; heldValidationStatus = status }
+    func releaseValidation() { validationGate?.resume(); validationGate = nil }
     func configure(hold: Bool = false, status: Int = 200, once401: Bool = false, tokenStatus: Int = 200) {
         holdRefresh = hold; apiStatus = status; apiOnce401 = once401; self.tokenStatus = tokenStatus
     }
@@ -61,6 +66,11 @@ actor ProviderHTTPFixture {
             if holdRefresh { refreshEntered = true; await withCheckedContinuation { refreshGate = $0 } }
             body = #"{"access_token":"fresh-access","refresh_token":"fresh-refresh","expires_in":3600,"scope":["https://www.googleapis.com/auth/youtube","channel:read:stream_key","channel:manage:broadcast"]}"#
         } else if path == "/oauth2/validate" {
+            if let held = heldValidationStatus {
+                validationEntered = true
+                await withCheckedContinuation { validationGate = $0 }
+                heldValidationStatus = nil; status = held
+            }
             body = #"{"client_id":"client","user_id":"42","scopes":["channel:read:stream_key","channel:manage:broadcast"],"expires_in":3600}"#
         } else if path == "/oauth2/device" {
             body = #"{"device_code":"device","user_code":"ABCD","verification_uri":"https://www.twitch.tv/activate","expires_in":60,"interval":1}"#
@@ -185,12 +195,80 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         try await httpBoundary()
         try await vaultLifecycle()
         try await sameClientAuthorizationDuringRefresh()
+        try await twitchValidationDuringRefresh()
         try await nativeSession()
         try await nativeChatLateReplies()
         try await nativeChatRevocation()
         try await nativeCrossWorkspaceChatAuthority()
         try await nativeEnding()
         print("Provider accounts: loopback/state/cancel, refresh coalescing/rotation/late response, safe GET retry, exact viewer identity/receipt freshness, twelve stale chat-reply fences/current revocation repair, native OAuth/discovery/public metadata/portable exclusions/event receipt/shutdown PASS")
+    }
+    static func twitchValidationDuringRefresh() async throws {
+        for status in [200, 401] {
+            let memory = MemoryProviderCredentials(), http = ProviderHTTPFixture()
+            let vault = ProviderTokenVault(keychain: memory, transport: { try await http.send($0) })
+            let configuration = try await vault.configure(.twitch, clientID: "client")
+            try await vault.accept(.init(access: "old-access", refresh: "old-refresh", expiresAt: Date().addingTimeInterval(3_600),
+                scopes: ManagedProvider.twitch.scopes), provider: .twitch, generation: configuration)
+            let generation = await vault.generation(.twitch)
+            await http.holdNextValidation(status: status)
+            let validation = Task { try await vault.validateTwitch() }
+            await settle { await http.validationEntered }
+            await http.configure(once401: true)
+            _ = try await vault.send(.twitch, request: ProviderAPI.request(.twitch, path: "/helix/users"))
+            let refreshed = memory.string(for: .provider(.twitch, field: .tokens))!
+            precondition(refreshed.contains("fresh-access") && refreshed.contains("fresh-refresh"))
+            await http.releaseValidation()
+            // A response for the pre-refresh token cannot validate or revoke its successor.
+            try await validation.value
+            let persisted = try JSONDecoder().decode(ProviderOAuthToken.self,
+                from: Data((memory.string(for: .provider(.twitch, field: .tokens)) ?? "").utf8))
+            check(persisted.access == "fresh-access" && persisted.refresh == "fresh-refresh",
+                "Delayed Twitch validation replaced or revoked the refreshed credential")
+            let validations = await http.allRequests().filter { $0.url?.path == "/oauth2/validate" }
+            check(validations.count == 2 && validations.last!.value(forHTTPHeaderField: "Authorization") == "Bearer fresh-access",
+                "The stale validation did not revalidate the current same-account token")
+            check(await vault.generation(.twitch) == generation, "Stale validation retired the same account's refresh")
+            _ = try await vault.send(.twitch, request: ProviderAPI.request(.twitch, path: "/helix/users"))
+            check(await http.allRequests().last!.value(forHTTPHeaderField: "Authorization") == "Bearer fresh-access")
+            // A deliberate new validation still updates current scopes/expiry.
+            try await vault.validateTwitch()
+            check(await vault.scopes(.twitch) == ["channel:read:stream_key", "channel:manage:broadcast"])
+        }
+        for status in [200, 401] {
+            for replacement in [false, true] {
+                let memory = MemoryProviderCredentials(), http = ProviderHTTPFixture()
+                let vault = ProviderTokenVault(keychain: memory, transport: { try await http.send($0) })
+                let configuration = try await vault.configure(.twitch, clientID: "client")
+                try await vault.accept(.init(access: "current-access", refresh: "current-refresh", expiresAt: Date().addingTimeInterval(3_600)),
+                    provider: .twitch, generation: configuration)
+                await http.holdNextValidation(status: status)
+                let validation = Task { try await vault.validateTwitch() }
+                await settle { await http.validationEntered }
+                if replacement {
+                    let newConfiguration = try await vault.configure(.twitch, clientID: "client")
+                    try await vault.accept(.init(access: "replacement-access", refresh: "replacement-refresh", expiresAt: Date().addingTimeInterval(3_600)),
+                        provider: .twitch, generation: newConfiguration)
+                } else { validation.cancel() }
+                let stored = memory.string(for: .provider(.twitch, field: .tokens))
+                await http.releaseValidation()
+                do { try await validation.value; preconditionFailure("Retired validation completed") } catch is CancellationError {}
+                check(memory.string(for: .provider(.twitch, field: .tokens)) == stored,
+                    "Canceled or replaced Twitch validation mutated current credentials")
+                check(await http.allRequests().filter { $0.url?.path == "/oauth2/validate" }.count == 1,
+                    "Retired validation sent another request")
+            }
+        }
+        let http = ProviderHTTPFixture(), vault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await http.send($0) })
+        let configuration = try await vault.configure(.twitch, clientID: "client")
+        try await vault.accept(.init(access: "revoked-access", expiresAt: Date().addingTimeInterval(3_600)), provider: .twitch, generation: configuration)
+        await http.holdNextValidation(status: 401)
+        let rejected = Task { try await vault.validateTwitch() }
+        await settle { await http.validationEntered }; await http.releaseValidation()
+        do { try await rejected.value; preconditionFailure("Current revoked token passed validation") }
+        catch let failure as ProviderFailure { precondition(failure.kind == .authorization) }
+        check(await !vault.hasToken(.twitch), "Current validation rejection did not retire the revoked token")
+        print("PASS: held Twitch validation 200/401 cannot replace or revoke rotated credentials; current-token retry, canceled/replaced validation fences and real current rejection repair")
     }
     static func sameClientAuthorizationDuringRefresh() async throws {
         for status in [200, 400] {
