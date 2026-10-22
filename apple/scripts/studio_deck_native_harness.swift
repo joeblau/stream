@@ -130,11 +130,20 @@ import StreamCore
         }
         print("PASS: actual distinct 256-layer Program + 256-layer Preview receipts survive \(original.count)-byte response in \(frames.count) bounded chunks (largest \(frames.map(\.count).max() ?? 0) bytes), exact full-state reassembly and explicit legacy-client rejection")
     }
-    static func main() async throws {
+    static func main() async {
+        do { try await run() }
+        catch {
+            FileHandle.standardError.write(Data("FAIL: \((error as NSError).localizedDescription)\n".utf8))
+            exit(1)
+        }
+    }
+    static func run() async throws {
         _ = NSApplication.shared
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("stream-deck-native-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let root = ProcessInfo.processInfo.environment["STREAM_DECK_NATIVE_ARTIFACT_ROOT"]
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                .appendingPathComponent("build/studio-deck-native-validation", isDirectory: true)
+        let directory = try DeckProcessDiagnostics.artifactDirectory(under: root)
         DesktopStorage.projectDirectory = directory
         let budgetDestination = StreamDestination(name: "Budget Fixture", transport: .rtmp)
         try JSONEncoder().encode([budgetDestination]).write(to: directory.appendingPathComponent("destinations.json"))
