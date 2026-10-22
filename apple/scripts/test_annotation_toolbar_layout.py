@@ -39,13 +39,40 @@ MAIN = r'''
 @main struct AnnotationToolbarLayoutProof {
     @MainActor static func main() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
+        var context: [String: Any] = [:]
+        var ownedRoot: NSView?
         func require(_ value: Bool, _ message: String) throws {
-            if !value { throw NSError(domain: "AnnotationLayout", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: message]) }
+            if !value {
+                var hierarchy: [[String: Any]] = []
+                func visit(_ view: NSView, depth: Int) {
+                    guard depth <= 12, hierarchy.count < 160 else { return }
+                    let rect = view.convert(view.bounds, to: ownedRoot)
+                    var row: [String: Any] = ["depth": depth, "type": String(describing: type(of: view)),
+                        "hidden": view.isHidden, "hiddenByAncestor": view.isHiddenOrHasHiddenAncestor,
+                        "mounted": view.window != nil,
+                        "frame": ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]]
+                    if let control = view as? NSControl { row["enabled"] = control.isEnabled }
+                    hierarchy.append(row)
+                    for child in view.subviews { visit(child, depth: depth + 1) }
+                }
+                if let ownedRoot { visit(ownedRoot, depth: 0) }
+                let native = ownedRoot.map(controls) ?? []
+                let receipt: [String: Any] = ["message": message, "case": context, "hierarchy": hierarchy,
+                    "hierarchyLimit": 160, "depthLimit": 12,
+                    "allControlCount": native.count,
+                    "allControlTypes": native.prefix(160).map { String(describing: type(of: $0)) },
+                    "pickerCount": native.filter { $0 is NSSegmentedControl }.count,
+                    "switchCount": native.filter { $0 is NSSwitch }.count]
+                if let data = try? JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]) {
+                    try? data.write(to: URL(fileURLWithPath: CommandLine.arguments[2]), options: .atomic)
+                    FileHandle.standardError.write(Data("ANNOTATION NATIVE FAILURE: ".utf8) + data + Data("\n".utf8))
+                }
+                throw NSError(domain: "AnnotationLayout", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            }
         }
         func controls(_ view: NSView) -> [NSControl] {
             if view is NSScroller { return [] }
-            return (view as? NSControl).map { [$0] } ?? view.subviews.flatMap(controls)
+            return ((view as? NSControl).map { [$0] } ?? []) + view.subviews.flatMap(controls)
         }
         func scrolls(_ view: NSView) -> [NSScrollView] {
             (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrolls)
@@ -71,6 +98,9 @@ MAIN = r'''
                                 .environment(\.dynamicTypeSize, points >= 18 ? .accessibility1 : points >= 16 ? .xxxLarge : .large)
                             let hosting = NSHostingController(rootView: root)
                             let name = tool?.rawValue ?? "select"
+                            context = ["width": width, "textPoints": points, "selection": name,
+                                "hasStagedScene": selected, "scrollerStyle": style == .legacy ? "legacy" : "overlay"]
+                            ownedRoot = hosting.view
                             let initial = hosting.sizeThatFits(in: CGSize(width: width, height: 1000))
                             try require(initial.width.isFinite && initial.height.isFinite && initial.height > 0,
                                         "Toolbar must report finite nonzero geometry")
@@ -102,10 +132,19 @@ MAIN = r'''
                                         "Reported height must contain the native scroll view")
                             try require(document.frame.height > 0 && scroll.documentVisibleRect.height + 0.5 >= document.frame.height,
                                         "Full toolbar height must remain visible including legacy scrollbar space")
-                            let native = controls(document)
-                            try require(native.count == 3, "One actual native tool picker and two switches must remain mounted")
-                            var nativeGeometry: [[String: Any]] = []
+                            let allNative = controls(document)
+                            let native = allNative.filter { $0 is NSSegmentedControl || $0 is NSSwitch }
+                            try require(native.filter { $0 is NSSegmentedControl }.count == 1
+                                && native.filter { $0 is NSSwitch }.count == 2,
+                                "One actual native tool picker and two switches must remain mounted")
                             for control in native {
+                                try require(control.window === window && !control.isHiddenOrHasHiddenAncestor,
+                                    "The actual tool picker and switches must remain mounted and visible")
+                                try require(control.isEnabled == selected,
+                                    "The actual tool picker and switches must follow staged-scene availability")
+                            }
+                            var nativeGeometry: [[String: Any]] = []
+                            for control in allNative {
                                 let rect = control.convert(control.bounds, to: document)
                                 let intrinsic = control.intrinsicContentSize
                                 try require(rect.minX >= -0.5 && rect.maxX <= document.bounds.width + 0.5 && rect.minY >= -0.5 && rect.maxY <= document.bounds.height + 0.5,
@@ -137,6 +176,8 @@ MAIN = r'''
                                 "documentWidth": document.frame.width, "documentHeight": document.frame.height,
                                 "viewportWidth": scroll.documentVisibleRect.width, "viewportHeight": scroll.documentVisibleRect.height,
                                 "leadingAndTrailingReached": true, "nativeControls": nativeGeometry,
+                                "toolPickerCount": native.filter { $0 is NSSegmentedControl }.count,
+                                "switchCount": native.filter { $0 is NSSwitch }.count,
                                 "hidden": !window.isVisible, "nonKey": !window.isKeyWindow])
                             window.close()
                             print("PASS width=\(width) points=\(points) selection=\(name) scene=\(selected) style=\(style.rawValue) height=\(measured.height) document=\(document.frame.size) viewport=\(scroll.documentVisibleRect.size)")
@@ -177,10 +218,14 @@ def main():
     definitions = "\n".join(definition(model, marker) for marker in
         ["struct AnnotationPointerState:", "struct AnnotationUIState:"])
     definitions += "\n" + definition((apple / "StreamMac/LayerGraph.swift").read_text(), "enum HexColor {")
+    # Swift emits the successful case inventory before Python collects it.
+    # Fresh owned report folders must exist before that executable starts.
+    args.report.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="stream-annotation-layout-") as temporary:
         folder = Path(temporary)
         fixture = folder / "OwnedAnnotationToolbar.swift"
         executable = folder / "AnnotationToolbarLayout"
+        native_failure = folder / "native-failure.json"
         sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
         inputs = [apple / "StreamCore/Annotations.swift", apple / "StreamMac/StudioAccessibility.swift",
             apple / "StreamMac/StudioControlRow.swift", apple / "StreamMac/AnnotationModel.swift",
@@ -208,7 +253,7 @@ def main():
                 str(apple / "StreamMac/StudioControlRow.swift"),
                 str(fixture), "-o", str(executable)], check=True, timeout=90)
             phase = "runtime"
-            subprocess.run([str(executable), str(args.report)], check=True, timeout=90)
+            subprocess.run([str(executable), str(args.report), str(native_failure)], check=True, timeout=90)
             phase = "collect-report"
             report = json.loads(args.report.read_text())
             report.update(provenance())
@@ -223,6 +268,11 @@ def main():
             elif isinstance(error, subprocess.TimeoutExpired):
                 failure["timeoutSeconds"] = error.timeout
             failure.update(provenance())
+            if native_failure.exists():
+                try:
+                    failure["nativeFailure"] = json.loads(native_failure.read_text())
+                except (OSError, ValueError) as diagnostic_error:
+                    failure["nativeFailureReadError"] = type(diagnostic_error).__name__
             write_report(failure)
             raise
         finally:
@@ -230,7 +280,7 @@ def main():
             # including compilation failures/timeouts and failed Swift assertions.
             if args.artifacts:
                 args.artifacts.mkdir(parents=True, exist_ok=True)
-                for artifact in (fixture, executable):
+                for artifact in (fixture, executable, native_failure):
                     if artifact.exists():
                         shutil.copy2(artifact, args.artifacts / artifact.name)
 
