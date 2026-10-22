@@ -58,7 +58,10 @@ final class StudioAutomationEndpoint {
         reopenStudio = reopen
     }
     func focusStudio() {
-        NSApp.activate(ignoringOtherApps: true)
+        // Shared controller commands also run in headless tools. Requesting
+        // visible review must not bootstrap AppKit or crash that command path.
+        guard let application = NSApp else { return }
+        application.activate(ignoringOtherApps: true)
         if studioWindow?.isVisible != true {
             studioReady = false
             reopenStudio?()

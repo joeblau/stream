@@ -62,6 +62,19 @@ func check(_ value: @autoclosure () -> Bool, _ message: String) {
 }
 @main struct Harness {
     @MainActor static func main() async throws {
+        if CommandLine.arguments.contains("--headless-focus") {
+            check(NSApp == nil, "Headless focus qualification already has an application")
+            let suite = "stream.automation.headless.\(UUID())"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let endpoint = StudioAutomationEndpoint(defaults: defaults)
+            var reopened = false
+            endpoint.attachStudioWindow(nil, reopen: { reopened = true })
+            endpoint.focusStudio()
+            check(NSApp == nil && !reopened, "A headless review hint must not create or open an application")
+            print("PASS: shared headless controller focus hint preserves command review without bootstrapping AppKit")
+            return
+        }
         _ = NSApplication.shared
         let suite = "stream.automation.harness.\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
