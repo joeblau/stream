@@ -1,0 +1,21 @@
+diff --git a/meson.build b/meson.build
+index 8f3f686..7bd4a99 100644
+--- a/meson.build
++++ b/meson.build
+@@ -814,7 +814,15 @@ if host_system != 'aix'
+ endif
+ 
+ foreach f : functions
+-  if cc.has_function(f)
++  # Apple SDK 27 exports pipe2 but deployment targets below 27 cannot call it.
++  # has_function's unprototyped symbol probe does not check availability.
++  available_at_target = true
++  if f == 'pipe2' and host_system == 'darwin'
++    available_at_target = cc.links('#include <unistd.h>\nint main(void) { int fds[2]; return pipe2(fds, 0); }',
++                                   args: ['-Werror=unguarded-availability-new'],
++                                   name: 'pipe2 available at deployment target')
++  endif
++  if available_at_target and cc.has_function(f)
+     define = 'HAVE_' + f.underscorify().to_upper()
+     glib_conf.set(define, 1)
+     glib_conf_prefix = glib_conf_prefix + '#define @0@ 1\n'.format(define)
