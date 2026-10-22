@@ -126,6 +126,12 @@ extension ResilientSourceFrames {
 SWIFT
 end
 fixture_replace(target, root, folder, 'StreamController.swift') do |source|
+  # The production default reads the real current login session. This owned
+  # lifecycle workload starts explicitly unlocked and injects later events;
+  # it must not inherit the host's current lock state or system observers.
+  constructor = 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))'
+  abort 'Resilience construction fixture boundary changed' unless source.include?(constructor)
+  source = source.sub(constructor, 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"), observeSystem: false, initialSessionState: .unlocked)')
   source + <<'SWIFT'
 
 extension StreamController {
