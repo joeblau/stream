@@ -23,6 +23,18 @@ struct CompositedFrame: @unchecked Sendable {
     }
 }
 
+#if STREAM_NATIVE_VALIDATION
+/// Gates the real clock task at its actor suspension boundaries. Captured per
+/// run so a fixture can release old work after stop/restart without a timer race.
+struct CompositionClockValidationHooks: Sendable {
+    var initialDeadlineOffset: Duration = .zero
+    var beforeTick: (@Sendable () async -> Void)?
+    var beforeMissedDeadlines: (@Sendable (Int) async -> Void)?
+    var afterIteration: (@Sendable () async -> Void)?
+    var onExit: (@Sendable () -> Void)?
+}
+#endif
+
 /// The process-wide hand-off of S07 project-level composition state (overlays
 /// + default background) from `SceneStore` (main actor, writes on every
 /// persist) to every `CompositionEngine` (its own actor, reads each tick).
@@ -232,6 +244,9 @@ actor CompositionEngine {
     private var layerFades: [LayerID: LayerFade] = [:]
 
     private var tickTask: Task<Void, Never>?
+    /// Cancellation alone does not revoke an actor call already enqueued by the
+    /// old task. Each clock operation must still belong to this run at entry.
+    private var clockAuthority = UUID()
     private var frameSequence: Int64 = 0
 
     private var subscribers: [UUID: FrameMailbox] = [:]
@@ -323,6 +338,7 @@ actor CompositionEngine {
     /// Stops composition (pipeline demand back to 0). Subscribers stay
     /// registered — they simply receive no frames until the next `run`.
     func stop() {
+        clockAuthority = UUID()
         tickTask?.cancel()
         tickTask = nil
     }
@@ -664,27 +680,58 @@ actor CompositionEngine {
     // Drive actual compositor frames at explicit media times without coupling
     // pixel correctness to the host's scheduling or first-use shader latency.
     private var validationTime: CMTime?
+    private var validationClockHooks = CompositionClockValidationHooks()
+    func setValidationClockHooks(_ hooks: CompositionClockValidationHooks) {
+        validationClockHooks = hooks
+    }
     func prepareValidation(scene: Scene, canvasSize: CGSize, frameRate: Int, at time: CMTime) {
         validationTime = time
         run(scene: scene, canvasSize: canvasSize, frameRate: frameRate)
         stop()
     }
     func setValidationTime(_ time: CMTime) { validationTime = time }
-    func renderValidationFrame(at time: CMTime) { validationTime = time; autoreleasepool { tick() } }
+    func renderValidationFrame(at time: CMTime) {
+        validationTime = time
+        // Explicit pixel validation has no autonomous clock owner. In particular,
+        // prepareValidation intentionally stops its clock before this entry.
+        autoreleasepool { tick(clockAuthority: nil) }
+    }
     #endif
 
     private func startTicking() {
         tickTask?.cancel()
+        let authority = UUID()
+        clockAuthority = authority
         frameSequence = 0
         let interval = Duration.nanoseconds(Int64(1_000_000_000 / max(1, frameRate)))
+        #if STREAM_NATIVE_VALIDATION
+        let hooks = validationClockHooks
+        #endif
         tickTask = Task { [weak self] in
+            #if STREAM_NATIVE_VALIDATION
+            defer { hooks.onExit?() }
+            #endif
             let clock = ContinuousClock()
             var deadline = clock.now
+            #if STREAM_NATIVE_VALIDATION
+            deadline += hooks.initialDeadlineOffset
+            #endif
             while !Task.isCancelled {
-                await self?.tick()
+                #if STREAM_NATIVE_VALIDATION
+                await hooks.beforeTick?()
+                #endif
+                await self?.tick(clockAuthority: authority)
                 let next = CompositionFrameSchedule.next(after: deadline, interval: interval, completedAt: clock.now)
                 deadline = next.deadline
-                if next.skipped > 0 { await self?.noteMissedDeadlines(next.skipped) }
+                if next.skipped > 0 {
+                    #if STREAM_NATIVE_VALIDATION
+                    await hooks.beforeMissedDeadlines?(next.skipped)
+                    #endif
+                    await self?.noteMissedDeadlines(next.skipped, clockAuthority: authority)
+                }
+                #if STREAM_NATIVE_VALIDATION
+                await hooks.afterIteration?()
+                #endif
                 if deadline <= clock.now {
                     // An overdue tick can run now. Yield so sustained overload
                     // cannot monopolize this actor or delay stop/reconfigure.
@@ -696,7 +743,14 @@ actor CompositionEngine {
         }
     }
 
-    private func noteMissedDeadlines(_ count: Int) { metrics.missedDeadlines += count }
+    private func permitsClockOperation(_ authority: UUID) -> Bool {
+        authority == clockAuthority && !Task.isCancelled
+    }
+
+    private func noteMissedDeadlines(_ count: Int, clockAuthority: UUID) {
+        guard permitsClockOperation(clockAuthority) else { return } // CLOCK_AUTHORITY_GUARD
+        metrics.missedDeadlines += count
+    }
 
     func kernelMetricsSnapshot() -> CompositionKernelMetrics { renderer.kernelMetrics }
 
@@ -709,7 +763,10 @@ actor CompositionEngine {
     /// output drops); completion falls through to the settled render in the
     /// same tick, so the tick that ends a transition already paints the new
     /// composition.
-    private func tick() {
+    private func tick(clockAuthority: UUID?) {
+        if let clockAuthority {
+            guard permitsClockOperation(clockAuthority) else { return } // CLOCK_AUTHORITY_GUARD
+        }
         let override = frameOverrideProvider()
         guard let scene = override ?? self.scene else { return }
         let renderStarted = ProcessInfo.processInfo.systemUptime
