@@ -81,6 +81,23 @@ struct PortableNativeReport: Codable {
     static var closeTrace: NSObjectProtocol?
     static var deliveries: [String: Int] = [:]
     static let folder = GuestFixtureStorage.fixtureDirectory
+    static func dropPackage(_ workspace: StudioWorkspace, name: String) throws -> URL {
+        let source = folder.appendingPathComponent("OwnedDrop-\(UUID()).streamshow", isDirectory: true)
+        try ShowPackageIO.export(documents: ["stream.scenes.v2.json": JSONEncoder().encode(workspace.runtime.sceneStore.document)],
+            media: [], name: name, includeMedia: false, to: source)
+        return source
+    }
+    static func fileProvider(_ url: URL, delayed: Bool = false) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier, visibility: .all) { completion in
+            if delayed {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.15,
+                    execute: DispatchWorkItem { completion(url.dataRepresentation, nil) })
+            } else { completion(url.dataRepresentation, nil) }
+            return nil
+        }
+        return provider
+    }
     static func terminating() {
         try? JSONSerialization.data(withJSONObject: ["pid": ProcessInfo.processInfo.processIdentifier,
             "stack": Thread.callStackSymbols]).write(to: folder.appendingPathComponent("termination-trace.json"), options: .atomic)
@@ -147,15 +164,49 @@ struct PortableNativeReport: Codable {
                         case "import": await workspace.importPreviewedPackage()
                         case "apply": await workspace.applyPending()
                         case "drop":
-                            let source = folder.appendingPathComponent("OwnedDrop-\(UUID()).streamshow", isDirectory: true)
-                            try ShowPackageIO.export(documents: ["stream.scenes.v2.json": JSONEncoder().encode(workspace.runtime.sceneStore.document)],
-                                media: [], name: "Native Drop Show", includeMedia: false, to: source)
-                            let provider = NSItemProvider()
-                            provider.registerDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier, visibility: .all) { completion in
-                                completion(source.dataRepresentation, nil); return nil
-                            }
-                            guard workspace.acceptPackageDrop([provider]) else { throw Failure.message("Shipping drop rejected a real NSItemProvider file URL") }
+                            let source = try dropPackage(workspace, name: "Native Drop Show")
+                            guard workspace.acceptPackageDrop([fileProvider(source)]) else { throw Failure.message("Shipping drop rejected a real NSItemProvider file URL") }
                             try await waitPreview(workspace, path: source.path)
+                        case "dropMixed":
+                            let source = try dropPackage(workspace, name: "Native Mixed Drop Show")
+                            let other = folder.appendingPathComponent("Not a show.txt")
+                            try Data("Owned nonpackage drop".utf8).write(to: other)
+                            guard workspace.acceptPackageDrop([fileProvider(other), fileProvider(source)]) else { throw Failure.message("Shipping mixed drop rejected typed file URLs") }
+                            try await waitPreview(workspace, path: source.path)
+                            guard workspace.error == nil else { throw Failure.message("Successful mixed drop retained an old error") }
+                        case "dropMultiple":
+                            let first = try dropPackage(workspace, name: "First Drop Show")
+                            let second = try dropPackage(workspace, name: "Second Drop Show")
+                            guard workspace.acceptPackageDrop([fileProvider(first), fileProvider(second)]) else { throw Failure.message("Shipping multiple drop rejected file URL representation") }
+                            for _ in 0..<200 {
+                                if workspace.error == "Open one show package at a time." { break }
+                                try await Task.sleep(for: .milliseconds(10))
+                            }
+                            guard workspace.error == "Open one show package at a time.", workspace.importPreview == nil else {
+                                throw Failure.message("Multiple package drop silently selected a resource")
+                            }
+                        case "dropThenOpen":
+                            let late = try dropPackage(workspace, name: "Stale Delayed Drop")
+                            let current = try dropPackage(workspace, name: "Latest Explicit Preview")
+                            guard workspace.acceptPackageDrop([fileProvider(late, delayed: true)]) else { throw Failure.message("Shipping delayed drop rejected typed URL") }
+                            workspace.previewPackage(current)
+                            try await waitPreview(workspace, path: current.path)
+                            try await Task.sleep(for: .milliseconds(350))
+                            guard portableSameFile(workspace.importPreview?.url.path, current.path) else { throw Failure.message("Late dropped URL replaced newer explicit preview") }
+                        case "changedPreview":
+                            let source = try dropPackage(workspace, name: "Previewed Original")
+                            workspace.previewPackage(source)
+                            try await waitPreview(workspace, path: source.path)
+                            let count = workspace.catalog.projects.count
+                            let manifestURL = source.appendingPathComponent("manifest.json")
+                            var manifest = try JSONDecoder().decode(PortableShowManifest.self, from: Data(contentsOf: manifestURL))
+                            manifest.name = "Changed After Preview"
+                            try JSONEncoder().encode(manifest).write(to: manifestURL, options: .atomic)
+                            await workspace.importPreviewedPackage()
+                            guard workspace.catalog.projects.count == count,
+                                  workspace.error == "The package changed after its preview. Open it again before importing." else {
+                                throw Failure.message("Import accepted different package contents than the confirmed preview")
+                            }
                         case "chooser":
                             guard let path = command.path else { throw Failure.message("Missing owned chooser path") }
                             let driver = OwnedPanelDriver(path: path)

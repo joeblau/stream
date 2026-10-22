@@ -122,3 +122,25 @@ and synthetic package bytes in
 `build/portable-show-native-validation/artifacts-d7b88e40-0b39-4990-969a-54cb9fdba6f9`
 of the isolated worktree. The unique owned app container and bookmark remain
 available under the fixture bundle identifier printed in the native log.
+
+
+## Package confirmation and drop intake, 2026-10-22
+
+The shipping drop receiver now reads up to eight file-URL providers before
+choosing a package. A non-package first item no longer hides a later package;
+multiple packages produce the same one-package error as native open-file.
+A newer file selection, chooser, import or canceled preview retires delayed
+drop authority. Failed or incomplete providers produce a readable error.
+Successful previews clear older intake errors, and scene names may repeat
+without duplicate list identities. Import revalidates the package against the
+manifest shown in its preview; changed packages require a new preview before
+creating any project files or catalog entry.
+
+The fresh `40d0737`-based native fixture passed these actual `NSItemProvider`
+mixed/multiple/delayed delivery cases and changed-preview rejection, together
+with hot/cold LaunchServices intake, explicit import/Apply, sandbox denial,
+scoped missing-asset repair and cold restart. Log:
+`/tmp/stream-wave2-projects-native-20261022.log`. These typed-provider checks do
+not claim a Finder pointer gesture. The shipping native chooser was attempted
+and canceled/aborted, so successful keyboard selection remains UNQUALIFIED.
+No unlock, permission, default association or personal settings change was made.

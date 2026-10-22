@@ -1,13 +1,13 @@
 import CryptoKit
 import Foundation
 
-public struct PortableShowManifest: Codable, Sendable {
+public struct PortableShowManifest: Codable, Equatable, Sendable {
     public var version = 1
     public var name: String
     public var createdAt = Date()
     public var includesMedia: Bool
     public var files: [File]
-    public struct File: Codable, Sendable {
+    public struct File: Codable, Equatable, Sendable {
         public var path: String
         public var bytes: Int64
         public var sha256: String

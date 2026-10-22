@@ -339,7 +339,7 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
             name: "Transferred Show", includeMedia: true, to: package)
         let preview = try ShowPackageIO.preview(package)
         try require(preview.sceneNames.count == document.scenes.count, "Package preview lost scenes")
-        try ShowPackageIO.importFiles(from: package, to: imported)
+        try ShowPackageIO.importFiles(from: package, to: imported, previewedManifest: preview.manifest)
         let importedDocument = try JSONDecoder().decode(SceneDocument.self, from: Data(contentsOf: imported.appendingPathComponent("stream.scenes.v2.json")))
         let importedAssets = try JSONDecoder().decode(AssetLibraryDocument.self, from: Data(contentsOf: imported.appendingPathComponent("stream.assets.v1.json")))
         let importedSlots = try JSONDecoder().decode(StudioChatCoordinator.SlotPreferences.self, from: Data(contentsOf: imported.appendingPathComponent("comment-slots.json")))
@@ -354,6 +354,18 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         let importedFolder = imported.appendingPathComponent(importedAssets.assets[1].relativePath!)
         try require(try Data(contentsOf: importedFolder.appendingPathComponent("styles/main.css")) == Data("body { color: red }".utf8),
             "Folder-backed asset bytes did not transfer with consistent IDs")
+        let manifestURL = package.appendingPathComponent("manifest.json")
+        let originalManifest = try Data(contentsOf: manifestURL)
+        var changedManifest = preview.manifest
+        changedManifest.name = "Different show after preview"
+        try JSONEncoder().encode(changedManifest).write(to: manifestURL, options: .atomic)
+        let unconfirmedDestination = root.appendingPathComponent("unconfirmed-import")
+        var rejectedChanged = false
+        do { try ShowPackageIO.importFiles(from: package, to: unconfirmedDestination, previewedManifest: preview.manifest) }
+        catch { rejectedChanged = String(describing: error).contains("changed after its preview") }
+        try require(rejectedChanged && !FileManager.default.fileExists(atPath: unconfirmedDestination.path),
+            "Import committed contents different from its confirmed package preview")
+        try originalManifest.write(to: manifestURL, options: .atomic)
         // A folder symlink must fail the entire atomic export, preserving the
         // destination and exposing a repairable error rather than omitting it.
         try FileManager.default.createSymbolicLink(at: folderURL.appendingPathComponent("linked.css"), withDestinationURL: folderURL.appendingPathComponent("styles/main.css"))

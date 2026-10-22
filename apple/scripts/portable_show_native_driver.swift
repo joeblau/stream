@@ -142,6 +142,23 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         // Keep the linked-resource project selected; drop import merely stages
         // another show and never implicitly retires this runtime.
         _ = try await command("cancelPreview")
+        let multipleDrop = try await command("dropMultiple")
+        try require(multipleDrop.error == "Open one show package at a time." && multipleDrop.previewPath == nil
+            && multipleDrop.project == applied.project, "Multiple typed package drop did not preserve current show")
+        let mixedDrop = try await command("dropMixed")
+        try require(mixedDrop.previewName == "Native Mixed Drop Show" && mixedDrop.project == applied.project,
+            "Nonpackage first item hid the actual dropped package")
+        _ = try await command("cancelPreview")
+        let latestDrop = try await command("dropThenOpen")
+        try require(latestDrop.previewName == "Latest Explicit Preview" && latestDrop.project == applied.project,
+            "Delayed drop replaced explicit preview")
+        _ = try await command("cancelPreview")
+        let changed = try await command("changedPreview")
+        try require(changed.error == "The package changed after its preview. Open it again before importing."
+            && changed.project == applied.project && changed.projectCount == duplicate.projectCount,
+            "Changed preview imported unconfirmed package or modified the active show")
+        _ = try await command("cancelPreview")
+        print("PASS: actual NSItemProvider mixed/multiple/deferred drop intake preserves one current show and latest preview; changed package confirmation rejects without catalog mutation")
         let chooser = try await command("chooser", path: package.path)
         let chooserQualified = chooser.phase == "ack" && portableSameFile(chooser.previewPath, package.path)
         print(chooserQualified ? "PASS: real shipping NSOpenPanel selected the owned package via local event dispatch" : "UNQUALIFIED: remote native chooser selection; actual panel cancelled/aborted, no fabricated success")
