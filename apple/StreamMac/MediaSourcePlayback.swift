@@ -142,6 +142,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// A play requested before the file finished loading; honored (with
     /// autoplay) at the end of `configure`.
     private var wantsPlay = false
+    private var wantsPause = false
     private var recovery = PausedMediaRecovery()
     private var didLoad = false
     private var loadedBookmark: Data?
@@ -313,7 +314,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         status.durationSeconds = duration.isNumeric ? duration.seconds : 0
         publishStatusLocked()
         let autoplay = payload?.autoplay ?? true
-        let shouldPlay = recovery.shouldPlay(autoplay: autoplay, requested: wantsPlay)
+        let shouldPlay = recovery.shouldPlay(autoplay: autoplay, requested: wantsPlay) && !wantsPause
         let recoverySeek = recovery.consumePosition()
         os_unfair_lock_unlock(&lock)
         if let recoverySeek { pause(); seek(toSeconds: recoverySeek) }
@@ -342,7 +343,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         status.positionSeconds = 0
         status.durationSeconds = contents.timeline.duration
         let autoplay = payloadProvider()?.autoplay ?? true
-        let shouldPlay = recovery.shouldPlay(autoplay: autoplay, requested: wantsPlay)
+        let shouldPlay = recovery.shouldPlay(autoplay: autoplay, requested: wantsPlay) && !wantsPause
         let recoverySeek = recovery.consumePosition()
         os_unfair_lock_unlock(&lock)
         engine.configure(contents: contents, autoplayHint: shouldPlay)
@@ -467,16 +468,29 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     }
 
     private func retiming(_ sample: CMSampleBuffer, to pts: CMTime) -> CMSampleBuffer? {
-        var timing = CMSampleTimingInfo(duration: sample.duration,
-                                        presentationTimeStamp: pts,
-                                        decodeTimeStamp: .invalid)
+        // Entries contain per-sample durations. Reusing the aggregate
+        // `sample.duration` would multiply an 8192-frame chunk into 1398 s.
+        // Shift every valid timestamp together; retain durations and invalid
+        // DTS entries verbatim so relative decode/presentation timing holds.
+        var count = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count) == noErr,
+              count > 0, sample.presentationTimeStamp.isNumeric else { return nil }
+        var timings = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: count)
+        let read = timings.withUnsafeMutableBufferPointer {
+            CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: count, arrayToFill: $0.baseAddress, entriesNeededOut: nil)
+        }
+        guard read == noErr else { return nil }
+        let offset = pts - sample.presentationTimeStamp
+        for index in timings.indices {
+            if timings[index].presentationTimeStamp.isNumeric { timings[index].presentationTimeStamp = timings[index].presentationTimeStamp + offset }
+            if timings[index].decodeTimeStamp.isNumeric { timings[index].decodeTimeStamp = timings[index].decodeTimeStamp + offset }
+        }
         var out: CMSampleBuffer?
-        guard CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault,
-                                                    sampleBuffer: sample,
-                                                    sampleTimingEntryCount: 1,
-                                                    sampleTimingArray: &timing,
-                                                    sampleBufferOut: &out) == noErr else { return nil }
-        return out
+        let copied = timings.withUnsafeBufferPointer {
+            CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: sample,
+                sampleTimingEntryCount: count, sampleTimingArray: $0.baseAddress!, sampleBufferOut: &out)
+        }
+        return copied == noErr ? out : nil
     }
 
     // MARK: - Transport
@@ -486,7 +500,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     func play() {
         os_unfair_lock_lock(&lock)
         recovery.playIntent()
-        wantsPlay = true
+        wantsPlay = true; wantsPause = false
         // G09: animated-image sources forward transport to their engine.
         if let animated {
             os_unfair_lock_unlock(&lock)
@@ -516,6 +530,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// demand-loss behavior: position holds for the next reference).
     func pause() {
         os_unfair_lock_lock(&lock)
+        wantsPlay = false; wantsPause = true
         if let animated {
             os_unfair_lock_unlock(&lock)
             animated.pause()
@@ -528,6 +543,8 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         player.pause()
         isPlaying = false
         removePositionObserverLocked(player)
+        let position = player.currentTime()
+        if position.isNumeric { status.positionSeconds = position.seconds }
         if status.phase == .playing {
             status.phase = .paused
         }
@@ -540,6 +557,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// issue's "stop" end action.
     func stop() {
         os_unfair_lock_lock(&lock)
+        wantsPlay = false; wantsPause = true
         if let animated {
             os_unfair_lock_unlock(&lock)
             animated.stop()
@@ -566,7 +584,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     func restart() {
         os_unfair_lock_lock(&lock)
         recovery.restartIntent()
-        wantsPlay = true
+        wantsPlay = true; wantsPause = false
         if let animated {
             os_unfair_lock_unlock(&lock)
             animated.restart()

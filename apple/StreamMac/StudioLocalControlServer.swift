@@ -82,7 +82,8 @@ import Network
                                     media: member.media.rawValue, slot: route?.slot, programAllowed: route?.programAllowed ?? false,
                                     monitorAllowed: route?.monitorAllowed ?? false, screenApproved: member.screenApproved, screenSharing: member.screenSharing)
                             }),
-                         recordingCountdown: dispatcher.controllerRecordingCountdown())
+                         recordingCountdown: dispatcher.controllerRecordingCountdown(), loops: dispatcher.controllerLoopSnapshot(),
+                         effectsBypassed: dispatcher.controllerEffectsBypassedSnapshot(), pdfPages: dispatcher.controllerPDFPagesSnapshot())
         }
         execute = { [weak self, weak dispatcher] id, value, delta, page, text in
             guard let self, let dispatcher else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "The studio is unavailable.")) }

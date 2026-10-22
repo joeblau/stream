@@ -52,6 +52,13 @@ struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var chat: StudioControlChatState? = nil
     var interview: StudioControlInterviewState? = nil
     var recordingCountdown: Int? = nil
+    var loops: [String: Bool]? = nil
+    var effectsBypassed: [String: Bool]? = nil
+    var pdfPages: [String: StudioControlPDFPageState]? = nil
+}
+struct StudioControlPDFPageState: Codable, Equatable, Sendable {
+    var currentPage: Int
+    var pageCount: Int
 }
 struct StudioControlInterviewState: Codable, Equatable, Sendable {
     struct Member: Codable, Equatable, Sendable {

@@ -1,0 +1,15 @@
+# Native controller audio and media validation
+
+`apple/scripts/run_deck_audio_media_harness.zsh` creates a generated macOS tool target and runs a bounded, fixture-owned media session. It compiles with at most two jobs. Set `STREAM_VENDOR_ROOT` when using an isolated worktree whose pinned vendor packages are shared read-only.
+
+The tool pairs an in-memory credential store with the shipping loopback server and sends authenticated stable-ID commands through the shipping dispatcher. Actual AVPlayer/AVAssetReader sound and playlist playback feeds AudioMixEngine's Program bus and the native recorder. Measured PCM windows distinguish play, pause, resume, gain, mute, file-end looping, native high-pass bypass, and an installed Apple AU effect's bypass. The resulting recording is decoded independently. The same session checks actual video transport, rendered PDF pages, recording marker persistence, stable bindings after rename/deletion, multiple bindings, reconnect snapshots, and decoder/pump/hosted-unit retirement.
+
+Steady tone assertions wait for the actual AVPlayer clock to advance; the initial waiting/startup PCM window remains in the report. Reader chunks in the fixture are 8192 frames at 48 kHz (171 ms) plus 150 ms read-ahead, so pause/stop silence and DSP comparisons drain 400 ms of already queued audio. Amplitude/frequency and silence thresholds remain strict. A focused timing regression checks an 8192-frame retime keeps its 0.170667 s duration, original PCM, 48 kHz sample grid, target PTS, and valid/invalid DTS semantics.
+
+Artifacts stay under `apple/build/deck-audio-media-validation/artifacts-<UUID>`, including owned WAV/MOV/PDF input, the recording and journal, and `deck-audio-media-report.json`. The report records the host, OS, audio windows, and decoded frame count.
+
+The generated tool replaces only credential/default/storage/capture-permission boundaries and resolution of an exact allowlist of ordinary, fixture-owned internal files. The playback engines, mixer, DSP, local protocol/server, dispatcher, compositor, PDF renderer, and recorder remain shipping implementations. This validates neither external security-scoped grants nor installation on every Stream Deck model; those are distinct release checks.
+
+Additive commands retain sound pad and playlist stable IDs. Sounds support `play`, `pause`, `restart`, `stop`, `loop`, `loop.on`, and `loop.off`; existing `trigger` preserves its restart/overlap policy. Sound/playlist channels expose normalized `gain` (0–1 maps to native 0–2) and `mute[.on|.off]`. Microphone, media, sound, and playlist effect controls expose `effects.<section>.bypass[.on|.off]` and `au.<slotUUID>.bypass[.on|.off]`. Here `bypass.on` disables processing and preserves all effect parameters.
+
+Snapshot fields `loops`, `effectsBypassed`, and `pdfPages` are optional and additive to protocol version 1. Keys are resource IDs for loops/pages and the base `.bypass` command ID for effects. Existing playback and mute fields remain authoritative.
