@@ -31,19 +31,21 @@ struct AnnotationToolbarView: View {
     private var stagedSceneID: SceneID? { previewProgram.stagedScene?.id }
 
     var body: some View {
-        HStack(spacing: 12) {
-            toolPicker
-            Divider().frame(height: 18)
-            colorSwatches
-            widthControl
-            Divider().frame(height: 18)
-            undoClearButtons
-            Spacer()
-            gateToggles
+        StudioControlRow(accessibilityLabel: "Annotation controls") {
+            HStack(spacing: 12) {
+                toolPicker
+                Divider().frame(height: 18)
+                colorSwatches
+                widthControl
+                Divider().frame(height: 18)
+                undoClearButtons
+                Spacer()
+                gateToggles
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .disabled(stagedSceneID == nil)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .disabled(stagedSceneID == nil)
     }
 
     // MARK: Tool picker
@@ -58,7 +60,6 @@ struct AnnotationToolbarView: View {
             }
         }
         .pickerStyle(.segmented)
-        .frame(maxWidth: 280)
         .help("Draw on the preview canvas: pen, highlighter, or laser pointer")
     }
 
