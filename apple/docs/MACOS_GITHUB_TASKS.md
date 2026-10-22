@@ -148,17 +148,17 @@ DESKTOP_RESOURCE_BUDGETS.md, GUEST_RETURN_AV_ORACLES.md and
 NATIVE_GUEST_TCP_QUALIFICATION.md for evidence and reproducible boundaries.
 ## Final-wave implementation and acceptance review — 2026-10-22 UTC
 
-This review starts from combined central source `33e9bc9`. It performs no GitHub
-closures. The previously verified inventory remains **41 open and 20 closed**;
-anticipated closures are not counted. The parent must refresh the exact API
-inventory after publication and any deliberate closure. Earlier sections retain
+This review starts from combined central source `33e9bc9`, published in
+`0d79056`. Task **#175 is closed**, and its parent checklist is updated.
+Exact paginated GitHub reconciliation of the initial 61 issues verifies
+**40 open and 21 closed**, with zero open PRs. Earlier sections retain
 their historical source snapshots, failures and test counts. The current
 remaining gates below supersede outdated remaining-gate wording in those
 snapshots without relabelling a failed run as passing.
 
 | Task | New verified evidence | Current disposition |
 | --- | --- | --- |
-| #175 external display output | All three original functional criteria pass independent review. An actual external display receives the borderless, non-key video surface with sRGB primaries, black letterboxing and Fit/Fill readback. Actual StreamController/Clean compositor/native-layer tests cover overlay/annotation exclusion, shared 4K30 budgeting and independent teardown. Universal Release at `230c` containing this feature and its bundle audit passed. | **Proposed closure after publication**; combined source `33e9bc9` now passes universal Release and bundle audit. GitHub remains open here. Physical cable unplug, negotiated AirPlay and broad display/scanout coverage remain disclosed limits; they are not invented additional closure criteria. |
+| #175 external display output | All three original functional criteria pass independent review. An actual external display receives the borderless, non-key video surface with sRGB primaries, black letterboxing and Fit/Fill readback. Actual StreamController/Clean compositor/native-layer tests cover overlay/annotation exclusion, shared 4K30 budgeting and independent teardown. Universal Release at `230c` containing this feature and its bundle audit passed. | **Closed after publication in `0d79056`**; combined source `33e9bc9` passes universal Release and bundle audit, and the parent checklist is reconciled. Physical cable unplug, negotiated AirPlay and broad display/scanout coverage remain disclosed limits; they are not invented additional closure criteria. |
 | #158 resilience | Controlled source failover, locked/wake ordering and output continuity have native evidence. Final permission recovery, initial-lock/display enumeration fixes and independent review are still in progress. | **Keep open pending those fixes and final acceptance review.** Do not infer physical notification/device/TCC coverage from injected lifecycle events. |
 | #107 / #108 keying and LUTs | The actual linear-LUT color-space bug is fixed, including small-table shadow preservation. Seven focused Core tests and actual Metal controls pass. All 48 photographed green-screen motion plates pass measured edge/temporal checks. Reserved combined 1080p30 key/mask/picture/64³ LUT work completes 1,800 frames in 60 seconds with no render-budget or cadence misses. | **Keep open for physical hardware-source qualification.** Representative photographed footage and this sustained render-cost workload are now completed evidence. The bypassed baseline's two budget/five cadence misses remain recorded; this is not all-hardware or long-broadcast capacity proof. |
 | #92 performance | Actual AAC priming, startup alignment, software RTMP presentation timestamps and bounded final codec/publisher drains are corrected. Hardware and software shared-media suites pass unchanged limits. Final actual storage-failure/network integration passes all three original 80 ms cues per transport: RTMP 7.500/1.500/5.500 ms and SRT 8.278/1.900/5.522 ms. | **Keep open for representative sustained Apple Silicon/native Intel workloads, thermal evidence and measured encoder/storage/uplink ceilings.** Earlier 82/91 ms media failures are retained and now have a concrete fix with passing media evidence. These small-profile checks do not establish resource ceilings. |
@@ -187,8 +187,9 @@ rendered PCM/AEC limits under #127 are unchanged by this publishing fix.
 
 The performance workflow is ready for a bounded longer dispatch: its timeout is
 90 minutes, native architecture checks are explicit, and five tests verify
-owned-process interrupt/termination cleanup. No 600-second or native Intel
-sustained result is claimed from workflow readiness alone.
+owned-process interrupt/termination cleanup. The parent dispatched actual 600-second/workload native ARM and Intel
+[run 39713883982](https://github.com/joeblau/stream/actions/runs/39713883982)
+at `0d79056`; results remain pending. No sustained PASS is claimed from dispatch.
 
 Hosted CI run [39706795991](https://github.com/joeblau/stream/actions/runs/39706795991)
 on exact published `40d0737` completed with iOS success and both macOS jobs

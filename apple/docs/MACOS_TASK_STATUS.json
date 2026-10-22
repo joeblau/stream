@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 41 open, 20 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
+  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 40 open, 21 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -79,9 +79,9 @@
     "wave2NativeQuality": "Actual native local palette/Escape, settings and attached-sheet dismissal restore exact native field editor/owner. Tab reaches a visible native target; chat and real mixer polling preserve native-search ownership. At 1024x640, real search callout scales to 18.461538 pt and caption 121x14 to 175x20. Virtual semantic AX/fader/panel removal and contrast-image reference remain unqualified; no mocked tree substitutes. See STUDIO_ACCESSIBILITY_2026-10-22.json.",
     "wave2BrowserAudio": "Missing mixer-preparation callback now refuses helper capture/Resume. Actual helper/WebKit/PCM suite passes late registration, synchronous authority withdrawal while retaining visuals, restored saved gain/Aux/delay and silence on Program/Monitor/Aux/pre+postISO during withdrawal. Production selection remains disabled; signed shared-container/live attribution/every-route exclusion/new A/V/endurance gates remain. See /tmp/stream-wave2-browser-audio-report-20261022.md.",
     "wave2Chat": "Final actual provider/vault/HTTP, direct manager and whole-source native renderer/recording fixtures pass queued mutation cancellation before HTTP, exact historical targets, reader health after outgoing refusal and shared-vault workspace identity pinning. Actual authorized live feeds/replies/moderation/event readings remain unqualified. See /tmp/stream-wave2-chat-report-20261022.md.",
-    "wave2ExternalDisplay": "All three original 175 functional criteria have implementation, actual external-screen color/Fit/Fill proof and independent review. Full StreamController Clean compositor/native-layer regression passes shared 4K30 budget admission/refusal and acknowledged independent teardown. Universal Release at 230c including 175 passed with bundle audit; combined source 33e9bc9 now also passes universal Release and bundle audit. Closure remains proposed, not performed. See /tmp/stream-175-independent-ac-review-20261022.md.",
+    "wave2ExternalDisplay": "All three original 175 functional criteria have implementation, actual external-screen color/Fit/Fill proof and independent review. Full StreamController Clean compositor/native-layer regression passes shared 4K30 budget admission/refusal and acknowledged independent teardown. Universal Release at 230c including 175 passed with bundle audit; combined source 33e9bc9 now also passes universal Release and bundle audit. Published 0d79056; task 175 closed after exact original-criteria review and parent checklist reconciliation. See /tmp/stream-175-independent-ac-review-20261022.md.",
     "wave2Profiles": "Existing installed Stream Deck editor exposes no actual author/export window through current public AX grants. Two bounded supported menu actions did not reveal Profiles/Export controls. All 11 ProfilesV2, 12 ProfilesV3 and 8 plugin entries remain byte-identical. No genuine starter exports were fabricated; issue 152 remains open. See /tmp/stream-wave2-profiles-report.md.",
-    "wave2PerformanceDispatch": "Workflow timeout now 90 minutes, native architecture checks are explicit, and owned workload process groups receive bounded SIGINT/SIGTERM/final cleanup. Five focused lifecycle tests pass. No 600-second hosted or native Intel sustained result is claimed by this readiness fix. See /tmp/stream-wave2-automation-proof-20261022.md.",
+    "wave2PerformanceDispatch": "Workflow timeout now 90 minutes, native architecture checks are explicit, and owned workload process groups receive bounded SIGINT/SIGTERM/final cleanup. Five focused lifecycle tests pass. No 600-second hosted or native Intel sustained result is claimed by this readiness fix. See /tmp/stream-wave2-automation-proof-20261022.md. Actual bounded 600-second/workload native ARM+Intel workflow dispatched at source 0d79056: run39713883982; results pending, no sustained PASS claimed.",
     "wave2HostedCI": "Run 39706795991 exact main 40d0737: iOS success; both macOS jobs fail step 12 from identical headless NSApp nil unwrap in StudioAutomationEndpoint.swift:61, after successful harness builds. Fixed by guarded headless focus with new focused regression and unchanged managed-start harness passing locally. Integrated fix hosted verification remains pending; later old-run qualifications were skipped. See /tmp/stream-wave2-ci-two-failure-classification-20261022.md.",
     "wave2ShippingApp": "Combined shipping source 33e9bc9 passes unsigned universal Release for arm64/x86_64 and the actual bundle/sandbox/App Intents/transport-hook audit. Logs: /tmp/stream-wave2-composed-release-20261022.log and /tmp/stream-wave2-composed-bundle-20261022.log. No Developer ID/notarization or physical Intel runtime claim."
   },
@@ -137,11 +137,9 @@
       "code": "O09",
       "title": "[macOS][O09] Add optional clean program output to external displays and AirPlay",
       "url": "https://github.com/joeblau/stream/issues/175",
-      "githubState": "open",
-      "completion": "original functional criteria and combined universal build verified; closure proposed after publication",
-      "remaining": [
-        "Publish the validated combined source and reconcile exact GitHub state. Original functional criteria, independent review and combined universal build are verified; no closure has been performed yet."
-      ],
+      "githubState": "closed",
+      "completion": "completed against original functional acceptance criteria",
+      "remaining": [],
       "qualificationLimits": [
         "Actual external-screen color/framing and owned-layer pacing passed. Physical cable unplug, negotiated AirPlay, panel scanout and broad display diversity were not exercised; these are accurately scoped coverage limits, not additional mandatory closure criteria."
       ],
@@ -149,8 +147,11 @@
         "/tmp/stream-175-independent-ac-review-20261022.md",
         "/tmp/stream-175-native-final-20261022.log",
         "/tmp/stream-175-clean-program-20261022.log",
-        "/tmp/stream-wave2-ready-release-20261022.log"
-      ]
+        "/tmp/stream-wave2-ready-release-20261022.log",
+        "/tmp/stream-wave2-composed-release-20261022.log",
+        "/tmp/stream-wave2-composed-bundle-20261022.log"
+      ],
+      "publishedSource": "0d790563590cff75d50bfef0d127b6839e55a8bc"
     },
     {
       "number": 174,
@@ -873,17 +874,17 @@
   ],
   "scopeCounts": {
     "initialOpenFeatureTasks": 48,
-    "openFeatureTasks": 30,
+    "openFeatureTasks": 29,
     "openEpicsAndRoadmap": 11,
     "total": 61,
-    "currentlyOpen": 41,
-    "closedSinceInitialInventory": 20
+    "currentlyOpen": 40,
+    "closedSinceInitialInventory": 21
   },
-  "overallStatus": "Incomplete roadmap. Existing verified GitHub snapshot remains 41 open / 20 closed; this wave performs no closures. New functional/media/Metal/package/portability/native-quality fixes have scoped passing evidence and explicit remaining gates. Issue 175 is proposed for closure only after final combined universal validation and publication; issue 158 recovery/deck fixes and review remain pending. Parent owns final publication and exact API reconciliation.",
-  "integratedMain": "8805d1e",
-  "githubStateRefreshedAt": "2026-10-22T01:37:50Z",
+  "overallStatus": "Incomplete roadmap: verified initial inventory now 40 open / 21 closed. Task 175 is closed after original functional acceptance, independent review, combined universal validation and publication. Permission recovery and initial-lock/display-observation follow-ups for 158 await final combined proof/review. Remaining device, provider, release and qualification limits are explicit.",
+  "integratedMain": "0d79056",
+  "githubStateRefreshedAt": "2026-10-22T02:55:25.245884+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "8805d1eb8e6d2f7ba4b54d7dfe5f67f72a94a64c",
+  "publishedIntegration": "0d790563590cff75d50bfef0d127b6839e55a8bc",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -903,17 +904,17 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "0e189b4",
+  "currentReviewBase": "33e9bc9",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
-    "githubWritesPerformed": false,
-    "closuresPerformed": [],
-    "proposedClosureAfterFinalCombinedBuildAndPublication": [
+    "githubWritesPerformed": true,
+    "closuresPerformed": [
       175
     ],
+    "proposedClosureAfterFinalCombinedBuildAndPublication": [],
     "pendingRecoveryAndDeckAcceptance": [
       158
     ],
-    "githubCountsNote": "Existing 41 open / 20 closed snapshot is retained. Parent must refresh exact API counts after publication and any deliberate closure; no anticipated closure is counted as completed."
+    "githubCountsNote": "Exact paginated API reconciliation of the 61 initial issues verifies 40 open / 21 closed and zero open PRs after closing 175 and checking its parent checklist."
   }
 }
