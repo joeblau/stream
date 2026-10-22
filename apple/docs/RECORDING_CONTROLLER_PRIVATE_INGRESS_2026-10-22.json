@@ -353,13 +353,13 @@
     "automatic sourceclock durationrotation",
     "automatic actualondisksize rotation and writable storagepreflight"
   ],
-  "scope": "Actual production RecordingController/ISOworker/writers/router/broker/coordinator; inert generated inlet stand-in delegates real EngineSourceResources+private banks. No production CompositionEngine/SourceFactory runtime, capture, device output, network or performance qualification.",
+  "scope": "Actual production RecordingController runtime, Program/isolated-audio writers/router/broker/coordinator; IsolatedVideoRecorder compiled but not instantiated (no selected ISO video in this fixture). Inert generated inlet stand-in delegates real EngineSourceResources+private banks. No production CompositionEngine/SourceFactory runtime, capture, device output, network or performance qualification.",
   "sourceChanges": [
     "outer writer event captures stream weakly instead of accidental strong capture",
     "pending initial installation Stop staysstopping until actor teardown ACK; countdown-only cancellation staysimmediateidle",
     "existing external inlet stand-in uses actual broker/EngineSourceResources/prepared privatebanks and waits explicit installation ACK, retaining all original media gates"
   ],
-  "status": "actual controller/ISO-worker compile and runtimePASS; narrow weak-capture+pending-stop lifecycle followup; final combined universal for changed Controller remains required",
+  "status": "actual Controller runtimePASS and Controller/ISO-worker compilePASS; narrow weak-capture+pending-stop lifecycle followup; final combined universal for changed Controller remains required",
   "version": 1,
   "weakCaptureCompileOnly": {
     "log": {
