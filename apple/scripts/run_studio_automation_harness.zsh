@@ -11,4 +11,5 @@ swiftc -swift-version 6 -emit-module -module-name StreamCore "$AUTOMATION_DIR/St
 swiftc -swift-version 6 -parse-as-library -I "$AUTOMATION_DIR" -framework AppKit -framework AppIntents \
   StreamMac/StudioAutomationModel.swift StreamMac/StudioAutomationEndpoint.swift StreamMac/StudioAppIntents.swift \
   scripts/studio_automation_harness.swift -o "$AUTOMATION_DIR/harness"
+"$AUTOMATION_DIR/harness" --headless-focus
 "$AUTOMATION_DIR/harness"
