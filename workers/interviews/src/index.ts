@@ -115,8 +115,19 @@ export class InterviewRoom extends DurableObject<Env> {
     try { socket.send(JSON.stringify({ ...(value as Record<string, unknown>), delivery })); }
     catch { socket.close(1011, 'Delivery failed'); }
   }
-  private broadcast(value: unknown) { for (const {socket} of this.peers()) this.emit(socket, value); }
-  private roster() { const room = this.room(); this.broadcast({ type: 'roster', peers: this.peers().map(({peer}) => ({ id: peer.id, role: peer.role, name: peer.name, state: peer.state, generation: peer.generation })), program: room?.program ?? false, recording: room?.recording ?? false, locked: room?.locked ?? false }); }
+  private roster() {
+    const room = this.room(), connections = this.peers();
+    const peers = connections.map(({peer}) => ({id:peer.id, role:peer.role, name:peer.name, state:peer.state}));
+    for (const recipient of connections) {
+      // Only the host needs waiting-guest generations for membership fencing.
+      // Guest rosters retain the original disclosure boundary; their own welcome
+      // and paired admission receipts already supply exactly what they need.
+      const visible = recipient.peer.role === 'host'
+        ? peers.map((peer,index) => ({...peer,generation:connections[index].peer.generation})) : peers;
+      this.emit(recipient.socket, {type:'roster', peers:visible, program:room?.program ?? false,
+        recording:room?.recording ?? false, locked:room?.locked ?? false});
+    }
+  }
   private async invite(role: Role) {
     const room = this.room()!;
     const secret = token(); const id = crypto.randomUUID(); const hash = await digest(secret);
