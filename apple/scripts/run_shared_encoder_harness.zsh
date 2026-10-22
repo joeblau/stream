@@ -41,7 +41,7 @@ xcodebuild -resolvePackageDependencies -project "$SHARED_ENCODER_DIR/SharedEncod
 python3 scripts/repair_desktop_transport_archives.py "$SHARED_ENCODER_BUILD_PATH"
 xcodebuild -project "$SHARED_ENCODER_DIR/SharedEncoderValidation.xcodeproj" \
   -scheme SharedEncoderHarness -destination 'platform=macOS' \
-  -derivedDataPath "$SHARED_ENCODER_BUILD_PATH" -jobs "${STREAM_XCODE_JOBS:-4}" CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath "$SHARED_ENCODER_BUILD_PATH" -jobs "${STREAM_XCODE_JOBS:-2}" CODE_SIGNING_ALLOWED=NO OTHER_SWIFT_FLAGS='$(inherited) -j2' build
 readonly SHARED_ENCODER_PRODUCTS="${SHARED_ENCODER_BUILD_PATH:A}/Build/Products/Debug"
 if (( $# > 0 )); then
   env DYLD_FRAMEWORK_PATH="$SHARED_ENCODER_PRODUCTS" "$SHARED_ENCODER_PRODUCTS/SharedEncoderHarness" "$@"

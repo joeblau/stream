@@ -686,6 +686,15 @@ actor SessionPublisher: Publisher {
         await stream?.append(sample)
         return false
     }
+    func prepareEncodedAudio(_ audio: SharedEncodedAudio) async {
+        guard encodedInput, !encodedAudioReady, isRunning, !isPaused, let stream else { return }
+        // TSWriter cannot write a PES until both formats exist. Video is gated
+        // by encodedAudioReady, so this installs AAC format without emitting a
+        // packet or starting the audio clock. The mailbox next supplies the IDR
+        // and then this same real AAC packet, once, at the aligned origin.
+        encodedAudioReady = true
+        await stream.append(audio.buffer, when: audio.when)
+    }
     func appendEncodedAudio(_ audio: SharedEncodedAudio) async -> Bool {
         guard encodedInput, isRunning, !isPaused, let stream else { return false }
         lastMediaAt = DispatchTime.now().uptimeNanoseconds

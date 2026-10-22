@@ -349,6 +349,11 @@ private struct StorageNetworkMedia: Codable {
         // subsequently fails its independent timing/cadence qualification.
         for (phase, snapshot) in clockEvidence { try snapshot.redactedExportData().write(to: root.appendingPathComponent("clock-" + phase + ".json"), options: .atomic) }
         let snapshot = capture.snapshot()
+        let sourceEvidence: [String: Any] = ["sourceFlashPTS": snapshot.flashes, "sourceTonePTS": snapshot.sounds,
+            "storageFailureSourcePTS": failureSourceTime, "localFailure": recorder.lastError ?? "", "localVideoState": recorder.progress.videoStatus.rawValue,
+            "localAudioState": recorder.progress.audioStatus.rawValue, "recordingEncoderReservationsAfterFailure": controller.reservedRecordingEncoderCount,
+            "host": ProcessInfo.processInfo.operatingSystemVersionString, "cpus": ProcessInfo.processInfo.processorCount]
+        try JSONSerialization.data(withJSONObject: sourceEvidence, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("source-evidence.json"), options: .atomic)
         try check(snapshot.flashes.count == 3 && snapshot.sounds.count == 3, "Original Program did not retain exactly three taken AV cues: \(snapshot.flashes)/\(snapshot.sounds)")
         for index in 0..<3 { try check(abs(snapshot.flashes[index] - snapshot.sounds[index]) < 0.06, "Actual pre-encoder Program source cue was not synchronized") }
         let local = try await inspect(moved.appendingPathComponent(original.lastPathComponent))
@@ -356,8 +361,15 @@ private struct StorageNetworkMedia: Codable {
         try check(local.flashes.count == 1 && local.tones.count == 1 && local.duration >= 2, "Failed local file lost accepted pre-failure media or gained post-cleanup cues")
         try check(abs(local.flashes[0] - local.tones[0]) < 0.08, "Failed local media AV cue drift")
         var results = [local]
+        defer {
+            // Preserve every decoded result reached, including the failing
+            // transport, without changing any qualification assertion below.
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try? encoder.encode(results).write(to: root.appendingPathComponent("decoded-media.json"), options: .atomic)
+        }
         for transport in transports {
             let media = try await inspect(root.appendingPathComponent("network-\(transport.rawValue).mp4"))
+            results.append(media)
             print("Media \(media.name): \(media.duration)s, \(media.videoFrames) decoded frames, max step \(media.maximumVideoStep)s, track starts \(media.videoStart)/\(media.audioStart), ends \(media.videoEnd)/\(media.audioEnd), flashes \(media.flashes), tones \(media.tones)")
             try check(media.flashes.count == 3 && media.tones.count == 3, "Actual \(transport.rawValue) lost a pre/post-failure cue: \(media.flashes)/\(media.tones)")
             try check(abs(media.videoStart - media.audioStart) < 0.08 && abs(media.videoEnd - media.audioEnd) < 0.12, "Actual network track start/end alignment failed")
@@ -366,7 +378,6 @@ private struct StorageNetworkMedia: Codable {
             for index in 1..<3 {
                 try check(abs((media.flashes[index] - media.flashes[0]) - (snapshot.flashes[index] - snapshot.flashes[0])) < 0.08, "Actual network source cue spacing changed across storage cleanup")
             }
-            results.append(media)
         }
         let library = RecordingLibraryModel()
         await library.refresh(access: RecordingDirectoryAccess(url: moved, scoped: false), activeURLs: [])
@@ -377,11 +388,6 @@ private struct StorageNetworkMedia: Codable {
         }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(results).write(to: root.appendingPathComponent("decoded-media.json"), options: .atomic)
-        let sourceEvidence: [String: Any] = ["sourceFlashPTS": snapshot.flashes, "sourceTonePTS": snapshot.sounds,
-            "storageFailureSourcePTS": failureSourceTime, "localFailure": recorder.lastError ?? "", "localVideoState": recorder.progress.videoStatus.rawValue,
-            "localAudioState": recorder.progress.audioStatus.rawValue, "recordingEncoderReservationsAfterFailure": controller.reservedRecordingEncoderCount,
-            "host": ProcessInfo.processInfo.operatingSystemVersionString, "cpus": ProcessInfo.processInfo.processorCount]
-        try JSONSerialization.data(withJSONObject: sourceEvidence, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("source-evidence.json"), options: .atomic)
         print("PASS: shipping StreamController compositor/mixer → simultaneous actual RTMP/SRT publishers and RecordingController; staged/Revert isolation and three taken AV cues; real recording-path loss preserves readable recoverable media, independent writer cleanup, preview stop and continued decoded network cadence/timing; independent network stops")
         print("Configuration: \(ProcessInfo.processInfo.operatingSystemVersionString); \(ProcessInfo.processInfo.processorCount) CPUs; artifacts \(root.path)")
         print("Qualification: controlled recording-directory relocation, generated capture PCM and owned localhost receivers; physical drive unplug, hardware capture and public ingest are not claimed")

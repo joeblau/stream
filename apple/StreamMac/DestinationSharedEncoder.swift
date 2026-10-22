@@ -293,7 +293,10 @@ final class DestinationSharedEncoder: @unchecked Sendable {
                 blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: Int(output.byteLength), flags: 0, blockBufferOut: &block) == noErr,
                 let block, CMBlockBufferReplaceDataBytes(with: output.data, blockBuffer: block, offsetIntoDestination: 0, dataLength: Int(output.byteLength)) == noErr,
                 let audioDescription else { throw CocoaError(.coderInvalidValue) }
-            let pts = audioOrigin + CMTime(value: audioFrames, timescale: 48_000)
+            // AAC output includes the converter's leading (priming) frames,
+            // even with primeMethod.none. Timestamp the content, rather than
+            // adding that codec latency to every audible cue.
+            let pts = audioOrigin + CMTime(value: audioFrames - Int64(converter.primeInfo.leadingFrames), timescale: 48_000)
             var packet = output.packetDescriptions?.pointee ?? AudioStreamPacketDescription(mStartOffset: 0, mVariableFramesInPacket: 1024, mDataByteSize: output.byteLength)
             var encoded: CMSampleBuffer?
             guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block,

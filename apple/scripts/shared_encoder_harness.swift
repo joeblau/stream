@@ -11,6 +11,7 @@ private actor EncodedPublisherProbe: Publisher {
     private(set) var video: [CMSampleBuffer] = []
     private(set) var audio: [SharedEncodedAudio] = []
     private(set) var raw = 0, configured = false, starts = 0
+    private(set) var encodedOrder: [String] = []
     private var held = false
     private var gate: CheckedContinuation<Void, Never>?
     private var holdsStop = false
@@ -25,9 +26,10 @@ private actor EncodedPublisherProbe: Publisher {
     func appendVideo(_ sample: CMSampleBuffer) async { raw += 1 }
     func appendEncodedVideo(_ sample: CMSampleBuffer) async -> Bool {
         if held { await withCheckedContinuation { gate = $0 } }
-        video.append(sample); return false
+        video.append(sample); encodedOrder.append("video"); return false
     }
-    func appendEncodedAudio(_ sample: SharedEncodedAudio) async -> Bool { audio.append(sample); return false }
+    func prepareEncodedAudio(_ sample: SharedEncodedAudio) async { encodedOrder.append("prepare") }
+    func appendEncodedAudio(_ sample: SharedEncodedAudio) async -> Bool { audio.append(sample); encodedOrder.append("audio"); return false }
     nonisolated func enqueueMic(_ sample: CMSampleBuffer) {}
     nonisolated func enqueueApp(_ sample: CMSampleBuffer) {}
     nonisolated func enqueueProgram(_ sample: CMSampleBuffer) {}
@@ -36,7 +38,7 @@ private actor EncodedPublisherProbe: Publisher {
     func statsSnapshot() async -> LiveStats? { nil }
     func hold() { held = true }
     func release() { held = false; gate?.resume(); gate = nil }
-    func reset() { video.removeAll(); audio.removeAll() }
+    func reset() { video.removeAll(); audio.removeAll(); encodedOrder.removeAll() }
     func holdStop() { holdsStop = true }
     func releaseStop() { holdsStop = false; stopGate?.resume(); stopGate = nil }
 }
@@ -87,6 +89,67 @@ private actor EncodedPublisherProbe: Publisher {
         a.markAsFinished()
         await writer.finishWriting()
         try check(writer.status == .completed, "Compressed container failed: \(String(describing: writer.error))")
+    }
+    private static func knownAACContentTime(_ url: URL) async throws {
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: tracks[0], outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
+        reader.add(output)
+        try check(reader.startReading(), "AAC content-time decoder could not start")
+        var onset: Double?
+        while let sample = output.copyNextSampleBuffer() {
+            guard let block = sample.dataBuffer else { continue }
+            var values = [Float](repeating: 0, count: CMBlockBufferGetDataLength(block) / 4)
+            values.withUnsafeMutableBytes { _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: $0.count, destination: $0.baseAddress!) }
+            if onset == nil, let index = values.firstIndex(where: { abs($0) > 0.15 }) {
+                onset = sample.presentationTimeStamp.seconds + Double(index / 2) / 48_000
+            }
+        }
+        try check(reader.status == .completed && onset != nil, "Actual AAC content did not decode")
+        // The generated original PCM pulse begins at .500s. This specifically
+        // catches unaccounted AAC priming, independently of a video's frame grid.
+        try check(abs(onset! - 0.5) < 0.004, "Actual AAC priming shifted original PCM content: \(onset!)s")
+        report("PASS: decoded actual AAC original .500s PCM pulse at \(onset!)s, within4ms content-time regression bound")
+    }
+    private static func startupAlignmentRegression(video: CMSampleBuffer, audio: SharedEncodedAudio) async throws {
+        let anchor = video.presentationTimeStamp
+        func packet(_ offset: Double) throws -> SharedEncodedAudio {
+            let pts = anchor + CMTime(seconds: offset, preferredTimescale: 48_000)
+            var timing = CMSampleTimingInfo(duration: CMTime(value: 1024, timescale: 48_000), presentationTimeStamp: pts, decodeTimeStamp: .invalid)
+            var copy: CMSampleBuffer?
+            try check(CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: audio.sample, sampleTimingEntryCount: 1,
+                sampleTimingArray: &timing, sampleBufferOut: &copy) == noErr, "AAC timing fixture could not copy actual packet")
+            return SharedEncodedAudio(sample: copy!, buffer: audio.buffer, when: AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: pts.seconds)))
+        }
+        let earlier = try packet(-0.032), nearest = try packet(-0.010), following = try packet(0.011333333333)
+        for audioFirst in [false, true] {
+            let probe = EncodedPublisherProbe()
+            let mailbox = DestinationEncodedMailbox(publisher: probe, requestKeyframe: {})
+            mailbox.setPublished(true)
+            if !audioFirst { mailbox.enqueueVideo(video) }
+            mailbox.enqueueAudio(earlier); mailbox.enqueueAudio(nearest)
+            if !audioFirst {
+                try await Task.sleep(for: .milliseconds(20))
+                let videoCount = await probe.video.count, audioCount = await probe.audio.count
+                try check(videoCount == 0 && audioCount == 0, "Startup escaped before the nearest AAC packet was known")
+            }
+            mailbox.enqueueAudio(following)
+            if audioFirst { mailbox.enqueueVideo(video) }
+            try await settle { await probe.audio.count == 2 }
+            let received = await probe.audio, frames = await probe.video, order = await probe.encodedOrder
+            try check(frames.count == 1 && frames[0] === video && received[0] === nearest && received[1] === following,
+                      "Callback order shifted the IDR/AAC origin or changed compressed references")
+            try check(order == ["prepare", "video", "audio", "audio"], "First actual IDR/AAC publication order was not format-safe")
+            mailbox.setPublished(false); await probe.reset(); mailbox.setPublished(true)
+            for _ in 0..<200 { mailbox.enqueueAudio(nearest) }
+            let state = mailbox.statistics()
+            try check(state.depth <= 8 && state.bytes <= 4 * 1024 * 1024 && state.waitingForKeyframe,
+                      "Audio without a startup IDR escaped its bounded history")
+            mailbox.stop()
+        }
+        report("PASS: actual compressed packet references choose the nearest content-time AAC packet independent of callback order; first IDR retained, AAC format prepared before media, and absent-video startup stays bounded")
     }
     static func feed(_ outputs: DestinationOutputController, start: Int, ticks: Int, canvas: OutputCanvas = .program) async throws {
         for tick in start..<(start + ticks) {
@@ -462,9 +525,11 @@ private actor EncodedPublisherProbe: Publisher {
         for (x, y) in zip(aa, ba) { try check(x === y && x.sample === y.sample && bytes(x.sample) == bytes(y.sample), "AAC packet was not reused") }
         let firstRaw = await first.raw, secondRaw = await second.raw, firstConfigured = await first.configured, secondConfigured = await second.configured
         try check(firstRaw == 0 && secondRaw == 0 && firstConfigured && secondConfigured, "Shared route reached raw encoder ingress")
+        try await startupAlignmentRegression(video: av[0], audio: aa[0])
         try await write(first, to: directory.appendingPathComponent("first.mp4"))
         try await write(second, to: directory.appendingPathComponent("second.mp4"))
         try await ProgramRecordingFixtures.inspect(directory.appendingPathComponent("first.mp4"), expectedDuration: 2, checkSync: true)
+        try await knownAACContentTime(directory.appendingPathComponent("first.mp4"))
         try await ProgramRecordingFixtures.inspect(directory.appendingPathComponent("second.mp4"), expectedDuration: 2, checkSync: true)
         report("PASS: same compressed H.264 CMSampleBuffer and AAC packet identities/bytes/timestamps reused by RTMP/SRT endpoints; two actual containers decode with matching samples and flash/tone")
 
