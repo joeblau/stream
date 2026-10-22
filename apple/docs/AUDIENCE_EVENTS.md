@@ -34,7 +34,8 @@ bounds and shared dispatcher/renderer resource limits still apply. Text-only Sta
 does not load avatars, stickers, emote graphics, audio, HTML or remote media.
 Separate explicit static Twitch tile buttons are described in
 [STATIC_TWITCH_EMOTES.md](STATIC_TWITCH_EMOTES.md); they are off by default and
-also require Take.
+require Take. The separate **Show emote** action displays the same bounded
+static artwork in native chat without editing a scene or requiring Take.
 Provider removal invalidates future promotion of that message; a deliberately
 staged/taken card remains ordinary scene content. A warning directs the operator
 to Hide and Take, avoiding an unsolicited output change.
