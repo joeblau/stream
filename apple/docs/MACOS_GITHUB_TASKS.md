@@ -100,7 +100,7 @@ The local SDK probe found no NDI runtime/SDK, DeckLink runtime/SDK or Zoom Meeti
 
 A further wave used up to ten concurrent subagents, independent acceptance
 review and combined validation. Original issue criteria for #91 and #147–#150
-are implemented and qualify for closure after this source is published. The
+are implemented and verified closed after source publication. The
 current GitHub reconciliation is recorded separately in MACOS_TASK_STATUS.json.
 
 - StreamCore passed 584 tests in 82 suites. Its production and test trees remain

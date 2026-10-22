@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 46 open, 15 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
+  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 41 open, 20 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -29,7 +29,7 @@
     "nativeInterviewProgramISO": "Actual manager/default native receiver through local TURN/Chrome decoded Program and guest ISO: 316946/294390 identical Float32 values, zero rational cue difference/history misses; separate screen approval/stop and Backstage privacy pass",
     "guestPrivateMessages": "Actual shipping dispatcher/manager/default receiver through local TURN/Chrome passes both directions/receipts, private Backstage routes, rejoin history wipe and stale-context refusal alongside unchanged stereo audio return",
     "review": "Final independent subagent review finds no actionable merge-resolution issue in portable package bounds/typed token remapping, workspace operation ownership/asset grants, recorder warnings or recovery. Production-source diff from e5925bf through reviewed HEAD is empty; later commits are fixture-only, so the successful universal build covers current shipping code.",
-    "performance": "Four ten-second 12-layer H264/AAC workloads complete with valid decoded tracks and zero recorder drops; actual 28.68/28.98/59.47/29.98fps. See PERFORMANCE_BASELINE_2026-10-21.json; physical/sustained/Intel qualification remains open.",
+    "performance": "Two quiet 120-second native ARM owned 1080p/static/decode+H264/AAC workloads pass, with actual process/Metal/kernel measurements and preserved original recordings. Runtime preview guards and idle hysteresis reset are implemented; actual network/recording geometry remains independent. Four resource-policy tests pass. See DESKTOP_RESOURCE_BUDGETS.md and PERFORMANCE_OWNED_SUSTAINED_2026-10-22.json for exact metrics and remaining representative/Intel/thermal/ceiling qualification.",
     "sharedCoreIOS": "Post-merge iOS: 576 tests in 80 suites passed on an owned simulator; /tmp/stream-postmerge-core-ios-20261021.log and matching xcresult. Owned simulator was shut down and deleted; cleanup receipt verifies its UDID is absent.",
     "appIntentsMetadata": "Actual unsigned bundle contains all six documented App Intents and three stable resource entities; an owned bundle with scene action removed is rejected",
     "guestPrivateTalkback": "Actual shipping manager/default receiver through owned TURN/Chrome passes addressed microphone PCM and decoded Opus, public/Monitor/Aux/pre+post ISO exclusion, no private sidechain ducking, FX/ring/converter boundary resets, exact public settings restoration, queued revision invalidation and full-lease press/release/rejoin/deadline safety. Native AppKit mouse/Space/repeat/modifier/responder/removal checks pass. Mixer and send authority expire the hold after ten seconds while MainActor is deliberately blocked.",
@@ -64,10 +64,15 @@
     "viewerFreshnessPostMerge": "Actual shipping mounted SwiftUI child/public AX passes YouTube zero and Twitch seven current-to-expired and rollback without account publication, finite/zero/unknown distinctions, exact 60-second bound, identity/authority fences, forget/shutdown and no provider polling. Test-only fake HTTP responses include the requested user_id required by the stronger shipping identity validator. All native control suites exit zero; commands/results: /tmp/stream-macos-postmerge-controls-20261021/results.json.",
     "postMergeFinishedAt": "2026-10-21T21:33:22+00:00",
     "guestVideoBudgetFollowup": "The first complete RTCP-accounting matrix passed two fresh captures per source with unchanged native50ms/raw-track100ms limits: Program71.83/44.85ms, Secondary76.75/33.88ms, Clean56.27/23.79ms. These successful recordings do not establish a fix for the earlier105.104ms failure or qualify true element-rendered/physical playback. See NATIVE_GUEST_RETURN_VIDEO.md.",
-    "currentReviewedCore": "Combined follow-up native macOS StreamCore:576tests in80suites passed, preserving the original ChannelFX gain bounds while measuring settled response; /tmp/stream-central-core-20261021.log and matching xcresult.",
-    "currentReviewedUniversal": "Final combined shipping Release app, embedded browser helper and camera extension build successfully for arm64+x86_64 after the scheduling, emote, accessible talkback, RTP/RTCP budget, encoder startup and Program publisher fixes. Actual bundle audit verifies both architectures, all six intents/three entities, sandbox/App Group/embed declarations and no transport validation hooks. Signature/notarization qualification is not claimed. Logs:/tmp/stream-central-app-release-20261021.log and /tmp/stream-central-bundle-20261021.log.",
+    "currentReviewedCore": "Combined macOS StreamCore: 584 tests in 82 suites pass; /tmp/stream-wave-core-20261022.log and matching xcresult. Current production/test trees exactly match the tested Core trees.",
+    "currentReviewedUniversal": "Final combined unsigned Release app, browser helper and camera extension pass for arm64+x86_64, including the final audience mapper. Final bundle audit retains six intents/three entities, sandbox/embed declarations and no guest validation hooks. Shipping binary excludes optional nice backend symbols. Logs: /tmp/stream-wave-app-final-20261022.log and /tmp/stream-wave-bundle-final-20261022.log. Physical Intel and signed/notarized installation are not asserted.",
     "currentReviewedSharedEncoders": "Actual merged hardware-preference and explicit-software shared encoder graph passes strict initial-frame/container/sync/cadence/overflow/IDR/stop/cancellation assertions and real local RTMP/SRT receiver decode. The merge keeps explicit receiver capability verification and the STREAM_FFMPEG_BIN override. Log:/tmp/stream-central-shared-encoder-20261021.log.",
-    "simultaneousStorageNetwork": "Two same-runtime actual shipping Controller/compositor/mixer/recorder/default-adaptive RTMP+SRT runs pass staged graphics/Revert/Take privacy, three decoded AV cues, real missing-storage detection/per-track failure/recorder cleanup, continuing healthy network outputs and independent stops. Final files:91local/129RTMP/261SRTframes; all original80ms sync/120ms endpoints/150ms cadence limits retained. This required fixing native packed-to-planar Program audio admission and raw-capture repeats racing the studio clock. See RECORDING_STORAGE_NETWORK.md."
+    "simultaneousStorageNetwork": "Two same-runtime actual shipping Controller/compositor/mixer/recorder/default-adaptive RTMP+SRT runs pass staged graphics/Revert/Take privacy, three decoded AV cues, real missing-storage detection/per-track failure/recorder cleanup, continuing healthy network outputs and independent stops. Final files:91local/129RTMP/261SRTframes; all original80ms sync/120ms endpoints/150ms cadence limits retained. This required fixing native packed-to-planar Program audio admission and raw-capture repeats racing the studio clock. See RECORDING_STORAGE_NETWORK.md.",
+    "currentReviewedControls": "All 28 combined controller/SDK tests, actual native IPC, 512 complete destination receipts, separate 256-layer Preview/Program receipts, source/ending/authority/profile checks and real localhost RTMP+independent recording controls pass. Exact native 65-destination audience mapper and real TCP freshness regression pass. Actual Chrome inspector and reference host/guest WebRTC flows pass. Official Elgato validation/package, universal helper and owned development lifecycle pass. Source/metadata references: transport-actions.md, LOCAL_CONTROL_IPC.md and DECK_AUDIO_MEDIA_VALIDATION.md.",
+    "currentClockDiagnostics": "Actual fixed offset vs observed rate, drops/held callbacks, stale/missing/rejoin, resource/kernel export, persistent timer and independent RTMP/SRT continuity through recorder storage failure pass on named Mac15,8. Failed publishers retire their elapsed timer. Default decoded media keeps original 80 ms cue/150 ms cadence bounds. Shared encoded callback confidence is explicit; its separate 82.2/91.2 ms media failures remain open. See STUDIO_DIAGNOSTICS.md and AV_CLOCK_PIPELINE_2026-10-22.json.",
+    "guestPlayerLifecycle": "Actual same-stream HTML renderer reset reproduced and fixed; On/Off/source/mute transitions retain the current player, while a new full lease replaces it. One bounded strict matrix passes two raw captures per Program/Secondary/Clean without relaxing native50ms/raw100ms gates. The earlier105.104ms failure and normal rendered PCM/AEC limits remain explicit in GUEST_RETURN_AV_ORACLES.md.",
+    "optionalNativeTCP": "Pinned source-owned libnice backend passes actual TCP-only native Manager/Chrome media, camera/screen approval/deny/stop/retry/revoke, stereo mix-minus, Program/Secondary/Clean return, rejoin/control/remove/end. Dependency-floor/license/hash and dirty-cache refusal checks pass. This optional newer-macOS backend is absent from shipping; UDP-only default, TLS and deployment-floor limits remain in NATIVE_GUEST_TCP_QUALIFICATION.md.",
+    "strictWorkerDependencies": "Node24.15 strict clean npm ci with scripts, engines and peer checks passes after exact workers-types5.20261019.1 aligns with Wrangler4.151.3. Typegen/typecheck, 21 actual Worker tests on Vitest4.1.12, 28 browser client tests, actual reference browser and dry-run build pass. Worker/host membership changes are generation-fenced and must release together."
   },
   "issues": [
     {
@@ -278,9 +283,13 @@
       "title": "[macOS][D09] Build Stream Deck configuration, dynamic feedback, profiles, and release packaging",
       "url": "https://github.com/joeblau/stream/issues/152",
       "githubState": "open",
-      "completion": "remaining acceptance",
+      "completion": "remaining sample profiles and package/configuration acceptance",
       "remaining": [
-        "Real supported Stream Deck/Plus/Pedal/Mobile install, restart, update/uninstall and feedback qualification."
+        "Genuine stream/record/interview sample-profile exports/imports remain absent; the recorded locked-session run could not compose/export them. Recipes do not satisfy this artifact requirement.",
+        "Complete remaining package/configuration lifecycle acceptance through the target runtime. Official package validation and an owned development link/update/unlink lifecycle pass."
+      ],
+      "evidence": [
+        "../../integrations/stream-deck/INSPECTOR_QUALIFICATION.md"
       ]
     },
     {
@@ -300,44 +309,55 @@
       "code": "D07",
       "title": "[macOS][D07] Add Stream Deck guest, comment, profile, and audience-stat actions",
       "url": "https://github.com/joeblau/stream/issues/150",
-      "githubState": "open",
-      "completion": "remaining acceptance",
-      "remaining": [
-        "Physical guest/comment/audience hardware feedback; live provider/guest-return capabilities."
-      ]
+      "githubState": "closed",
+      "completion": "original acceptance complete",
+      "remaining": [],
+      "evidence": [
+        "LOCAL_CONTROL_IPC.md",
+        "NATIVE_INTERVIEW_CONTROL.md",
+        "../../integrations/stream-deck/README.md"
+      ],
+      "githubStateNote": "Verified closed after publication of 8805d1e, independent original-criteria review, combined native/SDK/Worker/media checks and final universal bundle validation."
     },
     {
       "number": 149,
       "code": "D06",
       "title": "[macOS][D06] Add Stream Deck audio, soundboard, media, PDF, and marker actions",
       "url": "https://github.com/joeblau/stream/issues/149",
-      "githubState": "open",
-      "completion": "remaining acceptance",
-      "remaining": [
-        "Physical device key/dial/media/PDF/soundboard/marker qualification."
-      ]
+      "githubState": "closed",
+      "completion": "original acceptance complete",
+      "remaining": [],
+      "evidence": [
+        "DECK_AUDIO_MEDIA_VALIDATION.md"
+      ],
+      "githubStateNote": "Verified closed after publication of 8805d1e, independent original-criteria review, combined native/SDK/Worker/media checks and final universal bundle validation."
     },
     {
       "number": 148,
       "code": "D05",
       "title": "[macOS][D05] Add Stream Deck layer, camera, PIP, animation, and effect actions",
       "url": "https://github.com/joeblau/stream/issues/148",
-      "githubState": "open",
-      "completion": "remaining acceptance",
-      "remaining": [
-        "Physical device source/effect/PIP controls and reconnect qualification."
-      ]
+      "githubState": "closed",
+      "completion": "original acceptance complete",
+      "remaining": [],
+      "evidence": [
+        "../scripts/studio_deck_native_harness.swift",
+        "../../integrations/stream-deck/tests/visual-actions.test.ts"
+      ],
+      "githubStateNote": "Verified closed after publication of 8805d1e, independent original-criteria review, combined native/SDK/Worker/media checks and final universal bundle validation."
     },
     {
       "number": 147,
       "code": "D04",
       "title": "[macOS][D04] Add Stream Deck scene, Take, live, and recording actions",
       "url": "https://github.com/joeblau/stream/issues/147",
-      "githubState": "open",
-      "completion": "remaining acceptance",
-      "remaining": [
-        "Physical Stream Deck production transitions/record/live/reconnect qualification."
-      ]
+      "githubState": "closed",
+      "completion": "original acceptance complete",
+      "remaining": [],
+      "evidence": [
+        "../../integrations/stream-deck/docs/transport-actions.md"
+      ],
+      "githubStateNote": "Verified closed after publication of 8805d1e, independent original-criteria review, combined native/SDK/Worker/media checks and final universal bundle validation."
     },
     {
       "number": 146,
@@ -473,8 +493,12 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Latest repeated Program raw-track A/V recording exceeded 100 ms (105.104 ms; contiguous PCM 103.104 ms). Normal playback remains unqualified; the element-audio probe is silent and its optional fixture exits 77. Timing and observation-path investigation remain open.",
+        "An earlier raw-track A/V run exceeded 100 ms (105.104 ms; contiguous PCM 103.104 ms). Later bounded two-capture-per-source matrices pass but do not establish a fix for that variable failure. Normal rendered PCM/AEC/talkback playback remains unqualified; the recorded locked-session SCK calibration exits 77 with zero shareable displays.",
         "Program/Secondary/Clean selection, conservative feedback-driven bitrate and whole-AU admission, same-lease budget retention and optional-video failure isolation are implemented and locally verified. Multiple simultaneous recipients/capacity, physical AEC, desktop/mobile browsers, deployed/restricted-network and sustained A/V qualification remain. Natural higher-resolution upshift and actual high-to-low resolution impairment have not been qualified."
+      ],
+      "evidence": [
+        "GUEST_RETURN_AV_ORACLES.md",
+        "NATIVE_GUEST_TCP_QUALIFICATION.md"
       ]
     },
     {
@@ -565,7 +589,14 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Representative physical workloads and sustained Apple Silicon/Intel resource/thermal/A/V/UI measurements."
+        "Representative camera/desktop/interactive UI mixes, independent sustained waveform A/V and long thermal evidence, including named native Intel configurations. The two 120-second owned Apple Silicon workloads are recorded separately.",
+        "Measured encoder/output counts and storage/uplink ceilings; the observed recording write rate is not a maximum.",
+        "Shared encoded media retains 82.2/91.2 ms cue failures against its unchanged 80 ms limit; correctly uncertain callback telemetry does not repair media timing."
+      ],
+      "evidence": [
+        "DESKTOP_RESOURCE_BUDGETS.md",
+        "PERFORMANCE_OWNED_SUSTAINED_2026-10-22.json",
+        "STUDIO_DIAGNOSTICS.md"
       ]
     },
     {
@@ -573,10 +604,16 @@
       "code": "R01",
       "title": "[macOS][R01] Expose source, compositor, encoder, network, audio, and storage diagnostics",
       "url": "https://github.com/joeblau/stream/issues/91",
-      "githubState": "open",
-      "completion": "incomplete measurement and remaining acceptance",
-      "remaining": [
-        "Measured clock/perceptual A/V drift remains unimplemented; the UI explicitly describes track endpoint difference as a different measurement. Existing telemetry and redacted export pass controlled fixtures. Validate recovery/resource policy while actual independent network outputs remain healthy before closing the original issue."
+      "githubState": "closed",
+      "completion": "original acceptance complete",
+      "remaining": [],
+      "evidence": [
+        "STUDIO_DIAGNOSTICS.md",
+        "AV_CLOCK_PIPELINE_2026-10-22.json"
+      ],
+      "githubStateNote": "Verified closed after publication of 8805d1e, independent original-criteria review, combined native/SDK/Worker/media checks and final universal bundle validation.",
+      "qualificationLimits": [
+        "Timestamp observations identify named pipeline boundaries and confidence; they do not measure perceptual lip sync or receiver playout. The independent shared-encoder 80 ms media failure remains under publishing/performance qualification."
       ]
     },
     {
@@ -765,22 +802,23 @@
   ],
   "scopeCounts": {
     "initialOpenFeatureTasks": 48,
-    "openFeatureTasks": 35,
+    "openFeatureTasks": 30,
     "openEpicsAndRoadmap": 11,
     "total": 61,
-    "currentlyOpen": 46,
-    "closedSinceInitialInventory": 15
+    "currentlyOpen": 41,
+    "closedSinceInitialInventory": 20
   },
-  "overallStatus": "Incomplete roadmap. Reviewed native integration and lifecycle/media fixes are published on main; 46 tasks remain open for the actual implementation or acceptance gaps listed per issue.",
-  "integratedMain": "07d2fdb",
-  "githubStateRefreshedAt": "2026-10-22T00:25:46Z",
+  "overallStatus": "Incomplete roadmap. Reviewed native controls, diagnostics, lifecycle/media fixes and dependency repair are published on main; 41 tasks remain open for the implementation or acceptance gaps listed per issue.",
+  "integratedMain": "8805d1e",
+  "githubStateRefreshedAt": "2026-10-22T01:37:50Z",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "9fad18f8370572d5973008c7083cc61331776930",
+  "publishedIntegration": "8805d1eb8e6d2f7ba4b54d7dfe5f67f72a94a64c",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
       216,
-      218
+      218,
+      220
     ],
     "closedSuperseded": [
       208,
@@ -792,6 +830,7 @@
       215,
       217
     ],
-    "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Newly created dependency PR220 is reviewed separately."
-  }
+    "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
+  },
+  "currentReviewBase": "0e189b4"
 }
