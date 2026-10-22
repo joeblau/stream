@@ -163,6 +163,19 @@ final class SoundboardController: ObservableObject {
         }
     }
 
+    /// Project/runtime retirement closes every decoder and its mixer demand.
+    /// Late status callbacks cannot resurrect a removed instance.
+    func shutdown() {
+        for engines in padEngines.values { for entry in engines { retire(entry.engine, instanceID: entry.instanceID) } }
+        for entry in playlistEngines.values { retire(entry.engine, instanceID: entry.instanceID) }
+        for entry in ambientEngines.values { retire(entry.engine, instanceID: entry.instanceID) }
+        for entry in stingerEngines.values { retire(entry.engine, instanceID: entry.instanceID) }
+        padEngines = [:]; playlistEngines = [:]; playlistIndexes = [:]; ambientEngines = [:]; stingerEngines = [:]
+        playingEngines = []; playingPadIDs = []; padStatuses = [:]; playlistStates = [:]
+        programScene = nil; pumpTask?.cancel(); pumpTask = nil
+        cancellables.removeAll()
+    }
+
     /// The panic button: stop every pad and every in-flight stinger. Music
     /// playlists and scene ambient beds have their own explicit transport and
     /// are deliberately untouched.
