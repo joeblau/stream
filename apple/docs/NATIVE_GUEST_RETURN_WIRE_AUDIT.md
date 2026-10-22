@@ -227,3 +227,26 @@ STREAM_TEST_NODE=/absolute/verified/owned/node PYTHONDONTWRITEBYTECODE=1 \
   python3 -m unittest discover -s workers/interviews/test/browser \
     -p test_owned_null_loopback.py -v
 ```
+
+Independent source review found three failure-boundary gaps in that initial
+repair. The follow-up keeps a terminal abort latch bound to the actual signal
+handler and receipt writer: an abort during awaited cleanup, during a held
+receipt write or after publication changes the persisted result and exit status
+to UNQUALIFIED/77. Early abort before metadata binding is supported, and a late
+completion cannot undo it. Signal listeners remain installed through exit.
+
+Process retirement now requires an empty numeric group before reporting absent
+or drained. If the leader was already gone or original anchors disappear while
+the group still exists, cleanup reports `unconfirmed-group`. It observes only
+existence; it does not adopt new members or signal the unanchored/reused group.
+The launcher uses asynchronous retirement so its event loop can reap the owned
+child while the bounded cleanup checks for group emptiness.
+
+Finally, recursive removal rechecks the directory's exact lstat type, UID,
+device and inode immediately before removal. A renamed/recreated path or a
+replacement symlink is preserved and makes cleanup unqualified. The expanded
+checks include the actual fake-process launcher rename/recreate cleanup case,
+an actual detached child whose leader exits before retirement, synthetic late
+group/reuse cases, and the exact terminal latch around cleanup/write boundaries.
+The thirteen Python process checks and nine Node snapshot/lifecycle checks do
+not replace the unqualified browser receipts or establish receive-clock timing.
