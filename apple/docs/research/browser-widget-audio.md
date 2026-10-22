@@ -150,3 +150,36 @@ no actual audio routing, exclusion, bus levels or A/V synchronization.
 
 The production selector remains disabled. Program-only leases and shared mixer/ISO controls are integrated for explicit qualification; see [operator controls](browser-widget-operator-controls.md). Acknowledged every-route exclusions, signed shared-container IPC and actual tone/speech bus qualification remain required before #124 can close. Existing direct application capture and
 permission/availability checks are unchanged.
+
+## Capture operation ownership and Stop completion (2026-10-22)
+
+The capture driver now allocates a run intent before its first asynchronous
+retirement. Each run owns a distinct bounded PCM inlet, preparation/start tasks,
+producer and mixer holdback reservation. Stop revokes that inlet synchronously,
+detaches the exact resources and waits their completion. A producer returned by
+late discovery is stopped before Stop returns. If startCapture was already
+pending, cleanup stops its exact stream, waits that start to unwind and stops
+that same stream again. Stale completion/failure cannot reacquire authority,
+release a replacement holdback, invalidate a replacement inlet or report a
+failure against the replacement run. Concurrent Stop also waits cleanup already
+detached by an earlier Stop.
+
+Run `scripts/run_browser_capture_authority_harness.zsh` for the actual capture
+owner and AudioMixEngine actor with only the external SCK producer edges held.
+Seven controlled cases cover discovery/Stop, replacement holdback, initial
+retirement, successful and failed late starts, concurrent final Stop, and exact
+inlet-generation retirement. The callback case posts **synthetic PCM sentinels**
+to the actual inlet: late old-run samples are rejected while the replacement
+continues. It opens no SCK capture, output device or user media.
+
+Run the same script with `ipc` for the shipping helper launched at its exact
+owned app path/PID over the existing private sockets. Two silent WKWebViews load
+suspended. Removing one page during a held capture start requires its real
+retirement acknowledgment before the sibling resumes; evaluation confirms that
+only the sibling survives. Final release waits mixer lease cleanup and actual
+helper exit. The script ad hoc signs only its own temporary helper. This is an
+**unsandboxed prototype IPC** regression, not signed shared-container provenance,
+WebKit audio attribution, capture exclusion or audible routing qualification.
+Both modes passed locally on 2026-10-22. The production selector and startup
+remain disabled; all original #124 product/audio validation requirements remain
+open.

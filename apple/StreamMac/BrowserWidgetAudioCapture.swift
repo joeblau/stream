@@ -11,7 +11,14 @@ import ScreenCaptureKit
     func stop() async
 }
 
-/// A12 qualification seam only. Production helper selection stays disabled. This capture is
+/// The external SCK operation boundary. The production implementation owns
+/// the real stream/output; capture-free fixtures hold only these async edges.
+@MainActor protocol BrowserWidgetAudioProducer: AnyObject, Sendable {
+    func start() async throws
+    func stop() async
+}
+
+/// A12 qualification seam only. Production helper selection stays disabled. This capture
 /// requests the helper's exact application + PID; media ownership still needs measured proof.
 /// Never connect these unqualified samples to a product mixer. There is no system/global branch.
 @MainActor final class BrowserWidgetAudioCapture: BrowserWidgetAudioDriver {
@@ -22,24 +29,50 @@ import ScreenCaptureKit
     /// Any concurrent system-mix source MUST exclude this helper before a product route is enabled.
     let requiredSystemAudioExclusions: Set<String> = [BrowserWidgetAudioIdentity.helperBundleID]
     private(set) var isCapturing = false
-    let requiresScreenCaptureAccess = true
+    var requiresScreenCaptureAccess: Bool { validationPreparation == nil }
     private(set) var failure: String?
     var onFailure: (@MainActor (String) -> Void)?
     private(set) var requestedFilterIdentity: FilterIdentity?
-    private var stream: SCStream?
-    private var output: BrowserWidgetAudioOutput?
-    private var activeGeneration: UUID?
+    struct PreparedCapture: Sendable {
+        var producer: any BrowserWidgetAudioProducer
+        var identity: FilterIdentity
+    }
+    typealias Preparation = @MainActor (Int32, FilterStyle, BrowserWidgetPCMInlet, UUID) async throws -> PreparedCapture
+    private let validationPreparation: Preparation?
+    /// Intent is established before any await, including retiring a previous run.
+    private var operation = UUID()
+    @MainActor private final class Run {
+        let id = UUID()
+        let inlet: BrowserWidgetPCMInlet
+        let generation: UUID
+        var producer: (any BrowserWidgetAudioProducer)?
+        var preparation: Task<PreparedCapture, Error>?
+        var starting: Task<Void, Error>?
+        var reservation: (token: UUID, task: Task<Bool, Never>)?
+        var retirement: Task<Void, Never>?
+        init(sink: @escaping @Sendable (CMSampleBuffer) -> Void) {
+            inlet = BrowserWidgetPCMInlet(sink: sink); generation = inlet.begin()
+        }
+    }
+    private var active: Run?
+    private var lastInlet: BrowserWidgetPCMInlet?
+    private var retirements: [UUID: Task<Void, Never>] = [:]
     private let mixer: AudioMixEngine?
-    private var holdbackToken: UUID?
     /// Measured local SCK transport can exceed 40 ms; this is an explicit opt-in 80 ms lease,
     /// preserving host PTS on every bus. It is not a per-widget A/V sync qualification.
     static let qualificationHoldbackMilliseconds = 80.0
-    private let inlet: BrowserWidgetPCMInlet
+    private let sink: @Sendable (CMSampleBuffer) -> Void
     private let sampleQueue = DispatchQueue(label: "com.joeblau.StreamMac.browser-audio.capture", qos: .userInitiated)
 
     init(mixer: AudioMixEngine? = nil, sink: @escaping @Sendable (CMSampleBuffer) -> Void) {
-        self.mixer = mixer; inlet = BrowserWidgetPCMInlet(sink: sink)
+        self.mixer = mixer; self.sink = sink; validationPreparation = nil
     }
+    #if STREAM_NATIVE_VALIDATION
+    init(mixer: AudioMixEngine, validationPreparation: @escaping Preparation,
+         sink: @escaping @Sendable (CMSampleBuffer) -> Void) {
+        self.mixer = mixer; self.sink = sink; self.validationPreparation = validationPreparation
+    }
+    #endif
 
     convenience init(mixer: AudioMixEngine) {
         let channel = AudioChannelID.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID)
@@ -49,8 +82,110 @@ import ScreenCaptureKit
     /// The caller must own the launched helper, and keep it alive until `stop()` completes.
     /// Does not request permission: a missing existing Screen Recording grant fails closed.
     func startForQualification(helperPID: Int32, style: FilterStyle = .application) async throws {
-        await stop()
+        let request = UUID()
+        operation = request
+        let old = detachActive()
+        await retire(old)
+        guard operation == request, !Task.isCancelled else { throw CancellationError() }
         failure = nil
+        let run = Run(sink: sink)
+        active = run; lastInlet = run.inlet
+        let preparation = Task { @MainActor in
+            guard owns(run, request: request), !Task.isCancelled else { throw CancellationError() }
+            if let validationPreparation {
+                return try await validationPreparation(helperPID, style, run.inlet, run.generation)
+            }
+            return try await Self.prepareScreenCapture(helperPID: helperPID, style: style,
+                inlet: run.inlet, generation: run.generation, sampleQueue: sampleQueue) { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.owns(run, request: request) else { return }
+                    self.failure = "helper_audio_capture_stopped"
+                    let stopped = self.detachActive()
+                    await self.retire(stopped)
+                    guard self.operation == request else { return }
+                    self.onFailure?("helper_audio_capture_stopped")
+                }
+            }
+        }
+        run.preparation = preparation
+        do {
+            let prepared = try await preparation.value
+            guard owns(run, request: request), !Task.isCancelled else { throw CancellationError() }
+            run.producer = prepared.producer
+            requestedFilterIdentity = prepared.identity
+            if let mixer {
+                let token = UUID()
+                let reservation = Task {
+                    guard owns(run, request: request), !Task.isCancelled else { return false }
+                    return await mixer.reserveCaptureHoldback(token: token, milliseconds: Self.qualificationHoldbackMilliseconds)
+                }
+                run.reservation = (token, reservation)
+                let reserved = await reservation.value
+                guard owns(run, request: request), !Task.isCancelled else { throw CancellationError() }
+                guard reserved else { throw CaptureError.holdbackUnavailable }
+            }
+            let starting = Task {
+                guard owns(run, request: request), !Task.isCancelled else { throw CancellationError() }
+                try await prepared.producer.start()
+            }
+            run.starting = starting
+            try await starting.value
+            guard owns(run, request: request), !Task.isCancelled else { throw CancellationError() }
+            isCapturing = true
+        } catch {
+            if owns(run, request: request) {
+                if !(error is CancellationError) { failure = "helper_audio_capture_start_failed" }
+                _ = detachActive()
+            }
+            // This waits producer-only tasks, never the current caller's catch.
+            await retire(run)
+            throw error
+        }
+    }
+
+    private func owns(_ run: Run, request: UUID) -> Bool {
+        operation == request && active === run
+    }
+    /// All authority and input revocation precedes opaque async producer cleanup.
+    private func detachActive() -> Run? {
+        let old = active
+        active = nil; isCapturing = false
+        old?.inlet.invalidate()
+        return old
+    }
+    private func retire(_ run: Run?) async {
+        guard let run else { return }
+        if let retirement = run.retirement { await retirement.value; return }
+        run.inlet.invalidate()
+        let producer = run.producer, preparation = run.preparation, starting = run.starting
+        let reservation = run.reservation, mixer = mixer
+        run.producer = nil; run.preparation = nil; run.starting = nil; run.reservation = nil
+        let task = Task {
+            await run.inlet.waitUntilDrained()
+            // A discovery already in flight may return an allocated stream after Stop.
+            // Waiting this exact task also keeps the helper alive through final cleanup.
+            let prepared = await preparation?.result
+            let ownedProducer: (any BrowserWidgetAudioProducer)?
+            if let producer { ownedProducer = producer }
+            else if case .success(let value) = prepared { ownedProducer = value.producer }
+            else { ownedProducer = nil }
+            await ownedProducer?.stop()
+            if let starting {
+                _ = await starting.result
+                // stopCapture may complete before pending startCapture unwinds.
+                await ownedProducer?.stop()
+            }
+            if let reservation, await reservation.task.value {
+                await mixer?.releaseCaptureHoldback(reservation.token)
+            }
+        }
+        run.retirement = task; retirements[run.id] = task
+        await task.value
+        retirements[run.id] = nil
+    }
+
+    private static func prepareScreenCapture(helperPID: Int32, style: FilterStyle, inlet: BrowserWidgetPCMInlet,
+                                             generation: UUID, sampleQueue: DispatchQueue, onStopped: @escaping @Sendable () -> Void) async throws -> PreparedCapture {
         guard CGSessionCopyCurrentDictionary() != nil, CGPreflightScreenCaptureAccess() else { throw CaptureError.permissionUnavailable }
         guard let running = NSRunningApplication(processIdentifier: helperPID),
               !running.isTerminated, running.bundleIdentifier == BrowserWidgetAudioIdentity.helperBundleID else { throw CaptureError.helperMissing }
@@ -61,6 +196,7 @@ import ScreenCaptureKit
         guard matches.count == 1 else { throw matches.isEmpty ? CaptureError.helperMissing : CaptureError.ambiguousHelper }
         guard let display = content.displays.first else { throw CaptureError.displayMissing }
         let filter: SCContentFilter
+        let identity: FilterIdentity
         switch style {
         case .application:
             filter = SCContentFilter(display: display, including: matches, exceptingWindows: [])
@@ -69,11 +205,11 @@ import ScreenCaptureKit
                       filter.includedApplications[0].processID == helperPID,
                       filter.includedApplications[0].bundleIdentifier == BrowserWidgetAudioIdentity.helperBundleID else { throw CaptureError.ambiguousHelper }
             }
-            requestedFilterIdentity = FilterIdentity(style: style, helperPID: helperPID, bundleID: BrowserWidgetAudioIdentity.helperBundleID)
+            identity = FilterIdentity(style: style, helperPID: helperPID, bundleID: BrowserWidgetAudioIdentity.helperBundleID)
         case .independentWindow:
             guard let window = content.windows.first(where: { $0.owningApplication?.processID == helperPID && $0.owningApplication?.bundleIdentifier == BrowserWidgetAudioIdentity.helperBundleID }) else { throw CaptureError.windowMissing }
             filter = SCContentFilter(desktopIndependentWindow: window)
-            requestedFilterIdentity = FilterIdentity(style: style, helperPID: helperPID, bundleID: BrowserWidgetAudioIdentity.helperBundleID, windowID: window.windowID)
+            identity = FilterIdentity(style: style, helperPID: helperPID, bundleID: BrowserWidgetAudioIdentity.helperBundleID, windowID: window.windowID)
         }
         let configuration = SCStreamConfiguration()
         configuration.width = 2; configuration.height = 2
@@ -81,47 +217,33 @@ import ScreenCaptureKit
         configuration.showsCursor = false; configuration.queueDepth = 4
         configuration.capturesAudio = true; configuration.sampleRate = 48_000; configuration.channelCount = 2
         configuration.excludesCurrentProcessAudio = true
-        let generation = inlet.begin()
-        activeGeneration = generation
-        if let mixer {
-            let token = UUID()
-            guard await mixer.reserveCaptureHoldback(token: token, milliseconds: Self.qualificationHoldbackMilliseconds) else {
-                await stop(); throw CaptureError.holdbackUnavailable
-            }
-            holdbackToken = token
-        }
-        let output = BrowserWidgetAudioOutput(inlet: inlet, generation: generation) { [weak self] in
-            Task { @MainActor in
-                guard let self, self.activeGeneration == generation else { return }
-                self.failure = "helper_audio_capture_stopped"
-                await self.stop()
-                self.onFailure?("helper_audio_capture_stopped")
-            }
-        }
+        let output = BrowserWidgetAudioOutput(inlet: inlet, generation: generation, onStopped: onStopped)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: output)
-        do {
-            try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: sampleQueue)
-            try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
-            self.output = output; self.stream = stream
-            try await stream.startCapture()
-            isCapturing = true
-        } catch {
-            failure = "helper_audio_capture_start_failed"
-            await stop()
-            throw error
-        }
+        try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: sampleQueue)
+        try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
+        return PreparedCapture(producer: BrowserWidgetScreenAudioProducer(stream: stream, output: output), identity: identity)
     }
 
     func stop() async {
-        let old = stream
-        stream = nil; output = nil; activeGeneration = nil; isCapturing = false
-        await inlet.stop()
-        try? await old?.stopCapture()
-        if let token = holdbackToken { holdbackToken = nil; await mixer?.releaseCaptureHoldback(token) }
+        operation = UUID()
+        let old = detachActive()
+        // Snapshot prior cleanup only: this Stop cannot acquire a future run's resources.
+        let pending = Array(retirements.values)
+        await retire(old)
+        for task in pending { await task.value }
     }
     func start(helperPID: Int32) async throws { try await startForQualification(helperPID: helperPID) }
-    func invalidateInput() { inlet.invalidate() }
-    func statistics() -> BrowserWidgetPCMInlet.Statistics { inlet.statistics() }
+    func invalidateInput() { active?.inlet.invalidate() }
+    func statistics() -> BrowserWidgetPCMInlet.Statistics { lastInlet?.statistics() ?? .init() }
+
+}
+
+@MainActor private final class BrowserWidgetScreenAudioProducer: BrowserWidgetAudioProducer {
+    private let stream: SCStream
+    private let output: BrowserWidgetAudioOutput
+    init(stream: SCStream, output: BrowserWidgetAudioOutput) { self.stream = stream; self.output = output }
+    func start() async throws { try await stream.startCapture() }
+    func stop() async { try? await stream.stopCapture() }
 }
 
 /// Retains at most 200 ms / 256 KiB of PCM and drains off the SCStream queue. Shed is local;
@@ -195,6 +317,9 @@ final class BrowserWidgetPCMInlet: @unchecked Sendable {
     }
     func stop() async {
         invalidate()
+        await waitUntilDrained()
+    }
+    func waitUntilDrained() async {
         await withCheckedContinuation { continuation in queue.async { continuation.resume() } }
     }
     func statistics() -> Statistics { lock.lock(); defer { lock.unlock() }; return stats }
