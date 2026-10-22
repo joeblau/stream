@@ -53,7 +53,7 @@ final class DestinationOutputController: ObservableObject {
     // A failed target can retry under the same stable ID while its previous
     // publisher still drains. Count by session generation, never destination ID.
     private var finalizingRawPublishers: Set<UUID> = []
-    private var completedStops: Set<UUID> = []
+    private var finishedStops: [UUID: LocalStopResult] = [:]
     private var completedStopOrder: [UUID] = []
     var usesSecondaryCanvas: Bool { runtimes.values.map(\.canvas).contains(.secondary) }
 
@@ -189,15 +189,23 @@ final class DestinationOutputController: ObservableObject {
         fanout.remove(id: id)
         runtime.startTask.cancel()
         runtime.eventTask.cancel()
-        runtime.video.stop(); runtime.encoded?.stop(); releaseEncoderGroup(runtime, id: id)
+        runtime.video.stop()
         if runtime.encoderGroup == nil { finalizingRawPublishers.insert(runtime.generation) }
         changed()
         let task = Task { [weak self] in
+            let mediaDrained: Bool
+            if runtime.encoderGroup != nil {
+                mediaDrained = await self?.finishEncodedStop(runtime, id: id) ?? false
+                runtime.encoded?.stop()
+            } else { mediaDrained = true }
             await runtime.publisher.stop()
             guard let self else { return }
             self.finalizingRawPublishers.remove(runtime.generation)
-            self.completedStops.insert(runtime.generation); self.completedStopOrder.append(runtime.generation)
-            while self.completedStopOrder.count > 128 { self.completedStops.remove(self.completedStopOrder.removeFirst()) }
+            // A bounded mailbox timeout still closes the transport, but must
+            // not fabricate a completed media-drain receipt.
+            self.finishedStops[runtime.generation] = mediaDrained ? .stopped : .unconfirmed
+            self.completedStopOrder.append(runtime.generation)
+            while self.completedStopOrder.count > 128 { self.finishedStops.removeValue(forKey: self.completedStopOrder.removeFirst()) }
             let ownsStop = self.pendingStops[id]?.generation == runtime.generation
             if ownsStop { self.pendingStops[id] = nil }
             // A fresh session or teardown may already own this ID.
@@ -215,21 +223,21 @@ final class DestinationOutputController: ObservableObject {
     var endingSessions: [EndingSession] { runtimes.values.map { .init(destination: $0.destination, token: $0.generation) } }
     func sessionToken(_ id: UUID) -> UUID? { runtimes[id]?.generation }
     func stopReceipt(_ id: UUID, token: UUID) -> LocalStopResult {
-        if completedStops.contains(token) { return .stopped }
+        if let receipt = finishedStops[token] { return receipt }
         if let current = runtimes[id]?.generation, current != token { return .superseded }
         return .unconfirmed
     }
     func stopIfCurrent(_ id: UUID, token: UUID, timeout: Double = 10) async -> LocalStopResult {
-        if completedStops.contains(token) { return .stopped }
+        if let receipt = finishedStops[token] { return receipt }
         if runtimes[id]?.generation == token { stop(id) }
         else if pendingStops[id]?.generation != token { return .superseded }
         let deadline = ContinuousClock.now.advanced(by: .seconds(max(0, min(30, timeout))))
         while ContinuousClock.now < deadline {
-            if completedStops.contains(token) { return .stopped }
+            if let receipt = finishedStops[token] { return receipt }
             if let current = runtimes[id]?.generation, current != token { return .superseded }
             do { try await Task.sleep(for: .milliseconds(20)) } catch { return .unconfirmed }
         }
-        return completedStops.contains(token) ? .stopped : .unconfirmed
+        return finishedStops[token] ?? .unconfirmed
     }
 
     func stopAll() { for id in Array(states.keys) { stop(id) } }
@@ -317,6 +325,33 @@ final class DestinationOutputController: ObservableObject {
                 self.finishingEncoderGroups[group.id] = nil; self.changed()
             }
         }
+    }
+
+    private func finishEncodedStop(_ runtime: Runtime, id: UUID) async -> Bool {
+        guard let group = runtime.encoderGroup, let mailbox = runtime.encoded else { return true }
+        // Decide after the synchronous stop/stopAll call has removed runtimes.
+        // Simultaneously ending members then share one real EOS drain, while a
+        // single target leaving a live group never resets that group's codec.
+        let lastMembers = !runtimes.values.contains(where: { $0.encoderGroup === group })
+        if lastMembers, encoderGroups[group.key] === group {
+            encoderGroups[group.key] = nil; finishingEncoderGroups[group.id] = group
+        }
+        let encoderFinished: Bool
+        if lastMembers {
+            // A sibling stop may already have finished and released the
+            // reservation. finish also returns that cached success/failure.
+            encoderFinished = await withCheckedContinuation { continuation in
+                group.finish { continuation.resume(returning: $0) }
+            }
+            finishingEncoderGroups[group.id] = nil
+        } else {
+            group.remove(id)
+            encoderFinished = true
+        }
+        let drained = await mailbox.finish()
+        group.remove(id)
+        changed()
+        return encoderFinished && drained
     }
 
     private func changed() { stateDidChange?() }

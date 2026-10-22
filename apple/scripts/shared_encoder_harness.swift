@@ -11,6 +11,7 @@ private actor EncodedPublisherProbe: Publisher {
     private(set) var video: [CMSampleBuffer] = []
     private(set) var audio: [SharedEncodedAudio] = []
     private(set) var raw = 0, configured = false, starts = 0
+    private(set) var encodedOrder: [String] = []
     private var held = false
     private var gate: CheckedContinuation<Void, Never>?
     private var holdsStop = false
@@ -25,9 +26,10 @@ private actor EncodedPublisherProbe: Publisher {
     func appendVideo(_ sample: CMSampleBuffer) async { raw += 1 }
     func appendEncodedVideo(_ sample: CMSampleBuffer) async -> Bool {
         if held { await withCheckedContinuation { gate = $0 } }
-        video.append(sample); return false
+        video.append(sample); encodedOrder.append("video"); return false
     }
-    func appendEncodedAudio(_ sample: SharedEncodedAudio) async -> Bool { audio.append(sample); return false }
+    func prepareEncodedAudio(_ sample: SharedEncodedAudio) async { encodedOrder.append("prepare") }
+    func appendEncodedAudio(_ sample: SharedEncodedAudio) async -> Bool { audio.append(sample); encodedOrder.append("audio"); return false }
     nonisolated func enqueueMic(_ sample: CMSampleBuffer) {}
     nonisolated func enqueueApp(_ sample: CMSampleBuffer) {}
     nonisolated func enqueueProgram(_ sample: CMSampleBuffer) {}
@@ -36,7 +38,7 @@ private actor EncodedPublisherProbe: Publisher {
     func statsSnapshot() async -> LiveStats? { nil }
     func hold() { held = true }
     func release() { held = false; gate?.resume(); gate = nil }
-    func reset() { video.removeAll(); audio.removeAll() }
+    func reset() { video.removeAll(); audio.removeAll(); encodedOrder.removeAll() }
     func holdStop() { holdsStop = true }
     func releaseStop() { holdsStop = false; stopGate?.resume(); stopGate = nil }
 }
@@ -87,6 +89,72 @@ private actor EncodedPublisherProbe: Publisher {
         a.markAsFinished()
         await writer.finishWriting()
         try check(writer.status == .completed, "Compressed container failed: \(String(describing: writer.error))")
+    }
+    private static func knownAACContentTime(_ url: URL, expected: Double = 0.5) async throws {
+        var onset: Double?
+        if ProgramRecordingFixtures.usesAudioFileDecoder {
+            onset = try ProgramRecordingFixtures.audioFileEvents(url).onsets.first
+        } else {
+            let asset = AVURLAsset(url: url)
+            let tracks = try await asset.loadTracks(withMediaType: .audio)
+            let reader = try AVAssetReader(asset: asset)
+            let output = AVAssetReaderTrackOutput(track: tracks[0], outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM,
+                AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
+            reader.add(output)
+            try check(reader.startReading(), "AAC content-time decoder could not start")
+            while let sample = output.copyNextSampleBuffer() {
+                guard let block = sample.dataBuffer else { continue }
+                var values = [Float](repeating: 0, count: CMBlockBufferGetDataLength(block) / 4)
+                values.withUnsafeMutableBytes { _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: $0.count, destination: $0.baseAddress!) }
+                if onset == nil, let index = values.firstIndex(where: { abs($0) > 0.15 }) {
+                    onset = sample.presentationTimeStamp.seconds + Double(index / 2) / 48_000
+                }
+            }
+            try check(reader.status == .completed && onset != nil, "Actual AAC content did not decode")
+        }
+        // Compare the generated original PCM pulse to actual decoded samples. This specifically
+        // catches unaccounted AAC priming, independently of a video's frame grid.
+        try check(onset != nil, "Actual AAC original PCM pulse did not survive decoding")
+        try check(abs(onset! - expected) < 0.004, "Actual AAC priming shifted original PCM content: \(onset!)s")
+        report("PASS: decoded actual AAC original \(expected)s PCM pulse at \(onset!)s, within4ms content-time regression bound")
+    }
+    private static func startupAlignmentRegression(video: CMSampleBuffer, audio: SharedEncodedAudio) async throws {
+        let anchor = video.presentationTimeStamp
+        func packet(_ offset: Double) throws -> SharedEncodedAudio {
+            let pts = anchor + CMTime(seconds: offset, preferredTimescale: 48_000)
+            var timing = CMSampleTimingInfo(duration: CMTime(value: 1024, timescale: 48_000), presentationTimeStamp: pts, decodeTimeStamp: .invalid)
+            var copy: CMSampleBuffer?
+            try check(CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: audio.sample, sampleTimingEntryCount: 1,
+                sampleTimingArray: &timing, sampleBufferOut: &copy) == noErr, "AAC timing fixture could not copy actual packet")
+            return SharedEncodedAudio(sample: copy!, buffer: audio.buffer, when: AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: pts.seconds)))
+        }
+        let earlier = try packet(-0.032), nearest = try packet(-0.010), following = try packet(0.011333333333)
+        for audioFirst in [false, true] {
+            let probe = EncodedPublisherProbe()
+            let mailbox = DestinationEncodedMailbox(publisher: probe, requestKeyframe: {})
+            mailbox.setPublished(true)
+            if !audioFirst { mailbox.enqueueVideo(video) }
+            mailbox.enqueueAudio(earlier); mailbox.enqueueAudio(nearest)
+            if !audioFirst {
+                try await Task.sleep(for: .milliseconds(20))
+                let videoCount = await probe.video.count, audioCount = await probe.audio.count
+                try check(videoCount == 0 && audioCount == 0, "Startup escaped before the nearest AAC packet was known")
+            }
+            mailbox.enqueueAudio(following)
+            if audioFirst { mailbox.enqueueVideo(video) }
+            try await settle { await probe.audio.count == 2 }
+            let received = await probe.audio, frames = await probe.video, order = await probe.encodedOrder
+            try check(frames.count == 1 && frames[0] === video && received[0] === nearest && received[1] === following,
+                      "Callback order shifted the IDR/AAC origin or changed compressed references")
+            try check(order == ["prepare", "video", "audio", "audio"], "First actual IDR/AAC publication order was not format-safe")
+            mailbox.setPublished(false); await probe.reset(); mailbox.setPublished(true)
+            for _ in 0..<200 { mailbox.enqueueAudio(nearest) }
+            let state = mailbox.statistics()
+            try check(state.depth <= 8 && state.bytes <= 4 * 1024 * 1024 && state.waitingForKeyframe,
+                      "Audio without a startup IDR escaped its bounded history")
+            mailbox.stop()
+        }
+        report("PASS: actual compressed packet references choose the nearest content-time AAC packet independent of callback order; first IDR retained, AAC format prepared before media, and absent-video startup stays bounded")
     }
     static func feed(_ outputs: DestinationOutputController, start: Int, ticks: Int, canvas: OutputCanvas = .program) async throws {
         for tick in start..<(start + ticks) {
@@ -393,12 +461,79 @@ private actor EncodedPublisherProbe: Publisher {
             try await Task.sleep(for: .milliseconds(10))
         }
         try await settle { await target.video.count >= 47 }
+        outputs.stopAll(); try await settle { outputs.encoderSessionCount == 0 && outputs.activeCount == 0 }
         let count = await target.video.count
         try check((47...49).contains(count), "Fixed 24fps group undershot while sampling 60fps content: \(count) frames/2s")
         try await write(target, to: directory.appendingPathComponent("60-to-24.mp4"))
         try await ProgramRecordingFixtures.inspect(directory.appendingPathComponent("60-to-24.mp4"), expectedDuration: 2, checkSync: true)
         outputs.stopAll(); try await settle { outputs.encoderSessionCount == 0 && outputs.activeCount == 0 }
         report("PASS: actual 60fps source ->24fps fixed encoder preserves admission phase, produces \(count) compressed/decoded frames over two seconds and keeps audio/video synchronization")
+    }
+    private static func failedFinalizationReceipts(settings: StreamSettings) async throws {
+        let a = EncodedPublisherProbe(), b = EncodedPublisherProbe()
+        var pending = [a, b]
+        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
+        outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
+        let targets = [StreamDestination(name: "Failed finalizer A", transport: .rtmp), StreamDestination(name: "Failed finalizer B", transport: .srt)]
+        for target in targets { outputs.start(target, settings: settings) }
+        try await settle { outputs.liveCount == 2 }
+        let tokens = targets.map { outputs.sessionToken($0.id)! }
+        // A real invalid image-buffer input fails the shared encoder. Remove
+        // both runtimes synchronously before its asynchronous failure callback.
+        outputs.fanout.enqueueVideo(try ProgramRecordingFixtures.audio(at: 0))
+        outputs.stopAll()
+        try await settle { outputs.activeCount == 0 && outputs.encoderSessionCount == 0 }
+        for (target, token) in zip(targets, tokens) {
+            let repeated = await outputs.stopIfCurrent(target.id, token: token)
+            try check(outputs.stopReceipt(target.id, token: token) == .unconfirmed && repeated == .unconfirmed,
+                      "A sibling finishing task lost the shared encoder's failed finalization result")
+        }
+        report("PASS: real shared encoder failure during simultaneous stop retains unconfirmed receipts for every member and retry, with zero codec/publisher resources")
+    }
+    private static func terminalAACContent(directory: URL, settings: StreamSettings) async throws {
+        let probe = EncodedPublisherProbe()
+        let outputs = DestinationOutputController(factory: { _ in probe }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
+        outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
+        outputs.start(StreamDestination(name: "Real terminal PCM", transport: .rtmp), settings: settings)
+        try await settle { outputs.liveCount == 1 }
+        // Only the final20ms contains tone. Without a real converter EOS drain
+        // those original samples remain buffered and the decoded tone is absent.
+        for tick in 0..<100 {
+            let time = Double(tick) / 100
+            if tick % 4 == 0 { outputs.fanout.enqueueVideo(try ProgramRecordingFixtures.video(at: time, eventSeconds: 0.96)) }
+            outputs.fanout.enqueueAudio(try ProgramRecordingFixtures.audio(at: time, eventSeconds: 0.98))
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        outputs.stopAll(); try await settle { outputs.activeCount == 0 && outputs.encoderSessionCount == 0 }
+        let file = directory.appendingPathComponent("terminal-pcm.mp4")
+        try await write(probe, to: file)
+        try await knownAACContentTime(file, expected: 0.98)
+        try await ProgramRecordingFixtures.inspect(file, expectedDuration: 1, checkSync: true)
+        report("PASS: actual last20ms original PCM tone survives shipping controller last-member EOS/transport stop, within4ms source-time bound")
+    }
+    private static func boundedEncodedStop(settings: StreamSettings) async throws {
+        let blocked = EncodedPublisherProbe(), healthy = EncodedPublisherProbe()
+        var pending = [blocked, healthy]
+        let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
+        outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
+        let slow = StreamDestination(name: "Bounded stopping target", transport: .rtmp)
+        let survivor = StreamDestination(name: "Stop survivor", transport: .srt)
+        outputs.start(slow, settings: settings); outputs.start(survivor, settings: settings)
+        try await settle { outputs.liveCount == 2 }
+        await blocked.hold()
+        try await feed(outputs, start: 0, ticks: 20)
+        let token = outputs.sessionToken(slow.id)!, before = await healthy.video.count
+        outputs.stop(slow.id)
+        try await feed(outputs, start: 20, ticks: 120)
+        try await settle { outputs.states[slow.id] == .idle }
+        let retriedReceipt = await outputs.stopIfCurrent(slow.id, token: token)
+        try check(outputs.stopReceipt(slow.id, token: token) == .unconfirmed && retriedReceipt == .unconfirmed,
+                  "Stalled compressed drain fabricated a completed or superseded stop receipt")
+        let after = await healthy.video.count
+        try check(after > before + 20 && outputs.states[survivor.id] == .live && outputs.encoderSessionCount == 1,
+                  "One stalled stop blocked or reset the surviving shared encoder")
+        outputs.stopAll(); try await settle { outputs.activeCount == 0 && outputs.encoderSessionCount == 0 }
+        report("PASS: stalled target closes after bounded compressed drain and reports unconfirmed; independent live target continues on the same shared encoder")
     }
     static func higherRateFallback(settings: StreamSettings) async throws {
         let a = EncodedPublisherProbe(), b = EncodedPublisherProbe()
@@ -419,6 +554,7 @@ private actor EncodedPublisherProbe: Publisher {
     }
     static func main() async throws {
         setbuf(stdout, nil)
+        report("Audio decoder qualification: \(ProgramRecordingFixtures.usesAudioFileDecoder ? "explicit AVAudioFile offline PCM + AVAssetReader H264; default AVAssetReader PCM qualification remains separate" : "original AVAssetReader PCM/H264")")
         report("Encoder qualification: \(prefersHardwareEncoder ? "shipping hardware preference with public software fallback" : "explicit public VideoToolbox software encoder; no hardware throughput claim")")
         if CommandLine.arguments.contains("--receiver-check-only") {
             guard let receiver = try receiverExecutable() else {
@@ -434,13 +570,17 @@ private actor EncodedPublisherProbe: Publisher {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         report("Artifacts: \(directory.path)")
         let first = EncodedPublisherProbe(), second = EncodedPublisherProbe(), separate = EncodedPublisherProbe(), rejoin = EncodedPublisherProbe()
-        var pending = [first, second, separate, rejoin]
+        let phaseFirst = EncodedPublisherProbe(), phaseSecond = EncodedPublisherProbe()
+        var pending = [first, second, phaseFirst, phaseSecond, separate, rejoin]
         let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true
         outputs.sharedSourceFrameRate = 25
         var settings = StreamSettings.default
         settings.outputProfile = .init(canvasWidth: 320, canvasHeight: 180, frameRate: 25)
         settings.videoBitrate = 500_000; settings.audioBitrate = 128_000
+        if CommandLine.arguments.contains("--failed-finalization-only") {
+            try await failedFinalizationReceipts(settings: settings); return
+        }
         if CommandLine.arguments.contains("--transport-recovery-only") {
             try await localhostRecovery(directory: directory, settings: settings)
             report("Artifacts: \(directory.path)"); return
@@ -453,8 +593,20 @@ private actor EncodedPublisherProbe: Publisher {
         let observedFirst = await first.video.count, observedSecond = await second.video.count
         FileHandle.standardOutput.write(Data("Observed first-feed frames \(observedFirst)/\(observedSecond), states \(outputs.states)\n".utf8))
         try await settle { let a = await first.video.count; let b = await second.video.count; return a >= 45 && b >= 45 }
+        outputs.stopAll()
+        try await settle { outputs.encoderSessionCount == 0 && outputs.activeCount == 0 }
         let av = await first.video, bv = await second.video, aa = await first.audio, ba = await second.audio
         try check(av.count == bv.count && aa.count == ba.count, "Compatible destinations received different sample counts")
+        try check(av.allSatisfy { !$0.decodeTimeStamp.isValid },
+                  "No-reordering shared video retained a separate DTS that adds an RTMP composition offset")
+        let audioEnd = aa.last!.sample.presentationTimeStamp + CMTime(value: 1024, timescale: 48_000)
+        let sourceEnd = CMTime(seconds: 10_002, preferredTimescale: 48_000)
+        try check(audioEnd >= sourceEnd && (audioEnd - sourceEnd).seconds <= 1024.0 / 48_000,
+                  "Actual EOS lost the accepted original PCM frontier or invented more than one AAC padding packet")
+        try await Task.sleep(for: .milliseconds(20))
+        let stoppedVideoCount = await first.video.count, stoppedAudioCount = await first.audio.count
+        try check(stoppedVideoCount == av.count && stoppedAudioCount == aa.count,
+                  "Compressed media arrived after the terminal stop receipt")
         for (x, y) in zip(av, bv) {
             try check(x === y && bytes(x) == bytes(y) && x.presentationTimeStamp == y.presentationTimeStamp,
                       "Compatible video was re-encoded or retimed per destination")
@@ -462,27 +614,33 @@ private actor EncodedPublisherProbe: Publisher {
         for (x, y) in zip(aa, ba) { try check(x === y && x.sample === y.sample && bytes(x.sample) == bytes(y.sample), "AAC packet was not reused") }
         let firstRaw = await first.raw, secondRaw = await second.raw, firstConfigured = await first.configured, secondConfigured = await second.configured
         try check(firstRaw == 0 && secondRaw == 0 && firstConfigured && secondConfigured, "Shared route reached raw encoder ingress")
+        try await startupAlignmentRegression(video: av[0], audio: aa[0])
         try await write(first, to: directory.appendingPathComponent("first.mp4"))
         try await write(second, to: directory.appendingPathComponent("second.mp4"))
         try await ProgramRecordingFixtures.inspect(directory.appendingPathComponent("first.mp4"), expectedDuration: 2, checkSync: true)
+        try await knownAACContentTime(directory.appendingPathComponent("first.mp4"))
         try await ProgramRecordingFixtures.inspect(directory.appendingPathComponent("second.mp4"), expectedDuration: 2, checkSync: true)
         report("PASS: same compressed H.264 CMSampleBuffer and AAC packet identities/bytes/timestamps reused by RTMP/SRT endpoints; two actual containers decode with matching samples and flash/tone")
 
+        report("PASS: last-member stop EOS drains the actual accepted PCM frontier within one AAC packet, both bounded mailboxes finish before stop receipt, resources return to zero and no later media arrives")
+        outputs.start(a, settings: settings); outputs.start(b, settings: settings)
+        try await settle { outputs.liveCount == 2 && outputs.encoderSessionCount == 1 }
         var different = settings; different.outputProfile = .init(canvasWidth: 160, canvasHeight: 90, frameRate: 25)
         let c = StreamDestination(name: "Different profile", transport: .rtmps)
         outputs.start(c, settings: different)
         try await settle { outputs.liveCount == 3 }
         try check(outputs.encoderSessionCount == 2, "Different profile was incorrectly merged")
-        await second.hold()
+        let stalledStartCount = await phaseSecond.video.count
+        await phaseSecond.hold()
         try await feed(outputs, start: 200, ticks: 160)
-        let beforeStop = await first.video.count
+        let beforeStop = await phaseFirst.video.count
         let diagnostics = await outputs.diagnosticsSnapshot()
         let stalled = diagnostics.first { $0.id == b.id.uuidString }!
         try check(stalled.videoMailboxDrops > 0 && stalled.videoQueueDepth <= 64, "Compressed slow mailbox was unbounded or did not shed")
-        await second.release()
+        await phaseSecond.release()
         try await feed(outputs, start: 360, ticks: 80)
-        let bAfter = await second.video
-        let originalCount = bv.count
+        let bAfter = await phaseSecond.video
+        let originalCount = stalledStartCount
         try check(bAfter.count > originalCount + 1 && keyframe(bAfter[originalCount + 1]), "Slow endpoint resumed dependent frames without an IDR")
         let separateFrames = await separate.video
         try check(CMVideoFormatDescriptionGetDimensions(separateFrames[0].formatDescription!).width == 160, "Destination profile mutated unrelated dimensions")
@@ -495,7 +653,7 @@ private actor EncodedPublisherProbe: Publisher {
         try await feed(outputs, start: 440, ticks: 80)
         let joined = await rejoin.video
         try check(!joined.isEmpty && keyframe(joined[0]) && outputs.encoderSessionCount == 2, "Rejoin failed to reuse owner/start at IDR")
-        try check(await first.video.count > beforeStop, "Healthy output stopped under another target's overflow/rejoin")
+        try check(await phaseFirst.video.count > beforeStop, "Healthy output stopped under another target's overflow/rejoin")
         rejoin.continuation.yield(.failed(message: "fixture target failure"))
         try await settle { if case .failed = outputs.states[b.id] { return true }; return false }
         try check(outputs.states[a.id] == .live && outputs.encoderSessionCount == 2, "One target failure ended the healthy group")
@@ -528,6 +686,9 @@ private actor EncodedPublisherProbe: Publisher {
         try await cancelledSharedStart(settings: settings)
         try await canvasAndEncoderFailure(settings: settings)
         try await fixedCadence(directory: directory, settings: settings)
+        try await failedFinalizationReceipts(settings: settings)
+        try await terminalAACContent(directory: directory, settings: settings)
+        try await boundedEncodedStop(settings: settings)
         try await higherRateFallback(settings: settings)
         try await localhostTransports(directory: directory, settings: settings)
         report("Artifacts: \(directory.path)")

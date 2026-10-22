@@ -41,13 +41,29 @@ xcodebuild -resolvePackageDependencies -project "$SHARED_ENCODER_DIR/SharedEncod
 python3 scripts/repair_desktop_transport_archives.py "$SHARED_ENCODER_BUILD_PATH"
 xcodebuild -project "$SHARED_ENCODER_DIR/SharedEncoderValidation.xcodeproj" \
   -scheme SharedEncoderHarness -destination 'platform=macOS' \
-  -derivedDataPath "$SHARED_ENCODER_BUILD_PATH" -jobs "${STREAM_XCODE_JOBS:-4}" CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath "$SHARED_ENCODER_BUILD_PATH" -jobs "${STREAM_XCODE_JOBS:-2}" CODE_SIGNING_ALLOWED=NO OTHER_SWIFT_FLAGS='$(inherited) -j2' build
 readonly SHARED_ENCODER_PRODUCTS="${SHARED_ENCODER_BUILD_PATH:A}/Build/Products/Debug"
+run_shared_encoder_fixture() {
+  env DYLD_FRAMEWORK_PATH="$SHARED_ENCODER_PRODUCTS" python3 - "$SHARED_ENCODER_PRODUCTS/SharedEncoderHarness" "$@" <<'PYTHON'
+import os,signal,subprocess,sys
+process=subprocess.Popen(sys.argv[1:],start_new_session=True)
+try:
+    raise SystemExit(process.wait(timeout=90))
+except subprocess.TimeoutExpired:
+    # Only this generated fixture and its owned FFmpeg receivers share the group.
+    os.killpg(process.pid,signal.SIGTERM)
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid,signal.SIGKILL)
+        process.wait()
+    print('FAIL: shared encoder fixture exceeded90s; printed artifact directory retained',flush=True)
+    raise SystemExit(1)
+PYTHON
+}
 if (( $# > 0 )); then
-  env DYLD_FRAMEWORK_PATH="$SHARED_ENCODER_PRODUCTS" "$SHARED_ENCODER_PRODUCTS/SharedEncoderHarness" "$@"
+  run_shared_encoder_fixture "$@"
   exit
 fi
-env DYLD_FRAMEWORK_PATH="$SHARED_ENCODER_PRODUCTS" \
-  "$SHARED_ENCODER_PRODUCTS/SharedEncoderHarness"
-env DYLD_FRAMEWORK_PATH="$SHARED_ENCODER_PRODUCTS" \
-  "$SHARED_ENCODER_PRODUCTS/SharedEncoderHarness" --software
+run_shared_encoder_fixture
+run_shared_encoder_fixture --software
