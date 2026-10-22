@@ -120,3 +120,21 @@ production recording feed/archive/reader verifies both received-message and
 visible-show records, including Unicode/braces, while excluding artwork URLs,
 metadata and private token expansion. This remains owned fixture evidence,
 not an authorized live Twitch chat-feed qualification.
+
+
+The native-chat display follow-up passed one controlled component run on
+2026-10-22. [The dated receipt](NATIVE_CHAT_STATIC_EMOTE_2026-10-22.json) binds
+feature `50a55d6`, actual source hashes, all 550 compiler inputs, generated
+external-dependency seams, logs and 29 owned artifacts. The actual sidebar
+compiled without UI launch. The run passed explicit preview without scene
+slots or DLE restrictions, unchanged caption/compositions, stale account and
+message refusal, and the held-old-two cancellation/re-enable occupancy check.
+Existing alpha, Take and literal recording assertions also passed; the native
+movie contains three accepted video samples.
+
+This uses current actual Core with the declared nil-credential fixture boundary,
+owned defaults/storage, empty external device discovery and a fail-closed audio
+start sentinel. It exercises actual chat/coordinator/renderer/writer components;
+it does not qualify the whole runtime, hardware, UI interaction or an authorized
+live feed. The anonymous public CDN probe was unset. Earlier proof artifacts and
+authorized live-provider qualification remain separate.

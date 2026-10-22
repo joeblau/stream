@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-22",
+  "result": "PASS",
+  "issue": 143,
+  "scope": "Controlled actual native chat components and actual ChatSidebarView compile; no UI launch, live account/feed, hardware/capture/RTC or whole-runtime qualification.",
+  "featureCommit": "50a55d6ff4d93fdaac02f3579ca6eca6bed1a1c0",
+  "proofSourceCommit": "7b8a265cb3a73a81c07d278a8f9e27d5b2d2a990",
+  "shippingCoreAndMacByteEquivalentTo": "2aacf70",
+  "runtimeInvocations": 1,
+  "publicCDNProbePresent": false,
+  "runtime": {
+    "phase": "runtime",
+    "command": [
+      "/tmp/stream-chat-native-emote-proof-20261022/derived/Build/Products/Debug/AudienceEventsHarness",
+      "--artifacts-dir",
+      "/tmp/stream-chat-native-emote-proof-20261022/artifacts"
+    ],
+    "timeoutSeconds": 120,
+    "exitCode": 0,
+    "elapsedSeconds": 2.119131790997926
+  },
+  "build": {
+    "phase": "compile",
+    "command": [
+      "xcodebuild",
+      "-jobs",
+      "2",
+      "-project",
+      "/tmp/stream-chat-native-emote-proof-20261022/project/AudienceEventsValidation.xcodeproj",
+      "-scheme",
+      "AudienceEventsHarness",
+      "-destination",
+      "platform=macOS",
+      "-derivedDataPath",
+      "/tmp/stream-chat-native-emote-proof-20261022/derived",
+      "CODE_SIGNING_ALLOWED=NO",
+      "OTHER_SWIFT_FLAGS=$(inherited) -j2 -driver-batch-count 2",
+      "build"
+    ],
+    "timeoutSeconds": 1200,
+    "exitCode": 0,
+    "elapsedSeconds": 85.21959199999401
+  },
+  "sourceUnchanged": true,
+  "compilerInputs": {
+    "rows": 550,
+    "uniquePaths": 550,
+    "generatedToolBoundaryInputs": 16,
+    "actualCoreOriginalSources": 75,
+    "generatedNilKeychainSource": 1,
+    "actualDesktopOriginalSources": 231
+  },
+  "unmodifiedProductionAndFixtureInputs": {
+    "apple/StreamMac/StudioChatCoordinator.swift": {
+      "sha256": "c0febe0f1fe8d0c8df662ae4a779de6d8f3bf6a6b69d88ede4f851a71cc96508",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/ChatSidebarView.swift": {
+      "sha256": "9560338c3aef3dfd51b1834a3f88d549c3bf79f0d5b3b607cf2e82e072172e92",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/StudioDirectChatManager.swift": {
+      "sha256": "bcbac59658d7d5a688d36c2fc6feffcf60e622adfc6b84ebbf2bf63d7fca0c86",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/StudioChatModel.swift": {
+      "sha256": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/StudioDirectChatModel.swift": {
+      "sha256": "b68ef407344d9f3fcdb96639315d7a8d4abaaf1046206bd7120bdcf252bf8e6c",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/CommentAvatarStore.swift": {
+      "sha256": "1c340d4eb56edf81eee82a99a1a2b6c0770d56e60db6268996678fc39c5ec5a8",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/StudioCommandDispatcher.swift": {
+      "sha256": "136b4c748c724aa89919e0baf006174d3130e563c6993433b505479646eaa93b",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/SceneRenderer.swift": {
+      "sha256": "6b1d908822f502d5b7bd4367c3094e633a053c0250faa52847fa0825e761e923",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/ProgramRecordingSession.swift": {
+      "sha256": "63afe8eac41cb01e5fbb14a0cccb642680804a13e834db7f07c478ad7018b11e",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/RecordingChatArchive.swift": {
+      "sha256": "0a9c2ef94b3be4b942f2e9d1a43f0b3fba00fb943ac4f5cee2474e3ba3120513",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/RecordingChatTypes.swift": {
+      "sha256": "e8de84430ccb16e63b05522f246f0e793dce7a7926f766c6f237aa7046ed6ec5",
+      "compiledUnmodified": true
+    },
+    "apple/StreamMac/RecordingChatReader.swift": {
+      "sha256": "a59216ebb8d5a140ea49dfa951cd654c8473094b9da0e8cb115dfc805a9b1344",
+      "compiledUnmodified": true
+    },
+    "apple/scripts/static_emote_audience_fixture.swift": {
+      "sha256": "f5c27e31a1819e2c9912e00d2e8b88b9a3fa00f72b4b3845a7fd4732e7027e82",
+      "compiledUnmodified": true
+    },
+    "apple/scripts/audience_events_harness.swift": {
+      "sha256": "f67ce5d1af90cf06defa2ea2ad26eecbcc4a1a8d754219b1b6e408e353a3b41b",
+      "compiledUnmodified": true
+    }
+  },
+  "boundaries": {
+    "credential": "All current actual Core sources with sole declared nil-Keychain replacement; app-only validation guards enabled. Actual fresh shipping framework is a source/reference comparison, never runtime linked.",
+    "defaults": "Existing generated UUID suite and task-owned storage helper; generated input inventory retained.",
+    "externalInitialization": "Exact-count tool-only actual dependency seams inject empty device discovery, omit MIDI/OSC start and permission status refresh. Three exact diffs retained; shipping sources unchanged.",
+    "audio": "STREAM_AUDIENCE_NO_AUDIO_GRAPH=1 asserts before actual startAudioEngine; no AudioMixEngine.run, preview/output graph or capture start. No source/device permissions requested.",
+    "transport": "Controlled owned HTTP/socket and PNG loader; no live reader grants/feed or public CDN probe. Dependency source downloads/builds are separate from fixture transport.",
+    "nativeSlot": "Shared slot0, wrapper48378, child48391; xcodebuild jobs2/Swift j2. Existing archive repair helper internally used make j4/cmake parallel4, explicitly retained exception.",
+    "drain": "Wrapper exit0/released; exact owned runner/executable checks absent. No unrelated processes signaled."
+  },
+  "assertionsPassed": [
+    "Default-off requires explicit Show emote; no arrival-driven image fetch.",
+    "Native actual CGImage available with no staging slots and Direct Live Editing enabled; literal caption and both scene snapshots unchanged.",
+    "Staging and native preview share two real-operation permits: held old2 survive cancel/re-enable; new action refused until exactly one old operation exits.",
+    "Message tombstone, connection close/rejoin, account rebind and shutdown retire presentation/authorization; late completion cannot rearm cached message or mutate scene.",
+    "Existing Program changes only after Take; image aspect and alpha checks retained:12 exact backdrop and16 partial green pixels in21x10 tile.",
+    "Native movie3 accepted video samples and completed archive preserve complete literal Unicode/braces and Emotes message/show; no artwork metadata/URL/private token leakage.",
+    "Existing public-event promotion default-off, per-event styling, independent slots and lifecycle refusal assertions remain passing."
+  ],
+  "artifacts": {
+    "total": 29,
+    "keyArtifacts": {
+      "artifacts/TakenAlert.png": {
+        "bytes": 15218,
+        "sha256": "b7d0057cd06923a9f7008e80cc0512e57c956a2676674e83e93d7f77af6cd0cc"
+      },
+      "artifacts/TakenStaticEmote.mp4": {
+        "bytes": 4172,
+        "sha256": "4ae822825d461c73ee58da1fac4067a9aaa7871eaf0567d2efdb4cd7424496ab"
+      },
+      "artifacts/TakenStaticEmote.mp4.chat.jsonl": {
+        "bytes": 1203,
+        "sha256": "5dbb7c5fa88c48c051c0d3c39f1c75b42270f604d0fbdc74cf4be0add9490454"
+      },
+      "artifacts/TakenStaticEmote.mp4.chat.jsonl.summary.json": {
+        "bytes": 376,
+        "sha256": "f9681553eb8079bf7d0671c0a14a7d180faf22e468713e3ae23a859288feb02c"
+      },
+      "artifacts/TakenStaticEmote.mp4.recording.json": {
+        "bytes": 784,
+        "sha256": "d3f4bab50dbecb795441bb5fd3313c80c7e0286a4136f6e114d74fb005b581d6"
+      },
+      "artifacts/TakenStaticEmote.png": {
+        "bytes": 11812,
+        "sha256": "55e761109f86ecc909cc6e852bb177384853a469f4c5f59a992c5e64286c5116"
+      }
+    }
+  },
+  "compiledExecutable": {
+    "path": "/tmp/stream-chat-native-emote-proof-20261022/derived/Build/Products/Debug/AudienceEventsHarness",
+    "bytes": 77706952,
+    "sha256": "6372d10eec30d1b593f41248912b342e50a5f3bd2099b09f73a1ca9a6cba936f"
+  },
+  "runtimeCore": {
+    "path": "/tmp/stream-chat-native-emote-proof-20261022/derived/Build/Products/Debug/StreamCore.framework/StreamCore",
+    "sha256": "2d5dfc81f58d57c0333c59bbe0a39a68af719d8eddf2e70f3ca89b73b848ae83",
+    "nilCredentialBoundary": true
+  },
+  "proofFiles": {
+    "plan.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/plan.json",
+      "bytes": 553,
+      "sha256": "762e1a49cdfecaa7de7c87b9ed485ad1b1759b0cdeb4fcc71d2bd3153ba44810"
+    },
+    "source-before.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/source-before.json",
+      "bytes": 37706,
+      "sha256": "88789fb4c9804202b1b76a121df5ac39d9bb454e749666336b247a81278cccd8"
+    },
+    "source-after.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/source-after.json",
+      "bytes": 37706,
+      "sha256": "88789fb4c9804202b1b76a121df5ac39d9bb454e749666336b247a81278cccd8"
+    },
+    "commands.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/commands.json",
+      "bytes": 2414,
+      "sha256": "88460369fa740b19f57b4859922c1686cbf736a7a4c75fd3f413e18b9f41f7dc"
+    },
+    "compiler-inputs.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/compiler-inputs.json",
+      "bytes": 238021,
+      "sha256": "03657409d915b9b226f02b7aec619451eebefbb100ee669d284ba9f81c09f1dc"
+    },
+    "generated-inputs.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/generated-inputs.json",
+      "bytes": 3562,
+      "sha256": "e742c609dfc70bcc6271aae81ac8aa14b94af161500a9d88f5ea2f7eeaaf7083"
+    },
+    "external-boundaries.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/external-boundaries.json",
+      "bytes": 4268,
+      "sha256": "40c83078589a21c67e14386733e2e45cd531fb5ef41df07892178f90d4da42ec"
+    },
+    "shipping-Core-reference.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/shipping-Core-reference.json",
+      "bytes": 462,
+      "sha256": "47ac097cd221df959cd4d12803c8600ddfdccfec94ac0e861f13a7880561bc02"
+    },
+    "compiled-binary.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/compiled-binary.json",
+      "bytes": 213,
+      "sha256": "1253e01674904013dd7f3abdd62890d785ea243828519c95b06d2909e3db8f09"
+    },
+    "runtime-invocation.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/runtime-invocation.json",
+      "bytes": 416,
+      "sha256": "02ef4babdd4b50b1565ace548bba164a60ededdfee842699252521aaa16800df"
+    },
+    "result.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/result.json",
+      "bytes": 442,
+      "sha256": "4b3630738de6ecfd1e7d90f14e1a6a53852cc3f791b5a8fdeddeee1221299c7a"
+    },
+    "runtime.log": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/runtime.log",
+      "bytes": 1103,
+      "sha256": "73eb8b83d7cdb46d541323a13c5bcb83b16344fa7b1cffcf022eac4e18fc1d7d"
+    },
+    "compile.log": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/compile.log",
+      "bytes": 593060,
+      "sha256": "2040baf0d44e099d8b4b00bbd18019f1d2207699a5b803b18501c88e3cf5510f"
+    },
+    "process-drain.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/process-drain.json",
+      "bytes": 279,
+      "sha256": "36c8998c7fc1116c1ea633fb4a7a27bf8a60af94be53ee4c7bc7f87582db3b39"
+    },
+    "artifacts.json": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/artifacts.json",
+      "bytes": 6169,
+      "sha256": "d889b1bed4b6749f13d358227535d839221a495a105403f90685bc65aee76df3"
+    },
+    "prepare.rb": {
+      "path": "/tmp/stream-chat-native-emote-proof-20261022/prepare.rb",
+      "bytes": 3807,
+      "sha256": "a327b3a006363d6b9f323c600890e3289d98b22d47b712b336506cfbc154892d"
+    },
+    "ownedRunner": {
+      "path": "/tmp/stream-chat-native-emote-proof-runner-20261022.py",
+      "sha256": "9adb392a5434117981bb5f934470bdf2b9e83afa02ea86a0fb29746c28d129c5"
+    }
+  },
+  "remaining": "Authorized live provider feed/order/rate acceptance remains unqualified. Animated emotes, arbitrary image stickers and unsupported provider features are unchanged; this narrow static Twitch rendering proof does not close #139/#142/#143."
+}
