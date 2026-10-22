@@ -240,3 +240,21 @@ identities, containers or trust settings were changed for qualification. Real
 signed/group IPC, every-route exclusion/install/stop/drain acknowledgment and
 actual WebKit tone/speech Program/ISO/Monitor/A/V measurements remain required;
 #124 stays open.
+
+
+## Capture-owner coexistence software (2026-10-22)
+
+The prior blanket overlap latch is replaced by [generation-bound owner
+acknowledgments](../BROWSER_CAPTURE_EXCLUSIONS.md) for supported system-mix and
+pinned display app-exclusion filters. The actual capture classes await filter
+installation, old serial callback drain and their own mixer-history retirement.
+The helper consumes a live runtime/helper-PID/Program-demand proof; missing,
+retiring, failed or unsupported owners keep it silent, and a valid replacement
+generation can recover. Opaque picker/static-window/direct-helper routes remain
+explicit conflicts. Earlier blanket-latch receipts describe the previous source.
+
+Controlled held-driver/actual mixer PCM proofs and a build-only whole-source
+check establish software ownership and barrier behavior. No live SCK/helper
+launch, device, output, capture or permission operation accompanies this change.
+All remaining live/signing/attribution/A-V and local HTML/subresource gates
+remain; production selection and normal startup stay disabled.

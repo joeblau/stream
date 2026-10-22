@@ -1,0 +1,91 @@
+{
+  "base": "a9cfd98e56af023738db95113b17120fe8951d04",
+  "scope": "Software coexistence and retirement only; productionRouteQualified false; no real SCK/helper/UI/device/output/mixer clock/capture/runtime qualification.",
+  "productionSourceSHA256": {
+    "apple/StreamMac/BrowserCaptureExclusions.swift": "4932e8e139b89f4c7e851bb253780da2c04b6eeb4026309128b30387b860c5fc",
+    "apple/StreamMac/AppAudioCapture.swift": "91f93fd71336c046d2ecd14fa8c785939c50431502646388b716f189781399e5",
+    "apple/StreamMac/ScreenSourceCapture.swift": "8ac81d8d5a4638d124a57aabf4c674cf5a9d5f0b75e9f05f28b3fd048c041a28",
+    "apple/StreamMac/CaptureSourcePool.swift": "dd833908f0ce87ec6b6f856f9ee3cc0ebb7f9bc3dc44963bb3c41cf051a4b22d",
+    "apple/StreamMac/BrowserWidgetHelperSession.swift": "77e766470aea8215e10c70154a81847142f0f189ec04927c97e922db679328ce"
+  },
+  "logs": {
+    "mixer": {
+      "path": "/tmp/stream-wave12-browser-exclusion-mixer-commit-20261022.log",
+      "sha256": "1293c9f219fab97d0371474c47c3833c17eb777eb0c115ba5a431e610c3a7824"
+    },
+    "session": {
+      "path": "/tmp/stream-wave12-browser-exclusion-command-multipage-final-20261022.log",
+      "sha256": "5b660f7e636ec9ec3f241c86a72ec2e48781fd376a98a4cac0c4c9296e89f2b6"
+    },
+    "wholeSourceBuildOnly": {
+      "path": "/tmp/stream-wave12-browser-exclusion-whole-commit-20261022.log",
+      "sha256": "1d1b6e728ca757d43793f3dbfc4d1ff6e75a341a9fb39a4ff812e696cc55895e"
+    }
+  },
+  "focusedMixerReceipt": {
+    "scope": "Controlled no-capture transactions and actual mixer ingestion/reset; no mixer clock/device/UI/helper. Pool and session context are not compiled or executed by this focused target.",
+    "compiledSourceSHA256": {
+      "StreamMac/BrowserCaptureExclusions.swift": "4932e8e139b89f4c7e851bb253780da2c04b6eeb4026309128b30387b860c5fc",
+      "StreamMac/AppAudioCapture.swift": "91f93fd71336c046d2ecd14fa8c785939c50431502646388b716f189781399e5",
+      "StreamMac/ScreenSourceCapture.swift": "8ac81d8d5a4638d124a57aabf4c674cf5a9d5f0b75e9f05f28b3fd048c041a28",
+      "StreamMac/ScreenRegionDynamics.swift": "3e8983096c33c97cd47fa6e06e484fb7db549218fd3750ab96c3df2fac9c2e64",
+      "StreamMac/BrowserWidgetAudioProtocol.swift": "082ee7cecd430582b9cc13bae6ed571b90fe2346fb11e9c051ebf69ef4dca49d",
+      "StreamMac/BrowserWidgetVisualProtocol.swift": "63d5695c50ca368b7ab6b17657bc8e5b22193d9b6b088ba03d10cc058f405d99",
+      "StreamMac/GuestMediaReceipts.swift": "b3ba1a5b8c4450c1075b97827908ecfd3203bf78b8f7d8708eb84b2e20047a7a",
+      "StreamMac/IsolatedRecordingTypes.swift": "9ad457d29fb7548f0f81a4182a74da3a0a3ac033e92cb96b807e64558dc70372",
+      "StreamMac/IsolatedVideoTypes.swift": "6c37cae3f873416b8b4a437ee2623c35a42514cffdae44fdbdcea8415c31a0f8",
+      "StreamMac/RecordingChatTypes.swift": "560f3e1f5e37ebfcb98f92e28215caeafb372721b2e53f88c70c19014fc8cec4",
+      "StreamMac/RecordingChatArchive.swift": "0a9c2ef94b3be4b942f2e9d1a43f0b3fba00fb943ac4f5cee2474e3ba3120513",
+      "StreamMac/RecordingChatReader.swift": "a59216ebb8d5a140ea49dfa951cd654c8473094b9da0e8cb115dfc805a9b1344",
+      "StreamMac/RecordingPreferences.swift": "dace6e48df13c8bba1cf6c749c9dc80c1da377b2d031806cd0329bbb40fa824b",
+      "StreamMac/ProgramRecordingSession.swift": "e9e076d3e85d8c063c79a297d63810f7019c6f9b998ce097d0b849893a93d1a9",
+      "StreamMac/AudioMixEngine.swift": "4cdd8ede633737249574b5d617d9ca3806f786db397f2c1e64571daf06de12a4",
+      "scripts/browser_exclusion_harness.swift": "b20a0d0ef1af9f7ad5e1c6117f629e5a7fd8721bbc1585463d6a0f8d61e8af14"
+    },
+    "integrationContextSHA256": {
+      "StreamMac/CaptureSourcePool.swift": "dd833908f0ce87ec6b6f856f9ee3cc0ebb7f9bc3dc44963bb3c41cf051a4b22d",
+      "StreamMac/BrowserWidgetHelperSession.swift": "77e766470aea8215e10c70154a81847142f0f189ec04927c97e922db679328ce"
+    },
+    "generatedSourceSHA256": {
+      "ProductionIdentities.swift": "8f520784b7ad499b3dfe08900b094cdb4120cb5f2555c0424cdca7bfb0bb76ec",
+      "FixtureAudioMixEngine.swift": "47171b38275e6d8d4c517ad13b12ee26ea79125279da279ba103f9a1903baed1"
+    },
+    "frameworkSHA256": "90d9e5d5dbaed2f6a9c7f6277bee9f80aad21834b9bf46c85979c927cb0d64e4",
+    "harnessSHA256": "41f7107d0b14ce607e680083a58f5a5bc9d398f33f4985a616784f87736c1250"
+  },
+  "sessionCompiledSources": [
+    "BrowserCaptureExclusions.swift",
+    "BrowserWidgetAudioProtocol.swift",
+    "BrowserWidgetVisualProtocol.swift",
+    "BrowserWidgetAudioSocket.swift",
+    "BrowserWidgetAudioCapture.swift",
+    "BrowserWidgetHelperSession.swift",
+    "browser_helper_lifecycle_checks.swift",
+    "browser_helper_command_fixture.swift"
+  ],
+  "sessionExternalBoundaries": "Inert capture driver, synthetic command/reply transport, inert mixer. Actual production session ACK/permit logic executes; no actual helper or IPC/media.",
+  "wholeSourceScope": "Actual desktop capture/pool/session/mixer sources compiled, validation boundaries and credential isolation; BUILD_ONLY exits before any runtime.",
+  "failedAttemptsRetained": {
+    "/tmp/stream-wave12-browser-exclusion-mixer-20261022.log": "Missing visual-protocol compile dependency in new runner; no runtime.",
+    "/tmp/stream-wave12-browser-exclusion-mixer-retry-20261022.log": "Meter assertion invalid without mix reads; replaced by explicit production mix reads.",
+    "/tmp/stream-wave12-browser-exclusion-mixer-signal-20261022.log": "Independent application gain was zero by default; explicit intended gain now seeded.",
+    "/tmp/stream-wave12-browser-exclusion-mixer-owned-final-20261022.log": "Fresh synthetic read consumed an empty ring window without autonomous clock; separate real reset isolates preserved-gain check."
+  },
+  "remaining": [
+    "Opaque picker/static window/direct helper capture conflicts",
+    "Production signed/sandbox shared container positive launch",
+    "Actual WebKit PCM attribution/tails and every-route recapture",
+    "Live same-page tone/speech A/V, permission/device qualification",
+    "Helper local HTML/subresources unimplemented"
+  ],
+  "sessionCompiledSourceSHA256": {
+    "StreamMac/BrowserCaptureExclusions.swift": "4932e8e139b89f4c7e851bb253780da2c04b6eeb4026309128b30387b860c5fc",
+    "StreamMac/BrowserWidgetAudioProtocol.swift": "082ee7cecd430582b9cc13bae6ed571b90fe2346fb11e9c051ebf69ef4dca49d",
+    "StreamMac/BrowserWidgetVisualProtocol.swift": "63d5695c50ca368b7ab6b17657bc8e5b22193d9b6b088ba03d10cc058f405d99",
+    "StreamMac/BrowserWidgetAudioSocket.swift": "a38b991bc54969f6a70e9dc7dc807a7e8aabb72b3b96981e2d90d6ee8a08118f",
+    "StreamMac/BrowserWidgetAudioCapture.swift": "5ae8c3e2dd66509caa0e814a243b1de9843768a501982eee6e450b9004ad71d5",
+    "StreamMac/BrowserWidgetHelperSession.swift": "77e766470aea8215e10c70154a81847142f0f189ec04927c97e922db679328ce",
+    "scripts/browser_helper_lifecycle_checks.swift": "a2d77ffa074cdbb42866a212c05b75a3c2493242faab1be02cbedbe0689b4fd5",
+    "scripts/browser_helper_command_fixture.swift": "323461abddafbf5cc11cd0b381c699438ae8c06310092409947b637798e7ef64"
+  }
+}

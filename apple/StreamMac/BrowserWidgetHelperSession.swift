@@ -56,6 +56,7 @@ protocol BrowserWidgetHelperTransport: AnyObject {
     private var audioTask: Task<Void, Never>?
     private var audioRevision = UUID()
     private var requestedProgramLeases: Set<BrowserWidgetPageLease> = []
+    private var captureExclusionPermit: BrowserCaptureExclusionPermit?
     private var loadedLeases: Set<BrowserWidgetPageLease> = []
     private var suspendedLeases: Set<BrowserWidgetPageLease> = []
     private(set) var audibleLeases: Set<BrowserWidgetPageLease> = []
@@ -72,7 +73,6 @@ protocol BrowserWidgetHelperTransport: AnyObject {
             closeAudioBoundary(); reconcileAudio()
         }
     }
-    private var appliedExclusions: Set<String> = []
     private var captureConflict: String?
     private var pendingMedia: [UUID: PendingMedia] = [:]
     private var retiredLeases: Set<BrowserWidgetPageLease> = []
@@ -233,21 +233,25 @@ protocol BrowserWidgetHelperTransport: AnyObject {
 
     /// Pixels may be demanded by Preview/standby/ISO. Only current Program leases may resume
     /// media. The shared application channel is never an independent authorization to play.
-    func setProgramAudioDemand(_ leases: Set<BrowserWidgetPageLease>, applyingExclusions: Set<String>,
-                               unavailableReason: String? = nil) {
-        // Other capture owners do not yet acknowledge stop/install/drain epochs.
-        // Once an overlap was observed, removal from pixel demand alone cannot
-        // authorize new helper playback. Rebuild this explicit qualification
-        // session only after those captures have fully stopped.
-        let conflict = captureConflict ?? unavailableReason.map {
-            $0 + " Restart the qualification session after other captures have fully stopped."
-        }
-        guard leases != requestedProgramLeases || applyingExclusions != appliedExclusions ||
-              conflict != captureConflict else { return }
-        requestedProgramLeases = leases; appliedExclusions = applyingExclusions
-        captureConflict = conflict
+    func setProgramAudioDemand(_ leases: Set<BrowserWidgetPageLease>,
+                               exclusions: BrowserCaptureExclusionPermit?, unavailableReason: String? = nil) {
+        guard leases != requestedProgramLeases || exclusions?.id != captureExclusionPermit?.id ||
+              unavailableReason != captureConflict else { return }
+        requestedProgramLeases = leases; captureExclusionPermit = exclusions
+        captureConflict = unavailableReason
         closeAudioBoundary(); reconcileAudio()
     }
+    #if STREAM_NATIVE_VALIDATION
+    /// Explicit no-broad-capture fixture boundary. Production must supply owner receipts.
+    private var validationExclusions: (Set<String>, UUID)?
+    func setProgramAudioDemand(_ leases: Set<BrowserWidgetPageLease>, applyingExclusions: Set<String>,
+                               unavailableReason: String? = nil) {
+        if validationExclusions?.0 != applyingExclusions { validationExclusions = (applyingExclusions, UUID()) }
+        let permit: BrowserCaptureExclusionPermit? = applyingExclusions.isSuperset(of: requiredSystemAudioExclusions)
+            ? .init(id: validationExclusions!.1, helperPID: helperPID ?? -1, isCurrent: { true }) : nil
+        setProgramAudioDemand(leases, exclusions: permit, unavailableReason: unavailableReason)
+    }
+    #endif
 
     /// This synchronous boundary also fences an already-entered inlet callback. Draining and
     /// FX resets run in the serial worker, never while a UI callback waits on opaque plug-ins.
@@ -293,7 +297,7 @@ protocol BrowserWidgetHelperTransport: AnyObject {
                 let reason: String?
                 if target.isEmpty { reason = "Independent browser audio is silent outside Program." }
                 else if let captureConflict { reason = captureConflict }
-                else if !appliedExclusions.isSuperset(of: requiredSystemAudioExclusions) {
+                else if captureExclusionPermit?.allows(connection?.pid ?? -1) != true {
                     reason = "Independent browser audio is unavailable until other capture routes exclude its helper."
                 } else if mixer == nil { reason = "Independent browser audio requires its owned mixer channel." }
                 else if prepareMixerForAudio == nil { reason = "Independent browser audio requires current mixer preparation." }
@@ -301,16 +305,20 @@ protocol BrowserWidgetHelperTransport: AnyObject {
                 publishAudioState(reason ?? "Independent browser audio is preparing its Program route.")
                 if reason != nil { break }
                 guard let pid = connection?.pid else { break }
+                guard captureExclusionPermit?.allows(pid) == true else { break }
                 do { try await audio.start(helperPID: pid) }
                 catch { if revision == audioRevision { failSession("helper_audio_unavailable") }; break }
                 if revision != audioRevision { continue }
+                guard captureExclusionPermit?.allows(pid) == true else { continue }
                 var allResumed = true
                 for lease in target {
+                    guard revision == audioRevision, captureExclusionPermit?.allows(pid) == true else { break }
                     if !(await acknowledgeMedia(lease, suspended: false)) { allResumed = false; break }
                     if revision != audioRevision || Task.isCancelled { break }
                 }
                 guard !Task.isCancelled else { break }
                 if revision != audioRevision { continue }
+                guard captureExclusionPermit?.allows(pid) == true else { continue }
                 guard allResumed, audio.isCapturing else { failSession("helper_media_resume_failed"); break }
                 guard let prepareMixerForAudio else { continue }
                 do {
@@ -325,6 +333,7 @@ protocol BrowserWidgetHelperTransport: AnyObject {
                     }
                 }
                 guard revision == audioRevision, !Task.isCancelled else { continue }
+                guard captureExclusionPermit?.allows(pid) == true else { continue }
                 audibleLeases = target
                 mixer?.setCaptureRouteAllowed(channel, allowed: true)
                 publishAudioState(nil)
