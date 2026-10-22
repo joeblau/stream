@@ -684,3 +684,24 @@ No new media run accompanies the documentation or closures.
 All other outstanding original requirements retain their previous limits,
 including **#90, #92, #124 and #127**. The separate failed performance receipts,
 Intel pending inspection and prior source-scoped evidence remain unchanged.
+
+## Generated row-fixture initializer correction — 2026-10-22 UTC
+
+Published `78796d1` [native CI 39744489372](https://github.com/joeblau/stream/actions/runs/39744489372)
+finishes **failure**: both Mac jobs fail generated `FixtureControlsView(kind:)`
+compilation in row-probe step 10 because its synthesized initializer is private.
+The layout executable never runs. All three full Core runs pass **588 tests /
+82 suites**: ARM 231.091 s, Intel 158.415 s, iOS 177.642 s. Both actual paragraph
+probes pass. Encoder/Deck and later gates are not reached, so this run provides
+no new Intel fallback or Deck media qualification.
+
+`181bf6f` adds one explicit initializer in the generated fixture. Production
+app/Core/vendor source equals `78796d1`; all 40 layout assertions and timeouts
+are unchanged. The exact checked-in probe passes all 40 cases under **local
+Xcode 27.2**, which does **not** certify hosted Xcode 26.6. Fresh exact-head hosted
+execution remains required. Original terminal logs and the local probe hash are
+bound under `wave9FixtureCIReview` in [the ledger](MACOS_TASK_STATUS.json).
+
+Counts remain **27 closed / 34 open**, with #125/#130 closed. No issue state,
+original acceptance gate or earlier failed receipt is changed by this fixture
+correction or local pass.
