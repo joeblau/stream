@@ -19,8 +19,8 @@ spec['targets'].each_value do |target|
   target['sources'].map!{|s| s.is_a?(String) ? File.join(root,s) : s.merge('path'=>File.join(root,s['path']))}
   target.delete('entitlements'); target.delete('info')
 end
-# Only credential/hardware boundaries are generated copies. The real shipping
-# controller/dispatcher/coordinator/account/vault/server code compiles intact.
+# Only credential/hardware and owned-session boundaries are generated copies.
+# Controller/dispatcher/coordinator/account/vault/server behavior remains shipping.
 keychain=File.read('StreamCore/KeychainStore.swift')
 prefix=keychain.split('    private let service: String',2).first
 abort 'Keychain fixture boundary changed' if prefix==keychain
@@ -36,12 +36,20 @@ pattern=/    private nonisolated static func requestMicrophoneAccess\(\) async -
 abort 'Microphone fixture boundary changed' unless audio.match?(pattern)
 audio.sub!(pattern,"    private nonisolated static func requestMicrophoneAccess() async -> Bool { false }\n\n    private func configureAndStart")
 File.write(File.join(folder,'fixtures/MacAudioInput.swift'),audio)
+# This headless consent workload owns an unlocked session. It must not inherit
+# the host login state or asynchronous workspace/lock notifications. Keep the
+# shipping coordinator's fail-closed current-session default unchanged.
+controller=File.read('StreamMac/StreamController.swift')
+constructor='DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))'
+abort 'Resilience construction fixture boundary changed' unless controller.scan(constructor).length == 1
+controller.sub!(constructor, 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"), observeSystem: false, initialSessionState: .unlocked)')
+File.write(File.join(folder,'fixtures/StreamController.swift'),controller)
 spec['targets']['StreamCore']['sources']=[{'path'=>File.join(root,'StreamCore'),'excludes'=>['KeychainStore.swift']},File.join(folder,'fixtures/KeychainStore.swift')]
 target=spec['targets'].delete('StreamMac')
 target['type']='tool'
 target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
-target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift','MacAudioInput.swift']}
-target['sources'] += [File.join(folder,'fixtures/MacAudioInput.swift'),File.join(root,'scripts/managed_start_controller_harness.swift')]
+target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift','MacAudioInput.swift','StreamController.swift']}
+target['sources'] += [File.join(folder,'fixtures/MacAudioInput.swift'),File.join(folder,'fixtures/StreamController.swift'),File.join(root,'scripts/managed_start_controller_harness.swift')]
 spec['targets']['ManagedStartControllerHarness']=target
 spec['schemes']={'ManagedStartControllerHarness'=>{'build'=>{'targets'=>{'ManagedStartControllerHarness'=>'all'}}}}
 require File.join(root, 'scripts/desktop_transport_fixture')
