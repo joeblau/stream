@@ -59,11 +59,15 @@ private actor ReviewAccountHTTP {
     @MainActor static func main() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("stream-recovery-accounts-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let http = ReviewAccountHTTP(), vault = ProviderTokenVault(keychain: ReviewCredentials(), transport: { try await http.send($0) })
+        let http = ReviewAccountHTTP(), credentials = ReviewCredentials()
+        let retirement = ProviderCredentialRetirementStore.memory()
+        let vault = ProviderTokenVault(keychain: credentials, retirement: retirement, transport: { try await http.send($0) })
         let credential = try await vault.configure(.youtube, clientID: "fixture-public")
         try await vault.accept(.init(access: "FIXTURE_ACCESS", refresh: "FIXTURE_REFRESH", expiresAt: Date().addingTimeInterval(3600),
             scopes: ["https://www.googleapis.com/auth/youtube.readonly"]), provider: .youtube, generation: credential)
-        let accounts = ProviderAccountSession(restream: ReviewRestream(), vault: vault, pendingDirectory: directory)
+        let accounts = ProviderAccountSession(restream: ReviewRestream(), vault: vault,
+            transport: { try await http.send($0) }, openBrowser: { _ in preconditionFailure("Recovery opened a browser") },
+            pendingDirectory: directory)
         await until { accounts.snapshot(.youtube).hasCredential }
         let output = UUID(), session = UUID(), project = UUID(), profile = UUID()
         var snapshot = SessionRecoverySnapshot(projectID: project, profileID: profile)
@@ -116,8 +120,25 @@ private actor ReviewAccountHTTP {
         await http.configure(hold: true)
         coordinator.verify(output); await until { await http.entered }
         let current = await vault.generation(.youtube)
-        try await vault.accept(.init(access: "FIXTURE_REPLACED", expiresAt: Date().addingTimeInterval(3600),
-            scopes: ["https://www.googleapis.com/auth/youtube.readonly"]), provider: .youtube, generation: current)
+        let replacement = ProviderOAuthToken(access: "FIXTURE_REPLACED", expiresAt: Date().addingTimeInterval(3600),
+            scopes: ["https://www.googleapis.com/auth/youtube.readonly"])
+        // A current credential generation is not a fresh OAuth grant. Keep
+        // this captured old credential for the stale-send assertion below.
+        let beforeReusedGrant = await http.count()
+        let storedBeforeReplacement = credentials.string(for: .provider(.youtube, field: .tokens))
+        let retirementBeforeReplacement = retirement.read(.youtube)
+        do {
+            try await vault.accept(replacement, provider: .youtube, generation: current)
+            preconditionFailure("A credential generation accepted without a fresh grant")
+        } catch is CancellationError {}
+        check(await vault.generation(.youtube) == current)
+        check(await vault.hasToken(.youtube))
+        check(credentials.string(for: .provider(.youtube, field: .tokens)) == storedBeforeReplacement)
+        check(retirement.read(.youtube) == retirementBeforeReplacement)
+        check(await http.count() == beforeReusedGrant)
+        precondition(coordinator.verifying.contains(output))
+        let replacementAuthorization = try await vault.configure(.youtube, clientID: "fixture-public")
+        try await vault.accept(replacement, provider: .youtube, generation: replacementAuthorization)
         await http.release(); await until { !coordinator.verifying.contains(output) }
         precondition(coordinator.review(output).reason == .accountChanged)
         check(await accounts.recoveryAuthorizationGeneration() != generation)
@@ -156,10 +177,24 @@ private actor ReviewAccountHTTP {
         check(await http.count() == requestsBeforeClosure)
 
         // A token without actual granted read permission cannot invoke GETs.
-        let noScopeGeneration = await vault.generation(.youtube)
-        try await vault.accept(.init(access: "FIXTURE_NO_SCOPE", expiresAt: Date().addingTimeInterval(3600), scopes: []),
-            provider: .youtube, generation: noScopeGeneration)
-        let denied = ProviderAccountSession(restream: ReviewRestream(), vault: vault, pendingDirectory: directory.appendingPathComponent("denied"))
+        let retiredGeneration = await vault.generation(.youtube)
+        let noScope = ProviderOAuthToken(access: "FIXTURE_NO_SCOPE", expiresAt: Date().addingTimeInterval(3600), scopes: [])
+        let storedAfterForget = credentials.string(for: .provider(.youtube, field: .tokens))
+        let retirementAfterForget = retirement.read(.youtube)
+        do {
+            try await vault.accept(noScope, provider: .youtube, generation: retiredGeneration)
+            preconditionFailure("A retired account accepted without a fresh grant")
+        } catch is CancellationError {}
+        check(await vault.generation(.youtube) == retiredGeneration)
+        check(await vault.hasToken(.youtube) == false)
+        check(credentials.string(for: .provider(.youtube, field: .tokens)) == storedAfterForget)
+        check(retirement.read(.youtube) == retirementAfterForget)
+        check(await http.count() == requestsBeforeClosure)
+        let noScopeAuthorization = try await vault.configure(.youtube, clientID: "fixture-public")
+        try await vault.accept(noScope, provider: .youtube, generation: noScopeAuthorization)
+        let denied = ProviderAccountSession(restream: ReviewRestream(), vault: vault,
+            transport: { try await http.send($0) }, openBrowser: { _ in preconditionFailure("Recovery opened a browser") },
+            pendingDirectory: directory.appendingPathComponent("denied"))
         await until { denied.snapshot(.youtube).hasCredential }
         check(await denied.recoveryAuthorizationGeneration() == nil)
         await expectFailure { _ = try await denied.verifyRecoveryEvent(snapshot.remoteEvents[0].reviewIdentity!) }
@@ -169,6 +204,7 @@ private actor ReviewAccountHTTP {
         precondition(!publicJSON.contains("FIXTURE") && !publicJSON.contains("Authorization") && !publicJSON.contains("endpoint"))
         print("PASS: actual account/vault + review binding performs no startup reads; granted readonly GET ownership chain; live/ended/foreign/permission/offline; POST/body/token path rejection; 401 never replays or refreshes")
         print("PASS: opaque generation fences both Session authorization intent and vault replacement; forget/profile/runtime change and closed Session reject late replies; missing scopes disable reads; no secret journal fields or real network/mutation")
+        print("PASS: current and retired credential generations cannot replace fresh configure grants; rejected accepts preserve exact stored bytes, retirement state, generation and request counts")
         print("Environment: \(ProcessInfo.processInfo.operatingSystemVersionString)")
     }
 }
