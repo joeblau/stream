@@ -35,11 +35,11 @@ struct DesktopResilienceView: View {
             Picker("On screen lock / inactive user session", selection: $coordinator.policy.lockAction) {
                 ForEach(DesktopResiliencePolicy.LockAction.allCases, id: \.self) { Text($0.label).tag($0) }
             }
-            Toggle("Resume preview after wake", isOn: $coordinator.policy.previewAfterWake)
+            Toggle("Resume preview after wake and unlock", isOn: $coordinator.policy.previewAfterWake)
             ForEach(controller.sourceFailoverStatus, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
             Button("Restore Recovered Sources / Program") { controller.restoreResilienceProgram() }
                 .disabled(coordinator.isLocked)
-            Text("Sleep stops outputs. Wake and unlock never start publishing or recording. Standby video replaces pixels; audio retains the program mixer routing. A standby scene changes scene-bound audio. Freeze retains at most one frame per demanded source. Failed standby video shows an offline card.")
+            Text("Sleep stops outputs. Source refresh and optional preview wait until the Mac is awake and unlocked. Wake and unlock never start publishing or recording. Standby video replaces pixels; audio retains the program mixer routing. A standby scene changes scene-bound audio. Freeze retains at most one frame per demanded source. Failed standby video shows an offline card.")
                 .font(.caption).foregroundStyle(.secondary)
         }.onChange(of: coordinator.policy) { _, _ in coordinator.save() }
     }

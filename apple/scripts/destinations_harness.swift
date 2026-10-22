@@ -146,22 +146,38 @@ actor FakeDestinationPublisher: Publisher {
         coordinator.showOfflineSlate = { slateRequests += 1 }
         coordinator.startPreview = { previewStarts += 1 }
         coordinator.refreshSources = { refreshes += 1 }
+        coordinator.handle(.wake); coordinator.handle(.unlocked)
+        precondition(refreshes == 0 && previewStarts == 0, "Unmatched lifecycle signals must not restart capture")
         coordinator.policy.lockAction = .continueWithOfflineSlate
         coordinator.handle(.locked); coordinator.handle(.locked)
         precondition(slateRequests == 1 && lifecycleOutputs.liveCount == 2 && recorderStops == 0)
-        coordinator.handle(.unlocked)
+        coordinator.handle(.unlocked); coordinator.handle(.unlocked)
         precondition(lifecycleOutputs.liveCount == 2 && allocationsAfterStart == 2 && refreshes == 1)
         coordinator.handle(.sleep); coordinator.handle(.sleep)
         await settle { lifecycleOutputs.activeCount == 0 }
         precondition(recorderStops == 1 && coordinator.requiresManualRestart)
         coordinator.handle(.wake)
         precondition(previewStarts == 0 && lifecycleOutputs.activeCount == 0 && allocationsAfterStart == 2)
+        precondition(refreshes == 2)
         coordinator.policy.previewAfterWake = true
         coordinator.handle(.wake)
+        precondition(previewStarts == 0 && refreshes == 2, "Duplicate wake must not start opted-in preview")
+        coordinator.handle(.locked); coordinator.handle(.sleep)
+        coordinator.handle(.wake); coordinator.handle(.wake)
+        precondition(coordinator.isLocked && previewStarts == 0 && refreshes == 2 && recorderStops == 2,
+                     "Locked wake must defer both source refresh and preview")
+        coordinator.handle(.unlocked); coordinator.handle(.unlocked)
         precondition(previewStarts == 1 && lifecycleOutputs.activeCount == 0 && allocationsAfterStart == 2)
+        precondition(refreshes == 3)
+        coordinator.handle(.sleep); coordinator.handle(.locked)
+        coordinator.handle(.unlocked)
+        precondition(refreshes == 3 && previewStarts == 1 && slateRequests == 2 && recorderStops == 3,
+                     "Sleep must suppress late lock/unlock capture actions")
+        coordinator.handle(.wake)
+        precondition(refreshes == 4 && previewStarts == 2 && recorderStops == 3)
         coordinator.policy.lockAction = .stopOutputs
         coordinator.handle(.locked); coordinator.handle(.unlocked)
-        precondition(recorderStops == 2 && lifecycleOutputs.activeCount == 0 && allocationsAfterStart == 2)
+        precondition(recorderStops == 4 && lifecycleOutputs.activeCount == 0 && allocationsAfterStart == 2)
         let observed = DesktopResilienceCoordinator(observeSystem: true)
         var observedStops = 0
         observed.stopOutputs = { observedStops += 1 }
