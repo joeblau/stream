@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 @preconcurrency import Network
 import StreamCore
 
@@ -7,10 +8,47 @@ import StreamCore
 final class MemoryProviderCredentials: ProviderCredentialStore, @unchecked Sendable {
     private let lock = NSLock()
     private var values: [String: String] = [:]
+    private var rejectDeletion = false
+    private var rejectTokens = false
+    func fail(deletion: Bool = false, tokenWrite: Bool = false) {
+        lock.withLock { rejectDeletion = deletion; rejectTokens = tokenWrite }
+    }
     private func key(_ item: KeychainStore.Item) -> String { String(reflecting: item) }
     func string(for item: KeychainStore.Item) -> String? { lock.lock(); defer { lock.unlock() }; return values[key(item)] }
-    func set(_ value: String, for item: KeychainStore.Item) -> Bool { lock.lock(); defer { lock.unlock() }; values[key(item)] = value; return true }
+    func set(_ value: String, for item: KeychainStore.Item) -> Bool {
+        lock.withLock {
+            if value.isEmpty {
+                guard !rejectDeletion else { return false }
+                values[key(item)] = nil
+            } else {
+                if case .provider(_, field: .tokens) = item, rejectTokens { return false }
+                values[key(item)] = value
+            }
+            return true
+        }
+    }
     func remove(_ item: KeychainStore.Item) { lock.lock(); defer { lock.unlock() }; values[key(item)] = nil }
+}
+/// Shared owned marker storage models a fresh vault reading persisted intent;
+/// no test reads or writes the operator's UserDefaults or Keychain.
+final class MemoryProviderRetirement: @unchecked Sendable {
+    private let lock = NSLock()
+    private var states: [ManagedProvider: ProviderCredentialRetirementStore.State] = [:]
+    private var rejectRetirement = false
+    private var rejectActivation = false
+    func fail(retirement: Bool = false, activation: Bool = false) {
+        lock.withLock { rejectRetirement = retirement; rejectActivation = activation }
+    }
+    var store: ProviderCredentialRetirementStore {
+        .init(read: { provider in self.lock.withLock { self.states[provider] ?? .legacy } },
+              write: { provider, state in
+                  self.lock.withLock {
+                      guard !(state.retired ? self.rejectRetirement : self.rejectActivation) else { return false }
+                      self.states[provider] = state
+                      return true
+                  }
+              })
+    }
 }
 actor ProviderHTTPFixture {
     var requests: [URLRequest] = []
@@ -191,9 +229,16 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
 }
 @main struct ProviderAccountsHarness {
     @MainActor static func main() async throws {
+        if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--owned-retirement-child" {
+            try await persistentRetirementChild(suite: CommandLine.arguments[2]); return
+        }
+        try await persistentRetirement()
         try await loopback()
         try await httpBoundary()
         try await vaultLifecycle()
+        try await retirementFailures()
+        try await retirementDuringHeldRefresh()
+        try await nativeForgetStorageFailure()
         try await sameClientAuthorizationDuringRefresh()
         try await twitchValidationDuringRefresh()
         try await nativeSession()
@@ -201,7 +246,7 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         try await nativeChatRevocation()
         try await nativeCrossWorkspaceChatAuthority()
         try await nativeEnding()
-        print("Provider accounts: loopback/state/cancel, refresh coalescing/rotation/late response, safe GET retry, exact viewer identity/receipt freshness, twelve stale chat-reply fences/current revocation repair, native OAuth/discovery/public metadata/portable exclusions/event receipt/shutdown PASS")
+        print("Provider accounts: loopback/state/cancel, refresh coalescing/rotation/late response, durable retirement/storage failure/canceled acceptance/held-refresh replacement, safe GET retry, exact viewer identity/receipt freshness, twelve stale chat-reply fences/current revocation repair, native OAuth/discovery/public metadata/portable exclusions/event receipt/shutdown PASS")
     }
     static func twitchValidationDuringRefresh() async throws {
         for status in [200, 401] {
@@ -498,6 +543,185 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         request.url = base.appendingPathComponent("large")
         do { _ = try await ProviderHTTP.shared.send(request); preconditionFailure("HTTP accepted an oversized body") }
         catch let failure as ProviderFailure { precondition(failure.kind == .invalidResponse) }
+    }
+    static func persistentRetirementChild(suite: String) async throws {
+        precondition(suite.hasPrefix("com.joeblau.Stream.validation.provider-retirement."))
+        let credentials = MemoryProviderCredentials()
+        let token = ProviderOAuthToken(access: "owned-child-old", expiresAt: .distantFuture)
+        let raw = String(decoding: try JSONEncoder().encode(token), as: UTF8.self)
+        precondition(credentials.set(raw, for: .provider(.youtube, field: .tokens)))
+        let vault = ProviderTokenVault(keychain: credentials, retirement: .persistent(suiteName: suite))
+        check(await !vault.hasToken(.youtube), "Fresh process must read the owned durable retirement marker")
+        print("Owned retirement marker child-process deny PASS")
+    }
+    static func persistentRetirement() async throws {
+        let suite = "com.joeblau.Stream.validation.provider-retirement." + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suite)!
+        defer { preferences.removePersistentDomain(forName: suite); _ = preferences.synchronize() }
+        let credentials = MemoryProviderCredentials(), store = ProviderCredentialRetirementStore.persistent(suiteName: suite)
+        let vault = ProviderTokenVault(keychain: credentials, retirement: store)
+        let initial = try await vault.configure(.youtube, clientID: "owned-client")
+        try await vault.accept(.init(access: "owned-persistent-old", expiresAt: .distantFuture), provider: .youtube, generation: initial)
+        credentials.fail(deletion: true)
+        check(await !vault.disconnect(.youtube))
+        check(store.read(.youtube).retired)
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+        child.arguments = ["--owned-retirement-child", suite]
+        try child.run()
+        defer {
+            if child.isRunning { _ = kill(child.processIdentifier, SIGKILL) }
+            child.waitUntilExit()
+        }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(10))
+        while child.isRunning, clock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        if child.isRunning {
+            _ = kill(child.processIdentifier, SIGKILL); child.waitUntilExit()
+            preconditionFailure("Owned retirement child exceeded its 10-second deadline")
+        }
+        child.waitUntilExit()
+        precondition(child.terminationReason == .exit && child.terminationStatus == 0)
+        // Corrupt metadata fails closed without inspecting any personal secret.
+        preferences.set(Data("invalid-owned-marker".utf8), forKey: "providerAccounts.retired.v1.twitch")
+        _ = preferences.synchronize()
+        precondition(store.read(.twitch).retired)
+    }
+    static func retirementFailures() async throws {
+        for provider in [ManagedProvider.youtube, .twitch] {
+            let credentials = MemoryProviderCredentials(), markers = MemoryProviderRetirement(), http = ProviderHTTPFixture()
+            let vault = ProviderTokenVault(keychain: credentials, retirement: markers.store, transport: { try await http.send($0) })
+            let generation = try await vault.configure(provider, clientID: "client")
+            let old = ProviderOAuthToken(access: "old-retirement-fixture", refresh: "refresh", expiresAt: .distantFuture, scopes: ["read"])
+            try await vault.accept(old, provider: provider, generation: generation)
+            let raw = credentials.string(for: .provider(provider, field: .tokens))
+            credentials.fail(deletion: true)
+            check(await !vault.disconnect(provider), "Deletion failure must be reported")
+            precondition(credentials.string(for: .provider(provider, field: .tokens)) == raw)
+            let forgottenScopes = await vault.scopes(provider)
+            check(await !vault.hasToken(provider) && forgottenScopes.isEmpty)
+            let restarted = ProviderTokenVault(keychain: credentials, retirement: markers.store, transport: { try await http.send($0) })
+            check(await !restarted.hasToken(provider), "Persisted retirement must deny retained Keychain tokens in a fresh vault")
+            let request = try ProviderAPI.request(provider, path: provider == .youtube ? "/youtube/v3/channels" : "/helix/users")
+            do { _ = try await restarted.send(provider, request: request); preconditionFailure("Forgotten token was sent") }
+            catch let failure as ProviderFailure { precondition(failure.kind == .authorization) }
+            check(await http.allRequests().isEmpty, "Retired authorization cannot issue provider requests")
+
+            // Writing a new grant but failing to clear retirement must never
+            // reopen the retained OLD grant in another vault.
+            credentials.fail(); markers.fail(activation: true)
+            let reconnect = try await vault.configure(provider, clientID: "client")
+            do {
+                try await vault.accept(.init(access: "new-retirement-fixture", refresh: "new", expiresAt: .distantFuture), provider: provider, generation: reconnect)
+                preconditionFailure("Failed marker clear was accepted")
+            } catch is ProviderCredentialPersistenceFailure {}
+            check(await !vault.hasToken(provider))
+            let afterFailedClear = ProviderTokenVault(keychain: credentials, retirement: markers.store)
+            check(await !afterFailedClear.hasToken(provider))
+            precondition(credentials.string(for: .provider(provider, field: .tokens))?.contains("new-retirement-fixture") == true)
+            markers.fail()
+            let repaired = try await vault.configure(provider, clientID: "client")
+            try await vault.accept(old, provider: provider, generation: repaired)
+            let markerBeforeCancel = markers.store.read(provider)
+            let canceledGeneration = try await vault.configure(provider, clientID: "client")
+            let canceled = Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                try await vault.accept(.init(access: "canceled", expiresAt: .distantFuture), provider: provider, generation: canceledGeneration)
+            }
+            do { try await canceled.value; preconditionFailure("Canceled grant was accepted") } catch is CancellationError {}
+            precondition(markers.store.read(provider) == markerBeforeCancel)
+            check(await vault.hasToken(provider), "Canceled same-client consent must preserve the existing grant")
+            precondition(credentials.string(for: .provider(provider, field: .tokens))?.contains("old-retirement-fixture") == true)
+
+            // Failure to persist the new token leaves the old raw value behind,
+            // but the durable deny marker still prevents its reuse.
+            credentials.fail(tokenWrite: true)
+            let deniedWrite = try await vault.configure(provider, clientID: "client")
+            do { try await vault.accept(old, provider: provider, generation: deniedWrite); preconditionFailure("Failed token write accepted") }
+            catch is ProviderCredentialPersistenceFailure {}
+            check(await !vault.hasToken(provider))
+            let afterFailedWrite = ProviderTokenVault(keychain: credentials, retirement: markers.store)
+            check(await !afterFailedWrite.hasToken(provider))
+            credentials.fail()
+            let repair = try await vault.configure(provider, clientID: "client")
+            try await vault.accept(old, provider: provider, generation: repair)
+
+            // If ALL storage writes fail, only this running vault can guarantee
+            // denial. The returned failure must not claim durable sign-out.
+            credentials.fail(deletion: true); markers.fail(retirement: true)
+            check(await !vault.disconnect(provider))
+            check(await !vault.hasToken(provider))
+            let undurable = ProviderTokenVault(keychain: credentials, retirement: markers.store)
+            check(await undurable.hasToken(provider), "All-write failure cannot manufacture a durable marker")
+            credentials.fail(); markers.fail()
+            check(await vault.disconnect(provider))
+            let cleaned = ProviderTokenVault(keychain: credentials, retirement: markers.store)
+            check(await !cleaned.hasToken(provider))
+        }
+    }
+    static func retirementDuringHeldRefresh() async throws {
+        let credentials = MemoryProviderCredentials(), markers = MemoryProviderRetirement(), http = ProviderHTTPFixture()
+        let owner = ProviderTokenVault(keychain: credentials, retirement: markers.store, transport: { try await http.send($0) })
+        let initial = try await owner.configure(.youtube, clientID: "client")
+        try await owner.accept(.init(access: "expired", refresh: "held-old", expiresAt: .distantPast), provider: .youtube, generation: initial)
+        let oldContext = ProviderTokenVault(keychain: credentials, retirement: markers.store, transport: { try await http.send($0) })
+        await http.configure(hold: true)
+        let oldRequest = Task { try await oldContext.send(.youtube, request: ProviderAPI.request(.youtube, path: "/youtube/v3/channels")) }
+        await settle { await http.refreshEntered }
+        credentials.fail(deletion: true)
+        check(await !owner.disconnect(.youtube))
+        credentials.fail()
+        let next = try await owner.configure(.youtube, clientID: "client")
+        try await owner.accept(.init(access: "replacement-after-forget", refresh: "replacement", expiresAt: .distantPast), provider: .youtube, generation: next)
+        // Another caller in the old context must create a new refresh using
+        // the replacement, rather than joining its old held task under a new
+        // marker revision. The old task's eventual cleanup cannot remove it.
+        await http.configure(hold: false)
+        _ = try await oldContext.send(.youtube, request: ProviderAPI.request(.youtube, path: "/youtube/v3/channels"))
+        let refreshRequests = await http.allRequests().filter { $0.url?.host == "oauth2.googleapis.com" }
+        precondition(refreshRequests.count == 2)
+        precondition(String(decoding: refreshRequests[1].httpBody!, as: UTF8.self).contains("refresh_token=replacement"))
+        let replacement = credentials.string(for: .provider(.youtube, field: .tokens))
+        await http.release()
+        do { _ = try await oldRequest.value; preconditionFailure("Held old refresh restored retired authority") } catch is CancellationError {}
+        precondition(credentials.string(for: .provider(.youtube, field: .tokens)) == replacement)
+        check(await owner.hasToken(.youtube))
+    }
+    @MainActor static func nativeForgetStorageFailure() async throws {
+        let credentials = MemoryProviderCredentials(), markers = MemoryProviderRetirement(), http = ProviderHTTPFixture()
+        let vault = ProviderTokenVault(keychain: credentials, retirement: markers.store, transport: { try await http.send($0) })
+        let initial = try await vault.configure(.youtube, clientID: "client")
+        try await vault.accept(.init(access: "forget-ui", refresh: "refresh", expiresAt: .distantFuture, scopes: ["read"]), provider: .youtube, generation: initial)
+        let session = ProviderAccountSession(restream: FixtureRestream(), vault: vault, transport: { try await http.send($0) })
+        defer { session.shutdown() }
+        await settle { @MainActor in session.snapshot(.youtube).hasCredential }
+        credentials.fail(deletion: true)
+        session.forget(.youtube)
+        await settle { @MainActor in !session.snapshot(.youtube).isWorking }
+        let failed = session.snapshot(.youtube)
+        precondition(!failed.hasCredential && failed.scopes.isEmpty && failed.channels.isEmpty && failed.events.isEmpty && failed.verifiedAt == nil)
+        precondition(failed.localCredentialFailure?.contains("durable cleanup was not confirmed") == true)
+        precondition(!session.canRequest(.youtube))
+        credentials.fail()
+        session.forget(.youtube)
+        await settle { @MainActor in !session.snapshot(.youtube).isWorking }
+        precondition(session.snapshot(.youtube).localCredentialFailure == nil && session.canRequest(.youtube))
+        check(await !vault.hasToken(.youtube))
+
+        // Cancel stops waiting, not the already-requested local retirement.
+        // It must not leave verified channels/grants visible in the panel.
+        let reconnected = try await vault.configure(.youtube, clientID: "client")
+        try await vault.accept(.init(access: "cancel-forget", refresh: "refresh", expiresAt: .distantFuture, scopes: ["read"]), provider: .youtube, generation: reconnected)
+        session.refresh(.youtube)
+        await settle { @MainActor in session.snapshot(.youtube).verifiedAt != nil }
+        session.forget(.youtube); session.cancel(.youtube)
+        let canceled = session.snapshot(.youtube)
+        precondition(!canceled.hasCredential && canceled.scopes.isEmpty && canceled.channels.isEmpty && canceled.events.isEmpty && canceled.verifiedAt == nil)
+        precondition(canceled.localCredentialFailure?.contains("not been confirmed") == true)
+        await settle { await !vault.hasToken(.youtube) }
+        session.forget(.youtube)
+        await settle { @MainActor in !session.snapshot(.youtube).isWorking }
+        precondition(session.snapshot(.youtube).localCredentialFailure == nil)
     }
     static func vaultLifecycle() async throws {
         let memory = MemoryProviderCredentials(), http = ProviderHTTPFixture()
