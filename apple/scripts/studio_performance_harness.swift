@@ -193,7 +193,7 @@ private struct PerformanceReport: Codable {
             let slowDomain = StableFrameDomainID(workspace: workspace, kind: .validation,
                 outputID: "deliberate80ms", plane: .program)
             let sourceRequest = try engine.sourceFrameResourceRequest(canvasSize: CGSize(width: width, height: height))
-            let resources = try RawVideoResourceCoordinator.shared.reserveBatch([
+            let videoAdmissionResources = try RawVideoResourceCoordinator.shared.reserveBatch([
                 sourceRequest,
                 .init(domain: recordingDomain, descriptor: .init(width: width, height: height, capacityPolicy:
                     .recording(videoCapacity: configuration.videoCapacity,
@@ -202,12 +202,12 @@ private struct PerformanceReport: Codable {
                 // and one incoming copy; it has no downstream native queue.
                 .init(domain: slowDomain, descriptor: .init(width: width, height: height, capacity: 3), sessionGeneration: generation)
             ])
-            defer { RawVideoResourceCoordinator.shared.rollback(resources) }
-            let sourceResources = try resources.selecting(domain: sourceRequest.domain)
+            defer { RawVideoResourceCoordinator.shared.rollback(videoAdmissionResources) }
+            let sourceResources = try videoAdmissionResources.selecting(domain: sourceRequest.domain)
             defer { RawVideoResourceCoordinator.shared.rollback(sourceResources) }
-            let recordingResources = try resources.selecting(domain: recordingDomain)
+            let recordingResources = try videoAdmissionResources.selecting(domain: recordingDomain)
             defer { RawVideoResourceCoordinator.shared.rollback(recordingResources) }
-            let slowResources = try resources.selecting(domain: slowDomain)
+            let slowResources = try videoAdmissionResources.selecting(domain: slowDomain)
             defer { RawVideoResourceCoordinator.shared.rollback(slowResources) }
             let sourceBank = sourceResources.banks[0], recordingBank = recordingResources.banks[0], slowBank = slowResources.banks[0]
             let recordingCancellation = FrameDeliveryCancellation(), slowCancellation = FrameDeliveryCancellation()

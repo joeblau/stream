@@ -109,7 +109,7 @@ jobs:
               'apple/scripts/prepare_composition_hotpath_profile.py': 'ef4b918c20986a3d37259aa22a5f53b24caedd06cbe99f4264f41514b7c54163',
               'apple/scripts/composition_hotpath_profile.swift': '512dac74a982ecc7d49337fb46bd1fc43e72cd89a2f035b096d0fa45801a1b1b',
               'apple/scripts/run_composition_hotpath_profile.zsh': 'b051da683fd67b9a69cc6f1eca5261ab47607feba19edd27130b8bbc52e27804',
-              'apple/scripts/studio_performance_harness.swift': '381eb58932abfbe2ff259e14bbec32769f2c5b7071639c78343332d45e80540c',
+              'apple/scripts/studio_performance_harness.swift': 'ce1771c698cd8dea42e341778f2445cfd55f346c311abb6d53d3999614dd23ae',
               'apple/scripts/performance_owned_replay.swift': 'a37d3a5aba9bffc4e6e4516bfccc2e9461aa9bceb4b52a69c818f443140a937d',
               'apple/scripts/performance_workload_evidence.swift': '4312804d5de645cad552adb26d5217846f3c483510fd9bcc13881500746627f3',
               'apple/scripts/program_recording_fixtures.swift': '24f9e02a8b0a9866a05161e28cc9792a29b3336785550d4cd4a53b3537e1a0b4',
