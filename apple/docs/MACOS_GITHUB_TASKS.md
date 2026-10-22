@@ -1335,3 +1335,53 @@ bodies/states, no outside-inventory open issue and zero open PRs. Every open
 tracker retains incomplete children; no new closure is justified. All earlier
 wave objects and failed receipts remain intact. This ledger work performs no
 GitHub write, native run, benchmark or publication.
+
+## Durable diagnostics for the original software-fixture timeout — 2026-10-22 UTC
+
+`c0fae63` changes exactly **three validation recipes**: CI, the shared-encoder
+launcher and its Swift fixture. Shipping app/Core/vendor bytes remain identical
+to the exact `4e17084` universal Release/bundle PASS; **no new app build ran**.
+The current **838-path** manifest verifies c0fae63, with those three changed
+recipe hashes explicitly separated from the reused shipping build. The changed
+actual fixture was compiled and executed independently by its owner.
+
+The original e41 ARM native CI fails **step 14**, where the second software
+invocation exceeds its unchanged **90-second aggregate deadline**. The normal
+invocation and earlier software packet/codec/lifecycle checks pass. Full Core
+passes **609 tests across 83 suites in 114.954 seconds**; controller/PCM step 10
+passes, while annotation step 17 is not reached. Intel separately completes
+step 10 and remains active in the retained snapshot. Missing await markers and
+receiver/media artifacts prevent attribution of the original timeout to a
+specific wait or production defect. The last RTMP handshake is not a hang diagnosis.
+
+The diagnostic patch preserves every original Swift line in order, all awaits,
+feed pacing, assertions and the original deadline. It adds sparse monotonic
+phase/last-state records, direct durable raw output, receiver/media receipts and
+a CI always-upload subtree. Independent review clears **282 bindings/checks**.
+One local full software compilation/invocation passes the unchanged actual
+RTMP/SRT decoded-media checks: native-main time **20.83 seconds**, 58 phase
+records and all seven critical BEGIN/END pairs. This is local instrumentation
+smoke, not a hosted-timeout reproduction, cure or throughput comparison. The
+untriggered timeout cleanup remains source-reviewed, not dynamically exercised.
+
+One supplemental M3 Max inspection of the exact retained Intel case-1 movie
+passes in **31.905 seconds**, decoding **15,247 frames**, using the entire
+unchanged original `inspect(url, expectedDuration: nil, checkSync: false)`
+fixture and original AVAssetReader path. Independent review checks 41 facts and
+13 output bindings. This establishes scoped file/EOF readability only. It does
+**not** change the original Intel 1380-second failure, incomplete inspection,
+capacity deficit or waveform-sync scope, or establish its cause/later completion.
+
+The separate published f05 browser foundation run **39855898355 succeeds** with
+21 Worker tests, 58 browser-client tests and actual synthetic Chrome. Native
+f05 run 39855898463 is pending behind the active main group at its retained
+snapshot. Latest-pending coalescing can replace it automatically; no manual
+cancellation/retry or every-commit/FIFO guarantee is claimed. Earlier failed
+receipts and whole-run status remain unchanged.
+
+The fresh **2026-10-22T21:41:26Z** complete read-only inventory confirms original
+61 issues **27 closed / 34 open**, all 135 macOS issues **101 closed / 34 open**,
+unchanged bodies/states and zero open PRs or outside-inventory open issues. All
+open trackers have incomplete children; no closure is justified. Prior wave
+objects and original evidence remain intact. This ledger work runs no native
+fixture, benchmark, decoder or build and performs no GitHub write/publication.
