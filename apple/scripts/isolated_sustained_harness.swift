@@ -250,6 +250,8 @@ private final class ISOInputClock: @unchecked Sendable {
         let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         let diagnostic = ProcessInfo.processInfo.environment["ISO_SUSTAINED_DIAGNOSTIC"] == "1"
         let timeProbe = ISOTimeProbe.shared
+        if ProcessInfo.processInfo.environment["ISO_ENCODER_CADENCE_ONLY"] == "1" { try await SharedEncoderCadenceHarness.run(root: root); return }
+        if ProcessInfo.processInfo.environment["ISO_RAW_CADENCE_ONLY"] == "1" { try await SharedEncoderCadenceHarness.raw(root: root); return }
         if ProcessInfo.processInfo.environment["ISO_SOURCE_CLOCK_ONLY"] == "1" { try sourceClockRegression(); return }
         print("Artifacts: \(root.path)")
         if ProcessInfo.processInfo.environment["ISO_SUSTAINED_REGRESSIONS_ONLY"] == "1" { try await regressions(root); return }

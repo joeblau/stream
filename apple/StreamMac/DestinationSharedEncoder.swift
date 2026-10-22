@@ -235,7 +235,11 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     private func encodeVideo(_ sample: CMSampleBuffer) throws {
         let pts = sample.presentationTimeStamp
         guard pts.isNumeric, let input = sample.imageBuffer else { throw CocoaError(.coderInvalidValue) }
-        if nextVideoPTS.isNumeric, (pts - nextVideoPTS).seconds < -0.0001 { return }
+        // Equal/slower declared sources are already paced by the compositor.
+        // A same-rate phase threshold mistakes host-timer jitter for an extra
+        // source frame. Downsample only when the destination is truly slower.
+        if key.sourceFPS > key.fps, nextVideoPTS.isNumeric,
+           (pts - nextVideoPTS).seconds < -0.0001 { return }
         guard inFlight < 4 else { lock.lock(); rawVideoDrops += 1; lock.unlock(); return }
         if videoSession == nil { try makeVideoSession() }
         guard let videoSession, let pool else { throw CocoaError(.coderInvalidValue) }

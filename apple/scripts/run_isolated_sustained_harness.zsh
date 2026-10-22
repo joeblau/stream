@@ -47,6 +47,16 @@ def replace_mac(target,root,folder,name)
  target['sources'][0]['excludes'] << name
  target['sources'] << path
 end
+if ENV['ISO_CADENCE_BASELINE']=='1'
+ ['DestinationSharedEncoder.swift','RTMPPublisher.swift','SessionPublisher.swift'].each do |name|
+  replace_mac(target,root,folder,name) do |_|
+   directory=name=='DestinationSharedEncoder.swift' ? 'StreamMac' : 'StreamBroadcast'
+   source=IO.popen(['git','-C',root,'show',"d413aa1:apple/#{directory}/#{name}"], &:read)
+   abort 'Historical cadence source unavailable' if source.empty?
+   source
+  end
+ end
+end
 replace_mac(target,root,folder,'StreamController.swift') do |s|
  s.sub!('let capturePool = CaptureSourcePool()','let capturePool = CaptureSourcePool(defaultCameraDeviceID: { OwnedCaptureBoundary.defaultID })') or abort 'Camera construction changed'
  s.sub!('DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))','DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"), observeSystem: false, initialSessionState: .unlocked)') or abort 'Owned initial-lock construction changed'
@@ -130,7 +140,7 @@ end
  source.gsub!('size.width == 320 && size.height == 180', 'size.width == 1920 && size.height == 1080')
  path=File.join(folder,'fixtures',name);File.write(path,source);target['sources'] << path
 end
-target['sources'] += ['isolated_sustained_harness.swift','program_recording_fixtures.swift'].map{|n| File.join(root,'scripts',n)}
+target['sources'] += ['isolated_sustained_harness.swift','shared_encoder_cadence_harness.swift','program_recording_fixtures.swift'].map{|n| File.join(root,'scripts',n)}
 spec['targets']['IsolatedSustainedHarness']=target
 spec['schemes']['IsolatedSustainedHarness']={'build'=>{'targets'=>{'IsolatedSustainedHarness'=>'all'}}}
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
