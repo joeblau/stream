@@ -20,6 +20,11 @@ RUBY
     -destination 'platform=macOS' -derivedDataPath "${BUILD_DIR}/core-derived" -jobs 2 CODE_SIGNING_ALLOWED=NO OTHER_SWIFT_FLAGS='$(inherited) -j2' build
   FRAMEWORKS="${BUILD_DIR}/core-derived/Build/Products/Debug"
 fi
+reference_arguments=()
+if [[ -n "${STREAM_GUEST_RFC_OPUS_LIBRARY:-}" ]]; then
+  [[ "$STREAM_GUEST_RFC_OPUS_LIBRARY" == /* && -f "$STREAM_GUEST_RFC_OPUS_LIBRARY" ]] || { print -u2 'Set an existing absolute libopus file; no dependency installation is performed.'; exit 1; }
+  reference_arguments=(-D STREAM_GUEST_RFC_OPUS_VALIDATION "${SCRIPT_DIR}/guest_return_reference_opus.swift")
+fi
 xcrun swiftc -j2 -swift-version 6 -strict-concurrency=complete -parse-as-library \
   -target "$(uname -m)-apple-macos14.0" -F "${FRAMEWORKS}" -framework StreamCore \
   "${APPLE_DIR}/StreamMac/GuestMediaReceipts.swift" \
@@ -29,5 +34,5 @@ xcrun swiftc -j2 -swift-version 6 -strict-concurrency=complete -parse-as-library
   "${APPLE_DIR}/StreamMac/ProgramRecordingSession.swift" "${APPLE_DIR}/StreamMac/AudioMixEngine.swift" \
   "${APPLE_DIR}/StreamMac/NativeGuestReturnAudioEncoder.swift" \
   "${SCRIPT_DIR}/guest_return_sender_diagnostics.swift" \
-  "${SCRIPT_DIR}/guest_return_sender_local_harness.swift" -o "${BUILD_DIR}/GuestReturnSenderDiagnostic"
+  "${SCRIPT_DIR}/guest_return_sender_local_harness.swift" "${reference_arguments[@]}" -o "${BUILD_DIR}/GuestReturnSenderDiagnostic"
 env DYLD_FRAMEWORK_PATH="${FRAMEWORKS}" "${BUILD_DIR}/GuestReturnSenderDiagnostic"

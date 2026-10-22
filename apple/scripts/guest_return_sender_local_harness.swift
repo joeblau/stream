@@ -59,9 +59,28 @@ private final class UnitReturnSink: @unchecked Sendable {
         require((receipt["packetAttempts"] as! Int) >= 80 && (receipt["successfulSends"] as! Int) == 0 && (receipt["encoderErrors"] as! Int) == 0,
                 "Bounded actual encoder observation failed; no socket send is claimed by this unit")
         require(abs(amplitude(pcm,0,0)-0.4) < 0.035 && abs(amplitude(pcm,1,1)-0.2) < 0.025, "Actual recipient PCM is not the owned stereo tone")
-        require(abs(amplitude(decoded,0,0)-0.4) < 0.04 && abs(amplitude(decoded,1,1)-0.2) < 0.03, "Actual emitted Opus does not independently decode the owned stereo tone")
+        require(abs(amplitude(decoded,0,0)-0.4) < 0.04 && abs(amplitude(decoded,1,1)-0.2) < 0.03, "Actual emitted Opus does not decode the owned stereo tone in a separate AudioCodec instance")
+        #if STREAM_GUEST_RFC_OPUS_VALIDATION
+        let reference = receipt["referenceOpusDecode"] as! [String: Any]
+        require(reference["unavailable"] == nil, "Reference libopus decoder unavailable: \(reference)")
+        require(reference["packetFrames"] as? Int == 960 && reference["packetChannels"] as? Int == 2,
+                "Actual payload is not RFC stereo20ms Opus")
+        require(reference["frames"] as? Int == (reference["packets"] as! Int) * 960 && reference["sourceRTPAll960"] as? Bool == true
+                && reference["sourcePTSAll960"] as? Bool == true, "Reference count/source clock framing changed")
+        require(reference["malformedTOCRejected"] as? Bool == true, "Reference parser accepted malformedTOC control")
+        require(abs(amplitude(reference,0,0)-0.4) < 0.04 && abs(amplitude(reference,1,1)-0.2) < 0.03,
+                "Reference decoded stereo source amplitudes differ")
+        require(amplitude(reference,0,1) < 0.005 && amplitude(reference,1,0) < 0.005,
+                "Reference decoder lost stereo channel identity")
+        require((0..<2).allSatisfy { amplitude(reference,$0,2) < 0.005 && amplitude(reference,$0,3) < 0.005 },
+                "Reference decoder created absent440/880Hz tones")
+        let rms = (reference["channels"] as! [[String: Any]]).map { $0["rms"] as! Double }
+        require(abs(rms[0] - 0.4 / sqrt(2)) < 0.025 && abs(rms[1] - 0.2 / sqrt(2)) < 0.02,
+                "Reference decoded RMS differs from generated stereo amplitudes")
+        print("PASS: shipping encoder raw20ms/stereo payloads decode through actual existing reference libopus; original PTS/RTP960 grid, stereo frequency/amplitude identity and malformedTOC negative control")
+        #endif
         print(String(decoding: try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]), as: UTF8.self))
-        print("PASS:2.2s actual mixer/rings/recipient-return mailbox→shipping native Opus encoder→independent AudioCodec stereo PCM decode; no transport/browser/device/capture/permissions claim")
+        print("PASS:2.2s actual mixer/rings/recipient-return mailbox→shipping native Opus encoder→separate Apple AudioCodec stereo PCM decode; no transport/browser/device/capture/permissions claim")
     }
     static func sample(_ pcm: AVAudioPCMBuffer, pts: CMTime) -> CMSampleBuffer {
         let frames = Int(pcm.frameLength)
