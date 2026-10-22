@@ -204,6 +204,8 @@ private struct PDFSourceRowView: View {
             if pageCount > 1 {
                 HStack(spacing: 8) {
                     Slider(value: pageBinding, in: 1...Double(pageCount), step: 1)
+                        .accessibilityLabel("\(source.name) document page")
+                        .accessibilityValue("Page \(currentPage + 1) of \(pageCount)")
                     Text("Page \(currentPage + 1) of \(pageCount)")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -248,6 +250,7 @@ private struct PDFSourceRowView: View {
         .buttonStyle(.borderless)
         .disabled(!dispatcher.canExecute(.pdfPreviousPage(source.id)) || currentPage <= 0)
         .help("Previous page")
+        .accessibilityLabel("Previous page in \(source.name)")
         Button {
             dispatcher.execute(.pdfNextPage(source.id))
         } label: {
@@ -257,6 +260,7 @@ private struct PDFSourceRowView: View {
         .disabled(!dispatcher.canExecute(.pdfNextPage(source.id))
                   || (pageCount > 0 && currentPage >= pageCount - 1))
         .help("Next page")
+        .accessibilityLabel("Next page in \(source.name)")
     }
 
     @ViewBuilder
@@ -304,6 +308,8 @@ private struct PDFSourceRowView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Go to page \(index + 1)")
+                    .accessibilityLabel("\(source.name), go to page \(index + 1)")
+                    .accessibilityValue(index == currentPage ? "Current page" : "")
                 }
             }
             .padding(.vertical, 2)
