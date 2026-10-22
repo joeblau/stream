@@ -315,6 +315,15 @@ The native controller fixture verifies rejection before any publisher starts.
 | Apple M3 Max, Mac15,8, 16 CPUs | 1080p30 | Two 1080p30 camera/screen/guest selections; measured camera+screen and camera+guest pairs | Four including program and publishers |
 | Other models/variants, including Intel | Awaiting native qualification | Start is rejected with the detected class | No inferred limit |
 
+The later combined native workload in
+[ISOLATED_VIDEO_SUSTAINED_VALIDATION.md](docs/ISOLATED_VIDEO_SUSTAINED_VALIDATION.md)
+passes two60-second runs with actual Program + two ISO + RTMP encoders on that
+class. Four1080p files each contain1809 frames, selected H.264/HEVC and audio
+policy, zero render/audio drops, exact expected cue counts and13.94–49.10ms
+flash/tone deltas. The real123.9s network recording has3714 video packets and
+survives both independent recording stops. The report records marked source
+gaps, original/fixed cadence failures, resource observations and input limits.
+
 Each isolated source owns its serial render queue and independent Apple writer:
 six video frames/48 MB and 128 associated-audio chunks maximum. Every segment
 gets a fresh renderer and writer. It follows the program's accepted shared host
