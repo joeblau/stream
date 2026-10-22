@@ -289,7 +289,7 @@ private actor OwnedEndingPublisher: Publisher {
         var pool = [first, healthy]
         let outputs = DestinationOutputController(factory: { _ in pool.removeFirst() })
         let a = StreamDestination(name: "Explicit end", providerBinding: binding), b = StreamDestination(name: "Healthy peer")
-        outputs.start(a, settings: StreamSettings()); outputs.start(b, settings: StreamSettings())
+        outputs.start(a, settings: StreamSettings(), sourceSize: CGSize(width: 320, height: 180)); outputs.start(b, settings: StreamSettings(), sourceSize: CGSize(width: 320, height: 180))
         try await until { await MainActor.run { outputs.liveCount == 2 } }
         let healthyToken = outputs.sessionToken(b.id)
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("owned-ending-media-\(UUID())")

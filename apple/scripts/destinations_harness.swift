@@ -48,12 +48,12 @@ actor FakeDestinationPublisher: Publisher {
         let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() })
         let a = StreamDestination(name: "Slow"), b = StreamDestination(name: "Healthy")
         outputs.isPublishingAllowed = false
-        outputs.start(a, settings: .default)
+        outputs.start(a, settings: .default, sourceSize: CGSize(width: 2, height: 2))
         precondition(pending.count == 3 && outputs.states.isEmpty,
                      "Local rehearsal must prevent publisher allocation at the output boundary")
         outputs.isPublishingAllowed = true
-        outputs.start(a, settings: .default)
-        outputs.start(b, settings: .default)
+        outputs.start(a, settings: .default, sourceSize: CGSize(width: 2, height: 2))
+        outputs.start(b, settings: .default, sourceSize: CGSize(width: 2, height: 2))
         precondition(outputs.states[a.id] == .connecting && outputs.states[b.id] == .connecting)
         slow.emit(.published); healthy.emit(.published)
         await settle { outputs.liveCount == 2 }
@@ -61,6 +61,10 @@ actor FakeDestinationPublisher: Publisher {
         let acknowledgedStart = outputs.acknowledgedStarts[a.id]
         precondition(acknowledgedStart != nil)
 
+        // A synthetic published event alone does not acknowledge the new raw
+        // ingress. Wait for the actual start boundary (which follows broker ACK).
+        await settleAsync { await slow.startedSettings != nil }
+        await settleAsync { await healthy.startedSettings != nil }
         // A transport waiting forever on one frame cannot block the healthy sink.
         await slow.hold()
         outputs.fanout.enqueueVideo(try sample(0))
@@ -70,7 +74,9 @@ actor FakeDestinationPublisher: Publisher {
         await settleAsync { await healthy.frames.last == 100 }
         let diagnostics = await outputs.diagnosticsSnapshot()
         precondition(diagnostics.allSatisfy { $0.videoQueueDepth <= 2 })
-        precondition(diagnostics.first { $0.id == a.id.uuidString }!.videoMailboxDrops >= 98)
+        let slowDiagnostics = diagnostics.first { $0.id == a.id.uuidString }!
+        precondition(slowDiagnostics.videoMailboxDrops + (slowDiagnostics.privateVideoTransferDrops ?? 0) >= 98,
+                     "The combined bounded private transfer/mailbox must shed the unconsumed burst")
         await slow.release()
         await settleAsync { await slow.frames.count == 3 }
         let slowFrames = await slow.frames
@@ -88,7 +94,7 @@ actor FakeDestinationPublisher: Publisher {
         precondition(failedDiagnostics.first { $0.id == a.id.uuidString }?.startedAt == nil)
         precondition(failedDiagnostics.first { $0.id == b.id.uuidString }?.startedAt != nil)
         if case .failed(let message) = outputs.states[a.id] { precondition(!message.contains("secret")) }
-        outputs.start(a, settings: .default)
+        outputs.start(a, settings: .default, sourceSize: CGSize(width: 2, height: 2))
         slow.emit(.published) // Obsolete session must never acknowledge this retry.
         await Task.yield()
         precondition(outputs.states[a.id] == .connecting)
@@ -112,7 +118,7 @@ actor FakeDestinationPublisher: Publisher {
             allocations += 1
             return FakeDestinationPublisher()
         })
-        for number in 0..<11 { capacity.start(.init(name: "Output \(number)"), settings: .default) }
+        for number in 0..<11 { capacity.start(.init(name: "Output \(number)"), settings: .default, sourceSize: CGSize(width: 2, height: 2)) }
         precondition(allocations == 10 && capacity.activeCount == 10)
         precondition(capacity.states.values.filter { if case .failed = $0 { return true }; return false }.count == 1)
         capacity.stopAll()
@@ -127,7 +133,7 @@ actor FakeDestinationPublisher: Publisher {
             return lifecyclePending.removeFirst()
         })
         let one = StreamDestination(name: "One"), two = StreamDestination(name: "Two")
-        lifecycleOutputs.start(one, settings: .default); lifecycleOutputs.start(two, settings: .default)
+        lifecycleOutputs.start(one, settings: .default, sourceSize: CGSize(width: 2, height: 2)); lifecycleOutputs.start(two, settings: .default, sourceSize: CGSize(width: 2, height: 2))
         first.emit(.published); second.emit(.published)
         await settle { lifecycleOutputs.liveCount == 2 }
         var health = SourceFailureTracker<String>()
@@ -215,7 +221,7 @@ actor FakeDestinationPublisher: Publisher {
         let hardware = OutputCapabilities(hardwareTier: .uhd4K, hardwareMaxFrameRate: 60)
         for (destination, credentials) in [(x, xCredentials), (restream, relayCredentials)] {
             precondition(DestinationValidator.startErrors(destination, credentials: credentials, program: .default, capabilities: hardware).isEmpty)
-            outputs.start(destination, settings: DestinationValidator.settings(destination, credentials: credentials, base: .default))
+            outputs.start(destination, settings: DestinationValidator.settings(destination, credentials: credentials, base: .default), sourceSize: CGSize(width: 2, height: 2))
         }
         await settleAsync { await provider.startedSettings != nil }
         await settleAsync { await relay.startedSettings != nil }
@@ -227,7 +233,7 @@ actor FakeDestinationPublisher: Publisher {
         relay.emit(.failed(message: "fixture failure"))
         await settle { outputs.partialSuccess }
         precondition(outputs.states[x.id] == .live)
-        outputs.start(restream, settings: relaySettings)
+        outputs.start(restream, settings: relaySettings, sourceSize: CGSize(width: 2, height: 2))
         relay.emit(.published)
         await Task.yield()
         precondition(outputs.states[restream.id] == .connecting)

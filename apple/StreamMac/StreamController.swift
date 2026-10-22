@@ -184,6 +184,10 @@ final class StreamController: ObservableObject {
     private var guestSecondaryReturnTokens: Set<UUID> = []
     private var guestCleanReturnTokens: Set<UUID> = []
     private let engine: CompositionEngine
+    private var programGeometryCommand: Task<Void, Never>?
+    private var secondaryGeometryCommand: Task<Void, Never>?
+    private var programGeometryGeneration = UUID()
+    private var secondaryGeometryGeneration = UUID()
     /// The W03 preview engine: composites the STAGED scene for the PREVIEW
     /// monitor only. Same source providers, independent tick — preview work
     /// can never delay or re-anchor the program engine.
@@ -194,12 +198,14 @@ final class StreamController: ObservableObject {
     private var secondaryMonitorsEnabled = false
     private var secondaryPreviewSubscription: FrameSubscription?
     private var secondaryProgramSubscription: FrameSubscription?
-    private var secondaryPublisherSubscription: FrameSubscription?
     private let secondaryPreviewConverter = PreviewImageConverter()
     private let secondaryProgramConverter = PreviewImageConverter()
     /// The W03 staged/program scene model; the engines follow its snapshots.
     private let previewProgram: PreviewProgramModel
     let destinationOutputs: DestinationOutputController
+    /// One stable namespace for every raw-output isolation domain in this
+    /// workspace. An output activation uses a separate fresh generation.
+    var rawVideoResourceWorkspaceID: UUID { destinationOutputs.rawVideoResourceWorkspaceID }
     @Published private(set) var managedStart: ManagedYouTubeStartCoordinator?
     @Published private(set) var managedStartHasEntries = false
     private weak var managedStartAccounts: ProviderAccountSession?
@@ -207,10 +213,6 @@ final class StreamController: ObservableObject {
     private var managedStartEntriesObserver: AnyCancellable?
     private var managedStartAuthorityObserver: AnyCancellable?
     let ending = StudioEndingCoordinator()
-    /// Ordered publisher video path: the engine's publisher sink yields into
-    /// this newest-only stream; one consumer awaits `appendVideo` in order.
-    private var videoConsumer: Task<Void, Never>?
-    private var videoContinuation: AsyncStream<CMSampleBuffer>.Continuation?
     /// Captures + engine are up. Independent from preview: an active stream
     /// or recording keeps the pipeline running with the preview off (W02).
     private var isPipelineRunning = false
@@ -667,23 +669,26 @@ final class StreamController: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // The publisher output subscribes once for the controller's lifetime:
-        // the sink never blocks the engine (newest-only stream), and the
-        // consumer below drops frames while no publisher owns the session.
-        let (stream, continuation) = AsyncStream.makeStream(
-            of: CMSampleBuffer.self, bufferingPolicy: .bufferingNewest(1))
-        videoContinuation = continuation
-        videoConsumer = Task {
-            for await sample in stream {
-                publisherBox.enqueueVideo(sample)
-            }
-        }
+        // Raw video is registered per independent publisher/shared encoder
+        // lineage. Installation ACK precedes publisher.start; there is no
+        // aggregate publisher stream retaining compositor-backed samples.
         let engine = self.engine
-        let subscription = FrameSubscription()
-        Task { [continuation] in
-            await engine.addSink(token: subscription.token, capacity: 1) { frame in
-                continuation.yield(frame.sampleBuffer)
-            }
+        destinationOutputs.frameDelivery = .init(sourceRequest: { size, canvas in
+            try engine.sourceFrameResourceRequest(canvasSize: size, canvas: canvas)
+        }, install: { [weak self] token, domain, generation, bank, sourceBank, sourceReceipt, transfer, canvas, cancellation, authorized, sink in
+            guard let self, let sourceBank, sourceReceipt != nil else { throw CancellationError() }
+            try await self.awaitFrameDeliveryGeometry(canvas: canvas,
+                expectedSize: CGSize(width: sourceBank.descriptor.width, height: sourceBank.descriptor.height))
+            return try await engine.installFrameDelivery(token: token, domain: domain, generation: generation,
+                bank: bank, sourceBank: sourceBank, sourceReceipt: sourceReceipt,
+                transfer: transfer, capacity: 2, cancellation: cancellation, canvas: canvas, authorized: authorized, sink: sink)
+        }, remove: { lease, _ in _ = await engine.removeFrameDelivery(lease) },
+           cancel: { token, _ in await engine.cancelFrameDelivery(token: token) },
+           statistics: { lease, _ in await engine.frameDeliveryStatistics(lease) })
+        destinationOutputs.startIsCurrent = { [weak self] destination in
+            guard let self else { return false }
+            return !self.resilience.isLocked && !self.isRehearsing &&
+                self.destinations.saved.first(where: { $0.id == destination.id }) == destination
         }
         destinationOutputs.stateDidChange = { [weak self] in self?.destinationsDidChange() }
         // A10 (issue #122): push the persisted delays/ducking onto the
@@ -793,6 +798,48 @@ final class StreamController: ObservableObject {
         return subscription
     }
 
+    /// Await only the existing authoritative geometry command. Output startup
+    /// never overwrites geometry from a captured plan or polls/retries a bank.
+    func awaitFrameDeliveryGeometry(canvas: OutputCanvas = .program, expectedSize: CGSize) async throws {
+        let generation = canvas == .program ? programGeometryGeneration : secondaryGeometryGeneration
+        let command = canvas == .program ? programGeometryCommand : secondaryGeometryCommand
+        await command?.value
+        try Task.checkCancellation()
+        let actualSize = await engine.frameDeliveryCanvasSize(canvas: canvas)
+        try Task.checkCancellation()
+        let currentGeneration = canvas == .program ? programGeometryGeneration : secondaryGeometryGeneration
+        let currentSize = canvas == .program ? activeProfile.canvasSize : activeSecondaryProfile.canvasSize
+        guard generation == currentGeneration, currentSize == expectedSize, actualSize == expectedSize else {
+            throw RawVideoResourceFailure.sessionConflict
+        }
+    }
+
+    func sourceFrameResourceRequest(canvasSize: CGSize, canvas: OutputCanvas = .program,
+                                    clean: Bool = false) throws -> RawVideoResourceRequest {
+        try engine.sourceFrameResourceRequest(canvasSize: canvasSize, canvas: canvas, clean: clean)
+    }
+
+    /// The caller has already synchronously admitted this exact bank. The
+    /// returned lease acknowledges registration, before any opaque output start.
+    func installFrameDelivery(token: UUID, domain: StableFrameDomainID, generation: UUID,
+                              bank: RawVideoResourceBank, sourceBank: RawVideoResourceBank?, sourceReceipt: RawVideoResourceReceipt?,
+                              transfer: FrameDeliveryTransfer = .copyBGRA,
+                              capacity: Int = 2, canvas: OutputCanvas = .program, clean: Bool = false,
+                              cancellation: FrameDeliveryCancellation,
+                              authorized: @escaping @Sendable () -> Bool = { true },
+                              sink: @escaping @Sendable (CompositedFrame) -> Void) async throws -> FrameDeliveryLease {
+        guard let sourceBank, sourceReceipt != nil else { throw FrameDeliveryFailure.invalidBank }
+        try await awaitFrameDeliveryGeometry(canvas: canvas,
+            expectedSize: CGSize(width: sourceBank.descriptor.width, height: sourceBank.descriptor.height))
+        return try await engine.installFrameDelivery(token: token, domain: domain, generation: generation,
+            bank: bank, sourceBank: sourceBank, sourceReceipt: sourceReceipt,
+            transfer: transfer, capacity: capacity, cancellation: cancellation, canvas: canvas, clean: clean, authorized: authorized, sink: sink)
+    }
+    @discardableResult
+    func removeFrameDelivery(_ lease: FrameDeliveryLease) async -> FrameDeliveryStatistics { await engine.removeFrameDelivery(lease) }
+    func cancelFrameDelivery(token: UUID) async { await engine.cancelFrameDelivery(token: token) }
+    func frameDeliveryStatistics(_ lease: FrameDeliveryLease) async -> FrameDeliveryStatistics { await engine.frameDeliveryStatistics(lease) }
+
     @discardableResult
     func addCleanFrameSink(capacity: Int = 1, authorized: @escaping @Sendable () -> Bool = { true }, sink: @escaping @Sendable (CompositedFrame) -> Void) -> FrameSubscription {
         let subscription = FrameSubscription()
@@ -869,7 +916,8 @@ final class StreamController: ObservableObject {
         }
     }
 
-    func addRecordingVideoSource(targetID: String) -> (RecordingVideoSubscription, IsolatedVideoSource)? {
+    func addRecordingVideoSource(targetID: String,
+                                 deliveryProvider: @escaping @Sendable () -> RecordingVideoFrameDelivery? = { nil }) -> (RecordingVideoSubscription, IsolatedVideoSource)? {
         let source: SourceDefinition?
         switch targetID {
         case "video.defaultCamera": source = .init(name: "Default Camera", payload: .camera(CameraSourcePayload()))
@@ -880,7 +928,7 @@ final class StreamController: ObservableObject {
         guard let source else { return nil }
         if case .guest(let payload) = source.payload {
             guard let lease = guestLease, payload.slotID == lease.slot,
-                  let worker = RecordingVideoSourceFactory.makeGuest(source: source, lease: lease, frames: guestVideoFrames) else { return nil }
+                  let worker = RecordingVideoSourceFactory.makeGuest(source: source, lease: lease, frames: guestVideoFrames, deliveryProvider: deliveryProvider) else { return nil }
             return (RecordingVideoSubscription(), worker)
         }
         guard let key = Self.videoCaptureKey(source.payload) else { return nil }
@@ -889,7 +937,7 @@ final class StreamController: ObservableObject {
         let token = RecordingVideoSubscription()
         isolatedVideoCaptureSubscriptions[token] = recordingKey; reconcileSourceDemand()
         return (token, RecordingVideoSourceFactory.make(source: source,
-            key: recordingKey, frames: capturePool.frames))
+            key: recordingKey, frames: capturePool.frames, deliveryProvider: deliveryProvider))
     }
     func removeRecordingVideoSource(_ subscription: RecordingVideoSubscription) {
         isolatedVideoCaptureSubscriptions.removeValue(forKey: subscription); reconcileSourceDemand()
@@ -1293,14 +1341,21 @@ final class StreamController: ObservableObject {
             ? layout!.profile(frameRate: activeProfile.frameRate)
             : OutputProfile(canvasWidth: 720, canvasHeight: 1280, frameRate: activeProfile.frameRate)
         let size = activeSecondaryProfile.canvasSize
-        Task { await engine.setSecondaryOutput(canvasSize: size) }
+        let previous = secondaryGeometryCommand
+        let generation = UUID(); secondaryGeometryGeneration = generation
+        secondaryGeometryCommand = Task { [weak self, engine] in
+            await previous?.value
+            await engine.setSecondaryOutput(canvasSize: size)
+            guard let self, self.secondaryGeometryGeneration == generation else { return }
+            self.refreshOptionalMonitorsAfterGeometry()
+        }
     }
 
     func prepareForProjectChange() async {
         guard !outputSessionActive else { return }
         stopExternalDisplayOutput()
         stopPreview()
-        await engine.stop()
+        await scheduleProgramEngineStop().value
         await previewEngine.stop()
         await audioEngine.stop()
         capturePool.stopAll()
@@ -1565,7 +1620,21 @@ final class StreamController: ObservableObject {
         guard plan.issues.isEmpty else { errorMessage = plan.issues.joined(separator: "\n"); return }
         // Keep the program and recording canvas unchanged. Every destination's
         // encoder receives its own output geometry from its adapted settings.
-        for destination in destinations.enabled { startDestination(destination.id) }
+        destinationOutputs.sharedEncodingEnabled = destinations.sharesFixedH264AAC
+        destinationOutputs.sharedSourceFrameRate = activeProfile.frameRate
+        let immediate = destinations.enabled.compactMap { destination -> DestinationOutputController.VideoStartInput? in
+            guard destination.providerBinding == nil,
+                  !(destinationOutputs.states[destination.id]?.isActive ?? false) else { return nil }
+            let canvasProfile = destination.canvas == .secondary ? activeSecondaryProfile : settings.outputProfile
+            let credentials = destinations.savedCredentials(for: destination.id)
+            guard DestinationValidator.startErrors(destination, credentials: credentials, program: canvasProfile).isEmpty else { return nil }
+            var base = settings; base.outputProfile = canvasProfile
+            let adapted = DestinationValidator.settings(destination, credentials: credentials, base: base)
+            return .init(destination: destination, settings: adapted, sourceSize: canvasProfile.canvasSize)
+        }
+        destinationOutputs.withPreparedVideoResources(immediate) {
+            for destination in destinations.enabled { startDestination(destination.id) }
+        }
     }
 
     func startDestination(_ id: UUID) {
@@ -1633,8 +1702,7 @@ final class StreamController: ObservableObject {
             errorMessage = message; destinationOutputs.recordFailure(destination, message: message); return false
         }
         resilience.acknowledgeManualRestart()
-        destinationOutputs.start(destination, settings: adapted)
-        return true
+        return destinationOutputs.start(destination, settings: adapted, sourceSize: canvasProfile.canvasSize)
     }
 
     func stopDestination(_ id: UUID) { managedStart?.cancel(id); destinationOutputs.stop(id) }
@@ -1649,14 +1717,6 @@ final class StreamController: ObservableObject {
         if streamState.isLive { errorMessage = nil }
         promoteStagedProfileIfOutputsIdle()
         updatePipelineDemand()
-        if destinationOutputs.usesSecondaryCanvas, secondaryPublisherSubscription == nil {
-            let fanout = destinationOutputs.fanout
-            secondaryPublisherSubscription = addFrameSink(capacity: 1, canvas: .secondary) { frame in
-                fanout.enqueueVideo(frame.sampleBuffer, canvas: .secondary)
-            }
-        } else if !destinationOutputs.usesSecondaryCanvas, let subscription = secondaryPublisherSubscription {
-            removeFrameSink(subscription); secondaryPublisherSubscription = nil
-        }
         reconcileSourceDemand()
     }
 
@@ -2050,7 +2110,14 @@ final class StreamController: ObservableObject {
         // buffers at the new canvas/fps on the next tick.
         let canvasSize = profile.canvasSize
         let fps = encodeFrameRate
-        Task { await engine.setOutput(canvasSize: canvasSize, frameRate: fps) }
+        let previous = programGeometryCommand
+        let generation = UUID(); programGeometryGeneration = generation
+        programGeometryCommand = Task { [weak self, engine] in
+            await previous?.value
+            await engine.setOutput(canvasSize: canvasSize, frameRate: fps)
+            guard let self, self.programGeometryGeneration == generation else { return }
+            self.refreshOptionalMonitorsAfterGeometry()
+        }
         let previewEngine = self.previewEngine
         let previewSize = resourcePreviewSize(canvasSize)
         let previewFPS = min(fps, previewResourceLevel.maximumFrameRate)
@@ -2081,7 +2148,14 @@ final class StreamController: ObservableObject {
         let program = previewProgram.programScene
         let canvasSize = activeProfile.canvasSize
         let fps = encodeFrameRate
-        Task { await engine.run(scene: program, canvasSize: canvasSize, frameRate: fps) }
+        let previous = programGeometryCommand
+        let generation = UUID(); programGeometryGeneration = generation
+        programGeometryCommand = Task { [weak self, engine] in
+            await previous?.value
+            await engine.run(scene: program, canvasSize: canvasSize, frameRate: fps)
+            guard let self, self.programGeometryGeneration == generation else { return }
+            self.refreshOptionalMonitorsAfterGeometry()
+        }
         if previewState == .active {
             startPreviewEngine()
         }
@@ -2219,6 +2293,22 @@ final class StreamController: ObservableObject {
         refreshEchoHandlingState()
     }
 
+    /// Stop participates in both source-plane command chains. An older run
+    /// cannot reach the actor after this stop and reanimate a retired pipeline.
+    @discardableResult
+    private func scheduleProgramEngineStop() -> Task<Void, Never> {
+        let program = programGeometryCommand, secondary = secondaryGeometryCommand
+        programGeometryGeneration = UUID(); secondaryGeometryGeneration = UUID()
+        let engine = self.engine
+        let command = Task {
+            await program?.value
+            await secondary?.value
+            await engine.stop()
+        }
+        programGeometryCommand = command; secondaryGeometryCommand = command
+        return command
+    }
+
     private func stopPipeline() {
         resourceBudgetCoordinator?.stop()
         mediaAudioChannelIDs = []; mediaAudioDemand.replace([:])
@@ -2230,8 +2320,7 @@ final class StreamController: ObservableObject {
         resilienceTask?.cancel(); resilienceTask = nil
         failureTracker.resetObservations()
         resilientFrames.clear()
-        let engine = self.engine
-        Task { await engine.stop() }
+        _ = scheduleProgramEngineStop()
         let previewEngine = self.previewEngine
         Task { await previewEngine.stop() }
         let audioEngine = self.audioEngine

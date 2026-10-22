@@ -14,6 +14,11 @@ struct DestinationSharedEncoderKey: Hashable, Sendable {
     let width: Int, height: Int, fps: Int, sourceFPS: Int, videoBitrate: Int, audioBitrate: Int, keyframeSeconds: Int
     let audioPipeline = "program-postmix-48000-stereo"
     let latency = "realtime-h264-main-no-reordering"
+    /// Stable logical encoding lineage; activation UUIDs are separate. Canvas
+    /// is part of the domain plane, so Program and Secondary never share raw.
+    var resourceDomainID: String {
+        "h264:\(width):\(height):\(fps):\(sourceFPS):\(videoBitrate):\(audioBitrate):\(keyframeSeconds)"
+    }
     init?(destination: StreamDestination, settings: StreamSettings, sourceFrameRate: Int) {
         var effective = destination
         effective.followsProgramProfile = false; effective.outputProfile = settings.outputProfile
@@ -58,7 +63,7 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     private var videoSession: VTCompressionSession?
     private let prefersHardwareEncoder: Bool
     private var completesAcceptedVideo = false
-    private var pool: CVPixelBufferPool?
+    private let bank: RawVideoResourceBank
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var converter: AVAudioConverter?
     private var audioFormat: AVAudioFormat?
@@ -72,8 +77,8 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     private var inFlight = 0
     private var encodedVideoCount = 0, encodedAudioCount = 0, rawVideoDrops = 0
     private let failure: @Sendable () -> Void
-    init(key: DestinationSharedEncoderKey, id: UUID = UUID(), prefersHardwareEncoder: Bool = true, failure: @escaping @Sendable () -> Void) {
-        self.key = key; self.id = id; self.prefersHardwareEncoder = prefersHardwareEncoder; self.failure = failure
+    init(key: DestinationSharedEncoderKey, bank: RawVideoResourceBank, id: UUID = UUID(), prefersHardwareEncoder: Bool = true, failure: @escaping @Sendable () -> Void) {
+        self.key = key; self.bank = bank; self.id = id; self.prefersHardwareEncoder = prefersHardwareEncoder; self.failure = failure
     }
     /// Finish cold codec/render setup before an output can acknowledge its
     /// start. Otherwise that work occupies the bounded ingress queue and can
@@ -86,10 +91,9 @@ final class DestinationSharedEncoder: @unchecked Sendable {
                 do {
                     if videoSession == nil {
                         try makeVideoSession()
-                        guard let pool else { throw CocoaError(.coderInvalidValue) }
-                        var image: CVPixelBuffer?
-                        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &image) == kCVReturnSuccess,
-                              let image else { throw CocoaError(.coderInvalidValue) }
+                        // Warm-up is an opaque native exposure too. Its bank
+                        // remains charged even after this codec session ends.
+                        let image = try bank.allocatePixelBuffer()
                         context.render(CIImage(color: .black), to: image,
                             bounds: CGRect(x: 0, y: 0, width: key.width, height: key.height),
                             colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
@@ -104,7 +108,7 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     }
     func remove(_ id: UUID) { lock.lock(); sinks[id] = nil; lock.unlock() }
     func requestKeyframe() { lock.lock(); keyframeRequested = true; lock.unlock() }
-    func enqueueVideo(_ sample: CMSampleBuffer) {
+    func enqueuePreparedVideo(_ sample: CMSampleBuffer) {
         lock.lock(); defer { lock.unlock() }
         guard accepting else { return }
         guard let image = sample.imageBuffer, CVPixelBufferGetDataSize(image) <= 64 * 1024 * 1024 else {
@@ -185,7 +189,7 @@ final class DestinationSharedEncoder: @unchecked Sendable {
     }
     private func tearDownOnQueue() {
         if let videoSession { VTCompressionSessionInvalidate(videoSession) }
-        videoSession = nil; converter = nil; pool = nil; audioFormat = nil; audioDescription = nil
+        videoSession = nil; converter = nil; audioFormat = nil; audioDescription = nil
         lock.lock()
         let success = finishing && !failed && !finishCancelled
         didFinish = success
@@ -228,9 +232,6 @@ final class DestinationSharedEncoder: @unchecked Sendable {
               VTSessionSetProperties(created, propertyDictionary: properties as CFDictionary) == noErr,
               VTSessionSetProperty(created, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse) == noErr,
               VTCompressionSessionPrepareToEncodeFrames(created) == noErr else { throw CocoaError(.coderInvalidValue) }
-        let attributes: [CFString: Any] = [kCVPixelBufferWidthKey: key.width, kCVPixelBufferHeightKey: key.height,
-            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA, kCVPixelBufferIOSurfacePropertiesKey: [:]]
-        guard CVPixelBufferPoolCreate(nil, nil, attributes as CFDictionary, &pool) == kCVReturnSuccess else { throw CocoaError(.coderInvalidValue) }
     }
     private func encodeVideo(_ sample: CMSampleBuffer) throws {
         let pts = sample.presentationTimeStamp
@@ -242,18 +243,13 @@ final class DestinationSharedEncoder: @unchecked Sendable {
            (pts - nextVideoPTS).seconds < -0.0001 { return }
         guard inFlight < 4 else { lock.lock(); rawVideoDrops += 1; lock.unlock(); return }
         if videoSession == nil { try makeVideoSession() }
-        guard let videoSession, let pool else { throw CocoaError(.coderInvalidValue) }
-        var scaled: CVPixelBuffer?
-        let allocation = [kCVPixelBufferPoolAllocationThresholdKey: 6] as CFDictionary
-        if CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(nil, pool, allocation, &scaled) != kCVReturnSuccess { return }
-        guard let scaled else { return }
-        let source = CIImage(cvPixelBuffer: input)
-        let factor = min(Double(key.width) / source.extent.width, Double(key.height) / source.extent.height)
-        let image = source.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
-            .transformed(by: CGAffineTransform(translationX: (Double(key.width) - source.extent.width * factor) / 2,
-                                             y: (Double(key.height) - source.extent.height * factor) / 2))
-            .composited(over: CIImage(color: .black))
-        context.render(image, to: scaled, bounds: CGRect(x: 0, y: 0, width: key.width, height: key.height), colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        guard let videoSession,
+              CVPixelBufferGetPixelFormatType(input) == kCVPixelFormatType_32BGRA,
+              CVPixelBufferGetWidth(input) == key.width,
+              CVPixelBufferGetHeight(input) == key.height else { throw CocoaError(.coderInvalidValue) }
+        // The sealed broker transfer completed the existing fit/black/sRGB
+        // conversion into this group's admitted bank BEFORE this queue/VT.
+        // No compositor image reaches the encoder queue or native codec.
         lock.lock()
         let force = keyframeRequested && (!lastForcedPTS.isNumeric || (pts - lastForcedPTS).seconds >= 0.25)
         if force { keyframeRequested = false; lastForcedPTS = pts }
@@ -267,7 +263,7 @@ final class DestinationSharedEncoder: @unchecked Sendable {
             repeat { nextVideoPTS = nextVideoPTS + interval } while (pts - nextVideoPTS).seconds >= -0.0001
         }
         let properties = force ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
-        let result = VTCompressionSessionEncodeFrame(videoSession, imageBuffer: scaled, presentationTimeStamp: pts,
+        let result = VTCompressionSessionEncodeFrame(videoSession, imageBuffer: input, presentationTimeStamp: pts,
             duration: CMTime(value: 1, timescale: CMTimeScale(key.fps)), frameProperties: properties,
             infoFlagsOut: nil, outputHandler: { [self] status, _, sample in
                 if status == noErr, let sample {

@@ -128,7 +128,7 @@ private actor CanvasPublisherProbe: Publisher {
         var pending = [wide, tall]
         let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() })
         let wideDestination = StreamDestination(name: "Wide"), tallDestination = StreamDestination(name: "Tall", canvas: .secondary)
-        outputs.start(wideDestination, settings: .default); outputs.start(tallDestination, settings: .default)
+        outputs.start(wideDestination, settings: .default, sourceSize: CGSize(width: 320, height: 180)); outputs.start(tallDestination, settings: .default, sourceSize: CGSize(width: 320, height: 180))
         for _ in 0..<100 { if outputs.liveCount == 2 { break }; try await Task.sleep(for: .milliseconds(10)) }
         try check(outputs.liveCount == 2 && outputs.usesSecondaryCanvas, "Routed destinations failed to acknowledge")
         outputs.fanout.enqueueVideo(try ProgramRecordingFixtures.video(at: 0))
