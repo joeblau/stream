@@ -144,6 +144,14 @@ lifecycle without installing it. #173 remains open for signed installation and
 real client measurements; #174 does not proceed as a shipping implementation
 until that route is validated.
 
+The separate [evaluation packaging tool and native proof](VIRTUAL_MICROPHONE_PACKAGING.md)
+now construct a locally inspected fixed-HAL package without running it. The
+owned mode uses an ad-hoc driver signature and an unsigned installer; an explicit
+Developer ID candidate mode requires supplied matching identities. Actual
+extracted-driver callbacks and refusal cases are local software evidence, not
+signed installation, update/removal, sandbox IPC or target-app qualification.
+O07's supported-path decision remains unproven and O08 controls remain gated.
+
 ### Owned loopback feedback exclusion
 
 The studio excludes the prototype's exact stable device UID
