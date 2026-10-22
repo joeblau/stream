@@ -196,7 +196,7 @@ const server = http.createServer(async (request, response) => {
       response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ttl:600,iceServers:[]})); return;
     }
     const name = new URL(request.url, 'http://localhost').pathname;
-    assert(/^\/guest\.(html|js|css)$/.test(name));
+    assert(/^\/(?:guest\.(?:html|js|css)|public-chat\.js)$/.test(name));
     response.setHeader('Content-Type', name.endsWith('.js') ? 'application/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
     response.setHeader('Referrer-Policy', 'no-referrer'); response.end(await fs.readFile(path.join(publicPath, name.slice(1)))); startup.response();
   } catch { response.writeHead(404); response.end(); }

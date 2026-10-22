@@ -32,7 +32,7 @@ const server = http.createServer(async (request, response) => {
   }
   try {
     const name = new URL(request.url, 'http://localhost').pathname;
-    assert(/^\/(host|guest)\.(html|js|css)$/.test(name));
+    assert(/^\/(?:(?:host|guest)\.(?:html|js|css)|public-chat\.js)$/.test(name));
     response.setHeader('Content-Type', name.endsWith('js') ? 'application/javascript' : name.endsWith('css') ? 'text/css' : 'text/html');
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wss:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
