@@ -64,6 +64,19 @@ jobs:
             CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
       - name: Test native controller and automation boundaries
         run: |
+          zsh scripts/run_recording_chat_paint_harness.zsh
+          DELIVERY_CI_CORE_PACKAGE="$(mktemp -d "$RUNNER_TEMP/frame-delivery-core-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.XXXXXX")"
+          ditto "$PWD/build/desktop/Build/Products/Debug/StreamCore.framework" "$DELIVERY_CI_CORE_PACKAGE/StreamCore.framework"
+          python3 - "$DELIVERY_CI_CORE_PACKAGE" <<'PY'
+          import hashlib, json, pathlib, sys
+          products = pathlib.Path(sys.argv[1])
+          receipt = {
+              'sourceSHA256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('StreamCore').glob('*.swift')},
+              'binarySHA256': hashlib.sha256((products / 'StreamCore.framework/StreamCore').read_bytes()).hexdigest(),
+          }
+          (products / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+          STREAM_FRAME_DELIVERY_CORE_PRODUCTS="$DELIVERY_CI_CORE_PACKAGE" zsh scripts/run_frame_delivery_conversion_harness.zsh
           MEDIA_LIFECYCLE_FRAMEWORKS="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_media_playback_lifecycle_harness.zsh
           zsh scripts/run_studio_shortcuts_harness.zsh
           zsh scripts/run_studio_gain_accessibility_harness.zsh
