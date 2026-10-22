@@ -158,6 +158,7 @@ jobs:
           name: desktop-${{ matrix.runner }}
           path: |
             apple/build/desktop-tests.xcresult
+            apple/build/shared-encoder-validation/artifacts
             apple/build/recording-chat-validation/media-*
             apple/build/audience-events-validation/artifacts-*
             apple/build/fractional-iso-audio-validation/media-*

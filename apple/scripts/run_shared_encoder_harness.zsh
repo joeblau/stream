@@ -45,11 +45,66 @@ xcodebuild -project "$SHARED_ENCODER_DIR/SharedEncoderValidation.xcodeproj" \
 readonly SHARED_ENCODER_PRODUCTS="${SHARED_ENCODER_BUILD_PATH:A}/Build/Products/Debug"
 run_shared_encoder_fixture() {
   env DYLD_FRAMEWORK_PATH="$SHARED_ENCODER_PRODUCTS" python3 - "$SHARED_ENCODER_PRODUCTS/SharedEncoderHarness" "$@" <<'PYTHON'
-import os,signal,subprocess,sys
-process=subprocess.Popen(sys.argv[1:],start_new_session=True)
+import datetime,json,os,pathlib,signal,subprocess,sys,threading,time,uuid
+root=pathlib.Path(os.environ.get('STREAM_TRANSPORT_ARTIFACT_ROOT','build/shared-encoder-validation/artifacts')).resolve()
+root.mkdir(parents=True,exist_ok=True)
+invocation=root/('invocation-'+str(uuid.uuid4()))
+invocation.mkdir()
+environment=dict(os.environ,STREAM_TRANSPORT_ARTIFACT_ROOT=str(invocation))
+log=(invocation/'stdout-stderr.log').open('xb',buffering=0)
+started=time.monotonic()
+receipt={'arguments':sys.argv[2:],'deadlineSeconds':90,
+         'startedAtUTC':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+         'stdoutStderr':str(invocation/'stdout-stderr.log'),'timedOut':False}
+def persist():
+    temporary=invocation/'invocation.json.tmp'
+    temporary.write_text(json.dumps(receipt,indent=2)+'\n')
+    temporary.replace(invocation/'invocation.json')
+log.write(('Fixture invocation artifacts: '+str(invocation)+'\n').encode())
+persist()
+# Native output goes directly to the owned file. A slow/broken CI reader
+# can delay the optional live echo, never the child or durable capture.
 try:
-    raise SystemExit(process.wait(timeout=90))
+    process=subprocess.Popen(sys.argv[1:],start_new_session=True,stdout=log,stderr=subprocess.STDOUT,env=environment)
+except Exception as error:
+    receipt['spawnError']=type(error).__name__
+    receipt['launcherExitCode']=1
+    persist()
+    log.close()
+    raise
+spawned=time.monotonic()
+receipt['pid']=process.pid
+receipt['spawnedElapsedSeconds']=spawned-started
+receipt['stdoutCapture']='direct-owned-file'
+persist()
+finished=threading.Event()
+def echo():
+    try:
+        with (invocation/'stdout-stderr.log').open('rb',buffering=0) as source:
+            while True:
+                data=source.read(65536)
+                if data:
+                    remaining=memoryview(data)
+                    while remaining:
+                        written=os.write(sys.stdout.fileno(),remaining)
+                        if written <= 0: raise OSError('Live echo made no progress')
+                        remaining=remaining[written:]
+                elif finished.is_set():
+                    break
+                else:
+                    finished.wait(0.02)
+    except (BrokenPipeError,OSError) as error:
+        receipt['liveEchoError']=type(error).__name__
+reader=threading.Thread(target=echo,daemon=True)
+reader.start()
+exit_code=1
+try:
+    # Keep one absolute 90-second native budget; diagnostics never reset it.
+    exit_code=process.wait(timeout=max(0,90-(time.monotonic()-spawned)))
 except subprocess.TimeoutExpired:
+    receipt['timedOut']=True
+    receipt['timeoutElapsedSeconds']=time.monotonic()-spawned
+    persist()
     # Only this generated fixture and its owned FFmpeg receivers share the group.
     os.killpg(process.pid,signal.SIGTERM)
     try:
@@ -57,8 +112,24 @@ except subprocess.TimeoutExpired:
     except subprocess.TimeoutExpired:
         os.killpg(process.pid,signal.SIGKILL)
         process.wait()
-    print('FAIL: shared encoder fixture exceeded90s; printed artifact directory retained',flush=True)
-    raise SystemExit(1)
+    log.write(('FAIL: shared encoder fixture exceeded90s; durable invocation artifacts: '+str(invocation)+'\n').encode())
+finally:
+    log.close()
+    finished.set()
+    reader.join(timeout=1)
+    receipt['liveEchoComplete']=not reader.is_alive()
+    receipt['stdoutBytes']=(invocation/'stdout-stderr.log').stat().st_size
+    receipt['processExitCode']=process.returncode
+    receipt['launcherExitCode']=exit_code
+    receipt['elapsedSeconds']=time.monotonic()-started
+    receipt['nativeGuardElapsedSeconds']=time.monotonic()-spawned
+    last=[]
+    for path in invocation.glob('stream-shared-encoder-*/phase-last.json'):
+        try: last.append({'path':str(path),'value':json.loads(path.read_text())})
+        except (OSError,ValueError): last.append({'path':str(path),'unreadable':True})
+    receipt['lastPhases']=last
+    persist()
+raise SystemExit(exit_code)
 PYTHON
 }
 if (( $# > 0 )); then

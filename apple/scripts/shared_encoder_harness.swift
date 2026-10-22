@@ -50,6 +50,27 @@ private actor EncodedPublisherProbe: Publisher {
 @main @MainActor struct SharedEncoderHarness {
     private static let prefersHardwareEncoder = !CommandLine.arguments.contains("--software")
     static func report(_ value: String) { FileHandle.standardOutput.write(Data((value + "\n").utf8)) }
+    private static let phaseEpoch = DispatchTime.now().uptimeNanoseconds
+    private static var phaseStarts: [String: UInt64] = [:]
+    private static var phaseTrace: FileHandle?
+    private static var phaseLastURL: URL?
+    // Diagnostic writes happen before/after the original operations, without
+    // adding waits, retries or per-frame work. The wrapper owns timeout capture.
+    static func phase(_ name: String, _ edge: String) {
+        let epoch = phaseEpoch
+        let now = DispatchTime.now().uptimeNanoseconds
+        if edge == "BEGIN" { phaseStarts[name] = now }
+        var event: [String: Any] = ["phase": name, "edge": edge,
+            "elapsedSeconds": Double(now - epoch) / 1_000_000_000]
+        if let began = phaseStarts[name] { event["phaseSeconds"] = Double(now - began) / 1_000_000_000 }
+        if edge == "END" { phaseStarts[name] = nil }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: event, options: [.sortedKeys])
+            report("PHASE " + String(decoding: data, as: UTF8.self))
+            try phaseTrace?.write(contentsOf: data + Data([10]))
+            if let phaseLastURL { try data.write(to: phaseLastURL, options: .atomic) }
+        } catch { report("DIAGNOSTIC WRITE ERROR: phase receipt unavailable for \(name)") }
+    }
     static func check(_ value: Bool, _ message: String) throws {
         if !value { throw NSError(domain: "SharedEncoderHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
     }
@@ -206,16 +227,20 @@ private actor EncodedPublisherProbe: Publisher {
     }
     #if !STREAM_PUBLISHER_CODEC_ONLY
     static func localhostTransports(directory: URL, settings: StreamSettings) async throws {
+        phase("localhost.receiverExecutable", "BEGIN")
         guard let ffmpeg = try receiverExecutable() else {
             report("UNQUALIFIED: localhost transport fixtures require ffmpeg with libsrt/RTMP; no transport acceptance claimed")
             return
         }
+        phase("localhost.receiverExecutable", "END")
         var processes: [Process] = [], handles: [FileHandle] = [], ports: [Int] = []
+        var receiverReceipts: [[String: Any]] = []
         let transports: [StreamCore.StreamProtocol] = [.rtmp, .srt]
         defer {
             for process in processes where process.isRunning { process.interrupt() }
             for handle in handles { try? handle.close() }
         }
+        phase("localhost.spawnReceivers", "BEGIN")
         for transport in transports {
             let port = Int.random(in: 20_000...40_000); ports.append(port)
             let file = directory.appendingPathComponent("localhost-\(transport.rawValue).mp4")
@@ -227,11 +252,19 @@ private actor EncodedPublisherProbe: Publisher {
             process.arguments = ["-y", "-hide_banner", "-loglevel", "error"] + listen + ["-map", "0:v:0", "-map", "0:a:0", "-c", "copy", file.path]
             process.standardOutput = handle; process.standardError = handle
             try process.run(); processes.append(process)
+            receiverReceipts.append(["transport": transport.rawValue, "pid": process.processIdentifier,
+                "port": port, "stdoutStderr": log.path, "media": file.path])
+            try JSONSerialization.data(withJSONObject: receiverReceipts, options: [.sortedKeys])
+                .write(to: directory.appendingPathComponent("receivers.json"), options: .atomic)
         }
+        phase("localhost.spawnReceivers", "END")
         let receivers = processes
+        phase("localhost.receiverReady", "BEGIN")
         try await settle(seconds: 10) {
             transports.enumerated().allSatisfy { receiverReady(receivers[$0.offset], transport: $0.element, port: ports[$0.offset]) }
         }
+        phase("localhost.receiverReady", "END")
+        phase("localhost.createOutputs", "BEGIN")
         let outputs = DestinationOutputController(factory: { transport in
             if transport == .rtmp { return RTMPPublisher() }
             return SessionPublisher(protocol: .srt)
@@ -239,33 +272,54 @@ private actor EncodedPublisherProbe: Publisher {
         outputs.sharedEncodingEnabled = true
         outputs.sharedSourceFrameRate = 25
         defer { outputs.stopAll() }
+        phase("localhost.createOutputs", "END")
+        phase("localhost.startOutputs", "BEGIN")
         for (index, transport) in transports.enumerated() {
             var local = settings; local.selectedProtocol = transport
             local.rtmpURL = transport == .srt ? "srt://127.0.0.1:\(ports[index])?mode=caller&latency=50" : "rtmp://127.0.0.1:\(ports[index])/live"
             local.streamKey = transport == .rtmp ? "shared" : ""
             outputs.start(StreamDestination(name: "Actual localhost \(transport.rawValue)", transport: transport), settings: local, sourceSize: CGSize(width: 320, height: 180))
         }
+        phase("localhost.startOutputs", "END")
+        phase("localhost.waitLive", "BEGIN")
         do { try await settle(seconds: 10) { outputs.liveCount == 2 } }
         catch {
             fflush(nil)
             report("Localhost startup states: \(outputs.names) \(outputs.states); receivers running: \(receivers.map(\.isRunning))")
             throw error
         }
+        phase("localhost.waitLive", "END")
         try check(outputs.encoderSessionCount == 1, "Actual RTMP/SRT adapters did not share one fixed encoder owner")
+        phase("localhost.feed400", "BEGIN")
         try await feed(outputs, start: 0, ticks: 400)
+        phase("localhost.feed400", "END")
+        phase("localhost.stopAll", "BEGIN")
         outputs.stopAll()
+        phase("localhost.stopAll", "END")
         // FFmpeg closes its input without replying to RTMP Unpublish.Success.
         // HaishinKit waits its documented 3-second request timeout before local
         // teardown completes; the encoder itself must already be finalized.
+        phase("localhost.waitEncoderEOS", "BEGIN")
         try await settle { outputs.encoderSessionCount == 0 }
+        phase("localhost.waitEncoderEOS", "END")
+        phase("localhost.waitPublisherStop", "BEGIN")
         try await settle(seconds: 10) { outputs.activeCount == 0 }
+        phase("localhost.waitPublisherStop", "END")
+        phase("localhost.receiverGrace", "BEGIN")
         for _ in 0..<100 { if receivers.allSatisfy({ !$0.isRunning }) { break }; try await Task.sleep(for: .milliseconds(20)) }
+        phase("localhost.receiverGrace", "END")
+        phase("localhost.receiverInterrupt", "BEGIN")
         for process in receivers where process.isRunning { process.interrupt() }
+        phase("localhost.receiverInterrupt", "END")
+        phase("localhost.waitReceiverExit", "BEGIN")
         try await settle { receivers.allSatisfy({ !$0.isRunning }) }
+        phase("localhost.waitReceiverExit", "END")
         for transport in transports {
             let file = directory.appendingPathComponent("localhost-\(transport.rawValue).mp4")
             try check(FileManager.default.fileExists(atPath: file.path), "Actual localhost output missing for \(transport.rawValue)")
+            phase("localhost.inspect.\(transport.rawValue)", "BEGIN")
             try await ProgramRecordingFixtures.inspect(file, expectedDuration: nil, checkSync: true)
+            phase("localhost.inspect.\(transport.rawValue)", "END")
         }
         report("PASS: one actual fixed encoder -> RTMPPublisher/RTMPStream and SessionPublisher/SRTStream compressed passthrough -> simultaneous localhost ffmpeg MP4 receivers; H.264/AAC decode/sync/metadata, SRT startup primer and independent acknowledged stops")
     }
@@ -609,6 +663,8 @@ private actor EncodedPublisherProbe: Publisher {
 
     static func main() async throws {
         setbuf(stdout, nil)
+        phase("native.main", "BEGIN")
+        defer { phase("native.main", "END") }
         report("Audio decoder qualification: \(ProgramRecordingFixtures.usesAudioFileDecoder ? "explicit AVAudioFile offline PCM + AVAssetReader H264; default AVAssetReader PCM qualification remains separate" : "original AVAssetReader PCM/H264")")
         report("Encoder qualification: \(prefersHardwareEncoder ? "shipping hardware preference with public software fallback" : "explicit public VideoToolbox software encoder; no hardware throughput claim")")
         if CommandLine.arguments.contains("--receiver-check-only") {
@@ -624,6 +680,12 @@ private actor EncodedPublisherProbe: Publisher {
         let directory = artifactRoot.appendingPathComponent("stream-shared-encoder-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         report("Artifacts: \(directory.path)")
+        let traceURL = directory.appendingPathComponent("phase-trace.jsonl")
+        FileManager.default.createFile(atPath: traceURL.path, contents: nil)
+        phaseTrace = try FileHandle(forWritingTo: traceURL)
+        phaseLastURL = directory.appendingPathComponent("phase-last.json")
+        defer { try? phaseTrace?.close(); phaseTrace = nil; phaseLastURL = nil }
+        phase("invocation", "BEGIN")
         let first = EncodedPublisherProbe(), second = EncodedPublisherProbe(), separate = EncodedPublisherProbe(), rejoin = EncodedPublisherProbe()
         let phaseFirst = EncodedPublisherProbe(), phaseSecond = EncodedPublisherProbe()
         var pending = [first, second, phaseFirst, phaseSecond, separate, rejoin]
@@ -642,6 +704,7 @@ private actor EncodedPublisherProbe: Publisher {
             report("Artifacts: \(directory.path)"); return
         }
     #endif
+        phase("codec.initialAndIdentity", "BEGIN")
         let a = StreamDestination(name: "RTMP", transport: .rtmp), b = StreamDestination(name: "SRT", transport: .srt)
         outputs.start(a, settings: settings, sourceSize: CGSize(width: 320, height: 180)); outputs.start(b, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 2 }
@@ -680,6 +743,8 @@ private actor EncodedPublisherProbe: Publisher {
         report("PASS: same compressed H.264 CMSampleBuffer and AAC packet identities/bytes/timestamps reused by RTMP/SRT endpoints; two actual containers decode with matching samples and flash/tone")
 
         report("PASS: last-member stop EOS drains the actual accepted PCM frontier within one AAC packet, both bounded mailboxes finish before stop receipt, resources return to zero and no later media arrives")
+        phase("codec.initialAndIdentity", "END")
+        phase("codec.distinctProfilesAndRejoin", "BEGIN")
         outputs.start(a, settings: settings, sourceSize: CGSize(width: 320, height: 180)); outputs.start(b, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 2 && outputs.encoderSessionCount == 1 }
         var different = settings; different.outputProfile = .init(canvasWidth: 160, canvasHeight: 90, frameRate: 25)
@@ -717,6 +782,8 @@ private actor EncodedPublisherProbe: Publisher {
         outputs.stopAll()
         try await settle { outputs.activeCount == 0 && outputs.encoderSessionCount == 0 }
         report("PASS: distinct profiles separate owners; compressed overflow sheds GOP/audio and recovers at IDR, healthy target advances, independent stop/rejoin and late receipt isolation; real encoders finish before reservation count reaches zero")
+        phase("codec.distinctProfilesAndRejoin", "END")
+        phase("profile.policyPersistence", "BEGIN")
         try JSONEncoder().encode([StreamDestination]()).write(to: directory.appendingPathComponent("destinations.json"))
         let preferences = DestinationSession(fileURL: directory.appendingPathComponent("destinations.json"), settings: .default,
             legacyStore: DesktopSettingsStore(directory: directory))
@@ -743,20 +810,42 @@ private actor EncodedPublisherProbe: Publisher {
         try check(!unreadable.sharesFixedH264AAC && unreadable.errorMessage != nil && exists && isDirectory.boolValue,
             "Existing unreadable policy path was overwritten or its failed setting remained enabled: mode=\(unreadable.sharesFixedH264AAC), error=\(String(describing: unreadable.errorMessage)), exists=\(exists), directory=\(isDirectory)")
         report("PASS: profile fixed-sharing opt-in defaults off, persists independently and preserves unsupported document bytes")
+        phase("profile.policyPersistence", "END")
+        phase("codec.survivingGroupClaimRejoins", "BEGIN")
         try await survivingGroupClaimRejoins(settings: settings)
+        phase("codec.survivingGroupClaimRejoins", "END")
+        phase("codec.rawFinalization", "BEGIN")
         try await rawFinalization(settings: settings)
+        phase("codec.rawFinalization", "END")
+        phase("codec.cancelledSharedStart", "BEGIN")
         try await cancelledSharedStart(settings: settings)
+        phase("codec.cancelledSharedStart", "END")
+        phase("codec.canvasAndEncoderFailure", "BEGIN")
         try await canvasAndEncoderFailure(settings: settings)
+        phase("codec.canvasAndEncoderFailure", "END")
+        phase("codec.fixedCadence", "BEGIN")
         try await fixedCadence(directory: directory, settings: settings)
+        phase("codec.fixedCadence", "END")
+        phase("codec.failedFinalizationReceipts", "BEGIN")
         try await failedFinalizationReceipts(settings: settings)
+        phase("codec.failedFinalizationReceipts", "END")
+        phase("codec.terminalAACContent", "BEGIN")
         try await terminalAACContent(directory: directory, settings: settings)
+        phase("codec.terminalAACContent", "END")
+        phase("codec.boundedEncodedStop", "BEGIN")
         try await boundedEncodedStop(settings: settings)
+        phase("codec.boundedEncodedStop", "END")
+        phase("codec.higherRateFallback", "BEGIN")
         try await higherRateFallback(settings: settings)
+        phase("codec.higherRateFallback", "END")
         #if !STREAM_PUBLISHER_CODEC_ONLY
+        phase("localhost.transports", "BEGIN")
         try await localhostTransports(directory: directory, settings: settings)
+        phase("localhost.transports", "END")
         #else
         report("SCOPE: codec-only fixture compiled without transport implementations; no network transport was run")
         #endif
+        phase("invocation", "END")
         report("Artifacts: \(directory.path)")
     }
 }
