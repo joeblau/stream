@@ -4406,7 +4406,7 @@
     "acceptance": "27 closed /34 open unchanged; all original issue states and earlier wave receipts preserved. Fresh read-only audit finds no additional closure or PR to merge. No mounted AX, live browser/provider/device, real capture or sustained-performance qualification inferred. No issue/API writes, local runtime/build or publication for this ledger update."
   },
   "wave17Review": {
-    "currentLocalHead": "d28e7269c62a039c19ef36219f1379031838fa9d",
+    "currentLocalHead": "42c9ad59d861a8805af3895c4f8235d0aaeefb34",
     "publishedMainAtSnapshot": "30f2209199b818cc685a24647a46e5a54263daa3",
     "githubAudit": {
       "recordedAt": "2026-10-22T14:05:53Z",
@@ -4544,7 +4544,7 @@
       ],
       "proof": "Actual Engine/SceneRenderer matrix keeps source cap 4: four retained private-buffer/surface consumers each exhaust only their own bank while all 12 renders reach a healthy endpoint. Replacing detached sample with original causes4 renders / 8 failures; public-sequence-only lookup fails restart pixels/PTS. Lifecycle, exact lease receipts, fractional 17\u00d718 geometry and all six clock cases pass. Retained controls/executables are separated from the earlier overwritten-generator-path history.",
       "semantics": "Ring2 plus one synchronous trusted source borrow and next render; queued work contains publication identity rather than source samples. Synchronous source/private admission precedes factory; async installation ACK and current cancellation/authority checks precede activation. Only detached copies or sealed conversions enter callbacks; engine-owned source claims outlive private endpoint cleanup.",
-      "scope": "Owned synthetic storage/lifecycle evidence, not arbitrary SDK scheduling/progress or sustained capacity. Future performance fixture must migrate to admitted recording capacity; that source-only change is not included as qualified work."
+      "scope": "Owned synthetic storage/lifecycle evidence, not arbitrary SDK scheduling/progress or sustained capacity. Performance fixture migration is separately compiled and reviewed below; no workload execution or performance qualification."
     },
     "publisherIngress": {
       "document": {
@@ -4608,7 +4608,7 @@
       },
       "proof": "Actual writers/router/admission/converter produce decoded private pixels/paint/timing, queue-capacity and distinct typed-drop/rotation/stop receipts. Original raw-enqueue negative decodes 24 mutated frames and traps; classifier cannot read optimized assertion text and exits 1, retained as incompletely classified negative. Actual RecordingController fixture passes original Program and isolated-audio WAV/M4A/countdown/pause/rotation/storage plus held-install Pause, Stop stopping-until-ACK and fresh retry.",
       "policy": "Original decimal-byte queue Q retained; Program private Q+5, direct ISO private Q+2 with source 4. Admission before writers and exact removal receipts before terminal journal; old/new rotation banks coexist, exposed storage stays charged.",
-      "scope": "Independent 52-binding final review; final d28 universal fills the later controller integration compile gate. SourceFactory/CompositionEngine graph and selected ISO-video worker runtime were not executed in these proofs. Factory+ISO worker new runtime proof remains pending and omitted; no capture/network/device/performance claim."
+      "scope": "Independent 52-binding final review; final d28 universal fills the later Controller integration compile gate. These earlier writer/Controller fixtures do not execute SourceFactory or the selected ISO-video worker. The separate guestISO proof below now exercises those actual components with owned pixels and a decoded file; no capture/network/device/performance claim."
     },
     "optionalImages": {
       "documents": [
@@ -4849,6 +4849,46 @@
       },
       "scope": "Both c90 and 30f terminal FAILURE on both Mac jobs, iOS success. C90 recovery fixture was later repaired;30f ARM expected-control-count and Intel accumulated-malformed-PCM constituents remain unknown in original logs. Local controlled fixes do not relabel failed jobs or prove their exact hosted causes. No new unpublished-head CI is called pending/successful; any queue/run exists only after publication."
     },
-    "acceptance": "Original 27 closed / 34 open, all 135 macOS 101 closed / 34 open and zeroPR/closure candidates unchanged. All prior wave objects, original criteria/state hashes and failed qualification receipts preserved. #90/#92/#124/#127/#155 and all other incomplete original tasks remain open. No new API writes/build/runtime or qualification for this ledger update."
+    "acceptance": "Original 27 closed / 34 open, all 135 macOS 101 closed / 34 open and zero PR/closure candidates unchanged. Earlier wave objects, original criteria/state hashes and failed qualification receipts preserved. Separate owned ISO runtime and performance build-only evidence add no broad operator/device/provider/sustained acceptance. This ledger supplement performs no API write, native run or publication.",
+    "performanceFixtureAdmission": {
+      "commits": [
+        "5ba8f6b",
+        "7d8a946"
+      ],
+      "receipt": {
+        "path": "apple/docs/PERFORMANCE_FRAME_ADMISSION_SOURCE_2026-10-22.json",
+        "bytes": 4554,
+        "sha256": "341e9f6b929bbd57848e2b82ecfdbeaed63414e2275075c39aa7e8a6c0e845ac"
+      },
+      "review": {
+        "path": "/tmp/stream-wave18-performance-admission-review-20261022/review.md",
+        "bytes": 2645,
+        "sha256": "af1852190d2f25f83785a5c2fceefb5747b4e7bde859615c8e305a8c0e339462"
+      },
+      "status": "Full actual tool build-only PASS; recording and chat source reviews CLEAR",
+      "scope": "Source4 + recording Q30/B128M/headroom5 + slow3 admitted before writer, exact prepared append and lease-final statistics. Original content/PCM/FPS/17850/80ms/600s and media inspection unchanged. No executable/workload/benchmark dispatched; #92 original failed qualification remains open."
+    },
+    "guestISO": {
+      "commit": "42c9ad5",
+      "receipt": {
+        "path": "apple/docs/RECORDING_GUEST_ISO_PRIVATE_2026-10-22.json",
+        "bytes": 22355,
+        "sha256": "ae4f29989adf1006344cac5294a70ba634e61471b2a7990564bb38c7593d44c2"
+      },
+      "document": {
+        "path": "apple/docs/RECORDING_GUEST_ISO_PRIVATE.md",
+        "bytes": 3990,
+        "sha256": "c737760664e007edffc9c3818730d5e51e5c28e4a63da0a9a6c381d33a37b854"
+      },
+      "status": "Actual Factory raw/processed plus isolated worker, native writer and decoded video PASS",
+      "proof": "Eight retained completed private frames leave all four source-bank slots allocatable. Actual decoded MP4 has six pinned old-lease red frames then six black after withdrawal; a new green lease is never substituted. Exact rational PTS/duration/gap journal and charged retirement pass.",
+      "scope": "Owned synthetic guest store/leases/timeline, 0.4-second video-only file, paced by writer acknowledgment. No capture/RTC/audio graph/device/throughput or full #171 qualification. Two fixture compile failures retained; first native runtime passes.",
+      "independentReview": {
+        "path": "/tmp/stream-wave17-recording-iso-independent-review-20261022.md",
+        "bytes": 3753,
+        "sha256": "2eb1c0ec8a4f0bb3898f26871bf99af24255d987b10ece9d7ca944e0e4536c0e",
+        "result": "CLEAR; no reviewer runtime"
+      }
+    }
   }
 }

@@ -1143,8 +1143,13 @@ clock checks pass; historical control artifacts keep their original scopes.
   its classifier lacks assertion text and exits 1, so it remains incompletely
   classified. The actual controller passes Program/isolated-audio and held-install
   Pause/Stop/retry cases with an inert generated inlet. **SourceFactory and selected
-  ISO-video worker runtime are not exercised by these proofs.** Final compilation
-  does not substitute for that pending runtime evidence.
+  ISO-video worker runtime are not exercised by those earlier proofs.** The separate
+  [owned guest ISO proof](RECORDING_GUEST_ISO_PRIVATE.md) now runs the actual raw/processed
+  Factory and isolated video worker through native writing and decoding: eight held
+  private frames leave source capacity four available, and twelve decoded frames
+  retain six old-lease red frames followed by six black frames after withdrawal.
+  A green replacement is refused; rational PTS, duration, gap journal and charged
+  retirement pass. This 0.4-second video-only check is not full #171 qualification.
 - [Optional images](OPTIONAL_FRAME_IMAGE_DELIVERY.md) use admitted private banks
   and one-pending UI handoff. In the actual synthetic Engine proof, five retained
   images fill the private bank while all 18 renders succeed at source cap four;
@@ -1180,6 +1185,10 @@ The fresh **14:05:53 UTC** audit confirms **27 closed / 34 open** in the origina
 justified. These bounded isolation and lifecycle proofs do not qualify complete
 operator/AX/contrast flows, live capture/devices/providers or original
 representative sustained A/V/resource targets. **#90 and #92 remain open**, with
-all historical failed gates preserved. Source-only performance-fixture capacity
-migration and a new actual Factory/ISO-worker runtime proof are pending and are
-not credited here. This documentation performs no API write, runtime or publication.
+all historical failed gates preserved. The performance fixture now reserves the
+actual source4/recorder Q+5/slow-recipient banks before writing and uses prepared
+append. Its full actual tool build-only check and two independent source reviews
+pass; workload content, PCM, FPS, 17,850-frame, 80ms and 600-second gates remain
+unchanged. No benchmark ran and #92 stays open. The ledger separately binds this
+source-only migration and the bounded actual guest ISO proof. This documentation
+performs no API write, native run or publication.
