@@ -10,6 +10,23 @@ enum OwnedPermissionAudioQueue {
     static let value = DispatchQueue(label: "com.joeblau.fixture.permission-microphone")
 }
 
+final class OwnedPermissionResetBarrier: @unchecked Sendable {
+    private let lock = NSLock()
+    private let drain = DispatchSemaphore(value: 0)
+    private var armed = true, entered = false, timedOut = false
+    var hasEntered: Bool { lock.lock(); defer { lock.unlock() }; return entered }
+    var didTimeOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOut }
+    func reset() {
+        lock.lock()
+        guard armed else { lock.unlock(); return }
+        armed = false; entered = true; lock.unlock()
+        if drain.wait(timeout: .now() + 5) != .success {
+            lock.lock(); timedOut = true; lock.unlock()
+        }
+    }
+    func release() { drain.signal() }
+}
+
 @MainActor enum OwnedCaptureDiscovery {
     static var hold = false
     static var pending: [CheckedContinuation<SCShareableContent, any Error>] = []

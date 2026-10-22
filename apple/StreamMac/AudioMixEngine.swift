@@ -1366,8 +1366,15 @@ private final class AudioChannelRegistry: @unchecked Sendable {
 
     func statistics() -> AudioEngineStatistics {
         os_unfair_lock_lock(&lock)
-        let entries = channels.map { ($0.key.label, $0.value.statistics()) }
+        let current = channels.filter { captureGate.allowed($0.key) }
         os_unfair_lock_unlock(&lock)
+        // Sampling cannot wait behind an opaque insert or a permission drain,
+        // nor pin the registry while unrelated sources deliver their PCM.
+        // A busy/retired channel is unavailable in this sample, not zeroed.
+        let entries = current.compactMap { id, channel -> (String, AudioChannelStatistics)? in
+            guard captureGate.allowed(id), let value = channel.statisticsIfAvailable(), captureGate.allowed(id) else { return nil }
+            return (id.label, value)
+        }
         var stats = AudioEngineStatistics()
         stats.channels = Dictionary(uniqueKeysWithValues: entries)
         return stats
@@ -1623,8 +1630,8 @@ private final class ChannelIngest: @unchecked Sendable {
         return meter.levels
     }
 
-    func statistics() -> AudioChannelStatistics {
-        os_unfair_lock_lock(&lock)
+    func statisticsIfAvailable() -> AudioChannelStatistics? {
+        guard os_unfair_lock_trylock(&lock) else { return nil }
         defer { os_unfair_lock_unlock(&lock) }
         var stats = AudioChannelStatistics()
         stats.droppedFrames = ring.droppedFrames

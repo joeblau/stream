@@ -73,7 +73,8 @@ end
 fixture_replace(target, root, folder, 'MacAudioInput.swift') do |source|
   seam = /    private nonisolated static func requestMicrophoneAccess\(\) async -> Bool \{.*?\n    \}\n\n    private func configureAndStart/m
   abort 'Microphone fixture boundary changed' unless source.match?(seam)
-  source.sub(seam, "    private nonisolated static func requestMicrophoneAccess() async -> Bool { false }\n\n    private func configureAndStart")
+  source.sub(seam, "    private nonisolated static func requestMicrophoneAccess() async -> Bool { false }\n\n    private func configureAndStart") +
+    "\nextension MacAudioInput { var fixturePermissionAvailable: Bool { permissionAvailable } }\n"
 end
 fixture_replace(target, root, folder, 'ProviderAccountSession.swift') do |source|
   seam = 'transport: @escaping ProviderTokenVault.Transport = ProviderTokenVault.network'
@@ -136,6 +137,11 @@ extension StreamController {
         OwnedPermissionAudioQueue.value.async { callback?(boxed.value) }
     }
     func failoverFixtureAudioAllowed(_ channel: AudioChannelID) -> Bool { audioEngine.captureRouteIsAllowed(channel) }
+    var failoverFixtureMicPermissionAvailable: Bool { audio.fixturePermissionAvailable }
+    var failoverFixtureScreenStatus: PermissionsManager.Status? { lastPermissionStatuses[.screenCapture] }
+    func failoverFixtureHoldMicRestore(_ barrier: OwnedPermissionResetBarrier) async {
+        await audioEngine.addChannel(.microphone(deviceUID: nil), resetInsert: { barrier.reset() }, insert: { $0 })
+    }
 }
 SWIFT
 end

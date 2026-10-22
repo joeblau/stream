@@ -332,7 +332,7 @@ final class StreamController: ObservableObject {
     /// The permission statuses seen at the last change fold, so only real
     /// transitions act (`$statuses` republishes on every refresh).
     private var lastPermissionStatuses: [PermissionsManager.Kind: PermissionsManager.Status] = [:]
-    private var permissionRecoveryRevision = UUID()
+    private var permissionRecoveryRevisions: [PermissionsManager.Kind: UUID] = [:]
     /// Hardware + destination gating for the output profile (W07); the single
     /// auditable capability place lives in StreamCore's OutputCapabilities.
     private let capabilities = OutputCapabilities.current
@@ -522,9 +522,12 @@ final class StreamController: ObservableObject {
             capturePool.noteScreenPermissionRevoked()
         }
         permissions.$statuses
-            .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.handlePermissionChange()
+            .sink { [weak self] statuses in
+                // This @Published property is written only by its MainActor
+                // owner. Fold the emitted value (willSet), preserving every
+                // deny/regrant edge before another capture callback can run.
+                MainActor.assumeIsolated {
+                    self?.handlePermissionChange(snapshot: statuses)
                 }
             }
             .store(in: &cancellables)
@@ -2515,12 +2518,14 @@ final class StreamController: ObservableObject {
     /// clears that permission's signal history before reopening; sources keep
     /// their exact identity and outputs keep their existing session/clock.
     /// Transient discovery unavailability is not a confirmed TCC denial.
-    private func handlePermissionChange(resumeAvailable: Bool = false) {
+    private func handlePermissionChange(snapshot: [PermissionsManager.Kind: PermissionsManager.Status]? = nil,
+                                        resumeAvailable: Bool = false) {
         let previous = lastPermissionStatuses
-        let current = permissions.statuses
+        let current = snapshot ?? permissions.statuses
         lastPermissionStatuses = current
         guard previous != current || resumeAvailable else { return }
-        let revision = UUID(); permissionRecoveryRevision = revision
+        let changed = PermissionsManager.Kind.allCases.filter { previous[$0] != current[$0] || resumeAvailable }
+        for kind in changed { permissionRecoveryRevisions[kind] = UUID() }
         func transitioned(_ kind: PermissionsManager.Kind, to status: PermissionsManager.Status) -> Bool {
             previous[kind] != status && current[kind] == status
         }
@@ -2536,25 +2541,28 @@ final class StreamController: ObservableObject {
             audioEngine.cancelGuestTalkback()
             audio.setPermissionAvailable(false)
         }
-        let restoreScreen = current[.screenCapture] == .granted && (previous[.screenCapture] != .granted || resumeAvailable)
-        let restoreMic = current[.microphone] == .granted && (previous[.microphone] != .granted || resumeAvailable)
-        let restoreCamera = transitioned(.camera, to: .granted) || (resumeAvailable && current[.camera] == .granted)
-        Task { [weak self] in
-            guard let self, self.permissionRecoveryRevision == revision else { return }
-            if restoreScreen {
-                await self.audioEngine.restoreCapturePermission(.screenCapture)
-                guard self.permissionRecoveryRevision == revision else { return }
-                self.capturePool.restoreScreenPermission()
+        for kind in changed where current[kind] == .granted {
+            let revision = permissionRecoveryRevisions[kind]!
+            let restartMic = !resumeAvailable || !audio.isCapturing(.microphone(deviceUID: nil))
+            Task { [weak self] in
+                guard let self, self.permissionRecoveryRevisions[kind] == revision else { return }
+                switch kind {
+                case .camera: break
+                case .screenCapture:
+                    await self.audioEngine.restoreCapturePermission(.screenCapture)
+                    guard self.permissionRecoveryRevisions[kind] == revision else { return }
+                    self.capturePool.restoreScreenPermission()
+                case .microphone:
+                    await self.audioEngine.restoreCapturePermission(.microphone)
+                    guard self.permissionRecoveryRevisions[kind] == revision else { return }
+                    self.audio.setPermissionAvailable(true)
+                }
+                guard !self.resilience.isLocked, self.isPipelineRunning else { return }
+                if kind == .microphone {
+                    if restartMic { self.startAudioInput() }
+                } else { self.capturePool.retryErroredSources() }
+                self.evaluateSourceResilience()
             }
-            if restoreMic {
-                await self.audioEngine.restoreCapturePermission(.microphone)
-                guard self.permissionRecoveryRevision == revision else { return }
-                self.audio.setPermissionAvailable(true)
-            }
-            guard !self.resilience.isLocked, self.isPipelineRunning else { return }
-            if restoreScreen || restoreCamera { self.capturePool.retryErroredSources() }
-            if restoreMic { self.startAudioInput() }
-            self.evaluateSourceResilience()
         }
         evaluateSourceResilience()
     }

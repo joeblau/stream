@@ -95,7 +95,10 @@ display removal or TCC revocation, nor an actual interface handoff. The base
 fixture does not execute permission-transition or display-removal callbacks.
 Its optional `--permission-transitions` mode now qualifies screen/microphone
 retirement, regrant, transient-error classification and stale discovery
-completion with owned producer/discovery boundaries and actual decoded media;
+completion with owned producer/discovery boundaries and actual decoded media.
+The 22-phase recording additionally verifies independent permission-recovery
+ownership and nonblocking diagnostic sampling during a controlled microphone
+history drain, with its original five-second deadline;
 see [the measured source qualification](SOURCE_FAILOVER_NATIVE.md).
 Display-removal and camera-permission callbacks still need focused evidence
 before claiming all of issue #158;

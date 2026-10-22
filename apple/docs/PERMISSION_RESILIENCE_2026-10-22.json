@@ -6,7 +6,7 @@
     "Xcode": "27.2 (27B5038j)"
   },
   "qualification": "Controlled permission/discovery/capture producer boundaries; shipping controller, pool, mixer, GPU compositor, recording and lifecycle. Actual offline H264/AAC/PCM decode. No physical TCC or OS event-delivery claim.",
-  "sourceBase": "40d0737 + lifecycle/path fixes + permission follow-up",
+  "sourceBase": "40d0737 + lifecycle/path fixes + permission retirement and independent recovery ownership",
   "result": "passed",
   "originalLimits": {
     "trackStartSeconds": 0.04,
@@ -18,139 +18,153 @@
   },
   "measured": {
     "decoder": "ffmpeg-offline",
-    "durationSeconds": 14.933458,
-    "videoFrames": 448,
+    "durationSeconds": 15.635,
+    "videoFrames": 469,
     "videoStart": 0.0,
     "audioStart": 0.0,
-    "videoDuration": 14.933333,
-    "audioDuration": 14.933458,
+    "videoDuration": 15.635,
+    "audioDuration": 15.63425,
     "phases": [
       {
         "name": "healthy",
         "decodedFrames": 16,
-        "pcmSamples": 18326,
-        "pcmRMS": 0.3888990138313436
+        "pcmSamples": 18263,
+        "pcmRMS": 0.3727514175237254
       },
       {
         "name": "freeze-last-frame",
-        "decodedFrames": 15,
-        "pcmSamples": 18238,
-        "pcmRMS": 0.1974644087952831
+        "decodedFrames": 14,
+        "pcmSamples": 18219,
+        "pcmRMS": 0.19339794145437142
       },
       {
         "name": "recovered-provider-stays-frozen-until-manual-restore",
-        "decodedFrames": 14,
-        "pcmSamples": 18161,
-        "pcmRMS": 0.39153342601474656
+        "decodedFrames": 16,
+        "pcmSamples": 18213,
+        "pcmRMS": 0.37673765764025746
       },
       {
         "name": "blank-shows-project-background",
-        "decodedFrames": 14,
-        "pcmSamples": 18247,
-        "pcmRMS": 0.389279985234192
+        "decodedFrames": 15,
+        "pcmSamples": 18175,
+        "pcmRMS": 0.3841760824074518
       },
       {
         "name": "visible-source-offline-card",
-        "decodedFrames": 14,
-        "pcmSamples": 18262,
-        "pcmRMS": 0.3896840275427789
+        "decodedFrames": 15,
+        "pcmSamples": 19791,
+        "pcmRMS": 0.37979184441140923
       },
       {
         "name": "configured-healthy-standby-source",
-        "decodedFrames": 16,
-        "pcmSamples": 18229,
-        "pcmRMS": 0.38619827971193044
+        "decodedFrames": 15,
+        "pcmSamples": 18331,
+        "pcmRMS": 0.37751924484765986
       },
       {
         "name": "missing-standby-source-uses-offline-card",
-        "decodedFrames": 15,
-        "pcmSamples": 18276,
-        "pcmRMS": 0.3875879235264087
+        "decodedFrames": 14,
+        "pcmSamples": 18204,
+        "pcmRMS": 0.3848627578703956
       },
       {
         "name": "unknown-standby-id-uses-offline-card",
         "decodedFrames": 15,
-        "pcmSamples": 18283,
-        "pcmRMS": 0.39031444717300834
+        "pcmSamples": 18138,
+        "pcmRMS": 0.38733613146714807
       },
       {
         "name": "explicit-source-restore",
-        "decodedFrames": 16,
-        "pcmSamples": 18328,
-        "pcmRMS": 0.39215412171487707
+        "decodedFrames": 14,
+        "pcmSamples": 18125,
+        "pcmRMS": 0.38759066666026437
       },
       {
         "name": "actual-controller-standby-scene",
-        "decodedFrames": 16,
-        "pcmSamples": 18265,
-        "pcmRMS": 0.19337729514913393
+        "decodedFrames": 15,
+        "pcmSamples": 18190,
+        "pcmRMS": 0.1869433276683533
       },
       {
         "name": "manual-standby-scene-restore",
-        "decodedFrames": 16,
-        "pcmSamples": 18332,
-        "pcmRMS": 0.3864701773516302
+        "decodedFrames": 14,
+        "pcmSamples": 18218,
+        "pcmRMS": 0.37545228576670725
       },
       {
         "name": "actual-runtime-private-lock-slate",
-        "decodedFrames": 16,
-        "pcmSamples": 18241,
+        "decodedFrames": 15,
+        "pcmSamples": 18174,
         "pcmRMS": 0.0
       },
       {
         "name": "unlock-does-not-restore-private-program",
         "decodedFrames": 16,
-        "pcmSamples": 18218,
+        "pcmSamples": 18290,
         "pcmRMS": 0.0
       },
       {
         "name": "manual-private-program-restore",
-        "decodedFrames": 16,
-        "pcmSamples": 18216,
-        "pcmRMS": 0.38972525813789144
+        "decodedFrames": 15,
+        "pcmSamples": 18292,
+        "pcmRMS": 0.3790555581767374
+      },
+      {
+        "name": "unrelated-discovery-unavailable-during-mic-regrant-keeps-healthy-output",
+        "decodedFrames": 15,
+        "pcmSamples": 18277,
+        "pcmRMS": 0.37116421084497914
       },
       {
         "name": "known-microphone-grant",
-        "decodedFrames": 16,
-        "pcmSamples": 18285,
-        "pcmRMS": 0.09714527810191119
+        "decodedFrames": 14,
+        "pcmSamples": 18204,
+        "pcmRMS": 0.09463239664472935
       },
       {
         "name": "microphone-denial-rejects-continuing-callbacks-keeps-video-recording",
-        "decodedFrames": 15,
-        "pcmSamples": 18153,
+        "decodedFrames": 16,
+        "pcmSamples": 18258,
         "pcmRMS": 0.0
       },
       {
         "name": "microphone-regrant-keeps-original-recording",
         "decodedFrames": 15,
-        "pcmSamples": 18241,
-        "pcmRMS": 0.09393058512271454
+        "pcmSamples": 18264,
+        "pcmRMS": 0.08943149014841457
       },
       {
         "name": "screen-denial-offline-with-independent-healthy-mic",
-        "decodedFrames": 16,
-        "pcmSamples": 18278,
-        "pcmRMS": 0.09358361420522604
+        "decodedFrames": 15,
+        "pcmSamples": 18333,
+        "pcmRMS": 0.09847303080869846
       },
       {
         "name": "both-permissions-denied-retired-callbacks-silent",
-        "decodedFrames": 15,
-        "pcmSamples": 18240,
+        "decodedFrames": 16,
+        "pcmSamples": 18241,
         "pcmRMS": 0.0
       },
       {
         "name": "screen-regrant-waits-for-manual-program-restore",
         "decodedFrames": 14,
-        "pcmSamples": 18237,
-        "pcmRMS": 0.38885420877523524
+        "pcmSamples": 18280,
+        "pcmRMS": 0.37609524319255067
       },
       {
         "name": "manual-restore-after-screen-regrant",
-        "decodedFrames": 15,
-        "pcmSamples": 18148,
-        "pcmRMS": 0.39154266476742106
+        "decodedFrames": 14,
+        "pcmSamples": 18194,
+        "pcmRMS": 0.38297523113743326
       }
     ]
+  },
+  "controlledResetBarrier": {
+    "timeoutSeconds": 5,
+    "timedOut": false,
+    "unrelatedScreenResult": "unavailable",
+    "pendingMicrophoneRestored": true,
+    "confirmedDenialClosesBeforeSetterReturns": true,
+    "busyChannelStatistics": "unavailable; sampling does not wait for opaque reset or hold registry during channel reads"
   }
 }

@@ -379,6 +379,19 @@ private final class FailoverAudioProbe: @unchecked Sendable {
         controller.restoreResilienceProgram()
         try await phase("manual-private-program-restore", .red)
         if CommandLine.arguments.contains("--permission-transitions") {
+            let barrier = OwnedPermissionResetBarrier()
+            defer { barrier.release() }
+            await controller.failoverFixtureHoldMicRestore(barrier)
+            controller.failoverFixturePermission(.microphone, .granted)
+            try await wait("Owned mic restoration never reached its signal-history drain") { barrier.hasEntered }
+            controller.failoverFixturePermission(.screenCapture, .unavailable)
+            try await wait("Unrelated screen availability result was not folded") { controller.failoverFixtureScreenStatus == .unavailable }
+            try await phase("unrelated-discovery-unavailable-during-mic-regrant-keeps-healthy-output", .red)
+            barrier.release()
+            try await wait("Unrelated permission result cancelled the pending microphone regrant") { controller.failoverFixtureMicPermissionAvailable }
+            try check(!barrier.didTimeOut, "Owned signal-history drain exceeded its unchanged five-second deadline")
+            controller.failoverFixturePermission(.screenCapture, .granted)
+            print("PASS: pending mic history drain preserves healthy video/recording; unrelated unavailable screen result cannot cancel mic recovery")
             FailoverOwnedSources.audioLead = 0 // Original capture clock, never a future callback time after permission restore.
             FailoverOwnedSources.screenAudio = false; FailoverOwnedSources.micAudio = true
             controller.applyMixerChannelGain(.microphone(deviceUID: nil), volume: 0.5, isMuted: false)
@@ -386,6 +399,8 @@ private final class FailoverAudioProbe: @unchecked Sendable {
             try await wait("Microphone grant did not reopen its actual route") { controller.failoverFixtureAudioAllowed(.microphone(deviceUID: nil)) }
             try await phase("known-microphone-grant", .red)
             controller.failoverFixturePermission(.microphone, .denied)
+            try check(!controller.failoverFixtureAudioAllowed(.microphone(deviceUID: nil)),
+                      "A confirmed denial did not close audio authority before returning")
             try await wait("Microphone denial did not synchronously close its actual route") { !controller.failoverFixtureAudioAllowed(.microphone(deviceUID: nil)) }
             try await phase("microphone-denial-rejects-continuing-callbacks-keeps-video-recording", .red, tone: false)
             controller.failoverFixturePermission(.microphone, .granted)
