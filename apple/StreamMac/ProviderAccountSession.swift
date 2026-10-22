@@ -215,6 +215,7 @@ final class ProviderAccountSession: ObservableObject {
     func forget(_ provider: ManagedProvider) {
         guard !closed else { return }
         if provider == .youtube { lastThumbnailReceipt = nil }
+        // Retire this provider's viewer counts/dates synchronously as well.
         invalidateEndingEpoch(provider)
         if provider == .youtube { managedReadRevision = UUID() }
         directChat?.stop(provider)
@@ -237,8 +238,6 @@ final class ProviderAccountSession: ObservableObject {
             accounts[provider]?.channels = []; accounts[provider]?.events = []
             accounts[provider]?.verifiedAt = nil
             accounts[provider]?.localCredentialFailure = cleaned ? nil : "Local authorization cleanup failed. Authorization is disabled in this session, but durable cleanup was not confirmed. Repair local storage and retry Forget Authorization."
-            viewers = viewers.filter { !$0.key.hasPrefix(provider.rawValue + ":") }
-            viewerDates = viewerDates.filter { !$0.key.hasPrefix(provider.rawValue + ":") }
             finish(provider, generation)
         }
     }
