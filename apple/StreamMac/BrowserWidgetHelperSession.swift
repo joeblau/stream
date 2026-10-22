@@ -117,6 +117,7 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
         guard acceptsInjectedReplies else { return }
         receive(reply, epoch: epoch)
     }
+    func validationHasPendingLoad(_ id: UUID) -> Bool { loadClaims[id] != nil }
     #endif
     convenience init(applicationURL: URL, mixer: AudioMixEngine, ipcPolicy: BrowserWidgetAudioSocket.Policy = .production) {
         let channel = AudioChannelID.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID)
@@ -535,11 +536,15 @@ extension BrowserWidgetHelperTransport { @MainActor var hasTerminated: Bool { fa
             launchTask?.cancel(); try? await launchTask?.value; launchTask = nil
             let retiringConnection = connection
             let pages = Array(localPages.values); localPages.removeAll()
-            try? retiringConnection?.send(.init(action: .close)); retiringConnection?.close(); connection = nil
-            BrowserWidgetLocalRetirement.retain(pages, until: { retiringConnection == nil || retiringConnection?.hasTerminated == true })
+            // Authority is already revoked above, but the capture driver owns
+            // work against this exact helper PID until its stop completes.
+            // Join pending start/retirement before terminating the producer.
             audioTask?.cancel(); await audioTask?.value; audioTask = nil
             await audio.stop(); await mixer?.resetCaptureRouteHistory(channel)
             await mixer?.removeChannel(channel)
+            try? retiringConnection?.send(.init(action: .close)); retiringConnection?.close()
+            if let retiringConnection, connection === retiringConnection { connection = nil }
+            BrowserWidgetLocalRetirement.retain(pages, until: { retiringConnection == nil || retiringConnection?.hasTerminated == true })
         }
     }
 }
@@ -645,7 +650,10 @@ private final class BrowserWidgetHelperConnection: BrowserWidgetHelperTransport,
         let first = lock.withLock { () -> Bool in guard !closed else { return false }; closed = true; return true }
         guard first else { return }
         Darwin.shutdown(command.fileDescriptor, SHUT_RDWR); Darwin.shutdown(frames.fileDescriptor, SHUT_RDWR)
-        DispatchQueue.main.async { [self] in onClosed(); application.terminate() }
+        // The owner revokes authority on this notification, then closes this
+        // exact connection after capture retirement. A transport error must not
+        // terminate a still-running helper ahead of that asynchronous barrier.
+        DispatchQueue.main.async { [self] in onClosed() }
     }
     @MainActor var hasTerminated: Bool { application.isTerminated }
     @MainActor func close() {

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "1ba73513a5d5f29f34a6467ea9ddc07410ff810f",
+  "sourceSHA256": {
+    "StreamMac/BrowserCaptureExclusions.swift": "4932e8e139b89f4c7e851bb253780da2c04b6eeb4026309128b30387b860c5fc",
+    "StreamMac/BrowserWidgetAudioProtocol.swift": "4f2ea8b524f885075e72398c001b4d8a0f25222bc7083f2587c2761e4f19732c",
+    "StreamMac/BrowserWidgetLocalContent.swift": "a78869ccb94358da9f470e5d617166fe058992f4771da2d52e9ae53d40fdd377",
+    "StreamMac/BrowserWidgetVisualProtocol.swift": "63d5695c50ca368b7ab6b17657bc8e5b22193d9b6b088ba03d10cc058f405d99",
+    "StreamMac/BrowserWidgetAudioSocket.swift": "a38b991bc54969f6a70e9dc7dc807a7e8aabb72b3b96981e2d90d6ee8a08118f",
+    "StreamMac/BrowserWidgetAudioCapture.swift": "5ae8c3e2dd66509caa0e814a243b1de9843768a501982eee6e450b9004ad71d5",
+    "StreamMac/BrowserWidgetHelperSession.swift": "0882cac14c1d307ec14c055130d4f0435fc623fbb57f0a4154a9814ea9b05772",
+    "scripts/browser_helper_lifecycle_checks.swift": "65d51bc625ca9e6ed0c1c00f939877ef244407694b84dd4227f1d59575123abd",
+    "scripts/browser_helper_command_fixture.swift": "323461abddafbf5cc11cd0b381c699438ae8c06310092409947b637798e7ef64"
+  },
+  "artifactSHA256": {
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/StreamMac/BrowserCaptureExclusions.swift": "4932e8e139b89f4c7e851bb253780da2c04b6eeb4026309128b30387b860c5fc",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/StreamMac/BrowserWidgetAudioCapture.swift": "5ae8c3e2dd66509caa0e814a243b1de9843768a501982eee6e450b9004ad71d5",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/StreamMac/BrowserWidgetAudioProtocol.swift": "4f2ea8b524f885075e72398c001b4d8a0f25222bc7083f2587c2761e4f19732c",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/StreamMac/BrowserWidgetAudioSocket.swift": "a38b991bc54969f6a70e9dc7dc807a7e8aabb72b3b96981e2d90d6ee8a08118f",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/StreamMac/BrowserWidgetHelperSession.swift": "2af63b289256483223daf93fa9fbb6fd37e3f7163a96fa95bf584543e1031162",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/StreamMac/BrowserWidgetLocalContent.swift": "a78869ccb94358da9f470e5d617166fe058992f4771da2d52e9ae53d40fdd377",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/StreamMac/BrowserWidgetVisualProtocol.swift": "63d5695c50ca368b7ab6b17657bc8e5b22193d9b6b088ba03d10cc058f405d99",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/harness": "7c5b14c51048e5871baeaacd7a98644d4b82081f65befc56fd5ac38506f311a2",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/scripts/browser_helper_command_fixture.swift": "323461abddafbf5cc11cd0b381c699438ae8c06310092409947b637798e7ef64",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative/scripts/browser_helper_lifecycle_checks.swift": "65d51bc625ca9e6ed0c1c00f939877ef244407694b84dd4227f1d59575123abd",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative-compile-command.json": "6df6e7250322d35dbee0dd5851eaaa550bf9e25bd9fdda797d11728fa0038171",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative-compile.log": "0d05c6cbb49115273ed6a91ce00e338102ea2536acce5e80bbe217cf1a89f4af",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/negative-runtime.log": "582605f32f3ebec98493d793b20b91769d41bd0218ef654ae21bc125278978ef",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/StreamMac/BrowserCaptureExclusions.swift": "4932e8e139b89f4c7e851bb253780da2c04b6eeb4026309128b30387b860c5fc",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/StreamMac/BrowserWidgetAudioCapture.swift": "5ae8c3e2dd66509caa0e814a243b1de9843768a501982eee6e450b9004ad71d5",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/StreamMac/BrowserWidgetAudioProtocol.swift": "4f2ea8b524f885075e72398c001b4d8a0f25222bc7083f2587c2761e4f19732c",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/StreamMac/BrowserWidgetAudioSocket.swift": "a38b991bc54969f6a70e9dc7dc807a7e8aabb72b3b96981e2d90d6ee8a08118f",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/StreamMac/BrowserWidgetHelperSession.swift": "0882cac14c1d307ec14c055130d4f0435fc623fbb57f0a4154a9814ea9b05772",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/StreamMac/BrowserWidgetLocalContent.swift": "a78869ccb94358da9f470e5d617166fe058992f4771da2d52e9ae53d40fdd377",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/StreamMac/BrowserWidgetVisualProtocol.swift": "63d5695c50ca368b7ab6b17657bc8e5b22193d9b6b088ba03d10cc058f405d99",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/harness": "c77ba45631f62c7d116d9c60bd0eb9175346ffe967180cbc10421c972bf1bf1d",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/scripts/browser_helper_command_fixture.swift": "323461abddafbf5cc11cd0b381c699438ae8c06310092409947b637798e7ef64",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive/scripts/browser_helper_lifecycle_checks.swift": "65d51bc625ca9e6ed0c1c00f939877ef244407694b84dd4227f1d59575123abd",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive-compile-command.json": "000801923d888f161059ebfc11d8cc7714c88fa3c288b1719938c668fc4fb5cc",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive-compile.log": "e3acbad2fbbae32532e760b7d7fe5241da7524b2aa1202c8751febfc60271e9e",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/positive-runtime.log": "49a837c78ea283b1f94bf42c8d00aa69ae5af1d2e81d04872df146ec15de0373",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/results.json": "12759138cfae44517404347b0b7660c2d80af9d366e82acaf47ba01faa29ac38",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/run.py": "4f402c8df4369085e47a0df0273a02955c64a29751d1240ee78be21c2c472c7b",
+    "/tmp/stream-wave18-browser-shutdown-proof-20261022/source-manifest.json": "e1e0dd8f796594c8084c740f24fca94186557433f30748b228429af58ed7b595"
+  },
+  "results": {
+    "positive": {
+      "compileExit": 0,
+      "runtimeExit": 0
+    },
+    "negative": {
+      "compileExit": 0,
+      "runtimeExit": -5
+    }
+  },
+  "scope": {
+    "executed": "Actual BrowserWidgetHelperSession with controlled injected transport/audio driver; existing command-only mixer fixture; all BrowserHelperLifecycleChecks cases.",
+    "negative": "Only beginShutdown helper-close ordering reverted; same current tests, pending-load observation seam and disconnected owner delegation retained.",
+    "notExecuted": [
+      "Actual BrowserWidgetHelperConnection / NSRunningApplication shutdown",
+      "ScreenCaptureKit construction or capture",
+      "Real AudioMixEngine or PCM/DSP",
+      "Browser/helper/UI/network/device graph"
+    ],
+    "productionRouteQualified": false
+  },
+  "recipe": "/tmp/stream-wave18-browser-shutdown-proof-20261022/run.py",
+  "runtimeDeadlineSecondsPerVariant": 45,
+  "nativeJobs": 2,
+  "independentSourceReview": "guests provisional clear; frozen binding pending"
+}
