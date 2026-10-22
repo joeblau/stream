@@ -46,6 +46,17 @@ controller = File.join(folder, 'fixtures/InterviewStreamController.swift')
 File.write(controller, source)
 target['sources'][0]['excludes'] << 'StreamController.swift'
 target['sources'] << controller
+# Same-file, read-only resource observation; shipping playback is unchanged.
+soundboard = File.join(folder, 'fixtures/InterviewSoundboardController.swift')
+File.write(soundboard, File.read(File.join(root, 'StreamMac/SoundboardController.swift')) + <<'SWIFT')
+
+extension SoundboardController {
+    var deckFixtureResources: (players: Int, pumping: Bool) { (engineList.snapshot().count, pumpTask != nil) }
+}
+SWIFT
+target['sources'][0]['excludes'] << 'SoundboardController.swift'
+target['sources'] << soundboard
+
 app = File.read(File.join(root, 'StreamMac/StreamMacApp.swift'))
 first = app.index('            MainWindowView(firstRunCompleted: $hasCompletedFirstRun)')
 last = first && app.index("\n        }\n        .defaultSize", first)

@@ -78,7 +78,7 @@ export class InterviewReferenceHost {
     }
     if(data.type==='roster' && Array.isArray(data.peers) && data.peers.length<=11) {
       const members = new Map();
-      for(const peer of data.peers) if(peer.role==='guest' && UUID.test(peer.id) && typeof peer.name==='string' && peer.name.length<=80 && ['waiting','backstage','onair'].includes(peer.state)) members.set(peer.id,{id:peer.id,name:peer.name,state:peer.state});
+      for(const peer of data.peers) if(peer.role==='guest' && UUID.test(peer.id) && typeof peer.name==='string' && peer.name.length<=80 && ['waiting','backstage','onair'].includes(peer.state)) members.set(peer.id,{id:peer.id,name:peer.name,state:peer.state,generation:UUID.test(peer.generation)?peer.generation:undefined});
       this.members=members;
       for(const [id] of this.peers) if(!members.has(id) || members.get(id).state==='waiting') this.#dropPeer(id);
       this.flags={locked:data.locked===true,program:data.program===true,recording:data.recording===true}; this.changed(); return;
@@ -212,10 +212,10 @@ export class InterviewReferenceHost {
     record.control?.close();record.pc?.close();record.stream?.getTracks().forEach(track=>track.stop());record.screenStream?.getTracks().forEach(track=>track.stop());record.screenApproved=record.screenSharing=false;record.candidates=[];this.peers.delete(id);
     this.#outboundICE=this.#outboundICE.filter(item=>item.record!==record);
   }
-  admit(id) { const member=this.members.get(id);if(member && (member.state==='waiting' || !this.peers.has(id))) this.#send({type:'admit',id}); }
-  stage(id) { if(this.members.get(id)?.state==='backstage') this.#send({type:'stage',id}); }
-  backstage(id) { if(this.members.get(id)?.state==='onair') this.#send({type:'backstage',id}); }
-  revoke(id) { if(this.members.has(id) && this.#send({type:'revoke',id})) {this.#dropPeer(id);this.changed('Guest revocation requested; media stopped locally.');} }
+  admit(id) { const member=this.members.get(id);if(member && (member.state==='waiting' || !this.peers.has(id))) UUID.test(member.generation) && this.#send({type:'admit',id,targetGeneration:member.generation}); }
+  stage(id) { const member=this.members.get(id);if(member?.state==='backstage' && UUID.test(member.generation)) this.#send({type:'stage',id,targetGeneration:member.generation}); }
+  backstage(id) { const member=this.members.get(id);if(member?.state==='onair' && UUID.test(member.generation)) this.#send({type:'backstage',id,targetGeneration:member.generation}); }
+  revoke(id) { const member=this.members.get(id);if(UUID.test(member?.generation) && this.#send({type:'revoke',id,targetGeneration:member.generation})) {this.#dropPeer(id);this.changed('Guest revocation requested; media stopped locally.');} }
   #screenControl(record,approved) {
     if(record.control?.readyState!=='open')return false;
     try{if(record.control.bufferedAmount>8192)throw new Error('Control backlog');record.control.send(JSON.stringify({type:'screen-approval',negotiation:record.negotiation,approved}));return true;}

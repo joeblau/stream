@@ -171,6 +171,31 @@ class StudioClient:
                     raise ValueError("The host did not acknowledge the expected operation")
                 return reply
 
+    def command(self, command_id):
+        # Resolve the advertised authority for this deliberate invocation only.
+        # Never persist it, retry a rejected mutation, or replay after reconnect.
+        cursor = 0
+        while True:
+            reply = self.request("capabilities", cursor=cursor)
+            if reply.get("error"):
+                return reply
+            if reply.get("totalCommands", 0) > 10000:
+                raise ValueError("Unsupported command catalog")
+            target = next((item for item in reply.get("commands", []) if item.get("id") == command_id), None)
+            if target is not None:
+                if target.get("kind") == "feedback":
+                    return self.request("snapshot")
+                authority = target.get("authority")
+                if authority is not None and (not isinstance(authority, str) or not 1 <= len(authority.encode()) <= 128):
+                    raise ValueError("Invalid command authority")
+                return self.request("command", commandID=command_id, **({"authority": authority} if authority else {}))
+            next_cursor = reply.get("nextCursor")
+            if next_cursor is None:
+                raise ValueError("The bound resource is missing or unsupported")
+            if not isinstance(next_cursor, int) or next_cursor <= cursor or next_cursor > 10000:
+                raise ValueError("Invalid command catalog cursor")
+            cursor = next_cursor
+
     def close(self):
         self.reader.close()
         self.socket.close()
@@ -211,7 +236,7 @@ def main():
         else:
             operation = "command" if args.command else "subscribe" if args.subscribe else "snapshot"
             payload = {"commandID": args.command} if args.command else {}
-            reply = client.request(operation, **payload)
+            reply = client.command(args.command) if args.command else client.request(operation, **payload)
             print(json.dumps(reply), flush=True)
             if reply.get("error") or reply.get("result", {}).get("succeeded") is False:
                 return 2

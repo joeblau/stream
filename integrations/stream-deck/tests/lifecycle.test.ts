@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { createRequire } from "node:module";
 import { build } from "esbuild";
-import type { Snapshot } from "../src/studio-client.ts";
+import type { Capability, Snapshot } from "../src/studio-client.ts";
 const { WebSocketServer } = createRequire(import.meta.url)("ws");
 async function waitUntil(check: () => boolean): Promise<void> {
   for (let i = 0; i < 500; ++i) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
@@ -25,9 +25,10 @@ for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${sc
   const state: Snapshot = { projectID, revision: 1, stream: "idle", recording: "paused", preview: "active", pendingStagedEdits: false,
     stagedSceneID: sceneID, layerVisibility: {}, macroProgress: { phase: "idle", stepIndex: 0, totalSteps: 0, message: "" } };
   if (scenario === "destination") state.transport = { destinations: [{ id: sceneID, name: "Opening", state: "idle", eventKey: "e".repeat(64), endingPending: false, confirmationPending: false }], confirmationPending: false, endingPending: false };
-  const commands = [...new Set([commandID, secondCommandID])].map(id => ({ id, title: "Opening", category: scenario === "scene" ? "Scenes" : "Destinations", available: true, requiresConfirmation: id.endsWith(".endRemote") }));
+  const commands: Capability[] = [...new Set([commandID, secondCommandID])].map(id => ({ id, title: "Opening", category: scenario === "scene" ? "Scenes" : "Destinations", available: true, requiresConfirmation: id.endsWith(".endRemote") }));
   const nativePeers = new Map<net.Socket, string>();
   let connections = 0, executions = 0;
+  const mutations: any[] = [];
   const native = net.createServer(socket => {
     ++connections; const sessionID = randomUUID(); nativePeers.set(socket, sessionID);
     socket.on("close", () => nativePeers.delete(socket));
@@ -38,10 +39,10 @@ for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${sc
         const request = JSON.parse(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1);
         const send = (type: string, payload: object = {}) => socket.write(JSON.stringify({ version: 1, type, id: request.id, sessionID, ...payload }) + "\n");
         if (request.type === "authenticate") send("authenticated", { snapshot: state });
-        if (request.type === "subscribe") send("snapshot", { snapshot: state });
+        if (request.type === "subscribe" || request.type === "snapshot") send("snapshot", { snapshot: state });
         if (request.type === "capabilities") send("capabilities", { commands, totalCommands: commands.length });
         if (request.type === "command") {
-          ++executions; dispatched.push(request.commandID);
+          mutations.push(request); ++executions; dispatched.push(request.commandID);
           if (request.commandID.endsWith(".endRemote")) { state.transport!.destinations[0].confirmationPending = true; state.transport!.confirmationPending = true; ++state.revision; }
           send("result", { result: { succeeded: true }, snapshot: state });
         }
@@ -106,6 +107,39 @@ for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${sc
     for (const command of commands) command.title = "Renamed Opening"; ++state.revision;
     for (const [peer, sessionID] of nativePeers) peer.write(JSON.stringify({ version: 1, type: "event", sessionID, snapshot: state }) + "\n");
     await waitUntil(() => received.filter(message => message.event === "setTitle" && message.payload.title === "Renamed Opening").length >= 2);
+    // The actual bundled SDK routes new interaction IDs through the same
+    // shared client; the controlled native peer supplies no live account.
+    const slot = randomUUID(), guestID = `guest.slot.${slot}.mute`, profileProject = randomUUID(), profileID = randomUUID();
+    const showID = `show.${profileProject}.profile.${profileID}.select`;
+    const presetID = `chat.preset.${randomUUID()}.youtube.send`;
+    commands.push({id:guestID,title:"Mute Ada",category:"Guests",available:true,authority:"c".repeat(64),bindingIntent:"configuredSlot"},
+      {id:showID,title:"Select saved profile",category:"Show Profiles",available:true,scope:"studio",authority:"owned-runtime"},
+      {id:presetID,title:"Send Welcome",category:"Chat Presets",available:true,authority:"d".repeat(64),bindingIntent:"currentConnection"},
+      {id:"audience.viewers",title:"Actual provider readings",category:"Audience",available:true,kind:"feedback"});
+    state.guestSlots=[{id:slot,name:"Ada",media:"ready",muted:false,solo:false}];
+    state.audience={observedAt:Date.now()/1000,health:"idle",readings:[],presetDelivery:{}};
+    state.showProfiles={projectID:profileProject,profileID:randomUUID(),canSelect:true};
+    const publish=()=>{++state.revision;for(const [peer,sessionID] of nativePeers)peer.write(JSON.stringify({version:1,type:"event",sessionID,snapshot:state})+"\n");};
+    publish(); await new Promise(resolve=>setTimeout(resolve,650));
+    const bind=async(context:string,id:string)=>{
+      send("sendToPlugin",context,undefined,{operation:"bind",commandID:id});
+      await waitUntil(()=>settings.get(context)?.commandID===id);send("keyUp",context);
+    };
+    await bind("key-a",guestID);await bind("key-b",guestID);
+    const beforeGuests=executions;send("keyDown","key-a");send("keyDown","key-b");
+    await waitUntil(()=>executions===beforeGuests+2);
+    assert(mutations.filter(request=>request.commandID===guestID).every(request=>request.authority==="c".repeat(64)));
+    await bind("key-b",presetID);send("keyDown","key-b");await waitUntil(()=>mutations.some(request=>request.commandID===presetID));
+    assert.equal(mutations.find(request=>request.commandID===presetID).authority,"d".repeat(64));
+    await bind("key-b","audience.viewers");const beforeFeedback=executions;send("keyDown","key-b");
+    await new Promise(resolve=>setTimeout(resolve,100));assert.equal(executions,beforeFeedback,"Feedback-only SDK key must not issue a mutation");
+    await bind("key-b",showID);const savedSource=settings.get("key-b")!.projectID;
+    state.projectID=randomUUID();state.showProfiles.profileID=profileID;publish();await new Promise(resolve=>setTimeout(resolve,650));
+    send("keyDown","key-b");await waitUntil(()=>mutations.some(request=>request.commandID===showID));
+    assert.equal(settings.get("key-b")!.projectID,savedSource,"Profile requests never rewrite a saved binding's original context");
+    assert(received.filter(message=>message.event==="setSettings").every(message=>!["authority","scope","bindingIntent"].some(key=>key in message.payload)),"Only stable binding settings persist");
+    state.projectID=projectID;publish();await new Promise(resolve=>setTimeout(resolve,650));
+    await bind("key-a",commandID);await bind("key-b",commandID);
     send("willDisappear", "key-a"); await new Promise(resolve => setTimeout(resolve, 50));
     const afterDisappear = received.length; state.stream = "live"; ++state.revision;
     for (const [peer, sessionID] of nativePeers) peer.write(JSON.stringify({ version: 1, type: "event", sessionID, snapshot: state }) + "\n");

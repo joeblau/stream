@@ -16,13 +16,14 @@ import Network
     private var peers: [UUID: Peer] = [:]
     private var stateObservation: AnyCancellable?
     private var eventTask: Task<Void, Never>?
+    private var feedbackClock: Task<Void, Never>?
     private var revision: UInt64 = 0
     private var lastBroadcastRevision: UInt64 = 0
     private var lastSnapshot: StudioControlSnapshot?
     private var lastCapabilities: [StudioControlCapability] = []
     private var snapshot: () -> StudioControlSnapshot = { .init(projectID: "", stream: "idle", recording: "idle", preview: "idle", pendingStagedEdits: false, layerVisibility: [:], macroProgress: .init()) }
     private var capabilities: () -> [StudioControlCapability] = { [] }
-    private var execute: (String, Double?, Double?, Int?, String?) -> StudioControlCommandResult = { id, _, _, _, _ in .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "No studio is bound.")) }
+    private var execute: (String, Double?, Double?, Int?, String?, String?) -> StudioControlCommandResult = { id, _, _, _, _, _ in .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "No studio is bound.")) }
     private var cancelledRemoteRun: (UUID) -> Void = { _ in }
     private var currentRunID: () -> UUID? = { nil }
     private var currentEndingReviewID: () -> UUID? = { nil }
@@ -64,10 +65,11 @@ import Network
         let boundProjectDirectory = DesktopStorage.projectDirectory
         capabilities = { [weak dispatcher] in
             var result: [StudioControlCapability] = dispatcher?.catalogueActions().map { .init(id: $0.id, title: $0.title, category: $0.category,
-                                                      available: $0.command != nil && $0.unavailableReason == nil,
-                                                      unavailableReason: $0.unavailableReason, kind: "command",
+                                                      available: ($0.kind == "feedback" || $0.command != nil) && dispatcher?.controllerUnavailableReason(for: $0) == nil,
+                                                      unavailableReason: dispatcher?.controllerUnavailableReason(for: $0), kind: $0.kind ?? "command",
                                                       argument: $0.id.hasSuffix(".source.select") ? "source" : $0.id == "output.record.marker" ? "text" : $0.id.hasPrefix("pdf.") && $0.id.hasSuffix(".goto") ? "page" : nil, sourceKind: $0.sourceKind, sourceAvailable: $0.sourceAvailable,
-                                                      requiresConfirmation: $0.requiresConfirmation, target: $0.target) } ?? []
+                                                      requiresConfirmation: $0.requiresConfirmation, target: $0.target,
+                                                      authority: dispatcher?.controllerAuthority(for: $0.command), scope: $0.scope, bindingIntent: $0.bindingIntent) } ?? []
             for target in dispatcher?.controllerTargets() ?? [] where target.kind == .value {
                 result.append(.init(id: target.id, title: target.title, category: "Audio Levels", available: target.unavailableReason == nil, unavailableReason: target.unavailableReason, kind: "value"))
             }
@@ -93,9 +95,10 @@ import Network
                                     media: member.media.rawValue, slot: route?.slot, programAllowed: route?.programAllowed ?? false,
                                     monitorAllowed: route?.monitorAllowed ?? false, screenApproved: member.screenApproved, screenSharing: member.screenSharing)
                             }),
-                         recordingCountdown: dispatcher.controllerRecordingCountdown(), transport: dispatcher.controllerTransportSnapshot(), visuals: dispatcher.controllerVisualSnapshot())
+                         recordingCountdown: dispatcher.controllerRecordingCountdown(), transport: dispatcher.controllerTransportSnapshot(), visuals: dispatcher.controllerVisualSnapshot(), guestSlots: dispatcher.interactions.guestSlotsSnapshot(),
+                         audience: dispatcher.interactions.audienceSnapshot(), showProfiles: dispatcher.interactions.showProfilesSnapshot())
         }
-        execute = { [weak self, weak dispatcher] id, value, delta, page, text in
+        execute = { [weak self, weak dispatcher] id, value, delta, page, text, authority in
             guard let self, let dispatcher else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "The studio is unavailable.")) }
             guard DesktopStorage.projectDirectory == boundProjectDirectory, !self.interactionBlocked() else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: "Complete the studio's setup or permission choice before running remote commands.")) }
             if let target = dispatcher.controllerTargets().first(where: { $0.id == id && $0.kind == .value }) {
@@ -111,6 +114,10 @@ import Network
             }
             guard let action = dispatcher.catalogueActions().first(where: { $0.id == id }) else {
                 return .init(commandID: id, succeeded: false, error: .init(code: "invalidTarget", message: "The stable command/resource ID no longer exists."))
+            }
+            guard dispatcher.controllerAuthority(for: action.command) == authority,
+                  !dispatcher.controllerAuthorityRequired(for: action.command) || authority != nil else {
+                return .init(commandID: id, succeeded: false, error: .init(code: "invalidTarget", message: "The command authority changed. Refresh the current connection and press deliberately again."))
             }
             guard var command = action.command else { return .init(commandID: id, succeeded: false, error: .init(code: "unavailable", message: action.unavailableReason ?? "This action is unavailable.")) }
             if let page {
@@ -159,6 +166,7 @@ import Network
     func stop() {
         listener?.cancel(); listener = nil; listenerID = nil; listeningPort = nil
         eventTask?.cancel(); eventTask = nil
+        feedbackClock?.cancel(); feedbackClock = nil
         for peer in Array(peers.values) { disconnect(peer) }
         status = enabled ? "Stopped" : "Disabled"
     }
@@ -270,6 +278,15 @@ import Network
         case .snapshot: send(.init(type: "snapshot", id: request.id, sessionID: peer.session.sessionID, snapshot: currentSnapshot()), peer: peer)
         case .subscribe:
             peer.subscribed = true
+            if feedbackClock == nil {
+                feedbackClock = Task { [weak self] in
+                    while !Task.isCancelled {
+                        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                        guard let self else { return }
+                        if self.peers.values.contains(where: { $0.subscribed }) { self.scheduleEvent() }
+                    }
+                }
+            }
             send(.init(type: "snapshot", id: request.id, sessionID: peer.session.sessionID, snapshot: currentSnapshot()), peer: peer)
         case .capabilities:
             let all = capabilities(), cursor = request.cursor ?? 0
@@ -286,7 +303,7 @@ import Network
             let commandID = request.commandID!
             let previousReview = currentEndingReviewID()
             let previousRun = currentRunID()
-            let result = execute(commandID, request.value, request.delta, request.page, request.text)
+            let result = execute(commandID, request.value, request.delta, request.page, request.text, request.authority)
             if result.succeeded, currentEndingReviewID() != previousReview { peer.ownedEndingReview = currentEndingReviewID() }
             if result.succeeded, commandID.hasPrefix("macro."), commandID.hasSuffix(".run"), currentRunID() != previousRun { peer.ownedMacroRun = currentRunID() }
             send(.init(type: "result", id: request.id, sessionID: peer.session.sessionID, snapshot: currentSnapshot(), result: result), peer: peer)
@@ -357,6 +374,7 @@ import Network
         if let review = peer.ownedEndingReview { cancelEndingReview(review) }
         if let run = peer.ownedMacroRun { cancelledRemoteRun(run) }
         connectedClients = peers.count
+        if !peers.values.contains(where: { $0.subscribed }) { feedbackClock?.cancel(); feedbackClock = nil }
     }
     private static func streamLabel(_ state: StreamSessionState) -> String {
         switch state { case .idle: "idle"; case .connecting: "connecting"; case .live: "live"; case .reconnecting: "reconnecting"; case .stopping: "stopping"; case .failed: "failed" }

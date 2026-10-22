@@ -163,8 +163,7 @@ final class StudioWorkspace: ObservableObject {
         runtime.localControl.shutdown()
         runtime.dispatcher.rundown.stop()
         runtime.dispatcher.macros.cancel()
-        runtime.dispatcher.soundboard.stopAllSoundEffects()
-        for playlist in runtime.dispatcher.soundboardStore.playlists { runtime.dispatcher.soundboard.stopPlaylist(playlist) }
+        runtime.dispatcher.soundboard.shutdown()
         runtime.flush()
         await runtime.controller.prepareForProjectChange()
         do {
@@ -303,6 +302,7 @@ final class StudioWorkspace: ObservableObject {
         runtime.localControl.shutdown()
         runtime.dispatcher.macros.cancel()
         runtime.dispatcher.rundown.stop()
+        runtime.dispatcher.soundboard.shutdown()
         runtime.flush()
         await runtime.controller.prepareForProjectChange()
         do {
@@ -325,6 +325,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     private func observeRuntime() {
+        runtime.dispatcher.interactions.bind(workspace: self)
         let interactionIsBlocked: @MainActor @Sendable () -> Bool = { [weak self] in
             guard let self else { return true }
             return !UserDefaults.standard.bool(forKey: "onboarding.hasCompletedFirstRun") || self.permissionChoicePending || self.isSwitching || self.packageBusy
@@ -377,7 +378,7 @@ final class StudioWorkspace: ObservableObject {
             self.runtime.controller.retireGuestMedia()
             self.runtime.diagnostics.shutdown()
             self.runtime.controllers.shutdown(); self.runtime.controller.ending.shutdown(); self.runtime.providerAccounts.shutdown(); self.runtime.chat.shutdown(); self.runtime.localControl.shutdown()
-            self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop()
+            self.runtime.dispatcher.macros.cancel(); self.runtime.dispatcher.rundown.stop(); self.runtime.dispatcher.soundboard.shutdown()
             self.runtime.controller.stopStream(); self.runtime.controller.stopSecondaryRecording(); self.runtime.controller.stopExternalDisplayOutput(); self.runtime.controller.stopVirtualCameraOutput()
             self.runtime.flush()
             for _ in 0..<150 {

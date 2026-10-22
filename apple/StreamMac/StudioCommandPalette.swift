@@ -12,6 +12,9 @@ struct StudioPaletteAction: Identifiable {
     var sourceAvailable: Bool? = nil
     var requiresConfirmation = false
     var target: StudioControlTarget? = nil
+    var kind: String? = nil
+    var scope: String? = nil
+    var bindingIntent: String? = nil
 }
 
 extension StudioCommandDispatcher {

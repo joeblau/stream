@@ -25,6 +25,15 @@ enum NativeInterviewCommand: Equatable, Sendable {
         }
     }
 
+    var connection: NativeInterviewPeerLease? {
+        switch self {
+        case .setMuted(let context, _), .setSolo(let context, _), .rename(let context, _), .sendPrivateMessage(let context, _),
+             .setProgramReturn(let context, _), .selectReturnVideoSource(let context, _), .setPublicChatReturn(let context, _): return context
+        case .beginTalkback(let context, _, _), .endTalkback(let context, _): return context
+        default: return nil
+        }
+    }
+
     var guestID: UUID? {
         switch self {
         case .admit(let id), .backstage(let id), .onair(let id), .remove(let id), .restartMedia(let id),
@@ -294,6 +303,8 @@ struct NativeInterviewControlState: Equatable, Sendable {
             ?? state.snapshot.members.first(where: { $0.id == guest })?.name ?? "Guest"
     }
 
+    func controllerLease(for guest: UUID) -> NativeInterviewPeerLease? { session?.currentPeerLease(for: guest) }
+    func controllerRosterLease(for guest: UUID) -> NativeInterviewRosterLease? { session?.controllerRosterLease(for: guest) }
     func assignedSlot(for guest: UUID) -> UUID? {
         session?.currentPeerLease(for: guest)?.receive.slot
             ?? controller.sceneStore.guestSlots.first(where: { $0.reconnectPeerID == guest })?.id

@@ -61,10 +61,27 @@ struct StudioPaletteAction {
     var sourceAvailable: Bool? = nil
     var requiresConfirmation = false
     var target: StudioControlTarget? = nil
+    var kind: String? = nil
+    var scope: String? = nil
+    var bindingIntent: String? = nil
+}
+@MainActor struct HarnessInteractions {
+    func guestSlotsSnapshot() -> [StudioControlGuestSlotState] { [] }
+    func audienceSnapshot() -> StudioControlAudienceState { .init(observedAt: 0, health: "idle", readings: [], presetDelivery: [:]) }
+    func showProfilesSnapshot() -> StudioControlShowProfileState? { nil }
 }
 @MainActor final class StudioCommandDispatcher: ObservableObject {
     @Published var state = HarnessState()
     let macros = ShowMacroController()
+    let interactions = HarnessInteractions()
+    var guardedAuthority: String?
+    func controllerAuthority(for command: StudioCommand?) -> String? {
+        if case .action("guarded") = command { return guardedAuthority }; return nil
+    }
+    func controllerAuthorityRequired(for command: StudioCommand?) -> Bool {
+        if case .action("guarded") = command { return true }; return false
+    }
+    func controllerUnavailableReason(for action: StudioPaletteAction) -> String? { action.unavailableReason }
     var actions: [StudioPaletteAction] = []
     var emitted: [String] = []
     @Published var gain = 0.5
@@ -293,9 +310,9 @@ private final class BoundedProcessText: @unchecked Sendable {
     let process = Process()
     let output = BoundedProcessText(), errors = BoundedProcessText()
     private let input = Pipe(), stdout = Pipe(), stderr = Pipe()
-    init(script: URL, clientID: UUID, token: String, port: UInt16) throws {
+    init(script: URL, clientID: UUID, token: String, port: UInt16, arguments: [String] = []) throws {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["python3", "-u", script.path]
+        process.arguments = ["python3", "-u", script.path] + arguments
         process.standardInput = input; process.standardOutput = stdout; process.standardError = stderr
         let output = output, errors = errors
         stdout.fileHandleForReading.readabilityHandler = { handle in
@@ -510,6 +527,35 @@ private final class BoundedProcessText: @unchecked Sendable {
         let reconnect = WireClient(port: port)
         let reauthenticated = try await reconnect.request(.init(type: .authenticate, id: UUID(), clientID: pairing.id, token: pairing.token))
         precondition(reauthenticated.sessionID != sessionID)
+        // The actual Network server must reject an old/missing capability
+        // authority before reaching the controlled studio mutation boundary.
+        dispatcher.actions.append(.init(id: "guarded", title: "Guarded fixture", command: .action("guarded")))
+        dispatcher.guardedAuthority = "old-generation"
+        let authorityCatalog = try await reconnect.request(.init(type: .capabilities, id: UUID(), sessionID: reauthenticated.sessionID))
+        precondition(authorityCatalog.commands?.first { $0.id == "guarded" }?.authority == "old-generation")
+        dispatcher.guardedAuthority = "replacement-generation"
+        let beforeAuthority = dispatcher.emitted
+        let staleAuthority = try await reconnect.request(.init(type: .command, id: UUID(), sessionID: reauthenticated.sessionID, commandID: "guarded", authority: "old-generation"))
+        let missingAuthority = try await reconnect.request(.init(type: .command, id: UUID(), sessionID: reauthenticated.sessionID, commandID: "guarded"))
+        precondition(staleAuthority.result?.error?.code == "invalidTarget" && missingAuthority.result?.error?.code == "invalidTarget" && dispatcher.emitted == beforeAuthority)
+        let freshAuthority = try await reconnect.request(.init(type: .command, id: UUID(), sessionID: reauthenticated.sessionID, commandID: "guarded", authority: "replacement-generation"))
+        precondition(freshAuthority.result?.succeeded == true && dispatcher.emitted == beforeAuthority + ["guarded"])
+        let cliURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("studio_local_control.py")
+        let cli = try ExternalSampleProcess(script: cliURL, clientID: pairing.id, token: pairing.token, port: port,
+                                            arguments: ["--credentials-stdin", "--command", "guarded"])
+        defer { cli.stop() }
+        await waitUntil { !cli.process.isRunning && cli.pipesFinished }
+        precondition(cli.process.terminationStatus == 0 && cli.output.text.contains("succeeded") && dispatcher.emitted == beforeAuthority + ["guarded", "guarded"], "Shipping CLI did not echo freshly discovered native command authority")
+        dispatcher.actions.append(.init(id: "read-only-fixture", title: "Actual snapshot", command: nil, kind: "feedback"))
+        let readOnly = try ExternalSampleProcess(script: cliURL, clientID: pairing.id, token: pairing.token, port: port,
+                                                arguments: ["--credentials-stdin", "--command", "read-only-fixture"])
+        defer { readOnly.stop() }
+        await waitUntil { !readOnly.process.isRunning && readOnly.pipesFinished }
+        precondition(readOnly.process.terminationStatus == 0 && readOnly.output.text.contains("snapshot") && dispatcher.emitted == beforeAuthority + ["guarded", "guarded"], "Feedback-only CLI request reached a mutation")
+        dispatcher.actions.removeAll { $0.id == "read-only-fixture" }
+        dispatcher.emitted = beforeAuthority
+        dispatcher.actions.removeAll { $0.id == "guarded" }
+        progress("PASS: native Network command authority discovery/stale/missing rejection and fresh deliberate mutation")
         let noReplay = try await reconnect.request(.init(type: .command, id: UUID(), sessionID: sessionID, commandID: "output.stream.start"))
         precondition(noReplay.error?.code == "unauthorized" && dispatcher.emitted == [stable])
         reconnect.connection.cancel()

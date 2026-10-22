@@ -2,13 +2,13 @@ import type { Capability, Snapshot } from "./studio-client.js";
 export type Binding = { commandID?: string; projectID?: string; text?: string };
 export type KeyFeedback = { title: string; badge: string; color: string; unavailable: boolean };
 export function feedback(binding: Binding, status: string, snapshot: Snapshot | undefined,
-                         capabilities: Map<string, Capability>): KeyFeedback {
+                         capabilities: Map<string, Capability>, now = Date.now() / 1000): KeyFeedback {
   const unavailable = (title: string) => ({ title, badge: "!", color: "#5b3340", unavailable: true });
   if (status !== "Connected" || !snapshot) return unavailable(status);
   if (snapshot.receiptsPending) return unavailable("Updating\nState");
   if (!binding.commandID || !binding.projectID) return unavailable("Choose\nCommand");
-  if (binding.projectID !== snapshot.projectID) return unavailable("Project\nChanged");
   const command = capabilities.get(binding.commandID);
+  if (binding.projectID !== snapshot.projectID && !(command?.scope === "studio" && /^show\.[0-9a-f-]+\.profile\.[0-9a-f-]+\.select$/i.test(binding.commandID))) return unavailable("Project\nChanged");
   if (!command) return unavailable("Missing\nResource");
   let sourceUnavailable = false;
   let badge = command.available ? "READY" : "WAIT";
@@ -116,6 +116,43 @@ export function feedback(binding: Binding, status: string, snapshot: Snapshot | 
       if (binding.commandID.endsWith(".media.reconnect")) badge = guest.media.toUpperCase();
     } else {
       badge = interview.phase === "connected" ? interview.locked ? "LOCKED" : "ROOM OPEN" : interview.phase.toUpperCase();
+    }
+  }
+  const slotID = /^guest\.slot\.([0-9a-f-]+)\./i.exec(binding.commandID)?.[1];
+  if (slotID) {
+    const slot = snapshot.guestSlots?.find(value => value.id.toLowerCase() === slotID.toLowerCase());
+    if (!slot) return unavailable("Missing\nSlot");
+    badge = slot.membership === "waiting" ? "WAITING" : slot.media === "ready" ? "CONNECTED" : slot.media?.toUpperCase() ?? "OFFLINE";
+    if (/\.(?:mute|unmute)$/.test(binding.commandID) && slot.muted !== undefined) badge = slot.muted ? "MUTED" : "ON";
+    if (/\.(?:solo|unsolo)$/.test(binding.commandID) && slot.solo !== undefined) badge = slot.solo ? "MONITOR SOLO" : "SOLO OFF";
+    color = slot.media === "ready" ? "#266848" : "#5a4828";
+  }
+  if (binding.commandID.startsWith("chat.preset.")) {
+    badge = snapshot.audience?.presetDelivery[binding.commandID]?.toUpperCase() ?? (command.available ? "READY TO SEND" : "UNAVAILABLE");
+  }
+  const profile = /^show\.([0-9a-f-]+)\.profile\.([0-9a-f-]+)\.select$/i.exec(binding.commandID);
+  if (profile && snapshot.showProfiles) {
+    const state = snapshot.showProfiles;
+    badge = state.projectID.toLowerCase() === profile[1].toLowerCase() && state.profileID.toLowerCase() === profile[2].toLowerCase() ? "CURRENT" :
+      state.requestedProjectID?.toLowerCase() === profile[1].toLowerCase() && state.requestedProfileID?.toLowerCase() === profile[2].toLowerCase() ? "REQUESTED" : state.canSelect ? "READY" : "BUSY";
+  }
+  if (binding.commandID.startsWith("audience.")) {
+    const state = snapshot.audience;
+    if (!state) return unavailable("No\nReading");
+    if (now - state.observedAt < 0 || now - state.observedAt > 5) return unavailable("Stale\nFeedback");
+    if (binding.commandID === "audience.health") { badge = state.health.toUpperCase(); color = state.health === "degraded" ? "#983c4a" : "#233b4a"; }
+    else if (binding.commandID === "audience.liveTime") {
+      const seconds = state.liveSeconds;
+      badge = seconds === undefined ? "NOT LIVE" : `${Math.floor(seconds / 3600)}:${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+    } else {
+      const destination = /^audience\.([0-9a-f-]+)\.viewers$/i.exec(binding.commandID)?.[1];
+      const readings = destination ? state.readings.filter(value => value.destinationID.toLowerCase() === destination.toLowerCase()) : state.readings;
+      if (readings.length > 1) badge = `${readings.length} SOURCES`;
+      else if (!readings.length) badge = "UNAVAILABLE";
+      else {
+        const reading = readings[0];
+        badge = reading.freshness === "current" && reading.count !== undefined && reading.readAt !== undefined && now - reading.readAt >= 0 && now - reading.readAt <= 60 ? `${reading.count} VIEWERS` : reading.freshness === "current" ? "EXPIRED" : reading.freshness.toUpperCase();
+      }
     }
   }
   const macro = /^macro\.([0-9a-f-]+)\.run$/i.exec(binding.commandID)?.[1];

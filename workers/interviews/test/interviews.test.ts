@@ -57,7 +57,7 @@ async function connect(room: CreatedRoom, invite: Invite, acknowledge = true) {
   const connection = new Connection(response.webSocket!, acknowledge); await connection.next('welcome'); await connection.next('roster'); return connection;
 }
 async function admit(host: Connection, guest: Connection) {
-  const cursor = guest.messages.length; host.send({ type: 'admit', id: guest.id }); await guest.next('admitted', cursor); await host.barrier();
+  const cursor = guest.messages.length; host.send({ type: 'admit', id: guest.id, targetGeneration: guest.generation }); await guest.next('admitted', cursor); await host.barrier();
 }
 const signal = (peer: Connection, payload = 'fixture-sdp-marker') => ({ type: 'signal', to: peer.id, targetGeneration: peer.generation, kind: 'offer', payload });
 async function noSignal(sender: Connection, target: Connection, value: Message) {
@@ -114,8 +114,8 @@ describe('actual Worker and SQLite Durable Object interview signaling', () => {
 
   it('refuses self-admission, waiting/stale/guest-to-guest signaling and staging without admission', async () => {
     const room = await create(), host = await connect(room, room.host), guest = await connect(room, room.guest), other = await connect(room, await invite(room));
-    guest.send({ type: 'admit', id: guest.id }); expect((await guest.next('error')).error).toBe('Host action required');
-    host.send({ type: 'stage', id: guest.id }); await host.barrier(); await guest.barrier();
+    guest.send({ type: 'admit', id: guest.id, targetGeneration: guest.generation }); expect((await guest.next('error')).error).toBe('Host action required');
+    host.send({ type: 'stage', id: guest.id, targetGeneration: guest.generation }); await host.barrier(); await guest.barrier();
     expect(guest.messages.some(message => message.type === 'admitted')).toBe(false);
     await noSignal(guest, host, signal(host)); await noSignal(host, guest, signal(guest));
     await admit(host, guest); await admit(host, other);
@@ -124,9 +124,9 @@ describe('actual Worker and SQLite Durable Object interview signaling', () => {
     await noSignal(host, guest, { ...signal(guest), kind: 'unknown' });
     const cursor = guest.messages.length; host.send(signal(guest));
     expect(await guest.next('signal', cursor)).toMatchObject({ from: host.id, generation: host.generation, targetGeneration: guest.generation, payload: 'fixture-sdp-marker' });
-    const guestCursor = guest.messages.length; host.send({ type: 'stage', id: guest.id });
+    const guestCursor = guest.messages.length; host.send({ type: 'stage', id: guest.id, targetGeneration: guest.generation });
     expect((await guest.next('admitted', guestCursor)).state).toBe('onair');
-    host.send({ type: 'backstage', id: guest.id }); await host.barrier(); await guest.barrier();
+    host.send({ type: 'backstage', id: guest.id, targetGeneration: guest.generation }); await host.barrier(); await guest.barrier();
     expect((guest.roster.peers as Message[]).find(peer => peer.id === guest.id)?.state).toBe('backstage');
   });
 
@@ -141,6 +141,27 @@ describe('actual Worker and SQLite Durable Object interview signaling', () => {
     host.send({ type: 'lock', locked: false }); await host.barrier();
     host.send({ type: 'status', program: true, recording: true }); await host.barrier(); await guest.barrier();
     expect(guest.roster).toMatchObject({ program: true, recording: true, locked: false });
+  });
+
+  it('rejects delayed membership intent for a replaced invite and accepts only a fresh deliberate generation', async () => {
+    const room = await create(), host = await connect(room, room.host), old = await connect(room, room.guest);
+    const delayed = ['admit', 'stage', 'backstage', 'revoke'].map(type => ({type, id:old.id, targetGeneration:old.generation}));
+    const fresh = await connect(room, room.guest); await host.barrier();
+    for (const action of delayed) host.send(action);
+    host.send({type:'admit', id:fresh.id}); // Unversioned older clients fail closed too.
+    await host.barrier(); await fresh.barrier();
+    expect(fresh.closeCode).toBeUndefined();
+    expect((fresh.roster.peers as Message[]).find(peer => peer.id === fresh.id)?.state).toBe('waiting');
+    await admit(host, fresh);
+    host.send({...delayed[1], targetGeneration:fresh.generation}); await host.barrier(); await fresh.barrier();
+    expect((fresh.roster.peers as Message[]).find(peer => peer.id === fresh.id)?.state).toBe('onair');
+    // A delayed backstage/revoke cannot mutate or revoke the admitted replacement.
+    host.send(delayed[2]); host.send(delayed[3]); await host.barrier(); await fresh.barrier();
+    expect(fresh.closeCode).toBeUndefined();
+    expect((fresh.roster.peers as Message[]).find(peer => peer.id === fresh.id)?.state).toBe('onair');
+    host.send({...delayed[3], targetGeneration:fresh.generation});
+    await waitUntil(() => fresh.closeCode !== undefined, 'Fresh deliberate revoke did not close the replacement');
+    expect(fresh.closeCode).toBe(4003);
   });
 
   it('rejoining replaces one invite generation and resets guest admission', async () => {
@@ -169,9 +190,20 @@ describe('actual Worker and SQLite Durable Object interview signaling', () => {
     expect((guest.roster.peers as Message[]).find(peer => peer.id === guest.id)?.state).toBe('waiting');
   });
 
+  it('advertises public roster generation for scoped controllers and replaces it on rejoin', async () => {
+    const room = await create(), host = await connect(room, room.host), guest = await connect(room, room.guest);
+    await host.barrier();
+    expect((host.roster.peers as Message[]).find(peer => peer.id === guest.id)?.generation).toBe(guest.generation);
+    const replacement = await connect(room, room.guest);
+    await host.barrier();
+    expect(replacement.id).toBe(guest.id);
+    expect(replacement.generation).not.toBe(guest.generation);
+    expect((host.roster.peers as Message[]).find(peer => peer.id === guest.id)?.generation).toBe(replacement.generation);
+  });
+
   it('a new host generation fences the previous admission before explicit readmission', async () => {
     const room = await create(), oldHost = await connect(room, room.host), guest = await connect(room, room.guest);
-    await admit(oldHost, guest); oldHost.send({ type: 'stage', id: guest.id });
+    await admit(oldHost, guest); oldHost.send({ type: 'stage', id: guest.id, targetGeneration: guest.generation });
     oldHost.send({ type: 'status', program: true, recording: true }); await oldHost.barrier(); await guest.barrier();
     expect((guest.roster.peers as Message[]).find(peer => peer.id === guest.id)?.state).toBe('onair');
     const cursor = guest.messages.length, host = await connect(room, room.host);
@@ -194,14 +226,14 @@ describe('actual Worker and SQLite Durable Object interview signaling', () => {
     await evictDurableObject(env.ROOMS.getByName(room.id));
     await host.barrier(); await guest.barrier();
     const cursor = guest.messages.length; host.send(signal(guest, 'AFTER_HIBERNATION')); await guest.next('signal', cursor);
-    host.send({ type: 'stage', id: guest.id }); await host.barrier(); await guest.barrier();
+    host.send({ type: 'stage', id: guest.id, targetGeneration: guest.generation }); await host.barrier(); await guest.barrier();
     expect(guest.roster).toMatchObject({ program: true, recording: false });
     expect((guest.roster.peers as Message[]).find(peer => peer.id === guest.id)?.state).toBe('onair');
   });
 
   it('revokes connected guest authority, rejects expired invites and ends the room through its actual alarm', async () => {
     const room = await create(), host = await connect(room, room.host), guest = await connect(room, room.guest);
-    host.send({ type: 'revoke', id: guest.id }); await waitUntil(() => guest.closeCode !== undefined, 'Revoked guest stayed connected');
+    host.send({ type: 'revoke', id: guest.id, targetGeneration: guest.generation }); await waitUntil(() => guest.closeCode !== undefined, 'Revoked guest stayed connected');
     expect(guest.closeCode).toBe(4003); expect((await upgrade(room, room.guest)).status).toBe(401);
     expect((await turn(room, room.guest)).status).toBe(401);
     const expired = await invite(room);
@@ -302,7 +334,7 @@ describe('actual Worker and SQLite Durable Object interview signaling', () => {
     const pending = turn(room, room.guest);
     try {
       await waitUntil(() => entered, 'TURN provider was not called');
-      host.send({ type: 'revoke', id: guest.id }); await waitUntil(() => guest.closeCode !== undefined, 'Guest revoke did not complete');
+      host.send({ type: 'revoke', id: guest.id, targetGeneration: guest.generation }); await waitUntil(() => guest.closeCode !== undefined, 'Guest revoke did not complete');
     } finally { release(); }
     const response = await pending;
     expect(response.status).toBe(401); expect(await response.text()).not.toContain('LATE_CREDENTIAL_FIXTURE');

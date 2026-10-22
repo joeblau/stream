@@ -83,6 +83,7 @@ enum StudioCommand: Equatable, Sendable {
     case stopRehearsal
     case addRecordingMarker(String)
     case interview(NativeInterviewCommand)
+    case interaction(StudioInteractionCommand)
 
     // Scenes (S01 layer graph).
     case selectScene(SceneID)
@@ -632,6 +633,7 @@ enum StudioCommand: Equatable, Sendable {
         case .stopRehearsal: return "End Local Rehearsal"
         case .addRecordingMarker: return "Add Recording Marker"
         case .interview(let command): return command.displayName
+        case .interaction(let command): return command.label
         case .selectScene, .selectSceneAt: return "Select Scene"
         case .addScene, .insertScene: return "Add Scene"
         case .renameScene: return "Rename Scene"
@@ -993,6 +995,11 @@ final class StudioCommandDispatcher: ObservableObject {
     private var transportObservation: AnyCancellable?
     private var lastControllerTransport: StudioControlTransportState?
     private var chatObservation: AnyCancellable?
+    lazy var interactions: StudioInteractionController = {
+        let value = StudioInteractionController(dispatcher: self, controller: controller, store: sceneStore, preview: previewProgram)
+        value.changed = { [weak self] in self?.objectWillChange.send() }
+        return value
+    }()
     private weak var interviewManager: NativeInterviewManager?
     private var interviewObservation: AnyCancellable?
     private var interviewRefresh: Task<Void, Never>?
@@ -1224,16 +1231,21 @@ final class StudioCommandDispatcher: ObservableObject {
         }
     }
     func catalogueActions(includeMacros: Bool = true) -> [StudioPaletteAction] {
-        paletteActions(scenes: sceneStore.scenes, sources: sceneStore.sources, stagedScene: previewProgram.stagedScene, includeMacros: includeMacros)
+        let actions = paletteActions(scenes: sceneStore.scenes, sources: sceneStore.sources, stagedScene: previewProgram.stagedScene, includeMacros: includeMacros) + interactions.actions()
+        // Delayed macro steps resolve IDs at execution. Connection mutations
+        // require a fresh explicit press, not a newly resolved replacement lease.
+        return includeMacros ? actions : actions.filter { !controllerAuthorityRequired(for: $0.command) }
     }
     func controllerOverlays() -> [LayerNode] { sceneStore.overlays }
     func bindChatCoordinator(_ coordinator: StudioChatCoordinator) {
         chatCoordinator = coordinator
+        interactions.bind(chat: coordinator)
         chatObservation = coordinator.objectWillChange.sink { [weak self] _ in Task { @MainActor [weak self] in self?.refreshState() } }
         refreshState()
     }
     func bindInterviewManager(_ manager: NativeInterviewManager) {
         interviewManager = manager
+        interactions.bind(interviews: manager)
         interviewObservation = manager.$state.sink { [weak self] _ in
             guard let self, self.interviewRefresh == nil else { return }
             self.interviewRefresh = Task { [weak self] in
@@ -1246,7 +1258,7 @@ final class StudioCommandDispatcher: ObservableObject {
     /// Capture-layer gain retains its scene/layer ownership on the inspector.
     func controllerTargets() -> [StudioControllerTarget] {
         var result: [StudioControllerTarget] = []
-        for action in catalogueActions() where !action.id.hasPrefix("unavailable.") {
+        for action in catalogueActions() where !action.id.hasPrefix("unavailable.") && action.kind != "feedback" {
             var feedback = action.unavailableReason == nil ? 1.0 : 0
             if case .selectScene(let id) = action.command { feedback = state.stagedSceneID == id ? 1 : 0 }
             if action.id.hasPrefix("output.stream.") { feedback = state.stream.isActive ? 1 : 0 }
@@ -1263,6 +1275,9 @@ final class StudioCommandDispatcher: ObservableObject {
                 guard let self else { return "The studio is no longer available." }
                 if case .interview(let guest) = action.command, guest.capturesConnection {
                     return self.execute(.interview(guest)).error?.description
+                }
+                if case .interaction(let command) = action.command, command.capturesAuthority {
+                    return self.execute(.interaction(command)).error?.description
                 }
                 guard let current = self.catalogueActions().first(where: { $0.id == action.id }) else { return "The stable command target no longer exists." }
                 guard let command = current.command else { return current.unavailableReason ?? "This action is unavailable." }
@@ -1390,6 +1405,28 @@ final class StudioCommandDispatcher: ObservableObject {
         }
         return result
     }
+    func controllerAuthority(for command: StudioCommand?) -> String? {
+        switch command {
+        case .interaction(let value): return interactions.authority(for: value)
+        case .interview(let value): return value.connection.map(StudioInteractionController.authority) ?? value.guestID.flatMap { interactions.guestAuthority($0) }
+        default: return nil
+        }
+    }
+    func controllerAuthorityRequired(for command: StudioCommand?) -> Bool {
+        switch command {
+        case .interview(let value): return value.guestID != nil
+        case .interaction(.guestSlot(_, let action)): return action != .addToLayout
+        case .interaction(.sendPreset), .interaction(.selectProfile): return true
+        default: return false
+        }
+    }
+    func controllerUnavailableReason(for action: StudioPaletteAction) -> String? {
+        if let reason = action.unavailableReason { return reason }
+        if controllerAuthorityRequired(for: action.command), controllerAuthority(for: action.command) == nil {
+            return "The current guest generation is unavailable. Upgrade or reconnect the interview service before using remote guest controls."
+        }
+        return nil
+    }
     func controllerRecordingCountdown() -> Int { recorder.countdownRemaining }
     func controllerChatSnapshot() -> StudioControlChatState? {
         guard let chatCoordinator else { return nil }
@@ -1509,6 +1546,12 @@ final class StudioCommandDispatcher: ObservableObject {
             postRejection(command: command, error: error)
             return StudioCommandResult(outcome: .rejected(error), state: state)
         }
+        if case .interaction(let action) = command {
+            let error = interactions.execute(action)
+            refreshState()
+            if let error { postRejection(command: command, error: error); return .init(outcome: .rejected(error), state: state) }
+            return .init(outcome: .success, state: state)
+        }
         if case .interview(let action) = command {
             if let mixer = interviewManager?.mixerCommand(for: action) {
                 perform(mixer); refreshState()
@@ -1584,6 +1627,7 @@ final class StudioCommandDispatcher: ObservableObject {
         // browser organization, and the lock toggle stay available.
         if let error = sceneContentLockError(for: command) { return error }
         switch command {
+        case .interaction(let action): return interactions.availabilityError(for: action)
         case .interview(let action):
             return interviewManager?.availabilityError(for: action) ?? (interviewManager == nil
                 ? .unavailable("Create an interview room in Guests first.") : nil)
@@ -2546,6 +2590,7 @@ final class StudioCommandDispatcher: ObservableObject {
             sceneStore.selectedID = id
             if previewProgram.stagedScene?.id != id { previewProgram.stage(sceneStore.selected) }
             publishStaged()
+        case .interaction: break // execute routes the typed interaction through the shared authority checks.
         case .interview: break // execute preserves the manager's synchronous acceptance/rejection.
         case .startStream:
             controller.goLive()
@@ -4112,7 +4157,7 @@ private extension StudioCommand {
              .setLayerImage, .setOverlayImage:
             return true
         case .destination, .runScene, .startStream, .stopStream, .startPreview, .stopPreview,
-             .interview,
+             .interview, .interaction,
              .startRecording, .stopRecording, .pauseRecording, .resumeRecording, .startNewRecordingFile, .addRecordingMarker,
              .startRehearsal, .stopRehearsal,
              .selectScene, .selectSceneAt, .setSceneFolderCollapsed,

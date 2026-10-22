@@ -10,7 +10,7 @@ const relayResponse = () => ({ok:true, json:async () => ({ttl:600, iceServers:[
 
 function fixture() {
   const context = {clock:1e6, nextTimer:0, timers:new Map(), sockets:[], peers:[], streams:[], fetches:[],
-    room:crypto.randomUUID(), hostID:crypto.randomUUID(), generation:crypto.randomUUID()};
+    memberGenerations:new Map(), room:crypto.randomUUID(), hostID:crypto.randomUUID(), generation:crypto.randomUUID()};
   class Track {
     constructor(kind) { this.kind = kind; this.stopped = false; }
     stop() { this.stopped = true; }
@@ -91,10 +91,10 @@ function fixture() {
     return context.socket;
   };
   context.roster = peers => context.socket.message({type:'roster', peers:peers.map(peer => ({
-    id:peer.id, role:'guest', name:'Fixture guest', state:peer.state ?? 'backstage'
+    id:peer.id, role:'guest', name:'Fixture guest', state:peer.state ?? 'backstage',generation:peer.generation??context.memberGenerations.get(peer.id)??(() => {const generation=crypto.randomUUID();context.memberGenerations.set(peer.id,generation);return generation;})()
   })), program:false, recording:false, locked:false});
   context.admit = async (id=crypto.randomUUID()) => {
-    const guest = {id, generation:crypto.randomUUID()};
+    const guest = {id, generation:context.memberGenerations.get(id)??crypto.randomUUID()}; context.memberGenerations.set(id,guest.generation);
     context.socket.message({type:'admitted', guest:id, guestGeneration:guest.generation, state:'backstage'});
     await settle(); return guest;
   };
@@ -117,7 +117,7 @@ function fixture() {
 test('explicit admission, authoritative state, recv-only media and paced ICE', async () => {
   const f = fixture(); const id = crypto.randomUUID(); f.roster([{id, state:'waiting'}]);
   f.host.stage(id); assert(!f.socket.sent.some(data => data.type==='stage'));
-  f.host.admit(id); assert(f.socket.sent.some(data => data.type==='admit'));
+  f.host.admit(id); assert(f.socket.sent.some(data => data.type==='admit' && data.targetGeneration===f.host.members.get(id).generation));
   assert.equal(f.host.peers.size, 0, 'A request must not create media before server admission');
   await f.admit(id); f.roster([{id}]); const record = f.host.peers.get(id);
   assert.deepEqual(record.pc.transceivers.map(value=>[value.kind,value.direction]), [['audio','recvonly'], ['video','recvonly'], ['video','recvonly']]);
@@ -130,7 +130,7 @@ test('explicit admission, authoritative state, recv-only media and paced ICE', a
   assert.equal(f.host.members.get(id).state, 'backstage', 'Only server roster changes stage state');
   f.host.setStatus(true, true); f.host.lock(true);
   assert.deepEqual(f.host.flags, {locked:false, program:false, recording:false}, 'Status/lock requests wait for server state');
-  f.socket.message({type:'roster', peers:[{id, role:'guest', name:'Fixture guest', state:'onair'}], locked:true, program:true, recording:true});
+  f.socket.message({type:'roster', peers:[{id, role:'guest', name:'Fixture guest', state:'onair',generation:crypto.randomUUID()}], locked:true, program:true, recording:true});
   assert.deepEqual(f.host.flags, {locked:true, program:true, recording:true});
   f.host.leave(); assert.equal(f.timers.size, 0);
 });

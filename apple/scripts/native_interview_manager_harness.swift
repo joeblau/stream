@@ -260,6 +260,7 @@ private extension AudioMixEngine {
         recorder = .init(defaults: defaults, defaultDirectory: directory.appendingPathComponent("Recordings"))
         dispatcher = .init(controller: controller, sceneStore: scenes, session: settings, recorder: recorder, previewProgram: preview)
         chat = .init(dispatcher: dispatcher, previewProgram: preview)
+        dispatcher.bindChatCoordinator(chat)
         manager = NativeInterviewManager(controller: controller, serviceFactory: { [weak self] configuration, credential in
             let client = NativeInterviewServiceClient(configuration: configuration, credential: credential)
             let value = ManagerService(client, configuration: configuration)
@@ -306,6 +307,33 @@ private extension AudioMixEngine {
     static var appeared: [ObjectIdentifier: Int] = [:], disappeared: [ObjectIdentifier: Int] = [:]
     static var previewSuppressed: [ObjectIdentifier: Int] = [:]
 }
+// Actual provider vault/session/reader/outbox/controller code below uses only
+// owned in-memory credentials and controlled HTTP responses. It proves native
+// command binding and decoded receipts, not authorization to a live account.
+private final class InteractionCredentials: ProviderCredentialStore, @unchecked Sendable {
+    private let lock = NSLock(); private var values: [String: String] = [:]
+    func string(for item: KeychainStore.Item) -> String? { lock.withLock { values[String(reflecting: item)] } }
+    func set(_ value: String, for item: KeychainStore.Item) -> Bool { lock.withLock { values[String(reflecting: item)] = value }; return true }
+    func remove(_ item: KeychainStore.Item) { lock.withLock { values[String(reflecting: item)] = nil } }
+}
+private actor InteractionProviderHTTP {
+    private(set) var posts: [URLRequest] = []
+    func send(_ request: URLRequest) throws -> (Data, HTTPURLResponse) {
+        try require(request.value(forHTTPHeaderField: "Authorization") == "Bearer owned-d07-credential", "Provider fixture request bypassed the actual vault")
+        let value: [String: Any]
+        switch request.url!.path {
+        case "/youtube/v3/channels": value = ["items": [["id": "owned-channel", "snippet": ["title": "Owned fixture"]]]]
+        case "/youtube/v3/liveBroadcasts": value = ["items": [["id": "owned-broadcast", "snippet": ["channelId": "owned-channel", "title": "Owned", "liveChatId": "owned-chat"], "status": ["lifeCycleStatus": "live"]]]]
+        case "/youtube/v3/videos": value = ["items": [["id": "owned-broadcast", "liveStreamingDetails": ["concurrentViewers": "0"]]]]
+        case "/youtube/v3/liveChat/messages":
+            if request.httpMethod == "POST" { posts.append(request); value = ["id": "owned-provider-receipt"] }
+            else { value = ["items": [], "nextPageToken": "owned-next", "pollingIntervalMillis": 30_000] }
+        default: throw ManagerFixtureError.failed("Unexpected provider fixture request")
+        }
+        return (try JSONSerialization.data(withJSONObject: value), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
 @main @MainActor private enum NativeInterviewManagerHarness {
     static func wait(_ message: String, until: @escaping @MainActor () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(6)
@@ -336,7 +364,10 @@ private extension AudioMixEngine {
         return (guest, studio.manager.state.snapshot.members.first!.id)
     }
     static func admit(_ studio: ManagerStudio, guest: ManagerGuest, id: UUID, since cursor: Int = 0) async throws -> ManagerHost {
-        try studio.command(.admit(id))
+        if let slot = studio.manager.assignedSlot(for: id) {
+            try require(studio.dispatcher.execute(.interaction(.guestSlot(slot, .admit))).error == nil,
+                        "Configured slot admission failed through the production dispatcher")
+        } else { try studio.command(.admit(id)) }
         try require(!studio.dispatcher.canExecute(.interview(.admit(id))), "Pending admission remained advertised as executable")
         let offer = try await guest.nextOffer(since: cursor); try await guest.answer(offer)
         try await wait("Actual ready lease missing") { studio.manager.currentReadyLease?.receive.peerID == id }
@@ -473,10 +504,28 @@ private extension AudioMixEngine {
             return nil
         }
         try require(studio.manager.assignSlot(prepared.id, to: id), "Actual waiting guest could not choose a prepared project slot")
+        let configuredAdmit = StudioCommand.interaction(.guestSlot(prepared.id, .admit))
+        try require(studio.dispatcher.canExecute(configuredAdmit)
+            && studio.dispatcher.controllerAuthority(for: configuredAdmit) != nil,
+            "Generation-scoped configured waiting slot is not controller-bindable")
         try require(!studio.dispatcher.canExecute(.interview(.onair(id))), "Waiting guest received a Program command")
         let host = try await admit(studio, guest: guest, id: id)
         let oldPublicCommand = try await publicChatFlow(studio, host: host)
         let lease = host.context.receive
+        let configuredMute = StudioCommand.interaction(.guestSlot(lease.slot, .mute))
+        let configuredAuthority = studio.dispatcher.controllerAuthority(for: configuredMute)
+        try require(configuredAuthority == StudioInteractionController.authority(host.context), "Configured ready slot does not carry full native authority")
+        try require(studio.dispatcher.execute(configuredMute).error == nil, "Configured guest mute did not route through the native mixer")
+        try require(studio.dispatcher.state.mixer.channelMutes[AudioMixEngine.guestChannelID(for: lease).label] == true,
+                    "Configured guest mute feedback did not follow actual settings")
+        try require(studio.dispatcher.execute(.interaction(.guestSlot(lease.slot, .unmute))).error == nil, "Configured guest unmute failed")
+        let oldLayout = studio.preview.stagedScene
+        try require(studio.dispatcher.execute(.interaction(.guestSlot(lease.slot, .addToLayout))).error == nil,
+                    "Configured guest could not add ordinary layers to Preview")
+        try require(studio.preview.stagedScene!.layers.contains { if case .guest(let value) = $0.payload { return value.slotID == lease.slot }; return false },
+                    "Configured layout lost its stable guest source identity")
+        if let oldLayout { _ = studio.dispatcher.execute(.updateScene(oldLayout)) }
+        trace("D07 configured slots carry actual full lease, reach mixer mute feedback and create independent ordinary Preview layers")
         let waitingInvite = try await studio.client!.createInvite(room: studio.manager.state.snapshot.room!)
         let waitingSocket = try await studio.client!.connect(room: studio.manager.state.snapshot.room!, host: waitingInvite)
         // The shipping client deliberately creates a one-guest Worker room.
@@ -755,6 +804,11 @@ private extension AudioMixEngine {
         try await wait("Rejoin did not return guest to waiting") { studio.manager.state.snapshot.members.first?.membership == .waiting }
         let cursor = await guest.count
         let rejoined = try await admit(studio, guest: guest, id: id, since: cursor)
+        try require(studio.dispatcher.controllerAuthority(for: configuredMute) != configuredAuthority,
+                    "Configured slot retained retired connection authority after actual host rejoin")
+        try require(studio.dispatcher.execute(configuredMute).error == nil,
+                    "A fresh deliberate configured-slot press could not target its explicitly saved assignment after rejoin")
+        _ = studio.dispatcher.execute(.interaction(.guestSlot(lease.slot, .unmute)))
         try require(rejoined.context.receive.slot == lease.slot && rejoined.context.receive.generation > firstGeneration
             && rejoined.context.hostGeneration != host.context.hostGeneration && !studio.manager.state.routes[id]!.programAllowed,
                     "Rejoin did not keep stable identity and replace authority privately")
@@ -821,14 +875,76 @@ private extension AudioMixEngine {
         try studio.command(.end); try await wait("Second actual room did not end") { studio.manager.state.snapshot.phase == .ended }
         await studio.close()
         trace("actual held mixer actor + dispatcher Remove rejects late admission, cleans occupancy and allocates no host")
+        try await interactionProviderControls(directory: FileManager.default.temporaryDirectory.appendingPathComponent("stream-d07-provider-\(UUID().uuidString)"))
         try await shippingWindowLifecycle(configuration: configuration, credential: credential)
+    }
+
+    static func interactionProviderControls(directory: URL) async throws {
+        let previousDirectory = DesktopStorage.projectDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let binding = ProviderDestinationBinding(provider: .youtube, channelID: "owned-channel", eventID: "owned-broadcast")
+        let destination = StreamDestination(name: "Owned provider fixture", isEnabled: false, providerBinding: binding)
+        try JSONEncoder().encode([destination]).write(to: directory.appendingPathComponent("destinations.json"))
+        DesktopStorage.projectDirectory = directory
+        defer { DesktopStorage.projectDirectory = previousDirectory }
+        let studio = ManagerStudio(directory: directory), http = InteractionProviderHTTP()
+        let vault = ProviderTokenVault(keychain: InteractionCredentials(), transport: { try await http.send($0) })
+        let generation = try await vault.configure(.youtube, clientID: "owned-d07-client")
+        try await vault.accept(.init(access: "owned-d07-credential", expiresAt: Date().addingTimeInterval(3_600), scopes: ManagedProvider.youtube.scopes), provider: .youtube, generation: generation)
+        let accounts = ProviderAccountSession(restream: studio.chat.restream, vault: vault, transport: { try await http.send($0) }, openBrowser: { _ in false }, pendingDirectory: directory)
+        studio.dispatcher.interactions.bind(accounts: accounts); studio.chat.bindAccounts(accounts)
+        try await wait("Actual provider boot did not load owned fixture credential") { accounts.snapshot(.youtube).hasCredential }
+        accounts.refreshLive(binding)
+        try await wait("Actual provider audience read did not finish") { accounts.viewerReading(binding).freshness == .current }
+        let reading = studio.dispatcher.interactions.audienceSnapshot()
+        try require(reading.readings.first?.count == 0 && reading.readings.first?.freshness == "current" && reading.liveSeconds == nil && reading.health == "idle", "Audience controls did not preserve actual zero/idle state")
+        let future = studio.dispatcher.interactions.audienceSnapshot(now: Date().addingTimeInterval(61))
+        try require(future.readings.first?.count == nil && future.readings.first?.freshness == "expired", "Cached provider reading did not expire")
+        let direct = studio.chat.directChat!
+        direct.connect(.youtube, eventID: "owned-broadcast")
+        try await wait("Actual owned provider reader did not connect") { direct.snapshot(.youtube).isConnected }
+        try require(direct.presets.save(name: "Welcome", text: "Welcome from a controller"), "Could not save producer preset")
+        let preset = direct.presets.document.presets.first!
+        let id = "chat.preset.\(preset.id.uuidString).youtube.send"
+        try require(!studio.dispatcher.catalogueActions(includeMacros: false).contains(where: { $0.id == id }),
+                    "Delayed macro steps could silently target a replacement preset reader")
+        let target = studio.dispatcher.controllerTargets().first { $0.id == id }!
+        try require(target.execute(nil) == nil, "Actual preset command rejected")
+        try await wait("Actual provider receipt was not reflected in controller feedback") { studio.dispatcher.interactions.audienceSnapshot().presetDelivery[id] == "acknowledged" }
+        let sentCount = await http.posts.count
+        try require(sentCount == 1 && studio.chat.queue.messages.isEmpty, "Preset send duplicated or invented a local public echo")
+        let post = await http.posts.first!
+        let body = try JSONSerialization.jsonObject(with: post.httpBody!) as! [String: Any]
+        let snippet = body["snippet"] as! [String: Any]
+        try require(snippet["liveChatId"] as? String == "owned-chat", "Preset did not target the actual authorized reader")
+        direct.stop(.youtube); direct.connect(.youtube, eventID: "owned-broadcast")
+        try await wait("Replacement owned reader did not reconnect") { direct.snapshot(.youtube).isConnected }
+        try require(target.execute(nil) != nil, "Retained preset controller silently targeted a replacement reader")
+        let afterReplacement = await http.posts.count
+        try require(afterReplacement == 1, "Stale preset replayed a provider mutation")
+        // Public queue controls stage ordinary comment layers and require Take.
+        studio.chat.receive(try publicEvent("d07-first", text: "First")); studio.chat.createSlot()
+        studio.chat.receive(try publicEvent("d07-newest", text: "Newest"))
+        let program = studio.preview.programScene
+        try require(studio.dispatcher.execute(.interaction(.latestComment)).error == nil && studio.chat.queue.featuredID == studio.chat.queue.messages.last?.id, "Latest command did not stage the newest accepted message")
+        try require(studio.preview.programScene == program, "Latest command bypassed Take")
+        try require(studio.dispatcher.execute(.hideComment).error == nil, "Controller Hide failed")
+        accounts.forget(.youtube)
+        try require(studio.dispatcher.interactions.audienceSnapshot().readings.first?.count == nil && target.execute(nil) != nil, "Revoked account retained audience or write authority")
+        accounts.shutdown(); await studio.close()
+        trace("D07 actual vault/session/reader/outbox with controlled HTTP: zero/expired/revoked audience, exact preset target+ACK/no echo/no stale reader replay, latest/hide Preview policy")
     }
 
     static func shippingWindowLifecycle(configuration: NativeInterviewConfiguration, credential: NativeInterviewSecret) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("stream-interview-workspace-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let catalog = StudioProjectCatalog()
+        let currentShow = StudioProject(name: "Current Show", profiles: (0..<50).map { StudioProfile(name: "Profile \($0)") })
+        var catalog = StudioProjectCatalog(project: currentShow)
+        catalog.projects += (1..<200).map { index in
+            StudioProject(name: "Other show \(index)", profiles: (0..<50).map { StudioProfile(name: "Profile \($0)") })
+        }
+        try require(catalog.validationError == nil, "Maximum legal show/profile catalog fixture is invalid")
         let directory = root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: catalog.selectedProjectID, profile: catalog.selectedProfileID))
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(catalog).write(to: root.appendingPathComponent("projects.v1.json"))
@@ -848,9 +964,38 @@ private extension AudioMixEngine {
         window.contentView = view; window.makeKeyAndOrderFront(nil)
         try await wait("Actual shipping MainWindow did not reopen") { InterviewWindowReceipts.appeared[ObjectIdentifier(original), default: 0] > appeared }
         try require(workspace.runtime === original && original.interviews.state.snapshot.phase == .connected, "Window reopening replayed or replaced interview owner")
-        workspace.create(named: "Owned interview replacement")
-        await workspace.applyPending()
+        let advertised = original.dispatcher.catalogueActions()
+        try require(advertised.filter { $0.category == "Show Profiles" }.count == 50 && advertised.count < 10_000,
+                    "A valid 200-show/10,000-profile catalog broke the complete active-show controller catalog")
+        // Real looping media must retire with the actual profile graph.
+        let audio = root.appendingPathComponent("owned-ambient.wav")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000)!
+        buffer.frameLength = 48_000
+        for channel in 0..<2 { for index in 0..<48_000 { buffer.floatChannelData![channel][index] = Float(sin(Double(index) * 2 * .pi * 220 / 48_000)) * 0.1 } }
+        do { let file = try AVAudioFile(forWriting: audio, settings: format.settings); try file.write(from: buffer) }
+        let bed = SceneSoundBinding(rule: .continue, name: "Owned ambient", bookmarkData: try audio.bookmarkData(options: .withSecurityScope), fileName: audio.lastPathComponent)
+        var ambientScene = original.previewProgram.programScene!; ambientScene.soundBindings = [bed]
+        original.dispatcher.soundboard.syncProgramScene(ambientScene)
+        try await wait("Actual ambient decoder/pump did not start") { original.dispatcher.soundboard.deckFixtureResources.players == 1 && original.dispatcher.soundboard.deckFixtureResources.pumping }
+        workspace.stage(project: currentShow.id, profile: currentShow.profiles[1].id)
+        let selection = workspace.pending!
+        let command = StudioCommand.interaction(.selectProfile(project: selection.project, profile: selection.profile))
+        workspace.permissionChoicePending = true
+        try require(original.dispatcher.execute(command).error != nil && workspace.runtime === original,
+                    "D07 profile control bypassed pending permission authority")
+        workspace.permissionChoicePending = false
+        let profileID = "show.\(selection.project.uuidString).profile.\(selection.profile.uuidString).select"
+        let retainedProfile = original.dispatcher.controllerTargets().first { $0.id == profileID }!
+        try require(retainedProfile.execute(nil) == nil, "D07 profile switch request was not accepted")
+        try require(workspace.runtime === original && original.dispatcher.interactions.showProfilesSnapshot()?.requestedProfileID == selection.profile,
+                    "D07 profile request falsely reported a completed new runtime")
+        try await wait("D07 accepted profile request did not apply") { workspace.runtime !== original && !workspace.isSwitching }
         let replacement = workspace.runtime
+        try require(original.dispatcher.soundboard.deckFixtureResources.players == 0 && !original.dispatcher.soundboard.deckFixtureResources.pumping,
+                    "Actual profile retirement retained an ambient decoder or audio pump")
+        try require(retainedProfile.execute(nil) != nil && replacement.dispatcher.interactions.showProfilesSnapshot()?.profileID == selection.profile,
+                    "D07 retired profile binding replayed or new-runtime feedback was not authoritative")
         try require(replacement !== original && original.interviews.state.snapshot.phase == .closed,
                     "Actual runtime replacement did not retire the old session")
         try require(!original.chat.guestPublicAvailable && replacement.chat.guestPublicAvailable
