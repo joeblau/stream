@@ -131,3 +131,35 @@ connected/RTP positive control this is not the original 931-packet symptom and
 does not prove a clock cause. No additional attempt was made. Any future
 reviewed result would isolate only an explicit fake-output-clock decoder route,
 never normal/speaker playback or AEC.
+
+## Failure observation before receiver cleanup
+
+The two retained exit77 receipts cannot explain why connection failed: the first
+has only its coarse negotiation phase; the second has no peer/ICE/candidate or
+RTP statistics at the failed connection boundary. Neither establishes the
+original connected 931-packet/zero-decoder-emission symptom.
+
+The diagnostic now snapshots a fixed allowlist before its page's cleanup:
+phase, peer/ICE/signaling states, candidate counts (not candidate strings),
+bounded ICE error names/codes, null-context/player/track state, existing spectral
+PCM summaries, and available audio RTP/playout/selected-transport counters.
+It includes no SDP, IPs, credentials, track/peer IDs, raw PCM or packets. Each
+peer's statistics explicitly reports available, unavailable or timeout. Collection
+has a shared 500 ms failure-only budget; a late result cannot rewrite the frozen
+receipt. A nonresponsive page produces an explicit unavailable snapshot through
+the watchdog's bounded 700 ms failure-only read, before owned-browser retirement.
+
+API-phase deadlines use the remaining original 16-second no-progress and
+60-second total budgets. Additional subphase labels do not reset that budget.
+The original 10-second connection wait, 12-second measurement, null/muted
+requirements, positive PCM/RTP gates and exit77 refusal remain unchanged.
+Observing a failure never changes it into diagnostic completion.
+
+`owned-loopback-failure-snapshot-client.mjs` tests the exact serialized helper's
+redaction, fixed bounds, refused/stalled statistics and immutable late-result
+handling. It also executes the actual diagnostic page in an owned Node VM with
+API doubles to check that its snapshot precedes peer/track/context cleanup.
+Those checks exercise diagnostic code only; they do not establish a browser
+connection, decoder clock, playout or issue127 acceptance. A new browser attempt
+requires a separately scheduled owned null-output run; the old receipts remain
+unchanged.
