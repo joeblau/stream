@@ -309,7 +309,8 @@
       "bytes": 6479,
       "path": "/private/tmp/stream-wave15-recording-delivery-20261022/apple/build/recording-controller-validation/private-ingress-final-20261022/source-and-command.json",
       "sha256": "3f8ff5d8a350fc0f32e8b50e1f5ce8475461f9b3c0f38e8e5c85ed01823c3062"
-    }
+    },
+    "runtimeCoverageClarification": "The embedded immutable raw result uses ISOworker as historical shorthand: RecordingController and Program/isolated-audio writers ran; IsolatedVideoRecorder was compiled but not instantiated. The outer scope is authoritative. Original raw result bytes and hashes remain unchanged."
   },
   "historicalFirstRun": {
     "log": {

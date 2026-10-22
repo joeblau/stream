@@ -272,5 +272,6 @@
     "StreamMac/IsolatedVideoRecorder.swift"
   ],
   "status": "focused actual recorder writer/router/broker PASS; combined actual Controller/Factory build and integrated media remain required",
-  "version": 1
+  "version": 1,
+  "historicalControllerBinding": "The a19ed1045bd601153cac0ebd4145e4ffd38ce9ca8196e6861ba11f3aaacae4db Controller binding records the historical pre-followup source inspection only. That mutable owner path is not a claim about current Controller bytes; the final Controller receipt and combined build separately bind the later revision."
 }

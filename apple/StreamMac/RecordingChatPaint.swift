@@ -35,4 +35,3 @@ struct RecordingChatPaint: Codable, Hashable, Sendable {
         return values.filter(\.isValid)
     }
 }
-

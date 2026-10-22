@@ -66,4 +66,3 @@ final class GuestReturnVideoResources: @unchecked Sendable {
         return try bank.allocatePixelBuffer()
     }
 }
-

@@ -55,4 +55,3 @@ final class OptionalMonitorImageHandoff: @unchecked Sendable {
         return false
     }
 }
-
