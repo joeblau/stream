@@ -146,6 +146,38 @@ workloads; the measurements were not repeated or relabeled as a later commit.
 
 ## Qualification limits
 
+The compositor now retains one due render opportunity when a previous frame
+finishes slightly late. Previously it rounded every completion up to another
+future slot: a 33ms render plus 0.5ms wake jitter at 30fps could unnecessarily
+halve cadence. Fully elapsed opportunities are still skipped. An overdue loop
+yields its actor so stop and configuration work remain serviceable. Frames keep
+their actual host-clock PTS; no elapsed time is compressed, no queued timeline
+is replayed and neither target frame rate nor canvas size changes.
+
+`zsh apple/scripts/run_composition_frame_schedule_harness.zsh` runs the shipping
+helper against a deterministic virtual clock. Over virtual 600s, that specific
+33ms/jitter case improves from 9,001 to 18,000 frames against the unchanged
+17,850-frame requirement. A real 40ms render cost produces 15,000 frames and
+still fails the 30fps requirement. Fast rendering retains the 30fps cap, starts
+remain monotonic and a simulated 59s stall leaves at most one due opportunity.
+These are scheduling regressions, not a repeated GPU or hardware qualification.
+
+Read-only inspection of both retained hosted archives confirms ARM writers
+accepted all 11,722/12,140 rendered frames with no audio/video mailbox drops.
+Intel's first case wrote all 10,123 rendered frames but dropped 34 audio chunks.
+Its replay writer stopped after receiving no video for ten seconds: only 1,689
+frames through source time 117.14044s were written before the recoverable file
+ended at about 127.48s. The final 2,209 compositor renders are neither that
+written count nor a decoded-source count. This is a genuine stalled workload.
+
+The original 59.192148398s Intel assertion is an unsigned change in endpoint
+delivery latency: both frame PTS and callback arrival use the same host clock.
+Its exact OS/render stall cause remains unresolved; it is not an independent
+audio-clock or waveform drift measurement. The due-tick correction fixes a
+concrete cadence-loss mechanism without claiming that it explains or repairs
+that stall. [The forensic receipt](PERFORMANCE_HOSTED_FAILURES_2026-10-22.json)
+retains original journal/archive/log hashes and the separate virtual-clock proof.
+
 The hosted ARM job [119611316182](https://github.com/joeblau/stream/actions/runs/39713883982/job/119611316182)
 failed its requested two 600-second 1080p30 workload on VirtualMac2,1 / Apple M1
 (Virtual), macOS 26.6.2, Xcode 26.6. Static and replay cases rendered 11,722 and
