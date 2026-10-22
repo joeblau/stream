@@ -1,0 +1,313 @@
+{
+  "native": {
+    "successfulSends": 933,
+    "routingRevision": 2,
+    "emittedOpusDecode": {
+      "rate": 48000,
+      "channels": [
+        {
+          "rms": 0.2790342799124835,
+          "amplitudes1000_1700_440_880": [
+            0.3917482852372514,
+            3.478934712470459e-05,
+            5.4931587790903556e-05,
+            0.00022430877848375627
+          ]
+        },
+        {
+          "amplitudes1000_1700_440_880": [
+            8.84982413700431e-05,
+            0.19546161536269283,
+            1.4056549905923163e-05,
+            1.687357762299114e-05
+          ],
+          "rms": 0.13921568166796908
+        }
+      ],
+      "packets": 128,
+      "frames": 122880
+    },
+    "packetAttempts": 933,
+    "rtpSteps": [
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960,
+      960
+    ],
+    "retainedPackets": 128,
+    "minimumAgeSeconds": 0.017434958,
+    "preEncoderPCM": {
+      "channels": [
+        {
+          "rms": 0.282831754664494,
+          "amplitudes1000_1700_440_880": [
+            0.3999690157997186,
+            0.0001296325657684697,
+            0.00025955944869377883,
+            0.00043233749284658947
+          ]
+        },
+        {
+          "rms": 0.14142320270460582,
+          "amplitudes1000_1700_440_880": [
+            3.6681478067145865e-05,
+            0.20000522210633329,
+            2.479114038592659e-05,
+            4.6752970219814105e-05
+          ]
+        }
+      ],
+      "frames": 32768,
+      "rate": 48000
+    },
+    "maximumAgeSeconds": 0.025828125,
+    "receivedChunks": 2718,
+    "admittedChunks": 1750,
+    "receivedPCM": {
+      "channels": [
+        {
+          "rms": 0.282831754664494,
+          "amplitudes1000_1700_440_880": [
+            0.3999690157997186,
+            0.0001296325657684697,
+            0.00025955944869377883,
+            0.00043233749284658947
+          ]
+        },
+        {
+          "rms": 0.14142320270460582,
+          "amplitudes1000_1700_440_880": [
+            3.6681478067145865e-05,
+            0.20000522210633329,
+            2.479114038592659e-05,
+            4.6752970219814105e-05
+          ]
+        }
+      ],
+      "frames": 32768,
+      "rate": 48000
+    },
+    "successfullySentOpusDecode": {
+      "frames": 122880,
+      "channels": [
+        {
+          "amplitudes1000_1700_440_880": [
+            0.3917482852372514,
+            3.478934712470459e-05,
+            5.4931587790903556e-05,
+            0.00022430877848375627
+          ],
+          "rms": 0.2790342799124835
+        },
+        {
+          "rms": 0.13921568166796908,
+          "amplitudes1000_1700_440_880": [
+            8.84982413700431e-05,
+            0.19546161536269283,
+            1.4056549905923163e-05,
+            1.687357762299114e-05
+          ]
+        }
+      ],
+      "packets": 128,
+      "rate": 48000
+    },
+    "encoderErrors": 0,
+    "lastPCMPTSSeconds": 44764.636829625
+  },
+  "browser": {
+    "audio": [
+      {
+        "packetsReceived": 931,
+        "bytesReceived": 151615,
+        "packetsLost": 0,
+        "jitterBufferEmittedCount": 0,
+        "jitterBufferDelay": 0,
+        "totalAudioEnergy": 0,
+        "totalSamplesDuration": 0,
+        "totalSamplesReceived": 0,
+        "concealedSamples": 0,
+        "silentConcealedSamples": 0,
+        "audioLevel": 0,
+        "codec": "audio/opus"
+      }
+    ],
+    "context": {
+      "state": "running",
+      "sampleRate": 48000,
+      "time": 6.08,
+      "sink": "none"
+    },
+    "track": {
+      "enabled": true,
+      "muted": false,
+      "ready": "live"
+    },
+    "worklet": {
+      "revision": 1,
+      "rate": 48000,
+      "frames": 288768,
+      "n": 288768,
+      "windows": 141,
+      "channels": [
+        {
+          "rms": 0,
+          "amplitudes": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "rms": 0,
+          "amplitudes": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "track": "audio-return",
+      "live": "live"
+    }
+  },
+  "scope": "Actual owned TLS/Chrome null-sink diagnostic; unchanged positive PCM gate failed. No deployment, browser playout, AEC, AV timing, capacity or shipping backend adoption qualification.",
+  "sourceBaseline": "a346f567a1444fa9bce80fb7d887c792a3b47e26",
+  "nativeBinarySHA256": "420e68384f7abc24b7b0125d44fe5e43b3c50a177c3e459fa9f514599f599a8e",
+  "logSHA256": "daa34de890b649cd99901a94b83c6a4619a853defa78809d11f6114d5e8675ce",
+  "observationSourceSHA256": {
+    "apple/scripts/guest_return_sender_diagnostics.swift": "b5c3d3137fd806040ad8d1a9a0e024ebbbc9826eccee1db7e8d84ed04e418505",
+    "apple/scripts/guest_return_diagnostic_sources.rb": "bd68c42ac73c2bfc92cd96b22ca7bf13147d78d4bbdc31cff069641721cd3814",
+    "apple/scripts/guest_return_sender_local_harness.swift": "d02a41a1ac0d4853f747d484c50a44985799e186305166fa2cd01f1fdbd2d21f",
+    "apple/scripts/run_guest_return_sender_diagnostics.zsh": "b6c42c90bfb9ef29891c962824fb7b7884e0481040e259bdddd4cb3d079a1d90",
+    "apple/scripts/run_native_interview_return_audio_harness.zsh": "2027693a521bcba6f0a1d58c5e4cc88c491e670ef78ce3b2ea03bf5eb4b6041d",
+    "apple/scripts/prepare_owned_nice_media_cli.py": "9004aab3e166288b6dc62fbc8aca609826f1acd8ceb994aceb7e196e0ae89fbc",
+    "workers/interviews/test/browser/native-interview-return-video-browser.mjs": "e79272b035f476410b2c290abf649d9298bc1f1418ba2d02fdad68467b916172"
+  },
+  "leaseScope": "First and only receive lease, before any rejoin. Singleton counters/windows aggregate process lifetime; last routingRevision is not a lease identifier. Use a fresh process or reset/tag windows before attributing reconnect observations."
+}
