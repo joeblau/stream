@@ -1,0 +1,2593 @@
+{
+  "artifacts": [
+    {
+      "bytes": 1495,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/profile-source-hashes.json",
+      "sha256": "76cfd699ff84f430ecf7628f1ed55495acbc0edf87e70d161d0bc2281d4e99c6"
+    },
+    {
+      "bytes": 537,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/invocation-receipt.json",
+      "sha256": "1e63ddb8a36cecb33474142c87f007ba788d485801b975db66d6090e6643b216"
+    },
+    {
+      "bytes": 23449,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/performance.json",
+      "sha256": "fc7c4d077eccdad170f68443b0360aaf2ddd78cec3cac1f8d2de348df2ca0fe1"
+    },
+    {
+      "bytes": 9392,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/case-0.json",
+      "sha256": "ff99a67c2b88b64bc4ee0f3e941a92d2828ce7bd9f832a4aec2ff7410456536f"
+    },
+    {
+      "bytes": 10473,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/case-1.json",
+      "sha256": "62f43a324a76f34a2399f0cce3e3c09bd3462187a06fa8417839ec58dffe2c86"
+    },
+    {
+      "bytes": 957,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/case0-1920x1080-30.mp4.recording.json",
+      "sha256": "4de100288d6936e9322b1886eae5f8273cb1945359c95a7af1d8ea25a15940ee"
+    },
+    {
+      "bytes": 958,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/case1-1920x1080-30.mp4.recording.json",
+      "sha256": "bf0e76357de7c0529c10912ace32ae3da3f2090a04c920b221dbbbb35cbdfb4a"
+    },
+    {
+      "bytes": 4818024,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/hotpath-case-0.events.json",
+      "sha256": "96871681184961129155308ef93766bcc2dad16ce3aac1054c664b1a00a7ea43"
+    },
+    {
+      "bytes": 32238,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/hotpath-case-0.json",
+      "sha256": "3cfdff134bf47a4267588e8895691d51199368b444861df696f9c81e4bc9ea0e"
+    },
+    {
+      "bytes": 4826630,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/hotpath-case-1.events.json",
+      "sha256": "778d7c83af674bd90dd3006ec3e2d80e06a7472c3f9d54c58852c47f70bfd5b3"
+    },
+    {
+      "bytes": 32021,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/hotpath-case-1.json",
+      "sha256": "738a98fadfa7809d27ffc41a22c80a0f31b26b53b5279110b3d1df5357337602"
+    },
+    {
+      "bytes": 11699661,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/case0-1920x1080-30.mp4",
+      "sha256": "0106b9bad23db838522dcf2c849a099b25f581a51ea15db4a975de40d0222554"
+    },
+    {
+      "bytes": 12459476,
+      "path": "/tmp/stream-wave8-performance-trace-20261022/apple/build/composition-hotpath-profile/frames/CF712759-9BCE-4DAE-B1EA-1513466BEA41/case1-1920x1080-30.mp4",
+      "sha256": "7f7ba6f55424acab371f07b8718d737fb455a2d5fe5f05886a3d289f0a36fcc9"
+    },
+    {
+      "bytes": 1075251,
+      "path": "/tmp/stream-wave8-performance-trace-build-20261022.log",
+      "sha256": "ed6f243c599b8441bbe250e928f7944f915b27658f01f20c5528d772b577386c"
+    },
+    {
+      "bytes": 1594,
+      "path": "/tmp/stream-wave8-performance-one-trace-20261022.log",
+      "sha256": "103b711ea39bcfa68cc74907d97d8e9c62b1f0eda4701e2e5c2836ce3b4599c0"
+    }
+  ],
+  "cases": [
+    {
+      "checks": [
+        {
+          "detail": "An actual submitted video endpoint is required.",
+          "name": "videoSourceFrontier",
+          "status": "passed"
+        },
+        {
+          "detail": "Actual post-warmup arrivals 571; monotonic true; required > 30.",
+          "name": "monotonicArrivals",
+          "status": "passed"
+        },
+        {
+          "detail": "Duration error 0.001512499999080319s; original bound <0.08s.",
+          "name": "hostClockDuration",
+          "status": "passed"
+        },
+        {
+          "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.004835209)s.",
+          "name": "audioSourceTailCoverage",
+          "status": "passed"
+        },
+        {
+          "detail": "Actual writer completion.",
+          "name": "recordingFinalization",
+          "status": "passed"
+        },
+        {
+          "detail": "Original track/start/end/decode inspection completed.",
+          "name": "recordingDecodeInspection",
+          "status": "passed"
+        },
+        {
+          "detail": "Rendered 600; required at least 450 for 30 fps over 20.0s with the existing 5s allowance.",
+          "name": "nominalCompositorCapacity",
+          "status": "passed"
+        }
+      ],
+      "compositor": {
+        "attempts": 601,
+        "failed": 1,
+        "lastPresentationSeconds": 58654.065518958,
+        "maxRenderMilliseconds": 29.55245833436493,
+        "missedDeadlines": 0,
+        "rendered": 600,
+        "sampledAt": 58654.106974,
+        "startedAt": 58634.06372883334,
+        "subscriberDrops": 367,
+        "subscriberQueueDepth": 0,
+        "totalRenderMilliseconds": 5389.319666654046
+      },
+      "correlations": {
+        "delivery": {
+          "deliberate80ms": {
+            "count": 233,
+            "maximumStartGapMilliseconds": 95.18458333332092,
+            "meanStartGapMilliseconds": 86.21880262213882,
+            "p95StartGapMilliseconds": 90.21966666477965
+          },
+          "healthyRecording": {
+            "count": 600,
+            "maximumStartGapMilliseconds": 68.3950416641892,
+            "meanStartGapMilliseconds": 33.36210635781074,
+            "p95StartGapMilliseconds": 39.17354166333098
+          }
+        },
+        "slowOnlyPostSequences": [],
+        "synchronousThreadMigrations": 0,
+        "ticksWithoutPrimaryFanout": [
+          {
+            "phases": [
+              {
+                "endThread": 19203,
+                "endUptime": 58634.19853016667,
+                "phase": "sceneGraphPreparation",
+                "sequence": 5,
+                "startUptime": 58634.198269333334,
+                "thread": 19203,
+                "threadCPUMilliseconds": 0.260875,
+                "wallMilliseconds": 0.2608333379612304
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58634.19854291667,
+                "phase": "poolAllocation",
+                "sequence": 5,
+                "startUptime": 58634.19853445834,
+                "thread": 19203,
+                "threadCPUMilliseconds": 0.0085,
+                "wallMilliseconds": 0.00845832983031869
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58634.19855558334,
+                "phase": "tickTotal",
+                "sequence": 5,
+                "startUptime": 58634.1982435,
+                "thread": 19203,
+                "threadCPUMilliseconds": 0.312084,
+                "wallMilliseconds": 0.3120833353023045
+              }
+            ],
+            "sequence": 5
+          }
+        ],
+        "topThreeTickSpans": [
+          {
+            "phases": [
+              {
+                "endThread": 17155,
+                "endUptime": 58634.08198620834,
+                "phase": "sceneGraphPreparation",
+                "sequence": 1,
+                "startUptime": 58634.064017000004,
+                "thread": 17155,
+                "threadCPUMilliseconds": 11.830042,
+                "wallMilliseconds": 17.9692083329428
+              },
+              {
+                "endThread": 17155,
+                "endUptime": 58634.08234779167,
+                "phase": "poolAllocation",
+                "sequence": 1,
+                "startUptime": 58634.08216891667,
+                "thread": 17155,
+                "threadCPUMilliseconds": 0.178833,
+                "wallMilliseconds": 0.17887500143842772
+              },
+              {
+                "endThread": 17155,
+                "endUptime": 58634.093181125005,
+                "phase": "ciRender.sampledTaskWait",
+                "sequence": 1,
+                "startUptime": 58634.08235120834,
+                "thread": 17155,
+                "threadCPUMilliseconds": 1.505375,
+                "wallMilliseconds": 10.829916667717043
+              },
+              {
+                "endThread": 17155,
+                "endUptime": 58634.09333741667,
+                "phase": "fanout",
+                "sequence": 1,
+                "startUptime": 58634.09330204167,
+                "thread": 17155,
+                "threadCPUMilliseconds": 0.035375,
+                "wallMilliseconds": 0.03537500015227124
+              },
+              {
+                "endThread": 17155,
+                "endUptime": 58634.09336758334,
+                "phase": "tickTotal",
+                "sequence": 1,
+                "startUptime": 58634.063814875,
+                "thread": 17155,
+                "threadCPUMilliseconds": 14.088833,
+                "wallMilliseconds": 29.55270833626855
+              }
+            ],
+            "sequence": 1
+          },
+          {
+            "phases": [
+              {
+                "endThread": 19203,
+                "endUptime": 58642.599973833334,
+                "phase": "sceneGraphPreparation",
+                "sequence": 257,
+                "startUptime": 58642.59862191667,
+                "thread": 19203,
+                "threadCPUMilliseconds": 1.352792,
+                "wallMilliseconds": 1.3519166604964994
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58642.60005025,
+                "phase": "poolAllocation",
+                "sequence": 257,
+                "startUptime": 58642.600000000006,
+                "thread": 19203,
+                "threadCPUMilliseconds": 0.050292,
+                "wallMilliseconds": 0.050249997002538294
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58642.60870037501,
+                "phase": "ciRender.regular",
+                "sequence": 257,
+                "startUptime": 58642.600064625,
+                "thread": 19203,
+                "threadCPUMilliseconds": 2.45225,
+                "wallMilliseconds": 8.635750004032161
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58642.61674666667,
+                "phase": "fanout",
+                "sequence": 257,
+                "startUptime": 58642.61644866667,
+                "thread": 19203,
+                "threadCPUMilliseconds": 0.21575,
+                "wallMilliseconds": 0.29799999902024865
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58642.616775,
+                "phase": "tickTotal",
+                "sequence": 257,
+                "startUptime": 58642.59847491667,
+                "thread": 19203,
+                "threadCPUMilliseconds": 4.536,
+                "wallMilliseconds": 18.300083334906958
+              }
+            ],
+            "sequence": 257
+          },
+          {
+            "phases": [
+              {
+                "endThread": 19203,
+                "endUptime": 58641.134285583335,
+                "phase": "sceneGraphPreparation",
+                "sequence": 213,
+                "startUptime": 58641.131963583335,
+                "thread": 19203,
+                "threadCPUMilliseconds": 1.908375,
+                "wallMilliseconds": 2.322000000276603
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58641.13436116667,
+                "phase": "poolAllocation",
+                "sequence": 213,
+                "startUptime": 58641.134307750006,
+                "thread": 19203,
+                "threadCPUMilliseconds": 0.054125,
+                "wallMilliseconds": 0.05341666110325605
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58641.14928112501,
+                "phase": "ciRender.regular",
+                "sequence": 213,
+                "startUptime": 58641.13441225,
+                "thread": 19203,
+                "threadCPUMilliseconds": 3.525292,
+                "wallMilliseconds": 14.868875005049631
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58641.14970004167,
+                "phase": "fanout",
+                "sequence": 213,
+                "startUptime": 58641.14952195834,
+                "thread": 19203,
+                "threadCPUMilliseconds": 0.171709,
+                "wallMilliseconds": 0.17808333359425887
+              },
+              {
+                "endThread": 19203,
+                "endUptime": 58641.14976583334,
+                "phase": "tickTotal",
+                "sequence": 213,
+                "startUptime": 58641.13182866667,
+                "thread": 19203,
+                "threadCPUMilliseconds": 6.14775,
+                "wallMilliseconds": 17.937166667252313
+              }
+            ],
+            "sequence": 213
+          }
+        ]
+      },
+      "decodedSourceFrames": 0,
+      "fps": 30,
+      "healthySinkFrames": 571,
+      "height": 1080,
+      "hostClockDurationErrorSeconds": 0.001512499999080319,
+      "kernels": {
+        "backend": "Core Image on Metal: Apple M3 Max",
+        "maximumMilliseconds": 3.068124999117572,
+        "samples": 20,
+        "totalMilliseconds": 29.01733332691947,
+        "unavailableSamples": 0
+      },
+      "layers": 12,
+      "maxMainActorSchedulingDelayMilliseconds": 8.033708,
+      "maximumRecordingFrontierSkewSeconds": 0.027381124,
+      "peakMemoryBytes": 234962944,
+      "processCPUSeconds": 7.408933,
+      "producedAudioFrames": 961920,
+      "profile": {
+        "canvas": "1920x1080",
+        "case": 0,
+        "eventCount": 22780,
+        "eventFile": "hotpath-case-0.events.json",
+        "firstWarmPixelSHA256": "3ff60a27f655eea07a84e321ca0050e51ba1ece466f4effc46452bdf8c0159d9",
+        "fps": 30,
+        "layers": 12,
+        "omittedEvents": 0,
+        "scope": "Instrumented bounded local attribution only; not sustained capacity, hosted-VM cause, waveform or physical-source qualification. Thread CPU uses Darwin CLOCK_THREAD_CPUTIME_ID only within synchronous same-thread scopes. Nested spans overlap; do not sum them. Counter storage overhead occurs outside leaf measurements but inside enclosing spans. Drop removal preserves production location under lock; between-callback residual includes release, loop and scheduling and is not an isolated destructor measurement.",
+        "seconds": 20,
+        "sourceIdentity": "see profile-source-hashes.json",
+        "spans": {
+          "calibrationInnerFullRecord.threadCPU": {
+            "count": 200,
+            "maxMilliseconds": 0.00025,
+            "meanMilliseconds": 0.0001362400000000001,
+            "medianMilliseconds": 0.000125,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000167,
+            "p99Milliseconds": 0.000167,
+            "sumMilliseconds": 0.02724800000000002
+          },
+          "calibrationInnerFullRecord.wall": {
+            "count": 200,
+            "maxMilliseconds": 0.0002500019036233425,
+            "meanMilliseconds": 0.00013604167179437354,
+            "medianMilliseconds": 0.00012500095181167126,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.00016667036106809974,
+            "p99Milliseconds": 0.00020833249436691403,
+            "sumMilliseconds": 0.02720833435887471
+          },
+          "calibrationInnerRecord": {
+            "count": 200,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "ciExistingSampledWait.threadCPU": {
+            "count": 20,
+            "maxMilliseconds": 0.068625,
+            "meanMilliseconds": 0.02107085,
+            "medianMilliseconds": 0.020666,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.033042,
+            "p99Milliseconds": 0.033042,
+            "sumMilliseconds": 0.421417
+          },
+          "ciExistingSampledWait.wall": {
+            "count": 20,
+            "maxMilliseconds": 3.520208330883179,
+            "meanMilliseconds": 1.8326666664506774,
+            "medianMilliseconds": 1.6264166697510518,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 3.4331249989918433,
+            "p99Milliseconds": 3.4331249989918433,
+            "sumMilliseconds": 36.65333332901355
+          },
+          "ciRender.regular.threadCPU": {
+            "count": 580,
+            "maxMilliseconds": 4.765875,
+            "meanMilliseconds": 2.270274986206899,
+            "medianMilliseconds": 2.283,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 3.67375,
+            "p99Milliseconds": 4.256209,
+            "sumMilliseconds": 1316.7594920000015
+          },
+          "ciRender.regular.wall": {
+            "count": 580,
+            "maxMilliseconds": 14.868875005049631,
+            "meanMilliseconds": 6.814118606190936,
+            "medianMilliseconds": 7.308916668989696,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 11.014791663910728,
+            "p99Milliseconds": 13.102625001920387,
+            "sumMilliseconds": 3952.1887915907428
+          },
+          "ciRender.sampledTaskWait.threadCPU": {
+            "count": 20,
+            "maxMilliseconds": 4.09575,
+            "meanMilliseconds": 2.2750541,
+            "medianMilliseconds": 2.34525,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 3.756875,
+            "p99Milliseconds": 3.756875,
+            "sumMilliseconds": 45.501082000000004
+          },
+          "ciRender.sampledTaskWait.wall": {
+            "count": 20,
+            "maxMilliseconds": 14.58887499757111,
+            "meanMilliseconds": 7.200010415908764,
+            "medianMilliseconds": 7.721666668658145,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 12.176374999398831,
+            "p99Milliseconds": 12.176374999398831,
+            "sumMilliseconds": 144.00020831817528
+          },
+          "ciSampledSubmit.threadCPU": {
+            "count": 20,
+            "maxMilliseconds": 3.954792,
+            "meanMilliseconds": 2.14378335,
+            "medianMilliseconds": 2.049208,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 3.569417,
+            "p99Milliseconds": 3.569417,
+            "sumMilliseconds": 42.875667
+          },
+          "ciSampledSubmit.wall": {
+            "count": 20,
+            "maxMilliseconds": 12.765000006766059,
+            "meanMilliseconds": 5.238179166553891,
+            "medianMilliseconds": 4.783625001437031,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 11.38599999831058,
+            "p99Milliseconds": 11.38599999831058,
+            "sumMilliseconds": 104.76358333107783
+          },
+          "counterEmptySpanCalibration.threadCPU": {
+            "count": 200,
+            "maxMilliseconds": 0.000584,
+            "meanMilliseconds": 0.00015436000000000011,
+            "medianMilliseconds": 0.000166,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000167,
+            "p99Milliseconds": 0.000209,
+            "sumMilliseconds": 0.030872000000000024
+          },
+          "counterEmptySpanCalibration.wall": {
+            "count": 200,
+            "maxMilliseconds": 0.0009166687959805131,
+            "meanMilliseconds": 0.00015645789972040802,
+            "medianMilliseconds": 0.00016666308511048555,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.00016667036106809974,
+            "p99Milliseconds": 0.00024999462766572833,
+            "sumMilliseconds": 0.031291579944081604
+          },
+          "counterFullRecordCalibration.threadCPU": {
+            "count": 200,
+            "maxMilliseconds": 0.002875,
+            "meanMilliseconds": 0.001734169999999996,
+            "medianMilliseconds": 0.001708,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.001916,
+            "p99Milliseconds": 0.002041,
+            "sumMilliseconds": 0.3468339999999992
+          },
+          "counterFullRecordCalibration.wall": {
+            "count": 200,
+            "maxMilliseconds": 0.0028750000637955964,
+            "meanMilliseconds": 0.0017352078066323884,
+            "medianMilliseconds": 0.001708336640149355,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0018749997252598405,
+            "p99Milliseconds": 0.002041662810370326,
+            "sumMilliseconds": 0.3470415613264777
+          },
+          "counterRecordValueCalibration.threadCPU": {
+            "count": 200,
+            "maxMilliseconds": 0.000625,
+            "meanMilliseconds": 0.0003014200000000002,
+            "medianMilliseconds": 0.000292,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000375,
+            "p99Milliseconds": 0.0005,
+            "sumMilliseconds": 0.060284000000000046
+          },
+          "counterRecordValueCalibration.wall": {
+            "count": 200,
+            "maxMilliseconds": 0.0006666668923571706,
+            "meanMilliseconds": 0.0002985416358569637,
+            "medianMilliseconds": 0.0002916640369221568,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.00037500285543501377,
+            "p99Milliseconds": 0.0004999965312890708,
+            "sumMilliseconds": 0.05970832717139274
+          },
+          "fanout.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.415375,
+            "meanMilliseconds": 0.15780970666666652,
+            "medianMilliseconds": 0.159041,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.266709,
+            "p99Milliseconds": 0.3205,
+            "sumMilliseconds": 94.68582399999991
+          },
+          "fanout.wall": {
+            "count": 600,
+            "maxMilliseconds": 2.04358332848642,
+            "meanMilliseconds": 0.2037739581646747,
+            "medianMilliseconds": 0.17745832883520052,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.44354167039273307,
+            "p99Milliseconds": 0.766541670600418,
+            "sumMilliseconds": 122.26437489880482
+          },
+          "fixturePCMGenerateAndEnqueue.threadCPU": {
+            "count": 2004,
+            "maxMilliseconds": 3.00675,
+            "meanMilliseconds": 0.36408947105788386,
+            "medianMilliseconds": 0.323375,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.640958,
+            "p99Milliseconds": 0.704,
+            "sumMilliseconds": 729.6352999999992
+          },
+          "fixturePCMGenerateAndEnqueue.wall": {
+            "count": 2004,
+            "maxMilliseconds": 5.074916669400409,
+            "meanMilliseconds": 0.4989235488114183,
+            "medianMilliseconds": 0.3787916648434475,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 1.033125001413282,
+            "p99Milliseconds": 2.4453333317069337,
+            "sumMilliseconds": 999.8427918180823
+          },
+          "fixtureResourceSample.threadCPU": {
+            "count": 20,
+            "maxMilliseconds": 0.140834,
+            "meanMilliseconds": 0.07620005,
+            "medianMilliseconds": 0.0745,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.127917,
+            "p99Milliseconds": 0.127917,
+            "sumMilliseconds": 1.5240010000000002
+          },
+          "fixtureResourceSample.wall": {
+            "count": 20,
+            "maxMilliseconds": 1.2122916668886319,
+            "meanMilliseconds": 0.13994583387102466,
+            "medianMilliseconds": 0.07504166569560766,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.2514583320589736,
+            "p99Milliseconds": 0.2514583320589736,
+            "sumMilliseconds": 2.798916677420493
+          },
+          "frameOverrideProvider.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.020834,
+            "meanMilliseconds": 0.0040009750415973344,
+            "medianMilliseconds": 0.004084,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.005334,
+            "p99Milliseconds": 0.013625,
+            "sumMilliseconds": 2.404585999999998
+          },
+          "frameOverrideProvider.wall": {
+            "count": 601,
+            "maxMilliseconds": 0.08829166472423822,
+            "meanMilliseconds": 0.005181572428023514,
+            "medianMilliseconds": 0.005083333235234022,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.007124996045604348,
+            "p99Milliseconds": 0.016166661225724965,
+            "sumMilliseconds": 3.114125029242132
+          },
+          "generatedRasterHit.shape": {
+            "count": 3605,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "generatedRasterHit.title": {
+            "count": 2400,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "generatedRasterMiss.shape": {
+            "count": 1,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "generatedRasterMiss.title": {
+            "count": 4,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "inputSnapshots.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.050125,
+            "meanMilliseconds": 0.009613371048252918,
+            "medianMilliseconds": 0.010167,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.012375,
+            "p99Milliseconds": 0.021041,
+            "sumMilliseconds": 5.777636000000004
+          },
+          "inputSnapshots.wall": {
+            "count": 601,
+            "maxMilliseconds": 0.33579166483832523,
+            "meanMilliseconds": 0.010844495359764818,
+            "medianMilliseconds": 0.010166666470468044,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.01237499964190647,
+            "p99Milliseconds": 0.044874999730382115,
+            "sumMilliseconds": 6.517541711218655
+          },
+          "mailboxBetweenCallbackResidual.deliberate80ms.threadCPU": {
+            "count": 233,
+            "maxMilliseconds": 0.164708,
+            "meanMilliseconds": 0.03987466523605149,
+            "medianMilliseconds": 0.038334,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.065166,
+            "p99Milliseconds": 0.090667,
+            "sumMilliseconds": 9.290796999999996
+          },
+          "mailboxBetweenCallbackResidual.deliberate80ms.wall": {
+            "count": 233,
+            "maxMilliseconds": 0.30758333014091477,
+            "meanMilliseconds": 0.047299177494537596,
+            "medianMilliseconds": 0.038708334614057094,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.09895832772599533,
+            "p99Milliseconds": 0.22770833311369643,
+            "sumMilliseconds": 11.02070835622726
+          },
+          "mailboxBetweenCallbackResidual.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.028,
+            "meanMilliseconds": 0.0006566616666666645,
+            "medianMilliseconds": 0.000458,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.001166,
+            "p99Milliseconds": 0.001792,
+            "sumMilliseconds": 0.3939969999999987
+          },
+          "mailboxBetweenCallbackResidual.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.2033333366853185,
+            "meanMilliseconds": 0.0011027777145500295,
+            "medianMilliseconds": 0.0005416659405454993,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0015833284123800695,
+            "p99Milliseconds": 0.0030000010156072676,
+            "sumMilliseconds": 0.6616666287300177
+          },
+          "mailboxDequeue.deliberate80ms.threadCPU": {
+            "count": 233,
+            "maxMilliseconds": 0.100542,
+            "meanMilliseconds": 0.03048511158798283,
+            "medianMilliseconds": 0.027583,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.060041,
+            "p99Milliseconds": 0.082625,
+            "sumMilliseconds": 7.103031
+          },
+          "mailboxDequeue.deliberate80ms.wall": {
+            "count": 233,
+            "maxMilliseconds": 0.6271249949350022,
+            "meanMilliseconds": 0.04193544306126803,
+            "medianMilliseconds": 0.02787500125123188,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.08487499871989712,
+            "p99Milliseconds": 0.2790000071399845,
+            "sumMilliseconds": 9.77095823327545
+          },
+          "mailboxDequeue.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.061375,
+            "meanMilliseconds": 0.01205572833333333,
+            "medianMilliseconds": 0.011292,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.021917,
+            "p99Milliseconds": 0.039875,
+            "sumMilliseconds": 7.233436999999998
+          },
+          "mailboxDequeue.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.5151250006747432,
+            "meanMilliseconds": 0.01642812494537793,
+            "medianMilliseconds": 0.01200000406242907,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.02841666719177738,
+            "p99Milliseconds": 0.15337499644374475,
+            "sumMilliseconds": 9.856874967226759
+          },
+          "mailboxDropRemovalRelease.deliberate80ms.threadCPU": {
+            "count": 367,
+            "maxMilliseconds": 0.129458,
+            "meanMilliseconds": 0.04091731335149867,
+            "medianMilliseconds": 0.04125,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.065375,
+            "p99Milliseconds": 0.093417,
+            "sumMilliseconds": 15.016654000000011
+          },
+          "mailboxDropRemovalRelease.deliberate80ms.wall": {
+            "count": 367,
+            "maxMilliseconds": 0.5501666673808359,
+            "meanMilliseconds": 0.05271060403997246,
+            "medianMilliseconds": 0.04204166179988533,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.14041666145203635,
+            "p99Milliseconds": 0.2437083312543109,
+            "sumMilliseconds": 19.344791682669893
+          },
+          "mailboxLockHeld.deliberate80ms.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.131417,
+            "meanMilliseconds": 0.026206996666666673,
+            "medianMilliseconds": 0.028166,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.064958,
+            "p99Milliseconds": 0.083041,
+            "sumMilliseconds": 15.724198000000005
+          },
+          "mailboxLockHeld.deliberate80ms.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.5514166623470373,
+            "meanMilliseconds": 0.033723888833871264,
+            "medianMilliseconds": 0.028833332180511206,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.10733333328971639,
+            "p99Milliseconds": 0.21891666983719915,
+            "sumMilliseconds": 20.23433330032276
+          },
+          "mailboxLockHeld.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.034584,
+            "meanMilliseconds": 0.0021363366666666632,
+            "medianMilliseconds": 0.002042,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.003042,
+            "p99Milliseconds": 0.008667,
+            "sumMilliseconds": 1.2818019999999979
+          },
+          "mailboxLockHeld.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 1.172958334791474,
+            "meanMilliseconds": 0.004329722129720419,
+            "medianMilliseconds": 0.0020416700863279402,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.003041670424863696,
+            "p99Milliseconds": 0.023500004317611456,
+            "sumMilliseconds": 2.597833277832251
+          },
+          "mailboxLockWait.deliberate80ms.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.005209,
+            "meanMilliseconds": 0.0005954133333333312,
+            "medianMilliseconds": 0.000542,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.001083,
+            "p99Milliseconds": 0.0015,
+            "sumMilliseconds": 0.35724799999999873
+          },
+          "mailboxLockWait.deliberate80ms.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.006166665116325021,
+            "meanMilliseconds": 0.0008255557137696693,
+            "medianMilliseconds": 0.0006666668923571706,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0017916681827045977,
+            "p99Milliseconds": 0.003041663148906082,
+            "sumMilliseconds": 0.4953334282618016
+          },
+          "mailboxLockWait.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.004333,
+            "meanMilliseconds": 0.0003820699999999988,
+            "medianMilliseconds": 0.000292,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000708,
+            "p99Milliseconds": 0.001125,
+            "sumMilliseconds": 0.22924199999999928
+          },
+          "mailboxLockWait.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.014500001270789653,
+            "meanMilliseconds": 0.00044902782974531874,
+            "medianMilliseconds": 0.000291671312879771,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0007916678441688418,
+            "p99Milliseconds": 0.0016666672308929265,
+            "sumMilliseconds": 0.26941669784719124
+          },
+          "mailboxPost.deliberate80ms.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.132792,
+            "meanMilliseconds": 0.027482776666666677,
+            "medianMilliseconds": 0.029125,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.066834,
+            "p99Milliseconds": 0.084,
+            "sumMilliseconds": 16.489666000000007
+          },
+          "mailboxPost.deliberate80ms.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.552875004359521,
+            "meanMilliseconds": 0.03556569451272177,
+            "medianMilliseconds": 0.029958333470858634,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.11129166523460299,
+            "p99Milliseconds": 0.24341666721738875,
+            "sumMilliseconds": 21.339416707633063
+          },
+          "mailboxPost.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.076208,
+            "meanMilliseconds": 0.022186238333333316,
+            "medianMilliseconds": 0.02125,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.04225,
+            "p99Milliseconds": 0.058,
+            "sumMilliseconds": 13.31174299999999
+          },
+          "mailboxPost.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 1.1903750055353157,
+            "meanMilliseconds": 0.030028055589355063,
+            "medianMilliseconds": 0.021249994460958987,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.05858334043296054,
+            "p99Milliseconds": 0.17266666691284627,
+            "sumMilliseconds": 18.016833353613038
+          },
+          "mailboxSchedule.deliberate80ms.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.021375,
+            "meanMilliseconds": 0.00035023333333333287,
+            "medianMilliseconds": 0.00025,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000584,
+            "p99Milliseconds": 0.000709,
+            "sumMilliseconds": 0.21013999999999972
+          },
+          "mailboxSchedule.deliberate80ms.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.22041666670702398,
+            "meanMilliseconds": 0.000681736188804886,
+            "medianMilliseconds": 0.0002500019036233425,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0005833353498019278,
+            "p99Milliseconds": 0.0006666668923571706,
+            "sumMilliseconds": 0.4090417132829316
+          },
+          "mailboxSchedule.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.073083,
+            "meanMilliseconds": 0.019328668333333302,
+            "medianMilliseconds": 0.018333,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.036917,
+            "p99Milliseconds": 0.052833,
+            "sumMilliseconds": 11.59720099999998
+          },
+          "mailboxSchedule.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.730541672965046,
+            "meanMilliseconds": 0.024876180662734743,
+            "medianMilliseconds": 0.01824999344535172,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.05075000080978498,
+            "p99Milliseconds": 0.15391666966024786,
+            "sumMilliseconds": 14.925708397640847
+          },
+          "mailboxSink.deliberate80ms.threadCPU": {
+            "count": 233,
+            "maxMilliseconds": 0.068125,
+            "meanMilliseconds": 0.02481651931330472,
+            "medianMilliseconds": 0.023167,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.041875,
+            "p99Milliseconds": 0.058292,
+            "sumMilliseconds": 5.782249
+          },
+          "mailboxSink.deliberate80ms.wall": {
+            "count": 233,
+            "maxMilliseconds": 94.44358333712444,
+            "meanMilliseconds": 86.07371244638885,
+            "medianMilliseconds": 86.15408333571395,
+            "over100ms": 0,
+            "over33ms": 233,
+            "p95Milliseconds": 90.05812500254251,
+            "p99Milliseconds": 91.91091666434659,
+            "sumMilliseconds": 20055.175000008603
+          },
+          "mailboxSink.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 9.943667,
+            "meanMilliseconds": 0.03661861999999999,
+            "medianMilliseconds": 0.018417,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.042333,
+            "p99Milliseconds": 0.053833,
+            "sumMilliseconds": 21.971171999999996
+          },
+          "mailboxSink.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 11.273500000243075,
+            "meanMilliseconds": 0.045601180366550885,
+            "medianMilliseconds": 0.018791666661854833,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.07166666182456538,
+            "p99Milliseconds": 0.19549999706214294,
+            "sumMilliseconds": 27.36070821993053
+          },
+          "oneTimePixelHash.threadCPU": {
+            "count": 1,
+            "maxMilliseconds": 9.752958,
+            "meanMilliseconds": 9.752958,
+            "medianMilliseconds": 9.752958,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 9.752958,
+            "p99Milliseconds": 9.752958,
+            "sumMilliseconds": 9.752958
+          },
+          "oneTimePixelHash.wall": {
+            "count": 1,
+            "maxMilliseconds": 10.9166666661622,
+            "meanMilliseconds": 10.9166666661622,
+            "medianMilliseconds": 10.9166666661622,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 10.9166666661622,
+            "p99Milliseconds": 10.9166666661622,
+            "sumMilliseconds": 10.9166666661622
+          },
+          "poolAllocation.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.178833,
+            "meanMilliseconds": 0.0548586289517471,
+            "medianMilliseconds": 0.057208,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.087708,
+            "p99Milliseconds": 0.105917,
+            "sumMilliseconds": 32.97003600000001
+          },
+          "poolAllocation.wall": {
+            "count": 601,
+            "maxMilliseconds": 1.8396666637272574,
+            "meanMilliseconds": 0.07063879656592638,
+            "medianMilliseconds": 0.05704166687792167,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.12883333693025634,
+            "p99Milliseconds": 0.4690416681114584,
+            "sumMilliseconds": 42.453916736121755
+          },
+          "poolFailure.-6689": {
+            "count": 1,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "rendererTotal.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 13.818875,
+            "meanMilliseconds": 3.679961178036605,
+            "medianMilliseconds": 3.873708,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 5.343708,
+            "p99Milliseconds": 6.196917,
+            "sumMilliseconds": 2211.6566679999996
+          },
+          "rendererTotal.wall": {
+            "count": 601,
+            "maxMilliseconds": 29.28300000348827,
+            "meanMilliseconds": 8.580056710948663,
+            "medianMilliseconds": 9.112333333177958,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 13.448833327856846,
+            "p99Milliseconds": 15.391083332360722,
+            "sumMilliseconds": 5156.614083280147
+          },
+          "sampleWrapAndChat.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.233792,
+            "meanMilliseconds": 0.11591242833333332,
+            "medianMilliseconds": 0.124,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.17775,
+            "p99Milliseconds": 0.208625,
+            "sumMilliseconds": 69.547457
+          },
+          "sampleWrapAndChat.wall": {
+            "count": 600,
+            "maxMilliseconds": 2.88258333603153,
+            "meanMilliseconds": 0.15144333350084102,
+            "medianMilliseconds": 0.1273333327844739,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.33616666769376025,
+            "p99Milliseconds": 0.5572916707023978,
+            "sumMilliseconds": 90.8660001005046
+          },
+          "sceneGraphPreparation.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 11.830042,
+            "meanMilliseconds": 1.1515254958402659,
+            "medianMilliseconds": 1.241291,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 1.604417,
+            "p99Milliseconds": 1.785666,
+            "sumMilliseconds": 692.0668229999998
+          },
+          "sceneGraphPreparation.wall": {
+            "count": 601,
+            "maxMilliseconds": 17.9692083329428,
+            "meanMilliseconds": 1.4061198003181201,
+            "medianMilliseconds": 1.319166665780358,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 2.813458333548624,
+            "p99Milliseconds": 5.099833331769332,
+            "sumMilliseconds": 845.0779999911902
+          },
+          "skippedSlotsEquivalentMilliseconds": {
+            "count": 601,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "tickActorEntryDelay": {
+            "count": 601,
+            "maxMilliseconds": 0.07449999975506216,
+            "meanMilliseconds": 0.004262548546208388,
+            "medianMilliseconds": 0.004125002305954695,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.005250003596302122,
+            "p99Milliseconds": 0.02245833456981927,
+            "sumMilliseconds": 2.561791676271241
+          },
+          "tickStartDeadlineLateness": {
+            "count": 601,
+            "maxMilliseconds": 5.090073,
+            "meanMilliseconds": 1.7439554093178038,
+            "medianMilliseconds": 1.603886,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 4.093138,
+            "p99Milliseconds": 4.534797,
+            "sumMilliseconds": 1048.117201
+          },
+          "tickTotal.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 14.088833,
+            "meanMilliseconds": 3.997070207986687,
+            "medianMilliseconds": 4.216375,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 5.70575,
+            "p99Milliseconds": 6.500958,
+            "sumMilliseconds": 2402.2391949999987
+          },
+          "tickTotal.wall": {
+            "count": 601,
+            "maxMilliseconds": 29.55270833626855,
+            "meanMilliseconds": 8.967647254578873,
+            "medianMilliseconds": 9.536625002510846,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 13.977374997921288,
+            "p99Milliseconds": 16.32820833765436,
+            "sumMilliseconds": 5389.556000001903
+          },
+          "titleFontCascade.threadCPU": {
+            "count": 2404,
+            "maxMilliseconds": 7.988833,
+            "meanMilliseconds": 0.017225513727121448,
+            "medianMilliseconds": 0.013875,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.026625,
+            "p99Milliseconds": 0.045917,
+            "sumMilliseconds": 41.41013499999996
+          },
+          "titleFontCascade.wall": {
+            "count": 2404,
+            "maxMilliseconds": 13.542958338803146,
+            "meanMilliseconds": 0.022214226282661557,
+            "medianMilliseconds": 0.014041666872799397,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.02849999873433262,
+            "p99Milliseconds": 0.06654166645603254,
+            "sumMilliseconds": 53.402999983518384
+          },
+          "titleTotal.threadCPU": {
+            "count": 2404,
+            "maxMilliseconds": 9.491417,
+            "meanMilliseconds": 0.0836411326955075,
+            "medianMilliseconds": 0.066166,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.1775,
+            "p99Milliseconds": 0.215125,
+            "sumMilliseconds": 201.07328300000006
+          },
+          "titleTotal.wall": {
+            "count": 2404,
+            "maxMilliseconds": 15.151291663642041,
+            "meanMilliseconds": 0.10734893232541386,
+            "medianMilliseconds": 0.06670833681710064,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.20366666285553947,
+            "p99Milliseconds": 0.5022083278163336,
+            "sumMilliseconds": 258.0668333102949
+          }
+        }
+      },
+      "recording": {
+        "audioEndSeconds": 20.039871917,
+        "audioSamples": 2004,
+        "audioStatus": "complete",
+        "avEndDifferenceSeconds": -0.004835209,
+        "availableBytes": 2259443077120,
+        "bytesWritten": 11699661,
+        "droppedAudio": 0,
+        "droppedVideo": 0,
+        "durationSeconds": 20.039871917,
+        "elapsedWallSeconds": 20.069872975349426,
+        "sessionStartSourceSeconds": 58634.063815583,
+        "videoEndSeconds": 20.035036708,
+        "videoSamples": 600,
+        "videoStatus": "complete"
+      },
+      "recordingComplete": true,
+      "resourceSummary": {
+        "samples": 20,
+        "thermalStates": [
+          0
+        ]
+      },
+      "seconds": 20.043245166663837,
+      "sourceAudioTailCoverageSeconds": 0.004835209,
+      "storageBytesPerSecond": 584983.05,
+      "validationComplete": true,
+      "validationSeconds": 1.331111666336163,
+      "width": 1920,
+      "workload": "Static owned desktop/camera placeholders + 10 shape/title layers"
+    },
+    {
+      "checks": [
+        {
+          "detail": "An actual submitted video endpoint is required.",
+          "name": "videoSourceFrontier",
+          "status": "passed"
+        },
+        {
+          "detail": "Actual post-warmup arrivals 570; monotonic true; required > 30.",
+          "name": "monotonicArrivals",
+          "status": "passed"
+        },
+        {
+          "detail": "Duration error 0.00041037499613594264s; original bound <0.08s.",
+          "name": "hostClockDuration",
+          "status": "passed"
+        },
+        {
+          "detail": "Independent PCM must cover the final submitted video endpoint; actual Optional(0.018726959)s.",
+          "name": "audioSourceTailCoverage",
+          "status": "passed"
+        },
+        {
+          "detail": "Actual writer completion.",
+          "name": "recordingFinalization",
+          "status": "passed"
+        },
+        {
+          "detail": "Original track/start/end/decode inspection completed.",
+          "name": "recordingDecodeInspection",
+          "status": "passed"
+        },
+        {
+          "detail": "Rendered 601; required at least 450 for 30 fps over 20.0s with the existing 5s allowance.",
+          "name": "nominalCompositorCapacity",
+          "status": "passed"
+        },
+        {
+          "detail": "Source has 600 total frames for the 20.0s workload; nominal requirement 450. 449 frames are due before decoder grace ends.",
+          "name": "nominalReplayInputAvailability",
+          "status": "passed"
+        },
+        {
+          "detail": "Decoded 599 actual frames; required 449 from compressed source timestamps. This does not qualify nominal 30 fps capacity.",
+          "name": "actualSourceDecodeCadence",
+          "status": "passed"
+        },
+        {
+          "detail": "Original nominal gate unchanged: decoded 599, required at least 450. Input availability and actual-source decoding are reported separately.",
+          "name": "nominalReplayDecodeCapacity",
+          "status": "passed"
+        },
+        {
+          "detail": "No decoder error before sampling ended.",
+          "name": "replayDecoderCompletion",
+          "status": "passed"
+        }
+      ],
+      "compositor": {
+        "attempts": 601,
+        "failed": 0,
+        "lastPresentationSeconds": 58675.624490166,
+        "maxRenderMilliseconds": 25.632541663071606,
+        "missedDeadlines": 0,
+        "rendered": 601,
+        "sampledAt": 58675.64420404167,
+        "startedAt": 58655.62238879167,
+        "subscriberDrops": 368,
+        "subscriberQueueDepth": 1,
+        "totalRenderMilliseconds": 3979.339541729132
+      },
+      "correlations": {
+        "delivery": {
+          "deliberate80ms": {
+            "count": 233,
+            "maximumStartGapMilliseconds": 99.23095833073603,
+            "meanStartGapMilliseconds": 86.44530082613622,
+            "p95StartGapMilliseconds": 90.28787500574253
+          },
+          "healthyRecording": {
+            "count": 600,
+            "maximumStartGapMilliseconds": 51.98245833162218,
+            "meanStartGapMilliseconds": 33.33322189760968,
+            "p95StartGapMilliseconds": 37.163249995501246
+          }
+        },
+        "slowOnlyPostSequences": [
+          601
+        ],
+        "synchronousThreadMigrations": 0,
+        "ticksWithoutPrimaryFanout": [],
+        "topThreeTickSpans": [
+          {
+            "phases": [
+              {
+                "endThread": 33591,
+                "endUptime": 58667.52582833334,
+                "phase": "sceneGraphPreparation",
+                "sequence": 358,
+                "startUptime": 58667.52334716667,
+                "thread": 33591,
+                "threadCPUMilliseconds": 1.564875,
+                "wallMilliseconds": 2.481166666257195
+              },
+              {
+                "endThread": 33591,
+                "endUptime": 58667.52601095834,
+                "phase": "poolAllocation",
+                "sequence": 358,
+                "startUptime": 58667.52587225,
+                "thread": 33591,
+                "threadCPUMilliseconds": 0.123291,
+                "wallMilliseconds": 0.13870833936380222
+              },
+              {
+                "endThread": 33591,
+                "endUptime": 58667.548439583334,
+                "phase": "ciRender.regular",
+                "sequence": 358,
+                "startUptime": 58667.52602695834,
+                "thread": 33591,
+                "threadCPUMilliseconds": 2.47525,
+                "wallMilliseconds": 22.41262499592267
+              },
+              {
+                "endThread": 33591,
+                "endUptime": 58667.548767625005,
+                "phase": "fanout",
+                "sequence": 358,
+                "startUptime": 58667.54862345834,
+                "thread": 33591,
+                "threadCPUMilliseconds": 0.125166,
+                "wallMilliseconds": 0.14416666817851365
+              },
+              {
+                "endThread": 33591,
+                "endUptime": 58667.54883670834,
+                "phase": "tickTotal",
+                "sequence": 358,
+                "startUptime": 58667.52320358334,
+                "thread": 33591,
+                "threadCPUMilliseconds": 4.735542,
+                "wallMilliseconds": 25.63312499842141
+              }
+            ],
+            "sequence": 358
+          },
+          {
+            "phases": [
+              {
+                "endThread": 19459,
+                "endUptime": 58665.49300654167,
+                "phase": "sceneGraphPreparation",
+                "sequence": 297,
+                "startUptime": 58665.49129420834,
+                "thread": 19459,
+                "threadCPUMilliseconds": 1.202083,
+                "wallMilliseconds": 1.7123333309427835
+              },
+              {
+                "endThread": 19459,
+                "endUptime": 58665.49307716667,
+                "phase": "poolAllocation",
+                "sequence": 297,
+                "startUptime": 58665.4930295,
+                "thread": 19459,
+                "threadCPUMilliseconds": 0.048667,
+                "wallMilliseconds": 0.04766666825162247
+              },
+              {
+                "endThread": 19459,
+                "endUptime": 58665.50940529167,
+                "phase": "ciRender.regular",
+                "sequence": 297,
+                "startUptime": 58665.493087083334,
+                "thread": 19459,
+                "threadCPUMilliseconds": 3.002,
+                "wallMilliseconds": 16.318208334269002
+              },
+              {
+                "endThread": 19459,
+                "endUptime": 58665.51039729167,
+                "phase": "fanout",
+                "sequence": 297,
+                "startUptime": 58665.50961866667,
+                "thread": 19459,
+                "threadCPUMilliseconds": 0.279333,
+                "wallMilliseconds": 0.7786249989294447
+              },
+              {
+                "endThread": 19459,
+                "endUptime": 58665.51042204167,
+                "phase": "tickTotal",
+                "sequence": 297,
+                "startUptime": 58665.489929875,
+                "thread": 19459,
+                "threadCPUMilliseconds": 4.907083,
+                "wallMilliseconds": 20.492166666372214
+              }
+            ],
+            "sequence": 297
+          },
+          {
+            "phases": [
+              {
+                "endThread": 19971,
+                "endUptime": 58661.49172208334,
+                "phase": "sceneGraphPreparation",
+                "sequence": 177,
+                "startUptime": 58661.49049375,
+                "thread": 19971,
+                "threadCPUMilliseconds": 0.989667,
+                "wallMilliseconds": 1.2283333344385028
+              },
+              {
+                "endThread": 19971,
+                "endUptime": 58661.49192750001,
+                "phase": "poolAllocation",
+                "sequence": 177,
+                "startUptime": 58661.491743791674,
+                "thread": 19971,
+                "threadCPUMilliseconds": 0.070375,
+                "wallMilliseconds": 0.1837083327700384
+              },
+              {
+                "endThread": 19971,
+                "endUptime": 58661.506419125006,
+                "phase": "ciRender.regular",
+                "sequence": 177,
+                "startUptime": 58661.49194079167,
+                "thread": 19971,
+                "threadCPUMilliseconds": 3.136334,
+                "wallMilliseconds": 14.478333338047378
+              },
+              {
+                "endThread": 19971,
+                "endUptime": 58661.50667454167,
+                "phase": "fanout",
+                "sequence": 177,
+                "startUptime": 58661.506577458335,
+                "thread": 19971,
+                "threadCPUMilliseconds": 0.096959,
+                "wallMilliseconds": 0.0970833352766931
+              },
+              {
+                "endThread": 19971,
+                "endUptime": 58661.50669933334,
+                "phase": "tickTotal",
+                "sequence": 177,
+                "startUptime": 58661.49037691667,
+                "thread": 19971,
+                "threadCPUMilliseconds": 4.62375,
+                "wallMilliseconds": 16.322416668117512
+              }
+            ],
+            "sequence": 177
+          }
+        ]
+      },
+      "decodedSourceFrames": 599,
+      "fps": 30,
+      "healthySinkFrames": 570,
+      "height": 1080,
+      "hostClockDurationErrorSeconds": 0.00041037499613594264,
+      "kernels": {
+        "backend": "Core Image on Metal: Apple M3 Max",
+        "maximumMilliseconds": 2.188208331062924,
+        "samples": 21,
+        "totalMilliseconds": 17.6410000276519,
+        "unavailableSamples": 0
+      },
+      "layers": 12,
+      "maxMainActorSchedulingDelayMilliseconds": 10.063542,
+      "maximumRecordingFrontierSkewSeconds": 0.028765832,
+      "peakMemoryBytes": 262815744,
+      "processCPUSeconds": 8.337653000000001,
+      "producedAudioFrames": 960960,
+      "profile": {
+        "canvas": "1920x1080",
+        "case": 1,
+        "eventCount": 22788,
+        "eventFile": "hotpath-case-1.events.json",
+        "firstWarmPixelSHA256": "699a0f0117bcb16ab896c794e2382ebac0d2bc638d3ef3b67787eda408aa274f",
+        "fps": 30,
+        "layers": 12,
+        "omittedEvents": 0,
+        "scope": "Instrumented bounded local attribution only; not sustained capacity, hosted-VM cause, waveform or physical-source qualification. Thread CPU uses Darwin CLOCK_THREAD_CPUTIME_ID only within synchronous same-thread scopes. Nested spans overlap; do not sum them. Counter storage overhead occurs outside leaf measurements but inside enclosing spans. Drop removal preserves production location under lock; between-callback residual includes release, loop and scheduling and is not an isolated destructor measurement.",
+        "seconds": 20,
+        "sourceIdentity": "see profile-source-hashes.json",
+        "spans": {
+          "calibrationInnerFullRecord.threadCPU": {
+            "count": 200,
+            "maxMilliseconds": 0.00025,
+            "meanMilliseconds": 0.0001279150000000001,
+            "medianMilliseconds": 0.000125,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000125,
+            "p99Milliseconds": 0.00025,
+            "sumMilliseconds": 0.02558300000000002
+          },
+          "calibrationInnerFullRecord.wall": {
+            "count": 200,
+            "maxMilliseconds": 0.0002500019036233425,
+            "meanMilliseconds": 0.0001279168645851314,
+            "medianMilliseconds": 0.00012500095181167126,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.00016666308511048555,
+            "p99Milliseconds": 0.00020833249436691403,
+            "sumMilliseconds": 0.02558337291702628
+          },
+          "calibrationInnerRecord": {
+            "count": 200,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "ciExistingSampledWait.threadCPU": {
+            "count": 21,
+            "maxMilliseconds": 0.0415,
+            "meanMilliseconds": 0.022777809523809523,
+            "medianMilliseconds": 0.021084,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.031542,
+            "p99Milliseconds": 0.031542,
+            "sumMilliseconds": 0.478334
+          },
+          "ciExistingSampledWait.wall": {
+            "count": 21,
+            "maxMilliseconds": 1.6986666669254191,
+            "meanMilliseconds": 0.9230218250498486,
+            "medianMilliseconds": 0.7408750025206245,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 1.6191666654776782,
+            "p99Milliseconds": 1.6191666654776782,
+            "sumMilliseconds": 19.38345832604682
+          },
+          "ciRender.regular.threadCPU": {
+            "count": 580,
+            "maxMilliseconds": 3.546167,
+            "meanMilliseconds": 2.020493994827586,
+            "medianMilliseconds": 2.088917,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 2.832541,
+            "p99Milliseconds": 3.169417,
+            "sumMilliseconds": 1171.886517
+          },
+          "ciRender.regular.wall": {
+            "count": 580,
+            "maxMilliseconds": 22.41262499592267,
+            "meanMilliseconds": 4.635564367834314,
+            "medianMilliseconds": 4.406958338222466,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 7.344583333178889,
+            "p99Milliseconds": 9.842375002335757,
+            "sumMilliseconds": 2688.627333343902
+          },
+          "ciRender.sampledTaskWait.threadCPU": {
+            "count": 21,
+            "maxMilliseconds": 2.915708,
+            "meanMilliseconds": 2.1587280952380956,
+            "medianMilliseconds": 2.131,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 2.784917,
+            "p99Milliseconds": 2.784917,
+            "sumMilliseconds": 45.333290000000005
+          },
+          "ciRender.sampledTaskWait.wall": {
+            "count": 21,
+            "maxMilliseconds": 9.551166665914934,
+            "meanMilliseconds": 4.933430555822616,
+            "medianMilliseconds": 4.694916664448101,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 7.307166670216247,
+            "p99Milliseconds": 7.307166670216247,
+            "sumMilliseconds": 103.60204167227494
+          },
+          "ciSampledSubmit.threadCPU": {
+            "count": 21,
+            "maxMilliseconds": 2.731666,
+            "meanMilliseconds": 2.002603095238095,
+            "medianMilliseconds": 2.012542,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 2.591041,
+            "p99Milliseconds": 2.591041,
+            "sumMilliseconds": 42.05466499999999
+          },
+          "ciSampledSubmit.wall": {
+            "count": 21,
+            "maxMilliseconds": 8.150250003382098,
+            "meanMilliseconds": 3.86549801589267,
+            "medianMilliseconds": 3.6628750021918677,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 6.678708334220573,
+            "p99Milliseconds": 6.678708334220573,
+            "sumMilliseconds": 81.17545833374606
+          },
+          "counterEmptySpanCalibration.threadCPU": {
+            "count": 200,
+            "maxMilliseconds": 0.000958,
+            "meanMilliseconds": 0.0001493350000000001,
+            "medianMilliseconds": 0.000125,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000167,
+            "p99Milliseconds": 0.00025,
+            "sumMilliseconds": 0.02986700000000002
+          },
+          "counterEmptySpanCalibration.wall": {
+            "count": 200,
+            "maxMilliseconds": 0.001708336640149355,
+            "meanMilliseconds": 0.00015375026123365387,
+            "medianMilliseconds": 0.00012500095181167126,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.00016667036106809974,
+            "p99Milliseconds": 0.0002500019036233425,
+            "sumMilliseconds": 0.030750052246730775
+          },
+          "counterFullRecordCalibration.threadCPU": {
+            "count": 200,
+            "maxMilliseconds": 0.008583,
+            "meanMilliseconds": 0.0017031349999999978,
+            "medianMilliseconds": 0.001583,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.002291,
+            "p99Milliseconds": 0.002583,
+            "sumMilliseconds": 0.34062699999999957
+          },
+          "counterFullRecordCalibration.wall": {
+            "count": 200,
+            "maxMilliseconds": 0.008583338058087975,
+            "meanMilliseconds": 0.0017010416922857985,
+            "medianMilliseconds": 0.0015833284123800695,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.00224999530473724,
+            "p99Milliseconds": 0.0025833360268734396,
+            "sumMilliseconds": 0.3402083384571597
+          },
+          "counterRecordValueCalibration.threadCPU": {
+            "count": 200,
+            "maxMilliseconds": 0.00075,
+            "meanMilliseconds": 0.00025627000000000023,
+            "medianMilliseconds": 0.00025,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000292,
+            "p99Milliseconds": 0.000417,
+            "sumMilliseconds": 0.05125400000000004
+          },
+          "counterRecordValueCalibration.wall": {
+            "count": 200,
+            "maxMilliseconds": 0.0007083363016135991,
+            "meanMilliseconds": 0.0002593751923996024,
+            "medianMilliseconds": 0.0002500019036233425,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000291671312879771,
+            "p99Milliseconds": 0.00041667226469144225,
+            "sumMilliseconds": 0.05187503847992048
+          },
+          "fanout.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.279333,
+            "meanMilliseconds": 0.14703472212978366,
+            "medianMilliseconds": 0.146417,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.239166,
+            "p99Milliseconds": 0.259833,
+            "sumMilliseconds": 88.36786799999997
+          },
+          "fanout.wall": {
+            "count": 601,
+            "maxMilliseconds": 1.5699166688136756,
+            "meanMilliseconds": 0.17565682160866813,
+            "medianMilliseconds": 0.16054166917456314,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.3300000025774352,
+            "p99Milliseconds": 0.5386666671256535,
+            "sumMilliseconds": 105.56974978680955
+          },
+          "fixturePCMGenerateAndEnqueue.threadCPU": {
+            "count": 2002,
+            "maxMilliseconds": 0.812458,
+            "meanMilliseconds": 0.3958815334665334,
+            "medianMilliseconds": 0.343792,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.669667,
+            "p99Milliseconds": 0.716666,
+            "sumMilliseconds": 792.5548299999998
+          },
+          "fixturePCMGenerateAndEnqueue.wall": {
+            "count": 2002,
+            "maxMilliseconds": 6.5112916636280715,
+            "meanMilliseconds": 0.525583125216564,
+            "medianMilliseconds": 0.4301666631363332,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 1.0095416655531153,
+            "p99Milliseconds": 2.139416668796912,
+            "sumMilliseconds": 1052.2174166835612
+          },
+          "fixtureResourceSample.threadCPU": {
+            "count": 20,
+            "maxMilliseconds": 0.104292,
+            "meanMilliseconds": 0.0706396,
+            "medianMilliseconds": 0.080584,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.098833,
+            "p99Milliseconds": 0.098833,
+            "sumMilliseconds": 1.412792
+          },
+          "fixtureResourceSample.wall": {
+            "count": 20,
+            "maxMilliseconds": 0.18954167171614245,
+            "meanMilliseconds": 0.08007916767382994,
+            "medianMilliseconds": 0.0803333314252086,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.14929166354704648,
+            "p99Milliseconds": 0.14929166354704648,
+            "sumMilliseconds": 1.6015833534765989
+          },
+          "frameOverrideProvider.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.035583,
+            "meanMilliseconds": 0.0038834758735440903,
+            "medianMilliseconds": 0.003625,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.005625,
+            "p99Milliseconds": 0.017333,
+            "sumMilliseconds": 2.3339689999999984
+          },
+          "frameOverrideProvider.wall": {
+            "count": 601,
+            "maxMilliseconds": 0.404833335778676,
+            "meanMilliseconds": 0.006654395569505607,
+            "medianMilliseconds": 0.0047083376557566226,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.007833332347217947,
+            "p99Milliseconds": 0.04262499714968726,
+            "sumMilliseconds": 3.99929173727287
+          },
+          "generatedRasterHit.shape": {
+            "count": 3605,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "generatedRasterHit.title": {
+            "count": 2400,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "generatedRasterMiss.shape": {
+            "count": 1,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "generatedRasterMiss.title": {
+            "count": 4,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "inputSnapshots.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.056792,
+            "meanMilliseconds": 0.009325866888519134,
+            "medianMilliseconds": 0.008916,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.014291,
+            "p99Milliseconds": 0.027292,
+            "sumMilliseconds": 5.604845999999999
+          },
+          "inputSnapshots.wall": {
+            "count": 601,
+            "maxMilliseconds": 0.1612083360669203,
+            "meanMilliseconds": 0.010982182470306029,
+            "medianMilliseconds": 0.008916664228308946,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.016749996575526893,
+            "p99Milliseconds": 0.08658333536004648,
+            "sumMilliseconds": 6.600291664653923
+          },
+          "mailboxBetweenCallbackResidual.deliberate80ms.threadCPU": {
+            "count": 233,
+            "maxMilliseconds": 0.078583,
+            "meanMilliseconds": 0.036437931330472115,
+            "medianMilliseconds": 0.03625,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.058958,
+            "p99Milliseconds": 0.068083,
+            "sumMilliseconds": 8.490038000000002
+          },
+          "mailboxBetweenCallbackResidual.deliberate80ms.wall": {
+            "count": 233,
+            "maxMilliseconds": 0.8352083314093761,
+            "meanMilliseconds": 0.053472102838548405,
+            "medianMilliseconds": 0.0365416708518751,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.11870833259308711,
+            "p99Milliseconds": 0.31975000456441194,
+            "sumMilliseconds": 12.458999961381778
+          },
+          "mailboxBetweenCallbackResidual.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.013875,
+            "meanMilliseconds": 0.0006450316666666652,
+            "medianMilliseconds": 0.000584,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.001084,
+            "p99Milliseconds": 0.001292,
+            "sumMilliseconds": 0.38701899999999917
+          },
+          "mailboxBetweenCallbackResidual.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.16008333477657288,
+            "meanMilliseconds": 0.0011850695591419935,
+            "medianMilliseconds": 0.0006666668923571706,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0013333337847143412,
+            "p99Milliseconds": 0.0025833360268734396,
+            "sumMilliseconds": 0.7110417354851961
+          },
+          "mailboxDequeue.deliberate80ms.threadCPU": {
+            "count": 233,
+            "maxMilliseconds": 0.119,
+            "meanMilliseconds": 0.029801502145922733,
+            "medianMilliseconds": 0.0275,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.052083,
+            "p99Milliseconds": 0.076,
+            "sumMilliseconds": 6.943749999999997
+          },
+          "mailboxDequeue.deliberate80ms.wall": {
+            "count": 233,
+            "maxMilliseconds": 4.071958326676395,
+            "meanMilliseconds": 0.055398247362106495,
+            "medianMilliseconds": 0.027750000299420208,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.10566666605882347,
+            "p99Milliseconds": 0.2757916663540527,
+            "sumMilliseconds": 12.907791635370813
+          },
+          "mailboxDequeue.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.04525,
+            "meanMilliseconds": 0.013722698333333323,
+            "medianMilliseconds": 0.013625,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.021083,
+            "p99Milliseconds": 0.036916,
+            "sumMilliseconds": 8.233618999999994
+          },
+          "mailboxDequeue.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.5770833304268308,
+            "meanMilliseconds": 0.018299235998711083,
+            "medianMilliseconds": 0.01412499841535464,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.03679167275549844,
+            "p99Milliseconds": 0.15437500405823812,
+            "sumMilliseconds": 10.97954159922665
+          },
+          "mailboxDropRemovalRelease.deliberate80ms.threadCPU": {
+            "count": 368,
+            "maxMilliseconds": 0.085333,
+            "meanMilliseconds": 0.038513013586956524,
+            "medianMilliseconds": 0.039333,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.061833,
+            "p99Milliseconds": 0.072583,
+            "sumMilliseconds": 14.172789
+          },
+          "mailboxDropRemovalRelease.deliberate80ms.wall": {
+            "count": 368,
+            "maxMilliseconds": 0.2701249977690168,
+            "meanMilliseconds": 0.043228713741922074,
+            "medianMilliseconds": 0.03949999518226832,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.09604166552890092,
+            "p99Milliseconds": 0.14150000060908496,
+            "sumMilliseconds": 15.908166657027323
+          },
+          "mailboxLockHeld.deliberate80ms.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.087625,
+            "meanMilliseconds": 0.02500648086522462,
+            "medianMilliseconds": 0.030375,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.056875,
+            "p99Milliseconds": 0.072792,
+            "sumMilliseconds": 15.028894999999997
+          },
+          "mailboxLockHeld.deliberate80ms.wall": {
+            "count": 601,
+            "maxMilliseconds": 0.2752083310042508,
+            "meanMilliseconds": 0.028392956286576575,
+            "medianMilliseconds": 0.031124996894504875,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.07370833191089332,
+            "p99Milliseconds": 0.13062499783700332,
+            "sumMilliseconds": 17.06416672823252
+          },
+          "mailboxLockHeld.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.026625,
+            "meanMilliseconds": 0.002173799999999997,
+            "medianMilliseconds": 0.002083,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.002875,
+            "p99Milliseconds": 0.010209,
+            "sumMilliseconds": 1.304279999999998
+          },
+          "mailboxLockHeld.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.0714999987394549,
+            "meanMilliseconds": 0.002401597218219346,
+            "medianMilliseconds": 0.0020833322196267545,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.002833330654539168,
+            "p99Milliseconds": 0.016833328118082136,
+            "sumMilliseconds": 1.4409583309316076
+          },
+          "mailboxLockWait.deliberate80ms.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.0295,
+            "meanMilliseconds": 0.000755495840266221,
+            "medianMilliseconds": 0.000666,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.001125,
+            "p99Milliseconds": 0.001958,
+            "sumMilliseconds": 0.4540529999999988
+          },
+          "mailboxLockWait.deliberate80ms.wall": {
+            "count": 601,
+            "maxMilliseconds": 0.07270833157235757,
+            "meanMilliseconds": 0.001060801388028724,
+            "medianMilliseconds": 0.0008333299774676561,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0015833356883376837,
+            "p99Milliseconds": 0.003125001967418939,
+            "sumMilliseconds": 0.6375416342052631
+          },
+          "mailboxLockWait.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.020041,
+            "meanMilliseconds": 0.00048700499999999766,
+            "medianMilliseconds": 0.000375,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000834,
+            "p99Milliseconds": 0.001,
+            "sumMilliseconds": 0.2922029999999986
+          },
+          "mailboxLockWait.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.031833333196118474,
+            "meanMilliseconds": 0.0005302083445712924,
+            "medianMilliseconds": 0.00037500285543501377,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0009583309292793274,
+            "p99Milliseconds": 0.0013333337847143412,
+            "sumMilliseconds": 0.31812500674277544
+          },
+          "mailboxPost.deliberate80ms.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.088666,
+            "meanMilliseconds": 0.026648237936772054,
+            "medianMilliseconds": 0.031583,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.059041,
+            "p99Milliseconds": 0.076042,
+            "sumMilliseconds": 16.015591000000004
+          },
+          "mailboxPost.deliberate80ms.wall": {
+            "count": 601,
+            "maxMilliseconds": 0.27783332916442305,
+            "meanMilliseconds": 0.030542845407170793,
+            "medianMilliseconds": 0.03258333163103089,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0817500040284358,
+            "p99Milliseconds": 0.1453333316021599,
+            "sumMilliseconds": 18.356250089709647
+          },
+          "mailboxPost.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.062542,
+            "meanMilliseconds": 0.020777268333333307,
+            "medianMilliseconds": 0.020583,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.036833,
+            "p99Milliseconds": 0.051083,
+            "sumMilliseconds": 12.466360999999985
+          },
+          "mailboxPost.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.6596666644327343,
+            "meanMilliseconds": 0.02384090278307364,
+            "medianMilliseconds": 0.020541672711260617,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.04941666702507064,
+            "p99Milliseconds": 0.10529167047934607,
+            "sumMilliseconds": 14.304541669844184
+          },
+          "mailboxSchedule.deliberate80ms.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.009,
+            "meanMilliseconds": 0.00040876039933444196,
+            "medianMilliseconds": 0.000333,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.000625,
+            "p99Milliseconds": 0.000792,
+            "sumMilliseconds": 0.2456649999999996
+          },
+          "mailboxSchedule.deliberate80ms.wall": {
+            "count": 601,
+            "maxMilliseconds": 0.041416671592742205,
+            "meanMilliseconds": 0.00047483378804339944,
+            "medianMilliseconds": 0.0003333334461785853,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0006249974831007421,
+            "p99Milliseconds": 0.0007499984349124134,
+            "sumMilliseconds": 0.28537510661408305
+          },
+          "mailboxSchedule.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 0.058917,
+            "meanMilliseconds": 0.017696246666666655,
+            "medianMilliseconds": 0.017416,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.031166,
+            "p99Milliseconds": 0.04725,
+            "sumMilliseconds": 10.617747999999994
+          },
+          "mailboxSchedule.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 0.6556666630785912,
+            "meanMilliseconds": 0.020396180613412678,
+            "medianMilliseconds": 0.017291669792030007,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.03791666676988825,
+            "p99Milliseconds": 0.10129166912520304,
+            "sumMilliseconds": 12.237708368047606
+          },
+          "mailboxSink.deliberate80ms.threadCPU": {
+            "count": 233,
+            "maxMilliseconds": 0.052917,
+            "meanMilliseconds": 0.022237858369098695,
+            "medianMilliseconds": 0.021583,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.035958,
+            "p99Milliseconds": 0.042292,
+            "sumMilliseconds": 5.181420999999996
+          },
+          "mailboxSink.deliberate80ms.wall": {
+            "count": 233,
+            "maxMilliseconds": 99.05479166627629,
+            "meanMilliseconds": 86.26468347626226,
+            "medianMilliseconds": 86.51729166740552,
+            "over100ms": 0,
+            "over33ms": 233,
+            "p95Milliseconds": 90.09520833205897,
+            "p99Milliseconds": 90.94304166501388,
+            "sumMilliseconds": 20099.671249969106
+          },
+          "mailboxSink.healthyRecording.threadCPU": {
+            "count": 600,
+            "maxMilliseconds": 11.271375,
+            "meanMilliseconds": 0.03957890166666663,
+            "medianMilliseconds": 0.020208,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.038708,
+            "p99Milliseconds": 0.049708,
+            "sumMilliseconds": 23.747340999999977
+          },
+          "mailboxSink.healthyRecording.wall": {
+            "count": 600,
+            "maxMilliseconds": 13.189749995945022,
+            "meanMilliseconds": 0.051020972253657725,
+            "medianMilliseconds": 0.020541672711260617,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.06262499664444476,
+            "p99Milliseconds": 0.15283333050319925,
+            "sumMilliseconds": 30.612583352194633
+          },
+          "oneTimePixelHash.threadCPU": {
+            "count": 1,
+            "maxMilliseconds": 11.181083,
+            "meanMilliseconds": 11.181083,
+            "medianMilliseconds": 11.181083,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 11.181083,
+            "p99Milliseconds": 11.181083,
+            "sumMilliseconds": 11.181083
+          },
+          "oneTimePixelHash.wall": {
+            "count": 1,
+            "maxMilliseconds": 13.097166665829718,
+            "meanMilliseconds": 13.097166665829718,
+            "medianMilliseconds": 13.097166665829718,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 13.097166665829718,
+            "p99Milliseconds": 13.097166665829718,
+            "sumMilliseconds": 13.097166665829718
+          },
+          "poolAllocation.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.139792,
+            "meanMilliseconds": 0.05158325790349419,
+            "medianMilliseconds": 0.051916,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.079208,
+            "p99Milliseconds": 0.100666,
+            "sumMilliseconds": 31.001538000000007
+          },
+          "poolAllocation.wall": {
+            "count": 601,
+            "maxMilliseconds": 0.613416668784339,
+            "meanMilliseconds": 0.06285385474841189,
+            "medianMilliseconds": 0.05249999958323315,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.15141667245188728,
+            "p99Milliseconds": 0.29708333022426814,
+            "sumMilliseconds": 37.77516670379555
+          },
+          "rendererTotal.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 5.513416,
+            "meanMilliseconds": 3.297173660565723,
+            "medianMilliseconds": 3.4415,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 4.4255,
+            "p99Milliseconds": 4.745708,
+            "sumMilliseconds": 1981.6013699999994
+          },
+          "rendererTotal.wall": {
+            "count": 601,
+            "maxMilliseconds": 25.26758333260659,
+            "meanMilliseconds": 6.254483083484926,
+            "medianMilliseconds": 6.067249996704049,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 9.65929166704882,
+            "p99Milliseconds": 13.24058333557332,
+            "sumMilliseconds": 3758.9443331744405
+          },
+          "sampleWrapAndChat.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 0.219292,
+            "meanMilliseconds": 0.10664385357737101,
+            "medianMilliseconds": 0.10925,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.164125,
+            "p99Milliseconds": 0.180958,
+            "sumMilliseconds": 64.09295599999997
+          },
+          "sampleWrapAndChat.wall": {
+            "count": 601,
+            "maxMilliseconds": 2.5368749993504025,
+            "meanMilliseconds": 0.12526261789858661,
+            "medianMilliseconds": 0.11266666115261614,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.22449999960372224,
+            "p99Milliseconds": 0.42804166878340766,
+            "sumMilliseconds": 75.28283335705055
+          },
+          "sceneGraphPreparation.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 1.796333,
+            "meanMilliseconds": 1.0308429733777031,
+            "medianMilliseconds": 1.033375,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 1.556666,
+            "p99Milliseconds": 1.697542,
+            "sumMilliseconds": 619.5366269999996
+          },
+          "sceneGraphPreparation.wall": {
+            "count": 601,
+            "maxMilliseconds": 9.057291666977108,
+            "meanMilliseconds": 1.323955837666629,
+            "medianMilliseconds": 1.2020416688756086,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 2.426916667900514,
+            "p99Milliseconds": 4.842083333642222,
+            "sumMilliseconds": 795.697458437644
+          },
+          "skippedSlotsEquivalentMilliseconds": {
+            "count": 601,
+            "maxMilliseconds": 0,
+            "meanMilliseconds": 0,
+            "medianMilliseconds": 0,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0,
+            "p99Milliseconds": 0,
+            "sumMilliseconds": 0
+          },
+          "tickActorEntryDelay": {
+            "count": 601,
+            "maxMilliseconds": 0.15787499432917684,
+            "meanMilliseconds": 0.0047280919775304795,
+            "medianMilliseconds": 0.003541666956152767,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.0060416641645133495,
+            "p99Milliseconds": 0.04387499939184636,
+            "sumMilliseconds": 2.8415832784958184
+          },
+          "tickStartDeadlineLateness": {
+            "count": 601,
+            "maxMilliseconds": 7.283634,
+            "meanMilliseconds": 1.2911884792013304,
+            "medianMilliseconds": 1.247824,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 2.13811,
+            "p99Milliseconds": 4.064712,
+            "sumMilliseconds": 776.0042759999995
+          },
+          "tickTotal.threadCPU": {
+            "count": 601,
+            "maxMilliseconds": 5.878875,
+            "meanMilliseconds": 3.592857379367724,
+            "medianMilliseconds": 3.737875,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 4.778291,
+            "p99Milliseconds": 5.096625,
+            "sumMilliseconds": 2159.307285000002
+          },
+          "tickTotal.wall": {
+            "count": 601,
+            "maxMilliseconds": 25.63312499842141,
+            "meanMilliseconds": 6.622065654635711,
+            "medianMilliseconds": 6.452124995121267,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 10.12187500600703,
+            "p99Milliseconds": 13.562291671405546,
+            "sumMilliseconds": 3979.861458436062
+          },
+          "titleFontCascade.threadCPU": {
+            "count": 2404,
+            "maxMilliseconds": 0.666208,
+            "meanMilliseconds": 0.012454227537437568,
+            "medianMilliseconds": 0.009291,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.027667,
+            "p99Milliseconds": 0.045583,
+            "sumMilliseconds": 29.939962999999914
+          },
+          "titleFontCascade.wall": {
+            "count": 2404,
+            "maxMilliseconds": 2.257041669508908,
+            "meanMilliseconds": 0.016655886116411077,
+            "medianMilliseconds": 0.009666669939178973,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.03170833952026442,
+            "p99Milliseconds": 0.14433333853958175,
+            "sumMilliseconds": 40.04075022385223
+          },
+          "titleTotal.threadCPU": {
+            "count": 2404,
+            "maxMilliseconds": 0.805,
+            "meanMilliseconds": 0.07320999459234609,
+            "medianMilliseconds": 0.05375,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.181459,
+            "p99Milliseconds": 0.222291,
+            "sumMilliseconds": 175.996827
+          },
+          "titleTotal.wall": {
+            "count": 2404,
+            "maxMilliseconds": 6.011291668983176,
+            "meanMilliseconds": 0.09663210622358548,
+            "medianMilliseconds": 0.055000004067551345,
+            "over100ms": 0,
+            "over33ms": 0,
+            "p95Milliseconds": 0.2547083349782042,
+            "p99Milliseconds": 0.45437499647960067,
+            "sumMilliseconds": 232.30358336149948
+          }
+        }
+      },
+      "recording": {
+        "audioEndSeconds": 20.019935751,
+        "audioSamples": 2002,
+        "audioStatus": "complete",
+        "avEndDifferenceSeconds": -0.018726959,
+        "availableBytes": 2259424493568,
+        "bytesWritten": 12459476,
+        "droppedAudio": 0,
+        "droppedVideo": 0,
+        "durationSeconds": 20.019935751,
+        "elapsedWallSeconds": 20.045376896858215,
+        "sessionStartSourceSeconds": 58655.622418416,
+        "videoEndSeconds": 20.001208792,
+        "videoSamples": 600,
+        "videoStatus": "complete"
+      },
+      "recordingComplete": true,
+      "replaySource": {
+        "availableFrames": 600,
+        "durationSeconds": 20.035,
+        "framesDueBeforeGraceEnd": 449,
+        "monotonic": true
+      },
+      "resourceSummary": {
+        "samples": 20,
+        "thermalStates": [
+          0
+        ]
+      },
+      "seconds": 20.021815250001964,
+      "sourceAudioTailCoverageSeconds": 0.018726959,
+      "storageBytesPerSecond": 622973.8,
+      "validationComplete": true,
+      "validationSeconds": 1.1511362499980358,
+      "width": 1920,
+      "workload": "Real owned 1080p H.264 decode reused by desktop/camera placeholders + 10 shape/title layers"
+    }
+  ],
+  "dateUTC": "2026-10-22",
+  "host": {
+    "architecture": "arm64",
+    "date": "2026-10-22T08:18:52Z",
+    "encoderSessions": 1,
+    "hardwareModel": "Mac15,8",
+    "limitations": "Bounded 20-second instrumentation trace only, not sustained capacity qualification; same generated content; no physical capture, universal capacity, independent waveform drift or Internet uplink qualification. Actual-source decoder cadence is distinct from nominal output capacity. Main-actor delay is a responsiveness proxy; kernel time is not GPU utilization.",
+    "metal": {
+      "counterSets": [
+        "timestamp"
+      ],
+      "device": "Apple M3 Max",
+      "recommendedWorkingSetBytes": 115448725504,
+      "unifiedMemory": true,
+      "utilizationUnavailableReason": "Metal does not expose process-wide GPU utilization through this collector."
+    },
+    "os": "Version 27.2 (Build 26B118)",
+    "physicalMemory": 137438953472,
+    "processTranslated": false,
+    "processors": 16,
+    "publishingOutputs": 0,
+    "uplinkQualification": "Not measured by this local recorder workload; use the actual healthy RTMP/SRT fixture."
+  },
+  "instrumentation": {
+    "baseCommit": "78796d13dffc193217c6aa6ec3a8ecfb8a562182",
+    "generatedSHA256": {
+      "StreamMac/CompositionEngine.swift": "cfd1cc62575ef7fc025f24a579438e6ed7c0a97059e64c527530de6b3f9710be",
+      "StreamMac/CompositionHotPathProfile.swift": "875b75f21c4ec03d6d40149ae2785d7d499e79381d514e083ef7c231f0ee7f81",
+      "StreamMac/SceneRenderer.swift": "e3142686506f9c029bce3660caadbd3a551f909ce0d6c0169906d781e2997f08",
+      "hotpath_harness.swift": "49332e9d5b45484c06fca3ee38d823ebec5af453b50f0e364696f3f85fd045ce"
+    },
+    "qualification": false,
+    "scope": "Only bounded local attribution. Lookup count is not a measured cache-miss/builder count.",
+    "secondsPerCase": 20,
+    "sourceSHA256": {
+      "StreamMac/CompositionEngine.swift": "bd08893be8606a8e22608bbf186f10cb9f297754a88eac5ba463e52f0f942674",
+      "StreamMac/SceneRenderer.swift": "4bd6e70b51a59fd5bec82129ae0a08dff3e020761b2596b586210f0ebcdbc661",
+      "StreamMac/TitleRenderFontCache.swift": "b5d31b366da19ef7af64a3d28cc80e8603f70ec8721518023a95f7f1d7024862",
+      "scripts/composition_hotpath_profile.swift": "875b75f21c4ec03d6d40149ae2785d7d499e79381d514e083ef7c231f0ee7f81",
+      "scripts/prepare_composition_hotpath_profile.py": "96ef9d6dc970058ae226d8aedadb0d92328e3a73d7ed2c967ce70ea087f3ece6",
+      "scripts/run_composition_hotpath_profile.zsh": "b051da683fd67b9a69cc6f1eca5261ab47607feba19edd27130b8bbc52e27804",
+      "scripts/studio_performance_harness.swift": "b74f5f85e5acbf50475bd9d00f0e8cb816737d10450f528bd30315417a5e46f9"
+    }
+  },
+  "invocations": 1,
+  "qualification": false,
+  "schemaVersion": 1,
+  "scope": [
+    "Exactly one bounded generated-copy invocation; two20-second1920x1080/30fps12-layer static/replay cases, real recorder, independent48k PCM and original deliberate80ms sink. No physical capture, personal media, normal output device or remote publishing starts.",
+    "Shipping StreamMac/StreamCore, original sustained harness, replay/evidence helpers and workflow match exact787. Generated render/startTask/existing wait call counts match production; no added GPU wait, extra render or alternate async CI path. Original600s/17850frame/80ms/1380s hosted gates and all retained failures remain unchanged.",
+    "This20s tool retains its existing duration-dependent450frame local checks; passing those is not passing the original17850/600s sustained gate. No hosted dispatch, repeated trace or production optimization follows from this result.",
+    "Static compositor600renders/601attempts, replay601/601, zero whole scheduler skips both. Both actual movies finalized and decoded600frames. Replay source decoder599of600available,449due. Preserve all four distinct counters.",
+    "Static CVPixelBuffer allocation threshold -6689 occurs at sequence5, total tick0.312083ms; no fanout for that tick. This isolated failure is not a demonstrated long-stall mechanism or an explanation for hundreds of hosted whole skips.",
+    "Replay sequence601 posts only to the slow sink; healthy posts/deliveries cover sequences1through600. Source stop cancels without joining, followed by sink removal, so a queued shutdown tick is a source-backed possibility; no stop-entry event was added and precise lifecycle ordering is not proved. Do not call this an observed writer drop.",
+    "Per-thread CPU uses Darwin CLOCK_THREAD_CPUTIME_ID only inside synchronous same-thread intervals; no CPU subtraction across await/sleep/yield. Events are bounded to100000/case, preallocated, with zero omissions and zero observed synchronous thread migrations. Counter event construction/storage occurs outside mailbox critical locks. Calibration is retained. Nested spans overlap; do not sum them or infer negative wait from sub-microsecond CPU/wall sampling skew.",
+    "Original drop-oldest and callback scopes are retained; clocks bracket the existing removal under lock and event storage follows unlock. Between-callback residual includes frame release, loop, scheduling and instrumentation; it is not an isolated destructor measurement. Tracing adds overhead and is not a zero-overhead benchmark.",
+    "Local regular CI wall exceeds caller thread CPU, and existing sampled wait is mostly non-CPU. Off-thread work, host scheduling, driver work and GPU wait are not separated by regular-call wall minus CPU; kernel task samples are execution time, not utilization.",
+    "No hosted-like whole-skip or1second stall reproduced. The local trace identifies API wall and small mailbox costs on this M3Max; it establishes no cause or fix for previous hosted paravirtual ARM/Intel frame deficits, historical59second endpoint divergence or the Intel1380second inspection deadline.",
+    "Static first-warm pixel hash matches the prior trace. Replay source movie differs because this static run lost one allocation opportunity; replay warm hashes are not comparable across those different sources. No new fullbuffer pixel-equivalence claim is made.",
+    "No justified production patch is proposed. #92 remains open; old hosted logs/artifacts and nominal failures are unchanged."
+  ],
+  "secondsPerCase": 20,
+  "sourceCommit": "78796d13dffc193217c6aa6ec3a8ecfb8a562182",
+  "sourceSHA256": {
+    ".github/workflows/native-performance-budget.yml": "123a4cabd59421c712db5730ef2165ba9ea5beec5af423ae17034adc5d8a7217",
+    "apple/StreamMac/CompositionEngine.swift": "bd08893be8606a8e22608bbf186f10cb9f297754a88eac5ba463e52f0f942674",
+    "apple/StreamMac/CompositionFrameSchedule.swift": "02dab6e6d3dbe79c8f124bde5a57dff7598e7901995a54946e7f8446c995bf1b",
+    "apple/StreamMac/ProgramRecordingSession.swift": "e9e076d3e85d8c063c79a297d63810f7019c6f9b998ce097d0b849893a93d1a9",
+    "apple/StreamMac/SceneRenderer.swift": "4bd6e70b51a59fd5bec82129ae0a08dff3e020761b2596b586210f0ebcdbc661",
+    "apple/StreamMac/TitleRenderFontCache.swift": "b5d31b366da19ef7af64a3d28cc80e8603f70ec8721518023a95f7f1d7024862",
+    "apple/scripts/performance_owned_replay.swift": "a37d3a5aba9bffc4e6e4516bfccc2e9461aa9bceb4b52a69c818f443140a937d",
+    "apple/scripts/performance_workload_evidence.swift": "4312804d5de645cad552adb26d5217846f3c483510fd9bcc13881500746627f3",
+    "apple/scripts/studio_performance_harness.swift": "b74f5f85e5acbf50475bd9d00f0e8cb816737d10450f528bd30315417a5e46f9"
+  },
+  "status": "traceCompleted"
+}
