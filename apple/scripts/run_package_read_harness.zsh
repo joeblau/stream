@@ -48,7 +48,10 @@ replace_source(target, root, folder, 'StudioWorkspace.swift') do |source|
   source[first...last] = preview
   seam = 'ShowPackageIO.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)'
   abort 'Actual import IO boundary changed' unless source.include?(seam)
-  source.sub(seam, 'PackageReadProbe.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)')
+  source = source.sub(seam, 'PackageReadProbe.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)')
+  readback = 'let readback = try? Data(contentsOf: catalogURL)'
+  abort 'Actual catalog readback boundary changed' unless source.scan(readback).length == 1
+  source.sub(readback, 'let readback = try? PackageCatalogReadProbe.readback(catalogURL)')
 end
 replace_source(target, root, folder, 'ProviderAccountSession.swift') do |source|
   seam = 'transport: @escaping ProviderTokenVault.Transport = ProviderTokenVault.network'

@@ -15,7 +15,7 @@ def sha(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def generate(folder):
+def generate(folder, transaction=False):
     folder.mkdir(parents=True, exist_ok=True)
     records = []
 
@@ -53,12 +53,18 @@ def generate(folder):
         ("    func importPreviewedPackage()", "    func exportPackage("),
         ("    private func beginPackageWrite()", "    /// Capture retained security grants")]:
         methods.append(slice_file(ws, start, end))
+    if transaction:
+        methods.append(slice_file(ws, "    func archive(_ id:", "    func addProfile(named"))
     preview = "ShowPackageIO.preview(url)"
     bound = "ShowPackageIO.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest)"
     body = "".join(methods)
     if body.count(preview) != 1 or body.count(bound) != 1:
         raise ValueError("Actual manifest-bound IO boundary changed")
     body = body.replace(preview, "PackageReadProbe.preview(url)").replace(bound, bound.replace("ShowPackageIO", "PackageReadProbe"))
+    readback = "let readback = try? Data(contentsOf: catalogURL)"
+    if body.count(readback) != 1:
+        raise ValueError("Actual catalog readback boundary changed")
+    body = body.replace(readback, "let readback = try? PackageCatalogReadProbe.readback(catalogURL)")
     task = "        Task { [weak self] in\n"
     if body.count(task) != 1:
         raise ValueError("Preview completion boundary changed")
@@ -73,8 +79,21 @@ def generate(folder):
         catalog = try! JSONDecoder().decode(StudioProjectCatalog.self, from: Data(contentsOf: catalogURL))
     }
 """
+    if transaction:
+        init = """
+    // Fixture-only root, actual loader and automatic-save guard; no runtime.
+    init() {
+        root = GuestFixtureStorage.machineDirectory
+        catalogURL = root.appendingPathComponent("projects.v1.json")
+        let loaded = StudioCatalogRead.load(at: catalogURL)
+        catalog = loaded.catalog
+        recoveryFile = loaded.recoveryFile
+        if recoveryFile == nil { saveCatalog() }
+    }
+"""
     workspace = "import AppKit\nimport Combine\nimport Foundation\nimport StreamCore\n\n@MainActor final class StudioWorkspace: ObservableObject {\n" + "".join(properties) + fields + init + body + export + "}\n"
     dependencies = "import Foundation\nimport Security\nimport StreamCore\n\n"
+    dependencies += slice_file("StreamMac/StudioCatalogRead.swift", "import Foundation")
     dependencies += slice_file("StreamMac/AssetLibraryStore.swift", "final class ResolvedAssetAccess:")
     dependencies += slice_file("StreamMac/StudioControlPairingStore.swift", "@MainActor protocol StudioControlCredentials", "@MainActor private struct StudioControlKeychainCredentials")
     dependencies += slice_file("StreamMac/TransitionController.swift", "enum SceneTransitionStyle:", "// MARK: - Take → program-engine hand-off")
@@ -89,6 +108,8 @@ enum GuestFixtureStorage {
 }
 """
     harness = (APPLE / "scripts/package_read_harness.swift").read_text()
+    if transaction:
+        harness = harness[:harness.index("@main @MainActor struct PackageReadHarness {")] + (APPLE / "scripts/package_import_transaction_harness.swift").read_text()
     guard = '''        try require(!workspace.runtime.controller.outputSessionActive && !workspace.runtime.recorder.state.isActive,
             "Package fixture allocated an output")'''
     if harness.count(guard) != 1:
@@ -110,5 +131,6 @@ enum GuestFixtureStorage {
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("folder", type=Path)
+    parser.add_argument("--transaction", action="store_true", help="Execute durable import transaction cases with the same exact method extraction")
     args = parser.parse_args()
-    print(json.dumps(generate(args.folder), indent=2))
+    print(json.dumps(generate(args.folder, transaction=args.transaction), indent=2))

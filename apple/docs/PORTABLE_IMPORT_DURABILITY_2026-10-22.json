@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-22T20:09:40.619937+00:00",
+  "productionCommit": "c40bd73d3d8b46439c0ffe86dae487775a6a2e30",
+  "baselineCommit": "1ba73513a5d5f29f34a6467ea9ddc07410ff810f",
+  "scope": "Actual ShowPackageIO and exact extracted Workspace methods with owned filesystem and NSCondition IO holds. StudioRuntime, controller and recorder are not constructed. No Finder, LaunchServices, native chooser, full-window UI, sandbox entitlement or permission qualification.",
+  "changes": [
+    "persist candidate and confirm exact readback before publishing or staging",
+    "reject unresolved recovery and retain explicit retry preview",
+    "rollback only newly owned verified-uncommitted import directory",
+    "keep exact committed candidate after history prune error",
+    "preserve current durable catalog after intervening normal edits",
+    "retire sheet/task commit and error authority while holding capacity through real IO completion",
+    "block all stale catalog writes after ambiguous attempted save until reload",
+    "treat unreadable/invalid/dangling existing catalogs as explicit recovery, not first launch"
+  ],
+  "tests": {
+    "nativeTransactions": {
+      "result": "PASS",
+      "timeoutSeconds": 45,
+      "actualIO": [
+        "absent valid invalid mode0000 backed-up and dangling catalog reads",
+        "unaccepted recovery refuses before copy",
+        "regular-file history blocker causes actual precommit rollback then explicit retry",
+        "actual archive save during held import remains in committed candidate",
+        "immutable owned oldest backup causes actual postcommit prune error with committed show retained",
+        "sheet-only cancellation preserves newer UI error after actual package import throws",
+        "actual candidate write with final readback-only unavailable/unexpected controls retains files and fences actual ordinary archive/import writes",
+        "mode0000 restart preserves potentially committed bytes and explicit readable reopen recovers"
+      ]
+    },
+    "nativeReadRaces": {
+      "result": "PASS",
+      "timeoutSeconds": 45,
+      "phases": 5,
+      "changedContract": "Canceled in-flight import retains busy through actual IO return, then cannot commit/stage; separate fresh explicit retry retains original actual source-A content assertions."
+    },
+    "originalImportBodyControl": {
+      "result": "EXPECTED_FAILURE",
+      "exitCode": 1,
+      "assertion": "Unaccepted recovered catalog allowed import publication or dismissed retry preview",
+      "originalBodySHA256": "7e6a9f1ff3e7ecce35bbf07d9531dfc2c2542b60a8e72f24790fac93f20804e8",
+      "transformation": "ShowPackageIO.importFiles -> PackageReadProbe.importFiles only",
+      "allOtherGeneratedWorkspaceBytesEqual": true,
+      "scope": "Exact original import body in fixed inert shell, not untouched shipping app."
+    },
+    "generationTests": {
+      "result": "PASS",
+      "tests": 4
+    },
+    "initialAttempts": {
+      "fixtureSetup": "FAIL preserved: init created owned history directory before regular-file blocker setup; corrected only owned fixture setup",
+      "beforeControlSplice": "INVALID CONTROL compile failure preserved: removed later generated helper methods; corrected exact body replacement leaves all other Workspace bytes equal"
+    }
+  },
+  "externalBoundaries": [
+    "Actual preview/import IO wrapped only by deterministic NSCondition holds; previewedManifest forwarded unchanged.",
+    "Only final post-write catalog readback is replaced for two ambiguity cases; all package/catalog writes, normal reads, restart loader and history errors use actual owned filesystem.",
+    "Generated root initialization is fixture-only; transaction branch uses exact StudioCatalogRead and same automatic-save guard.",
+    "Final full-runtime output predicate replaced with explicit scope print; no runtime/output behavior inferred."
+  ],
+  "limits": [
+    "Original #155 native keyboard chooser selection qualification remains unproved by these fixtures.",
+    "No new credential/remapping/media-byte implementation change or new qualification claim."
+  ],
+  "sources": [
+    {
+      "path": "apple/StreamMac/AssetLibraryStore.swift",
+      "sha256": "0fa7a5365373339000099e5ec87cd4eb4a64e089528115ddccd402889dcbf852"
+    },
+    {
+      "path": "apple/StreamMac/LayerGraph.swift",
+      "sha256": "84bf12ec33fbfc61162a26faeec5cfc83262d66ec4820a8ee2110543568845d7"
+    },
+    {
+      "path": "apple/StreamMac/LayerStyle.swift",
+      "sha256": "29ffb649f818d455bb93aaaac29514df851a0681a510abcc780df4692be68c2e"
+    },
+    {
+      "path": "apple/StreamMac/MediaSourcePlayback.swift",
+      "sha256": "35d31c27b51c32519ba7a0649ac62a3836da6b974b11bcbea48cef844dd7c614"
+    },
+    {
+      "path": "apple/StreamMac/SceneDocumentMigration.swift",
+      "sha256": "f64bb10cdeb9826a58167b9c68f2a56d788efc7c7d8c8fa8ca3c6664cb5023fc"
+    },
+    {
+      "path": "apple/StreamMac/SceneMigration.swift",
+      "sha256": "34b153e244db047ca9e5998677e72151722de6bcac5a2e8bb0baf9de294ab7e9"
+    },
+    {
+      "path": "apple/StreamMac/SecondaryCanvasLayout.swift",
+      "sha256": "2a576e0b86f9e802d35249d614013dfca5e76bacf216a14f46111db4e650abd0"
+    },
+    {
+      "path": "apple/StreamMac/ShowPackage.swift",
+      "sha256": "28c54d9859208b7ea950aa291327992c707cf28ec51d937885736ed9ef10e097"
+    },
+    {
+      "path": "apple/StreamMac/SourceEffects.swift",
+      "sha256": "0451d9f25a228fd10fecad4f1e8ddafb2c96da9ef285181ebe2602d019a6a144"
+    },
+    {
+      "path": "apple/StreamMac/StudioCatalogRead.swift",
+      "sha256": "a3cfe6cfb2f9a3da4a1ca51cc55e265b73a161e3e4dd332532d2c3df93370ccc"
+    },
+    {
+      "path": "apple/StreamMac/StudioControlPairingStore.swift",
+      "sha256": "c9867c576b37480a871208af1434c2e4dc21291d2564495677ab966f9cf471a1"
+    },
+    {
+      "path": "apple/StreamMac/StudioWorkspace.swift",
+      "sha256": "a03b7ff08e1942c2303eeba4c5eef42e0c71ca814222e62988abc079a8516360"
+    },
+    {
+      "path": "apple/StreamMac/TextLayer.swift",
+      "sha256": "b14ea104cf2609cf878da151202cd4fdc42425eb2fd0544acc52af63588e1fd5"
+    },
+    {
+      "path": "apple/StreamMac/TransitionController.swift",
+      "sha256": "7744046c7023a4abd74cb4a3be08bc941055e783d860ca4b4144ec9f121539da"
+    },
+    {
+      "path": "apple/StreamMac/WebOverlayIntegration.swift",
+      "sha256": "ddb09da4b73134db1e3af62a8118cb03a21febd02206e4e0bb1562d311cb39e7"
+    },
+    {
+      "path": "apple/scripts/generate_package_read_methods.py",
+      "sha256": "5c69c73cab1ef15f1faa4dbd7b4bb8b16488299bde1604b7bebf82ddbc21079c"
+    },
+    {
+      "path": "apple/scripts/package_import_transaction_harness.swift",
+      "sha256": "601c75f3827635eb73cf5571cc2c96f502b32ec7b8c1e535165f8de2ec9c9be8"
+    },
+    {
+      "path": "apple/scripts/package_read_harness.swift",
+      "sha256": "5b5366b71b4334d5ba0e81a9262b997cf370279575c93baff76e70174cb42592"
+    },
+    {
+      "path": "apple/scripts/run_package_import_transaction_harness.zsh",
+      "sha256": "92f85a616c59b72dff7adb56da1d84f8cdb96c3890a1036922a111b6e45f0f2c"
+    },
+    {
+      "path": "apple/scripts/run_package_read_harness.zsh",
+      "sha256": "0bf4d1ca94143414fad4194776fe6fbf2fe9908fc24c13ac1455ac23a4b02b4f"
+    },
+    {
+      "path": "apple/scripts/run_package_read_methods_harness.zsh",
+      "sha256": "9ec9f3b7e21a992b4e568eb9450df67059595b52a002412cb866c55081bb3581"
+    },
+    {
+      "path": "apple/scripts/test_package_read_generation.py",
+      "sha256": "5ce255063806e7c2a40ca68be7f8121520bfc81bcd341ec7fc1e0a0e5b6506da"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "/tmp/stream-package-import-core-20261022/StreamCore.framework/Versions/A/Headers/StreamCore-Swift.h",
+      "bytes": 13669,
+      "sha256": "31d0faca301103ec58bcc275b353af07af13bd54cf4fc6788deba68f0fd41e77"
+    },
+    {
+      "path": "/tmp/stream-package-import-core-20261022/StreamCore.framework/Versions/A/Modules/StreamCore.swiftmodule/Project/arm64-apple-macos.swiftsourceinfo",
+      "bytes": 491192,
+      "sha256": "dc9a4c7f07746dad63b5a53cdb62194e718e7797b471d7aaa1b0707ec3b84054"
+    },
+    {
+      "path": "/tmp/stream-package-import-core-20261022/StreamCore.framework/Versions/A/Modules/StreamCore.swiftmodule/arm64-apple-macos.abi.json",
+      "bytes": 149,
+      "sha256": "4277ac6b49f8511196028a5ac20f5b1b1dfa754c24615d34068089f0b1739728"
+    },
+    {
+      "path": "/tmp/stream-package-import-core-20261022/StreamCore.framework/Versions/A/Modules/StreamCore.swiftmodule/arm64-apple-macos.swiftdoc",
+      "bytes": 382820,
+      "sha256": "af2b5185fa4bad569e08bd19fd50eb944e75670ed6b2e59d0cd74cb7d6268e61"
+    },
+    {
+      "path": "/tmp/stream-package-import-core-20261022/StreamCore.framework/Versions/A/Modules/StreamCore.swiftmodule/arm64-apple-macos.swiftmodule",
+      "bytes": 2235368,
+      "sha256": "97817e779f0b4fe10d56178884f401264ade7824ae4b33be198b305319464202"
+    },
+    {
+      "path": "/tmp/stream-package-import-core-20261022/StreamCore.framework/Versions/A/Modules/module.modulemap",
+      "bytes": 62,
+      "sha256": "e69027d3152640763634b95b0e670e3e06bc5dc65387af2ab70b5614764458b5"
+    },
+    {
+      "path": "/tmp/stream-package-import-core-20261022/StreamCore.framework/Versions/A/Resources/Info.plist",
+      "bytes": 1259,
+      "sha256": "2bb0837cd9e45e45f74bf81d3dbb51af0c609fa7c6fb1262138d8052a0b6f1b8"
+    },
+    {
+      "path": "/tmp/stream-package-import-core-20261022/StreamCore.framework/Versions/A/StreamCore",
+      "bytes": 6059240,
+      "sha256": "ed355819476e845e57266ca5992221a1270c505002fc8efde16cf1b304e57d4d"
+    },
+    {
+      "path": "/tmp/stream-package-import-static-20261022.log",
+      "bytes": 102,
+      "sha256": "9fe2729a6b710b31527f2f4120b3bd5e274ff35fb66be391e5675b917c3092ea"
+    },
+    {
+      "path": "/tmp/stream-package-read-races-20261022/PackageReadMethodsHarness",
+      "bytes": 2655240,
+      "sha256": "8ccd76f8cb84d45b43808fe4e3fe3b43bab0d09e618e9693a9133a1e987de788"
+    },
+    {
+      "path": "/tmp/stream-package-read-races-20261022/generated/PackageDependencies.swift",
+      "bytes": 9654,
+      "sha256": "ee25dd085d1212413e783a9883da0dba36531917fb53876fb121d5676fb5a01e"
+    },
+    {
+      "path": "/tmp/stream-package-read-races-20261022/generated/PackageReadHarness.swift",
+      "bytes": 14244,
+      "sha256": "f5fb5e7f4c8b06786b4d32d6c0ae5010998fab730293c0997ef73aac2142459e"
+    },
+    {
+      "path": "/tmp/stream-package-read-races-20261022/generated/WorkspacePackageMethods.swift",
+      "bytes": 10958,
+      "sha256": "8f1e69c6bd64cb59ddecf153300f8c712435cebbcbe82be5359bd3f6efc4f6bf"
+    },
+    {
+      "path": "/tmp/stream-package-read-races-20261022/generated/generation.json",
+      "bytes": 5671,
+      "sha256": "1e53d736f5a0bd61b037fe85bdcc46aead911693719173a9007fcd2ed7e92690"
+    },
+    {
+      "path": "/tmp/stream-package-read-races-20261022.log",
+      "bytes": 7435,
+      "sha256": "cc6b36e819e3add962625ab9e26acc17e27f2eca9e8b547fb45e64d7c36be6a0"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-20261022.log",
+      "bytes": 7560,
+      "sha256": "c2388ae76d2acd4a2765dccba196c3b89f8c73576aef09e74a13404ebf7008b7"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-20261022.log",
+      "bytes": 3362,
+      "sha256": "30061bb17dc3274592d26f565799255638659fdc3ba61fe784f366869451e257"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-corrected-20261022/OriginalImportMethod.swift",
+      "bytes": 958,
+      "sha256": "7e6a9f1ff3e7ecce35bbf07d9531dfc2c2542b60a8e72f24790fac93f20804e8"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-corrected-20261022/PackageImportTransactionHarness",
+      "bytes": 2740000,
+      "sha256": "2595bf39a9a96f392cf2d0a898e60e98944f4b7da982be24f9da5fea371a8d69"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-corrected-20261022/before-control.json",
+      "bytes": 480,
+      "sha256": "45e2fb62fd4266130f35a4e6c92740d03a12bb43c09b4757b302b6516b7ae8fb"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-corrected-20261022/generated/PackageDependencies.swift",
+      "bytes": 9654,
+      "sha256": "ee25dd085d1212413e783a9883da0dba36531917fb53876fb121d5676fb5a01e"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-corrected-20261022/generated/PackageReadHarness.swift",
+      "bytes": 20428,
+      "sha256": "ff987c5fe6253c662db1d6473a890068f6f620e0bba037d13bc419eac8ee60d4"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-corrected-20261022/generated/WorkspacePackageMethods.swift",
+      "bytes": 6768,
+      "sha256": "34761da50907aab74534937d83a3ab35b8a976586177bd31f55b7435f14eb7a8"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-corrected-20261022/generated/generation.json",
+      "bytes": 5925,
+      "sha256": "92d040b848883fb236c586ba67c587146ea53842a05bc0e058796a04be39bb35"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-corrected-20261022/run-before.zsh",
+      "bytes": 1655,
+      "sha256": "02c93d0807389cb71c03eb45bd00fccebe0ce87a4f3af98e713beb44321c4c06"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-before-corrected-20261022.log",
+      "bytes": 1380,
+      "sha256": "14619f32c99f4278ef0e565bbd9484f794f4d81b0d9ebd6452d2022613f30156"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-fixed-20261022/PackageImportTransactionHarness",
+      "bytes": 2757136,
+      "sha256": "5f7777ec87ca8892aa3b1fa97fa87459e5d680529f915ef7f10970f10949e9ad"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-fixed-20261022/generated/PackageDependencies.swift",
+      "bytes": 9654,
+      "sha256": "ee25dd085d1212413e783a9883da0dba36531917fb53876fb121d5676fb5a01e"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-fixed-20261022/generated/PackageReadHarness.swift",
+      "bytes": 20428,
+      "sha256": "ff987c5fe6253c662db1d6473a890068f6f620e0bba037d13bc419eac8ee60d4"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-fixed-20261022/generated/WorkspacePackageMethods.swift",
+      "bytes": 11342,
+      "sha256": "09e9e6b93cb86175d6e3dead369f39b948cdf0723e0434308c92ca88037c53db"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-fixed-20261022/generated/generation.json",
+      "bytes": 5925,
+      "sha256": "92d040b848883fb236c586ba67c587146ea53842a05bc0e058796a04be39bb35"
+    },
+    {
+      "path": "/tmp/stream-package-transactions-fixed-20261022.log",
+      "bytes": 7704,
+      "sha256": "5ab2c38a892a7156a2a7060cceaf9b229526dbe028160a09aba9586a58509415"
+    }
+  ]
+}
