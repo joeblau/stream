@@ -193,7 +193,18 @@ pairing/revocation. The distribution audit checks the built bundle and declared
 entitlements. Release packaging additionally runs the audit with `--require-signed`,
 which checks the exported host, camera extension, and browser helper's actual
 signed entitlements, matching team, Developer ID authority, secure timestamp,
-and hardened runtime, plus the complete nested signature seal. Unsigned CI
+and hardened runtime, plus the complete nested signature seal. For actual signed
+system-extension installation, explicit Keychain access-group claims and
+registered `group.` App Groups, it also checks decoded embedded-profile metadata:
+macOS platform, validity dates, Team/App ID (including historical non-Team App ID
+prefixes), the actual signing leaf certificate, and the documented authorization
+allowlists. TEAM-prefixed macOS App Groups alone do not require a profile; the
+camera extension therefore has no blanket profile requirement. These diagnostic
+metadata checks do not validate Apple's CMS signer or authoritative DER profile,
+or establish runtime entitlement acceptance. See [Apple TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles)
+and [Apple's macOS App Group guidance](https://developer.apple.com/forums/thread/721701).
+Synthetic decoded-profile/signature fixtures exercise this policy without
+qualifying an Apple-signed artifact. Unsigned CI
 audits do not establish signed or notarized distribution qualification.
 
 Portable show export offers selected scenes (including referenced scenes) or
