@@ -220,7 +220,7 @@ private final class QueuedISO: @unchecked Sendable {
     }
     static func canceledLoadChecks(_ application: URL) async throws {
         let mixer = AudioMixEngine(), driver = SyntheticCapture(mixer: mixer)
-        let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver)
+        let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver, ipcPolicy: .prototypeForQualification)
         var loadingTask: Task<Bool, Never>?
         loadingTask = Task { @MainActor in
             do {
@@ -238,7 +238,7 @@ private final class QueuedISO: @unchecked Sendable {
     }
     static func sessionChecks(_ application: URL) async throws {
         let mixer = AudioMixEngine(), driver = SyntheticCapture(mixer: mixer)
-        let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver)
+        let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver, ipcPolicy: .prototypeForQualification)
         inspectedSession = session
         // This direct-session fixture owns fixed mixer settings below; the
         // separate Controller/operator fixture seeds its actual live settings.
@@ -411,7 +411,7 @@ private final class QueuedISO: @unchecked Sendable {
     }
     static func controllerChecks(_ application: URL) async throws {
         let mixer = AudioMixEngine(), driver = SyntheticCapture(mixer: mixer)
-        let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver)
+        let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver, ipcPolicy: .prototypeForQualification)
         inspectedSession = session
         BrowserOverlayHelperBackend.qualificationSession = session
         defer { BrowserOverlayHelperBackend.qualificationSession = nil }
@@ -510,7 +510,7 @@ private final class QueuedISO: @unchecked Sendable {
     }
     static func operatorChecks(_ application: URL) async throws {
         let mixer = AudioMixEngine(), driver = SyntheticCapture(mixer: mixer)
-        let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver)
+        let session = BrowserWidgetHelperSession(applicationURL: application, mixer: mixer, validationAudioDriver: driver, ipcPolicy: .prototypeForQualification)
         inspectedSession = session
         BrowserOverlayHelperBackend.qualificationSession = session
         defer { BrowserOverlayHelperBackend.qualificationSession = nil }

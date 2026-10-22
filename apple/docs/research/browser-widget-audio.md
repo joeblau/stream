@@ -79,7 +79,7 @@ Each actual helper image is composited over magenta and encoded as 30 H264 frame
 The existing `run_browser_audio_helper_harness.zsh` inventory/protocol/inlet checks still run independently. Read-only and retained-media modes now skip the unnecessary ad hoc helper build/sign operation; the existing helper build runs only with explicit `--qualify`. No signing configuration or capture policy changed.
 
 
-The `StreamBrowserAudioHelper` target is packaged in `StreamMac.app/Contents/Helpers` with an independent bundle ID, hardened-runtime setting, and sandbox/network/shared-App-Group entitlements. The app builds with this target embedded. The current native fixtures use ad hoc unsigned-sandbox qualification helpers; a successful unsigned app build does not prove Developer ID profiles, notarization, sandbox enforcement, shared-container IPC access or a shipped permission lifecycle. Release packaging accepts `STREAM_BROWSER_HELPER_PROVISIONING_PROFILE` for the helper bundle and includes it in archive/export profile mapping. The bundle audit checks the embedded helper executable and declared sandbox/App Group; those checks do not validate actual signed IPC. The temporary `/tmp` socket architecture must be moved to a properly authorized shared-container/service boundary and validated with the actual signed app before enabling the route.
+The `StreamBrowserAudioHelper` target is packaged in `StreamMac.app/Contents/Helpers` with an independent bundle ID, hardened-runtime setting, and sandbox/network/shared-App-Group entitlements. The app builds with this target embedded. The current native fixtures use ad hoc unsigned-sandbox qualification helpers; a successful unsigned app build does not prove Developer ID profiles, notarization, sandbox enforcement, shared-container IPC access or a shipped permission lifecycle. Release packaging accepts `STREAM_BROWSER_HELPER_PROVISIONING_PROFILE` for the helper bundle and includes it in archive/export profile mapping. The bundle audit checks the embedded helper executable and declared sandbox/App Group; those checks do not validate actual signed IPC. The production transport now fails closed through the declared shared-container and signed-peer policy described below. Private `/tmp` sockets exist only in validation-compiled prototype transport. Actual provisioned shared-container access with the signed app still needs validation before enabling the route.
 
 Run `scripts/run_browser_audio_helper_harness.zsh --qualify --visual` for the actual same-page fixture. It measures an inspector click changing one page from a red button/440 Hz tone to blue/880 Hz while its page nonce remains unchanged, native keyboard and wheel delivery, transparent-backdrop behavior, frame pull overload, keep-alive, reload while a snapshot is pending, and stop/last-demand cleanup. The sibling widget plays a right-channel 1100 Hz tone and a separately identified app plays 1320 Hz throughout lifecycle changes. The helper's actual images and program mixer audio are written through the real H264/AAC writer, then decoded to verify the color/tone transition. Earlier local runs and retained-media decode, before the 2026-10-21 lifecycle hardening below, measured 42–64 ms between the decoded blue frame and 880 Hz event; the test checks a 180 ms fixture envelope. Native unexpected-helper exit and re-demand also clear output and release the helper lease while unrelated audio continues. PNG frames, CAF outputs and bounded frame statistics are also generated. This local test establishes the fixture's measured transition envelope; it does not qualify arbitrary streaming video/speech, DRM, IME, drag/drop or long-running remote widgets.
 
@@ -183,3 +183,60 @@ WebKit audio attribution, capture exclusion or audible routing qualification.
 Both modes passed locally on 2026-10-22. The production selector and startup
 remain disabled; all original #124 product/audio validation requirements remain
 open.
+
+## Production transport policy and peer provenance (2026-10-22)
+
+Normal helper sessions now default to production transport. Before resolving an
+App Group container or launching the helper, the host validates its live code
+against the Apple-generic signing anchor and fixed host identifier, derives its
+verified team, verifies the complete local bundle seal, and requires signed
+sandbox/group entitlements without debugger access. It checks the sealed helper
+at the exact embedded bundle/executable path against that same team and fixed
+helper identifier. Only then does it resolve `group.com.joeblau.Stream` and
+atomically create a short owned0700 directory/socket0600 within it. An oversized
+UNIX socket path or missing group access fails; there is no temporary fallback.
+
+Both socket directions retain effective-UID/exact-PID checks and obtain the
+connection's kernel `LOCAL_PEERTOKEN`. Security.framework resolves the live
+principal using that audit token, validates its code requirement, then compares
+its actual executable path, identifier, team and CodeDirectory hash with the
+sealed expected peer. Both command and frame channels must have the same audit
+token/hash principal. The helper derives the production host path from its own
+embedded bundle, not an arbitrary path supplied by an argument. It authenticates
+both channels before Ready, page content or its command reader starts.
+
+The private `/tmp` policy, prototype launch mode and ad hoc signature factory
+compile only with `STREAM_NATIVE_VALIDATION`. Existing qualification callsites
+select that policy explicitly, and their helper builders compile the same flag.
+The shipped helper rejects prototype/missing/unknown launch mode and never
+falls back to stdin/private sockets. Validation-only stdin/frame-only legacy
+pixel/audio fixtures remain explicitly prototype; they confer no production
+capability. The production selector and normal startup remain disabled.
+
+`scripts/run_browser_socket_authority_harness.zsh` uses actual owned sockets and
+Security.framework with ad hoc signed fixture executables. It checks successful
+bidirectional pinned identity, wrong PID/path/identifier/hash refusal, a re-sign
+at the same path after the authority snapshot, different second-channel process
+refusal, and default production rejection of an ad hoc process before group
+access. It also retains an actual negative compiler diagnostic proving that the
+production policy has no prototype case. Optional
+`BROWSER_SOCKET_HELPER_MODE_PROBES=1` builds the actual helper without validation
+and checks no Ready/content from refused modes/authority. These are prototype
+identity and negative production-boundary proofs, not a successful signed
+sandbox/shared-container launch.
+
+The actual silent helper IPC/retirement fixture remains
+`scripts/run_browser_capture_authority_harness.zsh ipc`; it explicitly opts into
+validation transport. No capture, audio output, permission or default-device
+operation is involved. Its two silent WebKit pages use the existing real
+suspension/retirement acknowledgments and exact mixer/capture lifetime.
+
+The declared `group.`-prefixed identifier requires macOS provisioning authority;
+see [Apple's App Group authorization guidance](https://developer.apple.com/documentation/xcode/accessing-app-group-containers)
+and [UNIX socket/group requirements](https://developer.apple.com/documentation/BundleResources/Entitlements/com.apple.security.application-groups).
+Current local profiles do not authorize this group for the macOS host/helper,
+so no positive provisioned sandbox result is claimed. No profiles, entitlements,
+identities, containers or trust settings were changed for qualification. Real
+signed/group IPC, every-route exclusion/install/stop/drain acknowledgment and
+actual WebKit tone/speech Program/ISO/Monitor/A/V measurements remain required;
+#124 stays open.

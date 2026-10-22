@@ -19,11 +19,11 @@ source += '\n@MainActor private final class BrowserAlphaPublicView: WKWebView { 
 Path(sys.argv[1], 'PublicOpacityCandidate.swift').write_text(source)
 PY
 readonly SHARED=(StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift StreamMac/BrowserWidgetRasterizer.swift)
-swiftc -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
+swiftc -j2 -DSTREAM_NATIVE_VALIDATION -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
   "${SHARED[@]}" BrowserAudioHelper/BrowserAudioHelperMain.swift -o "$ALPHA_DIR/helper-baseline"
-swiftc -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
+swiftc -j2 -DSTREAM_NATIVE_VALIDATION -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
   "${SHARED[@]}" "$ALPHA_DIR/PublicOpacityCandidate.swift" -o "$ALPHA_DIR/helper-public-opacity"
-swiftc -swift-version 6 -parse-as-library \
+swiftc -j2 -DSTREAM_NATIVE_VALIDATION -swift-version 6 -parse-as-library \
   "${SHARED[@]}" scripts/browser_snapshot_alpha_harness.swift -o "$ALPHA_DIR/BrowserSnapshotAlphaHarness"
 # Executable launch here qualifies pixels only, never app-audio attribution.
 # No app install, codesign operation, TCC request or system capture is performed.

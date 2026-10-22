@@ -183,7 +183,7 @@ import StreamCore
             precondition(pid > 0 && NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == BrowserWidgetAudioIdentity.helperBundleID)
             producers += 1; return prepared(producers == 1 ? first : second, pid: pid)
         }, sink: { _ in preconditionFailure("Silent IPC pages must not generate PCM") })
-        let session = BrowserWidgetHelperSession(applicationURL: helperURL, mixer: mixer, validationAudioDriver: capture)
+        let session = BrowserWidgetHelperSession(applicationURL: helperURL, mixer: mixer, validationAudioDriver: capture, ipcPolicy: .prototypeForQualification)
         session.prepareMixerForAudio = { [weak session] in
             guard let session else { return nil }
             let prepared = await mixer.prepareClosedApplicationMixer(session.channel, mixer: MixerSettings())

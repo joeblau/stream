@@ -73,7 +73,7 @@ private final class Frames: @unchecked Sendable {
         for host in hosts.dropFirst() { host.stop() }
         hosts = [retained]; payloads = [payloads[0]]
         let mixer = AudioMixEngine(), driver = NoCapture()
-        let helper = BrowserWidgetHelperSession(applicationURL: directory.appendingPathComponent("../browser-audio-helper/StreamBrowserAudioHelper.app"), mixer: mixer, validationAudioDriver: driver)
+        let helper = BrowserWidgetHelperSession(applicationURL: directory.appendingPathComponent("../browser-audio-helper/StreamBrowserAudioHelper.app"), mixer: mixer, validationAudioDriver: driver, ipcPolicy: .prototypeForQualification)
         let config = BrowserOverlayConfiguration(urlString: "https://owned-fixture.invalid", targetFPS: 15, pixelWidth: 480, pixelHeight: 270, audioRoute: .helperApp)
         let payload = WebSourcePayload(configuration: config)
         let helperHost = BrowserOverlayHost(configuration: config, storeKey: payload.browserOverlayStoreKey!, helperSessionForQualification: helper, helperHTMLForQualification: html)
