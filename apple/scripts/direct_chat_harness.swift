@@ -385,6 +385,9 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         let receipt = manager.delete(historical)!
         guard case .notSent = manager.receipts.first(where: { $0.id == receipt })!.state else { preconditionFailure() }
         precondition(http.calls.count == count && !manager.canDelete(historical))
+        manager.authorizationDidChange(.youtube)
+        precondition(manager.snapshot(.youtube).publicReaderState == "failed" && !manager.canSend(.youtube))
+        precondition(stream.queue.message(historical) != nil && manager.targetForMessage(historical) == nil)
         manager.stop(.youtube)
         precondition(manager.snapshot(.youtube).publicReaderState == "offline")
         manager.shutdown()

@@ -85,6 +85,12 @@ struct DirectChatSnapshot {
         snapshots[provider] = .init(retryUntil: cooldowns[provider])
     }
     func shutdown() { stop(.youtube); stop(.twitch) }
+    /// The machine vault changed user/authorization in another workspace.
+    /// Retire this reader instead of letting future work adopt that credential.
+    func authorizationDidChange(_ provider: ManagedProvider) {
+        guard let generation = generations[provider] else { return }
+        failed(provider, generation, ProviderFailure(.authorization))
+    }
     private func current(_ provider: ManagedProvider, _ generation: UUID) -> Bool {
         generations[provider] == generation && !Task.isCancelled
     }
