@@ -403,7 +403,7 @@ public extension ProviderAPI {
         return .init(endpoint: endpoint, streamKey: key)
     }
     func setTwitchTitle(channelID: String, title: String) async throws {
-        guard ProviderChannel.validID(channelID), !title.isEmpty, title.utf8.count <= 140 else { throw ProviderFailure(.invalidRequest) }
+        guard ProviderChannel.validID(channelID), !title.isEmpty, title.count <= 140 else { throw ProviderFailure(.invalidRequest) }
         var request = try Self.request(.twitch, path: "/helix/channels", query: ["broadcaster_id": channelID])
         request.httpMethod = "PATCH"; request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["title": title])
