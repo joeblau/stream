@@ -62,6 +62,26 @@ enum MediaSourceFactory {
     }
 }
 
+/// Serializes only sample delivery. Terminal retirement drains delivery after
+/// releasing the playback lock, before the owner removes its mixer channel.
+private final class MediaAudioDeliveryGate: @unchecked Sendable {
+    private let lock = NSRecursiveLock()
+    private var active = true
+    func deliver(_ body: () -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        if active { body() }
+    }
+    func revokeAndDrain() {
+        lock.lock(); active = false; lock.unlock()
+    }
+}
+
+private final class MediaFileAccess: @unchecked Sendable {
+    let url: URL
+    init(url: URL) { self.url = url }
+    deinit { url.stopAccessingSecurityScopedResource() }
+}
+
 /// A02 (issue #97): the playback engine for ONE registry media source.
 ///
 /// G09 (issue #116): image files (GIF/APNG/animated HEIC) dispatch at load
@@ -154,6 +174,10 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// above S09 transition blends).
     private var animated: AnimatedImagePlayback?
     private var loadTask: Task<Void, Never>?
+    private var loadGeneration: UInt64 = 0
+    private var retired = false
+    private var fileAccess: MediaFileAccess?
+    private let audioDelivery = MediaAudioDeliveryGate()
     private var periodicObserver: Any?
     private var boundaryObserver: Any?
     private var endNotificationObserver: NSObjectProtocol?
@@ -171,26 +195,28 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// once loaded (or while a load is in flight).
     func load() {
         os_unfair_lock_lock(&lock)
-        guard !didLoad, loadTask == nil else {
+        guard !retired, !didLoad, loadTask == nil else {
             os_unfair_lock_unlock(&lock)
             return
         }
         status.phase = .loading
         status.errorMessage = nil
         publishStatusLocked()
-        os_unfair_lock_unlock(&lock)
+        loadGeneration &+= 1
+        let generation = loadGeneration
         loadTask = Task { [weak self] in
-            await self?.performLoad()
+            await self?.performLoad(generation: generation)
         }
+        os_unfair_lock_unlock(&lock)
     }
 
-    private func performLoad() async {
+    private func performLoad(generation: UInt64) async {
         guard let payload = payloadProvider() else {
-            fail("The media source has no registered payload — relink it to a video file.")
+            fail("The media source has no registered payload — relink it to a video file.", generation: generation)
             return
         }
         guard let bookmark = payload.bookmarkData else {
-            fail("No video file is linked — relink the source to an MP4/MOV file.")
+            fail("No video file is linked — relink the source to an MP4/MOV file.", generation: generation)
             return
         }
         do {
@@ -200,11 +226,14 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
                               relativeTo: nil,
                               bookmarkDataIsStale: &isStale)
             guard url.startAccessingSecurityScopedResource() else {
-                fail("macOS denied access to \"\(url.lastPathComponent)\". Relink the file to restore access.")
+                fail("macOS denied access to \"\(url.lastPathComponent)\". Relink the file to restore access.", generation: generation)
                 return
             }
-            // Access is held for the rest of the session (one startAccessing
-            // per load; a relink resolves the new bookmark the same way).
+            // One successful scope acquisition has exactly one owner. A stale
+            // or failed load releases locally; accepted playback holds it until
+            // relink, terminal retirement, or deinitialization.
+            let access = MediaFileAccess(url: url)
+            try Task.checkCancellation()
             // G09 (issue #116): animated-image files dispatch to the
             // CGImageSource engine — the probe doubles as the load-time
             // unsupported-format gate (static/undecodable images fail here
@@ -212,9 +241,9 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             if MediaOverlayClassifier.isAnimatedImageCandidate(url: url) {
                 switch MediaOverlayClassifier.probeAnimatedImage(url: url) {
                 case .failure(let error):
-                    fail(error.message)
+                    fail(error.message, generation: generation)
                 case .success(let contents):
-                    configureAnimated(contents: contents, bookmark: bookmark)
+                    configureAnimated(contents: contents, bookmark: bookmark, access: access, generation: generation)
                 }
                 return
             }
@@ -228,25 +257,29 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             // clips that have no video track (the frame pull simply never
             // produces pixels; the audio path is unchanged).
             guard hasVideo || hasAudio else {
-                fail("\"\(url.lastPathComponent)\" has no audio or video track — sources need an AVFoundation-readable media file (MP4/MOV/ProRes/MP3/AAC/WAV/AIFF).")
+                fail("\"\(url.lastPathComponent)\" has no audio or video track — sources need an AVFoundation-readable media file (MP4/MOV/ProRes/MP3/AAC/WAV/AIFF).", generation: generation)
                 return
             }
             // `AVPlayerItem.init(asset:)` is MainActor-isolated, so the
             // player build hops to the main actor (transport and observer
             // callbacks live there anyway; only frame/audio pulls run on
             // the engine actors, through the nonisolated output APIs).
-            await configure(asset: asset, bookmark: bookmark,
+            await configure(asset: asset, bookmark: bookmark, access: access, generation: generation,
                             duration: duration,
                             audioTrack: tracks.first(where: { $0.mediaType == .audio }))
         } catch {
-            fail("The video file could not be opened: \(error.localizedDescription)")
+            fail("The video file could not be opened: \(error.localizedDescription)", generation: generation)
         }
     }
 
     @MainActor
-    private func configure(asset: AVAsset, bookmark: Data,
+    private func configure(asset: AVAsset, bookmark: Data, access: MediaFileAccess?, generation: UInt64,
                            duration: CMTime, audioTrack: AVAssetTrack?) {
         os_unfair_lock_lock(&lock)
+        guard acceptsLoadLocked(bookmark: bookmark, generation: generation) else {
+            os_unfair_lock_unlock(&lock); return
+        }
+        fileAccess = access
         self.asset = asset
         assetDuration = duration
         self.audioTrack = audioTrack
@@ -285,13 +318,13 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
 
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             if item.status == .failed {
-                self?.fail(item.error?.localizedDescription ?? "The video file failed to load.")
+                self?.fail(item.error?.localizedDescription ?? "The video file failed to load.", generation: generation)
             }
         }
         endNotificationObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
         ) { [weak self] _ in
-            self?.handleReachedEnd()
+            self?.handleReachedEnd(generation: generation)
         }
         // A trim-out short of the file's natural end is the same "reached
         // end" event for looping/end actions.
@@ -299,7 +332,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
             boundaryObserver = player.addBoundaryTimeObserver(
                 forTimes: [NSValue(time: trimOut)], queue: .main
             ) { [weak self] in
-                self?.handleReachedEnd()
+                self?.handleReachedEnd(generation: generation)
             }
         }
 
@@ -320,7 +353,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         if let recoverySeek { pause(); seek(toSeconds: recoverySeek) }
         if shouldPlay { play() }
         os_unfair_lock_lock(&lock)
-        loadTask = nil
+        if loadGeneration == generation { loadTask = nil }
         os_unfair_lock_unlock(&lock)
     }
 
@@ -328,14 +361,21 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// engine. Transport/status plumbing is identical to the video path —
     /// the engine reports through the same `onStatus` mirror and honors the
     /// payload's loops/autoplay/end action live.
-    private func configureAnimated(contents: AnimatedImageContents, bookmark: Data) {
+    private func configureAnimated(contents: AnimatedImageContents, bookmark: Data,
+                                   access: MediaFileAccess?, generation: UInt64) {
         let engine = AnimatedImagePlayback(sourceID: sourceID,
                                            payloadProvider: payloadProvider)
-        engine.onReachedEnd = { [weak self] id, time in self?.onReachedEnd?(id, time) }
+        engine.onReachedEnd = { [weak self] id, time in
+            self?.forwardAnimatedEnd(id, time: time, generation: generation)
+        }
         engine.onStatus = { [weak self] id, status in
-            self?.onStatus?(id, status)
+            self?.forwardAnimatedStatus(id, status: status, generation: generation)
         }
         os_unfair_lock_lock(&lock)
+        guard acceptsLoadLocked(bookmark: bookmark, generation: generation) else {
+            os_unfair_lock_unlock(&lock); return
+        }
+        fileAccess = access
         animated = engine
         loadedBookmark = bookmark
         didLoad = true
@@ -349,12 +389,38 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         engine.configure(contents: contents, autoplayHint: shouldPlay)
         if let recoverySeek { engine.pause(); engine.seek(toSeconds: recoverySeek); if shouldPlay { engine.play() } }
         os_unfair_lock_lock(&lock)
-        loadTask = nil
+        if loadGeneration == generation { loadTask = nil }
         os_unfair_lock_unlock(&lock)
     }
 
-    private func fail(_ message: String) {
+    private func forwardAnimatedStatus(_ id: SourceDefinitionID, status: MediaSourceStatus, generation: UInt64) {
         os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard !retired, loadGeneration == generation else { return }
+        onStatus?(id, status)
+    }
+
+    private func forwardAnimatedEnd(_ id: SourceDefinitionID, time: Double, generation: UInt64) {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard !retired, loadGeneration == generation else { return }
+        onReachedEnd?(id, time)
+    }
+
+    private func acceptsLoadLocked(bookmark: Data, generation: UInt64) -> Bool {
+        guard !retired, loadGeneration == generation, !Task.isCancelled else { return false }
+        guard payloadProvider()?.bookmarkData == bookmark else {
+            teardownLocked()
+            return false
+        }
+        return true
+    }
+
+    private func fail(_ message: String, generation: UInt64) {
+        os_unfair_lock_lock(&lock)
+        guard !retired, loadGeneration == generation else {
+            os_unfair_lock_unlock(&lock); return
+        }
         isPlaying = false
         status.phase = .error
         status.errorMessage = message
@@ -373,6 +439,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// the renderer's paint-nothing fallback.
     func pullFrame() -> CVPixelBuffer? {
         os_unfair_lock_lock(&lock)
+        guard !retired else { os_unfair_lock_unlock(&lock); return nil }
         // A relink (the registry payload's bookmark changed) reloads the
         // file in place; no other source is disturbed.
         if didLoad, let bookmark = payloadProvider()?.bookmarkData,
@@ -408,11 +475,20 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         }
         let frame = lastVideoBuffer
         let handler = onAudioSample
+        let generation = loadGeneration
         os_unfair_lock_unlock(&lock)
-        for sample in audio {
-            handler?(sample)
-        }
+        deliverAudio(audio, handler: handler, generation: generation)
         return frame
+    }
+
+    private func deliverAudio(_ audio: [CMSampleBuffer], handler: (@Sendable (CMSampleBuffer) -> Void)?, generation: UInt64) {
+        audioDelivery.deliver {
+            os_unfair_lock_lock(&lock)
+            let current = !retired && loadGeneration == generation
+            os_unfair_lock_unlock(&lock)
+            guard current else { return }
+            for sample in audio { handler?(sample) }
+        }
     }
 
     /// Reads decompressed audio up to 150 ms past the playhead and retimes
@@ -499,6 +575,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// pressing play on a finished file replays it).
     func play() {
         os_unfair_lock_lock(&lock)
+        guard !retired else { os_unfair_lock_unlock(&lock); return }
         recovery.playIntent()
         wantsPlay = true; wantsPause = false
         // G09: animated-image sources forward transport to their engine.
@@ -583,6 +660,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// Restart: back to the trim-in point and playing.
     func restart() {
         os_unfair_lock_lock(&lock)
+        guard !retired else { os_unfair_lock_unlock(&lock); return }
         recovery.restartIntent()
         wantsPlay = true; wantsPause = false
         if let animated {
@@ -655,9 +733,9 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// rewinds and clears it (black fallback). The issue's
     /// return-to-previous-scene / advance-rundown actions are S08
     /// scene-control decisions; `MediaEndAction` is the seam for them.
-    private func handleReachedEnd() {
+    private func handleReachedEnd(generation: UInt64) {
         os_unfair_lock_lock(&lock)
-        guard !isEnding, isPlaying, let player else {
+        guard !retired, loadGeneration == generation, !isEnding, isPlaying, let player else {
             os_unfair_lock_unlock(&lock)
             return
         }
@@ -700,11 +778,12 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
     /// sources report position on transport events) — no always-on timers.
     private func addPositionObserverLocked(_ player: AVPlayer) {
         guard periodicObserver == nil else { return }
+        let generation = loadGeneration
         periodicObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
             queue: .main
         ) { [weak self] time in
-            self?.notePosition(time)
+            self?.notePosition(time, generation: generation)
         }
     }
 
@@ -715,9 +794,9 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         periodicObserver = nil
     }
 
-    private func notePosition(_ time: CMTime) {
+    private func notePosition(_ time: CMTime, generation: UInt64) {
         os_unfair_lock_lock(&lock)
-        guard time.isNumeric else {
+        guard !retired, loadGeneration == generation, didLoad, time.isNumeric else {
             os_unfair_lock_unlock(&lock)
             return
         }
@@ -728,9 +807,35 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
 
     // MARK: - Teardown
 
+    /// Terminal retirement differs from transport Stop: no pending load,
+    /// observer, decoder or scoped resource may revive this instance.
+    func shutdown() {
+        os_unfair_lock_lock(&lock)
+        guard !retired else {
+            os_unfair_lock_unlock(&lock)
+            audioDelivery.revokeAndDrain()
+            return
+        }
+        retired = true
+        onAudioSample = nil; onStatus = nil; onReachedEnd = nil
+        wantsPlay = false; wantsPause = true
+        teardownLocked()
+        os_unfair_lock_unlock(&lock)
+        // In-flight callbacks may enqueue into the mixer; drain them before
+        // returning so the owner can now safely remove this channel.
+        audioDelivery.revokeAndDrain()
+    }
+
+    deinit {
+        onAudioSample = nil; onStatus = nil; onReachedEnd = nil
+        teardownLocked()
+    }
+
     /// Drops the current file (relink): every observer and reader goes, the
     /// held frame clears, and the next pull re-loads from the new bookmark.
     private func teardownLocked() {
+        loadGeneration &+= 1
+        loadTask?.cancel(); loadTask = nil
         if let player {
             player.pause()
             removePositionObserverLocked(player)
@@ -753,6 +858,7 @@ final class MediaSourcePlayback: MediaFrameSource, @unchecked Sendable {
         playerItem = nil
         videoOutput = nil
         asset = nil
+        fileAccess = nil
         assetDuration = .invalid
         audioTrack = nil
         lastVideoBuffer = nil
