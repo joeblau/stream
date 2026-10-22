@@ -19,13 +19,16 @@ struct LayerGeometrySectionView: View {
 }
 
 private struct LayerGeometryFields: View {
-    @StateObject private var editor: LayerGeometryEditor
+    @StateObject private var presentation: LayerGeometryPresentation
     init(workspace: StudioWorkspace, runtime: StudioRuntime, sceneID: SceneID, layer: LayerNode) {
-        _editor = StateObject(wrappedValue: LayerGeometryEditor(workspace: workspace, runtime: runtime,
-                                                               sceneID: sceneID, layer: layer))
+        _presentation = StateObject(wrappedValue: LayerGeometryPresentation(workspace: workspace, runtime: runtime,
+                                                                           sceneID: sceneID, layer: layer))
     }
 
     var body: some View {
+        // Closures retain this exact draft. A callback from an old rendering of
+        // the controls must not acquire the replacement editor's authority.
+        let editor = presentation.editor
         Section("Layer Geometry — \(editor.layerName)") {
             ForEach(LayerGeometryDraft.Field.allCases, id: \.self) { field in
                 VStack(alignment: .leading, spacing: 4) {
@@ -38,7 +41,7 @@ private struct LayerGeometryFields: View {
                         .disabled(editor.isRetired || (field == .height && editor.usesCameraPIP))
                 }
             }
-            Text("Position uses the \(anchorName) anchor. Percentages describe the stored box relative to the Program canvas; media retains its source framing and aspect fit. Rotation uses degrees. Type a decimal point for fractions. Only edited fields apply, and changes stay in this draft until Apply.")
+            Text("Position uses the \(anchorName(editor.anchor)) anchor. Percentages describe the stored box relative to the Program canvas; media retains its source framing and aspect fit. Rotation uses degrees. Type a decimal point for fractions. Only edited fields apply, and changes stay in this draft until Apply.")
                 .studioTextStyle(.caption)
                 .foregroundStyle(.studioSecondary)
             if editor.isCamera {
@@ -49,6 +52,12 @@ private struct LayerGeometryFields: View {
                 .disabled(!editor.draft.isDirty || editor.unavailableReason != nil)
             Button("Reload Current Geometry") { editor.reload() }
                 .disabled(editor.isRetired)
+            if editor.isRetired {
+                Text("This draft has retired. Start a new draft to replace its edits with the current layer values and canvas profile.")
+                    .studioTextStyle(.caption).foregroundStyle(.studioSecondary)
+                Button("Start New Geometry Draft") { presentation.startNewDraft(replacing: editor) }
+                    .disabled(!presentation.canStartNewDraft(replacing: editor))
+            }
             if let message = editor.error ?? editor.unavailableReason {
                 Text(message).studioTextStyle(.caption).foregroundStyle(.primary)
             }
@@ -56,8 +65,8 @@ private struct LayerGeometryFields: View {
         .studioTextStyle(.body)
     }
 
-    private var anchorName: String {
-        switch editor.anchor {
+    private func anchorName(_ anchor: LayerAnchor) -> String {
+        switch anchor {
         case .topLeft: "top-left"
         case .topRight: "top-right"
         case .bottomLeft: "bottom-left"

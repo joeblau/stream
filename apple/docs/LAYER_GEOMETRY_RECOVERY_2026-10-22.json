@@ -1,0 +1,56 @@
+{
+  "originalProofCommit": "4c1608fc71f3aab8b5087e540b6b08371c5c073a",
+  "originalReceipt": {
+    "path": "apple/docs/LAYER_GEOMETRY_ACCESSIBILITY_2026-10-22.json",
+    "sha256": "35b746eabf434c5d534a9885a5d9797e9cc426733d1799fed114e100d5556b43"
+  },
+  "status": "PASS: actual compiled-view and shipping presentation/editor/model callbacks; mounted SwiftUI identity and native event delivery remain unqualified",
+  "finding": "App subtree identity contains runtime only; geometry subtree identity contains runtime, scene and layer. Same-runtime profile change or coalesced selection A-to-B-to-A can retain a permanently retired visible editor. Reload intentionally does not revive its authority.",
+  "behavior": "Explicit Start New Geometry Draft creates a distinct editor from current same-runtime/scene/single-selected-layer values and active profile. Previous editor stays retired. Exact current editor identity is required before replacement. View closures capture their rendered editor locally.",
+  "sources": {
+    "apple/StreamMac/LayerGeometryDraft.swift": "edab2bbcd3517d01e576cec71e67c337450c301df6ed91dde94a042846089b32",
+    "apple/StreamMac/LayerGeometryEditor.swift": "037bfb9827cd9ccef7f3ef5bd83f8632cd94bfd25967e0ed2f9dfc836af8a6b8",
+    "apple/StreamMac/LayerGeometrySectionView.swift": "d131424feea8bb527f567f22aaafd6da70c879ea64b2fb7d83e8dce9e640ce01",
+    "apple/StreamMac/LayerStyleSectionView.swift": "d39afa69c047ddde955fd528b9d519d95bcffb86e3147f64944be81c93b838e1",
+    "apple/StreamMac/StudioCommandDispatcher.swift": "136b4c748c724aa89919e0baf006174d3130e563c6993433b505479646eaa93b",
+    "apple/scripts/layer_geometry_harness.swift": "e95464cb3fcea0e166d1f4473550bfe11b20521efbccfde4a0db317ec1ea1b4d",
+    "apple/scripts/studio_workspace_harness.swift": "26b418272b7feaf27cb357ea4cb04fe62fbdbefc3a1cd8a6367293d8bcddf3ac",
+    "apple/scripts/run_studio_workspace_harness.zsh": "004645d78d9c4a07630ec804ac48dd5125e8f744cc3ee7a9e325d221ed60cda9",
+    "apple/StreamMac/SceneRenderer.swift": "d4284de75fed1e9d23cf3ead89fca0fe6d452b46d0f5b81dd04d23d31103305e"
+  },
+  "changedSources": {
+    "apple/StreamMac/LayerGeometryEditor.swift": "037bfb9827cd9ccef7f3ef5bd83f8632cd94bfd25967e0ed2f9dfc836af8a6b8",
+    "apple/StreamMac/LayerGeometrySectionView.swift": "d131424feea8bb527f567f22aaafd6da70c879ea64b2fb7d83e8dce9e640ce01",
+    "apple/scripts/layer_geometry_harness.swift": "e95464cb3fcea0e166d1f4473550bfe11b20521efbccfde4a0db317ec1ea1b4d"
+  },
+  "logs": {
+    "initialRecoveryPass": {
+      "path": "/tmp/stream-wave8-layer-geometry-recovery-20261022.log",
+      "sha256": "9554ca219f66e1ea5c490c2f1389e12582227c0aca08082298eb362d59c4779b"
+    },
+    "finalQualifiedPass": {
+      "path": "/tmp/stream-wave8-layer-geometry-recovery-final-20261022.log",
+      "sha256": "40cf42eca7521ea6d0f95ee2a18ac7113ec59a9318511b854451ee3073be179b"
+    }
+  },
+  "binary": {
+    "path": "apple/build/studio-workspace-validation/derived/Build/Products/Debug/StudioWorkspaceHarness",
+    "sha256": "1768139ef62f486d4d1889422fbdcfffb4f008979cd560add421463d424087bf"
+  },
+  "command": "python3 /tmp/stream-native-build-slots-20261022.py --label layer-geometry-recovery-final -- env STREAM_VENDOR_ROOT=<owned-vendor> STREAM_XCODE_JOBS=2 zsh apple/scripts/run_studio_workspace_harness.zsh --layer-geometry",
+  "qualified": [
+    "Actual shipping presentation class refuses replacement while original layer is no longer selected",
+    "Rapid selection away and back permits explicit replacement with a distinct active editor initialized from current values",
+    "Old binding, Apply and recovery cannot change the newer dirty draft or publish through its presentation",
+    "Current editor mutation forwards a presentation publication before any stale callback is invoked",
+    "Actual same-runtime Apply Settings retires old editor; explicit replacement uses current values, rejects sub-four-pixel current-canvas height and accepts valid new Apply",
+    "Actual runtime replacement refuses old editor Apply and old presentation recovery",
+    "All original parsing, arithmetic, drag-Apply-Apply undo, lock/identity and exact synthetic camera rendering checks remain intact and pass"
+  ],
+  "unqualified": [
+    "Native keyboard, accessibility or VoiceOver delivery to the new SwiftUI controls",
+    "Full-window layout at 1024x640 or operator text-size and contrast verification",
+    "Parent combined universal application integration build"
+  ],
+  "isolation": "Reused only this task-owned derived directory and dependencies. Shared two-slot wrapper, xcodebuild -jobs 2. No window, native event, personal source, capture, permission or system-setting operation."
+}

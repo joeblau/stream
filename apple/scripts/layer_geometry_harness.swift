@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import StreamCore
 
@@ -82,29 +83,81 @@ enum LayerGeometryHarness {
         let staleSelection = editor(); staleSelection.draft.values[.rotation] = "45"
         store.selectedLayerIDs = [other.id]; store.selectedLayerIDs = [layer.id]
         try require(staleSelection.isRetired && !staleSelection.apply(), "Selection A→B→A revived old draft authority")
+        let selectionPresentation = LayerGeometryPresentation(workspace: workspace, runtime: runtime,
+                                                               sceneID: scene.id, layer: current())
+        let retiredSelection = selectionPresentation.editor
+        retiredSelection.draft.values[.rotation] = "45"
+        // These closures capture the same immutable editor as the actual view's
+        // bindings and buttons; none may inherit a later presentation's draft.
+        let oldBinding: (String) -> Void = { retiredSelection.draft.values[.rotation] = $0 }
+        let oldApply = { retiredSelection.apply() }
+        let oldRecovery = { selectionPresentation.startNewDraft(replacing: retiredSelection) }
+        store.selectedLayerIDs = [other.id]
+        try require(!oldRecovery() && selectionPresentation.editor === retiredSelection,
+                    "Recovery accepted a target that is no longer selected")
+        store.selectedLayerIDs = [layer.id]
+        try require(selectionPresentation.canStartNewDraft(replacing: retiredSelection) && oldRecovery(),
+                    "Rapid selection A→B→A left the visible presentation without recovery")
+        let currentSelection = selectionPresentation.editor
+        try require(currentSelection !== retiredSelection && retiredSelection.isRetired && !currentSelection.isRetired
+                    && currentSelection.draft == LayerGeometryDraft(current().transform),
+                    "Recovery revived an old editor or retained its discarded draft")
+        var publications = 0
+        let observation = selectionPresentation.objectWillChange.sink { publications += 1 }
+        currentSelection.draft.values[.rotation] = "25"
+        try require(publications > 0, "Current editor changes were not forwarded to its presentation")
+        let beforeStaleCallbacks = publications
+        let freshDraft = currentSelection.draft
+        oldBinding("75")
+        try require(!oldRecovery() && !oldApply() && retiredSelection.isRetired
+                    && selectionPresentation.editor === currentSelection && currentSelection.draft == freshDraft
+                    && publications == beforeStaleCallbacks,
+                    "Old binding, Apply or recovery changed a newer dirty presentation")
+        try require(currentSelection.apply() && current().transform.rotationDegrees == 25,
+                    "New presentation failed to apply after selection recovery")
+        observation.cancel()
         let staleScene = editor(); staleScene.draft.values[.rotation] = "45"
         let retainedScene = preview.stagedScene!
         preview.stage(second); preview.stage(retainedScene)
         try require(staleScene.isRetired && !staleScene.apply(), "Staged scene A→B→A revived old draft authority")
         try boundaries(current().transform, canvas: dispatcher.state.activeProfile.canvasSize)
         try cameraRendering()
-        let profileEdit = editor(); profileEdit.draft.values[.rotation] = "45"
+        let profilePresentation = LayerGeometryPresentation(workspace: workspace, runtime: runtime,
+                                                            sceneID: scene.id, layer: current())
+        let profileEdit = profilePresentation.editor; profileEdit.draft.values[.rotation] = "45"
         let originalProfile = dispatcher.state.activeProfile
         runtime.settings.draft.outputProfile = originalProfile.with(canvasWidth: 640, canvasHeight: 360)
         dispatcher.execute(.applySettings)
         try require(dispatcher.state.activeProfile != originalProfile && profileEdit.isRetired && !profileEdit.apply(),
                     "Actual applied output profile replacement did not retire geometry draft")
-        let staleRuntime = editor(); staleRuntime.draft.values[.rotation] = "60"
+        try require(profilePresentation.startNewDraft(replacing: profileEdit),
+                    "Same-runtime profile Apply left no way to replace the retired visible draft")
+        let currentProfileEdit = profilePresentation.editor
+        try require(currentProfileEdit !== profileEdit && profileEdit.isRetired
+                    && currentProfileEdit.draft == LayerGeometryDraft(current().transform),
+                    "Profile recovery did not start a distinct draft from current layer values")
+        let beforeProfileApply = current().transform
+        currentProfileEdit.draft.values[.height] = "1"
+        try require(!currentProfileEdit.apply() && current().transform == beforeProfileApply,
+                    "Recovered profile draft accepted height below four current-canvas pixels")
+        currentProfileEdit.draft.values[.height] = "2"
+        try require(currentProfileEdit.apply() && current().transform.size.height == 0.02,
+                    "Recovered profile draft did not use the current 360-pixel canvas")
+        let staleRuntimePresentation = LayerGeometryPresentation(workspace: workspace, runtime: runtime,
+                                                                 sceneID: scene.id, layer: current())
+        let staleRuntime = staleRuntimePresentation.editor; staleRuntime.draft.values[.rotation] = "60"
         let oldScene = preview.stagedScene
         workspace.create(named: "Geometry ownership replacement")
         await workspace.applyPending()
         let replacementScene = workspace.runtime.previewProgram.stagedScene
         try require(workspace.runtime !== runtime && staleRuntime.isRetired && !staleRuntime.apply()
+                    && !staleRuntimePresentation.startNewDraft(replacing: staleRuntime)
                     && preview.stagedScene == oldScene && workspace.runtime.previewProgram.stagedScene == replacementScene,
                     "Actual project switch allowed an old geometry Apply to edit a project")
         try require(!runtime.controller.isPreviewing && !workspace.runtime.controller.isPreviewing,
                     "Geometry fixture activated physical capture")
         print("PASS: shipping geometry draft/editor/dispatcher; no mutation while typing, live refresh preservation, field merge/conflict, drag→Apply→Apply undo/redo, locks, selection/scene/profile/runtime retirement")
+        print("PASS: shipping presentation replaces retired selection/profile drafts with current values; old binding/Apply/recovery cannot replace a newer dirty draft; current publications and Apply retained")
     }
 
     private static func boundaries(_ base: LayerTransform, canvas: CGSize) throws {

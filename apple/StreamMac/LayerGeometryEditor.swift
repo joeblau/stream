@@ -99,3 +99,49 @@ final class LayerGeometryEditor: ObservableObject {
         }
     }
 }
+
+/// A visible inspector can outlive its draft's authority (for example after a
+/// same-runtime profile change). Recovery replaces the draft, never revives it.
+@MainActor
+final class LayerGeometryPresentation: ObservableObject {
+    @Published private(set) var editor: LayerGeometryEditor
+    private weak var workspace: StudioWorkspace?
+    private weak var runtime: StudioRuntime?
+    private let sceneID: SceneID
+    private let layerID: LayerID
+    private var editorObservation: AnyCancellable?
+
+    init(workspace: StudioWorkspace, runtime: StudioRuntime, sceneID: SceneID, layer: LayerNode) {
+        self.workspace = workspace; self.runtime = runtime
+        self.sceneID = sceneID; layerID = layer.id
+        editor = LayerGeometryEditor(workspace: workspace, runtime: runtime, sceneID: sceneID, layer: layer)
+        observeEditor()
+    }
+
+    private var currentTarget: (StudioWorkspace, StudioRuntime, LayerNode)? {
+        guard let workspace, let runtime, workspace.runtime === runtime, !workspace.isSwitching,
+              runtime.sceneStore.selectedLayerIDs == [layerID],
+              let scene = runtime.previewProgram.stagedScene, scene.id == sceneID,
+              let layer = scene.layers.first(where: { $0.id == layerID }) else { return nil }
+        return (workspace, runtime, layer)
+    }
+
+    func canStartNewDraft(replacing previous: LayerGeometryEditor) -> Bool {
+        previous === editor && previous.isRetired && currentTarget != nil
+    }
+
+    @discardableResult
+    func startNewDraft(replacing previous: LayerGeometryEditor) -> Bool {
+        guard previous === editor, previous.isRetired,
+              let (workspace, runtime, layer) = currentTarget else { return false }
+        editor = LayerGeometryEditor(workspace: workspace, runtime: runtime, sceneID: sceneID, layer: layer)
+        observeEditor()
+        return true
+    }
+
+    private func observeEditor() {
+        editorObservation = editor.objectWillChange.sink { [weak self] in
+            self?.objectWillChange.send()
+        }
+    }
+}
