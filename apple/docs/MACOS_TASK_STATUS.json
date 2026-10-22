@@ -1173,8 +1173,8 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closures. Exact 873 generation, unsigned universal Release/bundle and combined four-gate numeric geometry checks PASS. Provider retirement, clock authority, Deck candidate artifacts and evaluation-only Program mic improve scoped software behavior; actual operator/import/install/distributable/performance gates remain open. Published a1bb native CI 39748453209 is active at the timestamped snapshot, no whole CI success inferred. Original failed receipts and all other acceptance limits remain preserved.",
-  "integratedMain": "873ddddd16c72fe0df543bf7b259d3f84f71b82f",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closures. Exact 873 generation, unsigned universal Release/bundle and combined four-gate numeric geometry checks PASS. Provider retirement, clock authority, Deck candidate artifacts and evaluation-only Program mic improve scoped software behavior; actual operator/import/install/distributable/performance gates remain open. Published a1bb native CI 39748453209 is active at the timestamped snapshot, no whole CI success inferred. Original failed receipts and all other acceptance limits remain preserved. Current local 34bea18 changes CI policy only after validated873: main retains active acceptance with pending-run coalescing; PR superseded cancellation stays enabled. No FIFO/every-commit execution is promised.",
+  "integratedMain": "34bea1841c3eb6a46cd1b4f3aa9985d013add481",
   "githubStateRefreshedAt": "2026-10-22T07:56:14.843578+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
   "publishedIntegration": "a1bb23d0a34e3b2983b70084ffc6192bb992fe38",
@@ -1197,7 +1197,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "873ddddd16c72fe0df543bf7b259d3f84f71b82f",
+  "currentReviewBase": "34bea1841c3eb6a46cd1b4f3aa9985d013add481",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -2628,6 +2628,17 @@
       173,
       174
     ],
-    "unintegratedWorkExcluded": "Pending chat diagnostics are not part of source 873 or this draft."
+    "unintegratedWorkExcluded": "Pending chat diagnostics are not part of source 873 or this draft.",
+    "currentLocalCIPolicyHead": "34bea1841c3eb6a46cd1b4f3aa9985d013add481",
+    "ciQueuePolicy": {
+      "commit": "34bea1841c3eb6a46cd1b4f3aa9985d013add481",
+      "path": ".github/workflows/ci.yml",
+      "sha256": "727b4a0fca9f16b5a185242be66523e0b0eda8b61c74f82b0ef6e3db20132f49",
+      "group": "ci-${{ github.ref }}",
+      "cancelInProgress": "${{ github.event_name == 'pull_request' }}",
+      "behavior": "Main pushes retain the active matching-ref acceptance run; newer main pushes coalesce the one pending run. Superseded PR runs still cancel. This is not FIFO or execution of every commit.",
+      "validation": "Parent reports official-documentation review, parsed/asserted YAML and diff-check PASS; this docs task verifies exact committed expression and CI-only source diff.",
+      "productionSourceBoundary": "Only CI policy differs from exact873 production/build/geometry validation. Active a1bb CI snapshot remains historical point-in-time evidence; no new hosted result is inferred."
+    }
   }
 }

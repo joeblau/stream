@@ -758,3 +758,13 @@ trace. **#92 stays open**: no sustained capacity, resource ceiling, waveform
 sync or cause/fix for the retained hosted failures is inferred. All original
 failed receipts and remaining acceptance limits are preserved. Pending chat
 diagnostics remain a separate workstream outside this frozen cohort.
+
+### CI queue policy follow-up
+
+CI-only `34bea18` retains the same `ci-${{ github.ref }}` group and sets
+`cancel-in-progress` to `${{ github.event_name == 'pull_request' }}`. Main pushes
+retain active acceptance while newer pending runs coalesce; superseded PR runs
+still cancel. This promises neither FIFO order nor execution of every commit.
+Parent official-documentation/YAML review passes; production source remains
+identical to validated `873dddd`. The recorded active `a1bb23d` result remains a
+point-in-time snapshot, not a new hosted pass or a publication claim.
