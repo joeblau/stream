@@ -1,0 +1,61 @@
+{
+  "baseline": "b53ae5d",
+  "sourceCommit": "eaa329c",
+  "scope": "Scoped source semantic controls repair; issue90 remains open. No whole-app source validation or operator VoiceOver/visual-contrast qualification.",
+  "sourceSHA256": {
+    "apple/StreamMac/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5",
+    "apple/StreamMac/SceneBrowserView.swift": "ab29f4fb6e79e34433cb552e0021c1d31829cf50fd651c68cc1dc136acf911f2",
+    "apple/StreamMac/MediaSourcesSectionView.swift": "c3ecef50641aa28897b71909e468755a6c7db29bff6890e809a9e85ea3b58ea7",
+    "apple/StreamMac/LayerPanelView.swift": "f4ca4df244e12c22341f8789699ec961e9955cc8d3983971adf89f8ab76ef66e",
+    "apple/StreamMac/MixerView.swift": "aaa47a83010638ace83aa8e3d9cd834714abb44ea533dfab31fb2dd5dd803af1"
+  },
+  "checks": [
+    {
+      "command": [
+        "xcrun",
+        "swiftc",
+        "-j2",
+        "-swift-version",
+        "6",
+        "-strict-concurrency=complete",
+        "-typecheck",
+        "apple/StreamMac/SceneSelectionButton.swift"
+      ],
+      "exitCode": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "xcrun",
+        "swiftc",
+        "-frontend",
+        "-parse",
+        "apple/StreamMac/SceneBrowserView.swift",
+        "apple/StreamMac/MediaSourcesSectionView.swift",
+        "apple/StreamMac/MixerView.swift",
+        "apple/StreamMac/LayerPanelView.swift"
+      ],
+      "exitCode": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "output": ""
+    }
+  ],
+  "sessionScreenLocked": true,
+  "nativeFinalExitCode": 77,
+  "actualNativeFinalTranscript": "Actual in-process public AX nodes=8, named scene buttons=0\nUNQUALIFIED: locked-session SwiftUI virtual semantic tree is unavailable; no replacement AX tree or invented label/action pass\nUNQUALIFIED: actual local keyboard scene-button activation; callbacks=[], firstResponder=Optional(SwiftUI.KeyViewProxy)\nActual native control role=AXUnknown, label=Owned AppKit positive control, bridgePress=false, directPress=false, callbacks=1\nUNQUALIFIED: genuine native-control AX positive control; no scene semantic acceptance follows\nSCOPE: actual mounted production SceneSelectionButton, own public in-process AX selectors/local window events only; no global activation/input/AX permissions, no VoiceOver or visual-contrast qualification\n",
+  "retainedLogs": {
+    "/tmp/stream-wave5-scene-selection-native-20261022.log": "63a7737615d28b42480fc4347d8527136ff144b36a404052c124933a09029fb0",
+    "/tmp/stream-wave5-scene-selection-native-positive-20261022.log": "f4be76c28d0456408c6944cae0700e63d3bee5f1c692afe213c33334b58203d3",
+    "/tmp/stream-wave5-scene-selection-native-final-20261022.log": "aa1c06f066ec544ba866967168ee952711f1bec3dba84f729edea8241fb48137",
+    "/tmp/stream-wave5-scene-selection-native-limits-20261022.log": "c012245e7351523bb41b33af7ff7408e29dad6258e52bc86d5d787adfa795f9b"
+  },
+  "nativeLimits": "Actual supplied owned NSWindow tree reported8nodes and0SwiftUIscene buttons; localSpace/Tab had0scene callbacks. Direct genuineNSButton reportsAXUnknown, ownlabelreadable, bothAXpressreturnfalse, callbackcount1. No nativecontrol was inserted into or substituted for the productionSwiftUIsemantic tree. Earlier precondition failures came from assuming a nativepositivecontrol would acknowledgeAXpress; retained rather than claimed aspass."
+}
