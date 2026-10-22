@@ -95,18 +95,18 @@ final class DestinationVideoIngress: @unchecked Sendable {
         let closing = lock.withLock { () -> (Bool, Task<FrameDeliveryLease, Error>?) in
             guard !closed else { return (false, nil) }
             closed = true; cancellation.cancel()
-            return (true, installation)
+            return (true, self.installation)
         }
         guard closing.0 else { return }
-        let installation = closing.1, adapter = adapter, token = token, canvas = canvas
-        installation?.cancel()
+        let installTask = closing.1, adapter = adapter, token = token, canvas = canvas
+        installTask?.cancel()
         // Cancellation/removal does not prove all external native aliases are
         // released. Refund is permitted only if nothing was ever exposed.
         RawVideoResourceCoordinator.shared.rollback(receipt)
         RawVideoResourceCoordinator.shared.retire(bankID: bank.id)
         Task {
             await adapter.cancel(token, canvas)
-            if let lease = try? await installation?.value { await adapter.remove(lease, canvas) }
+            if let lease = try? await installTask?.value { await adapter.remove(lease, canvas) }
         }
     }
 }
