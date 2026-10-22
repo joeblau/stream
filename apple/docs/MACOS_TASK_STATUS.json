@@ -17,8 +17,8 @@
     "signing": "Read-only inventory:3 valid signing identities (1 Developer ID Application, 2 Apple Development); 5 macOS profiles, none authorizing the declared shared browser App Group for host/helper. Two iOS profiles contain that group. No positive provisioned macOS shared-container launch, Developer ID distribution artifact, notarization or extension/driver installation is claimed; no profiles/identities/containers changed."
   },
   "validation": {
-    "sharedCore": "Published 78796d1 full Core: 588 tests / 82 suites PASS on ARM 231.091 s, Intel 158.415 s and iOS 177.642 s. Both actual paragraph probes pass. Both Mac jobs later fail the generated row fixture compile at step 10; no whole native CI or later encoder/Deck pass. Local 181bf6f is fixture-only with identical production/Core/vendor source; original log hashes in wave9FixtureCIReview.",
-    "shippingApp": "Exact 77f5081 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS; root wave11 receipts bind log hashes. Settings operation/unit semantic labels compile in that exact source. No mounted native AX delivery or whole desktop CI success is inferred. Shared Core source is unchanged by Settings; earlier exact-source Core/iOS receipts retain their scope.",
+    "sharedCore": "Exact a1bb23d hosted full Core 588/82 PASS: ARM 105.135 s, Intel 162.553 s, iOS 200.147 s. Both paragraph probes and 40 offscreen row cases also pass. Every native CI step succeeds on both architectures at that named source; newer a9 native CI is separate and active. Physical/operator/sustained/distribution acceptance is not implied.",
+    "shippingApp": "Exact7419966 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS. This source includes explicit clock sleep tolerance:.zero; no new timing comparison or throughput qualification follows. Exact a1bb earlier native CI passes both architectures/iOS; newer a9 CI is separate. Shared Core source is unchanged by this clock-only production change.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -278,7 +278,9 @@
     "wave10Controls": "Provider forgetting retires live credentials before storage work, persists a nonsecret denial marker where possible and keeps failed cleanup explicit. Numeric geometry drafts preserve untouched values, separate undo and reject stale/conflicting authority; explicit recovery creates a new current-target editor without reviving old callbacks. Exact combined 873 source/pixels/presentation checks PASS, not mounted keyboard/AX/full-window/contrast qualification.",
     "wave10ClockAndTrace": "Actual engine opaque clock tokens reject retired ticks and missed-deadline mutations; negative-control and six positive cases remain lifecycle evidence. The separate generated-only787 one-invocation 20 s trace is not a sustained qualification or cause/fix for hosted deficits; synchronous CPU spans, profiler-only hash peaks, measured tick-body boundaries and four distinct frame counters stay explicit. Later generated compatibility preserves shipping clock guards without a new trace.",
     "wave11Settings": "Four Settings slider construction sites now use native operation names and unit-bearing accessibility values, with unavailable/nonfinite safety and an explicit Close settings label. Existing bindings/ranges/steps/dispatch/identity are unchanged. Actual source parse and parent exact77 universal build pass; parent reports independent pro_adapters source approval. No mounted semantic tree, keyboard/VoiceOver or visual contrast qualification follows.",
-    "wave11OwnedRTC": "One repaired-wrapper owned EA null-output RTC diagnostic completes exit 77/UNQUALIFIED in 11.429 s at connection-wait; both ICE/connection states remain new. Both running 48 kHz null contexts and positive sender PCM do not establish networking: sender outbound Opus 0 packets / 0 bytes, receiver inbound/transport rows absent, receiver PCM zero. Original 12 s measurement is unreached. Retained trace counts are capped lowerbounds, bytecounter includes discarded batches; drained cleanup is independently verified. No retry, cause/native interop/normal output/AEC/timing qualification or relabel of prior failures."
+    "wave11OwnedRTC": "One repaired-wrapper owned EA null-output RTC diagnostic completes exit 77/UNQUALIFIED in 11.429 s at connection-wait; both ICE/connection states remain new. Both running 48 kHz null contexts and positive sender PCM do not establish networking: sender outbound Opus 0 packets / 0 bytes, receiver inbound/transport rows absent, receiver PCM zero. Original 12 s measurement is unreached. Retained trace counts are capped lowerbounds, bytecounter includes discarded batches; drained cleanup is independently verified. No retry, cause/native interop/normal output/AEC/timing qualification or relabel of prior failures.",
+    "wave12NativeCI": "Exact a1bb23d run 39748453209 terminal SUCCESS, all 3 jobs. Actual Intel software low-latency -12902\u2192ordinary 0, 10 BGRA \u2192 10 H.264 \u2192 10 decoded red frames and actual Deck localhost H264/AAC+two independent recording segments pass. Shared RTMP/SRT and later native gates pass; explicit software second pass is not hardware throughput qualification. Earlier failed runs keep original conclusions.",
+    "wave12Attribution": "Exact a9 diagnostic 39757372776 terminal SUCCESS on ARM/Intel, one fixed 2x20 s invocation per job, source identity verified, qualification=false. All raw short checks pass 450-frame minimum, not original 17,850 / 600 s capacity. ARM 553/574 rendered vs Intel 528/565; writer samples match each rendered count while postwarm counters 531/544 and 517/535 are separate. Replay decoded 553/553 available ARM and 528/528 Intel. Intel static drops 16audio chunks; other writer drop counters zero. Original sustained failures remain unchanged; independent Intel event interpretation and new clock candidate proofs are pending."
   },
   "issues": [
     {
@@ -921,9 +923,10 @@
         "Production due-tick idle cliff is corrected and its actual scheduling helper passes deterministic600s simulation, but no fresh sustained GPU/hardware qualification follows from that virtual-clock result; original resource/performance failures remain failed.",
         "Fresh run 39724736435 on native ARM VirtualMac2,1 improves to about 28.26/28.41 rendered fps but still fails the unchanged 17,850-frame gate with 16,957/17,047 frames. Both writers complete and actual-source replay decodes all 16,956 available frames; this is not nominal 30 fps capacity. Current Intel also fails nominal capacity at 17,366/17,058 rendered frames; replay decodes all 17,366 available frames and both writers complete. The prior long stall did not recur, but the real frame deficit remains.",
         "Registry-aware title font caching and actual native pixel/owned-font/nested-bake regressions pass. Bounded20 s candidate profile renders 601 but decodes 600/601 replay frames versus original 601/601; its trace predates the final nested guard. This does not replace either failed 600-second hosted result, qualify representative physical mixes/Intel/resource ceilings or prove waveform A/V sync.",
-        "Latest exact9881359 hosted 600 s run 39735454725 still fails both nominal capacity gates: ARM 17252/17306 and Intel 17232/16434 versus 17,850. ARM decodes 17251/17252 replay frames; Intel 17232/17232. All writers finish with zero A/V drops, but Intel second inspection remains pending at original 1380 s deadline. Endpoint <80 ms is not independent waveform sync; no unresolved inspection success/cause or newer 2ea819a sustained qualification is inferred.",
+        "Retained exact9881359 hosted 600 s run 39735454725 still fails both nominal capacity gates: ARM 17252/17306 and Intel 17232/16434 versus 17,850. ARM decodes 17251/17252 replay frames; Intel 17232/17232. All writers finish with zero A/V drops, but Intel second inspection was incomplete/UNQUALIFIED at owned 1380 s teardown; raw pending is its last persisted state, not a currently running inspection. Endpoint <80 ms is not independent waveform sync; no unresolved inspection success/cause or newer 2ea819a sustained qualification is inferred.",
         "Opaque composition-clock authority now rejects retired ticks/skips after stop/restart/output changes; deterministic actual engine cases and negative controls prove lifecycle fencing, not sustained throughput. One generated-only 20 s trace from 787 records static 600/601 and replay 601/601 rendered/attempted, two 600-frame writer movies, and 599/600 replay source frames decoded. It does not reproduce hosted whole skips or qualify capacity; generated clock-compatibility changes are not a new trace.",
-        "New reviewed manual-only fixed ARM/Intel two 20 s attribution workflow is defined but not dispatched at this snapshot. Source/generation/hash-gate checks do not qualify sustained capacity; original 600 s / 17,850 frames / 80 ms / 1380 s gates and retained failures are unchanged."
+        "The reviewed manual fixed ARM/Intel two 20 s attribution workflow has now completed one a9 dispatch successfully. Its source/hash-bound short checks do not qualify sustained capacity; original 600 s / 17,850 frames / 80 ms / 1380 s gates and retained failures are unchanged. The earlier undispatched snapshot remains historical evidence.",
+        "New a9 fixed 2x20 s attribution jobs succeed all short raw checks with 450-frame minimum, but do not qualify original 600 s / 17,850-frame capacity. Actual per-architecture renders/writer/postwarm/source-decode counters remain distinct; Intel static writer drops 16audio chunks. Old 600 s Intel final decode inspection is terminally incomplete/UNQUALIFIED at owned 1380 s teardown, not currently running. Clock lifecycle/epoch proofs and independent baseline audits are complete, but no timing-improvement or VM-cause claim follows without a real comparison."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -941,7 +944,11 @@
         "COMPOSITION_CLOCK_AUTHORITY.md",
         "COMPOSITION_CLOCK_AUTHORITY_2026-10-22.json",
         "PERFORMANCE_LOCAL_THREAD_TRACE_2026-10-22.json",
-        "../../.github/workflows/native-composition-attribution.yml"
+        "../../.github/workflows/native-composition-attribution.yml",
+        "/tmp/stream-attribution-a9cfd98-terminal-report-20261022.json",
+        "/tmp/stream-performance-39735454725-inspection-terminal-review-20261022.md",
+        "COMPOSITION_SLEEP_TOLERANCE.md",
+        "COMPOSITION_SLEEP_TOLERANCE_2026-10-22.json"
       ]
     },
     {
@@ -1181,11 +1188,11 @@
     "currentlyOpen": 34,
     "closedSinceInitialInventory": 27
   },
-  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closures. Exact 77 Settings generation, unsigned universal Release/bundle PASS; current 75fab97 has identical 316 shipping files/vendor. One owned EA RTC attempt completes 77/UNQUALIFIED before connection/12s measurement; no positive network/native return acceptance. New manual 2x20 s diagnostic workflow is defined/reviewed but not dispatched. Published EA browser 21+37/Chrome 156 and older 3be Deck succeed; a1bb native CI active and EA pending at timestamped snapshots, no whole/new-source native CI success. #90/#92/#127 and all other incomplete gates remain open; all prior failures preserved.",
-  "integratedMain": "75fab979df28c1d252fcf169b4bc1ce95964f6b1",
+  "overallStatus": "Incomplete roadmap: 27 of 61 original issues closed, 34 open (23 features / 11 trackers); no new closures. Current 639e49a preserves 316 shipping files/vendor from validated 741 generation, unsigned universal Release/bundle PASS. Clock source explicitly requests zero extra sleep tolerance; lifecycle/epoch proofs pass, no new timing comparison or VM-cause claim. Exact a1bb native CI 39748453209 SUCCESS on all 3 jobs/full Core 588/82 and actual Intel fallback/Deck/shared transport. Exact a9 fixed 2x20 s attribution diagnostic 39757372776 SUCCESS on both hosts with 450-frame short gate, not 600 s qualification; Intel static audio drops 16. Newer a9 native CI 39757320250 is active at its recorded snapshot. Old 39735454725 Intel final inspection is terminally incomplete/UNQUALIFIED at original 1380 s teardown, not currently running. All failed historical receipts and open gates remain preserved.",
+  "integratedMain": "639e49acdf0f5db7072559b4a4fe6fed639414d4",
   "githubStateRefreshedAt": "2026-10-22T09:36:15.823207+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "ea3c834613ff6b9c85d4383ba1c85d644402ca50",
+  "publishedIntegration": "a9cfd98e56af023738db95113b17120fe8951d04",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1205,7 +1212,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "75fab979df28c1d252fcf169b4bc1ce95964f6b1",
+  "currentReviewBase": "639e49acdf0f5db7072559b4a4fe6fed639414d4",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -2910,5 +2917,423 @@
       "productionManifestVerified": true,
       "vendorUnchanged": true
     }
+  },
+  "wave12Review": {
+    "nativeCI": {
+      "report": {
+        "path": "/tmp/stream-ci-a1bb23d-terminal-report-20261022.json",
+        "bytes": 19925,
+        "sha256": "b27ef3ce85c14c7a55c11908682832ae4cd24028b2c286b528c699c6c2a091ae"
+      },
+      "source": "a1bb23d0a34e3b2983b70084ffc6192bb992fe38",
+      "run": 39748453209,
+      "conclusion": "success",
+      "jobs": [
+        {
+          "id": 119722684248,
+          "name": "iOS Simulator",
+          "conclusion": "success",
+          "core": {
+            "tests": 588,
+            "suites": 82,
+            "durationSeconds": 200.147,
+            "conclusion": "passed"
+          },
+          "originalLog": "/tmp/stream-ci-a1bb23d-119722684248-original.log",
+          "originalLogBytes": 361043,
+          "originalLogSHA256": "b950804a146ca62af4458b607cb4088946bad786a1f3118c0824a3f86d4a9183"
+        },
+        {
+          "id": 119722684437,
+          "name": "ARM macOS",
+          "conclusion": "success",
+          "core": {
+            "tests": 588,
+            "suites": 82,
+            "durationSeconds": 105.135,
+            "conclusion": "passed"
+          },
+          "originalLog": "/tmp/stream-ci-a1bb23d-119722684437-original.log",
+          "originalLogBytes": 10505196,
+          "originalLogSHA256": "d78d0963343cee1572866e595b93cf109f050b0c2666febef711c40350a5a556"
+        },
+        {
+          "id": 119722684538,
+          "name": "Intel macOS",
+          "conclusion": "success",
+          "core": {
+            "tests": 588,
+            "suites": 82,
+            "durationSeconds": 162.553,
+            "conclusion": "passed"
+          },
+          "originalLog": "/tmp/stream-ci-a1bb23d-119722684538-original.log",
+          "originalLogBytes": 12434209,
+          "originalLogSHA256": "d612356ac831ec7551ccc99b371a0183261816704c68d05baa948b7a7da3b0c5"
+        }
+      ],
+      "scope": "Exact a1bb23d run 39748453209 terminal SUCCESS, all 3 jobs. Actual Intel software low-latency -12902\u2192ordinary 0, 10 BGRA \u2192 10 H.264 \u2192 10 decoded red frames and actual Deck localhost H264/AAC+two independent recording segments pass. Shared RTMP/SRT and later native gates pass; explicit software second pass is not hardware throughput qualification. Earlier failed runs keep original conclusions."
+    },
+    "attribution": {
+      "report": {
+        "path": "/tmp/stream-attribution-a9cfd98-terminal-report-20261022.json",
+        "bytes": 64936,
+        "sha256": "2ace5ff33c126e7ef46d6abc5fbd9916fb8a239c73779c7e34cbb561bb70a292"
+      },
+      "source": "a9cfd98e56af023738db95113b17120fe8951d04",
+      "run": 39757372776,
+      "conclusion": "success",
+      "qualification": false,
+      "dispatchesObserved": 1,
+      "hosts": [
+        {
+          "architecture": "arm",
+          "job": 119752695002,
+          "conclusion": "success",
+          "originalLog": {
+            "path": "/tmp/stream-attribution-a9cfd98-119752695002-original.log",
+            "bytes": 805939,
+            "sha256": "f8694efc2753ee66af22709325c1e78543a4ad6e1683edb6887e371560b2a1bf"
+          },
+          "originalArtifact": {
+            "path": "/tmp/stream-attribution-a9cfd98-arm12416347824-original.zip",
+            "bytes": 31926367,
+            "sha256": "047a81158847e7becbd8e25265dc225d592fb70ea24b3c1e94b17024a211e4be"
+          },
+          "identityVerified": true,
+          "cases": [
+            {
+              "case": 0,
+              "originalCase": {
+                "path": "/tmp/stream-attribution-a9cfd98-arm12416347824-extracted/composition-attribution-validation/frames/92A1EE62-AC2D-4054-8CEA-8C1A3CEB9EE6/case-0.json",
+                "bytes": 9396,
+                "sha256": "09668b3ff1fe15e0faba98fa6c5d660b087ea6bb86ee996849465eae675f28de"
+              },
+              "attempts": 561,
+              "wholeSkipped": 40,
+              "rendered": 553,
+              "failedRenders": 8,
+              "writerVideoSamples": 553,
+              "postWarmupHealthyCounter": 531,
+              "decodedSourceFrames": 0,
+              "replaySource": null,
+              "writerAudioDrops": 0,
+              "writerVideoDrops": 0,
+              "globalSubscriberDrops": 424,
+              "recordingComplete": true,
+              "validationComplete": true,
+              "achievedRenderedFPS": 27.56502918956316,
+              "allRawShortChecksPassed": true,
+              "shortMinimumFrames": 450
+            },
+            {
+              "case": 1,
+              "originalCase": {
+                "path": "/tmp/stream-attribution-a9cfd98-arm12416347824-extracted/composition-attribution-validation/frames/92A1EE62-AC2D-4054-8CEA-8C1A3CEB9EE6/case-1.json",
+                "bytes": 10505,
+                "sha256": "eb19a7a06037c12173630da4a5299ff4910628ecef09f3b1f3c2e7c8acd9445f"
+              },
+              "attempts": 574,
+              "wholeSkipped": 27,
+              "rendered": 574,
+              "failedRenders": 0,
+              "writerVideoSamples": 574,
+              "postWarmupHealthyCounter": 544,
+              "decodedSourceFrames": 553,
+              "replaySource": {
+                "availableFrames": 553,
+                "durationSeconds": 20.035,
+                "framesDueBeforeGraceEnd": 409,
+                "monotonic": true
+              },
+              "writerAudioDrops": 0,
+              "writerVideoDrops": 0,
+              "globalSubscriberDrops": 437,
+              "recordingComplete": true,
+              "validationComplete": true,
+              "achievedRenderedFPS": 28.499481389500396,
+              "allRawShortChecksPassed": true,
+              "shortMinimumFrames": 450
+            }
+          ]
+        },
+        {
+          "architecture": "intel",
+          "job": 119752695217,
+          "conclusion": "success",
+          "originalLog": {
+            "path": "/tmp/stream-attribution-a9cfd98-119752695217-original.log",
+            "bytes": 2588648,
+            "sha256": "c4d12d29f9937fd34c8ed5b986123c4db73896e48fd9ffb26c86e05c20783759"
+          },
+          "originalArtifact": {
+            "path": "/tmp/stream-attribution-a9cfd98-intel12417761236-original.zip",
+            "bytes": 41771255,
+            "sha256": "bf2e61152fdbb236b9c596bb4c48abbaa4e7f1ae35979b6291d66b8c9c41f435"
+          },
+          "identityVerified": true,
+          "cases": [
+            {
+              "case": 0,
+              "originalCase": {
+                "path": "/tmp/stream-attribution-a9cfd98-intel12417761236-extracted/composition-attribution-validation/frames/EBBCE207-3BD5-442F-B00F-4B702CC20E72/case-0.json",
+                "bytes": 9487,
+                "sha256": "b7ae3f9fb8281f30c6960759fb9951955dd0e25e10b5ed01e600f99913705c07"
+              },
+              "attempts": 547,
+              "wholeSkipped": 54,
+              "rendered": 528,
+              "failedRenders": 19,
+              "writerVideoSamples": 528,
+              "postWarmupHealthyCounter": 517,
+              "decodedSourceFrames": 0,
+              "replaySource": null,
+              "writerAudioDrops": 16,
+              "writerVideoDrops": 0,
+              "globalSubscriberDrops": 383,
+              "recordingComplete": true,
+              "validationComplete": true,
+              "achievedRenderedFPS": 26.346922939444063,
+              "allRawShortChecksPassed": true,
+              "shortMinimumFrames": 450
+            },
+            {
+              "case": 1,
+              "originalCase": {
+                "path": "/tmp/stream-attribution-a9cfd98-intel12417761236-extracted/composition-attribution-validation/frames/EBBCE207-3BD5-442F-B00F-4B702CC20E72/case-1.json",
+                "bytes": 10463,
+                "sha256": "6a4d6ca987e1d911dc0377708882542e85e580ea24897adc115782a37e1014ce"
+              },
+              "attempts": 566,
+              "wholeSkipped": 35,
+              "rendered": 565,
+              "failedRenders": 1,
+              "writerVideoSamples": 565,
+              "postWarmupHealthyCounter": 535,
+              "decodedSourceFrames": 528,
+              "replaySource": {
+                "availableFrames": 528,
+                "durationSeconds": 20.03666666666667,
+                "framesDueBeforeGraceEnd": 380,
+                "monotonic": true
+              },
+              "writerAudioDrops": 0,
+              "writerVideoDrops": 0,
+              "globalSubscriberDrops": 416,
+              "recordingComplete": true,
+              "validationComplete": true,
+              "achievedRenderedFPS": 28.192879133554143,
+              "allRawShortChecksPassed": true,
+              "shortMinimumFrames": 450
+            }
+          ]
+        }
+      ],
+      "independentARMAudit": {
+        "path": "/tmp/stream-attribution-arm119752695002-analysis-20261022.json",
+        "bytes": 192569,
+        "sha256": "aaef84c68c170947942d01df1c9b13fefaf6fce24705b197f2ec160f7d22a82a"
+      },
+      "independentIntelEventInterpretation": "Recording independent source/artifact/event-counter audit complete; facts agree with original raw counts. Cause of 16 static audio drops and mixed long/late intervals remains unproven; no clock improvement or VM-cause claim.",
+      "scope": "Exact a9 diagnostic 39757372776 terminal SUCCESS on ARM/Intel, one fixed 2x20 s invocation per job, source identity verified, qualification=false. All raw short checks pass 450-frame minimum, not original 17,850 / 600 s capacity. ARM 553/574 rendered vs Intel 528/565; writer samples match each rendered count while postwarm counters 531/544 and 517/535 are separate. Replay decoded 553/553 available ARM and 528/528 Intel. Intel static drops 16audio chunks; other writer drop counters zero. Original sustained failures remain unchanged; independent ARM/Intel binding-counter audits are complete; causes remain unproven and the new clock source has no timing comparison.",
+      "approvedARMBaselineDocuments": {
+        "commit": "94781dc",
+        "integratedAs": "639e49acdf0f5db7072559b4a4fe6fed639414d4",
+        "documents": [
+          {
+            "commit": "639e49acdf0f5db7072559b4a4fe6fed639414d4",
+            "path": "apple/docs/COMPOSITION_HOSTED_SLEEP_BOUNDARY.md",
+            "bytes": 5067,
+            "sha256": "ba6442ff1f07b9c43acdc77016ff23941f99ca8fcf7195eb2a0587bb7b3f6513"
+          },
+          {
+            "commit": "639e49acdf0f5db7072559b4a4fe6fed639414d4",
+            "path": "apple/docs/PERFORMANCE_HOSTED_ATTRIBUTION_39757372776_ARM.json",
+            "bytes": 244548,
+            "sha256": "97a82789f78a6b310f6897c942aa35849018667d2caefbd5d32bc13777da75b2"
+          }
+        ],
+        "independentReview": "Recording approved frozen owner source/artifact/counter audit and final two baseline documents."
+      },
+      "independentIntelCounterAudit": {
+        "reviewer": "recording",
+        "source": "a9cfd98e56af023738db95113b17120fe8951d04",
+        "staticPCMChunks": {
+          "produced": 2004,
+          "written": 1988,
+          "dropped": 16,
+          "cause": "unproven; no per-chunk reason/timestamp receipt"
+        },
+        "healthyVideo": "posts = deliveries = writer samples 528/565",
+        "slowSink": {
+          "posts": [
+            528,
+            565
+          ],
+          "deliveries": [
+            145,
+            149
+          ],
+          "drops": [
+            383,
+            416
+          ]
+        },
+        "replayInput": {
+          "available": 528,
+          "decoded": 528,
+          "dueBeforeGraceEnd": 380
+        },
+        "rawShortChecks": "all 7/11 original checks PASS; no600s qualification"
+      }
+    },
+    "retrospective600sInspection": {
+      "run": 39735454725,
+      "conclusion": "failure",
+      "currentInspectionStatus": "terminally incomplete/UNQUALIFIED at owned-process teardown; no inspection currently running",
+      "terminalAudit": {
+        "path": "/tmp/stream-performance-39735454725-inspection-terminal-review-20261022.md",
+        "bytes": 2999,
+        "sha256": "8919f9574fcd39ae18dd473699ef88f0e2135eb9c51b87ffe11a527ee9846b9f"
+      },
+      "authoritativeSnapshot": {
+        "path": "/tmp/stream-performance-39735454725-authoritative-20261022.json",
+        "bytes": 20363,
+        "sha256": "5e828032904d68cb313174ba575c09be7517a329a97335d824d220f3d9d3aaac"
+      },
+      "originalIntelLog": {
+        "path": "/tmp/stream-performance-intel119679960787-original.log",
+        "bytes": 2481948,
+        "sha256": "1ec9e0e297609f62de2808ec6013075006ee707629285ae25a66844dc4e06911"
+      },
+      "originalRawReport": {
+        "path": "/tmp/stream-wave5-performance-hotpath-20261022/apple/build/hosted-performance-evidence-wave6/12408397193/performance.json",
+        "bytes": 435145,
+        "sha256": "79443dd9566d835cfde8bd5b5373f65fb3806110da2a86aa76fdec0a3ed80bc3"
+      },
+      "terminalLogLine": 6229,
+      "terminalFailureAt": "2026-10-22T07:14:24.192407Z",
+      "failure": "FAIL: owned workload exceeded its deadline; exit 1",
+      "ownedDeadlineSeconds": 1380,
+      "rawFieldsPreserved": {
+        "validationComplete": false,
+        "recordingDecodeInspection": "pending",
+        "validationSeconds": 0.1985364170000139
+      },
+      "scope": "Raw pending is last snapshot at process kill. It is not a live job, eventual success, measured inspection elapsed time or known blocking-API cause. Both writer completions/first inspection pass and all failed capacity gates remain unchanged; no media rerun/download/gate change."
+    },
+    "originalIssueCounts": {
+      "closed": 27,
+      "open": 34
+    },
+    "githubWritesPerformed": false,
+    "closuresPerformed": [],
+    "currentNativeSnapshot": {
+      "recordedAt": "2026-10-22T10:17:43.614109+00:00",
+      "run": {
+        "id": 39757320250,
+        "head_sha": "a9cfd98e56af023738db95113b17120fe8951d04",
+        "status": "in_progress",
+        "conclusion": null,
+        "html_url": "https://github.com/joeblau/stream/actions/runs/39757320250"
+      },
+      "jobs": [
+        {
+          "id": 119761646018,
+          "name": "StreamMac build and tests (macos-26-intel)",
+          "status": "in_progress",
+          "conclusion": null,
+          "activeSteps": [
+            {
+              "number": 8,
+              "name": "Build desktop studio",
+              "status": "in_progress"
+            }
+          ]
+        },
+        {
+          "id": 119761646588,
+          "name": "StreamCore tests (iOS Simulator)",
+          "status": "completed",
+          "conclusion": "success",
+          "activeSteps": []
+        },
+        {
+          "id": 119761646594,
+          "name": "StreamMac build and tests (macos-26)",
+          "status": "in_progress",
+          "conclusion": null,
+          "activeSteps": [
+            {
+              "number": 10,
+              "name": "Test native controller and automation boundaries",
+              "status": "in_progress"
+            }
+          ]
+        }
+      ]
+    },
+    "clockSource": {
+      "commit": "0f3c8ef05d511c3b2cc51328c519c833fb7dfe1e",
+      "integratedAs": "7419966ffb68f785a29e89a46aa6c2c89571d2b0",
+      "documentation": {
+        "commit": "0f3c8ef05d511c3b2cc51328c519c833fb7dfe1e",
+        "path": "apple/docs/COMPOSITION_SLEEP_TOLERANCE.md",
+        "bytes": 2327,
+        "sha256": "23c123096df6ae19f235db780f94ec0cda1afd17e15418af59510ca7cba6c34d"
+      },
+      "proofReceipt": {
+        "commit": "0f3c8ef05d511c3b2cc51328c519c833fb7dfe1e",
+        "path": "apple/docs/COMPOSITION_SLEEP_TOLERANCE_2026-10-22.json",
+        "bytes": 17350,
+        "sha256": "03b07cd9c36044cc3eccf61a6b8d050b3f1b8e1069019f4f129210d30a223168"
+      },
+      "independentReview": "Recording approved frozen eight-file source and actual six lifecycle/epoch proofs; exact741 combined build/audit now PASS.",
+      "productionChange": "Existing ContinuousClock.sleep(until:) explicitly requests tolerance:.zero. No FPS, PTS, deadline, schedule, renderer, mailbox, encoder or QoS change. This does not guarantee on-time resumption or prove VM cause/timing improvement.",
+      "generatedObservation": "Request/return clock and wall endpoints; return lateness includes runtime/host/executor. No CPU delta across suspension. Run-captured profile epoch atomically commits new events/aggregates against reset; canceled points stay separate, sequence is loop iteration not frameID.",
+      "verification": "Actual unchanged six-case engine lifecycle suite, CPU-only actual-helper stale-success/cancellation/reset regression, generated helper/typecheck/engine parse pass. No locally timed full new trace or hosted comparison yet.",
+      "qualification": false,
+      "combinedProof": "Exact 741 generation, unsigned universal arm64/x86_64 Release and actual bundle audit PASS; three root log hashes verified."
+    },
+    "validatedIntegratedHead": "7419966ffb68f785a29e89a46aa6c2c89571d2b0",
+    "nativeChecks": [
+      {
+        "label": "generate",
+        "exit": 0,
+        "log": "/tmp/stream-wave12-parent-final-generate-20261022.log",
+        "bytes": 168,
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "label": "universal",
+        "exit": 0,
+        "log": "/tmp/stream-wave12-parent-final-universal-20261022.log",
+        "bytes": 247673,
+        "sha256": "8c8017d23beda50325905b2b78ea2644e72bdd393914cff18bdd13b46e9004d8"
+      },
+      {
+        "label": "bundle",
+        "exit": 0,
+        "log": "/tmp/stream-wave12-parent-final-bundle-20261022.log",
+        "bytes": 517,
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ],
+    "currentLocalHead": "639e49acdf0f5db7072559b4a4fe6fed639414d4",
+    "productionManifest": {
+      "path": "/tmp/stream-wave12-validated-production-manifest-20261022.json",
+      "bytes": 37220,
+      "sha256": "70ac9be91f799116f37f0aad1bc3bfc3c0437fd204d30e7b936dd1c725cec52f",
+      "files": 316,
+      "source": "7419966ffb68f785a29e89a46aa6c2c89571d2b0",
+      "vendor": "d9fceedc068994023900b4d69588b8af19136752",
+      "currentHeadEqualityVerified": true
+    },
+    "newClockComparison": {
+      "dispatchedAtSnapshot": false,
+      "qualification": false,
+      "scope": "No new post-clock timing measurement has run. A later parent-authorized fixed 2x20 s comparison needs its own source/run/result receipt; no 600 s dispatch or timing benefit/VM cause is inferred."
+    },
+    "excludedUnmergedWork": "Browser exclusion/coordinator #124 work remains separate and unmerged into this frozen clock cohort."
   }
 }
