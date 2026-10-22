@@ -79,7 +79,7 @@ enum StudioDirectChatDecoder {
                let user = detail["bannedUserDetails"] as? [String: Any], let author = identifier(user["channelId"]) { banned.append(author); continue }
             let names = ["textMessageEvent": "Text", "superChatEvent": "Super Chat", "superStickerEvent": "Super Sticker",
                          "newSponsorEvent": "Membership", "memberMilestoneChatEvent": "Milestone", "membershipGiftingEvent": "Gift",
-                         "giftMembershipReceivedEvent": "Gift"]
+                         "giftMembershipReceivedEvent": "Gift", "giftEvent": "Gift"]
             guard let kind = names[type], snippet["hasDisplayContent"] as? Bool == true,
                   let content = text(snippet["displayMessage"]), !content.isEmpty,
                   let author = item["authorDetails"] as? [String: Any], let authorID = identifier(author["channelId"]),
@@ -96,7 +96,7 @@ enum StudioDirectChatDecoder {
                 platform: "YouTube", author: name, roles: roles, text: content, timestamp: time ?? receivedAt,
                 timestampIsReceiptTime: time == nil, kind: kind, avatarURL: avatar)
             deliveries.append(.init(message: message, route: .init(provider: .youtube, channelID: channelID, chatID: chatID,
-                providerMessageID: id, authorID: authorID, roles: roles, timestamp: time ?? receivedAt, allowsMutation: true)))
+                providerMessageID: id, authorID: authorID, roles: roles, timestamp: time ?? receivedAt, allowsMutation: type != "giftEvent")))
         }
         return .init(deliveries: deliveries, removedIDs: removed, bannedAuthors: banned, nextPage: page,
                      interval: millis / 1_000, ended: ended)

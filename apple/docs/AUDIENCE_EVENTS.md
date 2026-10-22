@@ -7,6 +7,13 @@ emoji; Twitch's Emotes label requires documented emote fragments. YouTube events
 retain their documented public display text. No amount, reaction count, image
 URL or additional subscription is inferred from that text.
 
+YouTube's documented `giftEvent` additionally enters the existing Gift filter
+and palette with its literal public display text. Gift media/amounts remain
+unused and the event is read-only. Reused gift IDs retain the first caption;
+combo updates do not replay alerts or update a counter. The
+[owned regression receipt](YOUTUBE_GIFT_EVENTS_2026-10-22.json) preserves original
+omission, the read-only policy control, an orchestration failure and final proof.
+
 The direct Twitch reader additionally accepts ordinary public subscription
 notices: `sub` becomes Membership, `resub` becomes Milestone, and `sub_gift` /
 `community_sub_gift` become Gift. Their bounded literal public text uses the

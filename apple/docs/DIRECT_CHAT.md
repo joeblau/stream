@@ -23,6 +23,16 @@ Presets store only producer-authored names and text in project-local `chat-prese
 
 YouTube text, Super Chat, Super Sticker, membership, milestone and membership-gift events use documented display text and author roles. Twitch documented emote fragments classify the message as **Emotes**, while preserving its exact public text. No CDN URLs, prices, reaction counts, image emotes, remote HTML, or viewer metrics are guessed. Avatar URLs are bounded HTTPS metadata only; this adapter does not fetch them. Native event badges, separate filters, text-card palettes and manual staged alert promotion are described in [AUDIENCE_EVENTS.md](AUDIENCE_EVENTS.md); [manual static Twitch emotes](STATIC_TWITCH_EMOTES.md) use explicit provider metadata and the existing authorized reader for **Show emote** in native chat and separate staged tiles, while animated/sticker artwork remains unavailable.
 
+The existing YouTube reader also recognizes documented `giftEvent` records as
+Gift, using only their bounded public `displayMessage` and normal author fields.
+Gift asset URLs, amounts, durations, visual effects and combo metadata stay
+unused; the event is read-only for per-message reply/moderation. Google allows
+the same gift ID to recur for combo updates. Current first-identity dedup keeps
+the original displayed caption and does not generate repeated alerts or claim
+a live combo counter. Existing ordinary/membership action eligibility is
+unchanged. See the [current resource contract](https://developers.google.com/youtube/data/live/reference/rest/v3/liveChatMessages)
+and [owned decoder/manager controls](YOUTUBE_GIFT_EVENTS_2026-10-22.json).
+
 The same deliberately connected Twitch reader subscribes to documented public
 `channel.chat.notification` v1 with its existing `user:read:chat` grant. Ordinary
 `sub`, `resub`, `sub_gift` and `community_sub_gift` notices become Membership,

@@ -382,7 +382,7 @@ struct DirectChatSnapshot {
     func moderationAvailabilityError(_ id: String, kind: DirectChatWriteKind) -> String? {
         guard [.delete, .timeout, .ban].contains(kind) else { return "Choose a supported moderation action." }
         guard let route = routes[id] else { return "This message has no current authorized direct-provider route; this feed is read-only." }
-        guard route.allowsMutation else { return "Provider subscription notices are read-only. Choose an ordinary chat message for moderation." }
+        guard route.allowsMutation else { return "Provider event notices are read-only. Choose an ordinary chat message for moderation." }
         if let error = writeAvailabilityError(route.provider, kind: kind) { return error }
         guard let (account, chatID) = active[route.provider], chatID == route.chatID,
               account.channelID == route.channelID else { return "This message belongs to a different chat session." }

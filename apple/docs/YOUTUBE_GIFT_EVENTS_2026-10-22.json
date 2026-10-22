@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-22",
+  "issue": 143,
+  "result": "PASS",
+  "baseCommit": "5c2ce86",
+  "scope": "Actual YouTube public decoder/shared native manager with controlled identity/HTTP only; no account,Keychain,preferences,UI,renderer,Program,capture/audio/device,media/CDN,live provider or RTC operation.",
+  "eventType": "giftEvent",
+  "normalizedKind": "Gift",
+  "sourceContract": "https://developers.google.com/youtube/data/live/reference/rest/v3/liveChatMessages",
+  "behavior": "Existing owned-chat/hasDisplayContent/nonempty bounded displayMessage/author validation retained; only literal provider displayMessage and ordinary bounded author metadata normalized. giftDetails URL,amount,duration,visual effect,alt text and combo metadata are unused.",
+  "deduplication": "Official resource permits same-ID giftEvents to update combo count. Current first provider/message identity wins within bounded cache; repeat does not update the displayed caption or create another alert. No live combo-count update or synthetic unique messageID is claimed.",
+  "mutation": "Only newly recognized giftEvent routes are read-only. Actual reply/delete/timeout/ban attempts produce notSent before HTTP; existing ordinary and membership message eligibility remains enabled.",
+  "controls": {
+    "omission": {
+      "source": "Actual frozen5c2ce86 production decoder/manager",
+      "compileExit": 0,
+      "runtimeExit": 1,
+      "firstCheck": "decoder giftEvent",
+      "failure": "Documented giftEvent omitted",
+      "binarySHA256": "82c86027957174ae8c49c6103fb2e7cc8ec8bbdd24e61edb52b53ffdd5bfcdc0",
+      "sourceSHA256": {
+        "StudioChatModel.swift": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7",
+        "StudioChatOutbox.swift": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1",
+        "StudioChatSocket.swift": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19",
+        "StudioDirectChatManager.swift": "9874162a2a6c92fd3e817ebd5180e147045a9e38c035a10326ac368e5c0541a4",
+        "StudioDirectChatModel.swift": "ec4c3594408051c36b8ce5d00000567476da49f4db00d5549ddae8a8db3228e1",
+        "youtube_gift_events_harness.swift": "2f3b45781d7cece71afc04a383b6a762ea567834e37f54ab87fa5f7b456b1d3c"
+      }
+    },
+    "mappingOnlyPreliminary": {
+      "result": "PASS for initial mapping-only fixture, not mutation refusal",
+      "sourceSHA256": {
+        "apple/StreamMac/StudioChatModel.swift": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7",
+        "apple/StreamMac/StudioDirectChatModel.swift": "c517ad8414524135bc876f1e1092ea2b9d85ec8322ea18ba072e344676007477",
+        "apple/StreamMac/StudioChatSocket.swift": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19",
+        "apple/StreamMac/StudioChatOutbox.swift": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1",
+        "apple/StreamMac/StudioDirectChatManager.swift": "9874162a2a6c92fd3e817ebd5180e147045a9e38c035a10326ac368e5c0541a4",
+        "apple/scripts/youtube_gift_events_harness.swift": "2f3b45781d7cece71afc04a383b6a762ea567834e37f54ab87fa5f7b456b1d3c",
+        "apple/scripts/run_youtube_gift_events_harness.zsh": "fb0bec180a2230a687ba895c3f2f4bea8118e60049c5f96ccfd967a6727001dd"
+      },
+      "binarySHA256": "4e029a4a23e0dc77769099018afa0605ad73697f0fce9f79bcdaa2fd301f0a86",
+      "proofFiles": {
+        "baseline-compile.log": {
+          "path": "/tmp/stream-youtube-gift-events-proof-20261022/baseline-compile.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "baseline-runtime.log": {
+          "path": "/tmp/stream-youtube-gift-events-proof-20261022/baseline-runtime.log",
+          "bytes": 85,
+          "sha256": "fc20b64926e8aa324e1dcb11b62ea88e6c1183c13a4a7429ffcf39beb0882e44"
+        },
+        "fixed-runner.log": {
+          "path": "/tmp/stream-youtube-gift-events-proof-20261022/fixed-runner.log",
+          "bytes": 347,
+          "sha256": "78ac17abdf65dca733c71fbf938d249ec8de983c2b055da5b2659164e957f6ec"
+        },
+        "results.json": {
+          "path": "/tmp/stream-youtube-gift-events-proof-20261022/results.json",
+          "bytes": 4108,
+          "sha256": "7f3fda1106081f6ebe97b6ea8130c77b6cca52d916c1340240e4ef875a61d324"
+        }
+      }
+    },
+    "readonly": {
+      "source": "Exact retained mapping-only actual production bytes, stronger same final fixture",
+      "compileExit": 0,
+      "runtimeExit": 1,
+      "failure": "giftEvent exposed a mutation target",
+      "binarySHA256": "abf0c90770ea19576ef788f2b34596c57a63adf11f0cdd542ba1666ed3c8d7cd",
+      "sourceSHA256": {
+        "StudioChatModel.swift": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7",
+        "StudioChatOutbox.swift": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1",
+        "StudioChatSocket.swift": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19",
+        "StudioDirectChatManager.swift": "9874162a2a6c92fd3e817ebd5180e147045a9e38c035a10326ac368e5c0541a4",
+        "StudioDirectChatModel.swift": "c517ad8414524135bc876f1e1092ea2b9d85ec8322ea18ba072e344676007477",
+        "youtube_gift_events_harness.swift": "62210f4e58a2e93ed38688f19b334da294644cf3bfb6b7f6cfef6dcabbc2b419"
+      }
+    }
+  },
+  "discardedOrchestration": {
+    "result": "FAIL, retained separately",
+    "reason": "Exact substitution preflight matched both constructor suffixes and asserted before edit; shell continued erroneously. Unchanged mapping-only baseline ran exit0, then expected-negative assertion stopped the wrapper exit1. No fixed runtime ran; no final policy proof credit. Corrected later source edit targets exact YouTube constructor indentation and separate preflight checks.",
+    "proofFiles": {
+      "baseline-compile.log": {
+        "path": "/tmp/stream-youtube-gift-events-final-proof-20261022/baseline-compile.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "baseline-runtime.log": {
+        "path": "/tmp/stream-youtube-gift-events-final-proof-20261022/baseline-runtime.log",
+        "bytes": 347,
+        "sha256": "78ac17abdf65dca733c71fbf938d249ec8de983c2b055da5b2659164e957f6ec"
+      },
+      "results.json": {
+        "path": "/tmp/stream-youtube-gift-events-final-proof-20261022/results.json",
+        "bytes": 2825,
+        "sha256": "30142a955b038d1da874037c38641fa6b3fb0aa0c11146bb79fa3296c65d1814"
+      }
+    }
+  },
+  "final": {
+    "result": "PASS",
+    "stages": [
+      {
+        "name": "baseline-compile",
+        "command": [
+          "xcrun",
+          "swiftc",
+          "-swift-version",
+          "6",
+          "-parse-as-library",
+          "-O",
+          "-j2",
+          "-F",
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/products",
+          "-framework",
+          "StreamCore",
+          "-Xlinker",
+          "-rpath",
+          "-Xlinker",
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/products",
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline/StudioChatModel.swift",
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline/StudioDirectChatModel.swift",
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline/StudioChatSocket.swift",
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline/StudioChatOutbox.swift",
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline/StudioDirectChatManager.swift",
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline/youtube_gift_events_harness.swift",
+          "-o",
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline/gift-events-harness"
+        ],
+        "timeoutSeconds": 180,
+        "exitCode": 0,
+        "elapsedSeconds": 5.038607042006333,
+        "logSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "baseline-runtime",
+        "command": [
+          "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline/gift-events-harness"
+        ],
+        "timeoutSeconds": 30,
+        "exitCode": 1,
+        "elapsedSeconds": 0.2573947499913629,
+        "logSHA256": "7e98c2ea9116b6ad43dd9764616518e8d674fa24be01aa1308130d38ec6d52cf"
+      },
+      {
+        "name": "fixed-runner",
+        "command": [
+          "zsh",
+          "/tmp/stream-twitch-public-notices-20261022/apple/scripts/run_youtube_gift_events_harness.zsh"
+        ],
+        "timeoutSeconds": 180,
+        "exitCode": 0,
+        "elapsedSeconds": 5.059515500004636,
+        "logSHA256": "f4d11fc20a199016a215ebd5b35a7fff3604af30661f0fdaeb4bb76f90901aea"
+      }
+    ],
+    "binarySHA256": "128e06d4523b60e3cbc4927576b157f6994e4b51c29a959191798ecc472fee48",
+    "sourceSHA256": {
+      "apple/StreamMac/StudioChatModel.swift": "49698c31d60d443a24093f0850773662b8b72797fa6b1d4c402d37750812e3d7",
+      "apple/StreamMac/StudioDirectChatModel.swift": "14527a58ac9456681dfe2da8857d35d3f7d0f286656a933bd886f756b403182c",
+      "apple/StreamMac/StudioChatSocket.swift": "d4a53b7c2eb4a1904ea5ca0397a92881ffc0e5c626e059c7638c196fab37cf19",
+      "apple/StreamMac/StudioChatOutbox.swift": "a121bf3e98d3806fd9df53a2067d6b9db6104e5374b10933da01e01a85bf63c1",
+      "apple/StreamMac/StudioDirectChatManager.swift": "f909d219affeb480f46311c59f3ef0f3a8d3c344c719d6f3d2c4a9918aed28a4",
+      "apple/scripts/youtube_gift_events_harness.swift": "62210f4e58a2e93ed38688f19b334da294644cf3bfb6b7f6cfef6dcabbc2b419",
+      "apple/scripts/run_youtube_gift_events_harness.zsh": "fb0bec180a2230a687ba895c3f2f4bea8118e60049c5f96ccfd967a6727001dd"
+    },
+    "sourceUnchanged": true,
+    "proofFiles": {
+      "baseline-compile.log": {
+        "path": "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline-compile.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "baseline-runtime.log": {
+        "path": "/tmp/stream-youtube-gift-events-readonly-proof-20261022/baseline-runtime.log",
+        "bytes": 269,
+        "sha256": "7e98c2ea9116b6ad43dd9764616518e8d674fa24be01aa1308130d38ec6d52cf"
+      },
+      "fixed-runner.log": {
+        "path": "/tmp/stream-youtube-gift-events-readonly-proof-20261022/fixed-runner.log",
+        "bytes": 431,
+        "sha256": "f4d11fc20a199016a215ebd5b35a7fff3604af30661f0fdaeb4bb76f90901aea"
+      },
+      "results.json": {
+        "path": "/tmp/stream-youtube-gift-events-readonly-proof-20261022/results.json",
+        "bytes": 4271,
+        "sha256": "18bf28654b3482711e2165e3a433ba4acefb08f8555cda184b4a7365122178d9"
+      }
+    }
+  },
+  "core": {
+    "binarySHA256": "ed355819476e845e57266ca5992221a1270c505002fc8efde16cf1b304e57d4d",
+    "source": "Copied immutable full76 actual Core; e41 allCore byte-equalcf8d891. No Core rebuild/account/credential object instantiation."
+  },
+  "assertionsPassed": [
+    "Exact literal Unicode/braces displayMessage and existing Gift kind/author identity",
+    "5 unsupported/hidden/other-chat/oversized/empty events skipped",
+    "Gift media URL,amount,duration,combo/visual/alternative metadata excluded from typed message",
+    "Actual owned broadcast\u2192live chat binding, provider polling interval and page-token progression",
+    "Initial gift with neighboring ordinary/membership events retained; repeated same ID does not replace first caption",
+    "Existing Gift filter/palette/manual promotion capability reused",
+    "4 deliberate mutation attempts refused before any HTTP; ordinary/membership deletion eligibility retained",
+    "Held late page completion after Stop ignored; existing queue preserved"
+  ],
+  "remaining": "No authorized live Google gift feed, real event ordering/rate/permission acceptance,visual gift media or dynamic combos; no new actual Program/UI runtime and no issue closure."
+}
