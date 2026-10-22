@@ -125,9 +125,19 @@ final class FrameDeliveryConverter: @unchecked Sendable {
             throw FrameDeliveryTransferError.aliasedStorage
         }
         let sourceStride = CVPixelBufferGetBytesPerRow(input), targetStride = CVPixelBufferGetBytesPerRow(output)
-        // Clear row padding too: a reused bank buffer must not expose old bytes.
-        memset(to, 0, targetStride * height)
-        for row in 0..<height { memcpy(to.advanced(by: row * targetStride), from.advanced(by: row * sourceStride), width * 4) }
+        let activeRowBytes = width * 4
+        if sourceStride == activeRowBytes, targetStride == activeRowBytes {
+            memcpy(to, from, activeRowBytes * height)
+        } else {
+            // Every active byte is overwritten by the copy. Only destination
+            // padding needs clearing; never copy a source's padding bytes.
+            let padding = targetStride - activeRowBytes
+            for row in 0..<height {
+                let destination = to.advanced(by: row * targetStride)
+                memcpy(destination, from.advanced(by: row * sourceStride), activeRowBytes)
+                if padding > 0 { memset(destination.advanced(by: activeRowBytes), 0, padding) }
+            }
+        }
     }
 
     private func render(_ input: CVPixelBuffer, into output: CVPixelBuffer, referenceCanvas: CGSize?) throws {

@@ -20,6 +20,27 @@ private final class ProducerHolder: @unchecked Sendable {
     func get() -> VirtualCameraProducer? { lock.lock(); defer { lock.unlock() }; return value }
 }
 
+private final class OwnedPixelMemory {
+    let allocation: UnsafeMutableRawPointer
+    let span: Int
+    let guardBytes = 64
+    var pixels: UnsafeMutableRawPointer { allocation.advanced(by: guardBytes) }
+    init(span: Int, poison: Int32) {
+        self.span = span
+        allocation = .allocate(byteCount: span + 128, alignment: 64)
+        memset(allocation, poison, span + 128)
+    }
+    func snapshot() -> [UInt8] {
+        Array(UnsafeBufferPointer(start: allocation.assumingMemoryBound(to: UInt8.self), count: span + 128))
+    }
+    deinit { allocation.deallocate() }
+}
+
+private struct StridedPixels {
+    let image: CVPixelBuffer
+    let memory: OwnedPixelMemory
+}
+
 private final class HeldConsumer: @unchecked Sendable {
     private let lock = NSLock()
     let release = DispatchSemaphore(value: 0)
@@ -110,8 +131,99 @@ private final class HeldConsumer: @unchecked Sendable {
         producer.appendPrepared(try sample(pixels, duration: CMTime(value: 1, timescale: 30)))
     }
 
+    private static func stridedPixels(width: Int, height: Int, stride: Int, poison: Int32) throws -> StridedPixels {
+        let memory = OwnedPixelMemory(span: stride * height, poison: poison)
+        let retained = Unmanaged.passRetained(memory).toOpaque()
+        var image: CVPixelBuffer?
+        let status = CVPixelBufferCreateWithBytes(nil, width, height, kCVPixelFormatType_32BGRA,
+            memory.pixels, stride, { context, _ in
+                if let context { Unmanaged<OwnedPixelMemory>.fromOpaque(context).release() }
+            }, retained, nil, &image)
+        guard status == kCVReturnSuccess, let image else {
+            Unmanaged<OwnedPixelMemory>.fromOpaque(retained).release()
+            throw Failure(description: "owned strided CVPixelBuffer creation: \(status)")
+        }
+        try check(CVPixelBufferGetBytesPerRow(image) == stride, "fixture uses the requested actual native stride")
+        return StridedPixels(image: image, memory: memory)
+    }
+
+    static func verifyStridedCopies(_ converter: FrameDeliveryConverter) throws -> [[String: Any]] {
+        let width = 17, height = 13, active = width * 4
+        let cases = [("packed", active, active), ("equal-padded", active + 16, active + 16),
+                     ("padded-source", active + 16, active), ("padded-destination", active, active + 32),
+                     ("mixed-padding", active + 16, active + 32)]
+        var results: [[String: Any]] = []
+        for (label, sourceStride, targetStride) in cases {
+            let source = try stridedPixels(width: width, height: height, stride: sourceStride, poison: 0xA7)
+            let target = try stridedPixels(width: width, height: height, stride: targetStride, poison: 0xCC)
+            try check(CVPixelBufferLockBaseAddress(source.image, []) == kCVReturnSuccess, "owned strided source writable")
+            let from = CVPixelBufferGetBaseAddress(source.image)!.assumingMemoryBound(to: UInt8.self)
+            for row in 0..<height { for byte in 0..<active {
+                from[row * sourceStride + byte] = UInt8((row * 31 + byte * 17 + 19) % 256)
+            } }
+            CVPixelBufferUnlockBaseAddress(source.image, [])
+            let sourceBefore = try snapshot(source), targetBefore = try snapshot(target)
+            let original = try sample(source.image, duration: CMTime(value: 1001, timescale: 30000), dts: CMTime(value: 5999, timescale: 60))
+            let copied = try converter.prepare(original, into: target.image, transfer: .copyBGRA)
+            try check(copied.presentationTimeStamp == original.presentationTimeStamp && copied.decodeTimeStamp == original.decodeTimeStamp
+                      && copied.duration == original.duration, "strided \(label) copy retains exact PTS/DTS/duration")
+            try check(CVPixelBufferLockBaseAddress(target.image, .readOnly) == kCVReturnSuccess, "owned strided destination readable")
+            let bytes = CVPixelBufferGetBaseAddress(target.image)!.assumingMemoryBound(to: UInt8.self)
+            var activeMatches = true, paddingZero = true
+            for row in 0..<height {
+                for byte in 0..<active {
+                    activeMatches = activeMatches && bytes[row * targetStride + byte] == sourceBefore[64 + row * sourceStride + byte]
+                }
+                for byte in active..<targetStride { paddingZero = paddingZero && bytes[row * targetStride + byte] == 0 }
+            }
+            CVPixelBufferUnlockBaseAddress(target.image, .readOnly)
+            try check(activeMatches && paddingZero, "strided \(label) preserves every active byte and zeroes only destination padding")
+            let after = try snapshot(target)
+            try check(Array(after.prefix(64)) == Array(targetBefore.prefix(64)) && Array(after.suffix(64)) == Array(targetBefore.suffix(64)),
+                      "strided \(label) preserves allocation canaries")
+            try check(snapshot(source) == sourceBefore, "strided \(label) leaves all source bytes and padding unchanged")
+            results.append(["label": label, "width": width, "height": height, "activeRowBytes": active,
+                            "sourceStride": sourceStride, "destinationStride": targetStride,
+                            "activeBytesMatch": true, "destinationPaddingZero": true,
+                            "sourceUnchanged": true, "canariesUnchanged": true, "timingUnchanged": true])
+        }
+        return results
+    }
+
+    private static func snapshot(_ pixels: StridedPixels) throws -> [UInt8] {
+        try check(CVPixelBufferLockBaseAddress(pixels.image, .readOnly) == kCVReturnSuccess, "owned strided snapshot readable")
+        defer { CVPixelBufferUnlockBaseAddress(pixels.image, .readOnly) }
+        return pixels.memory.snapshot()
+    }
+
+    static func copyMicroEvidence() throws -> [String: Any] {
+        let inputBank = try bank("copy-micro-source4", width: 1920, height: 1080, capacity: 4)
+        let outputBank = try bank("copy-micro-recipient4", width: 1920, height: 1080, capacity: 4)
+        let pixels = try inputBank.allocatePixelBuffer(); try paint(pixels)
+        let original = try sample(pixels)
+        var durations: [UInt64] = []; durations.reserveCapacity(240)
+        var latest: CMSampleBuffer?
+        for frame in 0..<270 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            try autoreleasepool { latest = try FrameDeliveryConverter.copy(source: original, into: outputBank) }
+            let elapsed = DispatchTime.now().uptimeNanoseconds - start
+            if frame >= 30 { durations.append(elapsed) }
+        }
+        try check(latest.map { rgb($0, 40, 40).0 == 255 && rgb($0, 1800, 40).1 == 255 } == true,
+                  "micro evidence retains actual asymmetric output pixels")
+        let sorted = durations.sorted()
+        return ["scope": "Local full copy(source:into:) micro evidence only; not compositor/writer throughput or capacity qualification",
+                "width": 1920, "height": 1080, "warmup": 30, "samples": durations.count,
+                "sourceStride": CVPixelBufferGetBytesPerRow(pixels), "destinationStride": CVPixelBufferGetBytesPerRow(latest!.imageBuffer!),
+                "medianMilliseconds": Double(sorted[sorted.count / 2]) / 1_000_000,
+                "p95Milliseconds": Double(sorted[(sorted.count - 1) * 95 / 100]) / 1_000_000,
+                "maximumMilliseconds": Double(sorted.last!) / 1_000_000,
+                "durationNanoseconds": durations]
+    }
+
     static func main() async throws {
         let converter = FrameDeliveryConverter()
+        let stridedProof = try verifyStridedCopies(converter)
         let sourceBank = try bank("copy-source", width: 96, height: 48, capacity: 4)
         let source = try sourceBank.allocatePixelBuffer(); try paint(source)
         CVBufferSetAttachment(source, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
@@ -125,6 +237,13 @@ private final class HeldConsumer: @unchecked Sendable {
         let copiedPixels = copied.imageBuffer!
         try check(IOSurfaceGetID(CVPixelBufferGetIOSurface(source)!.takeUnretainedValue()) != IOSurfaceGetID(CVPixelBufferGetIOSurface(copiedPixels)!.takeUnretainedValue()), "copy owns a different actual IOSurface")
         do { _ = try converter.prepare(original, into: source, transfer: .copyBGRA); throw Failure(description: "alias accepted") }
+        catch FrameDeliveryTransferError.aliasedStorage { }
+        var unmanagedSurface: Unmanaged<CVPixelBuffer>?
+        try check(CVPixelBufferCreateWithIOSurface(nil, CVPixelBufferGetIOSurface(source)!.takeUnretainedValue(), nil, &unmanagedSurface) == kCVReturnSuccess,
+                  "owned second wrapper of actual source IOSurface")
+        let sameSurface = unmanagedSurface!.takeRetainedValue()
+        try check(sameSurface !== source, "same-IOSurface alias fixture uses distinct CVPixelBuffer wrappers")
+        do { _ = try converter.prepare(original, into: sameSurface, transfer: .copyBGRA); throw Failure(description: "same IOSurface alias accepted") }
         catch FrameDeliveryTransferError.aliasedStorage { }
 
         CVBufferSetAttachment(source, kCVImageBufferCGColorSpaceKey, CGColorSpaceCreateDeviceRGB(), .shouldPropagate)
@@ -366,6 +485,13 @@ private final class HeldConsumer: @unchecked Sendable {
         installFailure.add("allow-stop"); rejected.retryStop()
         try await wait({ installFailure.get("cleanup") == 1 }, "failed-install admission retires after explicit success")
         withExtendedLifetime(cameraHeld) {}
+        let microEvidence = try copyMicroEvidence()
+        if let path = ProcessInfo.processInfo.environment["STREAM_FRAME_DELIVERY_PROOF_REPORT"] {
+            let report: [String: Any] = ["stridedCopies": stridedProof, "copyMicroEvidence": microEvidence,
+                "existingConverterCasesPassed": true, "installedCMIOExecuted": false, "captureExecuted": false, "networkExecuted": false]
+            try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: path))
+        }
         print("PASS: actual admitted private BGRA/IOSurface copy, unchanged clocks and bounded recording metadata, completed fit/sRGB/camera conversion, camera bank4, real CMSimpleQueue pacing/drain, failed-stop pointer/private-storage/admission retention, explicit retry, orphaned transport, reentrant/held native stop, real broker source4 available during held callback, pre-factory refusal, failed install and stale ACK restart fences. Selected CMIO effects inert; no device/session/activation/capture/network APIs executed.")
+        print("PASS: packed/equal-padded/mixed native strides, exact active bytes, destination padding zero, source/canaries unchanged, distinct-wrapper same-IOSurface rejection. Local copy micro median \(microEvidence["medianMilliseconds"]!) ms; p95 \(microEvidence["p95Milliseconds"]!) ms.")
     }
 }

@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 readonly DELIVERY_CONVERSION_BUILD="${STREAM_FRAME_DELIVERY_CONVERSION_BUILD:-$PWD/build/frame-delivery-conversion-validation}"
+readonly DELIVERY_CONVERTER_SOURCE="${STREAM_FRAME_DELIVERY_CONVERTER_SOURCE:-$PWD/StreamMac/FrameDeliveryConverter.swift}"
 mkdir -p "$DELIVERY_CONVERSION_BUILD/module-cache"
 export CLANG_MODULE_CACHE_PATH="$DELIVERY_CONVERSION_BUILD/module-cache"
 typeset -a DELIVERY_CORE_FLAGS
@@ -30,21 +31,25 @@ xcrun swiftc -j2 -swift-version 6 -strict-concurrency=complete -D STREAM_NATIVE_
   "${DELIVERY_CORE_FLAGS[@]}" \
   VirtualOutputShared/VirtualCameraContract.swift \
   StreamMac/RawVideoResourceCoordinator.swift StreamMac/FrameDeliveryBroker.swift \
-  StreamMac/RecordingChatPaint.swift StreamMac/FrameDeliveryConverter.swift \
+  StreamMac/RecordingChatPaint.swift "$DELIVERY_CONVERTER_SOURCE" \
   StreamMac/ExternalDisplayOutputController.swift \
   StreamMac/VirtualCameraProducer.swift StreamMac/VirtualCameraOutputController.swift \
   scripts/frame_delivery_conversion_harness.swift \
   -o "$DELIVERY_CONVERSION_BUILD/harness"
-"$DELIVERY_CONVERSION_BUILD/harness"
-python3 - "$DELIVERY_CONVERSION_BUILD" <<'PY'
+STREAM_FRAME_DELIVERY_PROOF_REPORT="$DELIVERY_CONVERSION_BUILD/conversion-proof.json" "$DELIVERY_CONVERSION_BUILD/harness"
+python3 - "$DELIVERY_CONVERSION_BUILD" "$DELIVERY_CONVERTER_SOURCE" <<'PY'
 import hashlib,json,pathlib,sys
 root=pathlib.Path.cwd()
 build=pathlib.Path(sys.argv[1])
+converter=pathlib.Path(sys.argv[2])
 sources=['StreamCore/RawVideoResourceBudget.swift','StreamMac/RawVideoResourceCoordinator.swift',
  'StreamMac/FrameDeliveryBroker.swift','StreamMac/RecordingChatPaint.swift','StreamMac/FrameDeliveryConverter.swift',
  'StreamMac/VirtualCameraProducer.swift','StreamMac/VirtualCameraOutputController.swift','StreamMac/ExternalDisplayOutputController.swift',
  'VirtualOutputShared/VirtualCameraContract.swift','scripts/frame_delivery_conversion_harness.swift']
-receipt={'sourceSHA256':{s:hashlib.sha256((root/s).read_bytes()).hexdigest() for s in sources},
+receipt={'sourceSHA256':{s:hashlib.sha256((converter if s=='StreamMac/FrameDeliveryConverter.swift' else root/s).read_bytes()).hexdigest() for s in sources},
+ 'converterSource':str(converter.resolve()),
+ 'runnerSHA256':hashlib.sha256((root/'scripts/run_frame_delivery_conversion_harness.zsh').read_bytes()).hexdigest(),
+ 'conversionProofSHA256':hashlib.sha256((build/'conversion-proof.json').read_bytes()).hexdigest(),
  'harnessSHA256':hashlib.sha256((build/'harness').read_bytes()).hexdigest(),
  'installedCMIOExecuted':False,'captureExecuted':False,'networkExecuted':False,
  'actualPrivatePoolsAndBroker':True,'selectedCMIOEffectsInert':True}
