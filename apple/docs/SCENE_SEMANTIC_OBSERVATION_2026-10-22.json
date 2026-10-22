@@ -1,0 +1,287 @@
+{
+  "scope": "Genuine semantic-baseline observation diagnosis; no full studio/VoiceOver/keyboard acceptance. No production edits.",
+  "base": "1ba73513a5d5f29f34a6467ea9ddc07410ff810f",
+  "sources": {
+    "apple/StreamMac/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5",
+    "apple/scripts/scene_selection_native_harness.swift": "c3dd6871f5d14c7b8714c53489a23c19daf831232548ebde337223c8976b7671",
+    "apple/scripts/scene_selection_ax_bridge.m": "c6d03045b9f50b0ea07dd871bbb539e6c2b69fa434a2750230d3002366e80934",
+    "apple/scripts/scene_selection_ax_bridge.h": "dafc5fe30ead385034170129b213ffb3fe1fafe89d35bcbe2f5a39b2b5d3a803",
+    "apple/scripts/run_scene_selection_native_harness.zsh": "608075ca698eceea506869d574ee674871ad0081362073d6d2f24901790eb5f8"
+  },
+  "finalSourceValidation": "Final Swift syntax parse, zsh syntax and embedded Python compile PASS. Final runner bundle option and two conservative diagnostic classifications are source-only after the regular-app runtime; no claim the final runner was executed.",
+  "postRuntimeChanges": [
+    "Require genuine native AppKit baseline in all observation modes, including original Objective-C mode.",
+    "Unqualified local keyboard-delivery ambiguity when unchanged callback oracle fails and owned host is non-key or inactive; no control defect/lock inference.",
+    "Reusable --owned-bundle runner option matching retained app metadata; recursive artifact hashes."
+  ],
+  "executedLatest": {
+    "harnessSource": "/tmp/stream-wave18-semantic-regular-app-20261022/sources/scene_selection_native_harness.swift",
+    "harnessSHA256": "13cc90380e4e900d7e32921a7621ff6e8e4dcf3bebd496fafc6ecf8562af3d6d",
+    "runtimeExit": 77,
+    "runtimeSHA256": "0b7ed2bdfb7d73182477de7e42def33560817dc5f8cc28b08203356648b170fe",
+    "binarySHA256": "4fe6d1468bd392faaaee6c889347b95bad9a497bfa3b0f3c52e4590c866250b6"
+  },
+  "outcomes": [
+    {
+      "name": "baseline-first",
+      "meaning": "Original public Objective-C mounted-tree genuine stock baseline unavailable; direct native callback works.",
+      "directory": "/tmp/stream-wave18-semantic-baseline-first-20261022",
+      "receiptSHA256": "6b8ed3b090792575f93c247b3e2c7992b0ef431b0c818a8434b61f738cb6a8d2",
+      "exit": 77,
+      "files": {
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/bridge.o": "d838a2f81307a9e3691f8541cd38cf6230f7d79de4fdb9243e078039211ee662",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/public-capabilities.json": "83316d7c44c9180a35f0e5b7200228c24cc93e7b8f618bd92c801552f5661b18",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/swift.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/bridge.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/harness": "ec4efcf4f5c3bcd75896d2cef2cdfbb498d4058a849db0816a51dcc21523c0ab",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/native-nodes.json": "d1638bc5a17c563951dc48ac0cc2ee7db5443330c203ac4ba2f84311dd9788e8",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/runtime.log": "e93c4f47f9cf6ea9863249122549de385f5ddb6fd18604e8a9275cf3943081e0",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/receipt.json": "6b8ed3b090792575f93c247b3e2c7992b0ef431b0c818a8434b61f738cb6a8d2",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/sources/run_scene_selection_native_harness.zsh": "faa2ae277c7ef610ceb23a424d016e3b11ab39fa10fd6ac11a5b25134311a4e1",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/sources/scene_selection_ax_bridge.h": "0a1da4a6961bce2a418f0ac9bb28365e19631ef0421a0725c2b077f58b1f6d68",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/sources/scene_selection_native_harness.swift": "19542cf866b0ac8ac72f8b5dd683946de1cde0a3ed860fe5741f4a41d7bdf500",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/sources/scene_selection_ax_bridge.m": "eb0cfd4ee72bbbd0aea3862a3d27b263ff41aa951f29e1bc2ad8b55f5f6d8d12",
+        "/tmp/stream-wave18-semantic-baseline-first-20261022/sources/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5"
+      }
+    },
+    {
+      "name": "cax-self-first",
+      "meaning": "Public C AX self query success but original exact-title selection refused candidate.",
+      "directory": "/tmp/stream-wave18-semantic-cax-self-first-20261022",
+      "receiptSHA256": "7f188006c2784aeddb8bd13f5f372ac07e270a3b0420e8addfb0a7a5973cf0aa",
+      "exit": 77,
+      "files": {
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/public-press-status.json": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/bridge.o": "d838a2f81307a9e3691f8541cd38cf6230f7d79de4fdb9243e078039211ee662",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/public-capabilities.json": "83316d7c44c9180a35f0e5b7200228c24cc93e7b8f618bd92c801552f5661b18",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/swift.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/bridge.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/harness": "ad0b0dcd8b60ccec7939772ef6fc2226df8e0615a33cc7c35df5a216b9700b25",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/native-nodes.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/runtime.log": "3a203255f142df669b0693e445b77cf37e5ea5ba1559aa6c29112af93a0e398c",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/receipt.json": "7f188006c2784aeddb8bd13f5f372ac07e270a3b0420e8addfb0a7a5973cf0aa",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/sources/run_scene_selection_native_harness.zsh": "d1aeef0ec698fa606b543e6e4708283524025c503f4f6120a07f27ba67dc9c7a",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/sources/scene_selection_ax_bridge.h": "0a1da4a6961bce2a418f0ac9bb28365e19631ef0421a0725c2b077f58b1f6d68",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/sources/scene_selection_native_harness.swift": "bfc9f83b32d1e815bc55896f728c85c7bee43eae20eea392eca6da5d17f80fb3",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/sources/scene_selection_ax_bridge.m": "eb0cfd4ee72bbbd0aea3862a3d27b263ff41aa951f29e1bc2ad8b55f5f6d8d12",
+        "/tmp/stream-wave18-semantic-cax-self-first-20261022/sources/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5"
+      }
+    },
+    {
+      "name": "cax-owned-window",
+      "meaning": "Recorded actual own AXApplication alias instead of AXWindow; geometry0 vs350x282.",
+      "directory": "/tmp/stream-wave18-semantic-cax-owned-window-20261022",
+      "receiptSHA256": "de70620d75d3b250d9f19018a2a43f95716373b66facb28f22e15d7a0f7fa894",
+      "exit": 77,
+      "files": {
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/public-press-status.json": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/bridge.o": "d838a2f81307a9e3691f8541cd38cf6230f7d79de4fdb9243e078039211ee662",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/public-capabilities.json": "83316d7c44c9180a35f0e5b7200228c24cc93e7b8f618bd92c801552f5661b18",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/swift.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/bridge.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/harness": "03f5f053977949d1d89099fe9b3e82bcedbe6286b5ef02b1c8ec3879c3fbbdd7",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/native-nodes.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/runtime.log": "267ab57321fb0d77da7b526a41f4eebcc41beaba896090515af9b9f4bb882d5d",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/receipt.json": "de70620d75d3b250d9f19018a2a43f95716373b66facb28f22e15d7a0f7fa894",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/sources/run_scene_selection_native_harness.zsh": "d1aeef0ec698fa606b543e6e4708283524025c503f4f6120a07f27ba67dc9c7a",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/sources/scene_selection_ax_bridge.h": "0a1da4a6961bce2a418f0ac9bb28365e19631ef0421a0725c2b077f58b1f6d68",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/sources/scene_selection_native_harness.swift": "e9da28ab8dbfc6691731ed1fa0fa06603a1cd4a97b4bb68577cdf1dbe03579ae",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/sources/scene_selection_ax_bridge.m": "eb0cfd4ee72bbbd0aea3862a3d27b263ff41aa951f29e1bc2ad8b55f5f6d8d12",
+        "/tmp/stream-wave18-semantic-cax-owned-window-20261022/sources/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5"
+      }
+    },
+    {
+      "name": "cax-child-first",
+      "meaning": "Compile-only String(CGFloat) error; no runtime.",
+      "directory": "/tmp/stream-wave18-semantic-cax-child-first-20261022",
+      "receiptSHA256": "13193ae9004ce821c0d9dd0a8dd654adc2dc5ec8a879e234ef32ced3b6c79b33",
+      "exit": 1,
+      "files": {
+        "/tmp/stream-wave18-semantic-cax-child-first-20261022/bridge.o": "d838a2f81307a9e3691f8541cd38cf6230f7d79de4fdb9243e078039211ee662",
+        "/tmp/stream-wave18-semantic-cax-child-first-20261022/swift.log": "49631e3828380e818b5f3296cfdb2851982ba5ba5437d35a2366e362cdd348ee",
+        "/tmp/stream-wave18-semantic-cax-child-first-20261022/bridge.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-child-first-20261022/receipt.json": "13193ae9004ce821c0d9dd0a8dd654adc2dc5ec8a879e234ef32ced3b6c79b33",
+        "/tmp/stream-wave18-semantic-cax-child-first-20261022/sources/run_scene_selection_native_harness.zsh": "45f0344935eb0382f2fb409b08ff7d50daba4fa22afd8696b95590671896c507",
+        "/tmp/stream-wave18-semantic-cax-child-first-20261022/sources/scene_selection_ax_bridge.h": "0a1da4a6961bce2a418f0ac9bb28365e19631ef0421a0725c2b077f58b1f6d68",
+        "/tmp/stream-wave18-semantic-cax-child-first-20261022/sources/scene_selection_native_harness.swift": "cb0454f58d4c198c7c167a49c509f68b5682813d6782eebe26cf5875924203a8",
+        "/tmp/stream-wave18-semantic-cax-child-first-20261022/sources/scene_selection_ax_bridge.m": "eb0cfd4ee72bbbd0aea3862a3d27b263ff41aa951f29e1bc2ad8b55f5f6d8d12",
+        "/tmp/stream-wave18-semantic-cax-child-first-20261022/sources/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5"
+      }
+    },
+    {
+      "name": "cax-child-string-fixed",
+      "meaning": "External own-parent client also AXApplication alias; self-only hypothesis falsified.",
+      "directory": "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022",
+      "receiptSHA256": "ca3f5d67901eba3b4495792d4cd1e20731b61997828a88779cde80b0a363d2a3",
+      "exit": 77,
+      "files": {
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/child-baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/public-press-status.json": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/bridge.o": "d838a2f81307a9e3691f8541cd38cf6230f7d79de4fdb9243e078039211ee662",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/public-capabilities.json": "83316d7c44c9180a35f0e5b7200228c24cc93e7b8f618bd92c801552f5661b18",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/swift.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/bridge.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/harness": "07a70fcb388bb5888085c6bcef7fae2e9114a18f8ca4feb03c418534f6216fe8",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/native-nodes.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/runtime.log": "3b3fe3b4dc54edd4cda85263bc58c42ee084f8960dfc288e112ee3378ea2e938",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/child-baseline.json": "2753a36710da193e6f5bffa9e80ca368b86e5506ed93365f7b5dd2cc7dcbe196",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/receipt.json": "ca3f5d67901eba3b4495792d4cd1e20731b61997828a88779cde80b0a363d2a3",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/sources/run_scene_selection_native_harness.zsh": "45f0344935eb0382f2fb409b08ff7d50daba4fa22afd8696b95590671896c507",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/sources/scene_selection_ax_bridge.h": "0a1da4a6961bce2a418f0ac9bb28365e19631ef0421a0725c2b077f58b1f6d68",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/sources/scene_selection_native_harness.swift": "a4e6cda3314bde055ab0de1f476076821048172445c3b1de18cf4de7875714ab",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/sources/scene_selection_ax_bridge.m": "eb0cfd4ee72bbbd0aea3862a3d27b263ff41aa951f29e1bc2ad8b55f5f6d8d12",
+        "/tmp/stream-wave18-semantic-cax-child-string-fixed-20261022/sources/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5"
+      }
+    },
+    {
+      "name": "cax-raw-child",
+      "meaning": "Raw Objective-C CFArray confirms CFEqual(windowCandidate,application); Swift bridge hypothesis falsified.",
+      "directory": "/tmp/stream-wave18-semantic-cax-raw-child-20261022",
+      "receiptSHA256": "ddb1fa4efc8208949bc496a80d032704e871975f54332b6bfd8176d0508e1a36",
+      "exit": 77,
+      "files": {
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/child-baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/public-press-status.json": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/bridge.o": "774923d33be177cbf76e240160f4a66ba103ae704f054c9479070d54d8e65517",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/public-capabilities.json": "83316d7c44c9180a35f0e5b7200228c24cc93e7b8f618bd92c801552f5661b18",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/swift.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/bridge.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/harness": "7a6381c98150d6926ecec7cbdcab70fdf505db20bcfc9ad937b501a49ef511e9",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/native-nodes.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/runtime.log": "e7afa30fcbf0d5e97fc8df2ddd6fcf667d7bef27976581f8f0c1dc489122e1cb",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/child-baseline.json": "6a86cb62adcc6b1f55a9eb823825c1d614589cd2f3f8e86186d7854fe5a6525f",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/receipt.json": "ddb1fa4efc8208949bc496a80d032704e871975f54332b6bfd8176d0508e1a36",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/sources/run_scene_selection_native_harness.zsh": "45f0344935eb0382f2fb409b08ff7d50daba4fa22afd8696b95590671896c507",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/sources/scene_selection_ax_bridge.h": "dafc5fe30ead385034170129b213ffb3fe1fafe89d35bcbe2f5a39b2b5d3a803",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/sources/scene_selection_native_harness.swift": "daa49c32365e1b244107293f5731eee88098a78dedbecfa91a90abd6ead782f6",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/sources/scene_selection_ax_bridge.m": "c6d03045b9f50b0ea07dd871bbb539e6c2b69fa434a2750230d3002366e80934",
+        "/tmp/stream-wave18-semantic-cax-raw-child-20261022/sources/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5"
+      }
+    },
+    {
+      "name": "owned-app",
+      "meaning": "Byte-exact binary in proper owned app; application title recognizes bundle but AXApplication alias persists. Bundling alone insufficient.",
+      "directory": "/tmp/stream-wave18-semantic-owned-app-20261022",
+      "receiptSHA256": "95a13c23a97acae8c96e9fc81ccbc91ac498446c0e99c0ad0a301878faf8e808",
+      "exit": 77,
+      "files": {
+        "/tmp/stream-wave18-semantic-owned-app-20261022/child-baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/compiled-input-receipt.json": "ddb1fa4efc8208949bc496a80d032704e871975f54332b6bfd8176d0508e1a36",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/public-press-status.json": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/public-capabilities.json": "83316d7c44c9180a35f0e5b7200228c24cc93e7b8f618bd92c801552f5661b18",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/packaging-runner.py": "18a1bfeea0b7f8de8888c0e0a0f3ad9030a1fc152dccb6d3d0a322ef26687e46",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/native-nodes.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/runtime.log": "d2407a003081ca9ffc417d41db3cb0a1cbd4bf273417ecb9ba75feb6250dda32",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/child-baseline.json": "863febac529874c7917f16fdf99b7bf00ba01cfc5fa86b137e0d8a599c85bdc9",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/receipt.json": "95a13c23a97acae8c96e9fc81ccbc91ac498446c0e99c0ad0a301878faf8e808",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/sources/run_scene_selection_native_harness.zsh": "45f0344935eb0382f2fb409b08ff7d50daba4fa22afd8696b95590671896c507",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/sources/scene_selection_ax_bridge.h": "dafc5fe30ead385034170129b213ffb3fe1fafe89d35bcbe2f5a39b2b5d3a803",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/sources/scene_selection_native_harness.swift": "daa49c32365e1b244107293f5731eee88098a78dedbecfa91a90abd6ead782f6",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/sources/scene_selection_ax_bridge.m": "c6d03045b9f50b0ea07dd871bbb539e6c2b69fa434a2750230d3002366e80934",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/sources/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/OwnedSceneSemanticBaseline.app/Contents/Info.plist": "892a964997e1e7177719a8f4c7e5b857dcf0e6f4ec95228081c58414b058a92f",
+        "/tmp/stream-wave18-semantic-owned-app-20261022/OwnedSceneSemanticBaseline.app/Contents/MacOS/harness": "7a6381c98150d6926ecec7cbdcab70fdf505db20bcfc9ad937b501a49ef511e9"
+      }
+    },
+    {
+      "name": "regular-app",
+      "meaning": "Only host activation policy changed from accessory to regular; same own-parent public CAX genuine-baseline gate remains unqualified; no production/key gates ran.",
+      "directory": "/tmp/stream-wave18-semantic-regular-app-20261022",
+      "receiptSHA256": "2d1f2d35831f8029781327c60140a737a2f0e417ff75b8b6fe27d6fa78add80a",
+      "exit": 77,
+      "files": {
+        "/tmp/stream-wave18-semantic-regular-app-20261022/child-baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/public-press-status.json": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/bridge.o": "774923d33be177cbf76e240160f4a66ba103ae704f054c9479070d54d8e65517",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/public-capabilities.json": "83316d7c44c9180a35f0e5b7200228c24cc93e7b8f618bd92c801552f5661b18",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/owned-app-runner.py": "20510428d86c33f691bda32e931414cca78ee1bc53a5fe9abf8fcc7f9f8fb699",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/swift.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/bridge.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/native-nodes.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/runtime.log": "0b7ed2bdfb7d73182477de7e42def33560817dc5f8cc28b08203356648b170fe",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/child-baseline.json": "ca15787f2c263206d6dd3327f0d1852aa51ca75348dbcf19aa93936bb8221aa9",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/receipt.json": "2d1f2d35831f8029781327c60140a737a2f0e417ff75b8b6fe27d6fa78add80a",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/sources/run_scene_selection_native_harness.zsh": "45f0344935eb0382f2fb409b08ff7d50daba4fa22afd8696b95590671896c507",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/sources/scene_selection_ax_bridge.h": "dafc5fe30ead385034170129b213ffb3fe1fafe89d35bcbe2f5a39b2b5d3a803",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/sources/scene_selection_native_harness.swift": "13cc90380e4e900d7e32921a7621ff6e8e4dcf3bebd496fafc6ecf8562af3d6d",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/sources/scene_selection_ax_bridge.m": "c6d03045b9f50b0ea07dd871bbb539e6c2b69fa434a2750230d3002366e80934",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/sources/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/OwnedSceneSemanticBaseline.app/Contents/Info.plist": "892a964997e1e7177719a8f4c7e5b857dcf0e6f4ec95228081c58414b058a92f",
+        "/tmp/stream-wave18-semantic-regular-app-20261022/OwnedSceneSemanticBaseline.app/Contents/MacOS/harness": "4fe6d1468bd392faaaee6c889347b95bad9a497bfa3b0f3c52e4590c866250b6"
+      }
+    },
+    {
+      "name": "launchservices-app",
+      "meaning": "Ordinary unique-app LaunchServices launch: own host and child AXTrusted false, AXWindows -25211, genuine baseline unqualified. open0 is not app success. No product/key gates ran.",
+      "directory": "/tmp/stream-wave18-semantic-launchservices-app-20261022",
+      "receiptSHA256": "12b2de5c83fd28788b8294b1add0f2d60ac252173b44aad139dcb830252607e6",
+      "openExit": 0,
+      "nativeAppExit": "not observed through open -W",
+      "semanticQualification": "unqualified",
+      "files": {
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/child-baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/compiled-input-receipt.json": "2d1f2d35831f8029781327c60140a737a2f0e417ff75b8b6fe27d6fa78add80a",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/open.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/public-press-status.json": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/runtime.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/public-capabilities.json": "4a1317a5a51e04bc545cba7e3cde03a769f7fb9c5885748f541484dccb954fa9",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/native-nodes.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/runtime.log": "62a807c97fffb535eb8979b2193fd331368528d6a50053e148931e62f2b77d45",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/child-baseline.json": "cf9ef5ca0c507fca511ca7396922986e7066725866380f59b51a5d46b36f11d0",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/launchservices-runner.py": "1d2e97b4343dd6ee19c5b792113a50aaa06caa620853b01a30378fb40659fc9e",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/receipt.json": "12b2de5c83fd28788b8294b1add0f2d60ac252173b44aad139dcb830252607e6",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/sources/run_scene_selection_native_harness.zsh": "45f0344935eb0382f2fb409b08ff7d50daba4fa22afd8696b95590671896c507",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/sources/scene_selection_ax_bridge.h": "dafc5fe30ead385034170129b213ffb3fe1fafe89d35bcbe2f5a39b2b5d3a803",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/sources/scene_selection_native_harness.swift": "13cc90380e4e900d7e32921a7621ff6e8e4dcf3bebd496fafc6ecf8562af3d6d",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/sources/scene_selection_ax_bridge.m": "c6d03045b9f50b0ea07dd871bbb539e6c2b69fa434a2750230d3002366e80934",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/sources/SceneSelectionButton.swift": "baa491007188adec29c32975ae2916be49695cb321794e539fc258f68929dca5",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/OwnedSceneSemanticLaunch.app/Contents/Info.plist": "805f5ff14066de82cf1cff5156747af448d4cc8a7a039c6bc2bf0b13bc8de55e",
+        "/tmp/stream-wave18-semantic-launchservices-app-20261022/OwnedSceneSemanticLaunch.app/Contents/MacOS/harness": "4fe6d1468bd392faaaee6c889347b95bad9a497bfa3b0f3c52e4590c866250b6"
+      }
+    }
+  ],
+  "facts": {
+    "directExecution": {
+      "AXTrusted": true,
+      "sessionPresent": true,
+      "onConsole": true,
+      "windowVisible": true,
+      "windowKey": false,
+      "applicationActive": false,
+      "lockState": "unknown; no public supported lock-state read used"
+    },
+    "launchServices": {
+      "applicationActive": false,
+      "AXTrusted": false,
+      "lockState": "unknown: no public supported lock-state read used",
+      "onConsole": true,
+      "sessionPresent": true,
+      "windowKey": false,
+      "windowVisible": true
+    }
+  },
+  "hypothesesFalsifiedAsSufficient": [
+    "Self-only C AX observation failure",
+    "Swift CF-array bridging",
+    "Minimal app metadata alone",
+    "Accessory activation policy alone"
+  ],
+  "cause": "unknown",
+  "qualified": {
+    "productionSceneSemanticActions": false,
+    "keyboard": false,
+    "fullWorkspace": false
+  },
+  "safety": "Own process/parent only; no AX trust requests, VoiceOver/settings/system preference changes, unlock, other app tree, global input, device/media graph or capture. Final approved normal owned-app launch used open -n -W without explicit NSApp.activate; no owned processes remain.",
+  "launchServices": {
+    "binarySHA256": "4fe6d1468bd392faaaee6c889347b95bad9a497bfa3b0f3c52e4590c866250b6",
+    "openExitIsNotNativeAppExit": true,
+    "explicitNSAppActivate": false,
+    "ownedPIDsObserved": [
+      83591,
+      83602
+    ],
+    "ownedPIDsRemaining": [],
+    "runtimeSHA256": "62a807c97fffb535eb8979b2193fd331368528d6a50053e148931e62f2b77d45"
+  }
+}

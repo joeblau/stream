@@ -1,4 +1,46 @@
 #import "scene_selection_ax_bridge.h"
+#import <ApplicationServices/ApplicationServices.h>
+#import <unistd.h>
+
+static NSString *copiedAXString(AXUIElementRef element, CFStringRef attribute) {
+    CFTypeRef value = NULL;
+    AXError status = AXUIElementCopyAttributeValue(element, attribute, &value);
+    NSString *result = @"";
+    if (status == kAXErrorSuccess && value && CFGetTypeID(value) == CFStringGetTypeID()) result = [(__bridge NSString *)value copy];
+    if (value) CFRelease(value);
+    return result;
+}
+NSData *SceneSelectionCAXRawWindowReport(pid_t target) {
+    if (target != getpid() && target != getppid()) return [NSData data];
+    AXUIElementRef application = AXUIElementCreateApplication(target);
+    AXUIElementSetMessagingTimeout(application, 1);
+    CFTypeRef windows = NULL;
+    AXError status = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute, &windows);
+    NSMutableArray *rows = NSMutableArray.array;
+    BOOL array = windows && CFGetTypeID(windows) == CFArrayGetTypeID();
+    CFIndex count = array ? CFArrayGetCount((CFArrayRef)windows) : 0;
+    for (CFIndex index = 0; index < MIN(count, 16); index++) {
+        CFTypeRef raw = CFArrayGetValueAtIndex((CFArrayRef)windows, index);
+        if (!raw || CFGetTypeID(raw) != AXUIElementGetTypeID()) { [rows addObject:@{@"unexpectedElementType":@YES}]; continue; }
+        AXUIElementRef element = (AXUIElementRef)raw;
+        AXUIElementSetMessagingTimeout(element, 1);
+        pid_t owner = 0;
+        AXError ownerStatus = AXUIElementGetPid(element, &owner);
+        CGSize size = CGSizeZero;
+        CFTypeRef rawSize = NULL;
+        AXError sizeStatus = AXUIElementCopyAttributeValue(element, kAXSizeAttribute, &rawSize);
+        if (rawSize && CFGetTypeID(rawSize) == AXValueGetTypeID()) AXValueGetValue((AXValueRef)rawSize, kAXValueCGSizeType, &size);
+        if (rawSize) CFRelease(rawSize);
+        [rows addObject:@{@"role":copiedAXString(element,kAXRoleAttribute), @"title":copiedAXString(element,kAXTitleAttribute),
+            @"sameAXElementAsApplication":@(CFEqual(element,application)), @"ownerIsTarget":@(ownerStatus == kAXErrorSuccess && owner == target),
+            @"width":@(size.width), @"height":@(size.height), @"sizeStatus":@(sizeStatus)}];
+    }
+    NSDictionary *report = @{@"windowsStatus":@(status), @"valueIsCFArray":@(array), @"count":@(count), @"candidates":rows};
+    NSData *data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingSortedKeys error:nil];
+    if (windows) CFRelease(windows);
+    CFRelease(application);
+    return data;
+}
 
 // Query only the supplied owned window, using the public in-process informal
 // NSAccessibility selectors. SwiftUI proxies need not formally conform to the
