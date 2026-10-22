@@ -223,6 +223,8 @@ final class SceneRenderer {
     private var generatedCacheBytes = 0
     private let generatedCacheByteLimit = 64 * 1_024 * 1_024
     private var tickerLines: [String: CTLine] = [:]
+    private let titleFonts = TitleRenderFontCache()
+    private var titleFontGeneration: UInt64?
     private var layerMotionPlan: LayerMotionPlan?
     private var layerMotionProgress = 0.0
     /// Alpha contributions follow the same placement, opacity, transitions and
@@ -232,6 +234,7 @@ final class SceneRenderer {
     private struct CommentLayoutKey: Hashable {
         let text: String, fontName: String?, fontSize: Double, headerLength: Int, width: Double, height: Double
         let alignment: TextHorizontalAlignment
+        let fontGeneration: UInt64
     }
     private var commentLayouts: [CommentLayoutKey: CommentTextLayout] = [:]
     private var renderedCommentPages: [LayerID: (NSRange, Int, Int)] = [:]
@@ -315,6 +318,7 @@ final class SceneRenderer {
                 exitingLayers: [LayerNode] = [],
                 stinger: CVPixelBuffer? = nil,
                 annotations: AnnotationRenderSnapshot = .empty) -> CompositedFrame? {
+        refreshTitleFontResources()
         let outWidth = Int(canvasSize.width.rounded())
         let outHeight = Int(canvasSize.height.rounded())
         guard outWidth > 1, outHeight > 1 else { return nil }
@@ -376,6 +380,7 @@ final class SceneRenderer {
                           presentationTime: CMTime,
                           frameDuration: CMTime,
                           sequence: Int64) -> CompositedFrame? {
+        refreshTitleFontResources()
         let outWidth = Int(canvasSize.width.rounded())
         let outHeight = Int(canvasSize.height.rounded())
         guard outWidth > 1, outHeight > 1 else { return nil }
@@ -981,6 +986,7 @@ final class SceneRenderer {
     /// applies the renderer-side timed/fly-in visibility pass. Nil — paint
     /// nothing — for an empty string or an expired timed title.
     private func placeText(_ text: TextSourcePayload, layer: LayerNode, canvas: CGRect) -> CIImage? {
+        refreshTitleFontResources()
         let resolvedText: String
         if let timer = text.timer {
             guard let value = DynamicOverlayStore.shared.timer(timer, at: currentPresentationSeconds).text
@@ -1011,7 +1017,8 @@ final class SceneRenderer {
         let transformWidth = max(1, layer.transform.size.width * canvas.width)
         let transformHeight = max(1, layer.transform.size.height * canvas.height)
 
-        var font = TitleFontFallback.makeFont(requested: text.fontName, size: scaledFontSize)
+        var selectedFont = titleFonts.resolve(requested: text.fontName, size: scaledFontSize)
+        var font = selectedFont.font
         var effectiveFontSize = scaledFontSize
         let contentWidth: CGFloat
         let contentHeight: CGFloat
@@ -1035,7 +1042,8 @@ final class SceneRenderer {
             let boxHeight = max(1, transformHeight - scaledPadding * 2)
             if let headerLength = text.commentHeaderUTF16Length, text.recordingChatMessageID != nil {
                 let key = CommentLayoutKey(text: resolvedText, fontName: text.fontName, fontSize: Double(scaledFontSize),
-                    headerLength: headerLength, width: Double(boxWidth), height: Double(boxHeight), alignment: text.alignment)
+                    headerLength: headerLength, width: Double(boxWidth), height: Double(boxHeight), alignment: text.alignment,
+                    fontGeneration: selectedFont.generation)
                 let layout: CommentTextLayout
                 if let cached = commentLayouts[key] { layout = cached }
                 else {
@@ -1049,7 +1057,8 @@ final class SceneRenderer {
                 let pageIndex = max(0, min(text.commentPageIndex, layout.pages.count - 1))
                 let page = layout.pages[pageIndex]
                 paintedText = page.displayedText; effectiveFontSize = layout.fontSize
-                font = TitleFontFallback.makeFont(requested: text.fontName, size: effectiveFontSize)
+                selectedFont = titleFonts.resolve(requested: text.fontName, size: effectiveFontSize)
+                font = selectedFont.font
                 renderedCommentPages[layer.id] = (page.bodyRange, pageIndex, layout.pages.count)
             } else if text.overflow == .scaleDown {
                 let measured = TextMeasurement.measuredSize(text: resolvedText, font: font,
@@ -1060,8 +1069,8 @@ final class SceneRenderer {
                     measured: measured, box: CGSize(width: boxWidth, height: boxHeight)))
                 if factor < 1 {
                     effectiveFontSize = max(1, scaledFontSize * factor)
-                    font = TitleFontFallback.makeFont(requested: text.fontName,
-                                                      size: effectiveFontSize)
+                    selectedFont = titleFonts.resolve(requested: text.fontName, size: effectiveFontSize)
+                    font = selectedFont.font
                 }
             }
             contentWidth = boxWidth + avatarInset
@@ -1080,7 +1089,7 @@ final class SceneRenderer {
         // geometry — but never the timing, which animates the placed image.
         let fontPostScriptName = CTFontCopyPostScriptName(font) as String
         let descriptor = [
-            "text2", paintedText, fontPostScriptName, String(Double(effectiveFontSize)),
+            "text2", String(selectedFont.generation), paintedText, fontPostScriptName, String(Double(effectiveFontSize)),
             text.colorHex, text.backgroundColorHex ?? "-", String(Double(scaledPadding)),
             text.alignment.rawValue, text.verticalAlignment.rawValue,
             text.boxSizing.rawValue, String(text.wraps), text.overflow.rawValue, avatar == nil ? "-" : text.commentAvatarKey ?? "-"
@@ -1155,6 +1164,20 @@ final class SceneRenderer {
     private func pruneTextTimingAnchors() {
         guard !textTimingStart.isEmpty else { return }
         textTimingStart = textTimingStart.filter { textTimingSeen.contains($0.key) }
+    }
+
+    private func refreshTitleFontResources() {
+        let generation = titleFonts.registryGeneration()
+        guard titleFontGeneration != generation else { return }
+        titleFontGeneration = generation
+        // Re-registration can replace glyphs under the same PostScript name.
+        // Font-dependent rasters, layouts and baked nested scenes must refresh
+        // even when every document/style value stays identical.
+        generatedCache.removeAll(keepingCapacity: true)
+        generatedCacheBytes = 0
+        nestedCache.removeAll(keepingCapacity: true)
+        commentLayouts.removeAll(keepingCapacity: true)
+        tickerLines.removeAll(keepingCapacity: true)
     }
 
     /// The shared placement/styling tail for rasterized-content layers
@@ -1304,9 +1327,10 @@ final class SceneRenderer {
         let padding = CGFloat(text.padding) * scale
         let viewport = rect.insetBy(dx: padding, dy: padding)
         guard viewport.width > 0, viewport.height > 0 else { return nil }
-        let font = TitleFontFallback.makeFont(requested: text.fontName,
+        let selectedFont = titleFonts.resolve(requested: text.fontName,
                                              size: max(1, CGFloat(text.fontSize) * scale))
-        let descriptor = ["ticker", string, CTFontCopyPostScriptName(font) as String,
+        let font = selectedFont.font
+        let descriptor = ["ticker", String(selectedFont.generation), string, CTFontCopyPostScriptName(font) as String,
                           String(Double(CTFontGetSize(font))), text.colorHex].joined(separator: "|")
         let line: CTLine
         if let cached = tickerLines[descriptor] { line = cached }
@@ -1525,6 +1549,7 @@ final class SceneRenderer {
     /// than a lazy filter graph that would re-evaluate per frame), and
     /// caches it. Shares the generated cache's clear-on-cap bound.
     private func cachedNested(key: GeneratedKey, render: () -> CIImage?) -> CIImage? {
+        let fontGeneration = titleFonts.registryGeneration()
         if let cached = nestedCache[key] { return cached }
         if nestedCache.count >= generatedCacheLimit {
             nestedCache.removeAll()
@@ -1534,7 +1559,11 @@ final class SceneRenderer {
         guard !extent.isEmpty, !extent.isInfinite,
               let cgImage = ciContext.createCGImage(rendered, from: extent) else { return nil }
         let baked = CIImage(cgImage: cgImage)
-        nestedCache[key] = baked
+        // A later child can observe a registry change and clear the renderer
+        // while this enclosing build still contains an earlier child's font.
+        // Such an in-flight frame may finish, but must never become a static
+        // nested cache hit after that child advanced the renderer generation.
+        if titleFonts.registryGeneration() == fontGeneration { nestedCache[key] = baked }
         return baked
     }
 
