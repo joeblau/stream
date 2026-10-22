@@ -2157,12 +2157,7 @@ final class StreamController: ObservableObject {
     /// Starts mic capture on the preferred input from settings, falling back
     /// to the system default when none is chosen or the chosen device is gone.
     private func startAudioInput() {
-        if let uid = settings.preferredAudioInputUID,
-           let device = audio.devices.first(where: { $0.uniqueID == uid }) {
-            audio.start(device: device)
-        } else {
-            audio.start()
-        }
+        audio.start(preferredDeviceUID: settings.preferredAudioInputUID)
         // A05 (issue #84): arm every enabled additional input device; the
         // device the default mic channel uses is excluded so it never
         // captures twice.

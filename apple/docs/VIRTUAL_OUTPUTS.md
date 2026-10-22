@@ -144,6 +144,34 @@ lifecycle without installing it. #173 remains open for signed installation and
 real client measurements; #174 does not proceed as a shipping implementation
 until that route is validated.
 
+### Owned loopback feedback exclusion
+
+The studio excludes the prototype's exact stable device UID
+`com.joeblau.Stream.VirtualMicrophonePrototype.device` from microphone and
+monitor choices. A persisted/default input or additional-input selection of
+that UID is refused before device resolution, microphone permission or capture
+session creation. A prohibited persisted selection stays explicit rather than
+silently opening another microphone. Ordinary missing preferred inputs retain
+the existing system-default fallback, with the same loopback check on that
+default. Other virtual/aggregate devices, names and source IDs are preserved.
+
+Monitor admission checks both selected and freshly resolved identities. An
+owned loopback default, including fallback after an ordinary output disappears,
+stops the previous playback route and reports a repair message with no effective
+device. It does not claim that a refused fallback is playing. A reused HAL
+device ID cannot retain another device's reported UID or silently satisfy a
+pinned selection. The studio never changes the system default device.
+
+Run `zsh apple/scripts/run_studio_virtual_audio_routing_harness.zsh` for the
+focused production Core/input/monitor fixture. Its owned device-discovery and
+playback boundaries exercise explicit/default/persisted/additional admission,
+hot-plug/fallback refusal and recovery, ID reuse, unknown identities and ordinary
+device/mapping preservation. It performs no audio playback/capture, permission
+request or driver installation. It proves these routing guards, not installed
+HAL behavior, acoustic feedback prevention, nested aggregate-device topology,
+system/app-audio return paths or receiving-app compatibility. O07 remains open
+and O08's shipping controls remain gated.
+
 The 2026-10-21 local repeat built the universal arm64/x86_64 bundle and passed
 its actual dynamically loaded AudioServerPlugIn callback fixture: PCM energy
 48.25474, 512-frame delay, 44.1/48 kHz, malformed/NaN/underrun handling,
