@@ -509,3 +509,73 @@ The Intel receiver cause remains unknown.
 The 06:38 UTC read-only refresh confirms the same 25 closed / 36 open original
 issues and zero open PRs. The next published source needs fresh hosted CI; all
 old failing logs and exact original hashes remain in the terminal receipt.
+
+## Paragraph lifetimes, scene ordering and control-row cohort — 2026-10-22 UTC
+
+The 07:21 UTC read-only refresh of all original 61 issues still reports **25
+closed / 36 open**, including 25 open feature tasks and 11 open trackers, with
+zero open PRs. This cohort closes no issue. **#90, #92, #124 and #127 remain
+open**, as do all other previously incomplete original tasks. Already-closed
+#165 remains outside this inventory.
+
+Exact integrated source `2ea819a` passes generation, the unsigned universal
+arm64/x86_64 Release build, the actual bundle audit and the integrated **40-case
+native control-row probe**. Exact source bindings and log hashes are retained
+under `wave7Review` in [the ledger](MACOS_TASK_STATUS.json). These are new local
+receipts; previous failures and their source scopes remain unchanged.
+
+- `617fa81` keeps Core Text paragraph setting values and their array alive until
+  `CTParagraphStyleCreate` returns. All 23 focused Core tests pass, and an
+  optimized actual getter probe verifies 18 alignment/wrapping/overflow combinations
+  after factory return and stack pressure. Independent recording review is
+  clear. This fixes a pointer-lifetime defect without claiming previously
+  observed visual corruption or changing text policy. See [the lifetime
+  receipt](TEXT_PARAGRAPH_STYLE_LIFETIMES.md).
+- `5b1d2fe` adds per-scene Move Earlier/Later menus, named accessibility actions
+  and a native Scene menu. Reordering uses the complete current sibling order,
+  stable IDs and current runtime authority, preserving selection, Preview and
+  Program. Actual workspace/model/menu-callback, undo, persistence and stale
+  callback checks pass; independent pro_adapters review is clear. Actual menu
+  keyboard or platform AX delivery remains unqualified. See [the scene
+  ordering scope](SCENE_BROWSER_REORDERING.md).
+- `2ad4899` preserves both transport and transition control trees inside
+  persistent horizontal native scroll containers. The exact integrated probe
+  passes 40 static cases across both rows, ten configured text sizes and two
+  scroller styles, checking narrow/wide viewports, exact native intrinsic
+  height, full document extent and trailing-edge programmatic scrolling.
+  Independent providers review is clear. `2ea819a` adds CI wiring and a 90 s
+  process guard without changing layout assertions. Hidden owned row windows
+  do not qualify whole-window layout, readable operator states, focus,
+  keyboard/AX traversal or contrast. See [the control-row
+  receipt](STUDIO_CONTROL_ROW_LAYOUT_2026-10-22.md).
+
+Shared Core changes in this cohort. The published `9881359` iOS result of
+**587 tests in 82 suites** predates the paragraph fix and does not qualify the
+new Core head. At the timestamped snapshot, [native CI
+39735328975](https://github.com/joeblau/stream/actions/runs/39735328975) still has
+both macOS jobs running; its iOS job succeeds. [Browser interview CI
+39735328995](https://github.com/joeblau/stream/actions/runs/39735328995) succeeds.
+No whole desktop CI pass or newer-source hosted result is asserted. Routine
+publication is deferred until that live native run reaches a terminal state.
+
+The separate `9881359` [performance run
+39735454725](https://github.com/joeblau/stream/actions/runs/39735454725) finishes
+**failure on both hosts**. ARM renders **17,252 / 17,306** frames and Intel
+**17,232 / 16,434**, below the unchanged 17,850 gate for each 600 s workload.
+ARM replay decodes **17,251 / 17,252** available source frames; Intel decodes
+**17,232 / 17,232**. All four writers report completion and zero audio/video
+drops, with video sample counts equal to rendered counters. Both ARM media
+inspections and the first Intel inspection pass. **Intel's second inspection
+remains pending at the original 1,380 s owned-process deadline**; writer counts
+do not establish its encoded-frame verification. Endpoint duration errors are
+below 80 ms, which is not independent waveform drift qualification. No cause,
+universal font-cache benefit or eventual inspection result is inferred.
+
+The exact failed gates, statuses, source and artifact hashes are preserved in
+[the performance receipt](PERFORMANCE_HOSTED_39735454725.json) and [the readable
+resource budget account](DESKTOP_RESOURCE_BUDGETS.md). Those receipts are owned
+by commits `db9fabf` and wording follow-up `dc80bd1`; they preserve the previous
+hosted failures and distinguish deliberate slow-sink drops from recorder loss.
+**#92 remains open.** Local source repairs and bounded checks do not replace
+original performance, native accessibility, provisioned browser IPC or the
+other outstanding acceptance requirements.
