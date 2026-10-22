@@ -682,12 +682,16 @@ actor CompositionEngine {
             var deadline = clock.now
             while !Task.isCancelled {
                 await self?.tick()
-                deadline = deadline.advanced(by: interval)
-                let now = clock.now
-                var missed = 0
-                while deadline < now { deadline = deadline.advanced(by: interval); missed += 1 }
-                if missed > 0 { await self?.noteMissedDeadlines(missed) }
-                do { try await clock.sleep(until: deadline) } catch { break }
+                let next = CompositionFrameSchedule.next(after: deadline, interval: interval, completedAt: clock.now)
+                deadline = next.deadline
+                if next.skipped > 0 { await self?.noteMissedDeadlines(next.skipped) }
+                if deadline <= clock.now {
+                    // An overdue tick can run now. Yield so sustained overload
+                    // cannot monopolize this actor or delay stop/reconfigure.
+                    await Task.yield()
+                } else {
+                    do { try await clock.sleep(until: deadline) } catch { break }
+                }
             }
         }
     }

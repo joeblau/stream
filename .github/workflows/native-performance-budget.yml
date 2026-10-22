@@ -37,6 +37,7 @@ jobs:
         run: |
           python3 scripts/test_studio_performance_workloads.py -v
           python3 scripts/test_performance_evidence.py -v
+          zsh scripts/run_composition_frame_schedule_harness.zsh
       - name: Name the machine and verify native architecture
         run: |
           sysctl -n hw.model machdep.cpu.brand_string
