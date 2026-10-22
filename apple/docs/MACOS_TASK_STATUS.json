@@ -9,7 +9,7 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks all 61 macOS issues open at the initial inventory. The refreshed GitHub query returned 51 open; 10 were closed elsewhere during this work and their state is recorded. Neither an issue state nor a passing fixture establishes full product qualification; this branch did not close GitHub issues.",
+  "scope": "Tracks 61 macOS issues from the initial inventory (48 feature tasks and 13 roadmap/epic trackers). Current verified GitHub inventory: 46 open, 15 closed after original-criteria review. Completion and qualification are scoped separately; passing controlled fixtures or issue closure do not establish universal device, provider or release qualification.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
@@ -401,11 +401,13 @@
       "code": "T08",
       "title": "[macOS][T08] Create, schedule, edit, and select upcoming live events",
       "url": "https://github.com/joeblau/stream/issues/134",
-      "githubState": "open",
-      "completion": "local original criteria verified; publication pending",
-      "remaining": [
-        "Publish the validated combined implementation and reconcile this issue on GitHub. See currentReviewedUniversal, simultaneousStorageNetwork and the focused feature documents for actual proof and scoped limits."
-      ]
+      "githubState": "closed",
+      "completion": "original criteria verified and published",
+      "remaining": [],
+      "qualificationLimits": [
+        "Authorized public provider account/ingest qualification remains unperformed; unsupported provider CRUD remains external/manual and separate connector tasks remain open."
+      ],
+      "githubStateNote": "Verified closed after publication of 9fad18f, original-criteria review and final universal/core/actual-media checks."
     },
     {
       "number": 133,
@@ -547,11 +549,13 @@
       "code": "R04",
       "title": "[macOS][R04] Handle low disk space, external volumes, and interrupted recordings",
       "url": "https://github.com/joeblau/stream/issues/93",
-      "githubState": "open",
-      "completion": "local original criteria verified; publication pending",
-      "remaining": [
-        "Publish the validated combined implementation and reconcile this issue on GitHub. See currentReviewedUniversal, simultaneousStorageNetwork and the focused feature documents for actual proof and scoped limits."
-      ]
+      "githubState": "closed",
+      "completion": "original criteria verified and published",
+      "remaining": [],
+      "qualificationLimits": [
+        "No promise of arbitrary corrupt-container recovery or universal physical removable-volume qualification."
+      ],
+      "githubStateNote": "Verified closed after publication of 9fad18f, original-criteria review and final universal/core/actual-media checks."
     },
     {
       "number": 92,
@@ -591,11 +595,13 @@
       "code": "D01",
       "title": "[macOS][D01] Add configurable shortcuts and a command palette for studio actions",
       "url": "https://github.com/joeblau/stream/issues/88",
-      "githubState": "open",
-      "completion": "local original criteria verified; publication pending",
-      "remaining": [
-        "Publish the reviewed combined implementation and reconcile the GitHub issue after merge. Controlled native local and owned-foreground global shortcut validation covers the original command, binding and feedback criteria; broader physical-key and accessibility qualification remains tracked separately."
-      ]
+      "githubState": "closed",
+      "completion": "original criteria verified and published",
+      "remaining": [],
+      "qualificationLimits": [
+        "Physical keyboard/arbitrary third-party applications and full studio accessibility qualification are outside this completed command/binding proof; see #90."
+      ],
+      "githubStateNote": "Verified closed after publication of 9fad18f, original-criteria review and final universal/core/actual-media checks."
     },
     {
       "number": 87,
@@ -702,11 +708,13 @@
       "code": "EP05",
       "title": "[macOS][EP05] Graphics, titles, presentations, and web overlays",
       "url": "https://github.com/joeblau/stream/issues/52",
-      "githubState": "open",
-      "completion": "local original criteria verified; publication pending",
-      "remaining": [
-        "Publish the validated combined implementation and reconcile this issue on GitHub. See currentReviewedUniversal, simultaneousStorageNetwork and the focused feature documents for actual proof and scoped limits."
-      ]
+      "githubState": "closed",
+      "completion": "original criteria verified and published",
+      "remaining": [],
+      "qualificationLimits": [
+        "Production browser-widget audio enablement, specialized physical outputs and true guest-playback qualification remain in their individual open tasks."
+      ],
+      "githubStateNote": "Verified closed after publication of 9fad18f, original-criteria review and final universal/core/actual-media checks."
     },
     {
       "number": 51,
@@ -735,11 +743,13 @@
       "code": "EP01",
       "title": "[macOS][EP01] One-window workspace and media foundations",
       "url": "https://github.com/joeblau/stream/issues/48",
-      "githubState": "open",
-      "completion": "local original criteria verified; publication pending",
-      "remaining": [
-        "Publish the validated combined implementation and reconcile this issue on GitHub. See currentReviewedUniversal, simultaneousStorageNetwork and the focused feature documents for actual proof and scoped limits."
-      ]
+      "githubState": "closed",
+      "completion": "original criteria verified and published",
+      "remaining": [],
+      "qualificationLimits": [
+        "Specialized device, provider, performance and release qualification remain tracked in their individual open tasks."
+      ],
+      "githubStateNote": "Verified closed after publication of 9fad18f, original-criteria review and final universal/core/actual-media checks."
     },
     {
       "number": 47,
@@ -755,14 +765,33 @@
   ],
   "scopeCounts": {
     "initialOpenFeatureTasks": 48,
-    "openFeatureTasks": 38,
-    "openEpicsAndRoadmap": 13,
+    "openFeatureTasks": 35,
+    "openEpicsAndRoadmap": 11,
     "total": 61,
-    "currentlyOpen": 51,
-    "closedSinceInitialInventory": 10
+    "currentlyOpen": 46,
+    "closedSinceInitialInventory": 15
   },
-  "overallStatus": "Incomplete. Locally verified software is integrated on the named branch; remaining implementation, external SDK/service/device/signing and manual acceptance gates are listed per issue.",
+  "overallStatus": "Incomplete roadmap. Reviewed native integration and lifecycle/media fixes are published on main; 46 tasks remain open for the actual implementation or acceptance gaps listed per issue.",
   "integratedMain": "07d2fdb",
-  "githubStateRefreshedAt": "2026-10-21T21:17:00Z",
-  "reviewedFollowupBranch": "integrate/native-completion-20261021"
+  "githubStateRefreshedAt": "2026-10-22T00:25:46Z",
+  "reviewedFollowupBranch": "integrate/native-completion-20261021",
+  "publishedIntegration": "9fad18f8370572d5973008c7083cc61331776930",
+  "pullRequestReconciliation": {
+    "recordedMerged": [
+      210,
+      216,
+      218
+    ],
+    "closedSuperseded": [
+      208,
+      209,
+      211,
+      212,
+      213,
+      214,
+      215,
+      217
+    ],
+    "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Newly created dependency PR220 is reviewed separately."
+  }
 }
