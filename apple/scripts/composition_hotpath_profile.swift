@@ -96,7 +96,7 @@ final class CompositionHotPathProfile: @unchecked Sendable {
             "seconds": 20, "canvas": "1920x1080", "fps": 30, "layers": 12,
             "firstWarmPixelSHA256": hash ?? "missing", "eventFile": traceURL.lastPathComponent,
             "eventCount": trace.count, "omittedEvents": omitted,
-            "scope": "Instrumented bounded local attribution only; not sustained capacity, hosted-VM cause, waveform or physical-source qualification. Thread CPU uses Darwin CLOCK_THREAD_CPUTIME_ID only within synchronous same-thread scopes. Nested spans overlap; do not sum them. Counter storage overhead occurs outside leaf measurements but inside enclosing spans. Drop removal preserves production location under lock; between-callback residual includes release, loop and scheduling and is not an isolated destructor measurement.",
+            "scope": "Instrumented bounded attribution only; not sustained capacity, hosted-VM cause, waveform or physical-source qualification. Thread CPU uses Darwin CLOCK_THREAD_CPUTIME_ID only within synchronous same-thread scopes. Nested spans overlap; do not sum them. Counter storage overhead occurs outside leaf measurements but inside enclosing spans. Drop removal preserves production location under lock; between-callback residual includes release, loop and scheduling and is not an isolated destructor measurement.",
             "spans": result]
         try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
     }

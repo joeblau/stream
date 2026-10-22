@@ -1,0 +1,210 @@
+name: Native composition attribution (20s diagnostics, not qualification)
+
+# Fixed-duration diagnostics only. The separate 120–600s performance workflow
+# and its original qualification gates remain unchanged.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-composition-attribution-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagnostic-trace:
+    name: Diagnostic 2x20s, nonqualification (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            architecture: arm64
+          - runner: macos-26-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    # Fresh native Intel transport + app builds can exceed 35 minutes.
+    # This bounds build/diagnostics/upload, not a longer sampling window.
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apple
+        shell: bash
+    env:
+      COMPOSITION_PROFILE_DIR: build/composition-attribution-validation
+      COMPOSITION_PROFILE_BUILD_PATH: build/composition-attribution-validation/derived
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Record host and verify native architecture and toolchain
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+          MATRIX_RUNNER: ${{ matrix.runner }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/composition-attribution-results
+          {
+            date -u
+            git rev-parse HEAD
+            sysctl -n hw.model machdep.cpu.brand_string hw.ncpu hw.memsize
+            sw_vers
+            uname -m
+            xcode-select -p
+            xcodebuild -version
+            xcrun --show-sdk-path
+            xcrun --find swiftc
+            xcrun swiftc --version
+            test "$(uname -m)" = "$EXPECTED_ARCH"
+            test "$(sysctl -in sysctl.proc_translated || true)" != "1"
+            xcrun swiftc -print-target-info > build/composition-attribution-results/compiler-target.json
+            python3 - <<'PY'
+          import json, os, pathlib, re, subprocess
+          target = json.loads(pathlib.Path('build/composition-attribution-results/compiler-target.json').read_text())
+          assert target['target']['unversionedTriple'].startswith(os.environ['EXPECTED_ARCH'] + '-apple-'), target
+          version = subprocess.check_output(['xcodebuild', '-version'], text=True)
+          assert int(re.search(r'^Xcode (\d+)', version).group(1)) >= 26, version
+          sdk = subprocess.check_output(['xcrun', '--show-sdk-path'], text=True).strip()
+          assert pathlib.Path(sdk).is_dir(), sdk
+          print('Verified native compiler target, named Xcode and SDK; diagnostic only, not hardware certification.')
+          PY
+            brew install xcodegen cmake
+            xcodegen --version
+            cmake --version
+          } 2>&1 | tee build/composition-attribution-results/environment.log
+
+      - name: Run existing fixed 2x20s generated trace once (not qualification)
+        id: trace
+        run: |
+          set -euo pipefail
+          mkdir -p build/composition-attribution-results
+          python3 - <<'PY' 2>&1 | tee build/composition-attribution-results/identity-gate.log
+          import datetime, hashlib, json, os, pathlib, subprocess
+          root = pathlib.Path.cwd().parent
+          names = [
+              'apple/StreamMac/CompositionEngine.swift',
+              'apple/StreamMac/CompositionFrameSchedule.swift',
+              'apple/StreamMac/SceneRenderer.swift',
+              'apple/StreamMac/TitleRenderFontCache.swift',
+              'apple/StreamMac/ProgramRecordingSession.swift',
+              'apple/scripts/studio_performance_harness.swift',
+              'apple/scripts/performance_owned_replay.swift',
+              'apple/scripts/performance_workload_evidence.swift',
+              'apple/scripts/program_recording_fixtures.swift',
+              'apple/scripts/composition_hotpath_profile.swift',
+              'apple/scripts/prepare_composition_hotpath_profile.py',
+              'apple/scripts/run_composition_hotpath_profile.zsh',
+              '.github/workflows/native-performance-budget.yml',
+              '.github/workflows/native-composition-attribution.yml',
+          ]
+          # Pin the reviewed fixed-duration tool and its workload inputs. An
+          # unreviewed generator/template change must fail before any runner.
+          expected = {
+              'apple/scripts/prepare_composition_hotpath_profile.py': '20f54568fdf8bf1dd4bd77f27647a9f260398b733da41beb45bfacd08a6b4308',
+              'apple/scripts/composition_hotpath_profile.swift': 'be9a48e554dac67a137080d9a45b4af83e11501cc9c988c71f3ac380f0ea4506',
+              'apple/scripts/run_composition_hotpath_profile.zsh': 'b051da683fd67b9a69cc6f1eca5261ab47607feba19edd27130b8bbc52e27804',
+              'apple/scripts/studio_performance_harness.swift': 'b74f5f85e5acbf50475bd9d00f0e8cb816737d10450f528bd30315417a5e46f9',
+              'apple/scripts/performance_owned_replay.swift': 'a37d3a5aba9bffc4e6e4516bfccc2e9461aa9bceb4b52a69c818f443140a937d',
+              'apple/scripts/performance_workload_evidence.swift': '4312804d5de645cad552adb26d5217846f3c483510fd9bcc13881500746627f3',
+              'apple/scripts/program_recording_fixtures.swift': '24f9e02a8b0a9866a05161e28cc9792a29b3336785550d4cd4a53b3537e1a0b4',
+          }
+          receipt = {
+              'sourceCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'startedAtUTC': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'command': ['zsh', 'scripts/run_composition_hotpath_profile.zsh'],
+              'runnerInvocationsRequested': 1,
+              'cases': 2, 'secondsPerCase': 20, 'qualification': False,
+              'identityVerified': False, 'expectedToolSHA256': expected,
+              'profileDirectory': os.environ['COMPOSITION_PROFILE_DIR'],
+              'scope': 'Diagnostic attribution only. Existing runner builds with jobs2/Swift-j2 and owns the unchanged180s process-group launcher. No retry, added render/wait, source/workload/gate change or sustained qualification.',
+              'sourceSHA256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in names},
+          }
+          output = pathlib.Path('build/composition-attribution-results/source-and-command.json')
+          output.write_text(json.dumps(receipt, indent=2) + '\n')
+          for name, digest in expected.items():
+              if receipt['sourceSHA256'][name] != digest:
+                  raise SystemExit('Fixed20s identity changed: ' + name)
+          receipt['identityVerified'] = True
+          output.write_text(json.dumps(receipt, indent=2) + '\n')
+          print('Verified exact reviewed2x20s diagnostic tool/workload identity; sustained gates unchanged.')
+          PY
+          zsh scripts/run_composition_hotpath_profile.zsh 2>&1 | tee build/composition-attribution-results/original-run.log
+
+      - name: Inventory all available original evidence, including partial failure
+        if: always()
+        env:
+          TRACE_OUTCOME: ${{ steps.trace.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/composition-attribution-results
+          python3 - <<'PY'
+          import datetime, hashlib, json, os, pathlib, subprocess
+          profile = pathlib.Path(os.environ['COMPOSITION_PROFILE_DIR'])
+          results = pathlib.Path('build/composition-attribution-results')
+          selected = [
+              profile / 'profile-source-hashes.json', profile / 'project.json',
+              profile / 'hotpath_harness.swift',
+              profile / 'StreamMac/CompositionEngine.swift',
+              profile / 'StreamMac/SceneRenderer.swift',
+              profile / 'StreamMac/CompositionHotPathProfile.swift',
+          ]
+          selected += list((profile / 'frames').rglob('*'))
+          selected += list(results.glob('*'))
+          files = []
+          for path in sorted(set(selected)):
+              if not path.is_file() or path.name == 'artifact-inventory.json':
+                  continue
+              digest = hashlib.sha256()
+              with path.open('rb') as stream:
+                  for block in iter(lambda: stream.read(1024 * 1024), b''):
+                      digest.update(block)
+              files.append({'path': str(path), 'bytes': path.stat().st_size, 'sha256': digest.hexdigest()})
+          root = pathlib.Path.cwd().parent
+          tracked = subprocess.check_output([
+              'git', 'ls-files', '--full-name', '-z', '--', 'StreamMac', 'StreamCore',
+              'scripts/studio_performance_harness.swift', 'scripts/performance_owned_replay.swift',
+              'scripts/performance_workload_evidence.swift', 'scripts/composition_hotpath_profile.swift',
+              'scripts/program_recording_fixtures.swift',
+              'scripts/prepare_composition_hotpath_profile.py', 'scripts/run_composition_hotpath_profile.zsh',
+              '../.github/workflows/native-performance-budget.yml',
+              '../.github/workflows/native-composition-attribution.yml',
+          ]).decode().split('\0')
+          toolchain = []
+          for command in [['uname', '-m'], ['xcodebuild', '-version'], ['xcrun', '--show-sdk-path'], ['xcrun', 'swiftc', '--version']]:
+              try:
+                  observed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+                  toolchain.append({'command': command, 'exitCode': observed.returncode, 'output': observed.stdout})
+              except (OSError, subprocess.TimeoutExpired) as error:
+                  toolchain.append({'command': command, 'unavailable': str(error)})
+          receipt = {
+              'observedAtUTC': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'traceStepOutcome': os.environ['TRACE_OUTCOME'], 'qualification': False,
+              'sourceCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'checkoutSourceSHA256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in tracked if name and (root / name).is_file()},
+              'toolchain': toolchain,
+              'files': files,
+              'scope': 'All available original stdout, sources/manifests, raw trace/case/resource data and owned recordings. Existing profiler writes phase JSON only after case validation; an early failure or180s deadline can leave later phase files absent. Missing evidence is not a passed measurement. No derived build products are uploaded.',
+          }
+          (results / 'artifact-inventory.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          print(json.dumps({'traceStepOutcome': receipt['traceStepOutcome'], 'retainedFiles': len(files), 'qualification': False}))
+          PY
+
+      - name: Retain original diagnostic evidence (7 days, even on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: composition-attribution-${{ matrix.runner }}
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
+          path: |
+            apple/build/composition-attribution-results
+            apple/build/composition-attribution-validation/frames
+            apple/build/composition-attribution-validation/profile-source-hashes.json
+            apple/build/composition-attribution-validation/project.json
+            apple/build/composition-attribution-validation/hotpath_harness.swift
+            apple/build/composition-attribution-validation/StreamMac/CompositionEngine.swift
+            apple/build/composition-attribution-validation/StreamMac/SceneRenderer.swift
+            apple/build/composition-attribution-validation/StreamMac/CompositionHotPathProfile.swift
