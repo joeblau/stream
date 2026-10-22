@@ -103,6 +103,7 @@ final class StudioWorkspace: ObservableObject {
     private var occupiedPackageReads: Set<UUID> = []
     private var latestPackageRead: UUID?
     private var packageWrite: UUID?
+    private var catalogWriteUncertain = false
     private let maximumPackageReads = 4
     private struct PackageDropRead {
         let id: UUID
@@ -122,18 +123,9 @@ final class StudioWorkspace: ObservableObject {
         self.root = root
         self.recovery = SessionRecoveryCoordinator(directory: root.appendingPathComponent("SessionRecovery"))
         catalogURL = root.appendingPathComponent("projects.v1.json")
-        var catalog = StudioProjectCatalog()
-        var recovery: URL?
-        if let data = try? Data(contentsOf: catalogURL) {
-            if let loaded = try? JSONDecoder().decode(StudioProjectCatalog.self, from: data), loaded.validationError == nil {
-                catalog = loaded
-            } else {
-                recovery = catalogURL
-                if let backups = try? ProjectDocumentHistory.validBackups(for: catalogURL),
-                   let valid = backups.compactMap({ try? JSONDecoder().decode(StudioProjectCatalog.self, from: Data(contentsOf: $0)) })
-                    .first(where: { $0.validationError == nil }) { catalog = valid }
-            }
-        }
+        let loadedCatalog = StudioCatalogRead.load(at: catalogURL)
+        let catalog = loadedCatalog.catalog
+        let recovery = loadedCatalog.recoveryFile
         self.catalog = catalog
         let directory = root.appendingPathComponent(StudioProjectCatalog.relativeDirectory(project: catalog.selectedProjectID, profile: catalog.selectedProfileID), isDirectory: true)
         let firstLaunch = !FileManager.default.fileExists(atPath: directory.path)
@@ -159,6 +151,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func applyPending() async {
+        guard allowCatalogWrite() else { return }
         guard let next = pending, next != selection, canSwitch else { return }
         isSwitching = true
         StudioAutomationEndpoint.shared.unbind()
@@ -200,6 +193,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func create(named name: String, duplicate: Bool = false) {
+        guard allowCatalogWrite() else { return }
         guard StudioProjectCatalog.validName(name), catalog.projects.count < 200 else { error = "Choose a name of 1–200 bytes."; return }
         let project = StudioProject(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
         let target = Selection(project: project.id, profile: project.profiles[0].id)
@@ -217,6 +211,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func rename(_ id: UUID, to name: String) {
+        guard allowCatalogWrite() else { return }
         guard StudioProjectCatalog.validName(name), let index = catalog.projects.firstIndex(where: { $0.id == id }) else { return }
         catalog.projects[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if id == catalog.selectedProjectID { runtime.sceneStore.setProjectIdentity(id, name: catalog.projects[index].name) }
@@ -224,12 +219,14 @@ final class StudioWorkspace: ObservableObject {
     }
 
     func archive(_ id: UUID, archived: Bool) {
+        guard allowCatalogWrite() else { return }
         guard id != catalog.selectedProjectID, let index = catalog.projects.firstIndex(where: { $0.id == id }) else { return }
         catalog.projects[index].isArchived = archived
         saveCatalog()
     }
 
     func addProfile(named name: String, duplicate: Bool) {
+        guard allowCatalogWrite() else { return }
         guard StudioProjectCatalog.validName(name), let index = catalog.projects.firstIndex(where: { $0.id == catalog.selectedProjectID }),
               catalog.projects[index].profiles.count < 50 else { return }
         let profile = StudioProfile(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -247,6 +244,7 @@ final class StudioWorkspace: ObservableObject {
     }
 
     private func saveCatalog() {
+        guard allowCatalogWrite() else { return }
         guard recoveryFile == nil else { return }
         do {
             if let problem = catalog.validationError { throw NSError(domain: "StreamProjects", code: 1, userInfo: [NSLocalizedDescriptionKey: problem]) }
@@ -254,10 +252,19 @@ final class StudioWorkspace: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
+    private func allowCatalogWrite() -> Bool {
+        guard !catalogWriteUncertain else {
+            error = "The catalog save status is uncertain. Reopen Stream to reload the saved shows before editing or importing."
+            return false
+        }
+        return true
+    }
+
     func acceptRecoveredCatalog() {
+        guard allowCatalogWrite() else { return }
         guard let original = recoveryFile else { return }
         do {
-            try FileManager.default.moveItem(at: original, to: original.appendingPathExtension("corrupt-\(UUID().uuidString).bak"))
+            try FileManager.default.moveItem(at: original, to: original.appendingPathExtension("preserved-\(UUID().uuidString).bak"))
             recoveryFile = nil
             saveCatalog()
         } catch { self.error = error.localizedDescription }
@@ -521,20 +528,97 @@ final class StudioWorkspace: ObservableObject {
 
     func importPreviewedPackage() async {
         guard let preview = importPreview, !packageBusy else { return }
+        guard allowCatalogWrite() else { return }
+        guard recoveryFile == nil else {
+            error = "Review and use the recovered catalog before importing a show."
+            return
+        }
         guard catalog.projects.count < 200 else { error = "The catalog supports up to 200 shows. Import into a catalog with fewer shows."; return }
         guard let operation = beginPackageWrite() else { return }
         defer { finishPackageWrite(operation) }
+
+        // A previous uncertain write or an external catalog change must never
+        // be overwritten by a retry based on the old in-memory model.
+        func persistedCatalog(matching expected: StudioProjectCatalog) throws -> Data {
+            let bytes = try Data(contentsOf: catalogURL)
+            guard let saved = try? JSONDecoder().decode(StudioProjectCatalog.self, from: bytes),
+                  saved.validationError == nil, saved == expected else {
+                throw PortableShow.Failure.invalid("The saved show catalog changed. Reopen Stream or review catalog recovery before importing.")
+            }
+            return bytes
+        }
+
         let project = StudioProject(name: preview.name)
         let target = Selection(project: project.id, profile: project.profiles[0].id)
         let destination = directory(for: target)
+        var ownsImportedDirectory = false
+        var mayRemoveImportedDirectory = true
+        var attemptedCatalogWrite = false
         do {
+            _ = try persistedCatalog(matching: catalog)
             try await Task.detached { try ShowPackageIO.importFiles(from: preview.url, to: destination, previewedManifest: preview.manifest) }.value
-            catalog.projects.append(project)
+            ownsImportedDirectory = true
+            // Cancel revokes commit authority, but the completed copy remains
+            // owned until it can be removed here. Busy is held through cleanup.
+            guard packageWrite == operation, !Task.isCancelled,
+                  importPreview?.id == preview.id else { throw CancellationError() }
+            guard recoveryFile == nil else {
+                throw PortableShow.Failure.invalid("Review and use the recovered catalog before importing a show.")
+            }
+            // Normal catalog edits can finish while package IO is suspended.
+            // Construct the candidate from the current, verified durable state.
+            let previousBytes = try persistedCatalog(matching: catalog)
+            var candidate = catalog
+            candidate.projects.append(project)
+            if let problem = candidate.validationError { throw PortableShow.Failure.invalid(problem) }
+            let candidateBytes = try JSONEncoder().encode(candidate)
+            var writeFailure: Error?
+            // History maintenance may throw AFTER its atomic catalog write.
+            // Once writing is attempted, only exact readback decides whether
+            // the new directory is unreferenced and safe to remove.
+            mayRemoveImportedDirectory = false
+            attemptedCatalogWrite = true
+            do { try ProjectDocumentHistory.write(candidateBytes, to: catalogURL) }
+            catch { writeFailure = error }
+            let readback = try? Data(contentsOf: catalogURL)
+            guard readback == candidateBytes else {
+                if let writeFailure, readback == previousBytes {
+                    mayRemoveImportedDirectory = true
+                    throw writeFailure
+                }
+                catalogWriteUncertain = true
+                throw PortableShow.Failure.invalid("The catalog save could not be confirmed. Imported files were retained. Reopen Stream and review the saved shows before retrying.")
+            }
+            // Publish only the catalog whose exact durable bytes were read.
+            // A post-commit history error cannot orphan its referenced files.
+            catalog = candidate
             pending = target
             importPreview = nil
             showProjects = true
-            saveCatalog()
-        } catch { self.error = String(describing: error) }
+            if let writeFailure {
+                error = "The imported show is saved, but catalog history maintenance reported: \(writeFailure.localizedDescription)"
+            } else { error = nil }
+        } catch {
+            var cleanupFailure: Error?
+            if ownsImportedDirectory && mayRemoveImportedDirectory {
+                do { try FileManager.default.removeItem(at: destination) }
+                catch { cleanupFailure = error }
+            }
+            let retiredBeforeCommit = !attemptedCatalogWrite &&
+                (packageWrite != operation || Task.isCancelled || importPreview?.id != preview.id)
+            if error is CancellationError || retiredBeforeCommit {
+                // IO may fail before reaching the successful-copy fence. Do
+                // not replace a newer sheet/error with that retired result.
+                if let cleanupFailure, self.error == nil,
+                   importPreview == nil || importPreview?.id == preview.id {
+                    self.error = "Import canceled. Copied files were retained because cleanup failed: \(cleanupFailure.localizedDescription)"
+                }
+            } else {
+                var message = String(describing: error)
+                if let cleanupFailure { message += " Imported files were retained because cleanup failed: \(cleanupFailure.localizedDescription)" }
+                self.error = message
+            }
+        }
     }
 
     func exportPackage(includeMedia: Bool, selectedSceneOnly: Bool) {
