@@ -38,6 +38,13 @@ controller=File.read(File.join(root,'StreamMac/StreamController.swift')).gsub('U
 pattern=/    private func startAudioInput\(\) \{.*?\n    \}/m
 abort 'Local microphone fixture boundary changed' unless controller.scan(pattern).length==1
 controller.sub!(pattern,"    private func startAudioInput() {\n        InterviewCaptureBoundary.refusedMicrophoneStarts += 1\n    }")
+# Model an owned unlocked studio. The actual host can be locked/headless;
+# this media-route fixture neither qualifies system lock policy nor unlocks it.
+# Keep the production default intact and use the existing constructor seam only
+# in this generated tool, as the source-failover fixture does.
+resilience_constructor = 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))'
+abort 'Interview fixture resilience constructor changed' unless controller.scan(resilience_constructor).length == 1
+controller.sub!(resilience_constructor, 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"), observeSystem: false, initialSessionState: .unlocked)')
 controller_path=File.join(folder,'fixtures/InterviewProgramController.swift')
 File.write(controller_path,controller)
 target['sources'].reject!{|entry| entry.is_a?(String) && File.basename(entry)=='StreamController.swift'}
@@ -98,7 +105,7 @@ if [[ -n "${STREAM_INTERVIEW_REFERENCE_ARTIFACTS:-}" ]]; then
 fi
 python3 scripts/repair_desktop_transport_archives.py "$INTERVIEW_RETURN_BUILD_PATH" --require-relay-policy
 xcodebuild -project "$INTERVIEW_RETURN_DIR/NativeInterviewReturnAudioValidation.xcodeproj" -scheme NativeInterviewReturnAudioCLI \
-  -jobs "${STREAM_NATIVE_BUILD_JOBS:-4}" -destination 'platform=macOS' -derivedDataPath "$INTERVIEW_RETURN_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -jobs "${STREAM_NATIVE_BUILD_JOBS:-2}" -destination 'platform=macOS' -derivedDataPath "$INTERVIEW_RETURN_BUILD_PATH" CODE_SIGNING_ALLOWED=NO OTHER_SWIFT_FLAGS='$(inherited) -j2' build
 readonly INTERVIEW_RETURN_NODE="${STREAM_INTERVIEW_NODE:-node}"
 "$INTERVIEW_RETURN_NODE" -e 'const [major,minor]=process.versions.node.split(".").map(Number); if(major!==24||minor<15) throw Error("Node >=24.15 <25 required")'
 readonly INTERVIEW_RETURN_PRODUCTS="${INTERVIEW_RETURN_BUILD_PATH:A}/Build/Products/Debug"

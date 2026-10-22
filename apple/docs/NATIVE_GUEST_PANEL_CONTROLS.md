@@ -47,8 +47,9 @@ deployed TURN, Internet/mobile/restricted networks or operator devices.
 
 One native admitted media peer remains the measured limit. Private text is
 implemented separately in `NATIVE_GUEST_PRIVATE_MESSAGES.md`. Addressed private
-microphone talkback is described below. External browser/network/operator
-qualification remains open; this change does not close issue #128.
+microphone talkback is described below. The original feature/validation mapping
+and separately retained broader scopes are summarized in
+[GUEST_SLOT_BACKSTAGE_SOFTWARE_ACCEPTANCE.md](GUEST_SLOT_BACKSTAGE_SOFTWARE_ACCEPTANCE.md).
 
 Local software qualification on 2026-10-21 passed with Xcode 27.2 on Apple
 silicon: the whole-source manager/Worker/SwiftUI fixture, standalone native
