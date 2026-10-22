@@ -32,6 +32,9 @@ protocol Publisher: Actor {
     nonisolated var events: AsyncStream<PublisherEvent> { get }
     /// Desktop-only opt-in. Existing raw capture/iOS callers never enable it.
     nonisolated var supportsSharedH264AAC: Bool { get }
+    /// Desktop compositor input already owns a declared cadence. Raw capture
+    /// callers omit this contract and retain the SDK rate filter.
+    func configureProgramVideo(sourceFrameRate: Int) async
     func configureEncodedInput() async -> Bool
     /// Installs the AAC format before the first IDR when the packetizer needs
     /// both formats. This does not publish an audio packet on its own.
@@ -84,6 +87,7 @@ final class SharedEncodedAudio: @unchecked Sendable {
 extension Publisher {
     func encoderInputClockSnapshot() async -> AVClockSnapshot { .unsupported }
     nonisolated var supportsSharedH264AAC: Bool { false }
+    func configureProgramVideo(sourceFrameRate: Int) async {}
     func configureEncodedInput() async -> Bool { false }
     func prepareEncodedAudio(_ audio: SharedEncodedAudio) async {}
     func appendEncodedVideo(_ sample: CMSampleBuffer) async -> Bool { false }

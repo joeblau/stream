@@ -35,6 +35,10 @@ actor RTMPPublisher: Publisher {
         frameRate: settings.encodeFrameRate(maxFrameRate: capability.maxFrameRate)
     )
     private var isRunning = false
+    private var programSourceFrameRate: Int?
+    func configureProgramVideo(sourceFrameRate: Int) {
+        programSourceFrameRate = (1...120).contains(sourceFrameRate) ? sourceFrameRate : nil
+    }
     private var encodedInput = false
     private var encodedNeedsKeyframe = true
     private var settings: StreamSettings = .default
@@ -216,6 +220,7 @@ actor RTMPPublisher: Publisher {
         encoderInputClock.reset()
         self.settings = settings
         await networkController.setExternalEncoding(encodedInput)
+        await networkController.setProgramSourceFrameRate(programSourceFrameRate)
 
         // Keep AAC stable across Bluetooth HFP/built-in route changes.
         let a = AudioCodecSettings(bitRate: settings.audioBitrate,
@@ -814,7 +819,7 @@ actor RTMPPublisher: Publisher {
         // learned rate until the next 1 Hz strategy event.
         v.bitRate = encodedInput ? settings.videoBitrate : min(settings.videoBitrate, await networkController.currentTargetBitRate())
         v.expectedFrameRate = Double(frameRate)
-        v.frameInterval = max(0, (1.0 / Double(frameRate)) - 0.001)
+        v.frameInterval = encodedInput ? 0 : await networkController.currentFrameInterval()
         v.maxKeyFrameIntervalDuration = Int32(min(10, max(1, settings.destinationKeyframeSeconds ?? 2)))
         // VBR (.average), not CBR: a mostly-static screen compresses to near-
         // nothing instead of being padded to the full target, and mid-session
@@ -897,6 +902,13 @@ actor RTMPPublisher: Publisher {
 
     func appendVideo(_ sb: CMSampleBuffer) async {
         guard !encodedInput, outputSizeConfigured, isRunning, !isPaused, streamAttached else { return }
+        if programSourceFrameRate != nil {
+            guard await networkController.admitProgramVideo(at: sb.presentationTimeStamp) else {
+                telemetry.recordDrop(.pacing)
+                return
+            }
+            guard isRunning, !isPaused, streamAttached else { return }
+        }
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastVideoAppendAt = now
@@ -1139,6 +1151,33 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
     /// writes HaishinKit's encoder around it.
     private var abr: AdaptiveBitRateState
     private var externalEncoding = false
+    private var programSourceFrameRate: Int?
+    private var programNextVideoPTS: CMTime = .invalid
+    private var programVideoInterval: CMTime = .invalid
+    private var severeFrameRate = false
+    func setProgramSourceFrameRate(_ fps: Int?) {
+        programSourceFrameRate = fps.flatMap { (1...120).contains($0) ? $0 : nil }
+        programNextVideoPTS = .invalid; programVideoInterval = .invalid
+    }
+    /// The compositor owns source cadence. A minimum-gap SDK filter silently
+    /// drops legitimate short timer intervals at the same declared rate. Keep
+    /// original timestamps; only phase-sample an intentionally slower target.
+    func admitProgramVideo(at pts: CMTime) -> Bool {
+        guard let sourceFPS = programSourceFrameRate else { return true }
+        guard pts.isNumeric else { return false }
+        let rawInterval = abr.frameInterval(severe: severeFrameRate)
+        let targetFPS = max(1, Int((1.0 / (rawInterval + 0.001)).rounded()))
+        guard sourceFPS > targetFPS else { programNextVideoPTS = .invalid; return true }
+        let interval = CMTime(value: 1, timescale: CMTimeScale(targetFPS))
+        if interval != programVideoInterval { programVideoInterval = interval; programNextVideoPTS = .invalid }
+        if programNextVideoPTS.isNumeric, (pts - programNextVideoPTS).seconds < -0.0001 { return false }
+        if !programNextVideoPTS.isNumeric || (pts - programNextVideoPTS).seconds > 1 { programNextVideoPTS = pts + interval }
+        else { repeat { programNextVideoPTS = programNextVideoPTS + interval } while (pts - programNextVideoPTS).seconds >= -0.0001 }
+        return true
+    }
+    private func codecFrameInterval(severe: Bool) -> Double {
+        programSourceFrameRate == nil ? abr.frameInterval(severe: severe) : 0
+    }
     func setExternalEncoding(_ enabled: Bool) { externalEncoding = enabled }
     private var lastEventAt = DispatchTime.now().uptimeNanoseconds   // telemetry only
 
@@ -1196,7 +1235,8 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
         guard !externalEncoding else { return }
         var video = await stream.videoSettings
         video.bitRate = abr.targetBitRate
-        video.frameInterval = abr.frameInterval(severe: decision.severe)
+        severeFrameRate = decision.severe
+        video.frameInterval = codecFrameInterval(severe: decision.severe)
         try? await stream.setVideoSettings(video)
     }
 
@@ -1227,7 +1267,7 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
         abr.onThermalCeiling(bitRateScale: bitRateScale, frameRateCap: frameRateCap)
     }
 
-    func currentFrameInterval() -> Double { abr.frameInterval(severe: false) }
+    func currentFrameInterval() -> Double { codecFrameInterval(severe: false) }
 
     func currentFrameRate() -> Int { abr.currentFrameRate() }
 
@@ -1238,7 +1278,8 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
         guard !externalEncoding else { return }
         var video = await stream.videoSettings
         video.bitRate = abr.targetBitRate
-        video.frameInterval = abr.frameInterval(severe: false)
+        severeFrameRate = false
+        video.frameInterval = codecFrameInterval(severe: false)
         try? await stream.setVideoSettings(video)
     }
 
@@ -1253,7 +1294,8 @@ actor BroadcastAdaptiveBitRateController: StreamBitRateStrategy {
         abr.onThermalCeiling(bitRateScale: bitRateScale, frameRateCap: frameRateCap)
         var video = await stream.videoSettings
         video.bitRate = abr.targetBitRate
-        video.frameInterval = abr.frameInterval(severe: false)
+        severeFrameRate = false
+        video.frameInterval = codecFrameInterval(severe: false)
         try? await stream.setVideoSettings(video)
     }
 

@@ -28,6 +28,7 @@ final class DestinationOutputController: ObservableObject {
     var sharedEncodingEnabled = false
     /// Taken compositor cadence. Unknown or requested higher rates use the
     /// existing separate publisher path rather than claiming generated frames.
+    /// Raw publishers also receive this explicit pre-cadenced input contract.
     var sharedSourceFrameRate: Int?
     private var encoderGroups: [DestinationSharedEncoderKey: DestinationSharedEncoder] = [:]
     private var finishingEncoderGroups: [UUID: DestinationSharedEncoder] = [:]
@@ -133,6 +134,7 @@ final class DestinationOutputController: ObservableObject {
                 self.handle(event, id: id, generation: generation)
             }
         }
+        let programSourceFrameRate = sharedSourceFrameRate
         let startTask = Task { [weak self, encoderGroup] in
             do {
                 if let encoderGroup { try await encoderGroup.prepare() }
@@ -140,6 +142,8 @@ final class DestinationOutputController: ObservableObject {
                 if usesEncoded, !(await publisher.configureEncodedInput()) {
                     throw NSError(domain: "SharedEncoder", code: 1)
                 }
+                guard !Task.isCancelled else { return }
+                if !usesEncoded, let programSourceFrameRate { await publisher.configureProgramVideo(sourceFrameRate: programSourceFrameRate) }
                 guard !Task.isCancelled else { return }
                 try await publisher.start(settings)
                 guard !Task.isCancelled else { return }

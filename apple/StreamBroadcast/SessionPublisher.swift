@@ -39,6 +39,10 @@ actor SessionPublisher: Publisher {
     private var session: (any StreamSession)?
     private var stream: (any StreamConvertible)?
     private var isRunning = false
+    private var programSourceFrameRate: Int?
+    func configureProgramVideo(sourceFrameRate: Int) {
+        programSourceFrameRate = (1...120).contains(sourceFrameRate) ? sourceFrameRate : nil
+    }
     private var encodedInput = false
     private var encodedNeedsKeyframe = true
     private var encodedAudioReady = false
@@ -180,6 +184,7 @@ actor SessionPublisher: Publisher {
         encoderInputClock.reset()
         self.settings = settings
         await networkController.setExternalEncoding(encodedInput)
+        await networkController.setProgramSourceFrameRate(programSourceFrameRate)
         await Self.registerFactories()
 
         if !encodedInput { await applyAudioMixerSettings() }
@@ -716,6 +721,13 @@ actor SessionPublisher: Publisher {
 
     func appendVideo(_ sb: CMSampleBuffer) async {
         guard !encodedInput, outputSizeConfigured, isRunning, !isPaused, stream != nil else { return }
+        if programSourceFrameRate != nil {
+            guard await networkController.admitProgramVideo(at: sb.presentationTimeStamp) else {
+                telemetry.recordDrop(.pacing)
+                return
+            }
+            guard isRunning, !isPaused, stream != nil else { return }
+        }
         let now = DispatchTime.now().uptimeNanoseconds
         lastMediaAt = now
         lastVideoAppendAt = now
