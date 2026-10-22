@@ -21,11 +21,13 @@ struct NativeGuestProgramReturnSource: Sendable {
     let authority: NativeGuestProgramReturnAuthority
     let install: @Sendable (UUID, @escaping Consumer) async -> Bool
     let remove: @Sendable (UUID) async -> Void
+    var videoResources: @Sendable (UUID) -> GuestReturnVideoResources? = { _ in nil }
 }
 struct GuestReturnVideoFrame: @unchecked Sendable {
     let lease: GuestReceiveLease
     let token: UUID
     let sample: CMSampleBuffer
+    var resources: GuestReturnVideoResources? = nil
     var pts: CMTime { sample.presentationTimeStamp }
 }
 
@@ -128,10 +130,15 @@ final class NativeGuestMediaSink: @unchecked Sendable {
     }
     func installReturnVideo(token: UUID, sink: @escaping @Sendable (GuestReturnVideoFrame) -> Void) async -> Bool {
         guard let source = claimedReturnVideo(token) else { return false }
+        let resourcesForToken = source.videoResources
         guard await source.install(token, { [weak self] sample in
-            guard let self else { return }; sink(.init(lease: self.lease, token: token, sample: sample))
+            guard let self else { return }
+            sink(.init(lease: self.lease, token: token, sample: sample, resources: resourcesForToken(token)))
         }) else { clearVideoToken(token); return false }
-        guard retainReturnVideoToken(token, source: source.id) else { await source.remove(token); return false }
+        // A late ACK can race Stop while a previously delivered frame still
+        // occupies the serial codec owner. Only that owner's queued close may
+        // remove the source and release its encoder reservation.
+        guard retainReturnVideoToken(token, source: source.id) else { return false }
         return true
     }
     private func clearVideoToken(_ token: UUID) {

@@ -1415,37 +1415,115 @@ final class StreamController: ObservableObject {
         let program = engine, authority = guestProgramReturnAuthority
         for source in NativeInterviewReturnVideoSource.allCases {
             let canvas: OutputCanvas = source == .secondary ? .secondary : .program
-            let capability = NativeGuestProgramReturnSource(maximumProfile: IsolatedVideoBudget.current.qualified ? .high : .low, authority: authority, install: { [weak self, weak sink] token, consume in
-                let size = await MainActor.run { () -> CGSize? in
+            let maximumProfile: NativeGuestReturnVideoProfile = IsolatedVideoBudget.current.qualified ? .high : .low
+            let delivery = GuestReturnFrameDelivery()
+            let capability = NativeGuestProgramReturnSource(maximumProfile: maximumProfile, authority: authority, install: { [weak self, weak sink] token, consume in
+                let preparation = await MainActor.run { () -> GuestReturnFrameDelivery.Preparation? in
                     guard let self, let sink, sink.videoTokenIsCurrent(token), self.isPipelineRunning,
                           self.guestLease == lease,
                           source != .clean || self.cleanReturnStartError == nil,
+                          delivery.isVacant,
                           self.reserveRecordingEncoders(token, count: 1, canvas: canvas) == nil else { return nil }
-                    if source == .clean { self.guestCleanReturnTokens.insert(token) }
-                    if canvas == .secondary {
-                        self.guestSecondaryReturnTokens.insert(token)
-                        self.reconcileSourceDemand()
+                    let size = canvas == .secondary ? self.activeSecondaryProfile.canvasSize : self.activeProfile.canvasSize
+                    let domain = StableFrameDomainID(workspace: self.rawVideoResourceWorkspaceID, kind: .guestReturn,
+                        outputID: "return-\(source.rawValue)-ingress",
+                        plane: source == .clean ? .clean : canvas == .secondary ? .secondary : .program)
+                    do {
+                        let sourceRequest = try program.sourceFrameResourceRequest(canvasSize: size, canvas: canvas, clean: source == .clean)
+                        let encoderPlan = try GuestReturnVideoResources.plan(workspace: self.rawVideoResourceWorkspaceID,
+                            outputID: "return-\(source.rawValue)", generation: token,
+                            sourceSize: size, maximumProfile: maximumProfile)
+                        // Source4 + private ingress5 + every possible adaptive
+                        // conversion raster are committed before installation
+                        // can expose pixels or the sender can create VT.
+                        let receipt = try RawVideoResourceCoordinator.shared.reserveBatch([sourceRequest,
+                            .init(domain: domain,
+                                descriptor: .init(width: Int(size.width), height: Int(size.height), capacity: 5),
+                                sessionGeneration: token)] + encoderPlan.requests)
+                        do {
+                            guard let bank = receipt.bank(for: domain) else { throw FrameDeliveryFailure.invalidBank }
+                            let resources = try GuestReturnVideoResources(plan: encoderPlan, receipt: receipt)
+                            let sourceReceipt = try receipt.selecting(domain: sourceRequest.domain)
+                            let preparation = GuestReturnFrameDelivery.Preparation(token: token, generation: token,
+                                domain: domain, receipt: receipt, sourceReceipt: sourceReceipt, bank: bank, resources: resources)
+                            guard delivery.begin(preparation) else {
+                                RawVideoResourceCoordinator.shared.rollback(sourceReceipt)
+                                throw FrameDeliveryFailure.cancelled
+                            }
+                            if source == .clean { self.guestCleanReturnTokens.insert(token) }
+                            if canvas == .secondary {
+                                self.guestSecondaryReturnTokens.insert(token)
+                                self.reconcileSourceDemand()
+                            }
+                            return preparation
+                        } catch {
+                            RawVideoResourceCoordinator.shared.rollback(receipt)
+                            throw error
+                        }
+                    } catch {
+                        self.releaseRecordingEncoders(token)
+                        return nil
                     }
-                    return canvas == .secondary ? self.activeSecondaryProfile.canvasSize : self.activeProfile.canvasSize
                 }
-                guard let size else { return false }
-                if source == .clean { await program.addCleanSink(token: token, capacity: 1, authorized: { [weak sink] in sink?.videoTokenIsCurrent(token) == true }) { consume($0.sampleBuffer) } }
-                else { await program.addSink(token: token, capacity: 1, canvas: canvas, canvasSize: canvas == .secondary ? size : nil) { consume($0.sampleBuffer) } }
-                return true
+                guard let preparation else { return false }
+                do {
+                    guard let self else { throw FrameDeliveryFailure.cancelled }
+                    try await self.awaitFrameDeliveryGeometry(canvas: canvas,
+                        expectedSize: CGSize(width: preparation.bank.descriptor.width, height: preparation.bank.descriptor.height))
+                    let installed = try await program.installFrameDelivery(token: token, domain: preparation.domain,
+                        generation: preparation.generation, bank: preparation.bank,
+                        sourceBank: preparation.sourceReceipt.banks.first, sourceReceipt: preparation.sourceReceipt,
+                        capacity: 1, cancellation: preparation.cancellation, canvas: canvas, clean: source == .clean,
+                        authorized: { [weak sink] in sink?.videoTokenIsCurrent(token) == true }) { consume($0.sampleBuffer) }
+                    guard delivery.adopt(installed, preparation: preparation) else {
+                        await program.removeFrameDelivery(installed)
+                        RawVideoResourceCoordinator.shared.rollback(preparation.receipt)
+                        RawVideoResourceCoordinator.shared.rollback(preparation.sourceReceipt)
+                        return false
+                    }
+                    let current = await MainActor.run { [weak self, weak sink] in
+                        self?.guestLease == lease && self?.isPipelineRunning == true
+                            && sink?.videoTokenIsCurrent(token) == true
+                    }
+                    if !current || Task.isCancelled {
+                        preparation.cancellation.cancel()
+                        await program.removeFrameDelivery(installed)
+                        // Sender teardown retains the encoder reservation until
+                        // its serial codec owner has actually closed.
+                        return false
+                    }
+                    return true
+                } catch {
+                    _ = delivery.remove(token: token)
+                    RawVideoResourceCoordinator.shared.rollback(preparation.receipt)
+                    RawVideoResourceCoordinator.shared.rollback(preparation.sourceReceipt)
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.guestSecondaryReturnTokens.remove(token); self.guestCleanReturnTokens.remove(token)
+                        self.releaseRecordingEncoders(token)
+                        if canvas == .secondary { self.reconcileSourceDemand() }
+                    }
+                    return false
+                }
             }, remove: { [weak self] token in
                 let reserved = await MainActor.run {
                     guard let self, self.recordingEncoderReservations.recordings[token] != nil else { return false }
                     return self.guestReturnVideoRemovals.insert(token).inserted
                 }
+                if let preparation = delivery.remove(token: token) {
+                    if let installed = preparation.lease { await program.removeFrameDelivery(installed) }
+                    else { await program.cancelFrameDelivery(token: token) }
+                    RawVideoResourceCoordinator.shared.rollback(preparation.receipt)
+                    RawVideoResourceCoordinator.shared.rollback(preparation.sourceReceipt)
+                }
                 guard reserved else { return }
-                await program.removeSink(token)
                 await MainActor.run {
                     guard let self else { return }
                     self.guestSecondaryReturnTokens.remove(token); self.guestCleanReturnTokens.remove(token)
                     self.releaseRecordingEncoders(token); self.guestReturnVideoRemovals.remove(token)
                     if canvas == .secondary { self.reconcileSourceDemand() }
                 }
-            })
+            }, videoResources: { delivery.resources(for: $0) })
             if source == .program { sink.bindProgramReturn(capability) }
             else if source == .secondary { sink.bindSecondaryReturn(capability) }
             else { sink.bindCleanReturn(capability) }

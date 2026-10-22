@@ -3,6 +3,7 @@ import CoreImage
 import CoreMedia
 import CoreVideo
 import Foundation
+import StreamCore
 import VideoToolbox
 
 private final class ReturnVideoResult: @unchecked Sendable {
@@ -17,7 +18,7 @@ private final class ReturnVideoResult: @unchecked Sendable {
         return sample
     }
 }
-enum NativeGuestReturnVideoError: Error { case accessUnitTooLarge }
+enum NativeGuestReturnVideoError: Error { case accessUnitTooLarge, privateCapacityOccupied }
 struct NativeGuestReturnH264Frame: Sendable {
     let data: Data
     /// Exact RTP packets plus the SDK's per-AU compound sender report.
@@ -39,6 +40,10 @@ final class NativeGuestReturnVideoEncoder {
     private var width = 0, height = 0
     private var nextPTS = CMTime.invalid
     private var forceKeyframe = true
+    private(set) var privateCapacityDrops = 0
+    private let resourceWorkspace = UUID()
+    private var ownedResources: (token: UUID, width: Int, height: Int,
+                                 resources: GuestReturnVideoResources, receipt: RawVideoResourceReceipt)?
     #if STREAM_GUEST_VALIDATION
     var validationBeforeCompletion: (@Sendable () -> Void)?
     private(set) var validationSessionActive = false
@@ -46,7 +51,11 @@ final class NativeGuestReturnVideoEncoder {
     #endif
     private let context = CIContext(options: [.cacheIntermediates: false])
     func requestKeyframe() { forceKeyframe = true }
-    func close() { invalidate(resetCadence: true) }
+    func close() {
+        invalidate(resetCadence: true)
+        if let ownedResources { RawVideoResourceCoordinator.shared.rollback(ownedResources.receipt) }
+        ownedResources = nil
+    }
     private func invalidate(resetCadence: Bool) {
         if let session { VTCompressionSessionInvalidate(session) }
         #if STREAM_GUEST_VALIDATION
@@ -85,16 +94,26 @@ final class NativeGuestReturnVideoEncoder {
         if nextPTS.isNumeric, CMTimeCompare(pts, nextPTS) < 0 { return nil }
         let iw = CVPixelBufferGetWidth(input), ih = CVPixelBufferGetHeight(input)
         guard iw >= 2, ih >= 2, iw <= 8192, ih <= 8192 else { throw NativeGuestReturnAudioError.malformed }
-        let scale = min(1, min(Double(profile.width) / Double(iw), Double(profile.height) / Double(ih)))
-        let w = max(2, Int(Double(iw) * scale) / 2 * 2), h = max(2, Int(Double(ih) * scale) / 2 * 2)
+        let raster = try GuestReturnVideoResources.raster(sourceWidth: iw, sourceHeight: ih, profile: profile)
+        let w = raster.width, h = raster.height
+        // Shipping frames carry the conversion banks admitted by their source
+        // installation. Direct owned callers use the same admission contract
+        // before creating VT, rather than an unbounded CVPixelBufferCreate.
+        let resources = try frame.resources ?? prepareOwnedResources(token: frame.token, width: iw, height: ih)
+        let pixels: CVPixelBuffer
+        do { pixels = try resources.allocate(raster) }
+        catch RawVideoResourceFailure.capacityOccupied {
+            privateCapacityDrops = min(privateCapacityDrops, Int.max - 1) + 1
+            // The sender's existing failure path retires this output. Returning
+            // nil here would report a stalled bank as ordinary cadence shedding.
+            throw NativeGuestReturnVideoError.privateCapacityOccupied
+        }
+        autoreleasepool {
+            let image = CIImage(cvPixelBuffer: input).transformed(by: .init(scaleX: Double(w) / Double(iw), y: Double(h) / Double(ih)))
+            context.render(image, to: pixels, bounds: CGRect(x: 0, y: 0, width: w, height: h), colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        }
         if session == nil || width != w || height != h { try prepare(width: w, height: h) }
         guard let session else { throw NativeGuestReturnAudioError.unavailable }
-        var pixels: CVPixelBuffer?
-        guard CVPixelBufferCreate(nil, w, h, kCVPixelFormatType_32BGRA,
-            [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pixels) == kCVReturnSuccess,
-            let pixels else { throw NativeGuestReturnAudioError.codec }
-        let image = CIImage(cvPixelBuffer: input).transformed(by: .init(scaleX: Double(w) / Double(iw), y: Double(h) / Double(ih)))
-        context.render(image, to: pixels, bounds: CGRect(x: 0, y: 0, width: w, height: h), colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
         let result = ReturnVideoResult()
         let properties = forceKeyframe ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
         guard VTCompressionSessionEncodeFrame(session, imageBuffer: pixels, presentationTimeStamp: pts,
@@ -122,6 +141,20 @@ final class NativeGuestReturnVideoEncoder {
         return .init(data: data, sendBytes: projected,
             rtp: UInt32(truncatingIfNeeded: CMTimeConvertScale(pts, timescale: 90_000, method: .roundHalfAwayFromZero).value),
             ntp: whole << 32 | fraction)
+    }
+    private func prepareOwnedResources(token: UUID, width: Int, height: Int) throws -> GuestReturnVideoResources {
+        if let ownedResources, ownedResources.token == token,
+           ownedResources.width == width, ownedResources.height == height { return ownedResources.resources }
+        let plan = try GuestReturnVideoResources.plan(workspace: resourceWorkspace, outputID: "direct-return",
+            generation: UUID(), sourceSize: CGSize(width: width, height: height), maximumProfile: .high)
+        let receipt = try RawVideoResourceCoordinator.shared.reserveBatch(plan.requests)
+        let resources: GuestReturnVideoResources
+        do { resources = try .init(plan: plan, receipt: receipt) }
+        catch { RawVideoResourceCoordinator.shared.rollback(receipt); throw error }
+        let previous = ownedResources
+        ownedResources = (token, width, height, resources, receipt)
+        if let previous { RawVideoResourceCoordinator.shared.rollback(previous.receipt) }
+        return resources
     }
     private static func containsIDR(_ bytes: [UInt8]) -> Bool {
         var offset = 0

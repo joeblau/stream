@@ -1,0 +1,43 @@
+{
+  "baseCommit": "30f2209199b818cc685a24647a46e5a54263daa3",
+  "date": "2026-10-22",
+  "scope": "Actual owned BGRA/VT resource proof plus separately controlled actual Sink cleanup; no RTC/capture/device/output graph qualification",
+  "sources": {
+    "StreamMac/GuestReturnVideoResources.swift": "ecf21a28570ea7778e56888dcfd960e4a1ff374ea4d7bb5aa3a809e2d55f64d6",
+    "StreamMac/GuestReturnFrameDelivery.swift": "76b0a06f9ff5ffbf2c6858670640ad1eedf77abaf55b7c3c39074ea8a1b93a1e",
+    "StreamMac/NativeGuestMediaSink.swift": "ba8b4e91f90a31a268f847bd2a8dc72403da481e5103bd68dd31ef5659fbf9b0",
+    "StreamMac/NativeGuestReturnVideoEncoder.swift": "bdd5a974e00aa52701992477ba6ef596136b40114ce6e5dfa8d5285fd2c11165",
+    "StreamMac/NativeInterviewReceiverAdapter.swift": "d0b6aa0ea7962faa243295a86a83e414a49191828c951957820da08e05ba06db",
+    "StreamMac/StreamController.swift": "8e287fec9a96e4c3da3ee31336adc86c76bcddab934b9e5f094e1d451a0d6a81",
+    "scripts/guest_return_resource_harness.swift": "d141b21e88f99697802f5cb59d1da9a4968bae4fa41b8f27c52bcac36fda80e4",
+    "scripts/run_guest_return_resource_harness.py": "d90a10338e9f2d9db32f96534cc73b31346153043df12808a3b156d72750f773"
+  },
+  "compiledResourceProof": {
+    "receipt": "/tmp/stream-wave17-guest-return-resource-proof-matched-20261022/receipt.json",
+    "sha256": "d3e2dc0b98c4517e3e06b66607aabb5ec726bc880953a4923b7886bdae4d99f6",
+    "result": "PASS all five cases; packetizer-build/swift-build/runtime exits0",
+    "exactInputSnapshotsBoundByReceipt": true
+  },
+  "initialCompileFailure": {
+    "receipt": "/tmp/stream-wave17-guest-return-resource-proof-initial-20261022/receipt.json",
+    "sha256": "1a66b8372e43920abfc5df24e804981149b195fec41037c6611162b4cae56cd6",
+    "result": "Mismatched in-flight broker/camera converter ABI; Swift compile exit1; no runtime occurred"
+  },
+  "actualSinkProof": {
+    "commit": "ee02d2dfecb25c3c7e9ae54cfc74e30199f33aa4",
+    "receipt": "/tmp/stream-wave17-guest-installation-fence-20261022/apple/docs/GUEST_INSTALLATION_FENCE_2026-10-22.json",
+    "sha256": "06a1d09414bb05f2a828a86bb883f60b283d1fd28cb64da85060d6cc0220ce4e",
+    "fixedPassCases": 3,
+    "oldGuardOnlyNegativeExit": 1
+  },
+  "independentReview": {
+    "path": "/tmp/stream-wave17-guest-return-independent-review-20261022.md",
+    "sha256": "8322d6e2f683a411e4a9f1f86f56167b05ba3b6dbac7aaee743088e390964880",
+    "result": "CLEAR for actual resource/VT and Sink boundaries; Sender ordering source-reviewed"
+  },
+  "integrationPending": [
+    "Combined actual StreamController/App compile with providers geometry API and all other output paths",
+    "Live guest playback/RTC A/V and sustained representative workload qualification"
+  ],
+  "policy": "All exposed banks remain charged after retirement. Only a destroyed never-exposed owned preparation may refund. Source bank receipts transfer into Engine; private/encoder receipts remain endpoint-owned."
+}
