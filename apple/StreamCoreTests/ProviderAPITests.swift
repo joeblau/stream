@@ -272,6 +272,31 @@ private final class ProviderClock: @unchecked Sendable {
         #expect(ProviderChannel.publicLink(URL(string: "https://example.invalid/watch?token=SECRET")) == nil)
         #expect(throws: ProviderFailure.self) { try ProviderAPI.request(.youtube, path: "/../oauth") }
     }
+    @Test("YouTube live request throttling uses bounded cooldown rather than permission repair")
+    func liveRequestRateLimit() throws {
+        let data = Data(#"{"error":{"message":"PRIVATE_ERROR_FIXTURE","errors":[{"reason":"userRequestsExceedRateLimit"}]}}"#.utf8)
+        let cases: [(String?, Double?)] = [("20", 20), ("999999", 86_400), ("-7", 0),
+                                            ("nan", nil), ("inf", nil), ("invalid", nil), (nil, nil)]
+        for (header, expectedDelay) in cases {
+            let response = HTTPURLResponse(url: URL(string: "https://www.googleapis.com/youtube/v3/liveBroadcasts/transition")!,
+                statusCode: 403, httpVersion: nil, headerFields: header.map { ["Retry-After": $0] })!
+            do { try ProviderFailure.check(data: data, response: response); Issue.record("Expected throttling failure") }
+            catch let failure as ProviderFailure {
+                #expect(failure.kind == .rateLimited && failure.retryAfter == expectedDelay)
+                #expect(!failure.localizedDescription.contains("PRIVATE_ERROR_FIXTURE"))
+            }
+        }
+    }
+    @Test("YouTube eligibility, approval and unknown forbidden reasons remain permission failures")
+    func livePermissionFailures() throws {
+        let response = HTTPURLResponse(url: URL(string: "https://www.googleapis.com/youtube/v3/liveBroadcasts")!,
+            statusCode: 403, httpVersion: nil, headerFields: ["Retry-After": "20"])!
+        for reason in ["liveStreamingNotEnabled", "livePermissionBlocked", "insufficientLivePermissions", "unknownFutureReason"] {
+            let data = try JSONSerialization.data(withJSONObject: ["error": ["errors": [["reason": reason]]]])
+            do { try ProviderFailure.check(data: data, response: response); Issue.record("Expected permission failure") }
+            catch let failure as ProviderFailure { #expect(failure.kind == .permission && failure.retryAfter == nil) }
+        }
+    }
     @Test("Public Twitch device flow honors pending, slow_down, scopes and expiry")
     func device() async throws {
         let fixture = ProviderFixture([#"{"device_code":"device+&","user_code":"ABCD","verification_uri":"https://www.twitch.tv/activate","expires_in":60,"interval":2}"#, #"{"message":"authorization_pending"}"#, #"{"message":"slow_down"}"#, #"{"access_token":"access","refresh_token":"rotated","expires_in":3600,"scope":["channel:read:stream_key"]}"#])

@@ -76,6 +76,8 @@ actor ProviderHTTPFixture {
     var refreshGate: CheckedContinuation<Void, Never>?
     var refreshEntered = false
     var apiStatus = 200
+    var apiErrorReason: String?
+    var apiRetryAfter: String?
     var tokenStatus = 200
     var apiOnce401 = false
     var api401Remaining = 0
@@ -86,8 +88,10 @@ actor ProviderHTTPFixture {
     var heldValidationStatus: Int?
     func holdNextValidation(status: Int) { validationEntered = false; heldValidationStatus = status }
     func releaseValidation() { validationGate?.resume(); validationGate = nil }
-    func configure(hold: Bool = false, status: Int = 200, once401: Bool = false, tokenStatus: Int = 200) {
+    func configure(hold: Bool = false, status: Int = 200, once401: Bool = false, tokenStatus: Int = 200,
+                   errorReason: String? = nil, retryAfter: String? = nil) {
         holdRefresh = hold; apiStatus = status; apiOnce401 = once401; self.tokenStatus = tokenStatus
+        apiErrorReason = errorReason; apiRetryAfter = retryAfter
     }
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
@@ -138,12 +142,18 @@ actor ProviderHTTPFixture {
             status = tokenStatus
             if status == 400 { body = #"{"error":"invalid_grant","error_description":"SECRET_FIXTURE"}"# }
         }
+        var headers: [String: String]?
         if host == "www.googleapis.com" || host == "api.twitch.tv" {
             status = apiStatus
             if api401Remaining > 0 { api401Remaining -= 1; status = 401 }
             else if apiOnce401 { apiOnce401 = false; status = 401 }
+            if !(200..<300).contains(status), let apiErrorReason {
+                body = String(decoding: try JSONSerialization.data(withJSONObject:
+                    ["error": ["message": "PRIVATE_ERROR_FIXTURE", "errors": [["reason": apiErrorReason]]]]), as: UTF8.self)
+            }
+            headers = apiRetryAfter.map { ["Retry-After": $0] }
         }
-        return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!)
     }
     func release() { holdRefresh = false; refreshGate?.resume(); refreshGate = nil }
     func count(host: String) -> Int { requests.filter { $0.url?.host == host }.count }
@@ -234,6 +244,9 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--owned-retirement-child" {
             try await persistentRetirementChild(suite: CommandLine.arguments[2]); return
         }
+        if CommandLine.arguments == [CommandLine.arguments[0], "--youtube-rate-limit-only"] {
+            try await nativeYouTubeRateLimit(); return
+        }
         try await persistentRetirement()
         try await loopback()
         try await httpBoundary()
@@ -244,6 +257,7 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         try await sameClientAuthorizationDuringRefresh()
         try await twitchValidationDuringRefresh()
         try await nativeSession()
+        try await nativeYouTubeRateLimit()
         try await nativeChatLateReplies()
         try await nativeChatRevocation()
         try await nativeCrossWorkspaceChatAuthority()
@@ -793,6 +807,67 @@ final class ProviderHTTPServerFixture: @unchecked Sendable {
         catch let failure as ProviderFailure { precondition(failure.kind == .authorization && !failure.localizedDescription.contains("SECRET_FIXTURE")) }
         check(await !vault.hasToken(.twitch))
 
+    }
+    @MainActor static func nativeYouTubeRateLimit() async throws {
+        let http = ProviderHTTPFixture(), credentials = MemoryProviderCredentials(), markers = MemoryProviderRetirement()
+        let vault = ProviderTokenVault(keychain: credentials, retirement: markers.store, transport: { try await http.send($0) })
+        for provider in [ManagedProvider.youtube, .twitch] {
+            let grant = try await vault.configure(provider, clientID: "client")
+            try await vault.accept(.init(access: "rate-limit-fixture", refresh: "refresh", expiresAt: .distantFuture,
+                                         scopes: provider.scopes), provider: provider, generation: grant)
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("provider-rate-limit-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let session = ProviderAccountSession(restream: FixtureRestream(), vault: vault,
+            transport: { try await http.send($0) }, openBrowser: { _ in preconditionFailure("Injected cooldown test opened OAuth") },
+            pendingDirectory: directory)
+        defer { session.shutdown() }
+        await settle { @MainActor in session.snapshot(.youtube).hasCredential && session.snapshot(.twitch).hasCredential }
+        session.refresh(.youtube); session.refresh(.twitch)
+        await settle { @MainActor in session.snapshot(.youtube).verifiedAt != nil && session.snapshot(.twitch).verifiedAt != nil &&
+            !session.snapshot(.youtube).isWorking && !session.snapshot(.twitch).isWorking }
+        let healthyPeer = session.snapshot(.twitch)
+        for reason in ["liveStreamingNotEnabled", "livePermissionBlocked", "insufficientLivePermissions"] {
+            await http.configure(status: 403, errorReason: reason, retryAfter: "120")
+            session.refresh(.youtube)
+            await settle { @MainActor in !session.snapshot(.youtube).isWorking }
+            precondition(session.snapshot(.youtube).failure?.kind == .permission)
+            precondition(session.snapshot(.youtube).retryUntil == nil && session.canRequest(.youtube))
+            precondition(session.snapshot(.youtube).hasCredential, "Eligibility denial discarded the credential")
+        }
+        await http.configure()
+        session.refresh(.youtube)
+        await settle { @MainActor in session.snapshot(.youtube).verifiedAt != nil && !session.snapshot(.youtube).isWorking }
+        await http.configure(status: 403, errorReason: "userRequestsExceedRateLimit", retryAfter: "120")
+        let before = await http.count(host: "www.googleapis.com"), started = Date()
+        session.refresh(.youtube)
+        await settle { @MainActor in !session.snapshot(.youtube).isWorking }
+        let throttled = session.snapshot(.youtube)
+        precondition(throttled.failure?.kind == .rateLimited && throttled.failure?.retryAfter == 120)
+        precondition(throttled.retryUntil?.timeIntervalSince(started) ?? 0 >= 120)
+        precondition(throttled.retryUntil?.timeIntervalSinceNow ?? 0 > 0)
+        precondition(throttled.verifiedAt == nil && throttled.hasCredential && !session.canRequest(.youtube))
+        precondition(throttled.failure?.localizedDescription.contains("PRIVATE_ERROR_FIXTURE") == false)
+        check(await http.count(host: "www.googleapis.com") == before + 1, "Rate-limited GET was retried")
+        precondition(session.snapshot(.twitch).verifiedAt == healthyPeer.verifiedAt &&
+            session.snapshot(.twitch).failure == nil && session.snapshot(.twitch).retryUntil == nil && session.canRequest(.twitch))
+        let afterFailure = await http.count(host: "www.googleapis.com")
+        session.refresh(.youtube)
+        do {
+            _ = try await session.chatRequest(.youtube, ProviderAPI.request(.youtube, path: "/youtube/v3/liveChat/messages"))
+            preconditionFailure("Documented HTTP403 throttling did not suppress chat GET")
+        } catch let failure as ProviderFailure { precondition(failure.kind == .rateLimited && (failure.retryAfter ?? 0) > 0) }
+        check(await http.count(host: "www.googleapis.com") == afterFailure, "Cooldown emitted another provider GET")
+        // The healthy account can still complete a real injected API read while
+        // YouTube remains in cooldown; no external provider is contacted.
+        await http.configure()
+        let twitchBefore = await http.count(host: "api.twitch.tv")
+        session.refresh(.twitch)
+        await settle { @MainActor in !session.snapshot(.twitch).isWorking }
+        check(await http.count(host: "api.twitch.tv") == twitchBefore + 1)
+        precondition(session.snapshot(.twitch).verifiedAt != nil && session.snapshot(.twitch).failure == nil)
+        precondition(!session.canRequest(.youtube))
+        print("PASS: documented YouTube HTTP403 throttling activates bounded cooldown, suppresses repeated metadata/chat GETs, preserves permissions and healthy Twitch reads")
     }
     @MainActor static func nativeSession() async throws {
         let http = ProviderHTTPFixture(), vault = ProviderTokenVault(keychain: MemoryProviderCredentials(), transport: { try await http.send($0) })
