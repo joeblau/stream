@@ -82,7 +82,9 @@ jobs:
           # Exercise actual owned localhost RTMP and independent recording.
           STREAM_DECK_VALIDATE_TRANSPORT=1 zsh scripts/run_studio_deck_native_harness.zsh
       - name: Test browser helper protocol and bounded PCM inlet
-        run: BROWSER_AUDIO_BUILD_PATH=build/desktop zsh scripts/run_browser_audio_helper_harness.zsh
+        run: |
+          BROWSER_AUDIO_BUILD_PATH=build/desktop zsh scripts/run_browser_audio_helper_harness.zsh
+          BROWSER_CAPTURE_AUTHORITY_DERIVED="$PWD/build/desktop" zsh scripts/run_browser_capture_authority_harness.zsh
       - name: Test managed event review and shipping publisher gates
         run: |
           zsh scripts/run_managed_start_harness.zsh
