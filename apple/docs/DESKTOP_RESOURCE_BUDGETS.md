@@ -19,6 +19,9 @@ state reduces it immediately to 5 fps / 640 pixels; sustained severe footprint
 or missed-deadline pressure does so after one second. Monitor image conversion
 cadence follows the same guard. Thirty clear seconds restore one stage at a
 time. Invalid or stale observations cannot restore or escalate the policy.
+Stopping the pipeline clears observation windows and the CPU baseline while
+retaining the last safe preview level. Idle time cannot count as measured
+pressure or recovery, and a new lifecycle requires a fresh CPU delta.
 
 Only the optional preview engine, its secondary raster and monitor conversion
 cadence change. Program geometry, source enables, media clocks, outgoing
@@ -83,6 +86,43 @@ The manual Native performance budgets workflow runs the same bounded workload
 on ARM and Intel hosted Mac runners and retains original evidence. Intel jobs
 reject translated processes; a Rosetta run cannot qualify Intel hardware.
 No workflow was triggered by the local implementation task.
+
+## Quiet-host observations on October 22, 2026
+
+Commit `fd5f1ce` was measured after all collaborating native builds and media
+tests paused. Mac15,8 / M3 Max, 16 logical CPUs, 128 GiB RAM, macOS 27.2
+(26B118), Xcode 27.2 (27B5038j), native arm64 ran both 120-second sampling
+windows. Each contained twelve layers. Both original H.264/AAC recordings
+finalized and decoded with zero writer audio/video drops. The second workload
+actually decoded 3,600 source frames. Its Program compositor missed seven
+deadlines; no render failed. This is an observation, not a zero-drop guarantee.
+
+| Observation | Static owned source mix | Owned compressed replay mix |
+|---|---:|---:|
+| Achieved compositor cadence | 29.9899 fps | 29.9312 fps |
+| Rendered frames | 3,600 | 3,593 |
+| CPU, mean fraction of total logical capacity | 2.776% | 2.901% |
+| Maximum physical footprint | 263.2 MB | 262.4 MB |
+| Maximum actual Metal allocation | 10.94 MB | 22.69 MB |
+| Actual CI Metal kernel mean / maximum | 0.404 / 4.422 ms | 0.477 / 0.563 ms |
+| Maximum main-actor scheduling lag | 15.01 ms | 89.68 ms |
+| Original host-clock duration error | 12.19 ms | 8.38 ms |
+| Observed recording write rate | 0.573 MB/s | 0.576 MB/s |
+| Maximum accepted recording-frontier skew | 30.49 ms | 28.63 ms |
+
+Each case retained 119 actual process samples and 120 completed Metal kernel
+timing samples, with nominal thermal state throughout. The GPU exposed a
+timestamp counter set; process-wide GPU utilization remained unavailable. The
+writer rate is the achieved workload rate, not the disk ceiling. Frontier skew
+and scheduling lag retain the limitations below. The raw original report's
+`seconds` included about seven seconds of final decoding/validation; future
+reports separate actual compositor sampling time and validation time.
+
+[The bounded measurement summary](PERFORMANCE_OWNED_SUSTAINED_2026-10-22.json)
+retains the exact run commit, hardware facts, measured counters and SHA-256
+receipts for both original recordings and the original unmodified report.
+The subsequent lifecycle reset does not change these continuously running
+workloads; the measurements were not repeated or relabeled as a later commit.
 
 ## Qualification limits
 

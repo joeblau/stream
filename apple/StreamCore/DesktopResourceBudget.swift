@@ -41,6 +41,11 @@ public struct DesktopResourceBudget: Sendable {
         // Spend at most a fifth of RAM (4 GiB ceiling) before shedding preview.
         footprintBudgetBytes = StreamCapability.desktopPreviewFootprintBudget(physicalMemory: physicalMemory)
     }
+    /// Idle time is not observed pressure or observed recovery. Preserve the
+    /// last safe preview level, then require fresh evidence after restart.
+    public mutating func resetObservations() {
+        pressureSince = nil; severeSince = nil; clearSince = nil; lastTime = nil
+    }
     @discardableResult public mutating func update(_ sample: Observation) -> PreviewLevel {
         guard sample.time.isFinite, sample.cpuFraction.isFinite, sample.cpuFraction >= 0,
               sample.programMissFraction.isFinite, (0...1).contains(sample.programMissFraction),
