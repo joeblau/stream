@@ -13,6 +13,13 @@ private final class Counts: @unchecked Sendable {
     func get(_ key: String) -> Int { lock.lock(); defer { lock.unlock() }; return values[key, default: 0] }
 }
 
+private final class ProducerHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: VirtualCameraProducer?
+    func set(_ producer: VirtualCameraProducer?) { lock.lock(); value = producer; lock.unlock() }
+    func get() -> VirtualCameraProducer? { lock.lock(); defer { lock.unlock() }; return value }
+}
+
 private final class HeldConsumer: @unchecked Sendable {
     private let lock = NSLock()
     let release = DispatchSemaphore(value: 0)
@@ -98,6 +105,11 @@ private final class HeldConsumer: @unchecked Sendable {
         return queue!
     }
 
+    @inline(never) static func enqueueOwnedCamera(_ producer: VirtualCameraProducer, bank: RawVideoResourceBank) throws {
+        let pixels = try bank.allocatePixelBuffer()
+        producer.appendPrepared(try sample(pixels, duration: CMTime(value: 1, timescale: 30)))
+    }
+
     static func main() async throws {
         let converter = FrameDeliveryConverter()
         let sourceBank = try bank("copy-source", width: 96, height: 48, capacity: 4)
@@ -150,7 +162,7 @@ private final class HeldConsumer: @unchecked Sendable {
         try check(rgb(camera, 640, 100) == (0, 0, 0) && rgb(camera, 400, 360).0 > 245 && rgb(camera, 880, 360).1 > 245, "camera preserves selected-canvas two-stage fit")
         try check(camera.presentationTimeStamp == original.presentationTimeStamp && camera.duration == CMTime(value: 1, timescale: 30) && !camera.decodeTimeStamp.isValid, "camera retains original PTS and negotiated 30fps timing")
         let q = try queue(), stops = Counts()
-        let producer = try VirtualCameraProducer(validationQueue: q, format: .hd720, cadence: cameraCadence, stopStream: { stops.add("stop") })
+        let producer = try VirtualCameraProducer(validationQueue: q, format: .hd720, cadence: cameraCadence, stopStream: { stops.add("stop"); return noErr })
         producer.appendPrepared(camera)
         try check(CMSimpleQueueGetCount(q) == 1 && producer.statistics.sent == 1, "actual private camera sample enqueued")
         producer.appendPrepared(camera)
@@ -172,6 +184,64 @@ private final class HeldConsumer: @unchecked Sendable {
                   "failed full-queue enqueue does not advance the pre-conversion cadence")
         producer.stop(); producer.stop(); producer.appendPrepared(camera)
         try check(CMSimpleQueueGetCount(q) == 0 && stops.get("stop") == 1 && producer.statistics.sent == 2, "camera stop drains ownership and refuses late private frames")
+
+        let failedQueue = try queue(), failedStops = Counts()
+        let stopBank = try bank("stop-retained-bank4", width: 1280, height: 720, capacity: 4)
+        let failedProducer = try VirtualCameraProducer(validationQueue: failedQueue, format: .hd720, stopStream: {
+            failedStops.add("native-stop")
+            return failedStops.get("allow-stop") == 0 ? -50 : noErr
+        })
+        failedProducer.bindRetirement(revoke: { failedStops.add("revoke") }, completion: { failedStops.add("cleanup") })
+        try enqueueOwnedCamera(failedProducer, bank: stopBank)
+        let occupied = try (0..<3).map { _ in try stopBank.allocatePixelBuffer() }
+        try check(failedProducer.stop() == .unconfirmed(-50) && CMSimpleQueueGetCount(failedQueue) == 1,
+                  "failed native stop leaves the actual queued sample pointer untouched")
+        failedProducer.appendPrepared(camera)
+        try check(failedProducer.stop() == .unconfirmed(-50) && failedStops.get("native-stop") == 1
+                  && failedStops.get("revoke") == 1 && failedStops.get("cleanup") == 0 && CMSimpleQueueGetCount(failedQueue) == 1,
+                  "failed stop revokes ingress, retains admission, and repeated default stop never retries")
+        do { _ = try stopBank.allocatePixelBuffer(); throw Failure(description: "failed stop freed queued private storage") }
+        catch RawVideoResourceFailure.capacityOccupied { }
+        do { _ = try VirtualCameraProducer(validationQueue: queue(), format: .hd720); throw Failure(description: "fresh camera bypassed unconfirmed transport") }
+        catch is VirtualCameraProducer.Failure { }
+        failedStops.add("allow-stop")
+        try check(failedProducer.stop(retry: true) == .confirmed && CMSimpleQueueGetCount(failedQueue) == 0
+                  && failedStops.get("native-stop") == 2 && failedStops.get("cleanup") == 1,
+                  "one explicit successful retry drains the old queue and completes its exact admission once")
+        let reclaimed = try stopBank.allocatePixelBuffer()
+        withExtendedLifetime((occupied, reclaimed)) {}
+
+        let orphanQueue = try queue(), orphanStops = Counts()
+        var orphan: VirtualCameraProducer? = try VirtualCameraProducer(validationQueue: orphanQueue, format: .hd720, stopStream: {
+            orphanStops.add("native-stop"); return orphanStops.get("allow-stop") == 0 ? -51 : noErr
+        })
+        orphan!.bindRetirement(revoke: {}, completion: { orphanStops.add("cleanup") })
+        orphan!.appendPrepared(camera)
+        try check(orphan!.stop() == .unconfirmed(-51), "owned orphan enters failed retirement")
+        orphan = nil
+        try check(VirtualCameraProducer.hasUnconfirmedStop && orphanStops.get("native-stop") == 1
+                  && orphanStops.get("cleanup") == 0 && CMSimpleQueueGetCount(orphanQueue) == 1,
+                  "producer deinit preserves quarantined queue and admission without automatic retry")
+        orphanStops.add("allow-stop")
+        try check(VirtualCameraProducer.retryQuarantinedStop() == .confirmed && orphanStops.get("cleanup") == 1
+                  && CMSimpleQueueGetCount(orphanQueue) == 0, "exact orphaned transport can be explicitly retired")
+
+        let nativeGate = DispatchSemaphore(value: 0), heldStops = Counts(), holder = ProducerHolder()
+        let heldProducer = try VirtualCameraProducer(validationQueue: queue(), format: .hd720, stopStream: {
+            _ = holder.get()?.statistics // A synchronous callback can take the ingress lock.
+            heldStops.add("entered")
+            _ = nativeGate.wait(timeout: .now() + 2)
+            return noErr
+        })
+        holder.set(heldProducer)
+        let heldStop = Task.detached { heldProducer.stop() }
+        try await wait({ heldStops.get("entered") == 1 }, "native stop reenters statistics without deadlock")
+        try check(heldProducer.stop() == .inProgress, "overlapping stop does not create a second native call")
+        do { _ = try VirtualCameraProducer(validationQueue: queue(), format: .hd720); throw Failure(description: "fresh camera bypassed held native stop") }
+        catch is VirtualCameraProducer.Failure { }
+        nativeGate.signal()
+        try check(await heldStop.value == .confirmed, "held exact native stop confirms before replacement admission")
+        holder.set(nil)
         let fourthSource = try sample(source, pts: original.presentationTimeStamp + CMTime(value: 3, timescale: 30))
         let cameraHeld = [camera, secondCamera, thirdCamera,
             try converter.prepare(fourthSource, into: cameraBank.allocatePixelBuffer(), transfer: .virtualCameraBGRA(referenceCanvas: nil))]
@@ -217,10 +287,12 @@ private final class HeldConsumer: @unchecked Sendable {
         let controllerSources = EngineSourceResources(), controllerWorkspace = UUID()
         var attempt = 0
         let controller = VirtualCameraOutputController(observeSystem: false,
-            deviceProbe: { fatalError("unexpected real device probe") }, producerFactory: { format, cadence in
+            deviceProbe: { false }, producerFactory: { format, cadence in
                 try check(transport.get("source-prepared") > transport.get("factory"), "source4 admitted before native factory")
                 transport.add("factory")
-                return try VirtualCameraProducer(validationQueue: queue(), format: format, cadence: cadence, stopStream: { transport.add("stop") })
+                return try VirtualCameraProducer(validationQueue: queue(), format: format, cadence: cadence, stopStream: {
+                    transport.add("stop"); return transport.get("allow-stop") == 0 ? -52 : noErr
+                })
             }, prepare: { format, _ in
                 attempt += 1; let isFirst = attempt == 1
                 let size = CGSize(width: 96, height: 48)
@@ -241,8 +313,10 @@ private final class HeldConsumer: @unchecked Sendable {
                         capacity: 1, cancellation: ticket) { consume($0.sampleBuffer) }
                     try controllerSources.commit(sourceBank, receipt: sourceReceipt, size: size, canvas: .program, clean: false)
                     if isFirst { await gate.wait() }
-                }, cancel: {
+                }, revoke: { ticket.cancel() }, cancel: {
                     ticket.cancel()
+                    guard !state.cancelled else { return }; state.cancelled = true
+                    transport.add("cancel")
                     if let lease = state.lease { controllerBroker.remove(lease) }
                     RawVideoResourceCoordinator.shared.rollback(sourceReceipt)
                     RawVideoResourceCoordinator.shared.rollback(privateReceipt)
@@ -253,13 +327,45 @@ private final class HeldConsumer: @unchecked Sendable {
         try await wait({ gate.entered }, "first installation ACK held")
         try check(controller.isPreparing && !controller.isActive, "camera remains preparing until actual install ACK")
         controller.stop(); controller.start(programAvailable: true)
+        try check(controller.cleanupRequired && transport.get("factory") == 1 && transport.get("cancel") == 0,
+                  "held-install stop failure retains admission and refuses fresh start before preparation")
+        controller.refresh()
+        try check(!controller.deviceAvailable && controller.cleanupRequired && transport.get("stop") == 1,
+                  "discovery false is not a stop acknowledgement or an automatic retry")
+        controller.removeExtension()
+        try check(controller.activation == .unknown && controller.cleanupRequired && transport.get("stop") == 1,
+                  "deactivation submission cannot bypass unconfirmed cleanup")
+        transport.add("allow-stop"); controller.retryStop()
+        try await wait({ transport.get("cancel") == 1 }, "confirmed old stop releases exact admission")
+        controller.start(programAvailable: true)
         try await wait({ controller.isActive }, "fresh camera installation")
         gate.release()
         for _ in 0..<10 { await Task.yield() }
-        try check(controller.isActive && !controller.isPreparing && transport.get("factory") == 2 && transport.get("stop") == 1, "late canceled ACK cannot stop or reactivate a replacement camera")
+        try check(controller.isActive && !controller.isPreparing && transport.get("factory") == 2 && transport.get("stop") == 2, "late canceled ACK cannot stop or reactivate a replacement camera")
         controller.stop()
-        try check(transport.get("stop") == 2, "both exact native lifetimes close once")
+        try check(transport.get("stop") == 3, "replacement native lifetime closes once after old explicit retry")
+        try await wait({ transport.get("cancel") == 2 }, "both exact controller admissions release")
+
+        let installFailure = Counts()
+        let rejected = VirtualCameraOutputController(observeSystem: false, deviceProbe: { false }, producerFactory: { format, cadence in
+            try VirtualCameraProducer(validationQueue: queue(), format: format, cadence: cadence, stopStream: {
+                installFailure.add("stop"); return installFailure.get("allow-stop") == 0 ? -53 : noErr
+            })
+        }, prepare: { format, _ in
+            let resource = try bank("failed-install-bank", width: format.width, height: format.height, capacity: 4)
+            return VirtualCameraFrameAdmission(bank: resource, cadence: FrameDeliveryCameraCadence(), install: { _ in
+                throw Failure(description: "owned install rejection")
+            }, revoke: { installFailure.add("revoke") }, cancel: { installFailure.add("cleanup") })
+        })
+        rejected.start(programAvailable: true)
+        try await wait({ rejected.cleanupRequired }, "install rejection retains failed native stop")
+        try check(!rejected.isActive && !rejected.isPreparing && installFailure.get("cleanup") == 0,
+                  "install-failure catch does not release unconfirmed transport admission")
+        rejected.shutdown()
+        try check(installFailure.get("stop") == 1, "shutdown does not retry a previously failed stop")
+        installFailure.add("allow-stop"); rejected.retryStop()
+        try await wait({ installFailure.get("cleanup") == 1 }, "failed-install admission retires after explicit success")
         withExtendedLifetime(cameraHeld) {}
-        print("PASS: actual admitted private BGRA/IOSurface copy, unchanged clocks and bounded recording metadata, completed fit/sRGB/camera conversion, camera bank4, real CMSimpleQueue pacing/drain, real broker source4 stays available during held opaque callback, pre-factory refusal and held-install cancellation/restart. Selected CMIO effects inert; no device/session/activation/capture/network APIs executed.")
+        print("PASS: actual admitted private BGRA/IOSurface copy, unchanged clocks and bounded recording metadata, completed fit/sRGB/camera conversion, camera bank4, real CMSimpleQueue pacing/drain, failed-stop pointer/private-storage/admission retention, explicit retry, orphaned transport, reentrant/held native stop, real broker source4 available during held callback, pre-factory refusal, failed install and stale ACK restart fences. Selected CMIO effects inert; no device/session/activation/capture/network APIs executed.")
     }
 }

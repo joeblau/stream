@@ -53,6 +53,18 @@ incoming samples must match the negotiated 720p/1080p dimensions and be ready
 before entering the mailbox. Late old-format buffers cannot restore the old
 image while the camera is waiting for its newly negotiated input.
 
+Stopping revokes producer ingress immediately. Only a successful native
+`CMIODeviceStopStream` result permits the studio to drain its queue and release
+the exact video admission after broker removal. An unconfirmed stop retains
+that transport's queue, queued sample ownership and bank/source claims; it
+blocks another camera start and extension changes. The main window offers
+**Retry Camera Stop**, with one native attempt per explicit action. Refresh,
+device discovery failure, sleep, shutdown and deinit do not retry or establish
+cleanup success. The process retains at most one camera transport lifetime;
+even a released controller cannot drop its unconfirmed queue. This conservative
+failure handling does not assert that any particular native error means the
+consumer is still active. Installed transport cleanup remains an acceptance gate.
+
 ### Signing, activation and distribution
 
 The host has `com.apple.developer.system-extension.install`; both bundles have

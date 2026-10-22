@@ -13,15 +13,100 @@ enum VirtualCameraFormat: String, CaseIterable, Sendable {
 /// sink stream. The framework performs IPC to the sandboxed role-user daemon.
 final class VirtualCameraProducer: @unchecked Sendable {
     struct Failure: Error { var message: String }
-    private let lock = NSLock()
-    private let queue: CMSimpleQueue
-    private let format: VirtualCameraFormat
-    private let cadence: FrameDeliveryCameraCadence
-    private let stopStream: @Sendable () -> Void
-    private var accepting = true
-    private var lastPTS = CMTime.invalid
-    private var sent: UInt64 = 0
-    private var dropped: UInt64 = 0
+    enum StopResult: Equatable, Sendable {
+        case confirmed, unconfirmed(OSStatus), inProgress
+    }
+    /// One native stream lifetime per process. A failed stop retains its exact
+    /// transport core (queue, queued sample retains and admission completion).
+    /// Keeping the core rather than a deinitializing producer avoids resurrection.
+    private final class Registry: @unchecked Sendable {
+        static let shared = Registry()
+        private let lock = NSLock()
+        private var reservation: UUID?
+        private var pending: Transport?
+        func reserve() throws -> UUID {
+            lock.lock(); defer { lock.unlock() }
+            guard reservation == nil else { throw Failure(message: "The previous camera transport still owns its stream. Stop it or retry its unconfirmed cleanup before starting another camera.") }
+            let id = UUID(); reservation = id; return id
+        }
+        func release(_ id: UUID) {
+            lock.lock(); defer { lock.unlock() }
+            guard reservation == id else { return }
+            reservation = nil; pending = nil
+        }
+        func quarantine(_ transport: Transport) {
+            lock.lock(); defer { lock.unlock() }
+            guard reservation == transport.id else { return }
+            pending = transport
+        }
+        var occupied: Bool { lock.lock(); defer { lock.unlock() }; return reservation != nil }
+        var quarantined: Transport? { lock.lock(); defer { lock.unlock() }; return pending }
+    }
+    private final class Transport: @unchecked Sendable {
+        let id: UUID
+        let queue: CMSimpleQueue
+        let format: VirtualCameraFormat
+        let cadence: FrameDeliveryCameraCadence
+        let stopStream: @Sendable () -> OSStatus
+        let lock = NSLock()
+        var accepting = true
+        var stopped = false
+        var stopping = false
+        var failedStatus: OSStatus?
+        var revoke: (@Sendable () -> Void)?
+        var completion: (@Sendable () -> Void)?
+        var lastPTS = CMTime.invalid
+        var sent: UInt64 = 0
+        var dropped: UInt64 = 0
+        init(id: UUID, queue: CMSimpleQueue, format: VirtualCameraFormat,
+             cadence: FrameDeliveryCameraCadence, stopStream: @escaping @Sendable () -> OSStatus) {
+            self.id = id; self.queue = queue; self.format = format; self.cadence = cadence; self.stopStream = stopStream
+        }
+        func bind(revoke: @escaping @Sendable () -> Void, completion: @escaping @Sendable () -> Void) {
+            lock.lock()
+            precondition(self.revoke == nil && self.completion == nil && !stopped && !stopping)
+            self.revoke = revoke; self.completion = completion
+            lock.unlock()
+        }
+        func stop(retry: Bool) -> StopResult {
+            lock.lock()
+            accepting = false
+            if stopped { lock.unlock(); return .confirmed }
+            if stopping { lock.unlock(); return .inProgress }
+            if let failedStatus, !retry { lock.unlock(); return .unconfirmed(failedStatus) }
+            stopping = true
+            let revoke = self.revoke
+            lock.unlock()
+            revoke?()
+            // CMIO may call back synchronously: never hold our ingress lock
+            // across the native stop. No new enqueue can pass accepting=false.
+            let status = stopStream()
+            lock.lock()
+            stopping = false
+            guard status == noErr else {
+                failedStatus = status
+                lock.unlock()
+                Registry.shared.quarantine(self)
+                // CMSimpleQueue permits one dequeueing thread. A failed stop
+                // does not authorize us to compete with its native consumer.
+                return .unconfirmed(status)
+            }
+            stopped = true; failedStatus = nil
+            while let element = CMSimpleQueueDequeue(queue) { Unmanaged<CMSampleBuffer>.fromOpaque(element).release() }
+            let completion = self.completion
+            self.revoke = nil; self.completion = nil
+            lock.unlock()
+            Registry.shared.release(id)
+            completion?()
+            return .confirmed
+        }
+    }
+    private let transport: Transport
+    static var hasOutstandingTransport: Bool { Registry.shared.occupied }
+    static var hasUnconfirmedStop: Bool { Registry.shared.quarantined != nil }
+    @discardableResult static func retryQuarantinedStop() -> StopResult {
+        Registry.shared.quarantined?.stop(retry: true) ?? .confirmed
+    }
     static func address(_ selector: CMIOObjectPropertySelector, scope: CMIOObjectPropertyScope = CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal)) -> CMIOObjectPropertyAddress {
         CMIOObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
     }
@@ -47,11 +132,11 @@ final class VirtualCameraProducer: @unchecked Sendable {
     /// Resource admission and the broker's target-sized bank are prepared by
     /// the controller before this constructor can touch the CMIO device.
     init(format: VirtualCameraFormat, cadence: FrameDeliveryCameraCadence = FrameDeliveryCameraCadence()) throws {
+        let reservation = try Registry.shared.reserve()
+        var committed = false
+        defer { if !committed { Registry.shared.release(reservation) } }
         guard let target = Self.discover() else { throw Failure(message: "Activate Stream Studio Camera and refresh its device state first.") }
         let device = target.device, stream = target.sink
-        self.format = format
-        self.cadence = cadence
-        stopStream = { CMIODeviceStopStream(device, stream) }
         var description: CMVideoFormatDescription?
         guard CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA,
             width: Int32(format.width), height: Int32(format.height), extensions: nil, formatDescriptionOut: &description) == noErr,
@@ -63,51 +148,54 @@ final class VirtualCameraProducer: @unchecked Sendable {
         }
         var bufferQueue: Unmanaged<CMSimpleQueue>?
         guard CMIOStreamCopyBufferQueue(stream, nil, nil, &bufferQueue) == noErr, let bufferQueue else { throw Failure(message: "The camera input queue is unavailable.") }
-        queue = bufferQueue.takeRetainedValue()
-        guard CMSimpleQueueGetCapacity(queue) <= 2 else { throw Failure(message: "The camera input queue exceeds its supported capacity.") }
+        let queue = bufferQueue.takeRetainedValue()
+        guard CMSimpleQueueGetCapacity(queue) > 0, CMSimpleQueueGetCapacity(queue) <= 2 else { throw Failure(message: "The camera input queue exceeds its supported capacity.") }
         guard CMIODeviceStartStream(device, stream) == noErr else { throw Failure(message: "The signed studio could not start the extension's input stream.") }
+        transport = Transport(id: reservation, queue: queue, format: format, cadence: cadence,
+                              stopStream: { CMIODeviceStopStream(device, stream) })
+        committed = true
     }
     #if STREAM_NATIVE_VALIDATION
     /// Only the selected CMIO transport effects are inert. The production
     /// queue ownership, format checks, cadence, enqueue and stop drain execute.
     init(validationQueue: CMSimpleQueue, format: VirtualCameraFormat,
-         cadence: FrameDeliveryCameraCadence = FrameDeliveryCameraCadence(), stopStream: @escaping @Sendable () -> Void = {}) throws {
+         cadence: FrameDeliveryCameraCadence = FrameDeliveryCameraCadence(), stopStream: @escaping @Sendable () -> OSStatus = { noErr }) throws {
         guard CMSimpleQueueGetCapacity(validationQueue) > 0, CMSimpleQueueGetCapacity(validationQueue) <= 2 else {
             throw Failure(message: "The camera input queue exceeds its supported capacity.")
         }
-        queue = validationQueue; self.format = format; self.cadence = cadence; self.stopStream = stopStream
+        transport = Transport(id: try Registry.shared.reserve(), queue: validationQueue, format: format, cadence: cadence, stopStream: stopStream)
     }
     #endif
-    var statistics: (sent: UInt64, dropped: UInt64) { lock.lock(); defer { lock.unlock() }; return (sent, dropped) }
+    func bindRetirement(revoke: @escaping @Sendable () -> Void, completion: @escaping @Sendable () -> Void) {
+        transport.bind(revoke: revoke, completion: completion)
+    }
+    var statistics: (sent: UInt64, dropped: UInt64) {
+        transport.lock.lock(); defer { transport.lock.unlock() }; return (transport.sent, transport.dropped)
+    }
     /// Accepts ONLY the broker's completed target-sized private sample. There
     /// is no compositor frame, CI image, conversion task or source borrow in
     /// scope when the opaque CMIO queue is called.
     func appendPrepared(_ sample: CMSampleBuffer) {
+        let lock = transport.lock, queue = transport.queue, format = transport.format
         lock.lock(); defer { lock.unlock() }
-        guard accepting else { return }
+        guard transport.accepting else { return }
         guard CMSampleBufferDataIsReady(sample), CMSampleBufferGetNumSamples(sample) == 1,
               let input = CMSampleBufferGetImageBuffer(sample),
               CVPixelBufferGetPixelFormatType(input) == kCVPixelFormatType_32BGRA,
               CVPixelBufferGetWidth(input) == format.width, CVPixelBufferGetHeight(input) == format.height,
-              CMTimeCompare(CMSampleBufferGetDuration(sample), CMTime(value: 1, timescale: 30)) == 0 else { dropped += 1; return }
+              CMTimeCompare(CMSampleBufferGetDuration(sample), CMTime(value: 1, timescale: 30)) == 0 else { transport.dropped += 1; return }
         let pts = CMSampleBufferGetPresentationTimeStamp(sample)
-        guard pts.isNumeric else { dropped += 1; return }
-        if lastPTS.isValid, CMTimeCompare(CMTimeSubtract(pts, lastPTS), CMTime(value: 1, timescale: 30)) < 0 { return }
-        guard CMSimpleQueueGetCount(queue) < CMSimpleQueueGetCapacity(queue) else { dropped += 1; return }
+        guard pts.isNumeric else { transport.dropped += 1; return }
+        if transport.lastPTS.isValid, CMTimeCompare(CMTimeSubtract(pts, transport.lastPTS), CMTime(value: 1, timescale: 30)) < 0 { return }
+        guard CMSimpleQueueGetCount(queue) < CMSimpleQueueGetCapacity(queue) else { transport.dropped += 1; return }
         let retained = Unmanaged.passRetained(sample)
         if CMSimpleQueueEnqueue(queue, element: retained.toOpaque()) == noErr {
-            sent += 1; lastPTS = pts; cadence.didEnqueue(pts)
+            transport.sent += 1; transport.lastPTS = pts; transport.cadence.didEnqueue(pts)
         }
-        else { retained.release(); dropped += 1 }
+        else { retained.release(); transport.dropped += 1 }
     }
-    func stop() {
-        lock.lock(); defer { lock.unlock() }
-        guard accepting else { return }
-        accepting = false
-        stopStream()
-        // StopStream closes this producer's IPC stream before queued ownership
-        // is reclaimed; other camera consumers continue with black frames.
-        while let element = CMSimpleQueueDequeue(queue) { Unmanaged<CMSampleBuffer>.fromOpaque(element).release() }
+    @discardableResult func stop(retry: Bool = false) -> StopResult {
+        transport.stop(retry: retry)
     }
     deinit { stop() }
 }
