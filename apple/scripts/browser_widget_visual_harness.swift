@@ -34,7 +34,7 @@ extension BrowserAudioHelperHarness {
         let mixer = AudioMixEngine()
         let channel = AudioChannelID.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID)
         await mixer.setChannelGain(channel, volume: 1, isMuted: false)
-        let session = BrowserWidgetHelperSession(applicationURL: build.appendingPathComponent("StreamBrowserAudioHelper.app"), mixer: mixer) {
+        let session = BrowserWidgetHelperSession(applicationURL: build.appendingPathComponent("StreamBrowserAudioHelper.app"), mixer: mixer, ipcPolicy: .prototypeForQualification) {
             raw.append($0); mixer.enqueue(channel, $0)
         }
         session.prepareMixerForAudio = {

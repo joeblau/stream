@@ -110,7 +110,7 @@ source=source.replace(needle,needle+'            }\n',1)
 for suffix in ['', '.entered', '.release']:
     (folder/('retirement-gate'+suffix)).unlink(missing_ok=True)
 PYHELPER
-swiftc -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
+swiftc -j2 -DSTREAM_NATIVE_VALIDATION -target "$(uname -m)-apple-macos14.0" -swift-version 6 -parse-as-library -O \
   StreamMac/BrowserWidgetAudioProtocol.swift StreamMac/BrowserWidgetAudioSocket.swift StreamMac/BrowserWidgetVisualProtocol.swift StreamMac/BrowserWidgetRasterizer.swift "$LIFECYCLE_DIR/BrowserLifecycleHelper.swift" \
   -o "$HELPER_APP/Contents/MacOS/StreamBrowserAudioHelper"
 swiftc -swift-version 6 scripts/studio_accessibility_client.swift -o "$LIFECYCLE_DIR/BrowserOperatorAXClient"

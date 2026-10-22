@@ -44,6 +44,7 @@ protocol BrowserWidgetHelperTransport: AnyObject {
     var helperPID: Int32? { connection?.pid }
     var audioIsCapturing: Bool { audio.isCapturing }
     private let applicationURL: URL
+    private let ipcPolicy: BrowserWidgetAudioSocket.Policy
     private let acceptsInjectedReplies: Bool
     private let audio: any BrowserWidgetAudioDriver
     private let mixer: AudioMixEngine?
@@ -84,9 +85,10 @@ protocol BrowserWidgetHelperTransport: AnyObject {
     private var evaluations: [UUID: CheckedContinuation<String?, Never>] = [:]
 
     init(applicationURL: URL, mixer: AudioMixEngine? = nil,
+         ipcPolicy: BrowserWidgetAudioSocket.Policy = .production,
          transportForQualification: (any BrowserWidgetHelperTransport)? = nil,
          audioSink: @escaping @Sendable (CMSampleBuffer) -> Void) {
-        self.applicationURL = applicationURL; self.mixer = mixer
+        self.applicationURL = applicationURL; self.mixer = mixer; self.ipcPolicy = ipcPolicy
         self.connection = transportForQualification
         acceptsInjectedReplies = transportForQualification != nil
         audio = BrowserWidgetAudioCapture(mixer: mixer, sink: audioSink)
@@ -95,8 +97,9 @@ protocol BrowserWidgetHelperTransport: AnyObject {
     }
     #if STREAM_NATIVE_VALIDATION
     init(applicationURL: URL, mixer: AudioMixEngine, validationAudioDriver: any BrowserWidgetAudioDriver,
+         ipcPolicy: BrowserWidgetAudioSocket.Policy = .production,
          transportForQualification: (any BrowserWidgetHelperTransport)? = nil) {
-        self.applicationURL = applicationURL; self.mixer = mixer; audio = validationAudioDriver
+        self.applicationURL = applicationURL; self.mixer = mixer; self.ipcPolicy = ipcPolicy; audio = validationAudioDriver
         connection = transportForQualification; acceptsInjectedReplies = transportForQualification != nil
         audio.onFailure = { [weak self] category in self?.failSession(category) }
         mixer.setCaptureRouteAllowed(channel, allowed: false)
@@ -106,9 +109,9 @@ protocol BrowserWidgetHelperTransport: AnyObject {
         receive(reply, epoch: epoch)
     }
     #endif
-    convenience init(applicationURL: URL, mixer: AudioMixEngine) {
+    convenience init(applicationURL: URL, mixer: AudioMixEngine, ipcPolicy: BrowserWidgetAudioSocket.Policy = .production) {
         let channel = AudioChannelID.application(bundleID: BrowserWidgetAudioIdentity.helperBundleID)
-        self.init(applicationURL: applicationURL, mixer: mixer) { mixer.enqueue(channel, $0) }
+        self.init(applicationURL: applicationURL, mixer: mixer, ipcPolicy: ipcPolicy) { mixer.enqueue(channel, $0) }
     }
     /// Packaged helper lookup has no launch or permission side effects.
     static func packagedHelperURL(bundle: Bundle = .main) -> URL? {
@@ -365,7 +368,7 @@ protocol BrowserWidgetHelperTransport: AnyObject {
               !audio.requiresScreenCaptureAccess || CGPreflightScreenCaptureAccess() else { throw SessionError.unavailable }
         let expected = epoch
         let task = Task {
-            let connection = try await BrowserWidgetHelperConnection.launch(applicationURL: applicationURL,
+            let connection = try await BrowserWidgetHelperConnection.launch(applicationURL: applicationURL, policy: ipcPolicy,
                 onReply: { [weak self] in self?.receive($0, epoch: expected) },
                 onFrame: { [weak self] in self?.receive($0, pixels: $1, epoch: expected) },
                 onClosed: { [weak self] in if self?.epoch == expected { self?.failSession("helper_disconnected") } })
@@ -502,18 +505,30 @@ private final class BrowserWidgetHelperConnection: BrowserWidgetHelperTransport,
         var noSignal: Int32 = 1
         setsockopt(command.fileDescriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
     }
-    @MainActor static func launch(applicationURL: URL, onReply: @escaping @MainActor @Sendable (BrowserWidgetAudioReply) -> Void,
+    @MainActor static func launch(applicationURL: URL, policy: BrowserWidgetAudioSocket.Policy, onReply: @escaping @MainActor @Sendable (BrowserWidgetAudioReply) -> Void,
                        onFrame: @escaping @MainActor @Sendable (BrowserWidgetVisualHeader, Data) -> Void,
                        onClosed: @escaping @MainActor @Sendable () -> Void) async throws -> BrowserWidgetHelperConnection {
-        let commandListener = try BrowserWidgetAudioSocket(), frameListener = try BrowserWidgetAudioSocket()
+        let authority = try BrowserWidgetAudioSocket.Authority.host(helperURL: applicationURL, policy: policy)
+        let commandListener = try BrowserWidgetAudioSocket(authority: authority), frameListener = try BrowserWidgetAudioSocket(authority: authority)
         let config = NSWorkspace.OpenConfiguration()
-        config.arguments = ["--ipc-socket", commandListener.path, "--frame-socket", frameListener.path]
+        config.arguments = ["--ipc-mode", "production", "--host-pid", String(getpid()),
+                            "--ipc-socket", commandListener.path, "--frame-socket", frameListener.path]
+        #if STREAM_NATIVE_VALIDATION
+        if case .prototypeForQualification = policy {
+            guard let executable = Bundle.main.executableURL else { throw BrowserWidgetHelperSession.SessionError.unavailable }
+            config.arguments = ["--ipc-mode", "prototype", "--host-pid", String(getpid()), "--host-executable", executable.path,
+                                "--ipc-socket", commandListener.path, "--frame-socket", frameListener.path]
+        }
+        #endif
         config.activates = false; config.createsNewApplicationInstance = true; config.addsToRecentItems = false
         let application = try await NSWorkspace.shared.openApplication(at: applicationURL, configuration: config)
         guard application.bundleIdentifier == BrowserWidgetAudioIdentity.helperBundleID else { application.terminate(); throw BrowserWidgetHelperSession.SessionError.unavailable }
         do {
             let command = try await commandListener.accept(expectedPID: application.processIdentifier)
             let frames = try await frameListener.accept(expectedPID: application.processIdentifier)
+            guard commandListener.principal == frameListener.principal else {
+                try? command.close(); try? frames.close(); throw BrowserWidgetHelperSession.SessionError.unavailable
+            }
             let connection = BrowserWidgetHelperConnection(application: application, command: command, frames: frames,
                 listeners: [commandListener, frameListener], onReply: onReply, onFrame: onFrame, onClosed: onClosed)
             connection.startReaders(); return connection

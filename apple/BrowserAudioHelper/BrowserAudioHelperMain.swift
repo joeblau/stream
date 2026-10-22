@@ -36,13 +36,47 @@ import WebKit
     private var frameWriter: BrowserWidgetFrameWriter?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let index = CommandLine.arguments.firstIndex(of: "--ipc-socket"), CommandLine.arguments.indices.contains(index + 1) {
-            guard let handle = try? BrowserWidgetAudioSocket.connect(path: CommandLine.arguments[index + 1]) else { NSApplication.shared.terminate(nil); return }
-            commandHandle = handle; replyHandle = handle
+        // Authenticate both kernel connections before Ready, WebKit content or native fixtures.
+        // No production argument can enable the validation-only prototype transport.
+        func argument(_ name: String) -> String? {
+            let indices = CommandLine.arguments.indices.filter { CommandLine.arguments[$0] == name }
+            guard indices.count == 1, let index = indices.first, CommandLine.arguments.indices.contains(index + 1) else { return nil }
+            return CommandLine.arguments[index + 1]
         }
-        if let index = CommandLine.arguments.firstIndex(of: "--frame-socket"), CommandLine.arguments.indices.contains(index + 1) {
-            guard let handle = try? BrowserWidgetAudioSocket.connect(path: CommandLine.arguments[index + 1]) else { NSApplication.shared.terminate(nil); return }
-            frameWriter = BrowserWidgetFrameWriter(handle: handle)
+        guard let mode = argument("--ipc-mode") else { NSApplication.shared.terminate(nil); return }
+        let policy: BrowserWidgetAudioSocket.Policy
+        switch mode {
+        case "production": policy = .production
+        #if STREAM_NATIVE_VALIDATION
+        case "prototype": policy = .prototypeForQualification
+        #endif
+        default: NSApplication.shared.terminate(nil); return
+        }
+        let commandPath = argument("--ipc-socket"), framePath = argument("--frame-socket")
+        if case .production = policy, commandPath == nil || framePath == nil { NSApplication.shared.terminate(nil); return }
+        if commandPath != nil || framePath != nil {
+            guard let value = argument("--host-pid"), let pid = Int32(value), pid > 0 else { NSApplication.shared.terminate(nil); return }
+            do {
+                let authority: BrowserWidgetAudioSocket.Authority
+                #if STREAM_NATIVE_VALIDATION
+                if case .prototypeForQualification = policy {
+                    guard let executable = argument("--host-executable") else { throw BrowserWidgetAudioSocket.SocketError.invalidSignature }
+                    authority = try .prototype(peerURL: URL(fileURLWithPath: executable))
+                } else { authority = try .helper() }
+                #else
+                authority = try .helper()
+                #endif
+                var principal: BrowserWidgetAudioSocket.Principal?
+                if let commandPath {
+                    let connection = try BrowserWidgetAudioSocket.connect(path: commandPath, expectedPID: pid, authority: authority)
+                    commandHandle = connection.handle; replyHandle = connection.handle; principal = connection.principal
+                }
+                if let framePath {
+                    let connection = try BrowserWidgetAudioSocket.connect(path: framePath, expectedPID: pid, authority: authority)
+                    guard principal == nil || principal == connection.principal else { throw BrowserWidgetAudioSocket.SocketError.invalidPeer }
+                    frameWriter = BrowserWidgetFrameWriter(handle: connection.handle)
+                }
+            } catch { NSApplication.shared.terminate(nil); return }
         }
         if let index = CommandLine.arguments.firstIndex(of: "--native-tone"),
            CommandLine.arguments.indices.contains(index + 1),

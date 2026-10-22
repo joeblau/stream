@@ -10,9 +10,9 @@ private final class SnapshotHelper: @unchecked Sendable {
     private let lock = NSLock()
     private var replies: [BrowserWidgetAudioReply] = []
     init(executable: URL) throws {
-        listener = try BrowserWidgetAudioSocket()
+        listener = try BrowserWidgetAudioSocket(authority: .prototype(peerURL: executable))
         process.executableURL = executable
-        process.arguments = ["--frame-socket", listener.path]
+        process.arguments = ["--ipc-mode", "prototype", "--host-pid", String(getpid()), "--host-executable", Bundle.main.executableURL!.path, "--frame-socket", listener.path]
         process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
         try process.run()
         DispatchQueue(label: "browser-alpha.replies").async { [self] in

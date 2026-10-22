@@ -13,7 +13,7 @@ final class HelperProcess: @unchecked Sendable {
     private let lock = NSLock()
     private var replies: [BrowserWidgetAudioReply] = []
     init(executable: URL, arguments: [String] = []) throws {
-        process.executableURL = executable; process.arguments = arguments
+        process.executableURL = executable; process.arguments = arguments + ["--ipc-mode", "prototype"]
         process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
         try process.run()
         readReplies(output.fileHandleForReading)
@@ -21,10 +21,11 @@ final class HelperProcess: @unchecked Sendable {
     private init() {}
     @MainActor static func launch(applicationURL: URL, arguments: [String] = []) async throws -> HelperProcess {
         let helper = HelperProcess()
-        let listener = try BrowserWidgetAudioSocket()
+        let authority = try BrowserWidgetAudioSocket.Authority.prototype(peerURL: applicationURL)
+        let listener = try BrowserWidgetAudioSocket(authority: authority)
         helper.listener = listener
         let configuration = NSWorkspace.OpenConfiguration()
-        configuration.arguments = arguments + ["--ipc-socket", listener.path]
+        configuration.arguments = arguments + ["--ipc-mode", "prototype", "--host-pid", String(getpid()), "--host-executable", Bundle.main.executableURL!.path, "--ipc-socket", listener.path]
         configuration.activates = false; configuration.createsNewApplicationInstance = true; configuration.addsToRecentItems = false
         helper.application = try await NSWorkspace.shared.openApplication(at: applicationURL, configuration: configuration)
         do { helper.connection = try await listener.accept(expectedPID: helper.pid) }
