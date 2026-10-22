@@ -90,3 +90,11 @@ no live provider credentials, real OAuth grant or external audience message is
 used. Authorized provider feed/order/rate acceptance, deployed broker/TURN,
 mobile/restricted networks and operator installation remain separate gates.
 These local software proofs do not close #139 or the broader chat epic.
+
+
+The guest's adapter state describes incoming public-reader health independently
+of an outgoing post/moderation refusal. A healthy reader remains connected after
+write permission loss. Verifying authorization, reconnecting and waiting to
+resume a rate-limited reader project as connecting; failed and explicitly stopped
+readers remain distinct. The native controls keep the outgoing action's own
+receipt and error, without sending those write details to a read-only guest.

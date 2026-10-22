@@ -88,6 +88,7 @@ private final class FixtureTime: @unchecked Sendable {
     var banDurationOverride: Double?
     var rateLimitedReads = 0
     var readItems: [[String: Any]]?
+    var broadcastEventID = "owned-event", broadcastChatID = "live-chat"
     var audienceResponse: Data?
     var audienceFailure: ProviderFailure?
     var holdAudience = false
@@ -152,7 +153,7 @@ private final class FixtureTime: @unchecked Sendable {
         }
         throw ProviderFailure(.invalidRequest)
     }
-    func broadcast() -> Data { json(["items": [["id": "owned-event", "snippet": ["channelId": "owner", "liveChatId": "live-chat"], "status": ["lifeCycleStatus": "live"]]]]) }
+    func broadcast() -> Data { json(["items": [["id": broadcastEventID, "snippet": ["channelId": "owner", "liveChatId": broadcastChatID], "status": ["lifeCycleStatus": "live"]]]]) }
 }
 private func audienceYouTube(_ count: Any? = nil, chatID: String = "live-chat", ended: Bool = false) -> Data {
     var details: [String: Any] = ["activeLiveChatId": chatID]
@@ -305,6 +306,7 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         let rejected = StudioDirectChatManager(request: http.send, identity: { _ in .init(channelID: "owner", scopes: ["user:read:chat"]) }, socketFactory: deniedPool.make, emit: stream.receive)
         rejected.connect(.twitch); await until { !deniedPool.opened.isEmpty }; deniedSocket.push(twitchControl("session_welcome"))
         await until { rejected.snapshot(.twitch).state == "Failed" }; precondition(deniedSocket.isClosed && !rejected.snapshot(.twitch).isConnected)
+        precondition(rejected.snapshot(.twitch).publicReaderState == "failed")
         // A received chat-ended acknowledgement ends reading without any
         // remote broadcast mutation or unexpected restart.
         let endingHTTP = HTTPFixture(); endingHTTP.pages = 2
@@ -333,10 +335,60 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         let tombstone = try StudioDirectChatDecoder.youtube(youtubePage([["id": "deleted", "snippet": ["type": "tombstone", "liveChatId": "live-chat"]]]), channelID: "owner", chatID: "live-chat")
         precondition(tombstone.deliveries.isEmpty && tombstone.removedIDs.count == 1)
         precondition(StudioDirectChatDecoder.date("2026-10-02T19:30:00.123456789Z") != nil)
+        try await validatePreflightCancellation()
+        try await validateRetainedMessageTargets()
         try await validateStaticEmotes()
         try await validateAudience()
         try await validateOutbox()
         print("PASS: actual direct chat manager HTTP/WebSocket fixtures; granted-scope readers, provider intervals/page tokens, Unicode/kinds/roles, relay dedup, targeted deletion/tombstones, explicit send acknowledgement/no retry/echo, migration without resubscription, disconnect resubscription, independent stop, cancellation and late HTTP/socket rejection")
+    }
+    @MainActor static func validatePreflightCancellation() async throws {
+        for kind in [DirectChatWriteKind.post, .delete, .timeout, .ban] {
+            let http = HTTPFixture(), gate = PollGate(), stream = StreamFixture()
+            let manager = StudioDirectChatManager(request: http.send,
+                identity: { _ in .init(channelID: "owner", scopes: ManagedProvider.youtube.scopes) },
+                sleep: { try await gate.sleep($0) }, emit: stream.receive)
+            manager.connect(.youtube, eventID: "owned-event")
+            await until { manager.snapshot(.youtube).isConnected && !stream.queue.messages.isEmpty }
+            let before = http.calls.count
+            let receipt = kind == .post ? manager.send("Cancel before provider dispatch", provider: .youtube)
+                : manager.moderate(stream.queue.messages[0].id, kind: kind)!
+            // Still on the same actor turn: no provider operation has started.
+            manager.cancelWrite(receiptID: receipt)
+            for _ in 0..<8 { await Task.yield() }
+            precondition(http.calls.count == before,
+                         "A locally canceled action began an HTTP mutation after cancellation")
+            guard let state = manager.receipts.first(where: { $0.id == receipt })?.state,
+                  case .notSent = state else { preconditionFailure() }
+            precondition(manager.snapshot(.youtube).isConnected && stream.queue.messages.count == 2)
+            manager.shutdown()
+        }
+        print("PASS: cancellation before provider dispatch prevents post/delete/timeout/ban HTTP calls while preserving reader, incoming messages and precise not-sent receipts")
+    }
+    @MainActor static func validateRetainedMessageTargets() async throws {
+        let http = HTTPFixture(), gate = PollGate(), stream = StreamFixture()
+        let manager = StudioDirectChatManager(request: http.send,
+            identity: { _ in .init(channelID: "owner", scopes: ManagedProvider.youtube.scopes) },
+            sleep: { try await gate.sleep($0) }, emit: stream.receive)
+        manager.connect(.youtube, eventID: "owned-event")
+        precondition(manager.snapshot(.youtube).publicReaderState == "connecting")
+        await until { stream.queue.messages.count == 2 && manager.snapshot(.youtube).isConnected }
+        let historical = stream.queue.messages[0].id
+        precondition(manager.targetForMessage(historical)?.chatID == "live-chat")
+        http.broadcastEventID = "replacement-event"; http.broadcastChatID = "replacement-chat"; http.readItems = []
+        manager.connect(.youtube, eventID: "replacement-event")
+        await until { manager.snapshot(.youtube).isConnected }
+        precondition(stream.queue.message(historical) != nil) // preserve incoming/curation
+        precondition(manager.targetForMessage(historical) == nil,
+                     "A historical message was presented as routed to a replacement broadcast")
+        let count = http.calls.count
+        let receipt = manager.delete(historical)!
+        guard case .notSent = manager.receipts.first(where: { $0.id == receipt })!.state else { preconditionFailure() }
+        precondition(http.calls.count == count && !manager.canDelete(historical))
+        manager.stop(.youtube)
+        precondition(manager.snapshot(.youtube).publicReaderState == "offline")
+        manager.shutdown()
+        print("PASS: retained incoming messages stay read-only after broadcast replacement; exact original channel/chat review route, no HTTP mutation, truthful public-reader connection states")
     }
     @MainActor static func validateStaticEmotes() async throws {
         let http = HTTPFixture(), socket = FixtureSocket(), stream = StreamFixture(), clock = FixtureTime()
@@ -521,6 +573,8 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         if case .rejected = manager.receipts[1].state {} else { preconditionFailure("403 was not a refusal") }
         precondition(manager.receipts[0].batchID == manager.receipts[1].batchID && stream.queue.messages.count == queueCount)
         precondition(manager.snapshot(.twitch).isConnected && !manager.canSend(.twitch) && manager.canSend(.youtube))
+        precondition(manager.snapshot(.twitch).publicReaderState == "connected",
+                     "A refused write incorrectly marked the public incoming reader failed")
         first.push(twitchEvent("after-post-denied")); await until { stream.queue.messages.count == queueCount + 1 }
         precondition(manager.send("Duplicate targets", to: [capturedYT, capturedYT]).isEmpty)
         let postsBefore = http.calls.filter { ["/helix/chat/messages", "/youtube/v3/liveChat/messages"].contains($0.1.url!.path) && $0.1.httpMethod == "POST" }.count
@@ -541,6 +595,7 @@ private func twitchEvent(_ id: String, type: String = "channel.chat.message", au
         precondition(manager.canSend(.youtube))
         http.rateLimitedReads = 1; http.readItems = [youtubeItem("fresh-youtube")]
         await gate.resume(); await until { manager.snapshot(.youtube).state.contains("Rate limited") }
+        precondition(manager.snapshot(.youtube).publicReaderState == "connecting")
         let beforeResume = stream.queue.messages.count
         precondition(stream.queue.featuredID == one && stream.queue.favorites.contains(one))
         time.advance(6); await gate.resume(); await until { manager.snapshot(.youtube).isConnected && stream.queue.messages.count > beforeResume }

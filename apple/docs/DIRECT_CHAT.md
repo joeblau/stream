@@ -13,7 +13,7 @@ and no-replay behavior are described in [NATIVE_GUEST_PUBLIC_CHAT.md](NATIVE_GUE
 | Restream | Existing public aggregated reader; adapter resets preserve other providers and local curation. | Existing staged comment actions. | No provider write is inferred from relay identity. Restream public replies/moderation are not implemented. |
 | Other direct providers | Explicitly unavailable. Ordinary relay publishing remains available. | None. | An ingest credential proves neither chat access nor an approved provider connector. |
 
-Writes require operator confirmation and current connected/granted/owned context. The composer starts with no selected destination; a review captures exact account, broadcast and reader generation. An account or broadcast change invalidates the review. Each chosen provider receives one request and a separate receipt, including partial success. Send requests honor Twitch `is_sent` and create no local message echo. A missing/rejected/uncertain response is not treated as delivered. **Stop Waiting** cancels local work but cannot undo a provider action; its receipt explicitly reports an unknown provider outcome. Nothing is automatically replayed after reconnect, cooldown, cancellation, project change or recovery.
+Writes require operator confirmation and current connected/granted/owned context. The composer starts with no selected destination; a review captures exact account, broadcast and reader generation. An account or broadcast change invalidates the review. Each chosen provider receives one request and a separate receipt, including partial success. Send requests honor Twitch `is_sent` and create no local message echo. A missing/rejected/uncertain response is not treated as delivered. **Stop Waiting** cancels local work. A write operation that has begun reports an unknown provider outcome because cancellation cannot undo a provider action; cancellation before it begins reports not sent. Nothing is automatically replayed after reconnect, cooldown, cancellation, project change or recovery.
 
 Deletes always supply the selected provider message ID: Twitch never sends a delete without `message_id`, which would clear a channel. Timeout and ban require a separate author/target confirmation. Owner/moderator messages are conservatively protected; Twitch messages older than six hours cannot be deleted locally. API permission checks can still reject a grant. Successful delete responses and validated ban resources remove only known matching messages, favorites and queued selections, including a staged featured comment. An uncertain response leaves local messages intact. Staged changes reach Program with **Take** unless Direct Live Editing applies them immediately.
 
@@ -67,3 +67,30 @@ zsh apple/scripts/run_studio_chat_harness.zsh
 ```
 
  Native fixture coverage is software evidence and does not establish an authorized provider session or actual live service delivery. The SwiftUI/coordinator changes require the integrated app validation performed by the root task; no external messages or account mutations were sent for these checks.
+
+
+## Shared reader status and retained message targets
+
+Guest public status describes the incoming reader independently of outgoing
+post/moderation failures. A connected reader stays **connected** after a write
+permission refusal; authorization/reconnect/read cooldown transitions report
+**connecting**, a failed reader reports **failed**, and an explicitly stopped
+reader reports **offline**. Outgoing refusals remain visible in native action
+receipts and account controls. They do not falsely mark the read-only guest
+feed as failed.
+
+Historical public messages remain in local curation after a broadcast change,
+but a reply/moderation review target exists only when its original provider,
+channel and chat match the currently connected reader. A replacement broadcast
+cannot be named as the target of an old-chat message. Such messages remain
+read-only; rejected local actions issue no HTTP request. Same-chat history can
+still use the current reviewed target while its supported action remains
+available.
+
+
+Cancellation before a scheduled write operation starts is checked again at the
+manager's request boundary. It produces **Not sent · Canceled before provider
+dispatch** without invoking the post/delete/timeout/ban HTTP request. Once the
+operation has begun, **Stop Waiting** keeps its existing unknown-outcome receipt;
+it cannot undo an external side effect. This distinction does not enqueue or
+replay a canceled action and does not stop the incoming reader.
