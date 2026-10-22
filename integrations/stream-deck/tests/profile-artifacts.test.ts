@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
+test("outer package rejects links, nonregular entries, backslashes and inconsistent directory metadata", () => {
+  execFileSync("python3", ["-B", "tests/profile-package-refusals.py"], { stdio: "pipe" });
+});
+
 test("three reproducible profile candidates contain supported owned actions and require explicit project rebinding", async () => {
   execFileSync("python3", ["scripts/generate-profiles.py", "--check"], { stdio: "pipe" });
   // The standard ZIP reader checks each real binary archive, not a generator's
