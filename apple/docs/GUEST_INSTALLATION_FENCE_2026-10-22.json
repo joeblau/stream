@@ -1,0 +1,186 @@
+{
+  "date": "2026-10-22",
+  "baseCommit": "1ac4c58145ead66ac9fa14ec7722955180d98e90",
+  "host": {
+    "name": "Joes-MacBook-Pro.local",
+    "architecture": "arm64",
+    "macOS": "27.2"
+  },
+  "scope": "Actual NativeGuestMediaSink cleanup fence with controlled callbacks; sender fence source-reviewed only, no sender/codec/receiver/RTC or hardware graph",
+  "runtime": "Actual AudioMixEngine() emptyregistry/scratcharrays ONLY; no run/registerGuest/addChannel/PCM/DSP/device. ActualGuestVideoFrameStore.register+lease,actualNativeSink/authority,controlledsource actorholdsACK",
+  "result": {
+    "fixedExit": 0,
+    "fixedPassCases": 3,
+    "oldGuardNegativeExit": 1,
+    "oldGuardObservedPrematureRemovals": 1,
+    "fixedObservedPrematureRemovals": 0
+  },
+  "compiledSnapshots": {
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/GuestMediaReceipts.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/GuestMediaReceipts.swift",
+      "sha256": "b3ba1a5b8c4450c1075b97827908ecfd3203bf78b8f7d8708eb84b2e20047a7a"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/IsolatedRecordingTypes.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/IsolatedRecordingTypes.swift",
+      "sha256": "9ad457d29fb7548f0f81a4182a74da3a0a3ac033e92cb96b807e64558dc70372"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/IsolatedVideoTypes.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/IsolatedVideoTypes.swift",
+      "sha256": "6c37cae3f873416b8b4a437ee2623c35a42514cffdae44fdbdcea8415c31a0f8"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/RecordingChatTypes.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/RecordingChatTypes.swift",
+      "sha256": "560f3e1f5e37ebfcb98f92e28215caeafb372721b2e53f88c70c19014fc8cec4"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/RecordingChatArchive.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/RecordingChatArchive.swift",
+      "sha256": "0a9c2ef94b3be4b942f2e9d1a43f0b3fba00fb943ac4f5cee2474e3ba3120513"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/RecordingChatReader.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/RecordingChatReader.swift",
+      "sha256": "a59216ebb8d5a140ea49dfa951cd654c8473094b9da0e8cb115dfc805a9b1344"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/RecordingPreferences.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/RecordingPreferences.swift",
+      "sha256": "dace6e48df13c8bba1cf6c749c9dc80c1da377b2d031806cd0329bbb40fa824b"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/ProgramRecordingSession.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/ProgramRecordingSession.swift",
+      "sha256": "e9e076d3e85d8c063c79a297d63810f7019c6f9b998ce097d0b849893a93d1a9"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/AudioMixEngine.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/AudioMixEngine.swift",
+      "sha256": "4cdd8ede633737249574b5d617d9ca3806f786db397f2c1e64571daf06de12a4"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/GuestVideoFrameStore.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/GuestVideoFrameStore.swift",
+      "sha256": "544c4b452439ad06aaaef1f42791cf35bdca93a81004f517a655d2b3ba0892d1"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/NativeInterviewTypes.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/NativeInterviewTypes.swift",
+      "sha256": "3d53b263c4c2cced835c5f8df3fc12caee168e603916352766a29a7dfaf807d1"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/NativeGuestReturnVideoBudget.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/NativeGuestReturnVideoBudget.swift",
+      "sha256": "21f30c4ed6ec88efd77c36292a97fc4bd015be4899b8d038d763871f86852ccf"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/RawVideoResourceCoordinator.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/RawVideoResourceCoordinator.swift",
+      "sha256": "16e4c0314c6f3da380743017bbef82635319ca75c428f318fa433785543f1d90"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/NativeGuestMediaSink.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-return-delivery-20261022/apple/StreamMac/NativeGuestMediaSink.swift",
+      "sha256": "ba8b4e91f90a31a268f847bd2a8dc72403da481e5103bd68dd31ef5659fbf9b0"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/GuestReturnVideoResources.swift": {
+      "origin": "/private/tmp/stream-wave17-guest-return-delivery-20261022/apple/StreamMac/GuestReturnVideoResources.swift",
+      "sha256": "ecf21a28570ea7778e56888dcfd960e4a1ff374ea4d7bb5aa3a809e2d55f64d6"
+    },
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/ProductionIdentities.swift": {
+      "sha256": "8f520784b7ad499b3dfe08900b094cdb4120cb5f2555c0424cdca7bfb0bb76ec",
+      "exactProductionSlices": [
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "GraphID",
+          "sha256": "311a83a08e6b83c17723db8ecab595dcecb810c8140f1e6ddcbf71f2ed8e9af2"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "CameraSourcePayload",
+          "sha256": "91bdb118e25f8f4542fad1c924b83a522a663c428ecb2f095646e56610ce7f81"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "ScreenSourcePayload",
+          "sha256": "cf4c2312febd34b5cb72945c1966c5ee056d086c57dc7ca0cca40fc687ab2118"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "CaptureRegion",
+          "sha256": "0953d9576b9b3c586fe65aed8cd6bcd82db302494c715a350626ca6449c5ee3e"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "ScreenZoomOptions",
+          "sha256": "d0c4190e1819e8af644d75a08b665fffa563c584dfb8b1a20a74ec17faa19de5"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "ActiveAppTrackingOptions",
+          "sha256": "b1e5d8b5c329dcbdfb46072daf2269b55be07d7140483f8b7c7d529f26c6563d"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "CapturePrivacyOptions",
+          "sha256": "360c4a4c3c5152a963f26ea4011f93a83d060f1b1402e293f0398bd6327b787e"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "EffectiveCapturePrivacy",
+          "sha256": "20429d98068b435be2d8eb7277cd629da878025aed15aeab534cd96b3326def1"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "WebSourcePayload",
+          "sha256": "cbdd8a42ac8bd9295c5a0aeac27a1530f8bfe1fef26d9d7903da8cec31b3a0cf"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "SyphonSourcePayload",
+          "sha256": "75436fb9f056600303468ef6d1d1a4ac39bf341d5ebbbfd08d03d141f1e365c0"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/LayerGraph.swift",
+          "declaration": "AppAudioSourcePayload",
+          "sha256": "b2509f14d7a185f47c6c068cfe957995819b8486b88754996929424a662480c6"
+        },
+        {
+          "origin": "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/StreamMac/CaptureSourcePool.swift",
+          "declaration": "CaptureSourceKey",
+          "sha256": "707e62e33e99a78c088d3421da3bc465cafd18d2ac6fdffd8007f37d30d4057c"
+        }
+      ],
+      "fullGraphOriginSHA256": "84bf12ec33fbfc61162a26faeec5cfc83262d66ec4820a8ee2110543568845d7"
+    }
+  },
+  "recipeSources": {
+    "scripts/guest_installation_fence_harness.swift": "7f75562c83686cfc6c294cd1b0701cb77a99ba9b74f7bda1d4fca74e509b1b44",
+    "scripts/run_guest_installation_fence_harness.zsh": "70e89c149e5d6fdfa3a5b4d2bd2bcffe96165ff27ef0669b8ac0e4fde53e4b93"
+  },
+  "artifacts": {
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/GuestInstallationFenceHarness": "94eeb7c94891bd41bc30ae5f76f847c1a92a25d698ce51b3956e51dee369bcf5",
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/GuestInstallationFenceHarness.old-guard": "62a186dcf6d90a66016863783d1b4dd886aef1992ce33c27531fab898bccfa4c",
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources/NativeGuestMediaSink.old-guard.swift": "d72f444ff2178785b090c7c4ebb1507f3413d180f6b94f4861e5dd2bbbdf4129",
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/sources.json": "2a1294cd405a7ebd5c578bab0f64a621e4d9a2e97728f28233cedbed58152334",
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/frameworks/StreamCore.framework/StreamCore": "e55cf959a464ec4342e5b3aec72167f65939c5c0fe202fff807dd037ed7ed845"
+  },
+  "logs": {
+    "/tmp/stream-wave17-guest-installation-fence-typecheck-20261022.log": "35f150bc29c4af3afff2b1c1b0629fa34a7bba174ca0ed1440192fbe41e457ed",
+    "/tmp/stream-wave17-guest-installation-fence-typecheck-second-20261022.log": "96da18ed6b906d4614fd088033f547f3d4abd611d760183f603e6f825e410648",
+    "/tmp/stream-wave17-guest-installation-fence-final-20261022.log": "5a1fae69191d1bfe5d38c9137f709df01f45dbe918e378721ff7bd3e9e9c579b",
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/runtime.fixed.log": "947ee90434c3dd98790ec12998b211a0c4f81a65e61b0a579baae6dad44b5520",
+    "/private/tmp/stream-wave17-guest-installation-fence-20261022/apple/build/guest-installation-fence-validation/runtime.old-guard.log": "dbe3aeaa39a068cc5637866ef3cdc51116efd4f027de141a8ce4d93328a08ba7"
+  },
+  "sourceReviewedNotCompiled": {
+    "origin": "/private/tmp/stream-wave17-guest-return-delivery-20261022/apple/StreamMac/NativeInterviewReceiverAdapter.swift",
+    "sha256": "d0b6aa0ea7962faa243295a86a83e414a49191828c951957820da08e05ba06db",
+    "actualPrepareMethodSHA256": "3c4b42d26e9a976bc597dcd0323930115e10b91c3ee0878fc37296405f9e532c",
+    "scope": "ActualSender.prepare !isActive guard returnsfalse without sink revoke/remove; no actualsender execution"
+  },
+  "frameworkOrigin": {
+    "path": "/tmp/stream-raw-video-full-core-products-20261022",
+    "receiptSHA256": "7675d5e50913061494420c9dff231b8c9be7ea1291b39f48be672f4449daac97",
+    "additionalRawCoreSource": "f608982f1ebf961838c66acf2d32b42c2802851dd1ebec0b0c1cf9d9e4fd1488"
+  },
+  "negativeTransform": {
+    "onlyChange": "Actual sink retainReturnVideoToken failure guard restores await source.remove(token) before returningfalse. Same harness and allothercompiledsources.",
+    "fixedSourceSHA256": "ba8b4e91f90a31a268f847bd2a8dc72403da481e5103bd68dd31ef5659fbf9b0",
+    "oldGuardSourceSHA256": "d72f444ff2178785b090c7c4ebb1507f3413d180f6b94f4861e5dd2bbbdf4129"
+  },
+  "limits": [
+    "Recording/model dependencies are immutable30f/1ac actualsources; no claim currentrecordingvertical tested",
+    "InitialtypecheckmissingCaptureSourceKey/SourceDefinitionID preserved; exactproductionvalueslices added, nofakeidentityschema",
+    "No codec-owner drain executed: explicit fixture calls mark controlledcleanupboundary only",
+    "No controller, native sender/receiver, VideoToolbox, RTC, publicnetwork, permissions or device qualification"
+  ]
+}
