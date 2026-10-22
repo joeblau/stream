@@ -32,6 +32,9 @@ struct LayerStyleSectionView: View {
 
     var body: some View {
         if let layer = selectedLayer {
+            if let sceneID = previewProgram.stagedScene?.id {
+                LayerGeometrySectionView(sceneID: sceneID, layer: layer)
+            }
             styleSection(layer)
             Section("Scene Motion") {
                 TextField("Motion ID", text: Binding(get: { layer.motionID.uuidString }, set: { value in
