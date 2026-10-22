@@ -219,11 +219,16 @@ task wait; no extra render or wait was added.
 
 | Mean interval | Static wall / thread CPU | Replay wall / thread CPU |
 |---|---:|---:|
-| Complete tick | 8.968 / 3.997 ms | 6.622 / 3.593 ms |
+| Measured tick body | 8.968 / 3.997 ms | 6.622 / 3.593 ms |
 | Scene graph preparation | 1.406 / 1.152 ms | 1.324 / 1.031 ms |
 | Regular Core Image call | 6.814 / 2.270 ms | 4.636 / 2.020 ms |
 | Existing sampled task wait | 1.833 / 0.021 ms | 0.923 / 0.023 ms |
 | Subscriber fanout | 0.204 / 0.158 ms | 0.176 / 0.147 ms |
+
+The measured tick interval starts after `frameOverrideProvider` and the scene
+guard; the override phase is recorded separately. Thread CPU is never subtracted
+across asynchronous suspension. The deliberate sink's synchronous `Thread.sleep`
+remains on the same thread and is included in its callback wall/CPU interval.
 
 Neither case skipped a whole scheduling opportunity. Maximum tick wall times
 were 29.553/25.633 ms, deadline-start lateness 5.090/7.284 ms and actor-entry
