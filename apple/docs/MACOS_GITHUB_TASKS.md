@@ -1042,3 +1042,59 @@ step 10; iOS passes 588 tests / 82 suites in 210.314 s. The earlier `a9cfd98`
 both-Mac ending-fixture failures remain failed. Neither local compilation nor
 the owned diagnostic implies whole native CI success, mounted AX delivery,
 real WebKit/capture qualification or sustained performance acceptance.
+
+## Annotation geometry, Program health and repaired fixtures — 2026-10-22 UTC
+
+Exact local `e122c91` passes generation, unsigned universal arm64/x86_64 Release
+and the actual bundle audit. The expanded manifest covers **724 source/recipe
+paths plus vendor**, adding the actual CI recipe and all Core tests to the
+previous native/shared/helper/script scope. Independent read-only verification
+matches the exact path set, every file hash, vendor and all three check logs.
+Receipts are under `wave16Review` in [the ledger](MACOS_TASK_STATUS.json).
+Published main remains `9cb68c9` at this snapshot.
+
+- The annotation toolbar uses the existing native scroll row and retains the
+  picker's intrinsic width. All **192 hidden native geometry cases** pass with
+  inert owners; the unchanged old narrow toolbar fails its original width
+  assertion. A separate runner fix preserves source, executable and bounded
+  failure JSON before cleanup, with a fresh positive proof. Native keyboard,
+  AX/VoiceOver, focus, pixels/contrast and full-window operator acceptance remain
+  unqualified; **#90 stays open**. See [the layout scope](ANNOTATION_TOOLBAR_LAYOUT_2026-10-22.md).
+- Program health now measures failed/attempt separately from scheduler-missed
+  opportunities. Unavailable intervals cannot count as healthy recovery; measured
+  zero remains distinct. Existing thresholds/hysteresis and active outputs are
+  preserved. **12 actual fresh Core tests** and an optimized exact
+  coordinator/report-block probe pass; the combined build compiles the actual
+  coordinator. This optional preview policy fix neither repairs allocation nor
+  identifies a render-failure cause or qualifies sustained workloads; **#92 stays
+  open**. See [the resource policy](DESKTOP_RESOURCE_BUDGETS.md).
+- The recovery-accounts fixture obtains fresh configure grants for two positive
+  setup accepts, preserving the old captured generations and stale-credential
+  negatives. An owned original-source reproduction exits 133; the corrected
+  actual account/vault/recovery fixture passes. Production authority is unchanged.
+  The original hosted log lacks a phase marker; only the owned reproduction
+  locates its replacement acceptance. This is not a new hosted success.
+- The package fixture binds a fresh manifest and executes real `ShowPackageIO`
+  with exact copied Workspace methods. **Five original race/ownership/catalog/
+  import phases** and three generation checks pass with the original condition
+  holds and 45 s deadline. External dependencies are inert; no full runtime or
+  native UI is constructed. The canonical receipt removes only an irrelevant
+  hostname. It does not add native chooser, full-runtime, sandbox or
+  LaunchServices qualification; **#155 stays open**. See [the package proof](PACKAGE_READ_METHODS_2026-10-22.json).
+
+C90 run `39764965913` ARM job `119784721840` fails step 19 at **11:47:49 UTC**
+with top-level `CancellationError` in the recovery-accounts fixture. The original
+8,448,921-byte log and failure remain retained; all 588 / 82 Core tests pass
+in 92.940 s and native steps 10–18 pass. Later step-19 workspace checks were not
+reached. At **12:06:44 UTC**, Intel remains live in step 16 and iOS has succeeded
+with 588 / 82 in 210.314 s. The separate published `9cb68c9` run `39771035586`
+is **pending with zero jobs** at **12:06:50 UTC**. Neither local fixture fixes
+nor the new build convert these snapshots into whole native CI success.
+
+The fresh **11:42:59 UTC** complete read-only inventory covers 135 macOS issues:
+101 closed / 34 open. The original 61 remain **27 closed / 34 open**; all 74
+outside that original inventory are already closed, and there are no open PRs
+or overlooked open tasks. Each open tracker still has incomplete children.
+No additional closure is justified. Earlier source-scoped receipts, failed
+qualification gates and issue states are preserved; this update adds no new
+acceptance requirement and performs no issue write or publication.
