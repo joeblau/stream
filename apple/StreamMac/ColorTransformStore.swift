@@ -10,7 +10,7 @@ import os.lock
 final class ColorCubeCache: @unchecked Sendable {
     static let shared = ColorCubeCache()
     struct Table: Sendable { var dimension: Int; var data: Data }
-    private enum Key: Hashable, Sendable { case chroma(ChromaKeySettings); case lut(UUID, Double) }
+    private enum Key: Hashable, Sendable { case chroma(ChromaKeySettings); case lut(UUID, Double, LUTColorSpace) }
     private var lock = os_unfair_lock_s()
     private var tables: [Key: Table] = [:]
     private var order: [Key] = []
@@ -25,9 +25,12 @@ final class ColorCubeCache: @unchecked Sendable {
         let key = Key.chroma(configuration)
         return table(key) { ChromaKeyTransform.cubeData(settings: configuration).map { Table(dimension: 64, data: $0) } }
     }
-    func lut(_ entry: LUTTableStore.Entry, intensity: Double) -> Table? {
-        table(.lut(entry.generation, intensity)) {
-            entry.cube.rgbaData(intensity: intensity).map { Table(dimension: entry.cube.dimension, data: $0) }
+    func lut(_ entry: LUTTableStore.Entry, intensity: Double, colorSpace: LUTColorSpace = .sRGB) -> Table? {
+        table(.lut(entry.generation, intensity, colorSpace)) {
+            if colorSpace == .linearSRGB {
+                return entry.cube.highPrecisionRGBAData(intensity: intensity).map { Table(dimension: $0.dimension, data: $0.data) }
+            }
+            return entry.cube.rgbaData(intensity: intensity).map { Table(dimension: entry.cube.dimension, data: $0) }
         }
     }
     private func table(_ key: Key, prepare: @escaping @Sendable () -> Table?) -> Table? {
@@ -159,12 +162,22 @@ enum ColorTransformRenderer {
     }
     static func lut(_ settings: LUTSettings, image: CIImage) -> CIImage {
         guard settings.isEnabled, let id = settings.assetID, let entry = LUTTableStore.shared.entry(id),
-              let table = ColorCubeCache.shared.lut(entry, intensity: settings.intensity) else { return image }
+              let table = ColorCubeCache.shared.lut(entry, intensity: settings.intensity, colorSpace: settings.colorSpace) else { return image }
         return cube(table, colorSpace: settings.colorSpace, image: image).cropped(to: image.extent)
     }
     private static func cube(_ table: ColorCubeCache.Table, colorSpace: LUTColorSpace, image: CIImage) -> CIImage {
-        let color = CGColorSpace(name: colorSpace == .sRGB ? CGColorSpace.sRGB : CGColorSpace.linearSRGB)!
-        return image.applyingFilter("CIColorCubeWithColorSpace", parameters: [
-            "inputCubeDimension": table.dimension, "inputCubeData": table.data, "inputColorSpace": color])
+        // SceneRenderer deliberately disables implicit CI working-space
+        // conversion. CIColorCubeWithColorSpace's inputColorSpace is ignored
+        // in that context, so merely tagging a linear LUT silently evaluates
+        // it on encoded samples. Convert explicitly around the raw cube;
+        // these tone-curve filters unpremultiply/re-premultiply and retain
+        // the keyed alpha. Small linear cubes are upsampled on an aligned
+        // grid off-thread, avoiding finite cube-interpolation precision that
+        // would crush near-black values after the transfer round trip.
+        // Intensity is already blended in the LUT's declared space.
+        let input = colorSpace == .linearSRGB ? image.applyingFilter("CISRGBToneCurveToLinear") : image
+        let output = input.applyingFilter("CIColorCube", parameters: [
+            "inputCubeDimension": table.dimension, "inputCubeData": table.data])
+        return colorSpace == .linearSRGB ? output.applyingFilter("CILinearToSRGBToneCurve") : output
     }
 }

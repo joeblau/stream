@@ -92,4 +92,33 @@ public struct CubeLUT: Sendable {
         }
         return output.withUnsafeBytes { Data($0) }
     }
+    /// Upsample onto an aligned grid before a linear-light GPU lookup. Core
+    /// Image's cube interpolation has limited fractional precision: a two-texel
+    /// identity cube otherwise rounds small linear shadow values to zero.
+    /// Every original knot remains a knot, preserving the creator's exact
+    /// piecewise-trilinear function. Work and storage remain bounded at 64³.
+    public func highPrecisionRGBAData(intensity: Double) -> (dimension: Int, data: Data)? {
+        guard intensity.isFinite, (0...1).contains(intensity) else { return nil }
+        let intervals = dimension - 1
+        let preparedDimension = dimension >= 32 ? dimension : (63 / intervals) * intervals + 1
+        if preparedDimension == dimension { return rgbaData(intensity: intensity).map { (dimension, $0) } }
+        let t = Float(intensity), scale = Float(preparedDimension - 1)
+        var output = [Float](); output.reserveCapacity(preparedDimension * preparedDimension * preparedDimension * 4)
+        func sample(_ r: Int, _ g: Int, _ b: Int) -> SIMD3<Float> { values[(b * dimension + g) * dimension + r] }
+        for b in 0..<preparedDimension { for g in 0..<preparedDimension { for r in 0..<preparedDimension {
+            let input = SIMD3(Float(r), Float(g), Float(b)) / scale
+            let point = input * Float(intervals)
+            let r0 = min(intervals, Int(point.x)), g0 = min(intervals, Int(point.y)), b0 = min(intervals, Int(point.z))
+            let r1 = min(intervals, r0+1), g1 = min(intervals, g0+1), b1 = min(intervals, b0+1)
+            let x = point.x-Float(r0), y = point.y-Float(g0), z = point.z-Float(b0)
+            let low = (sample(r0,g0,b0)*(1-x)+sample(r1,g0,b0)*x)*(1-y)
+                + (sample(r0,g1,b0)*(1-x)+sample(r1,g1,b0)*x)*y
+            let high = (sample(r0,g0,b1)*(1-x)+sample(r1,g0,b1)*x)*(1-y)
+                + (sample(r0,g1,b1)*(1-x)+sample(r1,g1,b1)*x)*y
+            let value = input*(1-t)+(low*(1-z)+high*z)*t
+            output += [value.x, value.y, value.z, 1]
+        } } }
+        return (preparedDimension, output.withUnsafeBytes { Data($0) })
+    }
+
 }

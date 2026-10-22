@@ -1,5 +1,6 @@
 import Foundation
 import CoreImage
+import Metal
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
@@ -23,13 +24,11 @@ import StreamCore
         }
         precondition(ColorCubeCache.shared.chroma(settings) != nil)
         try cpuFixture(settings: settings, directory: directory)
-        let context = CIContext(options: [.useSoftwareRenderer: true])
+        guard let device = MTLCreateSystemDefaultDevice() else { fatalError("Metal device required for GPU qualification") }
+        let context = CIContext(mtlDevice: device, options: [.workingColorSpace: NSNull(), .cacheIntermediates: false])
         let rect = CGRect(x: 0,y: 0,width: 2,height: 2)
         let control = bytes(CIImage(color: .red).cropped(to: rect), context: context, rect: rect)
-        guard control.contains(where: { $0 != 0 }) else {
-            print("SKIP: native GPU/CI pixel and sustained-footage validation; solid-red control also renders zero in this sandbox")
-            return
-        }
+        precondition(control.contains(where: { $0 != 0 }), "Metal solid-red control failed; GPU qualification cannot pass")
         let green = ColorTransformRenderer.key(settings, image: CIImage(color: CIColor(red:0,green:1,blue:0)).cropped(to:rect))
         precondition(bytes(green,context:context,rect:rect).allSatisfy { $0 == 0 }, "Keyed green must be transparent")
         let red = CIImage(color: CIColor(red:1,green:0,blue:0,alpha:0.4)).cropped(to:rect)
@@ -49,7 +48,8 @@ import StreamCore
                      "LUT should map red to blue and preserve alpha")
         lut.isBypassed = true
         precondition(bytes(ColorTransformRenderer.lut(lut,image:red),context:context,rect:rect) == bytes(red,context:context,rect:rect))
-        print("PASS: native CI key/alpha, LUT channel ordering/intensity/color space, bypass")
+        print("PASS: Metal CI key/alpha, LUT channel ordering and bypass")
+        try await ColorGPUQualification.run(directory: directory, context: context, device: device)
     }
 
     static func bytes(_ image: CIImage, context: CIContext, rect: CGRect) -> [UInt8] {

@@ -1,0 +1,296 @@
+{
+  "credit": "(CC) Blender Foundation | mango.blender.org",
+  "license": "https://creativecommons.org/licenses/by/3.0/",
+  "source": "https://media.xiph.org/tearsofsteel/README.txt",
+  "color": "scene-linear Rec.709 per Blender source description; decode explicitly as linear sRGB",
+  "frames": [
+    {
+      "file": "04_2a_00100.exr",
+      "bytes": 7884758,
+      "sha256": "5942ee356077cada0b1ccc98b376ab582c092708ebc6e0440d4f138af27924c6",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00100.exr"
+    },
+    {
+      "file": "04_2a_00101.exr",
+      "bytes": 7892703,
+      "sha256": "6e1d6cba5f5d181f2992c6c5bc96a74a599f01a2d407d07f27deb7cbca5a334c",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00101.exr"
+    },
+    {
+      "file": "04_2a_00102.exr",
+      "bytes": 7898287,
+      "sha256": "a65758abfda11230aecc130a46f310d64d8572f5f9d1cbf57562f98d94867cc7",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00102.exr"
+    },
+    {
+      "file": "04_2a_00103.exr",
+      "bytes": 7902174,
+      "sha256": "dbb3683ac05501e0b2b6923a1bb2034bf1fc962b31530bd34a97cc5a498e022b",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00103.exr"
+    },
+    {
+      "file": "04_2a_00104.exr",
+      "bytes": 7915933,
+      "sha256": "38fdddd8c8f03e6f67ffbc133269b46bae665297c80bdd86bac4daa0a6c84101",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00104.exr"
+    },
+    {
+      "file": "04_2a_00105.exr",
+      "bytes": 7918328,
+      "sha256": "2b470f086271cd2a82e987059dbb7ad914cbdd81372d7ef0557370dad68e524e",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00105.exr"
+    },
+    {
+      "file": "04_2a_00106.exr",
+      "bytes": 7924050,
+      "sha256": "815dcbb565122e382e106502266bfdbe353fe8b891db4a251625b09d56331a15",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00106.exr"
+    },
+    {
+      "file": "04_2a_00107.exr",
+      "bytes": 7929449,
+      "sha256": "abae7275f24463b9f18f1e3255f0d060fd001891ec4dc659b1f422aaa3d20010",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00107.exr"
+    },
+    {
+      "file": "04_2a_00108.exr",
+      "bytes": 7926601,
+      "sha256": "554892cae2a389fb0a34ac3f76c814c80adc229fc05be6f3ece387cfc8081b74",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00108.exr"
+    },
+    {
+      "file": "04_2a_00109.exr",
+      "bytes": 7930697,
+      "sha256": "66f86b31feedd16f8edf0129a2e8c814ca565001fe3928b186a2dfad0921f5c8",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00109.exr"
+    },
+    {
+      "file": "04_2a_00110.exr",
+      "bytes": 7936761,
+      "sha256": "a9f71e2dfb2ab052651849054495e15372b9cef194dd81b6c327856960364935",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00110.exr"
+    },
+    {
+      "file": "04_2a_00111.exr",
+      "bytes": 7943448,
+      "sha256": "47418f164d604e9ba48a1d7d556e80176bd122cf097a5896784bc34d003fdfb0",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00111.exr"
+    },
+    {
+      "file": "04_2a_00112.exr",
+      "bytes": 7941145,
+      "sha256": "d9c3fe91a56b6dad878193489ac8c91885dc228c6dc83599ead00d2540486b4b",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00112.exr"
+    },
+    {
+      "file": "04_2a_00113.exr",
+      "bytes": 7942494,
+      "sha256": "07f0e5dcc6b22a990ecd3f605b3de30a247c4775284a4495253c66e75ee9dfc9",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00113.exr"
+    },
+    {
+      "file": "04_2a_00114.exr",
+      "bytes": 7947195,
+      "sha256": "005e0d34a86660510449a2c57d19c5d205adb76a1a10dd23d2916c3d2bf667ab",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00114.exr"
+    },
+    {
+      "file": "04_2a_00115.exr",
+      "bytes": 7954531,
+      "sha256": "576137021be42eaf51cde389536ee2415d3b1eee2e589c804b45af4a6e40349b",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00115.exr"
+    },
+    {
+      "file": "04_2a_00116.exr",
+      "bytes": 7957299,
+      "sha256": "f551e973db0e8cb06735ad4c665e4d2bb752730647b130e568548e3cbe741a76",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00116.exr"
+    },
+    {
+      "file": "04_2a_00117.exr",
+      "bytes": 7957162,
+      "sha256": "c8cc86e79d0eedfe24f00a31fc2820f6b55ade40c16f4dcca33cdd69959ac3f6",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00117.exr"
+    },
+    {
+      "file": "04_2a_00118.exr",
+      "bytes": 7974138,
+      "sha256": "df1e7e0fd4377153d9905a1443d439616baf91fe4e1876587793c752002a68d8",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00118.exr"
+    },
+    {
+      "file": "04_2a_00119.exr",
+      "bytes": 7976970,
+      "sha256": "7864b494efb3560c6355f465f8d6f6944fde4edfd666d4f1bffa17ef6bf04597",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00119.exr"
+    },
+    {
+      "file": "04_2a_00120.exr",
+      "bytes": 7985791,
+      "sha256": "4779a816d9d76d3ff3f76d24d6efee26e1006c3f0b782b7c49859d80b9a1cfae",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00120.exr"
+    },
+    {
+      "file": "04_2a_00121.exr",
+      "bytes": 7990877,
+      "sha256": "f772129fab1dd82d2e191af81778a74f7f514334bac1bc0f21054daaf9653f53",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00121.exr"
+    },
+    {
+      "file": "04_2a_00122.exr",
+      "bytes": 7997917,
+      "sha256": "df626fd568f7adb03fb73527b1722bda1cb1db56874503dc99d0248385adc55e",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00122.exr"
+    },
+    {
+      "file": "04_2a_00123.exr",
+      "bytes": 8007368,
+      "sha256": "da47868f9eb52e68b06a7ffdd8b771e43243522582173776cca948af0a2b578a",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00123.exr"
+    },
+    {
+      "file": "04_2a_00124.exr",
+      "bytes": 8011593,
+      "sha256": "5532e788fc3dc0e4896935038d61708c0ad47213c07938d65c733af07ce35332",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00124.exr"
+    },
+    {
+      "file": "04_2a_00125.exr",
+      "bytes": 8016170,
+      "sha256": "333c1fafcaada69b9db2b0a0e72159e26abd2ed668f9558e9e188785d839cef8",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00125.exr"
+    },
+    {
+      "file": "04_2a_00126.exr",
+      "bytes": 8016655,
+      "sha256": "45a2623f9e0ebb0adfb507b6595f70f48ef15cdca0a6af267675f01896301d40",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00126.exr"
+    },
+    {
+      "file": "04_2a_00127.exr",
+      "bytes": 8009489,
+      "sha256": "4e7552892dfadb875a2dd63cc642de9631f8496f9001a4d2e3db463e59a93c45",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00127.exr"
+    },
+    {
+      "file": "04_2a_00128.exr",
+      "bytes": 8013422,
+      "sha256": "5b526aa6a9faed15dd5787e4dd3573ef26cabebb2d6489fbafd9d432993b78e4",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00128.exr"
+    },
+    {
+      "file": "04_2a_00129.exr",
+      "bytes": 8015759,
+      "sha256": "5ec401dccb50d6f3f1d45e1f362b86d9d4e2b3d8663562da17cc8970a194311e",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00129.exr"
+    },
+    {
+      "file": "04_2a_00130.exr",
+      "bytes": 8025442,
+      "sha256": "c4e54afbe223ac86b981133590fddeb1de2cca0bb8dc15cbb46946ff6227ce1b",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00130.exr"
+    },
+    {
+      "file": "04_2a_00131.exr",
+      "bytes": 8026020,
+      "sha256": "d646af19d99dfb970afd19b28a8742ef6f3565077a7d90c08aa93fe174d70ba4",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00131.exr"
+    },
+    {
+      "file": "04_2a_00132.exr",
+      "bytes": 8027509,
+      "sha256": "9f5f1c2143ab1fa9bdd9aaf88538a4212584daf98b19b88805593dfa1b62a156",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00132.exr"
+    },
+    {
+      "file": "04_2a_00133.exr",
+      "bytes": 8030232,
+      "sha256": "b1c182562de970136eabc641fbb775e28c1d1d0d878b8910a7c0ca82d4de83c4",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00133.exr"
+    },
+    {
+      "file": "04_2a_00134.exr",
+      "bytes": 8033567,
+      "sha256": "89d6a889efb9888bce9738b70563ae9be3371ab2fd26405235d56ddd86374836",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00134.exr"
+    },
+    {
+      "file": "04_2a_00135.exr",
+      "bytes": 8033416,
+      "sha256": "277c7c4aac90c0200542fc0ff124e6ca0ab2ad9661ec9b245f1ea5a6cafc3f28",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00135.exr"
+    },
+    {
+      "file": "04_2a_00136.exr",
+      "bytes": 8033622,
+      "sha256": "ef80f13709af29baf9121468071785fa7c56ba94cca14136e2b635f7a9a0f169",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00136.exr"
+    },
+    {
+      "file": "04_2a_00137.exr",
+      "bytes": 8032260,
+      "sha256": "5679ea25a6dcc37eaba22d2a0aa3058967c70bf2ffa5b6d4638dbe8dc989fabb",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00137.exr"
+    },
+    {
+      "file": "04_2a_00138.exr",
+      "bytes": 8035553,
+      "sha256": "b59af426e6da8bb80354da0b332d48b2f0009fdfa42dcc87e3931a11a315d1e3",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00138.exr"
+    },
+    {
+      "file": "04_2a_00139.exr",
+      "bytes": 8033241,
+      "sha256": "7900b2bebbd7959d5afee88c3f3f400a34a1c7989fad4af4ea5858b586842e4c",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00139.exr"
+    },
+    {
+      "file": "04_2a_00140.exr",
+      "bytes": 8032663,
+      "sha256": "04390d74b61709e547c9c1c1e66aa3176a87307d7aa8aa1f91815707eb48f498",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00140.exr"
+    },
+    {
+      "file": "04_2a_00141.exr",
+      "bytes": 8032258,
+      "sha256": "6d66981f45d549605716178d7fd5c6a8d1dd43c4ad87f8cb608ff687f76b351d",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00141.exr"
+    },
+    {
+      "file": "04_2a_00142.exr",
+      "bytes": 8029235,
+      "sha256": "d307f44208564297548d926db3fb6ba4438000cca5dd97457a2f292f8a504227",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00142.exr"
+    },
+    {
+      "file": "04_2a_00143.exr",
+      "bytes": 8030895,
+      "sha256": "044fce958d6970b2cbc18434339418f38020c3f65fa43bcc46226e14b7128f6e",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00143.exr"
+    },
+    {
+      "file": "04_2a_00144.exr",
+      "bytes": 8026032,
+      "sha256": "8f571006e9395e751f79f864935bc910d529cbecf6367baa08846ac7bd91542d",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00144.exr"
+    },
+    {
+      "file": "04_2a_00145.exr",
+      "bytes": 8027590,
+      "sha256": "31855d304e0ff6a4710beaaca2a22a2e058b539f337877d1e4549c3817a5ceac",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00145.exr"
+    },
+    {
+      "file": "04_2a_00146.exr",
+      "bytes": 8027734,
+      "sha256": "a27c3442af3132906e6ede92fe278b403400c2a5afa2f8b81bd138d2b1c50090",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00146.exr"
+    },
+    {
+      "file": "04_2a_00147.exr",
+      "bytes": 8026813,
+      "sha256": "06bdbc789879b57134ca959ad4ceb885d669079ff2c5fc252717faab948714f4",
+      "url": "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/04_2a/linear_hd/04_2a_00147.exr"
+    }
+  ]
+}
