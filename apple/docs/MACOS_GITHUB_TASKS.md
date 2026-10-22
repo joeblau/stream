@@ -1275,7 +1275,8 @@ named source; combined compilation is not a repeat of every component test.
   focused test run, not a new full-suite or live-account pass.
 - Documented public Twitch subscription notices and YouTube gift events now
   enter the typed queue with strict anonymity/literal text, bounded payloads,
-  identity/session guards and read-only treatment where mutation IDs are absent.
+  identity/session guards and explicit read-only gates for subscription notices
+  and gifts. Public IDs do not establish ordinary mutation eligibility.
   Actual decoder/manager controlled proofs and independent reviews pass; no new
   authorized live feed or Program/UI qualification follows.
 - Guest device rechecks retain committed camera/microphone choices rather than

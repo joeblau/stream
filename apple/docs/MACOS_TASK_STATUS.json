@@ -439,7 +439,7 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Matching camera-extension signing profile, OS activation and real conferencing/browser/FaceTime consumer checks.",
+        "Matching host provisioning for the declared system-extension.install, legacy registered App Group and Keychain claims (and the helper's legacy App Group), signed OS activation, and real Zoom/browser/FaceTime receiving-app checks remain unqualified. The camera extension's TEAM-prefixed App Group alone supports profileless macOS 14+; there is no blanket camera-extension profile requirement.",
         "Unconfirmed native camera stop retains transport, queue/sample ownership and private admission; new lifetimes/deactivation are blocked until exact explicit retry succeeds. Controlled native-effects producer/controller proof passes; actual installed extension/discovery/activation/target clients not executed."
       ],
       "evidence": [
@@ -705,7 +705,7 @@
       "remaining": [
         "Authorized live events/viewer readings and provider permissions/rate acceptance remain. Supported static Twitch tiles, typed text-event cards, filters/styles and optional manual promotion are locally verified; animated/inline emotes, undocumented sticker graphics and unsupported reaction subscriptions stay unavailable.",
         "Native authorized-reader static Twitch emote controls now have controlled coordinator/renderer/recording pixel proof and independent 1015-check review. No live authorized feed/event/viewer acceptance follows; original issue remains open.",
-        "Public subscription/gift event entries preserve literal text, anonymity, typed filters and bounded limits; entries without supported mutation IDs remain read-only. Controlled positives/negatives do not establish live provider event/viewer or new Program/UI acceptance."
+        "Public subscription/gift event entries preserve literal text, anonymity, typed filters and bounded limits; explicit read-only gates apply to subscription notices and gifts because ordinary mutation eligibility is unsupported, despite their public IDs. Controlled positives/negatives do not establish live provider event/viewer or new Program/UI acceptance."
       ],
       "evidence": [
         "NATIVE_CHAT_STATIC_EMOTE_2026-10-22.json",
