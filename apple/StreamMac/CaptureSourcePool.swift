@@ -272,6 +272,15 @@ final class SourceFrameProviders: @unchecked Sendable {
         return holder?.latest()
     }
 
+    func recordingCameraHolder(for key: CaptureSourceKey) -> LatestCameraFrame? {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return cameraHoldersByKey[key]
+    }
+    func recordingScreenHolder(for key: CaptureSourceKey) -> LatestScreenFrame? {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return screenHoldersByKey[key]
+    }
+
     /// Capture delivery counts are read without requesting/pulling any media.
     /// A static screen can deliver zero new frames while the compositor stays paced.
     func deliveryCount(for key: CaptureSourceKey) -> Int? {
@@ -337,15 +346,21 @@ struct SourceFrameLookup: Sendable {
 /// compositing — moving camera overlays included — without ScreenCaptureKit
 /// producing fresh frames.
 final class LatestScreenFrame: @unchecked Sendable {
+    struct Frame { let buffer: CVPixelBuffer; let presentationTime: CMTime }
     let deliveryTelemetry = FrameTelemetry()
     let captureClock = AVClockTelemetry()
     private var lock = os_unfair_lock_s()
     private var buffer: CVPixelBuffer?
+    private var presentationTime: CMTime = .invalid
+    private let recordingHistory = RecordingSourceHistory<Frame>()
 
     func store(_ buffer: CVPixelBuffer, presentationTime: CMTime = .invalid) {
         if presentationTime.isNumeric { captureClock.record(.video, presentationSeconds: presentationTime.seconds) }
         os_unfair_lock_lock(&lock)
         self.buffer = buffer
+        self.presentationTime = presentationTime
+        recordingHistory.append(Frame(buffer: buffer, presentationTime: presentationTime), time: presentationTime,
+                                byteCount: CVPixelBufferGetDataSize(buffer))
         deliveryTelemetry.recordCaptured()
         os_unfair_lock_unlock(&lock)
     }
@@ -356,10 +371,34 @@ final class LatestScreenFrame: @unchecked Sendable {
         return buffer
     }
 
+    func acquireRecordingHistory() -> RecordingSourceHistoryLease {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        let lease = recordingHistory.acquire()
+        if let buffer {
+            recordingHistory.append(Frame(buffer: buffer,presentationTime: presentationTime), time: presentationTime,
+                                    byteCount: CVPixelBufferGetDataSize(buffer))
+        }
+        return lease
+    }
+    func recordingFrame(at time: CMTime) -> Frame? {
+        guard time.isNumeric else { return nil }
+        // Legacy static holders have no capture clock; their pixels are
+        // intentionally timeless. Native SCStream receipts always carry PTS.
+        if let value = snapshot(), !value.presentationTime.isNumeric { return value }
+        return recordingHistory.frame(at: time)
+    }
+    private func snapshot() -> Frame? {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return buffer.map { Frame(buffer: $0, presentationTime: presentationTime) }
+    }
+
     func clear() {
         captureClock.reset()
         os_unfair_lock_lock(&lock)
         buffer = nil
+        presentationTime = .invalid
+        recordingHistory.clear()
         os_unfair_lock_unlock(&lock)
     }
 }
@@ -394,7 +433,16 @@ final class CaptureSourcePool: ObservableObject {
     /// Recording pins the same normalized physical identity as capture.
     /// Unlike the legacy composition lookup, ISO never falls back to a
     /// different default camera when this exact holder is missing.
-    func recordingCaptureKey(for key: CaptureSourceKey) -> CaptureSourceKey { normalized(key) }
+    func recordingCaptureKey(for key: CaptureSourceKey) -> CaptureSourceKey {
+        guard case .camera(var payload) = key else { return key }
+        // A recording owns a physical identity, including when its source
+        // initially names the system default. Never pin the mutable default
+        // alias: another device may acquire that alias after a disconnect.
+        if payload.deviceID == nil {
+            payload.deviceID = cameraDeviceIDs[.defaultCamera] ?? defaultCameraDeviceID()
+        }
+        return .camera(payload)
+    }
     /// The last start/run failure per source identity, for future per-source
     /// UI badges. Cleared per source on a successful (re)start.
     @Published private(set) var sourceErrors: [CaptureSourceKey: String] = [:]
@@ -538,7 +586,9 @@ final class CaptureSourcePool: ObservableObject {
     /// recovery and permission-grant retries to restart captures.
     private var lastReconcileSettings: StreamSettings?
 
-    init() {
+    private let defaultCameraDeviceID: @MainActor () -> String?
+    init(defaultCameraDeviceID: @escaping @MainActor () -> String? = { AVCaptureDevice.default(for: .video)?.uniqueID }) {
+        self.defaultCameraDeviceID = defaultCameraDeviceID
         // C09: Syphon servers announce/retire independently of demand —
         // reconcile syphon sources against every directory change (server
         // quit → MISSING; the same name+app reappearing → auto-recovery).
@@ -825,6 +875,10 @@ final class CaptureSourcePool: ObservableObject {
             webHosts[key]?.dispose()
             webHosts[key] = nil
         }
+        // A same-device default/explicit handoff starts the replacement
+        // before stopping this capture. Republish after clearing its UID so
+        // the physical alias cannot retain this now-retired frame holder.
+        if case .camera = key { publishFrameHolders() }
     }
 
     /// Hands the engines the live holder set, default (unpinned) sources
@@ -845,9 +899,15 @@ final class CaptureSourcePool: ObservableObject {
         // legacy default-first arrays — the single-source legacy behavior
         // stays bit-identical), so `frames.screen(key)` resolves `.syphon`
         // keys with the same known-key/never-substitute semantics.
+        var cameraHolders = cameras.mapValues(\.latest)
+        for key in orderedCameras {
+            if let physicalID = cameraDeviceIDs[key], let holder = cameras[key]?.latest {
+                cameraHolders[.camera(CameraSourcePayload(deviceID: physicalID))] = holder
+            }
+        }
         frames.updateKeyed(
             screenHolders: screenFrames.merging(syphonCaptures.mapValues(\.frames)) { current, _ in current },
-            cameraHolders: cameras.mapValues(\.latest))
+            cameraHolders: cameraHolders)
         // A02: the keyed media playout sources (pull-based — the render tick
         // reads `frames.media(key)` straight from each playback engine).
         // G06: the PDF engines merge into the same keyed map.
@@ -1105,7 +1165,7 @@ final class CaptureSourcePool: ObservableObject {
                 return
             }
         } else {
-            guard let resolved = AVCaptureDevice.default(for: .video)?.uniqueID else {
+            guard let resolved = cameraDeviceIDs[key] ?? defaultCameraDeviceID() else {
                 cameraDeviceIDs[key] = nil
                 markMissing(key, message: "No camera is connected. Connect one, or relink the source to a specific camera.")
                 return
@@ -1118,7 +1178,10 @@ final class CaptureSourcePool: ObservableObject {
         let camera = FacecamCapture()
         cameras[key] = camera
         publishFrameHolders()
-        camera.start(with: settings, deviceUniqueID: payload.deviceID)
+        // Keep the capture's automatic rebuild on the same physical identity
+        // that the pool publishes. Passing nil here could reopen a different
+        // system-default camera while its holder still carries the old ID.
+        camera.start(with: settings, deviceUniqueID: cameraDeviceIDs[key])
         activeSources.insert(key)
         // E05 (issue #109): restore the device's persisted hardware control
         // preferences (focus/exposure/white-balance modes) — they live on the
@@ -1609,8 +1672,7 @@ final class CaptureSourcePool: ObservableObject {
 
     private func normalized(_ key: CaptureSourceKey) -> CaptureSourceKey {
         guard case .camera(let payload) = key, let deviceID = payload.deviceID,
-              let defaultDevice = AVCaptureDevice.default(for: .video),
-              defaultDevice.uniqueID == deviceID else { return key }
+              (cameraDeviceIDs[.defaultCamera] ?? defaultCameraDeviceID()) == deviceID else { return key }
         return .camera(CameraSourcePayload())
     }
 }

@@ -277,7 +277,7 @@ not gain arbitrary error userInfo or recording paths.
 
 ## Isolated camera and screen video
 
-Recording Options can select two camera/screen source IDs independently of the
+Recording Options can select two camera/screen/guest source IDs independently of the
 program scene, with separate 720p/1080p, 15/30 fps, H.264/HEVC, quality, source
 processing, and optional channel/bus audio association. Choices persist in the
 active profile. No Source Effects records scaled, unmirrored capture pixels;
@@ -285,7 +285,7 @@ Source Effects applies that registry source's current defaults and camera
 orientation. Layer transforms, scene overlays, annotations, and transitions
 are excluded. OS capture processing already present in pixels cannot be undone.
 
-Each source resolves through CaptureSourcePool's normalized physical identity
+Each source resolves through CaptureSourcePool's resolved physical identity
 and strict SourceFrameProviders keyed lookup. An unavailable source records
 marked black frames; it never falls back to an unrelated default camera/screen.
 A static screen holder remains recordable. Source subscriptions retain capture
@@ -297,8 +297,9 @@ the selected raw or processed video tap. The recorder never substitutes a
 replacement guest connection for a retired lease. Actual local guest camera
 Program/ISO recordings have decoded pixel, exact PCM-grid and disconnect/rejoin
 evidence in [NATIVE_INTERVIEW_PROGRAM_ISO.md](docs/NATIVE_INTERVIEW_PROGRAM_ISO.md).
-Per-Mac source-count/storage limits and sustained physical-source qualification
-remain open under #171.
+The enabled Mac class has additional controller-level sustained, mixed-codec,
+real-network evidence in [ISOLATED_VIDEO_SUSTAINED_VALIDATION.md](docs/ISOLATED_VIDEO_SUSTAINED_VALIDATION.md).
+That report states the generated capture boundaries and physical-device limits.
 
 The app budgets program + active publisher + isolated encoder sessions before
 start and write-tests the selected folder using an exclusive 8 MB temporary
@@ -311,7 +312,7 @@ The native controller fixture verifies rejection before any publisher starts.
 
 | Measured Mac class | Program maximum | Isolated maximum | Total native encoders |
 | --- | --- | --- | --- |
-| Apple M3 Max, Mac15,8, 16 CPUs | 1080p30 | Two 1080p30 camera/screen sources | Four including program and publishers |
+| Apple M3 Max, Mac15,8, 16 CPUs | 1080p30 | Two 1080p30 camera/screen/guest selections; measured camera+screen and camera+guest pairs | Four including program and publishers |
 | Other models/variants, including Intel | Awaiting native qualification | Start is rejected with the detected class | No inferred limit |
 
 Each isolated source owns its serial render queue and independent Apple writer:
@@ -327,6 +328,11 @@ can produce a counted black gap or a held-frame timeline gap; the app warns.
 A failing source writer closes and preserves its partial media while other
 writers and program/network consumers continue. Completed tracks release their
 native encoder and renderer pixel pools even while the session retains status.
+Active ISO consumers additionally lease bounded source-frame history (eight
+receipts/96 MiB per physical holder) and select by original capture PTS, including
+per-interval pause mapping. Missing historical windows record marked black;
+last-consumer retirement releases history. The ordinary Program/iOS latest-frame
+path does not retain those additional source buffers.
 
 `run_isolated_video_harness.zsh` builds actual StreamMac source/renderer/writer
 code and uses native generated camera/screen holders without hardware capture
@@ -348,9 +354,11 @@ runs intermittently rejected media at append/finalization with native error
 codes, including -11800/-16341. Repeated runs passed after this setting; copying
 shared PCM did not resolve the failures and was removed. The observed mitigation
 does not identify a private OSStatus meaning. Native camera/screen permissions,
-device/guest adapters, complex processed effects, long workloads, physical
-volume removal/sudden kill, mixed codecs, and other Mac classes remain release
-qualification. The source harness also passes shared pause/segment timing,
+physical device IO, complex processed effects, physical volume removal and
+workloads beyond the published bounded measurements remain release
+qualification. Native guest adapter evidence and the later mixed-codec
+controller workload are linked above; other Mac classes remain disabled. The
+source harness also passes shared pause/segment timing,
 independent low-storage playable partial preservation, library session/gap/error
 inspection, active-file export guards, and decoded video-only range export.
 

@@ -835,10 +835,12 @@ final class StreamController: ObservableObject {
             return (RecordingVideoSubscription(), worker)
         }
         guard let key = Self.videoCaptureKey(source.payload) else { return nil }
+        let recordingKey = capturePool.recordingCaptureKey(for: key)
+        if case .camera(let payload) = recordingKey, payload.deviceID == nil { return nil }
         let token = RecordingVideoSubscription()
-        isolatedVideoCaptureSubscriptions[token] = key; reconcileSourceDemand()
+        isolatedVideoCaptureSubscriptions[token] = recordingKey; reconcileSourceDemand()
         return (token, RecordingVideoSourceFactory.make(source: source,
-            key: capturePool.recordingCaptureKey(for: key), frames: capturePool.frames))
+            key: recordingKey, frames: capturePool.frames))
     }
     func removeRecordingVideoSource(_ subscription: RecordingVideoSubscription) {
         isolatedVideoCaptureSubscriptions.removeValue(forKey: subscription); reconcileSourceDemand()

@@ -137,7 +137,8 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
             let duration = CMTimeMinimum(interval, remaining)
             sequence += 1
             guard let frame = render?(CGSize(width: selection.resolution.width, height: selection.resolution.height),
-                nextVideoTime, duration, sequence, selection.processing) else {
+                nextVideoTime, duration, sequence, selection.processing,
+                sourceTime: timing.originalSourceTime(for: nextVideoTime) ?? .invalid) else {
                 failOnQueue("The source renderer could not produce a frame."); return
             }
             progress.sourceAvailable = frame.sourceAvailable
@@ -191,6 +192,19 @@ final class IsolatedVideoRecorder: @unchecked Sendable {
                     writer?.appendAudio(copy)
                     nextAudioTime = pts + CMTime(value: Int64(CMSampleBufferGetNumSamples(copy)), timescale: 48_000)
                 }
+            }
+        }
+        if !final, selection.audioTargetID != nil {
+            // A retired guest lease intentionally stops delivering associated
+            // PCM. Keep its file on the common clock with marked silence,
+            // allowing half a second for normal capture/tap delivery first.
+            // Bound each pass to one PCM chunk so a long absence never builds
+            // an unbounded allocation or a burst of queued writer samples.
+            let settled = timing.end - CMTime(value: 24_000, timescale: 48_000)
+            if settled > nextAudioTime {
+                establishedAudioGrid = true
+                padAudio(until: CMTimeMinimum(settled, nextAudioTime + CMTime(value: 4096, timescale: 48_000)),
+                         origin: timing.origin)
             }
         }
         if final {
