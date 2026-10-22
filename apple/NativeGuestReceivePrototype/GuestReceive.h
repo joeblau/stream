@@ -86,6 +86,9 @@ SGIcePair SGReceiverSelectedIcePair(SGReceiver *);
 void SGReceiverStop(SGReceiver *);
 void SGReceiverDestroy(SGReceiver *);
 #ifdef STREAM_GUEST_VALIDATION
+// Deidentified process-local TLS counters: verified, rejected, ciphertext
+// out/in, admitted plaintext out. Available only in explicit owned TLS builds.
+void SGReceiverValidationTLSReceipts(uint64_t output[5]);
 typedef struct {
     uint32_t forwarded_packets;
     int fragmented_prefix, failed, recovery_checked, recovered_idr;

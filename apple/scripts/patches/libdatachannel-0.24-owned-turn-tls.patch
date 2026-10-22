@@ -1,0 +1,32 @@
+--- a/src/impl/icetransport.cpp
++++ b/src/impl/icetransport.cpp
+@@ -9,0 +10 @@
++#include <cstdlib>
+@@ -396,0 +398,3 @@
++extern "C" void stream_nice_turn_tls_receipts(uint64_t output[5]);
++extern "C" int stream_rtc_turn_tls_20261022_v1() { return 1; }
++extern "C" void stream_rtc_turn_tls_receipts_20261022_v1(uint64_t output[5]) { stream_nice_turn_tls_receipts(output); }
+@@ -526,0 +531,5 @@
++
++	// Explicit process-local qualification trust only; no system trust changes.
++	// Original server identity below still undergoes certificate verification.
++	if (const char *ca = std::getenv("STREAM_OWNED_TURN_TLS_CA_FILE"); ca && *ca)
++		g_object_set_data_full(G_OBJECT(mNiceAgent.get()), "stream-owned-turn-tls-ca-file", g_strdup(ca), g_free);
+@@ -650 +659,3 @@
+-				nice_agent_set_relay_info(mNiceAgent.get(), mStreamId, 1, nodebuffer,
++				// TLS must authenticate the original DNS name/IP, not a resolved replacement.
++				const char *identity = niceRelayType == NICE_RELAY_TYPE_TURN_TLS ? server.hostname.c_str() : nodebuffer;
++				nice_agent_set_relay_info(mNiceAgent.get(), mStreamId, 1, identity,
+@@ -652,0 +664 @@
++				if (niceRelayType == NICE_RELAY_TYPE_TURN_TLS) break;
+--- a/src/configuration.cpp
++++ b/src/configuration.cpp
+@@ -66,0 +67,8 @@
++	}
++
++	// A turns URI always requires encrypted TURN. transport=tcp selects TLS
++	// over TCP, not a downgrade to cleartext TURN; DTLS is not implemented.
++	if (scheme == "turns" || scheme == "TURNS") {
++		if (relayType == RelayType::TurnUdp)
++			throw std::invalid_argument("TURN over DTLS is unavailable");
++		relayType = RelayType::TurnTls;

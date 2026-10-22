@@ -7,6 +7,9 @@ Homebrew archives. The shipping SDK and compile-time UDP-only guard remain
 unchanged. These artifacts have not been adopted as release dependencies.
 
 This advances the earlier [current-host TCP qualification](NATIVE_GUEST_TCP_QUALIFICATION.md).
+The subsequent [optional TURN/TLS proof](NATIVE_GUEST_TLS_QUALIFICATION.md)
+adds actual verified TLS control and certificate negatives, with a retained
+full-media failure; it does not adopt TLS into the shipping SDK.
 It establishes build floors and actual current-host TCP behavior; it does not
 establish execution on macOS 14 or Intel hardware.
 

@@ -17,12 +17,18 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 
 SDK_PIN = "8c31097ea78f051e857d0aa1b2f6efb26cd12b7e"
 NICE_PIN = "ae3eb16fd7d1237353bf64e899c612b8a63bca8a"
 OPENSSL_PIN = "c8bd5a57108599ac650bbae77fcabe3109dab2e8"
 PATCHED_ICE_SHA256 = "f21c77a844a340dd1ef128b0cb7d996fbcec3403f41d614df65dbc920c403e1d"
 PATCH = Path(__file__).resolve().parent / "patches/libdatachannel-0.24-nice-relay-policy.patch"
+TLS_PATCH = PATCH.with_name("libnice-0.1.22-owned-tls.patch")
+TLS_MANIFEST = PATCH.with_name("libnice-0.1.22-owned-tls.json")
+TLS_SDK_PATCH = PATCH.with_name("libdatachannel-0.24-owned-turn-tls.patch")
+TLS_SDK_MANIFEST = PATCH.with_name("libdatachannel-0.24-owned-turn-tls.json")
+TLS_ICE_SHA256 = "92d834e834cc38aaebfe08acde791c5da2320c64d2339b46b3b74a42f2bd0a90"
 
 
 def run(*args, env=None, capture=False):
@@ -94,7 +100,7 @@ def verify_owned_dependencies(prefix, architecture, target):
     return receipt
 
 
-def checkout(root, name, url, pin, recursive=False):
+def checkout(root, name, url, pin, recursive=False, allowed_changes=None):
     source = root / name
     if not source.exists():
         run("git", "clone", "--filter=blob:none", "--no-checkout", url, source)
@@ -105,7 +111,8 @@ def checkout(root, name, url, pin, recursive=False):
         raise RuntimeError(f"Unexpected source revision: {name}")
     changed = run("git", "-C", source, "diff", "HEAD", "--name-only", capture=True).splitlines()
     allowed = {"libdatachannel-source": ["src/impl/icetransport.cpp"], "glib-source": ["meson.build"]}.get(name, [])
-    if changed not in ([], allowed):
+    unexpected = set(changed) - set(allowed_changes) if allowed_changes is not None else changed not in ([], allowed)
+    if unexpected:
         raise RuntimeError(f"Unrelated source changes preserved; choose another build directory: {name}")
     if recursive:
         status = run("git", "-C", source, "submodule", "status", "--recursive", capture=True)
@@ -119,6 +126,28 @@ def checkout(root, name, url, pin, recursive=False):
     return source
 
 
+def reviewed_patch(source, patch, expected):
+    observed = {name: digest(source / name) if (source / name).is_file() else None for name in expected}
+    if observed == expected:
+        return
+    # Verify a complete candidate off-tree first. An unrelated staged/working
+    # mutation must not be modified merely because a zero-context patch applies.
+    with tempfile.TemporaryDirectory(prefix="stream-reviewed-tls-patch-") as directory:
+        owned = Path(directory)
+        for name in expected:
+            if (source / name).exists():
+                (owned / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source / name, owned / name)
+        result = subprocess.run(["git", "apply", "--unidiff-zero", str(patch)], cwd=owned,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if result.returncode != 0 or any(not (owned / name).is_file() or digest(owned / name) != sha for name, sha in expected.items()):
+            raise RuntimeError("Owned TLS source differs from exact reviewed patch; preserved without building")
+        current = {name: digest(source / name) if (source / name).is_file() else None for name in expected}
+        if current != observed:
+            raise RuntimeError("Owned TLS source changed during review; preserved without building")
+        run("git", "-C", source, "apply", "--unidiff-zero", patch)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", required=True, type=Path)
@@ -129,19 +158,34 @@ def main():
     parser.add_argument("--architecture", choices=["arm64", "x86_64"], default=platform.machine())
     parser.add_argument("--openssl-source", type=Path, help="Clean pinned OpenSSL source for corresponding-source material")
     parser.add_argument("--source-bundle", action="store_true", help="Retain corresponding source, recipes and notices; requires owned GLib and OpenSSL source")
+    parser.add_argument("--turn-tls", action="store_true", help="Compile explicitly owned real TLS socket; qualification and app guard remain separate")
     args = parser.parse_args()
     requested_floor = version(args.deployment_target)
     root = args.build_dir.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    sdk = checkout(root, "libdatachannel-source", "https://github.com/paullouisageneau/libdatachannel.git", SDK_PIN, True)
-    nice = checkout(root, "libnice-source", "https://github.com/libnice/libnice.git", NICE_PIN)
-    if subprocess.run(["git", "-C", str(sdk), "apply", "--check", str(PATCH)],
+    tls_manifest = json.loads(TLS_MANIFEST.read_text()) if args.turn_tls else None
+    tls_sdk_manifest = json.loads(TLS_SDK_MANIFEST.read_text()) if args.turn_tls else None
+    sdk = checkout(root, "libdatachannel-source", "https://github.com/paullouisageneau/libdatachannel.git", SDK_PIN, True,
+                   allowed_changes=tls_sdk_manifest["files"] if tls_sdk_manifest is not None else None)
+    if tls_manifest is not None and tls_manifest["pin"] != NICE_PIN:
+        raise RuntimeError("Owned TLS patch uses a different libnice source pin")
+    if tls_sdk_manifest is not None and tls_sdk_manifest["pin"] != SDK_PIN:
+        raise RuntimeError("Owned TLS patch uses a different SDK source pin")
+    nice = checkout(root, "libnice-source", "https://github.com/libnice/libnice.git", NICE_PIN,
+                    allowed_changes=tls_manifest["files"] if tls_manifest is not None else None)
+    already_tls = args.turn_tls and digest(sdk / "src/impl/icetransport.cpp") == TLS_ICE_SHA256
+    if already_tls:
+        pass
+    elif subprocess.run(["git", "-C", str(sdk), "apply", "--check", str(PATCH)],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         run("git", "-C", sdk, "apply", PATCH)
     else:
         run("git", "-C", sdk, "apply", "--reverse", "--check", PATCH)
-    if digest(sdk / "src/impl/icetransport.cpp") != PATCHED_ICE_SHA256:
+    if not already_tls and digest(sdk / "src/impl/icetransport.cpp") != PATCHED_ICE_SHA256:
         raise RuntimeError("SDK source includes changes beyond the reviewed backend patch")
+    if args.turn_tls:
+        reviewed_patch(nice, TLS_PATCH, tls_manifest["files"])
+        reviewed_patch(sdk, TLS_SDK_PATCH, tls_sdk_manifest["files"])
 
     env = os.environ.copy()
     env["PATH"] = str(args.tools_prefix.resolve() / "bin") + os.pathsep + env["PATH"]
@@ -221,6 +265,8 @@ def main():
     for symbol in ["_stream_rtc_nice_relay_policy_20261021_v1", "_stream_rtc_turn_transports_20261021_v1"]:
         if not any(symbol in line and " U " not in line for line in symbols.splitlines()):
             raise RuntimeError("Compiled backend receipt missing")
+    if args.turn_tls and not any("_stream_rtc_turn_tls_20261022_v1" in line and " U " not in line for line in symbols.splitlines()):
+        raise RuntimeError("Owned TLS implementation marker missing")
 
     notices = root / "licenses"
     notices.mkdir(exist_ok=True)
@@ -257,6 +303,11 @@ def main():
                "sdkSubmodules": run("git", "-C", sdk, "submodule", "status", "--recursive", capture=True).splitlines(),
                "additionalSystemLinkFlags": system_flags, "turnTransports": ["udp", "tcp"],
                "tlsQualified": False, "scope": "opt-in owned backend; runtime, selected relay and decoded media qualification required"}
+    if args.turn_tls:
+        receipt.update({"ownedTLSImplementation": True, "tlsQualified": False,
+                        "ownedTLSPatchSHA256": digest(TLS_PATCH), "ownedTLSManifestSHA256": digest(TLS_MANIFEST),
+                        "ownedSDKTLSPatchSHA256": digest(TLS_SDK_PATCH), "ownedSDKTLSManifestSHA256": digest(TLS_SDK_MANIFEST),
+                        "trustScope": "verified original host/IP; explicit process-local fixture CA or OpenSSL default trust; no system trust changes"})
     (root / "nice-transport-build.json").write_text(json.dumps(receipt, indent=2) + "\n")
     if args.source_bundle:
         bundle = root / "corresponding-source"
@@ -279,7 +330,7 @@ def main():
         for name in ["build_owned_nice_transport.py", "build_owned_glib_dependencies.py"]:
             shutil.copyfile(Path(__file__).resolve().parent / name, recipes / name)
         (recipes / "patches").mkdir(exist_ok=True)
-        for name in [PATCH.name, "glib-2.84.4-macos-pipe2-availability.patch"]:
+        for name in [PATCH.name, "glib-2.84.4-macos-pipe2-availability.patch"] + ([TLS_PATCH.name, TLS_MANIFEST.name, TLS_SDK_PATCH.name, TLS_SDK_MANIFEST.name] if args.turn_tls else []):
             shutil.copyfile(Path(__file__).resolve().parent / "patches" / name, recipes / "patches" / name)
         shutil.copytree(notices, bundle / "licenses", dirs_exist_ok=True)
         shutil.copyfile(owned_dependencies, bundle / "owned-glib-dependencies.json")
