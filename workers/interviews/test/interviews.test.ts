@@ -190,15 +190,29 @@ describe('actual Worker and SQLite Durable Object interview signaling', () => {
     expect((guest.roster.peers as Message[]).find(peer => peer.id === guest.id)?.state).toBe('waiting');
   });
 
-  it('advertises public roster generation for scoped controllers and replaces it on rejoin', async () => {
+  it('exposes roster generations only to the host and replaces scoped membership authority on rejoin', async () => {
     const room = await create(), host = await connect(room, room.host), guest = await connect(room, room.guest);
-    await host.barrier();
+    const other = await connect(room, await invite(room));
+    await host.barrier(); await guest.barrier(); await other.barrier();
     expect((host.roster.peers as Message[]).find(peer => peer.id === guest.id)?.generation).toBe(guest.generation);
+    expect((host.roster.peers as Message[]).find(peer => peer.id === other.id)?.generation).toBe(other.generation);
+    for (const observer of [guest, other]) {
+      expect((observer.roster.peers as Message[]).every(peer => !Object.hasOwn(peer,'generation'))).toBe(true);
+    }
+    await admit(host, guest);
+    expect((await guest.next('admitted')).hostGeneration).toBe(host.generation);
+    await other.barrier();
+    expect(other.messages.some(message => message.type === 'admitted')).toBe(false);
+    expect((other.roster.peers as Message[]).every(peer => !Object.hasOwn(peer,'generation'))).toBe(true);
     const replacement = await connect(room, room.guest);
     await host.barrier();
     expect(replacement.id).toBe(guest.id);
     expect(replacement.generation).not.toBe(guest.generation);
     expect((host.roster.peers as Message[]).find(peer => peer.id === guest.id)?.generation).toBe(replacement.generation);
+    await replacement.barrier(); await other.barrier();
+    for (const observer of [replacement, other]) {
+      expect((observer.roster.peers as Message[]).every(peer => !Object.hasOwn(peer,'generation'))).toBe(true);
+    }
   });
 
   it('a new host generation fences the previous admission before explicit readmission', async () => {
