@@ -1,0 +1,110 @@
+{
+  "baseCommit": "50084bb6ac1e92546fb830dcb8a51078ee121b86",
+  "originalCICommit": "e41fa06bae39ba14f3767a7bf3f92537f66b6313",
+  "scope": "Fixture-only correction; syntax/source-qualified. No production change, native execution, writer/renderer/mixer run, device, capture, helper, browser, IPC or network. Actual integrated rehearsal runtime remains pending next CI.",
+  "originalFailure": {
+    "logPath": "/tmp/stream-ci-e41fa06-120070198066-original.log",
+    "sha256": "c841b1c629ac8fa48bfa54f9ff5d64f536b9e6219ca820a17f8dc2bf34a9c37d",
+    "timestamp": "2026-10-22T23:07:28.1016870Z",
+    "message": "Synchronous storage failure leaked owned rehearsal or preview",
+    "exitCode": 132,
+    "priorCasesPassed": [
+      "countdown cancellation and stale callback ownership",
+      "pre-existing preview and preparing writer cleanup"
+    ]
+  },
+  "sourceCause": "Directory rejection moved behind asynchronous frameDeliveryTask geometry/install transaction. resolveStore returns configured regular-file path and volume-capacity check may succeed; makeSegment/ensureRecordingsDirectory rejects it only after the actor task runs. An immediate Preparing/owned-preview/public-guard state is not terminal cleanup failure. Eventual integrated cleanup has not been rerun.",
+  "originalFixtureSHA256": "ac472f0518a88982230fa699e75ae3da5cb5b9e06a4a64094644fc10dae8de44",
+  "fixedFixtureSHA256": "b285379d22c9c06b61db49e65f7257db5bad8fe771c4ddff2ad1b296828ff4e2",
+  "productionSourceSHA256": {
+    "apple/StreamMac/StreamController.swift": "6d781ec2373166943089450d3e44959f3afd543229138e1e25afb3bd9d92d53b",
+    "apple/StreamMac/RecordingController.swift": "8c2dcd01065243986c4fda3a3f6a1abdaa79d6de18f50eac87945526e330db42",
+    "apple/StreamCore/RecordingStore.swift": "94c0c811f02ac01373231c0c068f42bd36e9e1faa375fe05342b82a772e94438"
+  },
+  "unchangedProductionMethodSlices": {
+    "apple/StreamMac/StreamController.swift:beginLocalRehearsal": {
+      "sha256": "faaab1f07d8f4e0f9e4e09ce8bdf9a07ca1726032dcf67c42c43aa17f08325be",
+      "equalE41": true
+    },
+    "apple/StreamMac/StreamController.swift:endLocalRehearsal": {
+      "sha256": "3f01a303a08271ca40a44a7e7b0d665bb3b6b9b520369ad95227ba592267ea96",
+      "equalE41": true
+    },
+    "apple/StreamMac/StreamController.swift:stopLocalRehearsal": {
+      "sha256": "7c6ba56011afc99aa23efdb14cbc30dc77e163f3cd01be2dd39645b4afff3637",
+      "equalE41": true
+    },
+    "apple/StreamMac/RecordingController.swift:start": {
+      "sha256": "e895b04272c6cea91e49fb7dc9d87fff1cd1caa718101320b3807b69749daa1e",
+      "equalE41": true
+    },
+    "apple/StreamMac/RecordingController.swift:begin": {
+      "sha256": "e15e5eeef31ea465afb79c105bb937f10a1201696db91d131d7a01c8a07ca3f8",
+      "equalE41": true
+    },
+    "apple/StreamMac/RecordingController.swift:beginPrepared": {
+      "sha256": "6e29071909cc912a7341af59ad554dd6e9b283a3b7875a1c3941810ea8164ffd",
+      "equalE41": true
+    },
+    "apple/StreamMac/RecordingController.swift:finishBeginning": {
+      "sha256": "ea22a690cb9bf5a3685f8096de18166c174bda15e9513d99d642b227ccb79ad8",
+      "equalE41": true
+    },
+    "apple/StreamMac/RecordingController.swift:makeSegment": {
+      "sha256": "0e2b700b9486f7d301c7c1fc7a9df8245069f4d1637f59e7b8280482be86baf0",
+      "equalE41": true
+    },
+    "apple/StreamMac/RecordingController.swift:stop": {
+      "sha256": "c7751db958075384224ef618afc62af9a59358c9cd51c63df7fb45042f9d781e",
+      "equalE41": true
+    },
+    "apple/StreamMac/RecordingController.swift:completeStopsIfReady": {
+      "sha256": "69faa7ec961202369a98ddc82fa19706dfe983d63c11cca81cff1f2f38bb7dc7",
+      "equalE41": true
+    },
+    "apple/StreamCore/RecordingStore.swift:ensureRecordingsDirectory": {
+      "sha256": "8b4e4dc34b05d62ef424d17f1a615b3b89ed952147c5eeb44fa164b4ca1630e5",
+      "equalE41": true
+    },
+    "apple/StreamCore/RecordingStore.swift:makeRecordingURL": {
+      "sha256": "e13465f448cc08a3b647a93ed79ecfd7c0ae9dd4d9004b1c38497c61537c1d7b",
+      "equalE41": true
+    },
+    "apple/StreamCore/RecordingStore.swift:hasSufficientSpace": {
+      "sha256": "4a725ca5fbdbc51b29648e14e38d0ef9e02e59f9dc4ab1b5142b3130c278bfcb",
+      "equalE41": true
+    }
+  },
+  "preservedInvariants": {
+    "ownedPreviewFinalCondition": "!failedRecorder.state.isActive && failedRecorder.lastError != nil && !controller.isRehearsing && !controller.isPreviewing",
+    "preexistingPreviewFinalCondition": "controller.isPreviewing && !controller.isRehearsing && controller.destinationOutputs.isPublishingAllowed",
+    "existingWaitHelperByteIdentical": true,
+    "existingBlockedHelperByteIdentical": true,
+    "allExistingTaskSleepCallsUnchanged": true,
+    "newSleepCalls": 0,
+    "largerDeadlines": false,
+    "specificFolderErrorRequiredBothCases": true
+  },
+  "validation": {
+    "kind": "Swift6 syntax parse only; imports/dependencies were not typechecked or linked",
+    "command": [
+      "swiftc",
+      "-swift-version",
+      "6",
+      "-j2",
+      "-parse-as-library",
+      "-parse",
+      "apple/scripts/local_rehearsal_harness.swift"
+    ],
+    "exitCode": 0,
+    "logPath": "/tmp/stream-wave20-local-rehearsal-proof-20261022/swift-parse.log",
+    "logSHA256": "956ea494eaeee4260afc8124ae2e4ea6813ef075f058bf1c2f2ba3270fc6ac14",
+    "diffCheck": "PASS"
+  },
+  "artifactSHA256": {
+    "/tmp/stream-wave20-local-rehearsal-proof-20261022/source_check.py": "2e82f598945601139bf09fb708dce875279d997969d30f48c313b2d084bec8cc",
+    "/tmp/stream-wave20-local-rehearsal-proof-20261022/original-local-rehearsal-harness.swift": "ac472f0518a88982230fa699e75ae3da5cb5b9e06a4a64094644fc10dae8de44",
+    "/tmp/stream-wave20-local-rehearsal-proof-20261022/current-local-rehearsal-harness.swift": "b285379d22c9c06b61db49e65f7257db5bad8fe771c4ddff2ad1b296828ff4e2",
+    "/tmp/stream-wave20-local-rehearsal-proof-20261022/swift-parse.log": "956ea494eaeee4260afc8124ae2e4ea6813ef075f058bf1c2f2ba3270fc6ac14"
+  }
+}
