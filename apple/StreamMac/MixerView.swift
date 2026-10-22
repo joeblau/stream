@@ -45,6 +45,7 @@ struct MixerPanelView: View {
 
     /// The latest engine meter snapshot (polled while the tab is visible).
     @State private var levels = AudioEngineLevels()
+    @Environment(\.studioTextScale) private var textScale
     /// Every channel the mixer has shown this session, in stable strip order:
     /// the mic first, then capture channels in source-registry order, then
     /// anything else the engine reports (media/app/guest as they land).
@@ -235,6 +236,7 @@ struct MixerPanelView: View {
             .buttonStyle(.bordered)
             .controlSize(.mini)
             .tint(active ? .purple : nil)
+            .accessibilityLabel("Audio effects for \(name(for: id))")
             .help("Per-channel effects: high-pass, noise gate, EQ, compressor, Audio Units, limiter — applied live")
     }
 
@@ -258,7 +260,7 @@ struct MixerPanelView: View {
                 }
             }
         }
-        .font(.caption2)
+        .studioTextStyle(.caption2)
         .menuStyle(.borderlessButton)
         .fixedSize()
     }
@@ -298,7 +300,7 @@ struct MixerPanelView: View {
         let isActive = meterLevels != nil
         return VStack(spacing: 6) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .studioTextStyle(.caption, weight: .semibold)
                 .lineLimit(1)
                 .truncationMode(.tail)
             HStack(spacing: 5) {
@@ -316,8 +318,8 @@ struct MixerPanelView: View {
                     .frame(width: 10, height: Self.faderTravel)
             }
             Text(Self.gainLabel(volume))
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .studioTextStyle(.caption2).monospacedDigit()
+                .foregroundStyle(.studioSecondary)
             HStack(spacing: 4) {
                 stripButton("M", active: isMuted, tint: .orange) { onMute(!isMuted) }
                     .disabled(!controlsEnabled)
@@ -346,14 +348,14 @@ struct MixerPanelView: View {
                         .foregroundStyle(.yellow)
                 } else if !isActive {
                     Text("inactive")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.studioSecondary)
                 } else {
                     Text(" ")
                 }
             }
-            .font(.caption2.weight(.semibold))
+            .studioTextStyle(.caption2, weight: .semibold)
         }
-        .frame(width: 76)
+        .frame(width: 76 * max(1, textScale))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(title) audio channel, \(isActive ? "active" : "inactive")")
     }

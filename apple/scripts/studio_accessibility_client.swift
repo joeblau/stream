@@ -12,6 +12,7 @@ private struct StudioAXNode {
     let frame: CGRect
     let focused: Bool
     let enabled: Bool
+    let actions: [String]
 }
 private enum StudioAXClient {
     static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -65,7 +66,8 @@ private enum StudioAXClient {
                     : attribute(element, kAXPlaceholderValueAttribute) as? String ?? "",
                 value: value, frame: rectangle(element),
                 focused: attribute(element, kAXFocusedAttribute) as? Bool ?? false,
-                enabled: attribute(element, kAXEnabledAttribute) as? Bool ?? true))
+                enabled: attribute(element, kAXEnabledAttribute) as? Bool ?? true,
+                actions: actions(element).map { $0.1 }))
             queue += attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
         }
         guard queue.isEmpty else {
@@ -73,13 +75,24 @@ private enum StudioAXClient {
         }
         return result
     }
-    static func action(_ label: String, focus: Bool = false, increment: Bool = false) throws {
+    static func actions(_ element: AXUIElement) -> [(String, String)] {
+        var names: CFArray?
+        guard AXUIElementCopyActionNames(element, &names) == .success else { return [] }
+        return (names as? [String] ?? []).prefix(32).map { name in
+            var description: CFString?
+            _ = AXUIElementCopyActionDescription(element, name as CFString, &description)
+            return (name, description as String? ?? name)
+        }
+    }
+    static func action(_ label: String, focus: Bool = false, increment: Bool = false, named: String? = nil) throws {
         guard let node = try snapshot().first(where: { $0.label == label }) else {
             throw NSError(domain: "StudioAccessibility", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing public AX control: \(label)"])
         }
+        let requested = named.flatMap { requested in actions(node.element).first { $0.1 == requested || $0.0 == requested }?.0 }
+        if named != nil && requested == nil { throw NSError(domain: "StudioAccessibility", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing native action \(named!) on \(label): \(actions(node.element))"]) }
         let status = focus
             ? AXUIElementSetAttributeValue(node.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-            : AXUIElementPerformAction(node.element, (increment ? kAXIncrementAction : kAXPressAction) as CFString)
+            : AXUIElementPerformAction(node.element, (requested ?? (increment ? kAXIncrementAction : kAXPressAction)) as CFString)
         guard status == .success else {
             throw NSError(domain: "StudioAccessibility", code: 2, userInfo: [NSLocalizedDescriptionKey: "AX press \(label): \(status.rawValue)"])
         }
@@ -93,6 +106,8 @@ do {
         try StudioAXClient.action(CommandLine.arguments[3], increment: true); print("[]")
     } else if CommandLine.arguments.count > 3 && CommandLine.arguments[2] == "focus" {
         try StudioAXClient.action(CommandLine.arguments[3], focus: true); print("[]")
+    } else if CommandLine.arguments.count > 4 && CommandLine.arguments[2] == "action" {
+        try StudioAXClient.action(CommandLine.arguments[3], named: CommandLine.arguments[4]); print("[]")
     } else {
         let rows = try StudioAXClient.snapshot().map { node -> [String: Any] in
             ["role": node.role, "label": node.label, "value": node.value,
@@ -100,7 +115,7 @@ do {
              "y": node.frame.minY.isFinite ? node.frame.minY : 0,
              "width": node.frame.width.isFinite ? node.frame.width : 0,
              "height": node.frame.height.isFinite ? node.frame.height : 0,
-             "focused": node.focused, "enabled": node.enabled]
+             "focused": node.focused, "enabled": node.enabled, "actions": node.actions]
         }
         let data = try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys])
         print(String(decoding: data, as: UTF8.self))

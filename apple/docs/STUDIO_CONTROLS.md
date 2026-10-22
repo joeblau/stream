@@ -34,8 +34,12 @@ commands. Bindings target stable resource IDs; removed guests retain missing
 mappings, and commands resolve against the current admitted connection before
 execution.
 
-Settings > Application offers interface text size, native increased contrast,
-and reduced UI motion. System Reduce Motion also suppresses UI animations. These
+Settings > Application offers interface text size, increased interface contrast,
+and reduced UI motion. Explicit interface captions scale with the text-size
+setting on macOS, including the scene browser, mixer, inspector, chat, settings
+and command palette. Contrast uses opaque panel surfaces, borders and legible
+secondary text alongside the native control appearance; media pixels retain
+their original colors. System Reduce Motion also suppresses UI animations. These
 preferences are machine-local. Compact Layout hides chat/inspector on a laptop;
 the toolbar restores panels and its Focus menu moves keyboard focus. The
 inspector uses a menu so every section fits on a narrow panel. Layer rows expose
@@ -43,8 +47,12 @@ named visibility/selection/order actions to VoiceOver. Mixer faders and buttons
 announce their channel, value, and state; rapidly updating meters are excluded
 from the accessibility tree. Chat's Follow New Messages toggle lets a producer
 keep the reading position while messages arrive. Panel focus falls back to the
-canvas when its panel closes; command sheets restore the former first responder
-when it still belongs to the studio.
+canvas when its panel closes. A surviving native control retains focus when an
+unrelated panel changes. Settings, controller and permission sheets preserve
+weak bookmarks to the original native control, including the control that owns
+AppKit’s shared field editor; removed or hidden controls are never restored.
+Command sheets restore the former first responder when it still belongs to the
+studio.
 
 ## Validation
 
@@ -94,12 +102,51 @@ A later full foreground run on this host could not activate its owned helper
 and correctly exited 77 before posting input; the earlier successful run and
 this environment limitation are separate evidence.
 
-Manual acceptance still needs VoiceOver/Accessibility Inspector and Full
-Keyboard Access on a running studio: traverse panels and layer actions, adjust
-mixer sliders, restore focus after all native import/permission/settings sheets,
-read chat with Follow disabled, and test 1024×640 at every text size/contrast
-setting. Check global registration and ordinary text input while another app is
-foreground. These manual checks are not represented as completed by the harness.
+The workspace runner has three separate accessibility paths:
+
+- `--accessibility` walks and invokes the owned studio through a separate public
+  AX client. It never requests trust or controls another application.
+- `--accessibility-local` queries actual mounted objects through the public
+  native accessibility selectors. It does not fabricate SwiftUI semantics; an
+  unavailable virtual element tree is explicitly unqualified.
+- `--accessibility-native-controls` checks the mounted AppKit controls,
+  process-local keyboard events, focus restoration and production style
+  rendering. It cannot qualify an unavailable SwiftUI virtual accessibility
+  tree and says so in its result.
+
+The 2026-10-22 host session is locked. Existing AX trust was present, but external
+AX exposed no owned window and direct native selectors exposed only native
+controls/chrome rather than SwiftUI virtual labels and actions. No unlock,
+permission grant, global key event or VoiceOver/system setting change was made.
+The actual semantic label/action/order check remains open for issue #90. Native
+control/render checks and their exact results are recorded separately; they are
+not a substitute for that remaining check.
+
+The final scoped native run on Mac15,8 / macOS 27.2(26B118), dated 2026-10-22,
+built all native harness sources and exited 0. It exercised the shipping mounted
+scene-search control, actual process-local Shift-Command-P/Escape/Tab events,
+settings dismissal and an actual attached AppKit sheet through the production
+focus notification attachment. The original field editor/control survived
+restoration. The 13→20 point preference grew the native search callout by over 40%,
+to 18.4615 points; the production relative caption fitting size grew 121×14 to 175×20.
+At 1024×640 the actual root inherited text size, contrast and reduced-motion
+preferences. These are native font/environment observations, not a completed
+check of every primary-control boundary.
+
+Actual original PCM drove the real software mixer to 0.79999995 pre-fader peak
+while production meter polling preserved the native scene-search owner. All 24
+incoming chat queue fixtures were accepted without replacing the native chat
+search field editor. The owning fader remains a virtual SwiftUI control with no
+native NSSlider descendant here; its own-focus and accessibility-action checks
+are still unqualified. The software-only meter fixture explicitly disables
+Voice Polish, Audio Unit inserts and monitoring; it makes no DSP claim.
+
+The native bitmap's normal red reference did not match its comparison control,
+so contrast pixels remain unqualified. The production contrast implementation
+is present and compiled; this result does not establish an actual media color
+change or a successful visual contrast comparison. The current actual evidence,
+run hash and precise remaining scope are in
+[`STUDIO_ACCESSIBILITY_2026-10-22.json`](STUDIO_ACCESSIBILITY_2026-10-22.json).
 
 ## Show macros
 

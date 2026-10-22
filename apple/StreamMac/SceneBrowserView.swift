@@ -98,11 +98,11 @@ struct SceneBrowserView: View {
     private var header: some View {
         HStack {
             Text("Scenes")
-                .font(.callout.weight(.semibold))
+                .studioTextStyle(.callout, weight: .semibold)
             Spacer()
             Picker("Browser mode", selection: $gridMode) {
-                Image(systemName: "list.bullet").tag(false)
-                Image(systemName: "square.grid.2x2").tag(true)
+                Image(systemName: "list.bullet").accessibilityLabel("Scene list").tag(false)
+                Image(systemName: "square.grid.2x2").accessibilityLabel("Scene thumbnails").tag(true)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -116,7 +116,7 @@ struct SceneBrowserView: View {
     private var searchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.studioSecondary)
             TextField("Search scenes", text: $searchText)
                 .textFieldStyle(.plain)
             if !searchText.isEmpty {
@@ -124,12 +124,13 @@ struct SceneBrowserView: View {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.studioSecondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear scene search")
             }
         }
-        .font(.callout)
+        .studioTextStyle(.callout)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
@@ -186,6 +187,7 @@ struct SceneBrowserView: View {
             }
         }
         .listStyle(.sidebar)
+        .accessibilityLabel("Scene list")
     }
 
     private func folderSection(_ folder: SceneFolder) -> some View {
@@ -208,19 +210,19 @@ struct SceneBrowserView: View {
                                                             collapsed: !folder.isCollapsed))
             } label: {
                 Image(systemName: folder.isCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .studioTextStyle(.caption, weight: .semibold)
+                    .foregroundStyle(.studioSecondary)
                     .frame(width: 12)
             }
             .buttonStyle(.plain)
             .help(folder.isCollapsed ? "Expand folder" : "Collapse folder")
             Image(systemName: "folder.fill")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.studioSecondary)
             Text(folder.name)
-                .font(.callout.weight(.semibold))
+                .studioTextStyle(.callout, weight: .semibold)
                 .lineLimit(1)
             Text("\(memberCount)")
-                .font(.caption)
+                .studioTextStyle(.caption)
                 .foregroundStyle(.tertiary)
             Spacer()
         }
@@ -249,8 +251,8 @@ struct SceneBrowserView: View {
                 .lineLimit(1)
             if sceneStore.isLocked(scene.id) {
                 Image(systemName: "lock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .studioTextStyle(.caption)
+                    .foregroundStyle(.studioSecondary)
                     .help("Locked — unlock to rename, reorder, edit, or delete")
             }
             Spacer()
@@ -360,13 +362,13 @@ struct SceneBrowserView: View {
             HStack(spacing: 4) {
                 if sceneStore.isLocked(scene.id) {
                     Image(systemName: "lock.fill")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.studioSecondary)
                         .help("Locked — unlock to rename, reorder, edit, or delete")
                 }
                 Text(scene.name)
                     .lineLimit(1)
             }
-            .font(.caption)
+            .studioTextStyle(.caption)
         }
         .padding(5)
         .background(isSelected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.05),
@@ -406,7 +408,7 @@ struct SceneBrowserView: View {
                 Color.black.opacity(0.55)
                     .overlay {
                         Image(systemName: layoutIcon(for: scene))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.studioSecondary)
                     }
             }
         }
@@ -448,7 +450,7 @@ struct SceneBrowserView: View {
 
     private func marker(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(.caption2.weight(.bold))
+            .studioTextStyle(.caption2, weight: .bold)
             .padding(.horizontal, 4)
             .padding(.vertical, 1)
             .background(color.opacity(0.25), in: Capsule())

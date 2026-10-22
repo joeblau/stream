@@ -48,6 +48,7 @@ struct MainWindowView: View {
     /// section and the canvas drop share one instance.
     @StateObject private var imageLayers = ImageLayerCoordinator()
     @StateObject private var shortcuts = StudioShortcutController()
+    @StateObject private var nativeFocus = StudioFocusRestoration()
     @EnvironmentObject private var localControl: StudioLocalControlServer
     @Environment(\.studioReduceMotion) private var reduceMotion
     @State private var panelBeforeCommands: StudioPanel?
@@ -107,15 +108,18 @@ struct MainWindowView: View {
             if workspace.showProjects { ProjectBrowserView() }
             studioPanels
         }
+        .background(StudioFocusAttachment(coordinator: nativeFocus))
         .background(ManagedStartSheetHost(controller: controller, willPresent: {
-            panelBeforeSheet = focusedPanel
+            panelBeforeSheet = focusedPanel; nativeFocus.remember("controller-sheet")
         }, didDismiss: {
             focusedPanel = panelBeforeSheet; panelBeforeSheet = nil
+            nativeFocus.restore("controller-sheet")
         }))
         .background(StudioControllerEndingReview(coordinator: controller.ending, willPresent: {
-            panelBeforeSheet = focusedPanel
+            panelBeforeSheet = focusedPanel; nativeFocus.remember("controller-sheet")
         }, didDismiss: {
             focusedPanel = panelBeforeSheet; panelBeforeSheet = nil
+            nativeFocus.restore("controller-sheet")
         }))
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -134,6 +138,7 @@ struct MainWindowView: View {
         HSplitView {
             if showScenesPanel {
                 SceneBrowserView()
+                    .studioPanelSurface()
                     .frame(minWidth: 180, idealWidth: 220, maxWidth: 320)
                     .focusable()
                     .focused($focusedPanel, equals: .scenes)
@@ -142,6 +147,7 @@ struct MainWindowView: View {
                     .accessibilitySortPriority(5)
             }
             canvasPanel
+                .studioPanelSurface()
                 .frame(minWidth: 320)
                 .layoutPriority(1)
                 .focusable()
@@ -151,6 +157,7 @@ struct MainWindowView: View {
                 .accessibilitySortPriority(4)
             if showChatPanel {
                 ChatSidebarView(coordinator: workspace.runtime.chat)
+                    .studioPanelSurface()
                     .frame(maxWidth: 420)
                     .focusable()
                     .focused($focusedPanel, equals: .chat)
@@ -160,6 +167,7 @@ struct MainWindowView: View {
             }
             if showInspectorPanel {
                 inspectorPanel
+                    .studioPanelSurface()
                     .frame(minWidth: 240, idealWidth: 300, maxWidth: 420)
                     .focusable()
                     .focused($focusedPanel, equals: .inspector)
@@ -169,6 +177,7 @@ struct MainWindowView: View {
             }
             if session.isPresented {
                 settingsPane
+                    .studioPanelSurface()
                     .frame(minWidth: 300, idealWidth: 360, maxWidth: 480)
                     .focusable()
                     .focused($focusedPanel, equals: .settings)
@@ -281,8 +290,8 @@ struct MainWindowView: View {
         }
         .onChange(of: permissionPrompt) { _, prompt in
             workspace.permissionChoicePending = prompt != nil
-            if prompt != nil { panelBeforeSheet = focusedPanel }
-            else { focusedPanel = panelBeforeSheet; panelBeforeSheet = nil }
+            if prompt != nil { panelBeforeSheet = focusedPanel; nativeFocus.remember("permission") }
+            else { focusedPanel = panelBeforeSheet; panelBeforeSheet = nil; nativeFocus.restore("permission") }
         }
         .onChange(of: firstRunCompleted) { _, complete in
             if complete { focusedPanel = .canvas }
@@ -304,10 +313,12 @@ struct MainWindowView: View {
             showSettingsPanel = presented
             if presented {
                 panelBeforeSettings = focusedPanel
+                nativeFocus.remember("settings")
                 focusedPanel = .settings
             } else {
                 focusedPanel = panelBeforeSettings
                 panelBeforeSettings = nil
+                nativeFocus.restore("settings")
             }
         }
         .alert("Stream",
@@ -361,7 +372,7 @@ struct MainWindowView: View {
                 Button("Chat") { showChatPanel = true; focusedPanel = .chat }
                 Button("Inspector") { showInspectorPanel = true; focusedPanel = .inspector }
             }
-            Toggle(isOn: $showScenesPanel) {
+            Toggle(isOn: panelVisibility(.scenes)) {
                 Label("Scenes", systemImage: "rectangle.on.rectangle")
             }
             .toggleStyle(.button)
@@ -373,13 +384,13 @@ struct MainWindowView: View {
             .toggleStyle(.button)
             .help("Show or hide the diagnostics strip")
 
-            Toggle(isOn: $showChatPanel) {
+            Toggle(isOn: panelVisibility(.chat)) {
                 Label("Chat", systemImage: "bubble.left.and.bubble.right")
             }
             .toggleStyle(.button)
             .help("Show or hide the chat panel")
 
-            Toggle(isOn: $showInspectorPanel) {
+            Toggle(isOn: panelVisibility(.inspector)) {
                 Label("Inspector", systemImage: "sidebar.right")
             }
             .toggleStyle(.button)
@@ -394,6 +405,31 @@ struct MainWindowView: View {
             .toggleStyle(.button)
             .help("Show or hide the settings panel (⌘,)")
         }
+    }
+
+    private func panelVisibility(_ panel: StudioPanel) -> Binding<Bool> {
+        Binding(get: {
+            switch panel {
+            case .scenes: showScenesPanel
+            case .chat: showChatPanel
+            case .inspector: showInspectorPanel
+            case .canvas: true
+            case .settings: session.isPresented
+            }
+        }, set: { visible in
+            nativeFocus.remember("panel-change")
+            switch panel {
+            case .scenes: showScenesPanel = visible
+            case .chat: showChatPanel = visible
+            case .inspector: showInspectorPanel = visible
+            case .settings: session.isPresented = visible
+            case .canvas: break
+            }
+            // Child text/slider controls can own native focus while the
+            // container FocusState is nil. Preserve a surviving native control,
+            // or deliberately choose the canvas if that control was removed.
+            nativeFocus.restore("panel-change", fallback: { focusedPanel = .canvas })
+        })
     }
 
     // MARK: - Settings pane (W04)
@@ -538,7 +574,7 @@ struct MainWindowView: View {
             if dispatcher.state.hasPendingStagedEdits {
                 Label("Unpublished changes", systemImage: "circle.fill")
                     .foregroundStyle(.yellow)
-                    .font(.caption.weight(.semibold))
+                    .studioTextStyle(.caption, weight: .semibold)
                     .labelStyle(.titleAndIcon)
             }
 
@@ -546,7 +582,7 @@ struct MainWindowView: View {
 
             Toggle(isOn: directLiveBinding) {
                 Text("Direct Live")
-                    .font(.callout)
+                    .studioTextStyle(.callout)
             }
             .toggleStyle(.switch)
             .controlSize(.small)
@@ -584,7 +620,7 @@ struct MainWindowView: View {
                 Label("\(rejection.command): \(rejection.message)",
                       systemImage: "exclamationmark.octagon.fill")
                     .foregroundStyle(.orange)
-                    .font(.caption)
+                    .studioTextStyle(.caption)
                     .lineLimit(1)
                     .id(rejection.sequence)
                     .transition(.opacity)
@@ -595,19 +631,19 @@ struct MainWindowView: View {
             if recorder.state == .preparing {
                 Label(recorder.countdownRemaining > 0 ? "Recording in \(recorder.countdownRemaining)…" : "Preparing recording…", systemImage: "record.circle")
                     .foregroundStyle(.orange)
-                    .font(.callout.weight(.semibold))
+                    .studioTextStyle(.callout, weight: .semibold)
             } else if recorder.state.isRecording {
                 Label("Recording", systemImage: "record.circle")
                     .foregroundStyle(.red)
-                    .font(.callout.weight(.semibold))
+                    .studioTextStyle(.callout, weight: .semibold)
             } else if recorder.state == .paused {
                 Label("Recording paused", systemImage: "pause.circle")
                     .foregroundStyle(.orange)
-                    .font(.callout.weight(.semibold))
+                    .studioTextStyle(.callout, weight: .semibold)
             } else if recorder.state == .stopping {
                 Label("Stopping…", systemImage: "record.circle")
                     .foregroundStyle(.orange)
-                    .font(.callout.weight(.semibold))
+                    .studioTextStyle(.callout, weight: .semibold)
             }
             if let url = recorder.lastRecordingURL {
                 Button {
@@ -621,7 +657,7 @@ struct MainWindowView: View {
             if let warning = recorder.warning {
                 Label(warning, systemImage: "externaldrive.badge.exclamationmark")
                     .foregroundStyle(.orange)
-                    .font(.caption)
+                    .studioTextStyle(.caption)
                     .lineLimit(1)
                     .help(warning)
             }
@@ -634,7 +670,7 @@ struct MainWindowView: View {
             if let error = recorder.lastError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
-                    .font(.caption)
+                    .studioTextStyle(.caption)
                     .lineLimit(1)
             }
         }
@@ -965,7 +1001,7 @@ struct MainWindowView: View {
                 .fill(color)
                 .frame(width: 8, height: 8)
             Text(text)
-                .font(.headline)
+                .studioTextStyle(.headline)
                 .foregroundStyle(color)
         }
         .transition(.opacity)
@@ -1005,7 +1041,7 @@ struct MainWindowView: View {
                 .disabled(true)
             }
         }
-        .font(.headline)
+        .studioTextStyle(.headline)
         .frame(minWidth: 120)
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
@@ -1134,7 +1170,7 @@ private struct TransitionSettingsSectionView: View {
                 Text("Dissolve").tag(MotionFallback.dissolve)
             }
             Text("Duplicate a layer or share its Motion ID across scenes. Ambiguous identities and incompatible source/mask changes use the selected fallback.")
-                .font(.caption).foregroundStyle(.secondary)
+                .studioTextStyle(.caption).foregroundStyle(.studioSecondary)
         case .dissolve, .dipToColor, .wipe, .slide:
             durationSlider(transition)
             if transition.wrappedValue.style == .dipToColor {
@@ -1160,8 +1196,8 @@ private struct TransitionSettingsSectionView: View {
                 Text("Duration")
             }
             Text("Duration: \(transition.wrappedValue.durationSeconds, format: .number.precision(.fractionLength(2))) s")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .studioTextStyle(.caption)
+                .foregroundStyle(.studioSecondary)
         }
     }
 
@@ -1210,20 +1246,20 @@ private struct TransitionSettingsSectionView: View {
                 Text("Cut Point")
             }
             Text("Cut point: \(transition.wrappedValue.stingerCutPointSeconds, format: .number.precision(.fractionLength(1))) s into the stinger")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .studioTextStyle(.caption)
+                .foregroundStyle(.studioSecondary)
         }
         VStack(alignment: .leading, spacing: 2) {
             Slider(value: transition.stingerVolume, in: 0...2.0, step: 0.05) {
                 Text("Stinger Volume")
             }
             Text("Stinger volume: \(transition.wrappedValue.stingerVolume, format: .number.precision(.fractionLength(2)))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .studioTextStyle(.caption)
+                .foregroundStyle(.studioSecondary)
         }
         if !transition.wrappedValue.hasStingerMedia {
             Text("Without a stinger file the Take falls back to a plain dissolve.")
-                .font(.caption)
+                .studioTextStyle(.caption)
                 .foregroundStyle(.orange)
         }
     }

@@ -21,7 +21,7 @@ struct ChatSidebarView: View {
     var body: some View {
         VStack(spacing: 8) {
             HStack {
-                Text(status).font(.callout.weight(.semibold))
+                Text(status).studioTextStyle(.callout, weight: .semibold)
                 Spacer()
                 if chat.status == .connected { Button("Sign Out") { chat.signOut() } }
                 else { Button("Connect") { chat.connect() }.disabled(!chat.hasCredentials || chat.status == .connecting) }
@@ -52,7 +52,7 @@ struct ChatSidebarView: View {
             }
             ForEach(coordinator.connections.keys.sorted(), id: \.self) { id in
                 if let item = coordinator.connections[id] {
-                    Text("\(item.platform) · \(id) · \(item.state)").font(.caption2).foregroundStyle(.secondary)
+                    Text("\(item.platform) · \(id) · \(item.state)").studioTextStyle(.caption2).foregroundStyle(.studioSecondary)
                 }
             }
             HStack {
@@ -77,17 +77,17 @@ struct ChatSidebarView: View {
                     if follow, let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
                 .overlay {
-                    if messages.isEmpty { Text("Connect Restream or an authorized direct provider to read public messages.").font(.caption).foregroundStyle(.secondary) }
+                    if messages.isEmpty { Text("Connect Restream or an authorized direct provider to read public messages.").studioTextStyle(.caption).foregroundStyle(.studioSecondary) }
                 }
                 .onChange(of: coordinator.queue.messages.last?.id) {
                     guard followMessages, let last = messages.last else { return }
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
-            if let error = coordinator.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            if let error = coordinator.error { Text(error).studioTextStyle(.caption).foregroundStyle(.orange) }
             Text("Public text preserves Unicode emoji. Optional manual static Twitch emote tiles use the current authorized reader. Animated emotes, sticker artwork and reactions remain unavailable. Guest public chat stays text-only.")
 
-                .font(.caption2).foregroundStyle(.secondary)
+                .studioTextStyle(.caption2).foregroundStyle(.studioSecondary)
         }
         .padding(10).frame(minWidth: 260, idealWidth: 330)
         .onAppear { chat.autoConnect() }
@@ -98,8 +98,8 @@ struct ChatSidebarView: View {
                 Toggle("Enable Manual Static Twitch Emote Tiles", isOn: $coordinator.staticEmotesEnabled)
                     .toggleStyle(.checkbox)
                 Text("Explicit tile buttons load the first supported static emote beside the complete caption, using the avatar area. Each result is staged; Take publishes it. Direct Live Editing must be off. Up to 32 identities stay in memory for this app run; existing taken tiles are never evicted.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                if coordinator.staticEmoteLoads > 0 { Text("Loading \(coordinator.staticEmoteLoads) artwork request(s)…").font(.caption) }
+                    .studioTextStyle(.caption2).foregroundStyle(.studioSecondary)
+                if coordinator.staticEmoteLoads > 0 { Text("Loading \(coordinator.staticEmoteLoads) artwork request(s)…").studioTextStyle(.caption) }
                 Toggle("Enable Manual Alert Promotion", isOn: $coordinator.alertPromotionEnabled)
                     .toggleStyle(.checkbox)
                 Picker("Style event", selection: $styledKind) {
@@ -121,19 +121,19 @@ struct ChatSidebarView: View {
                         .disabled(coordinator.selectedAlertSlot == nil)
                 }.controlSize(.small).disabled(coordinator.audienceStagingError != nil)
                 if let layout = coordinator.selectedAlertPresentation {
-                    if layout.needsLargerBox { Text("Enlarge this slot to show the alert.").font(.caption).foregroundStyle(.orange) }
+                    if layout.needsLargerBox { Text("Enlarge this slot to show the alert.").studioTextStyle(.caption).foregroundStyle(.orange) }
                     else if layout.pages.count > 1 {
                         HStack {
                             Button("Previous Alert Page") { coordinator.advanceAudienceAlertPage(-1) }
                             Button("Next Alert Page") { coordinator.advanceAudienceAlertPage(1) }
-                            Text("\(coordinator.selectedAlertPage + 1) / \(layout.pages.count)").font(.caption)
+                            Text("\(coordinator.selectedAlertPage + 1) / \(layout.pages.count)").studioTextStyle(.caption)
                         }.controlSize(.small).disabled(coordinator.audienceStagingError != nil)
                     }
                 }
                 Text("Event arrival never promotes an alert. Use Stage Alert on a supported event, then Take. Hide also requires Take. Disable Direct Live Editing first. Palettes apply on the next deliberate promotion; text-only Stage Alert preserves public text without inferred amounts. Static artwork needs its separate explicit tile button.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                if let reason = coordinator.audienceStagingError { Text(reason).font(.caption).foregroundStyle(.orange) }
-                else if let reason = coordinator.alertSlotCreationError { Text(reason).font(.caption).foregroundStyle(.secondary) }
+                    .studioTextStyle(.caption2).foregroundStyle(.studioSecondary)
+                if let reason = coordinator.audienceStagingError { Text(reason).studioTextStyle(.caption).foregroundStyle(.orange) }
+                else if let reason = coordinator.alertSlotCreationError { Text(reason).studioTextStyle(.caption).foregroundStyle(.studioSecondary) }
             }
         }
     }
@@ -147,9 +147,9 @@ struct ChatSidebarView: View {
     }
     private var queueControls: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Comment Queue · \(coordinator.queue.queue.count)").font(.caption.weight(.semibold))
+            Text("Comment Queue · \(coordinator.queue.queue.count)").studioTextStyle(.caption, weight: .semibold)
             Text("Current: \(coordinator.queue.current?.author ?? "None") · Next: \(coordinator.queue.next?.author ?? "None")")
-                .font(.caption).lineLimit(2)
+                .studioTextStyle(.caption).lineLimit(2)
             HStack {
                 Button("Previous") { coordinator.advance(-1) }
                 Button("Next") { coordinator.advance(1) }
@@ -167,14 +167,14 @@ struct ChatSidebarView: View {
             }
             Button("Create Comment Slot") { coordinator.createSlot() }
             if let layout = coordinator.selectedCommentPresentation {
-                if layout.needsLargerBox { Text("Enlarge this slot to show the comment.").font(.caption).foregroundStyle(.orange) }
+                if layout.needsLargerBox { Text("Enlarge this slot to show the comment.").studioTextStyle(.caption).foregroundStyle(.orange) }
                 else if layout.pages.count > 1 {
                     HStack {
                         Button("Previous Page") { coordinator.advanceCommentPage(-1) }
                         Button("Next Page") { coordinator.advanceCommentPage(1) }
-                        Text("\(coordinator.selectedCommentPage + 1) / \(layout.pages.count)").font(.caption)
+                        Text("\(coordinator.selectedCommentPage + 1) / \(layout.pages.count)").studioTextStyle(.caption)
                     }.controlSize(.small)
-                    Text("Each page is staged. Take publishes it; the original message stays intact.").font(.caption2).foregroundStyle(.secondary)
+                    Text("Each page is staged. Take publishes it; the original message stays intact.").studioTextStyle(.caption2).foregroundStyle(.studioSecondary)
                 }
             }
             HStack {
@@ -184,7 +184,7 @@ struct ChatSidebarView: View {
                     .help("Load a public avatar from supported provider image servers when showing a comment; Take publishes the loaded image.")
             }
             Text("Show/replace/hide edit the staged scene; Take publishes them. Direct Live Editing applies them immediately. Style and resize the slot in the layer inspector.")
-                .font(.caption2).foregroundStyle(.secondary)
+                .studioTextStyle(.caption2).foregroundStyle(.studioSecondary)
             if !coordinator.queue.queue.isEmpty {
                 ScrollView(.horizontal) {
                     HStack {
@@ -215,16 +215,16 @@ struct ChatSidebarView: View {
             HStack {
                 Text(message.author).fontWeight(.semibold)
                 Spacer()
-                Text(message.platform).font(.caption).foregroundStyle(.secondary)
+                Text(message.platform).studioTextStyle(.caption).foregroundStyle(.studioSecondary)
             }
             HStack {
                 Text(message.timestamp, style: .time)
                 if message.timestampIsReceiptTime { Text("received") }
                 Text(message.roles.joined(separator: ", "))
-            }.font(.caption2).foregroundStyle(.secondary)
+            }.studioTextStyle(.caption2).foregroundStyle(.studioSecondary)
             if let event = message.audienceEvent, event != .text {
                 Label(event.rawValue, systemImage: event.symbol)
-                    .font(.caption.weight(.semibold))
+                    .studioTextStyle(.caption, weight: .semibold)
                     .foregroundStyle(audienceColor(coordinator.audienceStyle(for: event)))
             }
             Text(message.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

@@ -81,6 +81,7 @@ struct LayerPanelView: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .accessibilityLabel("Layer outline")
                 Divider()
                 bottomBar
                 // A02 (issue #97): per-source media transport (play/pause/
@@ -197,18 +198,18 @@ struct LayerPanelView: View {
     private func layerRow(_ layer: LayerNode, in scene: Scene) -> some View {
         HStack(spacing: 6) {
             Image(systemName: layer.payload.systemImage)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.studioSecondary)
                 .frame(width: 16)
             Text(layer.name)
                 .lineLimit(1)
-                .foregroundStyle(layer.isVisible ? .primary : .secondary)
+                .foregroundStyle(layer.isVisible ? AnyShapeStyle(.primary) : AnyShapeStyle(.studioSecondary))
             if !layer.payload.isRenderable {
                 Text("not rendered")
-                    .font(.caption2)
+                    .studioTextStyle(.caption2)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
                     .background(.quaternary, in: Capsule())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.studioSecondary)
                     .help("\(layer.payload.displayName) layers are model-only — the render path composites camera, screen, syphon, media, text, shape, and nested scene layers today.")
             }
             if let missing = missingReason(for: layer) {
@@ -249,13 +250,13 @@ struct LayerPanelView: View {
         let anyVisible = members.contains(where: \.isVisible)
         return HStack(spacing: 6) {
             Image(systemName: "folder.fill")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.studioSecondary)
                 .frame(width: 16)
             Text(group.name)
                 .lineLimit(1)
                 .foregroundStyle(anyVisible ? .primary : .secondary)
             Text("\(members.count)")
-                .font(.caption2)
+                .studioTextStyle(.caption2)
                 .foregroundStyle(.tertiary)
             Spacer()
             lockButton(isLocked: group.isLocked, viaGroup: false,
@@ -690,7 +691,7 @@ struct LayerPanelView: View {
             .help("Group the selected layers")
         }
         .labelStyle(.titleAndIcon)
-        .font(.callout)
+        .studioTextStyle(.callout)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
