@@ -120,6 +120,16 @@ final class DestinationSession: ObservableObject {
         draft.append(destination); credentials[destination.id] = connection; selectedID = destination.id
     }
 
+    /// Explicit account-wide relay import. It does not assert a downstream
+    /// event binding or activate the YouTube-only managed-start route.
+    func createRestreamRelay(connection: DestinationCredentials) {
+        let transport: StreamProtocol = URL(string: connection.endpoint)?.scheme == "rtmp" ? .rtmp : .rtmps
+        var destination = DestinationProviderTemplate.restream.makeDestination(transport: transport)
+        destination.name = "Restream account relay"
+        destination.isEnabled = false
+        draft.append(destination); credentials[destination.id] = connection; selectedID = destination.id
+    }
+
     func duplicate(_ id: UUID) {
         guard let source = draft.first(where: { $0.id == id }) else { return }
         let copy = source.duplicated()
