@@ -10,8 +10,8 @@ final class FixtureSample: @unchecked Sendable {
     init(_ value: CMSampleBuffer) { self.value = value }
 }
 
-/// Only the exact transport-semantics case controls time. Every other case
-/// reads the actual CM host clock, including PCM PTS and late-pull coverage.
+/// Exact transport and late-pull source-grid cases control time only after
+/// native decoder preparation. Independent real-host PCM coverage stays real.
 final class FixtureClock: @unchecked Sendable {
     static let shared = FixtureClock()
     private let lock = NSLock()
@@ -19,6 +19,18 @@ final class FixtureClock: @unchecked Sendable {
     func now() -> CMTime { lock.withLock { controlled } ?? CMClockGetTime(CMClockGetHostTimeClock()) }
     var isControlled: Bool { lock.withLock { controlled != nil } }
     func freeze() { lock.withLock { controlled = CMClockGetTime(CMClockGetHostTimeClock()) } }
+    func freezeOnNativePCMGrid() {
+        lock.withLock {
+            controlled = CMTimeConvertScale(CMClockGetTime(CMClockGetHostTimeClock()),
+                timescale: 48_000, method: .roundTowardZero)
+        }
+    }
+    func advanceNativePCMFrames(_ frames: Int64) {
+        lock.withLock {
+            precondition(controlled != nil && frames >= 0)
+            controlled = controlled! + CMTime(value: frames, timescale: 48_000)
+        }
+    }
     func advance(seconds: Double) {
         lock.withLock {
             precondition(controlled != nil && seconds >= 0)
@@ -94,19 +106,24 @@ final class FixtureAudioPullTiming: @unchecked Sendable {
     var snapshot: (Double, Double)? { lock.withLock { interval } }
 }
 
-/// One owned decoder stall; normal lifecycle coverage never arms this hook.
+/// Advance the owned timeline only after the real native PCM read completed.
+/// A real sleep is a minimum delay and cannot promise a partially live chunk.
 final class FixtureOfflineDecodeDelay: @unchecked Sendable {
     static let shared = FixtureOfflineDecodeDelay()
     private let lock = NSLock()
-    private var armed = false
-    func arm() { lock.withLock { armed = true } }
+    private var advanceSeconds: Double?
+    func arm(seconds: Double = 0.040) { lock.withLock { advanceSeconds = seconds } }
     func afterRead() {
-        let delay = lock.withLock { let value = armed; armed = false; return value }
-        guard delay else { return }
-        let start = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        Thread.sleep(forTimeInterval: 0.040)
-        let elapsed = CMClockGetTime(CMClockGetHostTimeClock()).seconds - start
-        FileHandle.standardError.write(Data("PCM OWNED DECODE DELAY: \(elapsed) seconds\n".utf8))
+        let advance = lock.withLock { let value = advanceSeconds; advanceSeconds = nil; return value }
+        guard let advance else { return }
+        precondition(FixtureClock.shared.isControlled)
+        let before = FixtureClock.shared.now()
+        let frames = Int64((advance * 48_000).rounded())
+        precondition(Double(frames) / 48_000 == advance)
+        FixtureClock.shared.advanceNativePCMFrames(frames)
+        let elapsed = (FixtureClock.shared.now() - before).seconds
+        precondition(abs(elapsed - advance) < 0.000000001)
+        FileHandle.standardError.write(Data("PCM OWNED DECODE ADVANCE: \(elapsed) seconds after actual native read; controlled timeline\n".utf8))
     }
 }
 
@@ -393,27 +410,59 @@ private final class FixtureAudioEvents: @unchecked Sendable {
         precondition(admission.expired == nil && admission.invalidClock == nil && admission.distantClock == nil)
         print("PASS PCM admission: actual4096-frame stereo ramp retains fresh native bytes; partial1440-frame removal preserves2656frames bit-for-bit and exact sourcePTS/duration/rate/channelgrid; fullyexpired/invalid/overflow clocks emit nothing")
         fixture.configure(loops: false, end: .hold, trimIn: nil, trimOut: nil); fixture.select("ramp.wav")
-        let late = MediaSourcePlayback(sourceID: SourceDefinitionID()) { fixture.payload() }, lateEvents = FixtureAudioEvents()
+        let late = MediaSourcePlayback(sourceID: SourceDefinitionID()) { fixture.payload() }, lateEvents = FixtureAudioEvents(usesFixtureClock: true)
         late.onStatus = { _, status in lateEvents.note(status) }; late.onAudioSample = { lateEvents.sample($0) }
         late.load(); try await until("delayed-pull real decoder") { lateEvents.snapshot.status.phase == .ready }
+        // Decoder preparation and actual file access are complete. The exact
+        // source-grid regression now owns time, independently of host load.
+        precondition(!FixtureClock.shared.isControlled)
+        FixtureClock.shared.freezeOnNativePCMGrid()
         late.play()
-        if CommandLine.arguments.contains("--decode-delay") { FixtureOfflineDecodeDelay.shared.arm() }
-        for (index, interval) in [120, 250, 120, 250].enumerated() {
-            if interval == 120 && lateEvents.snapshot.count > 0 { late.pause(); try await Task.sleep(for: .milliseconds(100)); late.play() }
-            try await Task.sleep(for: .milliseconds(interval))
-            lateEvents.resetFirst()
-            if index == 3 { FixtureOfflineDecodeDelay.shared.arm() }
-            let before = late.lifecycleItemPosition()!
-            _ = late.pullFrame()
-            let after = late.lifecycleItemPosition()!
-            let sourceFrame = Double(lateEvents.snapshot.first ?? -1) * 384_000
-            precondition(sourceFrame >= (before - 0.0201) * 48_000 && sourceFrame <= (after - 0.019) * 48_000 + 2,
-                "Delayed pull/catch-up dropped a whole valid PCM chunk at the20ms admission boundary: frame\(sourceFrame), clock\(before)...\(after)")
+        func checkFirstNativeFrame(_ label: String) {
+            let itemTime = late.lifecycleItemTime()!
+            let edge = itemTime - CMTime(value: 960, timescale: 48_000)
+            let expected = CMTimeConvertScale(edge, timescale: 48_000, method: .roundTowardPositiveInfinity).value
+            guard let first = lateEvents.snapshot.first else { preconditionFailure("\(label): no surviving PCM callback") }
+            let actual = Int64((Double(first) * 384_000).rounded())
+            precondition(actual == expected,
+                "\(label): fresh admission lost exact native source grid: frame\(actual), expected\(expected), item\(itemTime.seconds)")
             precondition(!lateEvents.snapshot.malformed, lateEvents.failureEvidence ?? "No PCM failure evidence")
         }
+        if CommandLine.arguments.contains("--decode-delay") { FixtureOfflineDecodeDelay.shared.arm() }
+        for (index, interval) in [120, 250, 120, 250].enumerated() {
+            if interval == 120 && lateEvents.snapshot.count > 0 {
+                late.pause()
+                let paused = late.lifecycleItemTime()!
+                FixtureClock.shared.advanceNativePCMFrames(4_800)
+                precondition(CMTimeCompare(late.lifecycleItemTime()!, paused) == 0)
+                late.play()
+            }
+            FixtureClock.shared.advanceNativePCMFrames(Int64(interval * 48))
+            lateEvents.resetFirst()
+            if index == 3 { FixtureOfflineDecodeDelay.shared.arm() }
+            _ = late.pullFrame()
+            checkFirstNativeFrame("Controlled \(interval)ms pull/40ms partial admission")
+        }
+        // A 200ms decode advance expires the entire precomputed 150ms horizon.
+        // Correct delivery emits nothing, then the next pull catches up on the
+        // same native source grid instead of rebasing expired source samples.
+        FixtureClock.shared.advanceNativePCMFrames(12_000)
+        lateEvents.resetFirst()
+        let countBeforeExpiry = lateEvents.snapshot.count
+        let expiryStart = late.lifecycleItemTime()!
+        FixtureOfflineDecodeDelay.shared.arm(seconds: 0.200)
+        _ = late.pullFrame()
+        precondition(CMTimeCompare(late.lifecycleItemTime()! - CMTime(value: 960, timescale: 48_000),
+            expiryStart + CMTime(value: 7_200, timescale: 48_000)) > 0)
+        precondition(lateEvents.snapshot.count == countBeforeExpiry && lateEvents.snapshot.first == nil,
+            "Controlled 200ms decode delivered PCM after its entire 150ms horizon expired")
+        _ = late.pullFrame()
+        checkFirstNativeFrame("Controlled whole-horizon expiry recovery")
         late.shutdown(); precondition(fixture.scopes == 0)
+        FixtureClock.shared.restoreHostClock()
+        precondition(!FixtureClock.shared.isControlled)
         fixture.configure(loops: true, end: .hold, trimIn: nil, trimOut: nil)
-        print("PASS delayed pulls: actual ramp PCM/source-frame and host-PTS proof covers120ms first pull,250ms starvation and delayed pause/resume without dropping a4096-frame chunk")
+        print("PASS controlled late pulls: actual native ramp decode;120/250ms starvation,100ms pause,40ms partial admission exact source grid;200ms whole-horizon expiry emits nothing and next pull recovers; unchanged30/160ms PTS and1us duration gates")
 
         fixture.configure(loops: true, end: .hold, trimIn: 0, trimOut: 0); fixture.select("first.wav")
         let empty = MediaSourcePlayback(sourceID: SourceDefinitionID()) { fixture.payload() }, emptyEvents = FixtureAudioEvents()
