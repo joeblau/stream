@@ -11,6 +11,9 @@ final class DestinationOutputController: ObservableObject {
     @Published private(set) var states: [UUID: StreamSessionState] = [:]
     @Published private(set) var names: [UUID: String] = [:]
     let fanout = DestinationMediaFanout()
+    let rawVideoResourceWorkspaceID: UUID
+    var frameDelivery: DestinationFrameDeliveryAdapter
+    var startIsCurrent: (StreamDestination) -> Bool = { _ in true }
     var stateDidChange: (() -> Void)?
     private(set) var acknowledgedStarts: [UUID: Date] = [:]
     /// Retain the most recent actual start for each output, including stopped
@@ -31,6 +34,7 @@ final class DestinationOutputController: ObservableObject {
     /// Raw publishers also receive this explicit pre-cadenced input contract.
     var sharedSourceFrameRate: Int?
     private var encoderGroups: [DestinationSharedEncoderKey: DestinationSharedEncoder] = [:]
+    private var encoderIngresses: [UUID: DestinationVideoIngress] = [:]
     private var finishingEncoderGroups: [UUID: DestinationSharedEncoder] = [:]
     /// Actual active or finalizing groups plus separate publisher sessions.
     var encoderSessionCount: Int {
@@ -48,6 +52,7 @@ final class DestinationOutputController: ObservableObject {
         var canvas: OutputCanvas
         var encoderGroup: DestinationSharedEncoder?
         var encoded: DestinationEncodedMailbox?
+        var ingress: DestinationVideoIngress
     }
     private var runtimes: [UUID: Runtime] = [:]
     private var pendingStops: [UUID: (generation: UUID, task: Task<Void, Never>)] = [:]
@@ -61,7 +66,10 @@ final class DestinationOutputController: ObservableObject {
     private let factory: (StreamCore.StreamProtocol) -> any Publisher
     private let sharedEncoderPrefersHardware: Bool
 
-    init(factory: @escaping (StreamCore.StreamProtocol) -> any Publisher, sharedEncoderPrefersHardware: Bool = true) {
+    init(factory: @escaping (StreamCore.StreamProtocol) -> any Publisher, sharedEncoderPrefersHardware: Bool = true,
+         workspaceID: UUID = UUID()) {
+        rawVideoResourceWorkspaceID = workspaceID
+        frameDelivery = .standalone(fanout: fanout)
         self.factory = factory
         self.sharedEncoderPrefersHardware = sharedEncoderPrefersHardware
     }
@@ -73,6 +81,8 @@ final class DestinationOutputController: ObservableObject {
         return 0
     }
     deinit {
+        for runtime in runtimes.values { runtime.ingress.close(); runtime.video.stop(); runtime.encoded?.stop() }
+        for ingress in encoderIngresses.values { ingress.close() }
         for group in encoderGroups.values { group.stop() }
         for group in finishingEncoderGroups.values { group.stop() }
     }
@@ -92,22 +102,174 @@ final class DestinationOutputController: ObservableObject {
     var activeCount: Int { states.values.filter(\.isActive).count }
     var partialSuccess: Bool { liveCount > 0 && liveCount < states.values.filter { $0 != .idle }.count }
 
-    func start(_ destination: StreamDestination, settings: StreamSettings) {
+    struct VideoStartInput {
+        let destination: StreamDestination
+        let settings: StreamSettings
+        let sourceSize: CGSize?
+    }
+    private struct PreparedVideoStart {
+        let input: VideoStartInput
+        let generation: UUID
+        let groupID: UUID
+        let key: DestinationSharedEncoderKey?
+        let usesExistingIngress: Bool
+        let sourceResources: DestinationSourceVideoResources?
+        let receipt: RawVideoResourceReceipt
+        let bank: RawVideoResourceBank
+    }
+    private var preparedVideoStarts: [UUID: PreparedVideoStart]?
+    private var usedPreparedVideoBanks: Set<UUID> = []
+
+    /// GoLive admits all immediate manual outputs atomically before any factory.
+    /// Managed targets still consume their own one-use review at their later
+    /// synchronous publish boundary. The body cannot suspend or change claims.
+    @discardableResult
+    func withPreparedVideoResources(_ inputs: [VideoStartInput], body: () -> Void) -> Bool {
+        guard !inputs.isEmpty else { body(); return true }
+        guard preparedVideoStarts == nil else { return false }
+        let prepared: [UUID: PreparedVideoStart]
+        do { prepared = try prepareVideoStarts(inputs) }
+        catch {
+            let message = (error as? RawVideoResourceFailure)?.localizedDescription ?? "The destinations' video resources could not be admitted."
+            for input in inputs { recordFailure(input.destination, message: message) }
+            return false
+        }
+        preparedVideoStarts = prepared; usedPreparedVideoBanks.removeAll()
+        defer {
+            for plan in prepared.values where !usedPreparedVideoBanks.contains(plan.bank.id) {
+                RawVideoResourceCoordinator.shared.rollback(plan.receipt)
+            }
+            preparedVideoStarts = nil; usedPreparedVideoBanks.removeAll()
+        }
+        body()
+        return true
+    }
+
+    private func prepareVideoStarts(_ inputs: [VideoStartInput]) throws -> [UUID: PreparedVideoStart] {
+        guard inputs.count <= 10, Set(inputs.map { $0.destination.id }).count == inputs.count else { throw RawVideoResourceFailure.invalidRequest }
+        var groupIDs = encoderGroups.mapValues(\.id)
+        var claims: [(VideoStartInput, UUID, UUID, DestinationSharedEncoderKey?, RawVideoResourceRequest)] = []
+        for input in inputs {
+            let destination = input.destination, settings = input.settings
+            let generation = UUID()
+            let key = sharedEncodingEnabled ? sharedSourceFrameRate.flatMap {
+                DestinationSharedEncoderKey(destination: destination, settings: settings, sourceFrameRate: $0)
+            } : nil
+            let groupID: UUID
+            if let key {
+                groupID = groupIDs[key] ?? UUID(); groupIDs[key] = groupID
+            } else { groupID = UUID() }
+            let canvas = destination.canvas ?? .program
+            let domain = StableFrameDomainID(workspace: rawVideoResourceWorkspaceID,
+                kind: key == nil ? .rawPublisher : .sharedEncoder,
+                outputID: key?.resourceDomainID ?? destination.id.uuidString,
+                plane: canvas == .secondary ? .secondary : .program)
+            let size = key.map { CGSize(width: $0.width, height: $0.height) } ?? input.sourceSize ?? settings.outputProfile.canvasSize
+            guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0,
+                  size.width <= 4096, size.height <= 4096 else { throw RawVideoResourceFailure.invalidRequest }
+            let request = RawVideoResourceRequest(domain: domain,
+                descriptor: .init(width: Int(size.width), height: Int(size.height), capacity: 6),
+                sessionGeneration: key == nil ? generation : groupID)
+            claims.append((input, generation, groupID, key, request))
+        }
+        var sourceRequests: [OutputCanvas: RawVideoResourceRequest] = [:]
+        for input in inputs {
+            let canvas = input.destination.canvas ?? .program
+            let size = input.sourceSize ?? input.settings.outputProfile.canvasSize
+            if let request = try frameDelivery.sourceRequest(size, canvas) {
+                if let existing = sourceRequests[canvas], existing != request { throw RawVideoResourceFailure.sessionConflict }
+                sourceRequests[canvas] = request
+            }
+        }
+        let receipt = try RawVideoResourceCoordinator.shared.reserveBatch(claims.map { $0.4 } + Array(sourceRequests.values))
+        var result: [UUID: PreparedVideoStart] = [:]
+        var children: [StableFrameDomainID: RawVideoResourceReceipt] = [:]
+        var sources: [OutputCanvas: DestinationSourceVideoResources] = [:]
+        var completed = false
+        defer {
+            if !completed {
+                for child in children.values { RawVideoResourceCoordinator.shared.rollback(child) }
+                RawVideoResourceCoordinator.shared.rollback(receipt)
+            }
+        }
+        for (canvas, request) in sourceRequests {
+            guard let bank = receipt.bank(for: request.domain) else { throw RawVideoResourceFailure.unknownReservation }
+            let child = try receipt.selecting(domain: request.domain)
+            children[request.domain] = child
+            sources[canvas] = .init(bank: bank, receipt: child)
+        }
+        for (input, generation, groupID, key, request) in claims {
+            guard let bank = receipt.bank(for: request.domain) else {
+                RawVideoResourceCoordinator.shared.rollback(receipt)
+                throw RawVideoResourceFailure.unknownReservation
+            }
+            let child: RawVideoResourceReceipt
+            if let existing = children[request.domain] { child = existing }
+            else {
+                child = try receipt.selecting(domain: request.domain)
+                children[request.domain] = child
+            }
+            result[input.destination.id] = .init(input: input, generation: generation, groupID: groupID, key: key,
+                usesExistingIngress: key.flatMap { encoderGroups[$0] } != nil,
+                sourceResources: sources[input.destination.canvas ?? .program], receipt: child, bank: bank)
+        }
+        completed = true
+        return result
+    }
+
+    @discardableResult
+    func start(_ destination: StreamDestination, settings: StreamSettings, sourceSize: CGSize? = nil) -> Bool {
         let id = destination.id
-        guard isPublishingAllowed else { return }
-        guard !(states[id]?.isActive ?? false) else { return }
-        guard activeCount < 10 else { states[id] = .failed("Ten destinations are already active."); changed(); return }
-        let generation = UUID()
+        guard isPublishingAllowed, startIsCurrent(destination) else { return false }
+        guard !(states[id]?.isActive ?? false) else { return false }
+        guard activeCount < 10 else { states[id] = .failed("Ten destinations are already active."); changed(); return false }
+        let prepared: PreparedVideoStart
+        do {
+            if let batch = preparedVideoStarts {
+                guard let plan = batch[id], plan.input.destination == destination,
+                      plan.input.settings == settings, plan.input.sourceSize == sourceSize else {
+                    throw RawVideoResourceFailure.sessionConflict
+                }
+                prepared = plan
+            } else {
+                guard let plan = try prepareVideoStarts([.init(destination: destination, settings: settings, sourceSize: sourceSize)])[id] else {
+                    throw RawVideoResourceFailure.unknownReservation
+                }
+                prepared = plan
+            }
+        } catch {
+            recordFailure(destination, message: (error as? RawVideoResourceFailure)?.localizedDescription ?? "The destination's video resources could not be admitted.")
+            return false
+        }
+        let generation = prepared.generation, groupID = prepared.groupID, key = prepared.key
+        let receipt = prepared.receipt, bank = prepared.bank
+        let existingGroup = key.flatMap { encoderGroups[$0] }
+        guard existingGroup == nil || existingGroup?.id == groupID else {
+            if preparedVideoStarts == nil { RawVideoResourceCoordinator.shared.rollback(receipt) }
+            recordFailure(destination, message: RawVideoResourceFailure.sessionConflict.localizedDescription)
+            return false
+        }
+        let canvas = destination.canvas ?? .program
+        // No factory or transport side effect occurs until the whole resource
+        // request has passed synchronous actual-storage admission.
         let publisher = factory(destination.transport)
+        if key != nil, !publisher.supportsSharedH264AAC {
+            if preparedVideoStarts == nil { RawVideoResourceCoordinator.shared.rollback(receipt) }
+            recordFailure(destination, message: "This publisher does not support the selected shared encoder input.")
+            return false
+        }
         let mailbox = DestinationVideoMailbox(publisher: publisher)
         var encoderGroup: DestinationSharedEncoder?
         var encoded: DestinationEncodedMailbox?
-        if sharedEncodingEnabled, publisher.supportsSharedH264AAC, let sourceFPS = sharedSourceFrameRate,
-           let key = DestinationSharedEncoderKey(destination: destination, settings: settings, sourceFrameRate: sourceFPS) {
-            if let existing = encoderGroups[key] { encoderGroup = existing }
+        let ingress: DestinationVideoIngress
+        if let key {
+            let group: DestinationSharedEncoder
+            if let existingGroup {
+                group = existingGroup
+                if prepared.usesExistingIngress { RawVideoResourceCoordinator.shared.rollback(receipt) }
+            }
             else {
-                let groupID = UUID()
-                let group = DestinationSharedEncoder(key: key, id: groupID, prefersHardwareEncoder: sharedEncoderPrefersHardware) { [weak self] in
+                group = DestinationSharedEncoder(key: key, bank: bank, id: groupID, prefersHardwareEncoder: sharedEncoderPrefersHardware) { [weak self] in
                     Task { @MainActor in
                         guard let self else { return }
                         for (id, runtime) in self.runtimes where runtime.encoderGroup?.id == groupID {
@@ -115,12 +277,27 @@ final class DestinationOutputController: ObservableObject {
                         }
                     }
                 }
-                encoderGroups[key] = group; encoderGroup = group
+                encoderGroups[key] = group
+                encoderIngresses[groupID] = DestinationVideoIngress(bank: bank, receipt: receipt, canvas: canvas,
+                    transfer: .aspectFitBGRA, sourceResources: prepared.sourceResources, adapter: frameDelivery) { [group, weak fanout] frame in
+                        fanout?.recordVideoClock(frame.sampleBuffer, canvas: canvas)
+                        group.enqueuePreparedVideo(frame.sampleBuffer)
+                    }
             }
-            if let encoderGroup {
-                let sink = DestinationEncodedMailbox(publisher: publisher) { [weak encoderGroup] in encoderGroup?.requestKeyframe() }
-                encoderGroup.add(sink, id: id); encoded = sink
+            guard let sharedIngress = encoderIngresses[groupID] else {
+                if preparedVideoStarts == nil { RawVideoResourceCoordinator.shared.rollback(receipt) }
+                recordFailure(destination, message: "The shared encoder's video ingress is unavailable.")
+                return false
             }
+            ingress = sharedIngress; encoderGroup = group
+            let sink = DestinationEncodedMailbox(publisher: publisher) { [weak group] in group?.requestKeyframe() }
+            group.add(sink, id: id); encoded = sink
+        } else {
+            ingress = DestinationVideoIngress(bank: bank, receipt: receipt, canvas: canvas,
+                transfer: .copyBGRA, sourceResources: prepared.sourceResources, adapter: frameDelivery) { [mailbox, weak fanout] frame in
+                    fanout?.recordVideoClock(frame.sampleBuffer, canvas: canvas)
+                    mailbox.enqueue(frame.sampleBuffer)
+                }
         }
         let usesEncoded = encoderGroup != nil
         names[id] = destination.name
@@ -135,27 +312,35 @@ final class DestinationOutputController: ObservableObject {
             }
         }
         let programSourceFrameRate = sharedSourceFrameRate
-        let startTask = Task { [weak self, encoderGroup] in
+        let startTask = Task { [weak self, encoderGroup, ingress] in
             do {
                 if let encoderGroup { try await encoderGroup.prepare() }
-                guard !Task.isCancelled else { return }
-                if usesEncoded, !(await publisher.configureEncodedInput()) {
-                    throw NSError(domain: "SharedEncoder", code: 1)
-                }
-                guard !Task.isCancelled else { return }
+                try Task.checkCancellation()
+                try await ingress.install()
+                try Task.checkCancellation()
+                guard let self, self.startStillCurrent(id: id, generation: generation, destination: destination) else { return }
+                if usesEncoded, !(await publisher.configureEncodedInput()) { throw NSError(domain: "SharedEncoder", code: 1) }
+                try Task.checkCancellation()
+                guard self.startStillCurrent(id: id, generation: generation, destination: destination) else { return }
                 if !usesEncoded, let programSourceFrameRate { await publisher.configureProgramVideo(sourceFrameRate: programSourceFrameRate) }
-                guard !Task.isCancelled else { return }
+                try Task.checkCancellation()
+                guard self.startStillCurrent(id: id, generation: generation, destination: destination) else { return }
                 try await publisher.start(settings)
-                guard !Task.isCancelled else { return }
+                try Task.checkCancellation()
+                guard self.startStillCurrent(id: id, generation: generation, destination: destination) else { return }
                 let size = settings.outputProfile.canvasSize
                 await publisher.setOutputSize(size, nativeShortEdge: min(settings.outputProfile.canvasWidth, settings.outputProfile.canvasHeight))
             } catch {
                 guard let self, self.runtimes[id]?.generation == generation else { return }
-                self.fail(id: id, message: "The destination could not connect. Check its endpoint, credentials and ingest availability.")
+                if error is CancellationError { self.stop(id); return }
+                let message = (error as? RawVideoResourceFailure)?.localizedDescription
+                    ?? "The destination could not start. Check its endpoint, credentials, video resources and ingest availability."
+                self.fail(id: id, message: message)
             }
         }
         runtimes[id] = Runtime(generation: generation, destination: destination, publisher: publisher, video: mailbox,
-                               startTask: startTask, eventTask: eventTask, canvas: destination.canvas ?? .program, encoderGroup: encoderGroup, encoded: encoded)
+                               startTask: startTask, eventTask: eventTask, canvas: canvas, encoderGroup: encoderGroup, encoded: encoded, ingress: ingress)
+        if preparedVideoStarts != nil { usedPreparedVideoBanks.insert(bank.id) }
         let binding = destination.providerBinding.flatMap {
             RecoveryEventIdentity.validID($0.channelID) && ($0.eventID.map(RecoveryEventIdentity.validID) ?? true) ? $0 : nil
         }
@@ -170,7 +355,22 @@ final class DestinationOutputController: ObservableObject {
         }
         fanout.add(id: id, publisher: publisher, video: mailbox, canvas: destination.canvas ?? .program, group: encoderGroup)
         changed()
+        return true
     }
+
+    private func startStillCurrent(id: UUID, generation: UUID, destination: StreamDestination) -> Bool {
+        guard runtimes[id]?.generation == generation else { return false }
+        guard isPublishingAllowed, startIsCurrent(destination) else { stop(id); return false }
+        return true
+    }
+
+    #if STREAM_NATIVE_VALIDATION
+    /// Deliberate defense-in-depth codec negatives only. Ordinary inputs MUST
+    /// cross the sealed broker; an audio sample is rejected there first.
+    func validationEnqueuePreparedVideo(_ sample: CMSampleBuffer, destinationID: UUID) {
+        runtimes[destinationID]?.encoderGroup?.enqueuePreparedVideo(sample)
+    }
+    #endif
 
     func recordFailure(_ destination: StreamDestination, message: String) {
         guard !(states[destination.id]?.isActive ?? false) else { return }
@@ -194,6 +394,11 @@ final class DestinationOutputController: ObservableObject {
         runtime.startTask.cancel()
         runtime.eventTask.cancel()
         runtime.video.stop()
+        if runtime.encoderGroup == nil { runtime.ingress.close() }
+        else if let group = runtime.encoderGroup,
+                !runtimes.values.contains(where: { $0.encoderGroup === group }) {
+            encoderIngresses.removeValue(forKey: group.id)?.close()
+        }
         if runtime.encoderGroup == nil { finalizingRawPublishers.insert(runtime.generation) }
         changed()
         let task = Task { [weak self] in
@@ -265,6 +470,7 @@ final class DestinationOutputController: ObservableObject {
             let runtime = runtimes[id]
             let stats = await runtime?.publisher.statsSnapshot()
             let inputClock = await runtime?.publisher.encoderInputClockSnapshot()
+            let transfer = await runtime?.ingress.statistics()
             let mailbox: (depth: Int, drops: Int)?
             if let encoded = runtime?.encoded {
                 let counters = encoded.statistics(); mailbox = (counters.depth, counters.drops)
@@ -274,7 +480,9 @@ final class DestinationOutputController: ObservableObject {
                 bitrate: stats?.bitRate, socketQueueBytes: stats?.queueBytes,
                 stalledSeconds: stats?.zeroOutputSeconds, encoderCongestionDrops: stats?.droppedFrames,
                 videoQueueDepth: mailbox?.depth ?? 0, videoMailboxDrops: mailbox?.drops ?? 0,
-                encoderInputClock: inputClock, sharedEncodedClock: runtime?.encoderGroup?.encodedClock.snapshot()))
+                encoderInputClock: inputClock, sharedEncodedClock: runtime?.encoderGroup?.encodedClock.snapshot(),
+                privateVideoTransferDrops: transfer?.drops, privateVideoCapacityDrops: transfer?.privateCapacityDrops,
+                privateVideoConversionFailures: transfer?.conversionFailures))
         }
         return result
     }
@@ -304,6 +512,7 @@ final class DestinationOutputController: ObservableObject {
             runtime.startTask.cancel()
             runtime.eventTask.cancel()
             runtime.video.stop(); runtime.encoded?.stop(); releaseEncoderGroup(runtime, id: id)
+            if runtime.encoderGroup == nil { runtime.ingress.close() }
             if runtime.encoderGroup == nil { finalizingRawPublishers.insert(runtime.generation) }
             Task { [weak self] in
                 await runtime.publisher.stop()
@@ -323,6 +532,7 @@ final class DestinationOutputController: ObservableObject {
         guard !runtimes.values.contains(where: { $0.encoderGroup === group }) else { return }
         guard encoderGroups[group.key] === group else { return }
         encoderGroups[group.key] = nil; finishingEncoderGroups[group.id] = group
+        encoderIngresses.removeValue(forKey: group.id)?.close()
         group.stop { [weak self, weak group] in
             Task { @MainActor in
                 guard let self, let group else { return }
@@ -408,13 +618,25 @@ final class DestinationMediaFanout: @unchecked Sendable {
         defer { os_unfair_lock_unlock(&lock) }
         return Array(sinks.values)
     }
+    private var lastVideoPTS: [OutputCanvas: CMTime] = [:]
+    private let programDelivery = FrameDeliveryBroker()
+    private let secondaryDelivery = FrameDeliveryBroker()
+    func broker(for canvas: OutputCanvas) -> FrameDeliveryBroker { canvas == .secondary ? secondaryDelivery : programDelivery }
+    func recordVideoClock(_ sample: CMSampleBuffer, canvas: OutputCanvas) {
+        let pts = sample.presentationTimeStamp
+        guard pts.isNumeric else { return }
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard lastVideoPTS[canvas].map({ CMTimeCompare(pts, $0) > 0 }) ?? true else { return }
+        lastVideoPTS[canvas] = pts
+        (canvas == .program ? programClock : secondaryClock).record(.video, presentationSeconds: pts.seconds)
+    }
+    /// Standalone source ingress used by owned publisher fixtures. Shipping
+    /// installs the same logical deliveries on the compositor's central broker.
+    /// This never forwards an original sample into a publisher or encoder.
     func enqueueVideo(_ sample: CMSampleBuffer, canvas: OutputCanvas = .program) {
-        (canvas == .program ? programClock : secondaryClock).record(.video, presentationSeconds: sample.presentationTimeStamp.seconds)
-        var visited = Set<UUID>()
-        for sink in snapshot() where sink.canvas == canvas {
-            if let group = sink.group { if visited.insert(group.id).inserted { group.enqueueVideo(sample) } }
-            else { sink.video.enqueue(sample) }
-        }
+        broker(for: canvas).offer(.init(sampleBuffer: sample, presentationTime: sample.presentationTimeStamp,
+            frameDuration: sample.duration, sequence: sample.presentationTimeStamp.value))
     }
     func enqueueAudio(_ sample: CMSampleBuffer) {
         let now = ProcessInfo.processInfo.systemUptime
@@ -442,6 +664,9 @@ struct DestinationDiagnosticSnapshot: Codable, Sendable {
     var videoMailboxDrops: Int
     var encoderInputClock: AVClockSnapshot? = nil
     var sharedEncodedClock: AVClockSnapshot? = nil
+    var privateVideoTransferDrops: Int? = nil
+    var privateVideoCapacityDrops: Int? = nil
+    var privateVideoConversionFailures: Int? = nil
 }
 
 private final class DestinationMailboxCounters: @unchecked Sendable {

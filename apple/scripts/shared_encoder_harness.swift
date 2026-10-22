@@ -4,6 +4,10 @@ import Darwin
 import Foundation
 import StreamCore
 
+#if STREAM_PUBLISHER_CODEC_ONLY
+extension CMSampleBuffer: @retroactive @unchecked Sendable {}
+#endif
+
 private actor EncodedPublisherProbe: Publisher {
     nonisolated let supportsSharedH264AAC: Bool
     nonisolated let events: AsyncStream<PublisherEvent>
@@ -200,6 +204,7 @@ private actor EncodedPublisherProbe: Publisher {
         }
         return URL(fileURLWithPath: path)
     }
+    #if !STREAM_PUBLISHER_CODEC_ONLY
     static func localhostTransports(directory: URL, settings: StreamSettings) async throws {
         guard let ffmpeg = try receiverExecutable() else {
             report("UNQUALIFIED: localhost transport fixtures require ffmpeg with libsrt/RTMP; no transport acceptance claimed")
@@ -238,7 +243,7 @@ private actor EncodedPublisherProbe: Publisher {
             var local = settings; local.selectedProtocol = transport
             local.rtmpURL = transport == .srt ? "srt://127.0.0.1:\(ports[index])?mode=caller&latency=50" : "rtmp://127.0.0.1:\(ports[index])/live"
             local.streamKey = transport == .rtmp ? "shared" : ""
-            outputs.start(StreamDestination(name: "Actual localhost \(transport.rawValue)", transport: transport), settings: local)
+            outputs.start(StreamDestination(name: "Actual localhost \(transport.rawValue)", transport: transport), settings: local, sourceSize: CGSize(width: 320, height: 180))
         }
         do { try await settle(seconds: 10) { outputs.liveCount == 2 } }
         catch {
@@ -300,7 +305,7 @@ private actor EncodedPublisherProbe: Publisher {
         let healthy = StreamDestination(name: "Owned continuous SRT", transport: .srt)
         var rtmp = settings; rtmp.rtmpURL = "rtmp://127.0.0.1:\(rtmpPort)/live"; rtmp.streamKey = "shared"
         var srt = settings; srt.selectedProtocol = .srt; srt.rtmpURL = "srt://127.0.0.1:\(srtPort)?mode=caller&latency=50"; srt.streamKey = ""
-        outputs.start(interrupted, settings: rtmp); outputs.start(healthy, settings: srt)
+        outputs.start(interrupted, settings: rtmp, sourceSize: CGSize(width: 320, height: 180)); outputs.start(healthy, settings: srt, sourceSize: CGSize(width: 320, height: 180))
         try await settle(seconds: 10) { outputs.liveCount == 2 }
         let initial = await outputs.diagnosticsSnapshot()
         let healthyStart = initial.first { $0.id == healthy.id.uuidString }?.startedAt
@@ -368,6 +373,7 @@ private actor EncodedPublisherProbe: Publisher {
                   "Recovery shifted or truncated the healthy output's original source timeline")
         report("PASS: actual RTMP loss/backoff/reconnect to replacement owned receiver; unchanged live SRT publisher/start/shared encoder, \(frames) continuous decoded frames, original first/late flashes \(firstFlash!)/\(lateFlash!)s and final PTS \(previous ?? -1)s; both acknowledged stops")
     }
+    #endif
     static func rawFinalization(settings: StreamSettings) async throws {
         let failed = EncodedPublisherProbe(shared: false), retry = EncodedPublisherProbe(shared: false)
         var pending = [failed, retry]
@@ -375,13 +381,13 @@ private actor EncodedPublisherProbe: Publisher {
         outputs.sharedEncodingEnabled = true
         outputs.sharedSourceFrameRate = 25
         let target = StreamDestination(name: "Separate fallback", transport: .whip)
-        outputs.start(target, settings: settings)
+        outputs.start(target, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 1 }
         await failed.holdStop()
         failed.continuation.yield(.failed(message: "injected"))
         try await settle { outputs.activeCount == 0 }
         try check(outputs.encoderSessionCount == 1, "Failed raw publisher released its encoder before teardown")
-        outputs.start(target, settings: settings)
+        outputs.start(target, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 1 }
         try check(outputs.encoderSessionCount == 2, "Stable-ID retry hid the previous finalizing raw owner")
         await failed.releaseStop()
@@ -397,7 +403,7 @@ private actor EncodedPublisherProbe: Publisher {
         let outputs = DestinationOutputController(factory: { _ in publisher }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
         let target = StreamDestination(name: "Cancelled cold start", transport: .rtmp)
-        outputs.start(target, settings: settings)
+        outputs.start(target, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         outputs.stopAll()
         try await settle { outputs.activeCount == 0 && outputs.encoderSessionCount == 0 }
         try check(await publisher.starts == 0 && outputs.states[target.id] == .idle,
@@ -413,7 +419,7 @@ private actor EncodedPublisherProbe: Publisher {
         let a = StreamDestination(name: "Program", transport: .rtmp)
         var b = StreamDestination(name: "Secondary", transport: .srt); b.canvas = .secondary
         var c = b.duplicated(); c.isEnabled = true
-        outputs.start(a, settings: settings); outputs.start(b, settings: settings); outputs.start(c, settings: settings)
+        outputs.start(a, settings: settings, sourceSize: CGSize(width: 320, height: 180)); outputs.start(b, settings: settings, sourceSize: CGSize(width: 320, height: 180)); outputs.start(c, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 3 }
         try check(outputs.encoderSessionCount == 2, "Different compositions shared an encoder because their profiles matched")
         for tick in 0..<20 {
@@ -431,7 +437,18 @@ private actor EncodedPublisherProbe: Publisher {
         }
         let p = await primary.video, s = await secondary.video, t = await secondaryCopy.video
         try check(p[0] !== s[0] && bytes(p[0]) != bytes(s[0]) && s[0] === t[0], "Canvas content identity was not respected by actual compressed fanout")
+        // An invalid source is rejected by the sealed transfer, before any
+        // encoder receives it. This is a local drop, not a provider failure.
         outputs.fanout.enqueueVideo(try ProgramRecordingFixtures.audio(at: 0.2), canvas: .secondary)
+        try await settle {
+            let snapshots = await outputs.diagnosticsSnapshot()
+            return (snapshots.first { $0.id == b.id.uuidString }?.privateVideoConversionFailures ?? 0) > 0
+        }
+        try check(outputs.states[b.id] == .live && outputs.states[c.id] == .live,
+                  "A rejected source transfer was mislabeled as an encoder/provider failure")
+        // Separately exercise the actual encoder's defensive prepared-input
+        // guard; no original compositor image is injected by this negative.
+        outputs.validationEnqueuePreparedVideo(try ProgramRecordingFixtures.audio(at: 0.2), destinationID: b.id)
         try await settle {
             if case .failed = outputs.states[b.id], case .failed = outputs.states[c.id] { return true }; return false
         }
@@ -448,7 +465,7 @@ private actor EncodedPublisherProbe: Publisher {
         let outputs = DestinationOutputController(factory: { _ in target }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 60
         var profile = settings; profile.outputProfile = profile.outputProfile.with(frameRate: 24)
-        outputs.start(StreamDestination(name: "60 to24"), settings: profile)
+        outputs.start(StreamDestination(name: "60 to24"), settings: profile, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 1 }
         var sourceFrame = 0
         for tick in 0..<200 {
@@ -475,12 +492,13 @@ private actor EncodedPublisherProbe: Publisher {
         let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
         let targets = [StreamDestination(name: "Failed finalizer A", transport: .rtmp), StreamDestination(name: "Failed finalizer B", transport: .srt)]
-        for target in targets { outputs.start(target, settings: settings) }
+        for target in targets { outputs.start(target, settings: settings, sourceSize: CGSize(width: 320, height: 180)) }
         try await settle { outputs.liveCount == 2 }
         let tokens = targets.map { outputs.sessionToken($0.id)! }
-        // A real invalid image-buffer input fails the shared encoder. Remove
-        // both runtimes synchronously before its asynchronous failure callback.
-        outputs.fanout.enqueueVideo(try ProgramRecordingFixtures.audio(at: 0))
+        // The explicit validation seam reaches the real codec's prepared-input
+        // guard; the ordinary broker correctly rejects this audio sample first.
+        // Remove both runtimes before its asynchronous failure callback.
+        outputs.validationEnqueuePreparedVideo(try ProgramRecordingFixtures.audio(at: 0), destinationID: targets[0].id)
         outputs.stopAll()
         try await settle { outputs.activeCount == 0 && outputs.encoderSessionCount == 0 }
         for (target, token) in zip(targets, tokens) {
@@ -494,7 +512,7 @@ private actor EncodedPublisherProbe: Publisher {
         let probe = EncodedPublisherProbe()
         let outputs = DestinationOutputController(factory: { _ in probe }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
-        outputs.start(StreamDestination(name: "Real terminal PCM", transport: .rtmp), settings: settings)
+        outputs.start(StreamDestination(name: "Real terminal PCM", transport: .rtmp), settings: settings, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 1 }
         // Only the final20ms contains tone. Without a real converter EOS drain
         // those original samples remain buffered and the decoded tone is absent.
@@ -518,7 +536,7 @@ private actor EncodedPublisherProbe: Publisher {
         outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
         let slow = StreamDestination(name: "Bounded stopping target", transport: .rtmp)
         let survivor = StreamDestination(name: "Stop survivor", transport: .srt)
-        outputs.start(slow, settings: settings); outputs.start(survivor, settings: settings)
+        outputs.start(slow, settings: settings, sourceSize: CGSize(width: 320, height: 180)); outputs.start(survivor, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 2 }
         await blocked.hold()
         try await feed(outputs, start: 0, ticks: 20)
@@ -541,8 +559,8 @@ private actor EncodedPublisherProbe: Publisher {
         let outputs = DestinationOutputController(factory: { _ in pending.removeFirst() }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
         outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 24
         var faster = settings; faster.outputProfile = faster.outputProfile.with(frameRate: 60)
-        outputs.start(StreamDestination(name: "Higher rate RTMP", transport: .rtmp), settings: faster)
-        outputs.start(StreamDestination(name: "Higher rate SRT", transport: .srt), settings: faster)
+        outputs.start(StreamDestination(name: "Higher rate RTMP", transport: .rtmp), settings: faster, sourceSize: CGSize(width: 320, height: 180))
+        outputs.start(StreamDestination(name: "Higher rate SRT", transport: .srt), settings: faster, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 2 }
         try check(outputs.encoderSessionCount == 2, "Higher-than-source fixed rate received a false sharing discount")
         outputs.fanout.enqueueVideo(try ProgramRecordingFixtures.video(at: 0))
@@ -552,6 +570,43 @@ private actor EncodedPublisherProbe: Publisher {
         outputs.stopAll(); try await settle { outputs.encoderSessionCount == 0 && outputs.activeCount == 0 }
         report("PASS: fixed profiles requesting more fps than the taken canvas use actual separate raw publishers and receive no sharing budget discount")
     }
+    private static func survivingGroupClaimRejoins(settings: StreamSettings) async throws {
+        let anchor = EncodedPublisherProbe()
+        var first = true
+        var created: [EncodedPublisherProbe] = []
+        let outputs = DestinationOutputController(factory: { _ in
+            if first { first = false; return anchor }
+            let publisher = EncodedPublisherProbe(); created.append(publisher); return publisher
+        }, sharedEncoderPrefersHardware: prefersHardwareEncoder)
+        outputs.sharedEncodingEnabled = true; outputs.sharedSourceFrameRate = 25
+        let owner = StreamDestination(name: "Surviving shared owner", transport: .rtmp)
+        try check(outputs.start(owner, settings: settings, sourceSize: CGSize(width: 320, height: 180)), "Anchor bank admission failed")
+        try await settle { outputs.states[owner.id] == .live }
+        let ownerToken = outputs.sessionToken(owner.id)
+        let originalBanks = RawVideoResourceCoordinator.shared.snapshot().banks.filter {
+            $0.reservation.request.domain.workspace == outputs.rawVideoResourceWorkspaceID
+        }.map { $0.reservation.bankGeneration }
+        for index in 0..<35 {
+            let member = StreamDestination(name: "Rejoined member \(index)", transport: .srt)
+            try check(outputs.start(member, settings: settings, sourceSize: CGSize(width: 320, height: 180)),
+                      "Joining a surviving group leaked a resource claim at member \(index)")
+            let publisher = created.last!
+            try await settle { let starts = await publisher.starts; return outputs.states[member.id] == .live && starts == 1 }
+            outputs.stop(member.id)
+            try await settle { outputs.states[member.id] == .idle }
+            try check(outputs.states[owner.id] == .live && outputs.sessionToken(owner.id) == ownerToken && outputs.encoderSessionCount == 1,
+                      "One member retirement changed the surviving codec session")
+        }
+        let finalBanks = RawVideoResourceCoordinator.shared.snapshot().banks.filter {
+            $0.reservation.request.domain.workspace == outputs.rawVideoResourceWorkspaceID
+        }.map { $0.reservation.bankGeneration }
+        try check(Set(finalBanks) == Set(originalBanks), "Shared joins created fresh raw bank credits")
+        try await feed(outputs, start: 0, ticks: 40)
+        try await settle { await anchor.video.count >= 8 }
+        outputs.stopAll(); try await settle { outputs.encoderSessionCount == 0 && outputs.activeCount == 0 }
+        report("PASS: 35 actual publisher joins/leaves on one prepared VT/AAC group release extra claims, retain one original bank/codec/session, and surviving compressed media advances")
+    }
+
     static func main() async throws {
         setbuf(stdout, nil)
         report("Audio decoder qualification: \(ProgramRecordingFixtures.usesAudioFileDecoder ? "explicit AVAudioFile offline PCM + AVAssetReader H264; default AVAssetReader PCM qualification remains separate" : "original AVAssetReader PCM/H264")")
@@ -581,12 +636,14 @@ private actor EncodedPublisherProbe: Publisher {
         if CommandLine.arguments.contains("--failed-finalization-only") {
             try await failedFinalizationReceipts(settings: settings); return
         }
+    #if !STREAM_PUBLISHER_CODEC_ONLY
         if CommandLine.arguments.contains("--transport-recovery-only") {
             try await localhostRecovery(directory: directory, settings: settings)
             report("Artifacts: \(directory.path)"); return
         }
+    #endif
         let a = StreamDestination(name: "RTMP", transport: .rtmp), b = StreamDestination(name: "SRT", transport: .srt)
-        outputs.start(a, settings: settings); outputs.start(b, settings: settings)
+        outputs.start(a, settings: settings, sourceSize: CGSize(width: 320, height: 180)); outputs.start(b, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 2 }
         try check(outputs.encoderSessionCount == 1, "Compatible started targets did not share one actual owner")
         try await feed(outputs, start: 0, ticks: 200)
@@ -623,11 +680,11 @@ private actor EncodedPublisherProbe: Publisher {
         report("PASS: same compressed H.264 CMSampleBuffer and AAC packet identities/bytes/timestamps reused by RTMP/SRT endpoints; two actual containers decode with matching samples and flash/tone")
 
         report("PASS: last-member stop EOS drains the actual accepted PCM frontier within one AAC packet, both bounded mailboxes finish before stop receipt, resources return to zero and no later media arrives")
-        outputs.start(a, settings: settings); outputs.start(b, settings: settings)
+        outputs.start(a, settings: settings, sourceSize: CGSize(width: 320, height: 180)); outputs.start(b, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 2 && outputs.encoderSessionCount == 1 }
         var different = settings; different.outputProfile = .init(canvasWidth: 160, canvasHeight: 90, frameRate: 25)
         let c = StreamDestination(name: "Different profile", transport: .rtmps)
-        outputs.start(c, settings: different)
+        outputs.start(c, settings: different, sourceSize: CGSize(width: 320, height: 180))
         try await settle { outputs.liveCount == 3 }
         try check(outputs.encoderSessionCount == 2, "Different profile was incorrectly merged")
         let stalledStartCount = await phaseSecond.video.count
@@ -647,7 +704,7 @@ private actor EncodedPublisherProbe: Publisher {
         outputs.stop(b.id)
         try await settle { outputs.states[b.id] == .idle }
         try check(outputs.states[a.id] == .live && outputs.encoderSessionCount == 2, "Independent stop ended the shared survivor")
-        outputs.start(b, settings: settings)
+        outputs.start(b, settings: settings, sourceSize: CGSize(width: 320, height: 180))
         second.continuation.yield(.published) // Late prior-session acknowledgment.
         try await settle { outputs.states[b.id] == .live }
         try await feed(outputs, start: 440, ticks: 80)
@@ -661,27 +718,32 @@ private actor EncodedPublisherProbe: Publisher {
         try await settle { outputs.activeCount == 0 && outputs.encoderSessionCount == 0 }
         report("PASS: distinct profiles separate owners; compressed overflow sheds GOP/audio and recovers at IDR, healthy target advances, independent stop/rejoin and late receipt isolation; real encoders finish before reservation count reaches zero")
         try JSONEncoder().encode([StreamDestination]()).write(to: directory.appendingPathComponent("destinations.json"))
-        let preferences = DestinationSession(fileURL: directory.appendingPathComponent("destinations.json"), settings: .default)
+        let preferences = DestinationSession(fileURL: directory.appendingPathComponent("destinations.json"), settings: .default,
+            legacyStore: DesktopSettingsStore(directory: directory))
         try check(!preferences.sharesFixedH264AAC, "Sharing must default off")
         preferences.sharesFixedH264AAC = true
-        let reloaded = DestinationSession(fileURL: directory.appendingPathComponent("destinations.json"), settings: .default)
+        let reloaded = DestinationSession(fileURL: directory.appendingPathComponent("destinations.json"), settings: .default,
+            legacyStore: DesktopSettingsStore(directory: directory))
         try check(reloaded.sharesFixedH264AAC, "Profile sharing policy did not persist")
         let policyFile = directory.appendingPathComponent("destination-encoding.v1.json")
         let future = Data("{\"version\":2,\"sharesFixedH264AAC\":true}".utf8)
         try future.write(to: policyFile)
-        let preserved = DestinationSession(fileURL: directory.appendingPathComponent("destinations.json"), settings: .default)
+        let preserved = DestinationSession(fileURL: directory.appendingPathComponent("destinations.json"), settings: .default,
+            legacyStore: DesktopSettingsStore(directory: directory))
         preserved.sharesFixedH264AAC = true
         try check(try Data(contentsOf: policyFile) == future, "Future profile policy bytes were overwritten")
         try check(!preserved.sharesFixedH264AAC && preserved.errorMessage != nil, "Unsupported preference silently enabled an unsaved mode")
         try FileManager.default.removeItem(at: policyFile)
         try FileManager.default.createDirectory(at: policyFile, withIntermediateDirectories: false)
-        let unreadable = DestinationSession(fileURL: directory.appendingPathComponent("destinations.json"), settings: .default)
+        let unreadable = DestinationSession(fileURL: directory.appendingPathComponent("destinations.json"), settings: .default,
+            legacyStore: DesktopSettingsStore(directory: directory))
         unreadable.sharesFixedH264AAC = true
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: policyFile.path, isDirectory: &isDirectory)
         try check(!unreadable.sharesFixedH264AAC && unreadable.errorMessage != nil && exists && isDirectory.boolValue,
             "Existing unreadable policy path was overwritten or its failed setting remained enabled: mode=\(unreadable.sharesFixedH264AAC), error=\(String(describing: unreadable.errorMessage)), exists=\(exists), directory=\(isDirectory)")
         report("PASS: profile fixed-sharing opt-in defaults off, persists independently and preserves unsupported document bytes")
+        try await survivingGroupClaimRejoins(settings: settings)
         try await rawFinalization(settings: settings)
         try await cancelledSharedStart(settings: settings)
         try await canvasAndEncoderFailure(settings: settings)
@@ -690,7 +752,11 @@ private actor EncodedPublisherProbe: Publisher {
         try await terminalAACContent(directory: directory, settings: settings)
         try await boundedEncodedStop(settings: settings)
         try await higherRateFallback(settings: settings)
+        #if !STREAM_PUBLISHER_CODEC_ONLY
         try await localhostTransports(directory: directory, settings: settings)
+        #else
+        report("SCOPE: codec-only fixture compiled without transport implementations; no network transport was run")
+        #endif
         report("Artifacts: \(directory.path)")
     }
 }

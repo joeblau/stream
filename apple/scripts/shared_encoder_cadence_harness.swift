@@ -53,7 +53,7 @@ private actor CadencePublisher: Publisher {
             settings.rtmpURL = transport == .srt ? "srt://127.0.0.1:\(port)?mode=caller&latency=50" : "rtmp://127.0.0.1:\(port)/live"
             settings.streamKey = transport == .srt ? "" : "cadence"
             settings.voicePolishEnabled = false; settings.selectedProtocol = transport
-            outputs.start(StreamDestination(name:"Owned actual raw jitter",transport:transport),settings:settings)
+            outputs.start(StreamDestination(name:"Owned actual raw jitter",transport:transport),settings:settings, sourceSize: CGSize(width: 320, height: 180))
             try await IsolatedSustainedHarness.wait("Raw cadence destination did not start") { outputs.liveCount == 1 }
             try await Task.sleep(for:.milliseconds(100))
             if let thermalCap { await publisher.setThermalCeiling(bitRateScale:1,frameRateCap:thermalCap) }
@@ -111,7 +111,7 @@ private actor CadencePublisher: Publisher {
             var settings = StreamSettings.default
             settings.outputProfile = .init(canvasWidth: 320, canvasHeight: 180, frameRate: targetFPS)
             settings.videoBitrate = 500_000; settings.audioBitrate = 128_000
-            outputs.start(StreamDestination(name: "Owned jitter cadence"), settings: settings)
+            outputs.start(StreamDestination(name: "Owned jitter cadence"), settings: settings, sourceSize: CGSize(width: 320, height: 180))
             try await IsolatedSustainedHarness.wait("Cadence encoder did not start") { outputs.liveCount == 1 }
             var frame = 0, inputPTS: [Double] = []
             for tick in 0..<200 {

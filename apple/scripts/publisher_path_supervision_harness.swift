@@ -56,7 +56,7 @@ enum OwnedPublisherPathFeed {
         let usable = NetworkPathSnapshot(isSatisfied: true, interface: .wiredEthernet, interfaceName: "owned-loopback")
         let unavailable = NetworkPathSnapshot(isSatisfied: false, interface: .none, interfaceName: "")
         OwnedPublisherPathFeed.send(usable)
-        outputs.start(interrupted, settings: rtmp); outputs.start(healthy, settings: srt)
+        outputs.start(interrupted, settings: rtmp, sourceSize: CGSize(width: 320, height: 180)); outputs.start(healthy, settings: srt, sourceSize: CGSize(width: 320, height: 180))
         try await SharedEncoderHarness.settle(seconds: 10) { outputs.liveCount == 2 }
         let before = await outputs.diagnosticsSnapshot()
         let healthyStart = before.first { $0.id == healthy.id.uuidString }?.startedAt
