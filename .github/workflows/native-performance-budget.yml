@@ -1,0 +1,60 @@
+name: Native performance budgets
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds_per_workload:
+        description: "Owned static and decoded-media workload duration (120–600 seconds each)"
+        default: "600"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-performance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  measured-workloads:
+    name: Sustained owned workloads (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Name the machine and reject translated Intel evidence
+        run: |
+          sysctl -n hw.model machdep.cpu.brand_string
+          sw_vers
+          xcodebuild -version
+          uname -m
+          if [[ "${{ matrix.runner }}" == "macos-26-intel" ]]; then
+            test "$(uname -m)" = "x86_64"
+            test "$(sysctl -in sysctl.proc_translated || true)" != "1"
+          fi
+          brew install xcodegen cmake
+      - name: Measure actual render, decode, encoder, storage and process resources
+        env:
+          STUDIO_PERFORMANCE_SECONDS: ${{ inputs.seconds_per_workload }}
+        run: |
+          mkdir -p build/studio-performance-results
+          set -euo pipefail
+          zsh scripts/run_studio_performance_harness.zsh --sustained 2>&1 | tee build/studio-performance-results/measurements.log
+      - name: Retain bounded original recordings and measured capability data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-budget-${{ matrix.runner }}
+          retention-days: 7
+          path: |
+            apple/build/studio-performance-validation/frames
+            apple/build/studio-performance-results

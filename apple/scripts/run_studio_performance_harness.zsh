@@ -1,7 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
-readonly WORKSPACE_DIR="build/studio-performance-validation"
+readonly WORKSPACE_DIR="${PERFORMANCE_DIR:-build/studio-performance-validation}"
+readonly PERFORMANCE_BUILD_PATH="${PERFORMANCE_BUILD_PATH:-$WORKSPACE_DIR/derived}"
 mkdir -p "$WORKSPACE_DIR"
 ruby -ryaml -rjson - "$WORKSPACE_DIR" <<'RUBY'
 root=Dir.pwd
@@ -25,6 +26,7 @@ h['type']='tool'
 h['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
 h['sources'] << File.join(root,'scripts/studio_performance_harness.swift')
 h['sources'] << File.join(root,'scripts/program_recording_fixtures.swift')
+h['sources'] << File.join(root,'scripts/performance_owned_replay.swift')
 spec['targets']['StudioPerformanceHarness']=h
 spec['schemes']['StudioPerformanceHarness']={'build'=>{'targets'=>{'StudioPerformanceHarness'=>'all'}}}
 require File.join(root, 'scripts/desktop_transport_fixture')
@@ -32,8 +34,16 @@ StreamDesktopTransportFixture.apply(h, root)
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))
 RUBY
 xcodegen generate --spec "$WORKSPACE_DIR/project.json" --project "$WORKSPACE_DIR"
-xcodebuild -project "$WORKSPACE_DIR/StudioPerformanceValidation.xcodeproj" \
+xcodebuild -jobs 2 -resolvePackageDependencies -project "$WORKSPACE_DIR/StudioPerformanceValidation.xcodeproj" \
+    -scheme StudioPerformanceHarness -derivedDataPath "$PERFORMANCE_BUILD_PATH"
+python3 scripts/repair_desktop_transport_archives.py "$PERFORMANCE_BUILD_PATH"
+xcodebuild -jobs 2 -project "$WORKSPACE_DIR/StudioPerformanceValidation.xcodeproj" \
     -scheme StudioPerformanceHarness -destination 'platform=macOS' \
-    -derivedDataPath "$WORKSPACE_DIR/derived" CODE_SIGNING_ALLOWED=NO build
-env DYLD_FRAMEWORK_PATH="$PWD/$WORKSPACE_DIR/derived/Build/Products/Debug" \
-    "$WORKSPACE_DIR/derived/Build/Products/Debug/StudioPerformanceHarness" "$WORKSPACE_DIR/frames"
+    -derivedDataPath "$PERFORMANCE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+if [[ "${1:-}" == "--build-only" ]]; then exit 0; fi
+sysctl -n hw.model machdep.cpu.brand_string
+sw_vers
+xcodebuild -version
+env DYLD_FRAMEWORK_PATH="${PERFORMANCE_BUILD_PATH:A}/Build/Products/Debug" \
+    python3 scripts/run_studio_performance_workloads.py \
+    "${PERFORMANCE_BUILD_PATH:A}/Build/Products/Debug/StudioPerformanceHarness" "${WORKSPACE_DIR:A}/frames" "$@"
