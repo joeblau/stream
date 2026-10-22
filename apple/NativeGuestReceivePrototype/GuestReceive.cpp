@@ -20,11 +20,28 @@ static int compiledTurnTransports() {
 #ifdef STREAM_NATIVE_NICE_TURN_TCP
     const auto receipt = reinterpret_cast<int (*)()>(dlsym(RTLD_DEFAULT, "stream_rtc_turn_transports_20261021_v1"));
     const auto policy = reinterpret_cast<int (*)()>(dlsym(RTLD_DEFAULT, "stream_rtc_nice_relay_policy_20261021_v1"));
-    return receipt && policy && policy() == 1 ? receipt() & 3 : 1;
+    int supported = receipt && policy && policy() == 1 ? receipt() & 3 : 1;
+#ifdef STREAM_NATIVE_NICE_TURN_TLS
+    const auto tls = reinterpret_cast<int (*)()>(dlsym(RTLD_DEFAULT, "stream_rtc_turn_tls_20261022_v1"));
+    if (supported == 3 && tls && tls() == 1) supported |= 4;
+#endif
+    return supported;
 #else
     return 1;
 #endif
 }
+
+#ifdef STREAM_GUEST_VALIDATION
+extern "C" void SGReceiverValidationTLSReceipts(uint64_t output[5]) {
+    if (!output) return;
+    std::fill(output, output + 5, 0);
+#ifdef STREAM_NATIVE_NICE_TURN_TLS
+    if ((compiledTurnTransports() & 4) == 0) return;
+    const auto receipt = reinterpret_cast<void (*)(uint64_t *)>(dlsym(RTLD_DEFAULT, "stream_rtc_turn_tls_receipts_20261022_v1"));
+    if (receipt) receipt(output);
+#endif
+}
+#endif
 
 static_assert(RTC_VERSION_MAJOR == 0 && RTC_VERSION_MINOR == 24 && RTC_VERSION_PATCH == 0,
               "Guest receive requires the qualified public libdatachannel 0.24.0 ABI");

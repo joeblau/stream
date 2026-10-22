@@ -1,0 +1,7 @@
+{
+  "pin": "8c31097ea78f051e857d0aa1b2f6efb26cd12b7e",
+  "files": {
+    "src/impl/icetransport.cpp": "92d834e834cc38aaebfe08acde791c5da2320c64d2339b46b3b74a42f2bd0a90",
+    "src/configuration.cpp": "5d8b098b65bbf0ab33aae1c5e1c78706ab181e40d09bac99fef63cf3e0113254"
+  }
+}

@@ -13,7 +13,9 @@ import {analyzeReturnAV} from './native-return-video-analysis.mjs';
 import {renderedReturnWorklet,installRenderedReturnOracle} from './rendered-return-oracle.mjs';
 import {chromeFixtureExecutable, chromeFixtureCredentialArguments, ChromeFixtureDiagnostics} from './chrome-fixture.mjs';
 const elementAudioProbe=process.argv.find(value=>value.startsWith('--video-element-audio-probe='))?.split('=')[1];
+const ownedNullContexts=process.argv.includes('--owned-null-contexts');
 const isolatedMode=Boolean(elementAudioProbe)||process.argv.includes('--video-flow-only')||process.argv.includes('--video-fault-only')||process.argv.includes('--video-delivery-failure')||process.argv.some(value=>value.startsWith('--video-av-final='));
+assert(!ownedNullContexts||process.argv.includes('--video-flow-only'),'Explicit null contexts apply only to the separate video-flow fixture, never AV qualification');
 if(!isolatedMode){
   const plans=[['--video-flow-only','--video-feedback-probe'],['--video-delivery-failure'],...Array.from({length:2},()=>['program','secondary','clean'].map(source=>[`--video-av-final=${source}`])).flat()];
   for(const arguments_ of plans){
@@ -29,8 +31,9 @@ async function port(){const server=net.createServer();await new Promise(resolve=
 const workerRoot=fileURLToPath(new URL('../../',import.meta.url));
 const cli=process.env.NATIVE_INTERVIEW_RETURN_AUDIO_CLI, turnserver=process.env.STREAM_INTERVIEW_TURN_SERVER;
 const relayTransport=process.env.STREAM_INTERVIEW_RELAY_TRANSPORT??'udp';
-if(relayTransport==='tcp')console.log('Qualification backend: explicit opt-in current-host libnice; packaged shipping SDK remains UDP-only.');
-assert(['udp','tcp'].includes(relayTransport),'Use an explicitly supported owned TURN transport');
+if(relayTransport!=='udp')console.log('Qualification backend: explicit opt-in current-host libnice; packaged shipping SDK remains UDP-only.');
+assert(['udp','tcp','tls'].includes(relayTransport),'Use an explicitly supported owned TURN transport');
+assert(!ownedNullContexts||relayTransport==='tls','Explicit null-context mode is scoped to the owned TLS attempt');
 assert(cli&&path.isAbsolute(cli)&&turnserver&&path.isAbsolute(turnserver),'Set absolute owned native CLI and pinned Coturn executable paths');
 await fs.access(cli,fs.constants.X_OK);await fs.access(turnserver,fs.constants.X_OK);
 const owned=await fs.mkdtemp(path.join(os.tmpdir(),'stream-native-return-relay-'));await fs.chmod(owned,0o700);
@@ -48,6 +51,8 @@ class CDP {
       if (pending) { this.pending.delete(value.id); clearTimeout(pending.timer);
         value.error ? pending.reject(new Error(value.error.message)) : pending.resolve(value.result); }
       if (value.method === 'Runtime.exceptionThrown') this.errors.push(value.params.exceptionDetails.text);
+      if(value.method==='Runtime.consoleAPICalled'&&value.params.args?.[0]?.value==='owned-tls-prepare-complete')this.prepareDone=value.params.args?.[1]?.value;
+      if(value.method==='Runtime.consoleAPICalled'&&value.params.args?.[0]?.value==='owned-tls-analysis-complete')this.analysisDone=value.params.args?.[1]?.value;
       startup.event(value.method);
     });
     socket.on('close', () => { for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Chrome closed')); } this.pending.clear(); });
@@ -68,7 +73,8 @@ class CDP {
 
 const syntheticMedia = `
 window.__fixturePeers=[];window.__fixtureVideoVisibility=[];window.__fixtureCamera=[];window.__fixtureScreens=[];window.__fixtureAudio=[];
-const Peer=window.RTCPeerConnection;window.RTCPeerConnection=class extends Peer{constructor(configuration){super({...configuration,iceTransportPolicy:"relay"});window.__fixturePeers.push(this);this.addEventListener('datachannel',e=>e.channel.addEventListener('message',e=>{let v;try{v=JSON.parse(e.data);}catch{return;}if(v.type==='return-video'){window.__fixtureVideoVisibility.push({enabled:v.enabled,at:performance.now()});if(window.__fixtureVideoVisibility.length>32)window.__fixtureVideoVisibility.shift();}}));}};
+${ownedNullContexts?`window.__fixtureNullContexts=[];const ActualAudioContext=window.AudioContext;window.AudioContext=class extends ActualAudioContext{constructor(options={}){super({...options,sinkId:{type:'none'}});if(this.sinkId?.type!=='none')throw new Error('Owned null context unavailable');window.__fixtureNullContexts.push(this);}};`:''}
+const Peer=window.RTCPeerConnection;window.RTCPeerConnection=class extends Peer{constructor(configuration){super({...configuration,iceTransportPolicy:"relay"});window.__fixturePeers.push(this);this.__ownedICEErrors=[];this.addEventListener('icecandidateerror',e=>{if(this.__ownedICEErrors.length<8)this.__ownedICEErrors.push(e.errorCode);});this.addEventListener('datachannel',e=>e.channel.addEventListener('message',e=>{let v;try{v=JSON.parse(e.data);}catch{return;}if(v.type==='return-video'){window.__fixtureVideoVisibility.push({enabled:v.enabled,at:performance.now()});if(window.__fixtureVideoVisibility.length>32)window.__fixtureVideoVisibility.shift();}}));}};
 const canvasTrack=color=>{const canvas=document.createElement('canvas');canvas.width=320;canvas.height=180;const context=canvas.getContext('2d');let counter=0;
 const paint=()=>{context.fillStyle=color;context.fillRect(0,0,320,180);context.fillStyle='white';context.fillRect((counter++%80)*4,0,4,4);};paint();
 const stream=canvas.captureStream(15),track=stream.getVideoTracks()[0];const timer=setInterval(()=>{if(track.readyState==='ended'){clearInterval(timer);return;}paint();},60);return stream;};
@@ -114,19 +120,29 @@ try {
   await fs.writeFile(path.join(assets,'fixture-return-meter.js'),returnMeterModule,{mode:0o600});
   await fs.writeFile(path.join(assets,'fixture-rendered-return-cue.js'),renderedReturnWorklet,{mode:0o600});
   const operatorToken=randomBytes(32).toString('hex'),turnUsername=randomBytes(16).toString('hex'),turnCredential=randomBytes(32).toString('hex');
-  const turnURL=`turn:127.0.0.1:${turnPort}?transport=${relayTransport}`;
+  let tls;
+  if(relayTransport==='tls'){
+    const openssl=process.env.STREAM_INTERVIEW_TLS_OPENSSL;
+    assert(openssl&&path.isAbsolute(openssl),'TLS fixture needs the owned pinned OpenSSL executable');
+    const helper=fileURLToPath(new URL('../../../../apple/scripts/owned_turn_tls_fixture.py',import.meta.url));
+    const directory=path.join(owned,'tls');
+    execFileSync('python3',[helper,'--directory',directory,'--openssl',openssl],{stdio:'ignore',timeout:10000});
+    tls=JSON.parse(await fs.readFile(path.join(directory,'tls-fixture.json'),'utf8'));
+  }
+  const turnURL=`${tls?'turns':'turn'}:127.0.0.1:${turnPort}?transport=${tls?'tcp':relayTransport}`;
   const workerConfig={name:'native-session-relay-validation',main:path.join(workerRoot,'src/index.ts'),compatibility_date:'2026-10-02',compatibility_flags:['nodejs_compat'],durable_objects:{bindings:[{name:'ROOMS',class_name:'InterviewRoom'}]},migrations:[{tag:'v1',new_sqlite_classes:['InterviewRoom']}],assets:{directory:assets,binding:'ASSETS',run_worker_first:true},vars:{OPERATOR_TOKEN:operatorToken,ALLOWED_ORIGIN:origin,TURN_KEY_ID:''},observability:{enabled:false}};
   const config=path.join(owned,'wrangler.json'),relayConfig=path.join(owned,'turnserver.conf'),nativeConfig=path.join(owned,'native.json');
   await fs.writeFile(config,JSON.stringify(workerConfig),{mode:0o600});
   await fs.writeFile(nativeConfig,JSON.stringify({serviceURL:origin,operatorToken,turnURL,turnUsername,turnCredential,mediaDirectory:pathToFileURL(path.join(owned,"media")).href}),{mode:0o600});
-  await fs.writeFile(relayConfig,[`listening-port=${turnPort}`,'listening-ip=127.0.0.1','relay-ip=127.0.0.1',`min-port=${relayTransport==='tcp'?49200:49160}`,`max-port=${relayTransport==='tcp'?49215:49175}`,'realm=owned-fixture.invalid','lt-cred-mech',`user=${turnUsername}:${turnCredential}`,'fingerprint','allow-loopback-peers','allowed-peer-ip=127.0.0.1','denied-peer-ip=0.0.0.0-255.255.255.255','no-multicast-peers',relayTransport==='tcp'?'no-udp':'no-tcp','no-tls','no-tcp-relay','no-stdout-log','log-file=/dev/null',`pidfile=${path.join(owned,'turn.pid')}`,`userdb=${path.join(owned,'turn.db')}`,'relay-threads=1','cpus=2','user-quota=8','total-quota=8','max-allocate-lifetime=120','max-bps=1048576','bps-capacity=8388608'].join('\n')+'\n',{mode:0o600});
+  const listeners=tls?[`listening-port=${await port()}`,`tls-listening-port=${turnPort}`,'no-tcp','no-udp','no-dtls','no-tlsv1','no-tlsv1_1',`cert=${tls.certificate}`,`pkey=${tls.privateKey}`]:[`listening-port=${turnPort}`,relayTransport==='tcp'?'no-udp':'no-tcp','no-tls'];
+  await fs.writeFile(relayConfig,[...listeners,'listening-ip=127.0.0.1','relay-ip=127.0.0.1',`min-port=${relayTransport!=='udp'?49200:49160}`,`max-port=${relayTransport!=='udp'?49215:49175}`,'realm=owned-fixture.invalid','lt-cred-mech',`user=${turnUsername}:${turnCredential}`,'fingerprint','allow-loopback-peers','allowed-peer-ip=127.0.0.1','denied-peer-ip=0.0.0.0-255.255.255.255','no-multicast-peers','no-tcp-relay','no-stdout-log','log-file=/dev/null',`pidfile=${path.join(owned,'turn.pid')}`,`userdb=${path.join(owned,'turn.db')}`,'relay-threads=1','cpus=2','user-quota=8','total-quota=8','max-allocate-lifetime=120','max-bps=1048576','bps-capacity=8388608'].join('\n')+'\n',{mode:0o600});
   turn=child(turnserver,['-c',relayConfig]);
   worker=child(process.execPath,[path.join(workerRoot,'node_modules/wrangler/bin/wrangler.js'),'dev','--local','--config',config,'--ip','127.0.0.1','--port',String(servicePort),'--inspector-port',String(inspectorPort),'--persist-to',path.join(owned,'state'),'--log-level','none','--show-interactive-dev-session=false']);
   await wait('real local Worker readiness',async()=>{check();try{return(await fetch(`${origin}/guest.html`,{signal:AbortSignal.timeout(1000)})).status===200;}catch{return false;}},20_000);
   assert(turn.exitCode===null,'Owned Coturn must remain running');
 
   let pending='',nativeBytes=0,stderrBytes=0,state,invite,ack,stopped=false,closed=false,linesAfterStop=0;
-  native=child(cli,[nativeConfig],{stdio:['pipe','pipe','pipe']});
+  native=child(cli,[nativeConfig],{stdio:['pipe','pipe','pipe'],env:{...process.env,...(tls?{STREAM_OWNED_TURN_TLS_CA_FILE:tls.caFile}:{})}});
   native.stdin.on('error',()=>{failure=new Error('Native command pipe closed');});
   native.stderr.on('data',chunk=>{stderrBytes+=chunk.length;if(stderrBytes>262144)failure=new Error('Native diagnostic budget exceeded');});
   native.on('close',(code,signal)=>{closed=true;if(!stopped||code!==0){console.error(`Owned native process exit: code=${code}, signal=${signal}; stderrBytes=${stderrBytes}`);failure??=new Error('Native process failed before terminal receipt');}});
@@ -151,7 +167,7 @@ try {
   const executable=await chromeFixtureExecutable(process.env.CHROME_BIN??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', owned);
   const profile=path.join(owned,'chrome');await fs.mkdir(profile,{mode:0o700});
   startup.phase('launch');
-  chrome=child(executable,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--no-first-run','--disable-background-networking','--disable-component-update','--disable-extensions','--autoplay-policy=no-user-gesture-required',...chromeFixtureCredentialArguments(),...(process.env.CHROME_NO_SANDBOX==='1'?['--no-sandbox']:[]),'about:blank'],{stdio:['ignore','ignore','pipe']});
+  chrome=child(executable,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--no-first-run','--disable-background-networking','--disable-component-update','--disable-extensions','--autoplay-policy=no-user-gesture-required',...chromeFixtureCredentialArguments(),...(tls?[`--ignore-certificate-errors-spki-list=${tls.spkiSHA256}`]:[]),...(process.env.CHROME_NO_SANDBOX==='1'?['--no-sandbox']:[]),'about:blank'],{stdio:['ignore','ignore','pipe']});
   startup.observe(chrome);
   const debugging=await wait('isolated Chrome launch',async()=>{check();try{return(await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).trim().split('\n');}catch{return undefined;}});
   startup.phase('debug-endpoint');
@@ -173,14 +189,36 @@ try {
   startup.phase('guest-ready');
   await browser.evaluate(g,`(()=>{const v=document.getElementById('return');window.__returnPlayerLifecycle={loads:0,emptied:0};for(const [event,key]of [['loadstart','loads'],['emptied','emptied']])v.addEventListener(event,()=>{window.__returnPlayerLifecycle[key]++;});})()`);
   assert(browser.errors.length===0&&await browser.evaluate(g,'Array.isArray(window.__fixtureCamera)'),'Generated capture and local TURN override must initialize without script errors');
+  if(ownedNullContexts){
+    await browser.evaluate(g,"document.getElementById('return').muted=true");
+    console.log('Scope: explicit real verified null AudioContext sinks and muted owned HTML player. Actual direct-track decoded PCM/video/control only; normal HTML audio, rendered PCM/AEC and playout AV sync remain unqualified.');
+  }
   assert(await browser.evaluate(g,"location.hash===''")===true,'Guest strips capability fragment');
-  await browser.evaluate(g,"document.getElementById('prepare').click()");await browser.until(g,"!document.getElementById('join').disabled",'generated devices prepared');
+  if(tls){
+    // Observe genuine cold AudioContext preparation without holding a CDP
+    // request open across the synchronous host audio-service startup. Neither
+    // the AudioContext nor the HTML return player is substituted.
+    await browser.evaluate(g,"setTimeout(()=>{Promise.resolve(document.getElementById('prepare').onclick()).then(()=>console.debug('owned-tls-prepare-complete','complete'),()=>console.debug('owned-tls-prepare-complete','failed'));},0);undefined");
+    await wait('actual cold device preparation completion',()=>{check();return browser.prepareDone;},45_000);
+    assert.equal(browser.prepareDone,'complete');
+  }else await browser.evaluate(g,"document.getElementById('prepare').click()");
+  await browser.until(g,"!document.getElementById('join').disabled",'generated devices prepared');
   await browser.evaluate(g,"document.getElementById('join').click()");
   await wait('native actual Worker waiting roster',()=>{check();return state?.members[0]?.membership==='waiting';});
   assert(await browser.evaluate(g,'window.__fixturePeers.length')===0,'No peer before actual service admission');
 
   const guest=state.members[0].id;command({type:'admit',id:guest});
-  await wait('actual default Manager return ready',()=>{check();return state?.members[0]?.media==='ready'&&state?.members[0]?.returnAudio==='ready'&&state?.transport?.local==='relay'&&state?.audioAccepted>=5;},20000);
+  try{
+    await wait('actual default Manager return ready',()=>{check();return state?.members[0]?.media==='ready'&&state?.members[0]?.returnAudio==='ready'&&state?.transport?.local==='relay'&&state?.audioAccepted>=5;},20000);
+  }catch(error){
+    if(tls){
+      const peers=await browser.evaluate(g,"window.__fixturePeers.map(p=>({connection:p.connectionState,ice:p.iceConnectionState,gathering:p.iceGatheringState,errors:p.__ownedICEErrors}))");
+      const captures=await browser.evaluate(g,"window.__fixtureAudio.map(v=>({state:v.context.state,sink:v.context.sinkId?.type??'default',tracks:v.stream.getTracks().map(t=>({live:t.readyState,enabled:t.enabled}))}))");
+      console.log(`Bounded TLS readiness diagnostic: ${JSON.stringify({phase:state?.phase,failure:state?.failure,media:state?.members[0]?.media,returnAudio:state?.members[0]?.returnAudio,audioAccepted:state?.audioAccepted,incoming:state?.incoming,tls:state?.tls,peers,captures})}`);
+    }
+    throw error;
+  }
+  if(tls)console.log(`Actual native TLS receive readiness: ${JSON.stringify({audioAccepted:state.audioAccepted,cameraFrames:state.incoming?.camera?.frames,tls:state.tls,hostSyntheticInput:state.hostSyntheticInput,program:state.program})}`);
   await browser.until(g,"document.getElementById('return').srcObject?.getAudioTracks().length===1",'shipping guest return audio track');
 
   const returnAnalyzer=String.raw`(async()=>{
@@ -195,11 +233,19 @@ try {
     window.__returnSpectrum=()=>({...value.last,track:track.id,live:track.readyState});
     return{track:track.id,channels:track.getSettings().channelCount??0};
   })()`;
-  await browser.evaluate(g,returnAnalyzer);
+  async function startReturnAnalyzer(){
+    if(tls&&ownedNullContexts){
+      browser.analysisDone=undefined;
+      await browser.evaluate(g,`setTimeout(()=>{Promise.resolve(${returnAnalyzer}).then(()=>console.debug('owned-tls-analysis-complete','complete'),()=>console.debug('owned-tls-analysis-complete','failed'));},0);undefined`);
+      await wait('actual cold return analyzer completion',()=>{check();return browser.analysisDone;},45_000);
+      assert.equal(browser.analysisDone,'complete');
+    }else await browser.evaluate(g,returnAnalyzer);
+  }
+  await startReturnAnalyzer();
   async function spectrum(label,left,right){
     await browser.evaluate(g,'window.__resetReturn()');
     let observed;
-    const result=await wait(label,async()=>{check();const r=await browser.evaluate(g,'window.__returnSpectrum()');observed=r;if(!r.n||r.n<24576)return false;const a=r.channels[0].amplitudes,b=r.channels[1].amplitudes;if(Math.abs(a[0]-left)>.035||Math.abs(b[1]-right)>.025||a[2]>.01||a[3]>.01||b[2]>.01||b[3]>.01)return false;return r;},6000).catch(error=>{console.error(`Observed actual Chrome ${label}: ${JSON.stringify(observed)}`);throw error;});
+    const result=await wait(label,async()=>{check();const r=await browser.evaluate(g,'window.__returnSpectrum()');observed=r;if(!r.n||r.n<24576)return false;const a=r.channels[0].amplitudes,b=r.channels[1].amplitudes;if(Math.abs(a[0]-left)>.035||Math.abs(b[1]-right)>.025||a[2]>.01||a[3]>.01||b[2]>.01||b[3]>.01)return false;return r;},6000).catch(error=>{console.error(`Observed actual Chrome ${label}: ${JSON.stringify(observed)}`);if(tls)console.error(`Native gate/tone at failed return: ${JSON.stringify({hostSyntheticInput:state.hostSyntheticInput,program:state.program,tls:state.tls})}`);throw error;});
     assert(result.rate===48000&&result.live==='live'&&result.channels.length===2);if(left===0&&right===0)assert(result.channels.every(c=>c.rms<.002),'Muted return must carry actual near-zero decoded PCM');console.log(`Actual Chrome decoded return ${label}: ${JSON.stringify(result)}`);return result;
   }
   const first=await spectrum('backstage-local-only',.4,.2);
@@ -422,10 +468,11 @@ try {
   await wait('Program purple after explicit overlay removal',async()=>{const p=await browser.evaluate(g,videoPixels);return p?.pixel[0]>100&&p.pixel[1]<80&&p.pixel[2]>140;});
   const pair=await browser.evaluate(g,`(async()=>{const pc=window.__fixturePeers.at(-1),stats=await pc.getStats();let result={};for(const s of stats.values()){if(s.type==='inbound-rtp'&&s.kind==='audio'){result={...result,packets:s.packetsReceived,samples:s.totalSamplesReceived,codec:stats.get(s.codecId)?.mimeType,channels:stats.get(s.codecId)?.channels};}if(s.type==='transport'&&s.selectedCandidatePairId){const pair=stats.get(s.selectedCandidatePairId);result={...result,local:stats.get(pair.localCandidateId)?.candidateType,remote:stats.get(pair.remoteCandidateId)?.candidateType};}}return result;})()`);
   assert(pair.local==='relay'&&pair.packets>10&&pair.samples>24000&&pair.codec==='audio/opus'&&state.transport.local==='relay'&&state.transport.udp);
+  let verifiedBeforeRejoin=0;
   async function verifyRelayTransport(phase){
     const selected=await browser.evaluate(g,`(async()=>{const stats=await window.__fixturePeers.at(-1).getStats();for(const s of stats.values())if(s.type==='transport'&&s.selectedCandidatePairId){const p=stats.get(s.selectedCandidatePairId),c=stats.get(p.localCandidateId);return{kind:c?.candidateType,allocation:c?.protocol,relay:c?.relayProtocol};}return null;})()`);
     assert(selected?.kind==='relay'&&selected.relay===relayTransport,'Actual selected browser TURN connection transport must match the requested restriction');
-    if(relayTransport==='tcp'){
+    if(relayTransport!=='udp'){
       // Read-only process socket evidence; no addresses or credentials are
       // printed. Candidate UDP describes the relay allocation, not its TCP
       // client/server connection. Coturn's UDP listener is disabled above.
@@ -437,7 +484,14 @@ try {
       catch(error){if(error.status!==1)throw error;}
       const udpListener=udpSockets.split('\n').some(line=>line===`n127.0.0.1:${turnPort}`);
       assert(!udpListener,'Owned restricted TURN endpoint must have no UDP listener');
-      console.log(`Actual restricted relay receipt: ${JSON.stringify({phase,nativeTURN:'tcp',browserTURN:selected.relay,nativeLocalRelay:true,browserLocalRelay:true,relayAllocation:selected.allocation,nativeEstablishedTURNConnections:connections,serverUDPListener:false})}`);
+      if(tls){
+        const listeners=execFileSync('/usr/sbin/lsof',['-nP','-a','-p',String(turn.pid),'-iTCP','-sTCP:LISTEN','-Fn'],{encoding:'utf8',timeout:3000,maxBuffer:65536});
+        assert.deepEqual([...new Set(listeners.split('\n').filter(line=>line.startsWith('n')))], [`n127.0.0.1:${turnPort}`],'TLS fixture exposes only its TLS listener');
+        assert(state.tls?.verified>=1&&state.tls?.cipherOut>0&&state.tls?.cipherIn>0&&state.tls?.plainOut>0,'Native real TLS handshake and encrypted media/control counters');
+        if(phase==='fresh-rejoin')assert(state.tls.verified>verifiedBeforeRejoin,'Fresh full lease completes a new verified TLS connection');
+        else verifiedBeforeRejoin=state.tls.verified;
+      }
+      console.log(`Actual restricted relay receipt: ${JSON.stringify({phase,nativeTURN:relayTransport,...(tls?{tls:state.tls}:{}),browserTURN:selected.relay,nativeLocalRelay:true,browserLocalRelay:true,relayAllocation:selected.allocation,nativeEstablishedTURNConnections:connections,serverUDPListener:false})}`);
     }
   }
   await verifyRelayTransport('before-rejoin');
@@ -487,6 +541,7 @@ try {
     command({type:'video-select-secondary'});await wait('Select Secondary before actual rejoin',()=>state.members[0].returnSource==='secondary');
     command({type:'video-on'});await wait('Secondary active before actual rejoin',blue,20000);
   }
+  if(tls)verifiedBeforeRejoin=state.tls.verified;
   await browser.evaluate(g,'window.__priorReturnTrack=window.__returnAnalysis.track');command({type:'rejoin'});
   await browser.until(g,"document.getElementById('return').srcObject===null",'shipping guest reset clears return after host disconnect');
   assert(await browser.evaluate(g,"window.__returnAnalysis.track.readyState==='ended'")===true,'Actual previous remote return track retires');
@@ -498,7 +553,7 @@ try {
   const replacementPlayer=await browser.evaluate(g,`(()=>{const v=document.getElementById('return');return {...window.__returnPlayerLifecycle,newStream:v.srcObject!==window.__returnPlayerStream};})()`);
   assert(replacementPlayer.newStream&&replacementPlayer.loads>playerBeforeVideo.loads,'Actual full-lease replacement must retire the old player and attach its new stream');
   console.log('PASS actual guest HTML player preserves clock across video changes and replaces its stream for a new full lease: '+JSON.stringify(replacementPlayer));
-  await browser.evaluate(g,returnAnalyzer);await spectrum('rejoined-new-fulllease',.16,.08);
+  await startReturnAnalyzer();await spectrum('rejoined-new-fulllease',.16,.08);
   assert(await browser.evaluate(g,"document.getElementById('return').srcObject.getVideoTracks().length===0"),'A new full lease cannot inherit Program video opt-in');
   assert(state.members[0].returnSource==='program','A new full lease resets ephemeral Secondary selection to Program');
   ack=undefined;command({type:'stale-video-selection'});await wait('Old fulllease video selection/start rejected',()=>{check();return ack==='stale-video-selection-rejected';});
@@ -519,6 +574,7 @@ try {
   command({type:'end'});await wait('actual room ended',()=>{check();return state.phase==='ended';});
   command({type:'stop'});await wait('native permanent cleanup receipt',()=>{check();return stopped&&closed;},10000);assert(linesAfterStop===0);
   assert(browser.errors.length===0,'Actual shipping guest page no runtime errors');
+  if(ownedNullContexts)assert(await browser.evaluate(g,"window.__fixtureNullContexts.length>=3&&window.__fixtureNullContexts.every(c=>c.sinkId?.type==='none')&&document.getElementById('return').muted"),'Actual capture/analysis contexts retain explicit null sinks; owned HTML audio remains muted');
   console.log(`PASS ${version.product}: actual shipping NativeInterviewManager/default receiver/controller-issued sink→preclamp fulllease return→public native stereo Opus→SDK RTP/RTCP→owned TURN→shipping guest audio track/Chrome decoded48k PCM; own440/880 excluded, local1000/1700 preserved, mute/nonunity restore, new-generation rejoin and remove fence`);
   console.log('Scope: owned local Worker/Coturn/synthetic captures only. Program/Secondary/Clean video and public stereo audio only; higher-profile adaptive upshift/bootstrap, addressed talkback, physical/browser AEC, mobile/restricted-network/deployed broker remain unqualified.');
   }

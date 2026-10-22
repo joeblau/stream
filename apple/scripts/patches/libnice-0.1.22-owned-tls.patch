@@ -1,0 +1,326 @@
+diff --git a/agent/agent-priv.h b/agent/agent-priv.h
+index e72eed9..14b3eae 100644
+--- a/agent/agent-priv.h
++++ b/agent/agent-priv.h
+@@ -243 +243 @@ NiceSocket * agent_create_tcp_turn_socket (NiceAgent *agent,
+-    NiceAddress *server, NiceRelayType type, gboolean reliable_tcp);
++    NiceAddress *server, NiceRelayType type, gboolean reliable_tcp, const gchar *server_identity);
+diff --git a/agent/agent.c b/agent/agent.c
+index fe7a299..661e93c 100644
+--- a/agent/agent.c
++++ b/agent/agent.c
+@@ -2256,0 +2257,9 @@ _tcp_sock_is_writable (NiceSocket *sock, gpointer user_data)
++  /* The TCP callback releases its socket mutex before taking our agent
++   * lock. Its raw socket may already have retired: compare pointer identity
++   * through currently owned chains before dereferencing any socket fields. */
++  for (GSList *item = component->socket_sources; item != NULL; item = item->next) {
++    NiceSocket *live = ((SocketSource *) item->data)->socket;
++    if (live != NULL && stream_nice_tls_resume (live, sock)) {
++      break;
++    }
++  }
+@@ -2819 +2828 @@ agent_create_tcp_turn_socket (NiceAgent *agent, NiceStream *stream,
+-    NiceAddress *server, NiceRelayType type, gboolean reliable_tcp)
++    NiceAddress *server, NiceRelayType type, gboolean reliable_tcp, const gchar *server_identity)
+@@ -2823,0 +2833,7 @@ agent_create_tcp_turn_socket (NiceAgent *agent, NiceStream *stream,
++  /* This owned TLS extension supports only direct standards-based TURN.
++   * Refuse proxy and legacy pseudoSSL modes rather than falling back. */
++  if (type == NICE_RELAY_TYPE_TURN_TLS &&
++      (agent->proxy_type != NICE_PROXY_TYPE_NONE ||
++       agent->compatibility != NICE_COMPATIBILITY_RFC5245))
++    return NULL;
++
+@@ -2866 +2882,6 @@ agent_create_tcp_turn_socket (NiceAgent *agent, NiceStream *stream,
+-  if (type ==  NICE_RELAY_TYPE_TURN_TLS &&
++  if (type == NICE_RELAY_TYPE_TURN_TLS && agent->compatibility == NICE_COMPATIBILITY_RFC5245) {
++    NiceSocket *tls = stream_nice_tls_socket_new (nicesock, server, server_identity,
++        g_object_get_data (G_OBJECT (agent), "stream-owned-turn-tls-ca-file"));
++    if (tls == NULL) { nice_socket_free (nicesock); return NULL; }
++    nicesock = tls;
++  } else if (type == NICE_RELAY_TYPE_TURN_TLS &&
+@@ -2935 +2956 @@ priv_add_new_candidate_discovery_turn (NiceAgent *agent,
+-        component, nicesock, &turn->server, turn->type, reliable_tcp);
++        component, nicesock, &turn->server, turn->type, reliable_tcp, turn->server_address);
+diff --git a/agent/component.c b/agent/component.c
+index 92347b1..8760b3a 100644
+--- a/agent/component.c
++++ b/agent/component.c
+@@ -1570,0 +1571,2 @@ turn_server_new (const gchar *server_ip, guint server_port,
++  /* Retain the original TLS reference identity for numeric addresses too. */
++  turn->server_address = g_strdup (server_ip);
+@@ -1573,2 +1574,0 @@ turn_server_new (const gchar *server_ip, guint server_port,
+-  else
+-    turn->server_address = g_strdup (server_ip);
+diff --git a/agent/conncheck.c b/agent/conncheck.c
+index 4b45080..8b7a6af 100644
+--- a/agent/conncheck.c
++++ b/agent/conncheck.c
+@@ -3995 +3995 @@ static void priv_handle_turn_alternate_server (NiceAgent *agent,
+-            nice_socket_is_reliable (d->nicesock));
++            nice_socket_is_reliable (d->nicesock), d->turn->server_address);
+diff --git a/socket/meson.build b/socket/meson.build
+index e6da31d..48fd79a 100644
+--- a/socket/meson.build
++++ b/socket/meson.build
+@@ -2,0 +3 @@ socket_sources = [
++  'stream-tls.c',
+diff --git a/socket/socket.h b/socket/socket.h
+index c4c287b..603115c 100644
+--- a/socket/socket.h
++++ b/socket/socket.h
+@@ -68 +68,2 @@ typedef enum {
+-  NICE_SOCKET_TYPE_TCP_SO
++  NICE_SOCKET_TYPE_TCP_SO,
++  NICE_SOCKET_TYPE_STREAM_TLS
+@@ -152,0 +154 @@ nice_socket_free (NiceSocket *sock);
++#include "stream-tls.h"
+diff --git a/socket/stream-tls.c b/socket/stream-tls.c
+new file mode 100644
+index 0000000..e065328
+--- /dev/null
++++ b/socket/stream-tls.c
+@@ -0,0 +1,229 @@
++/* Application-owned real TURN TLS extension; corresponding source is retained.
++ * Encryption is inside the NiceSocket chain, never a local plaintext tunnel.
++ * All socket methods and resume execute under the existing NiceAgent lock. */
++#include "config.h"
++#include "stream-tls.h"
++#include <openssl/ssl.h>
++#include <openssl/err.h>
++#include <openssl/x509v3.h>
++#include <string.h>
++
++#define MAX_PLAIN_BYTES (256 * 1024)
++#define MAX_MESSAGE_BYTES 65535
++#define MAX_MESSAGES 32
++#define MAX_TLS_BUFFER (128 * 1024)
++#define TLS_SOCKET_KEY "stream-owned-tls-socket-v1"
++
++typedef struct { guint8 *data; gsize size; } PlainBlock;
++typedef struct {
++  NiceSocket *base;
++  NiceAddress remote;
++  SSL_CTX *context;
++  SSL *ssl;
++  BIO *input, *output;
++  GQueue plain;
++  gsize plain_bytes;
++  gboolean failed, verified;
++  gint64 deadline;
++} TLSPriv;
++
++static GMutex receipts_lock;
++static guint64 receipts[5]; /* verified, rejected, cipher-out, cipher-in, plain-out */
++static void metric(guint index, guint64 value) {
++  g_mutex_lock(&receipts_lock); receipts[index] += value; g_mutex_unlock(&receipts_lock);
++}
++void stream_nice_turn_tls_receipts(guint64 output[5]) {
++  g_mutex_lock(&receipts_lock); memcpy(output, receipts, sizeof(receipts)); g_mutex_unlock(&receipts_lock);
++}
++static void block_free(PlainBlock *block) {
++  OPENSSL_cleanse(block->data, block->size); g_free(block->data); g_free(block);
++}
++static gboolean fail(TLSPriv *p) {
++  if (!p->failed) metric(1, 1);
++  p->failed = TRUE;
++  while (!g_queue_is_empty(&p->plain)) block_free(g_queue_pop_head(&p->plain));
++  p->plain_bytes = 0;
++  return FALSE;
++}
++static gboolean drain(TLSPriv *p) {
++  guint8 cipher[16384];
++  if (BIO_ctrl_pending(p->output) > MAX_TLS_BUFFER) return fail(p);
++  while (BIO_ctrl_pending(p->output) > 0 && nice_socket_can_send(p->base, NULL)) {
++    int count = BIO_read(p->output, cipher, sizeof(cipher));
++    if (count <= 0) return fail(p);
++    if (nice_socket_send_reliable(p->base, NULL, count, (gchar *)cipher) != count) return fail(p);
++    metric(2, count);
++  }
++  return TRUE;
++}
++static gboolean drive(TLSPriv *p) {
++  if (p->failed) return FALSE;
++  if (!p->verified && g_get_monotonic_time() > p->deadline) return fail(p);
++  if (!drain(p)) return FALSE;
++  if (!p->verified) {
++    ERR_clear_error();
++    int result = SSL_do_handshake(p->ssl);
++    if (result == 1) {
++      if (SSL_get_verify_result(p->ssl) != X509_V_OK || SSL_get0_peer_certificate(p->ssl) == NULL) return fail(p);
++      p->verified = TRUE; metric(0, 1);
++    } else {
++      int error = SSL_get_error(p->ssl, result);
++      if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) return fail(p);
++    }
++    if (!drain(p)) return FALSE;
++  }
++  while (p->verified && !g_queue_is_empty(&p->plain)
++      && BIO_ctrl_pending(p->output) == 0 && nice_socket_can_send(p->base, NULL)) {
++    PlainBlock *block = g_queue_peek_head(&p->plain);
++    size_t written = 0;
++    ERR_clear_error();
++    int result = SSL_write_ex(p->ssl, block->data, block->size, &written);
++    if (result == 1) {
++      if (written != block->size) return fail(p);
++      p->plain_bytes -= block->size; metric(4, block->size);
++      block_free(g_queue_pop_head(&p->plain));
++    } else {
++      int error = SSL_get_error(p->ssl, result);
++      if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) return fail(p);
++      if (!drain(p)) return FALSE;
++      break;
++    }
++    if (!drain(p)) return FALSE;
++  }
++  return TRUE;
++}
++gboolean stream_nice_tls_resume(NiceSocket *live, NiceSocket *callback_identity) {
++  /* Only live is dereferenced. callback_identity may already be retired. */
++  if (live != NULL && live->fileno != NULL) {
++    NiceSocket *socket = g_object_get_data(G_OBJECT(live->fileno), TLS_SOCKET_KEY);
++    if (socket != NULL && socket->priv != NULL) {
++      TLSPriv *p = socket->priv;
++      if (p->base == callback_identity) { drive(p); return TRUE; }
++    }
++  }
++  return FALSE;
++}
++static gint partial_result(guint completed, NiceInputMessage *message, gboolean error) {
++  return message->length > 0 ? (gint)completed + 1 : completed > 0 ? (gint)completed : error ? -1 : 0;
++}
++static gint recv_messages(NiceSocket *socket, NiceInputMessage *messages, guint count) {
++  TLSPriv *p = socket->priv;
++  guint completed;
++  if (!drive(p)) return -1;
++  for (completed = 0; completed < count; completed++) {
++    NiceInputMessage *message = &messages[completed];
++    guint vector;
++    message->length = 0;
++    if (message->from) *message->from = p->remote;
++    for (vector = 0; message->n_buffers < 0 ? message->buffers[vector].buffer != NULL : vector < (guint)message->n_buffers; vector++) {
++      size_t length = 0;
++      guint reads = 0;
++      if (message->buffers[vector].size == 0) continue;
++      for (;;) {
++        if (!drive(p)) return partial_result(completed, message, TRUE);
++        if (p->verified) {
++          ERR_clear_error();
++          int result = SSL_read_ex(p->ssl, message->buffers[vector].buffer, message->buffers[vector].size, &length);
++          if (result == 1) break;
++          int error = SSL_get_error(p->ssl, result);
++          if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) { fail(p); return partial_result(completed, message, TRUE); }
++          if (!drain(p)) return partial_result(completed, message, TRUE);
++        }
++        if (reads++ >= 16) return partial_result(completed, message, FALSE);
++        guint8 cipher[16384];
++        GInputVector buffer = { cipher, sizeof(cipher) };
++        NiceInputMessage encrypted = { &buffer, 1, message->from, 0 };
++        int received = nice_socket_recv_messages(p->base, &encrypted, 1);
++        if (received < 0) { fail(p); return partial_result(completed, message, TRUE); }
++        if (received == 0) return partial_result(completed, message, FALSE);
++        if (encrypted.length == 0 || BIO_ctrl_pending(p->input) + encrypted.length > MAX_TLS_BUFFER
++            || BIO_write(p->input, cipher, encrypted.length) != (gint)encrypted.length) { fail(p); return -1; }
++        metric(3, encrypted.length);
++      }
++      message->length += length;
++      /* A stream recv can return a partial vector, as tcp-bsd does. */
++      if (length < message->buffers[vector].size) break;
++    }
++    if (message->length == 0) return completed;
++  }
++  return completed;
++}
++static gint send_common(NiceSocket *socket, const NiceOutputMessage *messages, guint count, gboolean reliable) {
++  TLSPriv *p = socket->priv;
++  guint sent;
++  if (!drive(p)) return -1;
++  for (sent = 0; sent < count; sent++) {
++    const NiceOutputMessage *message = &messages[sent];
++    gsize size = 0, offset = 0;
++    guint i, vectors;
++    for (i = 0; message->n_buffers < 0 ? message->buffers[i].buffer != NULL : i < (guint)message->n_buffers; i++) {
++      if (message->buffers[i].size > MAX_MESSAGE_BYTES - size) return -1;
++      size += message->buffers[i].size;
++    }
++    vectors = i;
++    if (size == 0 || size > MAX_PLAIN_BYTES - p->plain_bytes || g_queue_get_length(&p->plain) >= MAX_MESSAGES)
++      return reliable ? -1 : (gint)sent;
++    PlainBlock *block = g_new0(PlainBlock, 1);
++    block->data = g_malloc(size); block->size = size;
++    for (i = 0; i < vectors; i++) {
++      memcpy(block->data + offset, message->buffers[i].buffer, message->buffers[i].size); offset += message->buffers[i].size;
++    }
++    g_queue_push_tail(&p->plain, block); p->plain_bytes += size;
++    if (!drive(p)) return -1;
++  }
++  return sent;
++}
++static gint send_messages(NiceSocket *s, const NiceAddress *to, const NiceOutputMessage *m, guint n) { return send_common(s, m, n, FALSE); }
++static gint send_reliable(NiceSocket *s, const NiceAddress *to, const NiceOutputMessage *m, guint n) { return send_common(s, m, n, TRUE); }
++static gboolean reliable(NiceSocket *s) { TLSPriv *p=s->priv; return nice_socket_is_reliable(p->base); }
++static gboolean can_send(NiceSocket *s, NiceAddress *address) {
++  TLSPriv *p=s->priv;
++  return drive(p) && p->verified && g_queue_is_empty(&p->plain) && BIO_ctrl_pending(p->output)==0 && nice_socket_can_send(p->base,address);
++}
++static void writable(NiceSocket *s, NiceSocketWritableCb cb, gpointer data) { TLSPriv *p=s->priv; nice_socket_set_writable_callback(p->base,cb,data); }
++static gboolean based_on(NiceSocket *s, NiceSocket *other) { TLSPriv *p=s->priv; return nice_socket_is_based_on(p->base,other); }
++static void close_socket(NiceSocket *s) {
++  TLSPriv *p=s->priv;
++  g_object_set_data(G_OBJECT(p->base->fileno),TLS_SOCKET_KEY,NULL);
++  while (!g_queue_is_empty(&p->plain)) block_free(g_queue_pop_head(&p->plain));
++  SSL_free(p->ssl); SSL_CTX_free(p->context); nice_socket_free(p->base); g_free(p); s->priv=NULL;
++}
++NiceSocket *stream_nice_tls_socket_new(NiceSocket *base, const NiceAddress *remote, const char *identity, const char *ca_file) {
++  if (base == NULL || identity == NULL || *identity == '\0' || strlen(identity)>253) return NULL;
++  TLSPriv *p=g_new0(TLSPriv,1);
++  p->base=base; p->remote=*remote; p->deadline=g_get_monotonic_time()+10*G_TIME_SPAN_SECOND;
++  p->context=SSL_CTX_new(TLS_client_method());
++  if (p->context==NULL) goto rejected;
++  SSL_CTX_set_verify(p->context,SSL_VERIFY_PEER,NULL);
++  SSL_CTX_set_verify_depth(p->context,8);
++  if (SSL_CTX_set_min_proto_version(p->context,TLS1_2_VERSION)!=1) goto rejected;
++  if (ca_file != NULL && *ca_file != '\0') {
++    if (SSL_CTX_load_verify_locations(p->context,ca_file,NULL)!=1) goto rejected;
++  } else if (SSL_CTX_set_default_verify_paths(p->context)!=1) goto rejected;
++  p->ssl=SSL_new(p->context);
++  if (p->ssl==NULL) goto rejected;
++  SSL_set_max_cert_list(p->ssl,65536);
++  X509_VERIFY_PARAM *parameters=SSL_get0_param(p->ssl);
++  GInetAddress *ip=g_inet_address_new_from_string(identity);
++  if (ip != NULL) {
++    g_object_unref(ip);
++    if (X509_VERIFY_PARAM_set1_ip_asc(parameters,identity)!=1) goto rejected;
++  } else {
++    X509_VERIFY_PARAM_set_hostflags(parameters,X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS | X509_CHECK_FLAG_NEVER_CHECK_SUBJECT);
++    if (SSL_set1_host(p->ssl,identity)!=1 || SSL_set_tlsext_host_name(p->ssl,identity)!=1) goto rejected;
++  }
++  p->input=BIO_new(BIO_s_mem()); p->output=BIO_new(BIO_s_mem());
++  if (p->input==NULL || p->output==NULL) { BIO_free(p->input); BIO_free(p->output); goto rejected; }
++  BIO_set_mem_eof_return(p->input,-1); BIO_set_mem_eof_return(p->output,-1);
++  SSL_set_bio(p->ssl,p->input,p->output); SSL_set_connect_state(p->ssl);
++  NiceSocket *s=g_slice_new0(NiceSocket);
++  s->type=NICE_SOCKET_TYPE_STREAM_TLS; s->fileno=base->fileno; s->addr=base->addr; s->priv=p;
++  s->recv_messages=recv_messages; s->send_messages=send_messages; s->send_messages_reliable=send_reliable;
++  s->is_reliable=reliable; s->can_send=can_send; s->set_writable_callback=writable; s->is_based_on=based_on; s->close=close_socket;
++  g_object_set_data(G_OBJECT(base->fileno),TLS_SOCKET_KEY,s);
++  if (!drive(p)) { g_object_set_data(G_OBJECT(base->fileno),TLS_SOCKET_KEY,NULL); SSL_free(p->ssl); SSL_CTX_free(p->context); g_free(p); g_slice_free(NiceSocket,s); return NULL; }
++  return s;
++rejected:
++  metric(1,1); SSL_free(p->ssl); SSL_CTX_free(p->context); g_free(p);
++  return NULL;
++}
+diff --git a/socket/stream-tls.h b/socket/stream-tls.h
+new file mode 100644
+index 0000000..32dc321
+--- /dev/null
++++ b/socket/stream-tls.h
+@@ -0,0 +1,9 @@
++/* Application-owned real TURN TLS extension; corresponding source is retained. */
++#ifndef STREAM_OWNED_TURN_TLS_H
++#define STREAM_OWNED_TURN_TLS_H
++#include "socket.h"
++NiceSocket *stream_nice_tls_socket_new (NiceSocket *base, const NiceAddress *remote, const char *identity, const char *ca_file);
++/* Called with a currently owned live chain under the existing agent lock. */
++gboolean stream_nice_tls_resume (NiceSocket *live, NiceSocket *callback_identity);
++void stream_nice_turn_tls_receipts (guint64 output[5]);
++#endif

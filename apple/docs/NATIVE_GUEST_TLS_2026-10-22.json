@@ -1,0 +1,324 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseline": "d413aa1c6f24f4454cfc77a8c9d3f2e586593047",
+  "shippingAdoption": false,
+  "architecture": "arm64",
+  "host": "macOS27.2, Apple Silicon",
+  "backendSHA256": "c7df56076fd3876ae72c8911d9c1ca29a5d067cd3998c92c47761f7d4c29415c",
+  "requestedDeploymentTarget": "14.0",
+  "archiveFloors": {
+    "/private/tmp/stream-wave3-providers-tls-owned-20261022/libdatachannel-build/deps/libsrtp/libsrtp2.a": "14.0",
+    "/private/tmp/stream-wave3-providers-tls-owned-20261022/libdatachannel-build/deps/usrsctp/usrsctplib/libusrsctp.a": "14.0",
+    "/private/tmp/stream-wave3-providers-tls-owned-20261022/libdatachannel-build/libdatachannel.a": "14.0",
+    "/private/tmp/stream-wave3-providers-tls-owned-20261022/libnice-install/lib/libnice.a": "14.0",
+    "/private/tmp/stream-wave2-providers-owned-20261022/arm64/prefix/lib/libgio-2.0.a": "14.0",
+    "/private/tmp/stream-wave2-providers-owned-20261022/arm64/prefix/lib/libgobject-2.0.a": "14.0",
+    "/private/tmp/stream-wave2-providers-owned-20261022/arm64/prefix/lib/libffi.a": "14.0",
+    "/private/tmp/stream-wave2-providers-owned-20261022/arm64/prefix/lib/libgmodule-2.0.a": "14.0",
+    "/private/tmp/stream-wave2-providers-owned-20261022/arm64/prefix/lib/libgthread-2.0.a": "14.0",
+    "/private/tmp/stream-wave2-providers-owned-20261022/arm64/prefix/lib/libglib-2.0.a": "14.0",
+    "/private/tmp/stream-wave2-providers-owned-20261022/arm64/prefix/lib/libintl.a": "14.0",
+    "/private/tmp/stream-wave2-providers-owned-20261022/arm64/prefix/lib/libpcre2-8.a": "14.0",
+    "/private/tmp/stream-macos-guest-media-20261021/apple/build/native-interview-return-audio-validation/derived/TransportSourceBuild/arm64/openssl-install/lib/libssl.a": "14.0",
+    "/private/tmp/stream-macos-guest-media-20261021/apple/build/native-interview-return-audio-validation/derived/TransportSourceBuild/arm64/openssl-install/lib/libcrypto.a": "14.0"
+  },
+  "patches": {
+    "libdatachannel-0.24-owned-turn-tls.json": "eb2570470aa050908dbb146166f0ec68eba4c38d06e9dce0485737443047ff31",
+    "libnice-0.1.22-owned-tls.json": "109fc49b607bebdc12ab020bb0b85792e0e2077075dd4b48a4d24a9c13118dcb",
+    "libdatachannel-0.24-owned-turn-tls.patch": "d30a8f153542439fbd075dcc927366293bde980e250dbf019e9d7dbd83379042",
+    "libnice-0.1.22-owned-tls.patch": "e3564375b9fa1a138b3662d5b797c1a174f4d9056197c2cb0ff0ed8d7e706f9c"
+  },
+  "controlMatrix": {
+    "trusted": {
+      "architecture": "arm64",
+      "binarySHA256": "dd1f59575fb16ef82e6ecba47ee027d5b210c81f89cbdb99d87fb02aeeb24595",
+      "backendSHA256": "c7df56076fd3876ae72c8911d9c1ca29a5d067cd3998c92c47761f7d4c29415c",
+      "binaryMinOS": "14.0",
+      "tls": true,
+      "serverTLSVersion": "TLSv1.3",
+      "expectedRejection": null,
+      "nativeTCPConnections": 4,
+      "serverUDPListener": false,
+      "result": "PASS owned optional SDK relay-only bidirectional control over sole TLS TURN endpoint; arch=arm64; translated=0; tls=1; expectedRejection=0; verified=4; rejected=0; cipherOut=14984; cipherIn=17593; plainOut=7652",
+      "scope": "public SDK relay-only bidirectional control; Intel translation is not Intel hardware or full media qualification"
+    },
+    "untrusted": {
+      "architecture": "arm64",
+      "binarySHA256": "dd1f59575fb16ef82e6ecba47ee027d5b210c81f89cbdb99d87fb02aeeb24595",
+      "backendSHA256": "c7df56076fd3876ae72c8911d9c1ca29a5d067cd3998c92c47761f7d4c29415c",
+      "binaryMinOS": "14.0",
+      "tls": true,
+      "serverTLSVersion": "TLSv1.3",
+      "expectedRejection": "untrusted",
+      "nativeTCPConnections": 0,
+      "serverUDPListener": false,
+      "result": "PASS owned optional SDK relay-only certificate rejection over sole TLS TURN endpoint; arch=arm64; translated=0; tls=1; expectedRejection=1; verified=0; rejected=4; cipherOut=6088; cipherIn=7719; plainOut=0",
+      "scope": "public SDK relay-only bidirectional control; Intel translation is not Intel hardware or full media qualification"
+    },
+    "identity": {
+      "architecture": "arm64",
+      "binarySHA256": "dd1f59575fb16ef82e6ecba47ee027d5b210c81f89cbdb99d87fb02aeeb24595",
+      "backendSHA256": "c7df56076fd3876ae72c8911d9c1ca29a5d067cd3998c92c47761f7d4c29415c",
+      "binaryMinOS": "14.0",
+      "tls": true,
+      "serverTLSVersion": "TLSv1.3",
+      "expectedRejection": "identity",
+      "nativeTCPConnections": 0,
+      "serverUDPListener": false,
+      "result": "PASS owned optional SDK relay-only certificate rejection over sole TLS TURN endpoint; arch=arm64; translated=0; tls=1; expectedRejection=1; verified=0; rejected=4; cipherOut=6088; cipherIn=7736; plainOut=0",
+      "scope": "public SDK relay-only bidirectional control; Intel translation is not Intel hardware or full media qualification"
+    }
+  },
+  "lifecycle": {
+    "architecture": "arm64",
+    "backendSHA256": "c7df56076fd3876ae72c8911d9c1ca29a5d067cd3998c92c47761f7d4c29415c",
+    "binarySHA256": "9328b3cb7ce1e3ef7ca4664956112f2b62dd49cde8f333d7b91db0ffd282111f",
+    "binaryMinOS": "14.0",
+    "result": "PASS owned TLS writable callback ignores inaccessible retired identity through live and retired socket-source ownership",
+    "scope": "deterministic inaccessible retired identity; not a general upstream race or sanitizer qualification"
+  },
+  "nativeCLI": {
+    "sourceBaseline": "d413aa1c6f24f4454cfc77a8c9d3f2e586593047",
+    "sourceSHA256": {
+      "apple/StreamMac/StreamController.swift": "4f0c9498759f44b426fb1d7479dc9804cde46b799ad84b6da4aedb41c3bfb569",
+      "apple/StreamMac/NativeInterviewManager.swift": "0e6df0e4f6ce311f28c6e37d9896295bf51ff283c7784dba502e31b45a92fe5b",
+      "apple/NativeGuestReceivePrototype/GuestReceive.cpp": "3680e2e75535b01e7dce744f1f277450947aed30cbf502c80a21ee6827c07e4e",
+      "apple/NativeGuestReceivePrototype/GuestReceive.h": "c22181c528b67babe088d9041948fe5fe6b385c375671a0476292f85bf1c1b1a",
+      "apple/scripts/native_interview_return_video_cli.swift": "186ad52734c865cd8a9feec647d85a65e701cf39d2ab13bb1712239f77473b88"
+    },
+    "generatedSHA256": {
+      "InterviewProgramController.swift": "969a2bf7ad85610713e63c8877ad8178397507b18919f73aa14004eda27d79a1",
+      "InterviewProgramManager.swift": "206b21572a7ceadc6a629b5fe823bd948538ab768b53563cdd3212f918415280"
+    },
+    "fixtureBoundaries": [
+      "private credential/default/storage copies",
+      "local mic startup refused",
+      "explicit owned unlocked resilience coordinator; shipping lock checks unchanged",
+      "explicit local TURN URL",
+      "synthetic camera/screen/PCM"
+    ],
+    "compiledTransportMacros": [
+      "STREAM_NATIVE_NICE_TURN_TCP",
+      "STREAM_NATIVE_NICE_TURN_TLS"
+    ],
+    "backendSHA256": "c7df56076fd3876ae72c8911d9c1ca29a5d067cd3998c92c47761f7d4c29415c",
+    "backendDeploymentTarget": "14.0",
+    "binarySHA256": "39a4b4232060c4e471a0e588fbd48364cdc931b2f920927ab8f850a428607592",
+    "runtimeLinks": [
+      "\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.32.0)",
+      "\t/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)",
+      "\t/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)",
+      "\t/usr/lib/libresolv.9.dylib (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon (compatibility version 2.0.0, current version 170.0.0)",
+      "\t@rpath/StreamCore.framework/Versions/A/StreamCore (compatibility version 1.0.0, current version 1.0.0)",
+      "\t@rpath/Syphon.framework/Versions/A/Syphon (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5027.1.8)",
+      "\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)",
+      "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.40.3)",
+      "\t/System/Library/Frameworks/AVFAudio.framework/Versions/A/AVFAudio (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation (compatibility version 1.0.0, current version 2.0.0)",
+      "\t/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate (compatibility version 1.0.0, current version 4.0.0)",
+      "\t/System/Library/Frameworks/AppIntents.framework/Versions/A/AppIntents (compatibility version 0.0.0, current version 301.1.16)",
+      "\t/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit (compatibility version 45.0.0, current version 2775.20.127)",
+      "\t/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox (compatibility version 1.0.0, current version 1000.0.0)",
+      "\t/System/Library/Frameworks/AuthenticationServices.framework/Versions/A/AuthenticationServices (compatibility version 1.0.0, current version 625.2.8)",
+      "\t/System/Library/Frameworks/Combine.framework/Versions/A/Combine (compatibility version 1.0.0, current version 3023.0.0)",
+      "\t/System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 5027.1.8)",
+      "\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 2050.1.6)",
+      "\t/System/Library/Frameworks/CoreImage.framework/Versions/A/CoreImage (compatibility version 1.0.1, current version 7.0.0)",
+      "\t/System/Library/Frameworks/CoreMIDI.framework/Versions/A/CoreMIDI (compatibility version 1.0.0, current version 69.0.0)",
+      "\t/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia (compatibility version 1.0.0, current version 3385.14.5)",
+      "\t/System/Library/Frameworks/CoreMediaIO.framework/Versions/A/CoreMediaIO (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices (compatibility version 1.0.0, current version 1226.0.0)",
+      "\t/System/Library/Frameworks/CoreText.framework/Versions/A/CoreText (compatibility version 1.0.0, current version 910.0.0)",
+      "\t/System/Library/Frameworks/CoreTransferable.framework/Versions/A/CoreTransferable (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo (compatibility version 1.2.0, current version 776.2.0)",
+      "\t/System/Library/Frameworks/CryptoKit.framework/Versions/A/CryptoKit (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/System/Library/Frameworks/ImageIO.framework/Versions/A/ImageIO (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 383.1.0)",
+      "\t/System/Library/Frameworks/MetalKit.framework/Versions/A/MetalKit (compatibility version 1.0.0, current version 174.4.0)",
+      "\t/System/Library/Frameworks/Network.framework/Versions/A/Network (compatibility version 1.0.0, current version 6681.41.1)",
+      "\t/System/Library/Frameworks/PDFKit.framework/Versions/A/PDFKit (compatibility version 1.0.0, current version 1537.1.4)",
+      "\t/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore (compatibility version 1.2.0, current version 1223.10.17)",
+      "\t/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/ScreenCaptureKit (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 62460.40.78)",
+      "\t/System/Library/Frameworks/SwiftUI.framework/Versions/A/SwiftUI (compatibility version 1.0.0, current version 8.1.13)",
+      "\t/System/Library/Frameworks/SystemExtensions.framework/Versions/A/SystemExtensions (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox (compatibility version 1.0.0, current version 3385.14.5)",
+      "\t/System/Library/Frameworks/Vision.framework/Versions/A/Vision (compatibility version 1.0.0, current version 10.1.7)",
+      "\t/System/Library/Frameworks/WebKit.framework/Versions/A/WebKit (compatibility version 1.0.0, current version 625.2.8)",
+      "\t/System/Library/Frameworks/_AVKit_SwiftUI.framework/Versions/A/_AVKit_SwiftUI (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/usr/lib/swift/libswiftAVFoundation.dylib (compatibility version 1.0.0, current version 2475.13.5)",
+      "\t/usr/lib/swift/libswiftAccelerate.dylib (compatibility version 1.0.0, current version 82.0.0)",
+      "\t/usr/lib/swift/libswiftCompression.dylib (compatibility version 1.0.0, current version 18.0.0, weak)",
+      "\t/usr/lib/swift/libswiftCore.dylib (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/usr/lib/swift/libswiftCoreAudio.dylib (compatibility version 1.0.0, current version 482.208.0)",
+      "\t/usr/lib/swift/libswiftCoreFoundation.dylib (compatibility version 1.0.0, current version 120.100.0)",
+      "\t/usr/lib/swift/libswiftCoreImage.dylib (compatibility version 1.0.0, current version 3.0.0, weak)",
+      "\t/usr/lib/swift/libswiftCoreLocation.dylib (compatibility version 1.0.0, current version 57.0.0, weak)",
+      "\t/usr/lib/swift/libswiftCoreMIDI.dylib (compatibility version 1.0.0, current version 6.0.0, weak)",
+      "\t/usr/lib/swift/libswiftCoreMediaIO.dylib (compatibility version 1.0.0, current version 5634.41.3, weak)",
+      "\t/usr/lib/swift/libswiftDarwin.dylib (compatibility version 1.0.0, current version 428.40.1)",
+      "\t/usr/lib/swift/libswiftDispatch.dylib (compatibility version 1.0.0, current version 1605.40.4)",
+      "\t/usr/lib/swift/libswiftIOKit.dylib (compatibility version 1.0.0, current version 1.0.0, weak)",
+      "\t/usr/lib/swift/libswiftMetal.dylib (compatibility version 1.0.0, current version 383.1.0, weak)",
+      "\t/usr/lib/swift/libswiftMetalKit.dylib (compatibility version 1.0.0, current version 1.2.0, weak)",
+      "\t/usr/lib/swift/libswiftModelIO.dylib (compatibility version 1.0.0, current version 1.0.0, weak)",
+      "\t/usr/lib/swift/libswiftOSLog.dylib (compatibility version 1.0.0, current version 10.0.0, weak)",
+      "\t/usr/lib/swift/libswiftObjectiveC.dylib (compatibility version 1.0.0, current version 973.1.0)",
+      "\t/usr/lib/swift/libswiftObservation.dylib (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/usr/lib/swift/libswiftQuartzCore.dylib (compatibility version 1.0.0, current version 5.0.0, weak)",
+      "\t/usr/lib/swift/libswiftSpatial.dylib (compatibility version 1.0.0, current version 1.0.0, weak)",
+      "\t/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib (compatibility version 1.0.0, current version 917.1.12)",
+      "\t/usr/lib/swift/libswiftXPC.dylib (compatibility version 1.0.0, current version 167.0.2, weak)",
+      "\t/usr/lib/swift/libswift_Concurrency.dylib (compatibility version 0.0.0, current version 0.0.0)",
+      "\t/usr/lib/swift/libswiftos.dylib (compatibility version 1.0.0, current version 1090.40.3)",
+      "\t/usr/lib/swift/libswiftsimd.dylib (compatibility version 1.0.0, current version 25.0.0, weak)",
+      "\t/usr/lib/swift/libswiftCoreGraphics.dylib (compatibility version 1.0.0, current version 1.0.0)",
+      "\t/usr/lib/swift/libswiftCoreMedia.dylib (compatibility version 1.0.0, current version 3385.14.5)",
+      "\t/usr/lib/swift/libswiftWebKit.dylib (compatibility version 1.0.0, current version 625.2.8)"
+    ],
+    "binaryMinOS": [
+      "minos 14.0"
+    ],
+    "generationRecipe": "prepare_owned_nice_media_cli.py, using shared generator plus owned unlocked session seam; compatible with existing7083f6a injection",
+    "originalFailedMediaBinarySHA256": "487931ee57921b671776b90b11ea446ad3ce98836386ad23714d0b07308c88eb"
+  },
+  "notQualified": [
+    "shipping optional-backend adoption",
+    "macOS14 execution",
+    "x86_64 TLS execution",
+    "DNS hostname TLS execution",
+    "configured proxy or legacy TLS compatibility",
+    "system/macOS trust-store integration",
+    "full native/Chrome TLS media and rejoin",
+    "normal rendered output/AEC or browser/physical playout AV sync",
+    "deployed TURN, Internet/mobile and higher capacity"
+  ],
+  "failedMediaAttempts": {
+    "stream-wave3-providers-tls-manager-media.log": "826cb43109007df532d6ec87bef169b42957a0a47afbf9993347a47f5387b459",
+    "stream-wave3-providers-tls-manager-media-scheduled.log": "eeb43d3885873ca2b9be3ecfdaaeea8dd1bf78a912e3feeebc0dce424184db81",
+    "stream-wave3-providers-tls-manager-diagnostic.log": "76735d5e7bea4f82940e594f084e8f4d9170c832efce19d9137ed5967b545d0a",
+    "stream-wave3-providers-tls-manager-null-contexts.log": "27b1834733b45d89bb265c0c672d83a7141cfd929270358d3b26da7621b2413f",
+    "stream-wave3-providers-tls-manager-scheduled-contexts.log": "2be44dea854d341a5843c6a6f5b624170e0866496b357716fd09d80838e5002e",
+    "stream-wave3-providers-tls-manager-muted-explicit.log": "3bfc0a68773b7bff9bc0b7c62a6bfb59d5aa584dbe345e01c732e8864b8623a1",
+    "stream-wave3-providers-tls-manager-active-host-gate.log": "5dc8575b68c9f27023fde795513f172ebc9e5c3a32c1e4f3ece8fc63d75e7431"
+  },
+  "nativeTLSReception": {
+    "log": "stream-wave3-providers-tls-manager-active-host-gate.log",
+    "audioAcceptedPackets": 7,
+    "decodedCameraFrames": 28,
+    "tlsVerified": 2,
+    "tlsFailed": 1,
+    "cipherOut": 31564,
+    "cipherIn": 42324,
+    "plainOut": 27484,
+    "browser": "Chrome/155.0.8059.85",
+    "qualification": "partial incoming media only; full flow failed actual decoded return PCM gate"
+  },
+  "failedReturnPCM": {
+    "sampleRate": 48000,
+    "analyzedFrames": 284672,
+    "channels": 2,
+    "channelRMS": [
+      0,
+      0
+    ],
+    "amplitudes": "all zero",
+    "expectedReturnAmplitudes": [
+      0.4,
+      0.2
+    ],
+    "thresholdsPreserved": true,
+    "scope": "real direct-track AudioWorklet with verified null contexts and muted owned HTML player; no full audio/control/rejoin/AV acceptance",
+    "hostCaptureRouteAllowed": true,
+    "initialMicrophoneDenied": false,
+    "nativeProgramLocalMagnitudes": [
+      0.3999357533305141,
+      0.20000515730466117
+    ],
+    "nativeTLSAtFailure": {
+      "verified": 2,
+      "failed": 1,
+      "cipherOut": 214598,
+      "cipherIn": 226816,
+      "plainOut": 191620
+    },
+    "cause": "unclassified across return sender/browser null-sink consumption; no initial or active capture permission closure"
+  },
+  "idleCaptureGate": {
+    "sourceBaseline": "d413aa1",
+    "binarySHA256": "cce0ce605e4ad752f991da739a526161f5b983e2641c8a84c7ebcad4f2f450c2",
+    "hostSyntheticInput": {
+      "routeAllowed": true,
+      "initialMicrophoneDenied": false
+    },
+    "scope": "idle owned fixture startup, no session/network/browser/physical capture requested"
+  },
+  "idleNativeTonePositiveControl": {
+    "sourceBaseline": "d413aa1",
+    "binarySHA256": "39a4b4232060c4e471a0e588fbd48364cdc931b2f920927ab8f850a428607592",
+    "states": 21,
+    "first": {
+      "input": {
+        "initialMicrophoneDenied": false,
+        "routeAllowed": true
+      },
+      "program": {
+        "pts": 0,
+        "own440and880": [
+          0,
+          0
+        ],
+        "local1000and1700": [
+          0,
+          0
+        ],
+        "chunks": 0
+      }
+    },
+    "last": {
+      "input": {
+        "initialMicrophoneDenied": false,
+        "routeAllowed": true
+      },
+      "program": {
+        "pts": 43163.217372917,
+        "own440and880": [
+          0.0002679527934450871,
+          4.932274539602571e-05
+        ],
+        "local1000and1700": [
+          0.40001058632735087,
+          0.20000486346120075
+        ],
+        "chunks": 64
+      }
+    },
+    "peakLocalProgramMagnitudes": [
+      0.4000642650523899,
+      0.20000569087973885
+    ],
+    "scope": "idle owned fixture host-tone positive control, no session/network/browser/physical capture requested"
+  },
+  "preparedProjectRecipe": {
+    "backendSHA256": "c7df56076fd3876ae72c8911d9c1ca29a5d067cd3998c92c47761f7d4c29415c",
+    "architecture": "arm64",
+    "tlsExplicitlyEnabled": true,
+    "repositoryHEAD": "d413aa1c6f24f4454cfc77a8c9d3f2e586593047",
+    "shippingControllerSHA256": "4f0c9498759f44b426fb1d7479dc9804cde46b799ad84b6da4aedb41c3bfb569",
+    "generatedControllerSHA256": "969a2bf7ad85610713e63c8877ad8178397507b18919f73aa14004eda27d79a1",
+    "projectSHA256": "91a2aa13f600bd1049e0b153d1fc4d0851e1ae5d5e99ef9e10929cac208f536c",
+    "scope": "prepared owned full-source fixture; not build/runtime qualification or shipping adoption"
+  },
+  "sourceValidation": [
+    "exact libnice TLS patch applies to pinned clean files with every manifest SHA matching",
+    "exact SDK TLS patch applies after pinned base policy patch with every manifest SHA matching",
+    "4 owned transport provenance unit tests pass",
+    "native video browser syntax check passes",
+    "full d413 source validation CLI build/relinks pass",
+    "prepared-project helper creates owned copy with explicit optional macro and exact generated controller SHA",
+    "git diff --check passes"
+  ]
+}

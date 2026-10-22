@@ -108,7 +108,7 @@ private final class ReturnProgramProbe: @unchecked Sendable {
     func snapshot() -> [String: Any] {
         lock.lock(); let packets = packets; lock.unlock()
         var amplitudes: [Double] = []
-        for (side, frequency) in [(0, 440.0), (1, 880.0)] {
+        for (side, frequency) in [(0, 440.0), (1, 880.0), (0, 1_000.0), (1, 1_700.0)] {
             var re = 0.0, im = 0.0, count = 0
             for (pts, values) in packets {
                 for index in 0..<512 {
@@ -119,7 +119,8 @@ private final class ReturnProgramProbe: @unchecked Sendable {
             }
             amplitudes.append(count > 0 ? 2 * hypot(re, im) / Double(count) : 0)
         }
-        return ["chunks": packets.count, "pts": packets.last?.0.seconds ?? 0, "own440and880": amplitudes]
+        return ["chunks": packets.count, "pts": packets.last?.0.seconds ?? 0,
+                "own440and880": Array(amplitudes.prefix(2)), "local1000and1700": Array(amplitudes.suffix(2))]
     }
 }
 private final class ReturnToneCue: @unchecked Sendable {
@@ -161,6 +162,7 @@ private final class ReturnAVProbe: @unchecked Sendable {
     let mixer = AudioMixEngine(), scenes: SceneStore, preview: PreviewProgramModel
     let controller: StreamController, settings: SettingsSession, recorder: RecordingController, dispatcher: StudioCommandDispatcher
     let manager: NativeInterviewManager
+    let initialMicrophoneDenied: Bool
     let program = ReturnProgramProbe(), programToken = UUID(), av = ReturnAVProbe(), toneCue = ReturnToneCue()
     private var avVideo: StreamController.FrameSubscription?
     // Primary mic identity is retained by real scene-demand reconciliation.
@@ -182,7 +184,9 @@ private final class ReturnAVProbe: @unchecked Sendable {
             [secondary.id: .init(transform: .fullscreen, isVisible: true)])
         let blank = scenes.addScene(Scene(name: "Owned Guest Return", layers: [secondary], background: .solid(colorHex: "#00CC44"), secondaryCanvas: layout))
         preview = .init(selected: blank)
-        controller = .init(sceneStore: scenes, previewProgram: preview, permissions: PermissionsManager(), audioEngine: mixer)
+        let permissions = PermissionsManager()
+        initialMicrophoneDenied = permissions.status(for: .microphone) == .denied
+        controller = .init(sceneStore: scenes, previewProgram: preview, permissions: permissions, audioEngine: mixer)
         settings = .init(store: DesktopSettingsStore(), controller: controller)
         recorder = .init(defaultDirectory: directory.appendingPathComponent("unused-default-recordings"))
         dispatcher = .init(controller: controller, sceneStore: scenes, session: settings, recorder: recorder, previewProgram: preview)
@@ -360,6 +364,11 @@ private final class ReturnAVProbe: @unchecked Sendable {
                         }
                     }
                     state["av"] = current.av.snapshot(); state["authoredAV"] = current.toneCue.snapshot()
+                    var tls = [UInt64](repeating: 0, count: 5)
+                    tls.withUnsafeMutableBufferPointer { SGReceiverValidationTLSReceipts($0.baseAddress) }
+                    state["tls"] = Dictionary(uniqueKeysWithValues: zip(["verified", "rejected", "cipherOut", "cipherIn", "plainOut"], tls))
+                    state["hostSyntheticInput"] = ["initialMicrophoneDenied": current.initialMicrophoneDenied,
+                        "routeAllowed": current.mixer.captureRouteIsAllowed(current.local)]
                     state["videoFault"] = current.manager.fixtureReturnVideoFault
                     state["videoFeedback"] = current.manager.fixtureReturnVideoFeedback
                     if let profile = value.members.first?.returnVideoProfile { state["videoProfile"] = ["width": profile.width, "height": profile.height, "fps": profile.framesPerSecond, "bitrate": profile.maximumBitrate] }

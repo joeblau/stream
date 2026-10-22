@@ -1,0 +1,13 @@
+{
+  "pin": "ae3eb16fd7d1237353bf64e899c612b8a63bca8a",
+  "files": {
+    "agent/agent-priv.h": "5f47824deacd86dc927e9b40c92512c81f163345d1b57047a3dd17879a55886d",
+    "agent/agent.c": "cde9b4a3596e32211327858065f58b9e8a7d373e3955a62a48fe2cec38ddfd11",
+    "agent/component.c": "21b53720521d98ca9509b24d68fb1fcae5722bcccfd0b39494f6cf211991d58d",
+    "agent/conncheck.c": "345d3fb6f2dec564df5d00f21eff4ecfa007ed6d001e0575e4d4241416820af7",
+    "socket/meson.build": "19304a08c80e73aeef502fb76c008dc50756963fe5cff1ab4f270245fce60a87",
+    "socket/socket.h": "e2c689065e4eff405f75f39cd459d24524da57e0e3814de3d0fd71058d1cf691",
+    "socket/stream-tls.c": "87d34cb150bdff3ced4d21626b417fc2a89a9c89ba7de21924cfda265d51b09b",
+    "socket/stream-tls.h": "a1a568deaf08b97ca09e7bb9f253680b9f173ead5b4f5eff3546260466c6c18f"
+  }
+}
