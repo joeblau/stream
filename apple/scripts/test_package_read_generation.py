@@ -47,6 +47,30 @@ end
         self.assertIn("Actual import IO boundary changed", result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_transaction_copy_uses_actual_loader_archive_and_all_transaction_assertions(self):
+        with TemporaryDirectory() as directory:
+            folder = Path(directory)
+            receipt = generate(folder, transaction=True)
+            workspace = (folder / "WorkspacePackageMethods.swift").read_text()
+            actual = (APPLE / "StreamMac/StudioWorkspace.swift").read_text()
+            archive = actual[actual.index("    func archive(_ id:"):actual.index("    func addProfile(named")]
+            self.assertIn(archive, workspace)
+            self.assertIn("let loaded = StudioCatalogRead.load(at: catalogURL)", workspace)
+            self.assertIn("if recoveryFile == nil { saveCatalog() }", workspace)
+            self.assertIn("private var catalogWriteUncertain = false", workspace)
+            self.assertIn("private func allowCatalogWrite() -> Bool", workspace)
+            self.assertIn("PackageCatalogReadProbe.readback(catalogURL)", workspace)
+            self.assertIn((APPLE / "StreamMac/StudioCatalogRead.swift").read_text(),
+                          (folder / "PackageDependencies.swift").read_text())
+            prefix = (APPLE / "scripts/package_read_harness.swift").read_text().split("@main @MainActor struct PackageReadHarness {")[0]
+            tracked = (APPLE / "scripts/package_import_transaction_harness.swift").read_text()
+            guard = '''        try require(!workspace.runtime.controller.outputSessionActive && !workspace.runtime.recorder.state.isActive,
+            "Package fixture allocated an output")'''
+            expected = (prefix + tracked).replace(guard,
+                '        print("SCOPE: StudioRuntime/controller/recorder not constructed; their behavior not tested")')
+            self.assertEqual((folder / "PackageReadHarness.swift").read_text(), expected)
+            self.assertEqual(len(receipt["slices"]), 20)
+
     def test_inert_copy_preserves_all_package_assertions_and_only_omits_runtime_guard(self):
         with TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -62,7 +86,7 @@ end
             self.assertIn("guard let operation = beginPackageWrite() else { return }", workspace)
             self.assertIn("preconditionFailure", workspace)
             self.assertIn("previewedManifest: preview.manifest", workspace)
-            self.assertEqual(len(receipt["slices"]), 18)
+            self.assertEqual(len(receipt["slices"]), 19)
 
 
 if __name__ == "__main__":

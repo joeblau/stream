@@ -65,6 +65,22 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
     if try !value() { throw NSError(domain: "PackageReadHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
 }
 
+// Only generated owned harnesses call this readback boundary. Actual catalog
+// writes and all normal reads remain real Foundation file IO.
+@MainActor enum PackageCatalogReadProbe {
+    enum Reply { case actual, unavailable, unexpected }
+    static var nextReply = Reply.actual
+    static func readback(_ url: URL) throws -> Data {
+        let reply = nextReply
+        nextReply = .actual
+        switch reply {
+        case .actual: return try Data(contentsOf: url)
+        case .unavailable: throw CocoaError(.fileReadNoPermission)
+        case .unexpected: return Data("unexpected readback sentinel".utf8)
+        }
+    }
+}
+
 @main @MainActor struct PackageReadHarness {
     static func main() async {
         setbuf(stdout, nil)
@@ -181,15 +197,24 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
             && PackageReadProbe.count("preview", b) == readsB,
             "Sheet/task cancellation released an occupied import or admitted another package")
         PackageReadProbe.release("import", a); await importing.value
+        try require(!workspace.packageBusy && workspace.catalog.projects.count == oldCount && workspace.pending == nil,
+            "Canceled import published or staged its uncommitted copied show")
+        let savedAfterCancel = try JSONDecoder().decode(StudioProjectCatalog.self,
+            from: Data(contentsOf: root.appendingPathComponent("projects.v1.json")))
+        try require(savedAfterCancel == workspace.catalog, "Canceled import changed the durable catalog")
+        print("PASS: canceled actual import stays busy until IO returns, then refuses commit/staging")
+        workspace.previewPackage(a)
+        try await wait("Fresh deliberate A retry preview missing") { workspace.importPreview?.url == a && !workspace.packageBusy }
+        await workspace.importPreviewedPackage()
         try require(!workspace.packageBusy && workspace.catalog.projects.count == oldCount + 1,
-            "Actual import did not finish its exclusive write")
+            "Fresh deliberate import retry did not commit")
         let staged = try workspace.pending.unwrap("Imported show was not staged")
         let data = try Data(contentsOf: workspace.directory(for: staged).appendingPathComponent("stream.scenes.v2.json"))
         let imported = try JSONDecoder().decode(SceneDocument.self, from: data)
         try data.write(to: root.appendingPathComponent("actual-imported-scenes.json"), options: .atomic)
         try require(workspace.catalog.projects.last?.name == "OwnedPackage0" && imported.scenes.first?.name == "OwnedPackage0",
             "Actual imported data/catalog came from a replacement package")
-        print("PASS: native preview/export and sheet/task cancellation cannot overlap actual import; catalog and real copied scene retain source A")
+        print("PASS: fresh explicit retry commits catalog and actual copied scene from source A")
         try require(!workspace.runtime.controller.outputSessionActive && !workspace.runtime.recorder.state.isActive,
             "Package fixture allocated an output")
         print("Owned synthetic package/read evidence: \(root.path)")
