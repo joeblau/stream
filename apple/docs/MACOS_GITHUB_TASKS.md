@@ -818,3 +818,70 @@ is pending. EA browser foundations pass 21 Worker tests, 37 client tests and
 actual synthetic Chrome 156 loopback; the older `3be6110` Deck workflow succeeds.
 These source-scoped passes are not a whole native CI result or native/physical
 media qualification. All original failed receipts and other open gates remain.
+
+## Native CI completion and short attribution data — 2026-10-22 UTC
+
+Exact `a1bb23d` [native CI 39748453209](https://github.com/joeblau/stream/actions/runs/39748453209)
+finishes **SUCCESS on all three jobs**. Full Core passes **588 tests / 82 suites**:
+ARM 105.135 s, Intel 162.553 s, iOS 200.147 s. Both hosted paragraph probes and
+all 40 static offscreen row cases pass. Actual Intel software encoder creation
+rejects optional low latency with `-12902`, retries ordinary creation successfully,
+and encodes/decodes ten red frames. Actual localhost Deck H.264/AAC and two
+independent recording segments pass, along with shared RTMP/SRT and all later
+native gates. This qualifies that named CI source and fixture scope; it does
+not relabel earlier failed runs or prove physical/operator, sustained throughput
+or signed distribution acceptance. Newer `a9cfd98` native CI is separate.
+
+The `a9cfd98` [attribution run 39757372776](https://github.com/joeblau/stream/actions/runs/39757372776)
+finishes **diagnostic SUCCESS** on ARM and Intel, one fixed two-case 20 s
+invocation per job with verified source identity. All original short-run checks
+pass their **450-frame minimum**, not the original 17,850-frame / 600 s gate.
+
+| Host/case | Attempts + whole skips | Rendered / writer video | Post-warmup counter | Replay input decoded / available | Writer audio drops |
+| --- | --- | --- | --- | --- | --- |
+| ARM static | 561 + 40 | 553 / 553 | 531 | — | 0 |
+| ARM replay | 574 + 27 | 574 / 574 | 544 | 553 / 553 | 0 |
+| Intel static | 547 + 54 | 528 / 528 | 517 | — | 16 |
+| Intel replay | 566 + 35 | 565 / 565 | 535 | 528 / 528 | 0 |
+
+ARM's 22/30 valid warmup frames explain its post-warmup counters; deliberate
+slow-sink drops are separate from healthy writer delivery. Independent ARM and Intel
+source/event/counter binding reviews are complete; Intel
+static audio-drop cause remains unproven. Mean render time is not total frame latency, and diagnostic success
+does not prove 30 fps capacity, a sole bottleneck or any new clock candidate.
+**#92 remains open.** Exact original logs, archives and case bindings are under
+`wave12Review` in [the ledger](MACOS_TASK_STATUS.json).
+
+A fresh retrospective check confirms old 600 s run `39735454725` is terminal
+**FAILURE on both hosts**. Intel's second decode inspection was **incomplete /
+UNQUALIFIED at the original 1,380 s owned-process teardown**, not still running.
+Original log line 6229 explicitly reports the deadline failure; raw
+`validationComplete:false` / inspection `pending` remains its last persisted
+snapshot. The 0.198536 s field is pre-inspection overhead, not final inspection
+duration. No eventual success or blocking-API cause is inferred. Both writers,
+the first inspection pass and all original capacity failures retain their
+recorded outcomes; no media rerun, duplicate download or gate change occurred.
+
+The separately reviewed clock source requests `tolerance: .zero` on the existing
+sleep call. It changes no FPS, PTS, deadline arithmetic, renderer, mailbox,
+encoder or QoS. It does not guarantee on-time resumption or establish a cause
+or timing improvement.
+Actual six-case lifecycle and CPU-only helper epoch/reset checks pass. New
+generated request/return observations include executor/host resumption and do
+not subtract CPU across suspension; their per-run epoch atomically fences events
+and aggregates against case reset. Loop iteration is not a rendered-frame ID.
+A new real comparison has not run. See [the source/proof scope](COMPOSITION_SLEEP_TOLERANCE.md).
+
+Exact combined `7419966` passes generation, unsigned universal arm64/x86_64
+Release and the actual bundle audit after the clock source change. This build
+result is separate from the old `a1bb23d` CI success and the baseline `a9cfd98`
+short diagnostic; a new timing comparison has not run. It does not establish a
+performance improvement, and every original sustained gate remains unchanged.
+
+Current local `639e49a` adds the independently approved [ARM baseline account](COMPOSITION_HOSTED_SLEEP_BOUNDARY.md)
+and [bound raw-counter receipt](PERFORMANCE_HOSTED_ATTRIBUTION_39757372776_ARM.json)
+after validated `7419966`; all 316 shipping files and the vendor gitlink remain
+identical. Counts stay **27 closed / 34 open**. The new post-clock comparison is
+**not dispatched at this snapshot**; independent Intel binding/counter review is
+complete while causal interpretation remains unqualified. Browser exclusions remain separate, unmerged #124 work. No open
+issue or original qualification gate is closed by this cohort.
