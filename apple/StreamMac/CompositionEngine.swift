@@ -737,7 +737,9 @@ actor CompositionEngine {
                     // cannot monopolize this actor or delay stop/reconfigure.
                     await Task.yield()
                 } else {
-                    do { try await clock.sleep(until: deadline) } catch { break }
+                    // Live cadence requests no extra wake-coalescing tolerance.
+                    // The executor or host may still resume after the deadline.
+                    do { try await clock.sleep(until: deadline, tolerance: .zero) } catch { break }
                 }
             }
         }
