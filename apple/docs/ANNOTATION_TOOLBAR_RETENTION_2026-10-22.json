@@ -1,0 +1,72 @@
+{
+  "change": "Python failure-artifact custody only; production toolbar and Swift fixture HEADER/MAIN unchanged",
+  "checks": [
+    "Negative retained generated source/executable hashes equal failure JSON",
+    "Positive retained generated source/executable hashes equal final JSON",
+    "Actual Swift fixture HEADER/MAIN AST constants identical to 1abae38",
+    "Production toolbar diff against 1abae38 empty",
+    "git diff --check PASS"
+  ],
+  "currentDocumentationSHA256": "8729512abf0278b727c5152ce0f78d115548f3976f0f858d7376e9563c477690",
+  "currentPositiveProof": {
+    "executable": {
+      "path": "/private/tmp/stream-wave13-annotation-layout-20261022/apple/build/annotation-toolbar-retention-positive-20261022/AnnotationToolbarLayout",
+      "sha256": "35535bf7187caba4620af1d01b1364b86f7d4eab7e03109f826a93787872416d"
+    },
+    "generatedFixture": {
+      "path": "/private/tmp/stream-wave13-annotation-layout-20261022/apple/build/annotation-toolbar-retention-positive-20261022/OwnedAnnotationToolbar.swift",
+      "sha256": "8a704ab7315a262beed51a1e62b8ed5b7c0ce70ebeb745e505909e58e7a45ae1"
+    },
+    "log": {
+      "path": "/tmp/stream-wave13-annotation-retention-positive-20261022.log",
+      "sha256": "eb99d01e74e26a1988bcc77240a913895fb95d8374190fadb2ecead1136b939a"
+    },
+    "report": {
+      "path": "/tmp/stream-wave13-annotation-retention-positive-20261022.json",
+      "sha256": "bd2c0f47e7e10d01ae879888351108929e2bcc575ecf42265311a441866b1718"
+    },
+    "result": "PASS",
+    "runnerExitCode": 0
+  },
+  "failureChildReturnCode": -5,
+  "failurePhase": "runtime",
+  "oldToolbarExpectedFailure": {
+    "executable": {
+      "path": "/private/tmp/stream-wave13-annotation-layout-20261022/apple/build/annotation-toolbar-retention-negative-20261022/AnnotationToolbarLayout",
+      "sha256": "3e332712823457278845700f296cac4cace4d821f2d390ac9dccce27afb2f85b"
+    },
+    "generatedFixture": {
+      "path": "/private/tmp/stream-wave13-annotation-layout-20261022/apple/build/annotation-toolbar-retention-negative-20261022/OwnedAnnotationToolbar.swift",
+      "sha256": "a47c966a64aa039de54ecb20d922b280ca9c2e35bc77f99266d67d0869c6d60e"
+    },
+    "log": {
+      "path": "/tmp/stream-wave13-annotation-retention-negative-20261022.log",
+      "sha256": "9ee78167161c330c1d3cfad1aff11ccf8ae715363935d545307fd95a904a98ba"
+    },
+    "report": {
+      "path": "/tmp/stream-wave13-annotation-retention-negative-20261022.json",
+      "sha256": "aa84ea11222512d52c22770778b38a35877b7d7af08c0e265fb4faa0a81230f6"
+    },
+    "result": "EXPECTED FAILURE; retained input/executable/failure JSON",
+    "runnerExitCode": 1
+  },
+  "originalReceiptUnchanged": {
+    "path": "/private/tmp/stream-wave13-annotation-layout-20261022/apple/docs/ANNOTATION_TOOLBAR_LAYOUT_2026-10-22.json",
+    "sha256": "ee191ed8add93abdbc004054721e25207f4e5b217bc9164af59fc2b8ed6760a7"
+  },
+  "positiveCases": 192,
+  "previousCommit": "1abae38f6a4f2c8dd41615241ed89b1103edeb7a",
+  "productionToolbarSHA256": "07e84852ba46bd47719575a180d33a9e09c3ba234f2bb75b098e05ba84b212a8",
+  "runnerSHA256": "0a796945c60f6a5cf4a39f505102dd0d4691e834d8f6b53e21b03ad6daa00c1d",
+  "scope": "No additional runtime/AX/operator qualification; no capture, devices, network, activation, global input, preferences or real production owners; issue90 remains open",
+  "sourceHashes": {
+    "StreamCore/Annotations.swift": "8739a3ac99a57120551a9d14ae470a45162266aeab0493033e3c64e7b22b13ef",
+    "StreamMac/AnnotationModel.swift": "eea89dddd0966daf2807aa5b1a0ce16e47c9fcb40d9d76104a3f48c774a0403e",
+    "StreamMac/LayerGraph.swift": "84bf12ec33fbfc61162a26faeec5cfc83262d66ec4820a8ee2110543568845d7",
+    "StreamMac/StudioAccessibility.swift": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c",
+    "StreamMac/StudioControlRow.swift": "581b2013d6b3daa9bcfb4d294fcb6332467979cf2b43b4c78d10de593c5e18be",
+    "scripts/test_annotation_toolbar_layout.py": "0a796945c60f6a5cf4a39f505102dd0d4691e834d8f6b53e21b03ad6daa00c1d"
+  },
+  "unchangedGeneratedPositiveSwiftSHA256": "8a704ab7315a262beed51a1e62b8ed5b7c0ce70ebeb745e505909e58e7a45ae1",
+  "untestedFailureBranches": "Compiler-failure and timeout paths covered by source review only; actual negative proof is runtime width assertion"
+}
