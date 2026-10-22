@@ -175,6 +175,8 @@ private struct MediaSourceRowView: View {
                         self.scrubPosition = nil
                     }
                 }
+                .accessibilityLabel("Seek \(source.name)")
+                .accessibilityValue(String(format: "%.1f seconds of %.1f seconds", position, status.durationSeconds))
                 .disabled(status.durationSeconds <= 0)
                 Text("\(format(position))  −\(format(remaining))")
                     .font(.caption2.monospacedDigit())
@@ -196,11 +198,15 @@ private struct MediaSourceRowView: View {
                     }
                     Slider(value: trimInBinding(payload),
                            in: 0...max(status.durationSeconds, 1))
+                        .accessibilityLabel("Trim in for \(source.name)")
+                        .accessibilityValue(String(format: "%.1f seconds", payload.trimInSeconds ?? 0))
                     LabeledContent("Trim Out") {
                         Text(format(payload.trimOutSeconds ?? status.durationSeconds))
                     }
                     Slider(value: trimOutBinding(payload),
                            in: 0...max(status.durationSeconds, 1))
+                        .accessibilityLabel("Trim out for \(source.name)")
+                        .accessibilityValue(String(format: "%.1f seconds", payload.trimOutSeconds ?? status.durationSeconds))
                 }
             }
             .font(.caption)
@@ -225,6 +231,7 @@ private struct MediaSourceRowView: View {
         }
         .buttonStyle(.borderless)
         .help(isPlaying ? "Pause" : "Play")
+        .accessibilityLabel("\(isPlaying ? "Pause" : "Play") \(source.name)")
         Button {
             dispatcher.execute(.mediaStop(source.id))
         } label: {
@@ -232,6 +239,7 @@ private struct MediaSourceRowView: View {
         }
         .buttonStyle(.borderless)
         .help("Stop — rewind and clear the frame")
+        .accessibilityLabel("Stop \(source.name)")
         Button {
             dispatcher.execute(.mediaRestart(source.id))
         } label: {
@@ -239,6 +247,7 @@ private struct MediaSourceRowView: View {
         }
         .buttonStyle(.borderless)
         .help("Restart from the beginning")
+        .accessibilityLabel("Restart \(source.name)")
     }
 
     @ViewBuilder
