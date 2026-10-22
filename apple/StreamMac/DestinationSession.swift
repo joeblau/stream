@@ -116,7 +116,17 @@ final class DestinationSession: ObservableObject {
         let transport: StreamProtocol = URL(string: connection.endpoint)?.scheme == "rtmp" ? .rtmp : .rtmps
         let destination = StreamDestination(name: "\(provider.name): \(event?.title ?? channel.title)",
             transport: transport, isEnabled: false, videoCodec: .h264,
-            providerBinding: .init(provider: provider, channelID: channel.id, eventID: event?.id))
+            providerBinding: provider == .youtube ? .init(provider: provider, channelID: channel.id, eventID: event?.id) : nil)
+        draft.append(destination); credentials[destination.id] = connection; selectedID = destination.id
+    }
+
+    /// Explicit account-wide relay import. It does not assert a downstream
+    /// event binding or activate the YouTube-only managed-start route.
+    func createRestreamRelay(connection: DestinationCredentials) {
+        let transport: StreamProtocol = URL(string: connection.endpoint)?.scheme == "rtmp" ? .rtmp : .rtmps
+        var destination = DestinationProviderTemplate.restream.makeDestination(transport: transport)
+        destination.name = "Restream account relay"
+        destination.isEnabled = false
         draft.append(destination); credentials[destination.id] = connection; selectedID = destination.id
     }
 

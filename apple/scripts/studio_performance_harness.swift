@@ -79,7 +79,7 @@ private struct WorkloadResult: Codable {
     var recording: ProgramRecordingSession.Progress
     var recordingComplete: Bool
     var producedAudioFrames: Int64
-    var sourceAudioTailCoverageSeconds: Double
+    var sourceAudioTailCoverageSeconds: Double?
     var workload: String
     var decodedSourceFrames: Int
     var resources: [DesktopResourceSnapshot]
@@ -87,6 +87,9 @@ private struct WorkloadResult: Codable {
     var storageBytesPerSecond: Double
     var maximumRecordingFrontierSkewSeconds: Double?
     var validationSeconds: Double
+    var replaySource: PerformanceReplayInventory?
+    var checks: [PerformanceWorkloadCheck]
+    var validationComplete: Bool
 }
 
 private final class PerformanceRecordingProbe: @unchecked Sendable {
@@ -99,11 +102,27 @@ private final class PerformanceRecordingProbe: @unchecked Sendable {
     var skew: Double? { lock.withLock { maximumSkew } }
 }
 
+private struct PerformanceReport: Codable {
+    var date = Date()
+    var os = ProcessInfo.processInfo.operatingSystemVersionString
+    var hardwareModel = StudioDiagnosticSnapshot.machineModel()
+    var processors = ProcessInfo.processInfo.processorCount
+    var physicalMemory = ProcessInfo.processInfo.physicalMemory
+    var architecture = DesktopResourceSampler.architecture
+    var processTranslated = DesktopResourceSampler.isTranslated
+    var limitations: String
+    var metal: DesktopMetalCapabilities
+    var publishingOutputs = 0
+    var encoderSessions = 1
+    var uplinkQualification = "Not measured by this local recorder workload; use the actual healthy RTMP/SRT fixture."
+    var status: String
+    var workloads: [WorkloadResult]
+}
+
 @main struct StudioPerformanceHarness {
     @MainActor static func main() async throws {
         let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true).appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let fixed = try StaticFrame()
         let sustained = CommandLine.arguments.contains("--sustained")
         let requestedSeconds = ProcessInfo.processInfo.environment["STUDIO_PERFORMANCE_SECONDS"].flatMap(Double.init) ?? 180
         guard requestedSeconds.isFinite, !sustained || (120...600).contains(requestedSeconds) else {
@@ -115,11 +134,25 @@ private final class PerformanceRecordingProbe: @unchecked Sendable {
         var results: [WorkloadResult] = []
         var previousRecording: URL?
         let sampler = DesktopResourceSampler()
+        let journal = PerformanceEvidenceJournal(directory: directory)
+        let limitations = sustained
+            ? "Sustained owned static/layer and actual H.264 replay/encoding workloads; no physical capture, universal capacity, independent waveform drift or Internet uplink qualification. Actual-source decoder cadence is distinct from nominal output capacity. Main-actor delay is a responsiveness proxy; kernel time is not GPU utilization."
+            : "Ten-second owned static/layer smoke baseline; not sustained or physical/network qualification."
+        func persist() throws {
+            let failed = results.contains { $0.checks.contains { $0.status == .failed } }
+            let complete = results.count == cases.count && results.allSatisfy(\.validationComplete)
+            try journal.write(PerformanceReport(limitations: limitations, metal: sampler.metalCapabilities,
+                status: failed ? "failed" : complete ? "passed" : "incomplete", workloads: results), name: "performance.json")
+        }
+        try persist()
+        print("Performance artifacts: \(directory.path)")
+        let fixed = try StaticFrame()
         for (caseIndex, (width, height, fps)) in cases.enumerated() {
             let replay = PerformanceOwnedReplay()
             let replayURL = sustained && caseIndex == 1 ? previousRecording : nil
-            let decode: Task<Void, Error>? = replayURL.map { url in Task.detached { try await replay.run(url: url) } }
-            defer { decode?.cancel() }
+            let replaySource: PerformanceReplayInventory?
+            if let replayURL { replaySource = try await PerformanceOwnedReplay.inventory(url: replayURL, workloadSeconds: workloadSeconds) }
+            else { replaySource = nil }
             var scene = Scene.screenPlusCam(name: "Synthetic static desktop and camera")
             for index in 0..<6 {
                 scene.layers.append(LayerNode(name: "Editable shape \(index)", payload: .shape(ShapeSourcePayload(fillColorHex: "#245A86")),
@@ -153,6 +186,8 @@ private final class PerformanceRecordingProbe: @unchecked Sendable {
             await engine.addSink(token: UUID(), capacity: 1) { _ in Thread.sleep(forTimeInterval: 0.080) }
             var before = StudioDiagnosticSnapshot(); before.sampleProcess()
             let clock = ContinuousClock(); let started = clock.now
+            let decode: Task<Void, Error>? = replayURL.map { url in Task.detached { try await replay.run(url: url) } }
+            defer { decode?.cancel() }
             let sourceStart = CMTimeConvertScale(CMClockGetTime(CMClockGetHostTimeClock()), timescale: 48_000, method: .roundTowardNegativeInfinity)
             let audioBoundary = AudioFinishBoundary()
             // Independent PCM follows its original 48 kHz source grid while
@@ -191,24 +226,41 @@ private final class PerformanceRecordingProbe: @unchecked Sendable {
             await engine.stop()
             await engine.removeSink(token)
             let finalVideoSourceEnd = probe.closeVideo()
-            precondition(finalVideoSourceEnd.isNumeric, "No actual video frontier was delivered")
+            var decodeError: String?
+            if let decode {
+                decode.cancel()
+                do { try await decode.value }
+                catch is CancellationError { /* Sampling ended; evaluate accepted frames against source PTS below. */ }
+                catch { decodeError = error.localizedDescription }
+            }
             recording.sealVideo()
-            audioBoundary.set(finalVideoSourceEnd)
+            audioBoundary.set(finalVideoSourceEnd.isNumeric ? finalVideoSourceEnd : CMClockGetTime(CMClockGetHostTimeClock()))
             let audioFrames = try await audio.value
-            let sourceAudioTailCoverage = (sourceStart + CMTime(value: audioFrames, timescale: 48_000) - finalVideoSourceEnd).seconds
-            precondition(sourceAudioTailCoverage >= 0, "Independent PCM must cover the final submitted video source endpoint")
+            let sourceAudioTailCoverage: Double? = finalVideoSourceEnd.isNumeric
+                ? (sourceStart + CMTime(value: audioFrames, timescale: 48_000) - finalVideoSourceEnd).seconds : nil
             let metrics = await engine.metricsSnapshot()
             let kernels = await engine.kernelMetricsSnapshot()
             let result = await withCheckedContinuation { continuation in recording.finish { continuation.resume(returning: $0) } }
             var after = StudioDiagnosticSnapshot(); after.sampleProcess()
             let arrival = probe.snapshot()
             FileHandle.standardOutput.write(Data("ARRIVALS: \(width)x\(height) count \(arrival.count), monotonic \(arrival.monotonic), rendered \(metrics.rendered), failed \(metrics.failed)\n".utf8))
-            precondition(arrival.count > fps && arrival.monotonic, "Static sources must keep producing monotonic output")
-            precondition(arrival.error < 0.08, "Video duration diverged from host-clock audio: \(arrival.error)")
-            if result.completed {
-                try await ProgramRecordingFixtures.inspect(url, expectedDuration: nil, checkSync: false)
-            } else {
-                print("MEASURED LIMIT: \(width)x\(height) \(fps) recording failed: \(result.error ?? "Unknown writer failure")")
+            var checks: [PerformanceWorkloadCheck] = [
+                .check("videoSourceFrontier", finalVideoSourceEnd.isNumeric, "An actual submitted video endpoint is required."),
+                .check("monotonicArrivals", arrival.count > fps && arrival.monotonic,
+                    "Actual post-warmup arrivals \(arrival.count); monotonic \(arrival.monotonic); required > \(fps)."),
+                .check("hostClockDuration", arrival.error < 0.08, "Duration error \(arrival.error)s; original bound <0.08s."),
+                .check("audioSourceTailCoverage", sourceAudioTailCoverage.map { $0 >= 0 } ?? false,
+                    "Independent PCM must cover the final submitted video endpoint; actual \(String(describing: sourceAudioTailCoverage))s."),
+                .check("recordingFinalization", result.completed, result.error ?? "Actual writer completion."),
+                .init(name: "recordingDecodeInspection", status: result.completed ? .pending : .failed,
+                    detail: "Original track/start/end/decode inspection has not completed.")
+            ]
+            if sustained {
+                checks += PerformanceWorkloadCheck.cadence(fps: fps, seconds: workloadSeconds,
+                    rendered: metrics.rendered, decoded: replay.decodedFrames, source: replaySource)
+            }
+            if replayURL != nil {
+                checks.append(.check("replayDecoderCompletion", decodeError == nil, decodeError ?? "No decoder error before sampling ended."))
             }
             let measured = started.duration(to: clock.now).components
             let samplingSeconds = max(0, metrics.sampledAt - metrics.startedAt)
@@ -223,34 +275,40 @@ private final class PerformanceRecordingProbe: @unchecked Sendable {
                 decodedSourceFrames: replay.decodedFrames, resources: resources, kernels: kernels,
                 storageBytesPerSecond: Double(result.progress.bytesWritten) / max(1, workloadSeconds),
                 maximumRecordingFrontierSkewSeconds: recordingProbe.skew,
-                validationSeconds: max(0, totalSeconds - samplingSeconds)))
-            if let decode { decode.cancel(); _ = try? await decode.value }
-            if replayURL != nil { precondition(replay.decodedFrames >= fps * Int(workloadSeconds - 5), "Owned replay decoder did not sustain its source cadence") }
+                validationSeconds: max(0, totalSeconds - samplingSeconds), replaySource: replaySource,
+                checks: checks, validationComplete: false))
+            // Persist all observed resources and failed/pending gates BEFORE
+            // inspecting media. Even an OS decoder stall or an internal trap
+            // leaves this case and the preceding cases available to CI upload.
+            try journal.write(results[caseIndex], name: "case-\(caseIndex).json")
+            try persist()
+            if result.completed {
+                do {
+                    try await ProgramRecordingFixtures.inspect(url, expectedDuration: nil, checkSync: false)
+                    checks[5].status = .passed
+                    checks[5].detail = "Original track/start/end/decode inspection completed."
+                } catch {
+                    checks[5].status = .failed
+                    checks[5].detail = error.localizedDescription
+                }
+            }
+            results[caseIndex].checks = checks
+            results[caseIndex].validationComplete = true
+            let validated = started.duration(to: clock.now).components
+            results[caseIndex].validationSeconds = max(0, Double(validated.seconds) + Double(validated.attoseconds) / 1e18 - samplingSeconds)
+            try journal.write(results[caseIndex], name: "case-\(caseIndex).json")
+            try persist()
             previousRecording = url
-            print("SOURCE GRID: \(width)x\(height) \(fps) fps, \(audioFrames) independent PCM frames, final video source end \(finalVideoSourceEnd.seconds), PCM tail coverage \(sourceAudioTailCoverage) seconds, recording complete \(result.completed)")
+            print("SOURCE GRID: \(width)x\(height) \(fps) fps, \(audioFrames) independent PCM frames, final video source end \(finalVideoSourceEnd.seconds), PCM tail coverage \(String(describing: sourceAudioTailCoverage)) seconds, recording complete \(result.completed)")
             print("MEASURED: \(width)x\(height) \(fps) fps, \(scene.layers.count) layers, achieved \(metrics.achievedFPS), mean render \(metrics.meanRenderMilliseconds) ms, host-clock error \(arrival.error), main actor max lag \(maxDelay) ms")
         }
-        struct Report: Codable {
-            var date = Date()
-            var os = ProcessInfo.processInfo.operatingSystemVersionString
-            var hardwareModel = StudioDiagnosticSnapshot.machineModel()
-            var processors = ProcessInfo.processInfo.processorCount
-            var physicalMemory = ProcessInfo.processInfo.physicalMemory
-            var architecture = DesktopResourceSampler.architecture
-            var processTranslated = DesktopResourceSampler.isTranslated
-            var limitations: String
-            var metal: DesktopMetalCapabilities
-            var publishingOutputs = 0
-            var encoderSessions = 1
-            var uplinkQualification = "Not measured by this local recorder workload; use the actual healthy RTMP/SRT fixture."
-            var workloads: [WorkloadResult]
+        try persist()
+        let failures = results.flatMap(\.checks).filter { $0.status == .failed }
+        if !failures.isEmpty {
+            print("FAIL: workload qualification failed; original gates and per-case evidence retained at \(directory.path)")
+            for failure in failures { print("FAILED GATE: \(failure.name): \(failure.detail)") }
+            exit(1)
         }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
-        let limitations = sustained
-            ? "Sustained owned static/layer and actual H.264 replay/encoding workloads; no physical camera/desktop capture, hardware interactions, Internet uplink ceiling or universal workload certification. Main-actor scheduling delay is a responsiveness proxy, not an input-to-photon UI latency. Recording frontier skew is not waveform A/V drift. Kernel time is measured from actual Core Image Metal render tasks, not GPU utilization."
-            : "Ten-second owned static/layer smoke baseline. Not sustained, physical capture, decoder, network or thermal qualification."
-        try encoder.encode(Report(limitations: limitations, metal: sampler.metalCapabilities, workloads: results))
-            .write(to: directory.appendingPathComponent("performance.json"), options: .atomic)
-        print("PASS: \(sustained ? "sustained owned media" : "short smoke") workload observations persisted; supported workload limits require reviewing the measured results and explicit qualification gaps. Artifacts: \(directory.path)")
+        print("PASS: \(sustained ? "sustained owned media" : "short smoke") workload checks and observations persisted. Artifacts: \(directory.path)")
     }
 }

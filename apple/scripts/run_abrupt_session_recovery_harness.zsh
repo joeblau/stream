@@ -127,9 +127,14 @@ SWIFT
   source + <<'SWIFT'
 
 extension MediaSourcePlayback {
-    func abruptFixturePlayerState() -> (seconds: Double, rate: Float, muted: Bool)? {
+    func abruptFixturePlayoutState() -> (seconds: Double, rate: Float, deviceOutputSuppressed: Bool)? {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
+        if let offlineAudio {
+            let seconds = min(trimOut, offlineAudio.time(at: CMClockGetTime(CMClockGetHostTimeClock()), playing: isPlaying)).seconds
+            // Actual host-clock state; no AVPlayer or output device exists.
+            return (seconds, isPlaying ? 1 : 0, true)
+        }
         guard let player else { return nil }
         return (player.currentTime().seconds, player.rate, player.isMuted)
     }
@@ -140,8 +145,8 @@ fixture_replace(target, root, folder, 'CaptureSourcePool.swift') do |source|
   source + <<'SWIFT'
 
 extension CaptureSourcePool {
-    func abruptFixturePlayerState(for id: SourceDefinitionID) -> (seconds: Double, rate: Float, muted: Bool)? {
-        mediaPlaybacks[.media(id)]?.abruptFixturePlayerState()
+    func abruptFixturePlayoutState(for id: SourceDefinitionID) -> (seconds: Double, rate: Float, deviceOutputSuppressed: Bool)? {
+        mediaPlaybacks[.media(id)]?.abruptFixturePlayoutState()
     }
 }
 SWIFT

@@ -89,7 +89,10 @@ the intended Developer ID Application identity. Build a separate installer
 package with `pkgbuild` rooted at that HAL destination and sign it with Developer
 ID Installer; notarize/staple and verify the package through the release
 process. The repository does not infer a signing identity or notarization
-credential, and it does not produce a signed artifact without those inputs.
+credential. The [evaluation packaging tool](../../docs/VIRTUAL_MICROPHONE_PACKAGING.md)
+can prepare and audit a separate candidate using those explicit inputs, or
+create a clearly labeled ad-hoc/unsigned local fixture. It never executes an
+installer, activates a driver or establishes a supported distribution decision.
 The driver needs no App Group or DriverKit entitlement: Core Audio loads it
 into its audio-server process, rather than running a sandboxed app extension.
 Its higher process privilege and crash impact require careful qualification.
@@ -125,9 +128,10 @@ and default device selections. Client apps may require relaunch after changes.
 - Prevent selecting the virtual microphone as the studio's own mic, additional
   input or monitoring device. Validate app/system audio capture and conferencing
   return paths; a read-only bus tap alone does not prevent every feedback loop.
-- Make an explicit supported-distribution decision from those results. Until
-  then #174's signed packaging, main-window bus/format/state controls and target
-  app compatibility remain unimplemented acceptance gates.
+- Make an explicit supported-distribution decision from those results. The
+  build-only evaluation package is not signed installation/update/removal
+  qualification. #174's main-window bus/format/state controls and target-app
+  compatibility remain gated by that decision.
 
 Primary architecture references: [Apple AudioServerPlugIn sample](https://developer.apple.com/documentation/coreaudio/creating-an-audio-server-driver-plug-in),
 [Apple AudioDriverKit sample's virtual-device guidance](https://developer.apple.com/documentation/audiodriverkit/creating-an-audio-device-driver),

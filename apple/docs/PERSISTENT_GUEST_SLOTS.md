@@ -49,10 +49,14 @@ The existing actual local Worker manager fixture additionally checks a prepared
 slot chosen in the lobby, acknowledged admission into that exact slot, unchanged
 source IDs, real scene document reload, and generation-fenced host reconnect.
 Its media host is controlled for this control proof; it does not qualify browser
-or relay decoding. Desktop/mobile browser compatibility, restricted networks,
-studio return feed, A/V synchronization and capacity beyond one native peer
-remain separate #125–130 validation gates. #129 remains open until those required
-external validations are qualified.
+or relay decoding. A subsequent actual browser/SDK fixture now deliberately
+selects the second prepared slot and checks its source/name/title/reconnect
+identity through acknowledged admission, On Air/Backstage, a fresh receive
+generation and actual project reload. See
+[GUEST_SLOT_BACKSTAGE_SOFTWARE_ACCEPTANCE.md](GUEST_SLOT_BACKSTAGE_SOFTWARE_ACCEPTANCE.md)
+for that bounded proof and the separate incoming A/V, return-routing and
+restricted-network SDK evidence. Unsupported physical/browser/deployed scopes
+remain explicit; they do not add universal interview certification to slot ACs.
 
 Local Xcode 26.6 qualification: `/tmp/stream-guest-slots-native-final.log` and
 `/tmp/stream-guest-slots-manager-final.log`. The dedicated native guest workflow also

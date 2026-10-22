@@ -29,6 +29,29 @@ def repository(root):
 
 
 class SourceRefusalTests(unittest.TestCase):
+    def test_reviewed_zero_context_patch_is_idempotent_and_preserves_mutation(self):
+        with tempfile.TemporaryDirectory(prefix="stream-reviewed-patch-") as directory:
+            root = Path(directory)
+            source = root / "owned-source"
+            repository(source)
+            readme = source / "README"
+            readme.write_text("Owned baseline\nReviewed TLS extension\n")
+            expected = {"README": backend.digest(readme)}
+            patch = root / "reviewed.patch"
+            patch.write_text(git(source, "diff", "HEAD", "--unified=0", "--", "README"))
+            readme.write_text("Owned baseline\n")
+            backend.reviewed_patch(source, patch, expected)
+            backend.reviewed_patch(source, patch, expected)
+            self.assertEqual(readme.read_text(), "Owned baseline\nReviewed TLS extension\n")
+            readme.write_text("Owned baseline\nReviewed TLS extension\nUnrelated staged change\n")
+            git(source, "add", "README")
+            index = git(source, "diff", "--cached", "--binary")
+            before = readme.read_bytes()
+            with self.assertRaisesRegex(RuntimeError, "differs from exact reviewed patch"):
+                backend.reviewed_patch(source, patch, expected)
+            self.assertEqual(readme.read_bytes(), before)
+            self.assertEqual(git(source, "diff", "--cached", "--binary"), index)
+
     def test_owned_archive_receipt_refuses_mutation_and_foreign_target(self):
         with tempfile.TemporaryDirectory(prefix="stream-owned-archive-refusal-") as directory:
             prefix = Path(directory)

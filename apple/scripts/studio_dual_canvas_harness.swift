@@ -103,6 +103,8 @@ private actor CanvasPublisherProbe: Publisher {
     init() {
         sceneStore = SceneStore(); previewProgram = PreviewProgramModel(selected: sceneStore.selected)
         controller = StreamController(sceneStore: sceneStore, previewProgram: previewProgram, permissions: PermissionsManager())
+        precondition(!controller.resilience.isLocked && !controller.resilience.requiresManualRestart,
+                     "Owned dual-canvas fixture must construct its explicit simulated unlocked session")
         dispatcher = StudioCommandDispatcher(controller: controller, sceneStore: sceneStore,
             session: SettingsSession(controller: controller), recorder: RecordingController(), previewProgram: previewProgram)
     }

@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "originalBenchmarkCommit": "0d790563590cff75d50bfef0d127b6839e55a8bc",
+  "reviewBase": "a346f56",
+  "dateUTC": "2026-10-22",
+  "result": "Original hosted 1080p30/600-second qualification failures remain FAILED.",
+  "inspection": "Verified both retained archive digests; read original recording journals. Intel compressed packet timestamps inspected without decoding or GPU work.",
+  "runs": [
+    {
+      "platform": "ARM",
+      "artifactID": 12399600168,
+      "archiveSHA256": "ac02a3b1432c3efed2805320795920a8988f4663f5c4a09c963b063918253473",
+      "originalLogSHA256": "fd75ec1666934ce99df3d3d43d60a4ad99b715e588cd386996288c7e7263d2fb",
+      "cases": [
+        {
+          "case": 0,
+          "status": "complete",
+          "error": null,
+          "writerVideoSamples": 11722,
+          "writerAudioChunks": 60003,
+          "droppedVideo": 0,
+          "droppedAudio": 0,
+          "videoEndSeconds": 600.025099208,
+          "audioEndSeconds": 600.025102084,
+          "avFrontierDifferenceSeconds": -2.876e-06,
+          "writerElapsedWallSeconds": 600.3571230173111,
+          "journalSHA256": "2dcef26cdefe328d5fa7d4dcc51ce79284627876a3319497f5918efe5a4ecc79"
+        },
+        {
+          "case": 1,
+          "status": "complete",
+          "error": null,
+          "writerVideoSamples": 12140,
+          "writerAudioChunks": 60002,
+          "droppedVideo": 0,
+          "droppedAudio": 0,
+          "videoEndSeconds": 600.01742975,
+          "audioEndSeconds": 600.017443709,
+          "avFrontierDifferenceSeconds": -1.3959e-05,
+          "writerElapsedWallSeconds": 600.2948830127716,
+          "journalSHA256": "c3c21247a752aef3c6d55eeb5603317307c9c5e4ee4af1fe0a0a786fe0a3f28c"
+        }
+      ]
+    },
+    {
+      "platform": "Intel",
+      "artifactID": 12399698685,
+      "archiveSHA256": "3fe747242571f1669c6186113e3de9a5990de38765f931cf888e9ce3ef94a503",
+      "originalLogSHA256": "fec058fbede089ebcc4b02c6bd511debf223982973904d1b4b621d24315c366a",
+      "cases": [
+        {
+          "case": 0,
+          "status": "complete",
+          "error": null,
+          "writerVideoSamples": 10123,
+          "writerAudioChunks": 59971,
+          "droppedVideo": 0,
+          "droppedAudio": 34,
+          "videoEndSeconds": 600.047647054,
+          "audioEndSeconds": 600.048588184,
+          "avFrontierDifferenceSeconds": -0.00094113,
+          "writerElapsedWallSeconds": 600.2158709764481,
+          "journalSHA256": "248ec6566f45e5562fe3d0953cee2ea5de5288cc12408eaa20b07e8d8277e240"
+        },
+        {
+          "case": 1,
+          "status": "recoverable",
+          "error": "No video was written for ten seconds.",
+          "writerVideoSamples": 1689,
+          "writerAudioChunks": 12748,
+          "droppedVideo": 0,
+          "droppedAudio": 0,
+          "videoEndSeconds": 117.140439835,
+          "audioEndSeconds": 127.479674352,
+          "avFrontierDifferenceSeconds": -10.339234517,
+          "writerElapsedWallSeconds": 127.8532589673996,
+          "journalSHA256": "1ef4460ae2e18b4714f79e6dc6f87e84eb418a2ef70daa4b3f44dd0ef3f270be"
+        }
+      ]
+    }
+  ],
+  "intelCompressedVideo": [
+    {
+      "case": 0,
+      "packets": 10123,
+      "firstPTS": 0,
+      "lastPTS": 600.015,
+      "medianGapSeconds": 0.058333,
+      "maximumGapSeconds": 1.135
+    },
+    {
+      "case": 1,
+      "packets": 1689,
+      "firstPTS": 0,
+      "lastPTS": 117.106667,
+      "medianGapSeconds": 0.066667,
+      "maximumGapSeconds": 0.265
+    }
+  ],
+  "sourceFindings": [
+    "ARM writers accepted every rendered frame with no video/audio mailbox drops; upstream compositor output was below requested30fps.",
+    "Intel replay writer stopped with no video written for10s at127.853s wall elapsed, while only1689 frames through117.14044s had arrived. Final2209 compositor renders do not equal written frames or decoded-source frames.",
+    "ArrivalProbe error is absolute change in delivery-minus-PTS latency between endpoints, both from the same host clock. The59.192148398s unsigned change does not measure independent audio/waveform drift.",
+    "Current scheduler unnecessarily idles until a future slot after any slight lateness. Shipping helper now retains one due tick and skips only fully elapsed opportunities; host-clockPTS and all nominal gates stay unchanged."
+  ],
+  "virtualClockRegression": {
+    "logSHA256": "3156f33ce3b3226198cc0ef3e836e4002e802b7ee43592eb8b8100b0f10f62f1",
+    "durationSeconds": 600,
+    "targetFPS": 30,
+    "requiredFrames": 17850,
+    "wakeJitterMilliseconds": 0.5,
+    "render33msOldFrames": 9001,
+    "render33msFixedFrames": 18000,
+    "render40msFixedFrames": 15000,
+    "qualification": "Deterministic clock/actual production-helper regression only, no native GPU/capacity qualification."
+  },
+  "remaining": [
+    "Exact cause/sign of Intel59.192s endpoint-latency change and native render/OS stall remain unproven; original resourceJSON absent.",
+    "Actual original decoded replay counts unknown on both runners.",
+    "No repeat600s/GPU benchmark; no threshold relaxation, dimension/frame-rate reduction or retimestamping.",
+    "Writer frontier skew is not waveform A/V sync; virtualMac results do not certify physical hardware or close#92."
+  ]
+}

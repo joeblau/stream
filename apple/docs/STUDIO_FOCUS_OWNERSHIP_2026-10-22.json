@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "issue": 90,
+  "dateUTC": "2026-10-22",
+  "sourceBase": "d413aa1",
+  "fullAccessibilityQualified": false,
+  "fix": "Queued native focus completion requires the captured owned window, current attachment/presentation/restoration generation and matching consumed scope bookmark; stale work cannot execute its target or fallback.",
+  "sourceSHA256": "85fa6fe152bd267327354645a8eeddd853f1aec53a5c7366ff9503a169ce28b3",
+  "nativeHarnessSHA256": "5e251963c294448a65a3cfdd47d87de04a623c33ff9ed2a614bccc321af51cb1",
+  "baseline": {
+    "source": "published d413aa1 before production edit",
+    "log": "/tmp/stream-wave3-focus-baseline-20261022.log",
+    "sha256": "fb095ac05f9aa92fdfd35bdab28ba70dc7603486428033a9376415ac23d070d2",
+    "mode": "--reproduce-stale",
+    "exitCode": 0,
+    "meaning": "Six actual stale native focus defects reproduced; not a passing behavior qualification.",
+    "transcript": [
+      "SCOPE: real mounted NSTextFields/shared native field editors and unchanged production StudioFocusRestoration; no virtual AX tree, global input, app activation, capture, DSP or permissions",
+      "PASS positive: current native field owner restores; repeated remember is idempotent",
+      "PASS positive: removed native target uses its owned live fallback once",
+      "REPRODUCED BASELINE DEFECT: new settings presentation before queued settings completion",
+      "REPRODUCED BASELINE DEFECT: new panel-change presentation before queued settings completion",
+      "REPRODUCED BASELINE DEFECT: replacement window must reject old fallback",
+      "REPRODUCED BASELINE DEFECT: detach then reattach same native window before callback",
+      "REPRODUCED BASELINE DEFECT: old native control moved into replacement window must not regain ownership",
+      "REPRODUCED BASELINE DEFECT: scope without a matching bookmark must not execute fallback",
+      "BASELINE REPRODUCTION COMPLETE: six actual stale native focus outcomes confirmed"
+    ]
+  },
+  "fixed": {
+    "log": "/tmp/stream-wave3-focus-native-final-20261022.log",
+    "sha256": "e7b2bcbf7142a61497023f5750ae60a01382aff2bef30e89b37959b261512937",
+    "mode": "default",
+    "exitCode": 0,
+    "transcript": [
+      "SCOPE: real mounted NSTextFields/shared native field editors and actual production StudioFocusRestoration source; no virtual AX tree, global input, app activation, capture, DSP or permissions",
+      "PASS positive: shared field-editor owner restores; repeated remember and same-window updates are idempotent",
+      "PASS positive: removed native target uses its owned live fallback once",
+      "PASS positive: nested child and later parent presentations retain their own native bookmarks",
+      "PASS positive: mounted production attachment and real native sheet notifications compose with controller dismissal",
+      "PASS cancelled stale restoration: new settings presentation before queued settings completion",
+      "PASS cancelled stale restoration: new panel-change presentation before queued settings completion",
+      "PASS cancelled stale restoration: replacement window must reject old fallback",
+      "PASS cancelled stale restoration: detach then reattach same native window before callback",
+      "PASS cancelled stale restoration: old native control moved into replacement window must not regain ownership",
+      "PASS cancelled stale restoration: scope without a matching bookmark must not execute fallback",
+      "PASS: current restoration plus replacement, cross-window, detach/reattach, moved-control and missing-scope ownership checks"
+    ]
+  },
+  "coverage": [
+    "Exact shared native field-editor owner restoration",
+    "Repeated remember and unchanged-window attachment remain idempotent",
+    "Removed native target uses current fallback once",
+    "Nested child then parent bookmarks still restore",
+    "Mounted production StudioFocusAttachment plus actual AppKit sheet notifications/controller dismissal",
+    "New same-scope or different-scope presentation retires queued restoration",
+    "Replacement window rejects old fallback",
+    "Detach/reattach same window rejects old completion",
+    "Old saved NSView moved into replacement window cannot gain ownership",
+    "Missing scope cannot execute unowned fallback"
+  ],
+  "scope": "Actual mounted native NSTextFields, shared field editors, production coordinator/attachment, NSWindow sheets and main-queue callbacks. Small strict Swift 6 compile only; no whole app build, old derived cache, virtual accessibility tree, DSP, capture, global input, app activation or permission/system changes.",
+  "original90Remaining": "Virtual accessibility labels/actions/order, layer/table/fader/panel action qualification and actual visual contrast comparison remain open as documented in STUDIO_ACCESSIBILITY_2026-10-22.json. This focused native correction does not close #90."
+}

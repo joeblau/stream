@@ -28,12 +28,15 @@ struct ProviderAccountsView: View {
     @State private var channelID = ""
     @State private var eventID = ""
     @State private var twitchEndpoint = ""
+    @State private var twitchIngestID: Int? = nil
+    @StateObject private var twitchIngest = TwitchIngestDiscovery()
     @State private var twitchTitle = ""
     @State private var edit: EventEditorSelection?
     @State private var deleteEvent: ProviderEvent?
     @State private var importJob: Task<Void, Never>?
     @State private var importError: String?
     @State private var importing = false
+    @State private var importID = UUID()
     @State private var thumbnail: ThumbnailSelection?
     @State private var readChat = false
     @State private var writeChat = false
@@ -86,6 +89,10 @@ struct ProviderAccountsView: View {
                             Text("Event ID: \(event.id)").font(.caption).textSelection(.enabled)
                             if let date = event.scheduledAt { Text("Scheduled \(date.formatted()) · \(TimeZone.current.identifier)").font(.caption) }
                             if let url = event.publicURL { Link("Open broadcast", destination: url) }
+                            if let url = event.coverURL { Link("Open public event cover", destination: url).font(.caption) }
+                            if provider == .restream {
+                                Text(event.description).font(.caption).textSelection(.enabled)
+                            }
                             if provider == .youtube {
                                 Text("YouTube latency preference: \((event.latencyPreference ?? .unknown).label)")
                                     .font(.caption)
@@ -112,7 +119,11 @@ struct ProviderAccountsView: View {
                     if provider == .youtube { youtubeControls }
                     if provider == .twitch { twitchControls }
                     if provider == .restream {
+                        Button(importing ? "Discovering relay ingest…" : "Add Account Relay Ingest Draft") { importDestination() }
+                            .disabled(importing || snapshot.isWorking || snapshot.verifiedAt == nil || channel == nil || !accounts.canRequest(.restream))
                         Text("Authorized channels and upcoming encoder events are available. Create/edit/attach/delete/end events in Restream; Stream cannot infer downstream broadcast state or guarantee every platform accepts scheduling.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Imports the account's currently selected RTMP relay and key into a disabled manual draft. It does not attach the selected event or choose downstream channels. Restream must grant channels.read and stream.read; older grants without recorded scopes require Forget Authorization, then reconnecting in Settings → Chat. Review the relay and destination profile before enabling. SRT and RTMPS upgrade discovery are unavailable here.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -128,10 +139,10 @@ struct ProviderAccountsView: View {
         }
         .onAppear { clientID = snapshot.clientID }
         .onChange(of: snapshot.clientID) { _, value in if clientID.isEmpty { clientID = value } }
-        .onChange(of: provider) { _, _ in thumbnail = nil; clientID = snapshot.clientID; channelID = ""; eventID = ""; importError = nil }
-        .onChange(of: channelID) { _, _ in eventID = ""; thumbnail = nil }
+        .onChange(of: provider) { _, _ in twitchIngest.cancel(); twitchIngestID = nil; twitchEndpoint = ""; importJob?.cancel(); importing = false; thumbnail = nil; clientID = snapshot.clientID; channelID = ""; eventID = ""; importError = nil }
+        .onChange(of: channelID) { _, _ in twitchIngest.cancel(); twitchIngestID = nil; twitchEndpoint = ""; importJob?.cancel(); importing = false; eventID = ""; thumbnail = nil }
         .onChange(of: eventID) { _, _ in thumbnail = nil }
-        .onDisappear { importJob?.cancel(); importJob = nil }
+        .onDisappear { twitchIngest.cancel(); importJob?.cancel(); importJob = nil }
         .sheet(isPresented: $showSchedule) { ProviderShowSchedulingEditor(coordinator: scheduling, destinations: destinations.draft) }
         .sheet(item: $edit) { selection in
             YouTubeEventEditor(selection: selection) { draft in
@@ -239,7 +250,29 @@ struct ProviderAccountsView: View {
     }
     private var twitchControls: some View {
         VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button(twitchIngest.isWorking ? "Discovering Twitch ingest…" : "Discover Twitch Ingest Servers") {
+                    twitchIngestID = nil
+                    twitchIngest.load(for: "twitch:\(channelID)")
+                }.disabled(importing || twitchIngest.isWorking || twitchIngest.retryUntil != nil)
+                if twitchIngest.isWorking { Button("Cancel Discovery") { twitchIngest.cancel() } }
+            }
+            if !twitchIngest.endpoints.isEmpty {
+                Picker("Returned Twitch ingest", selection: $twitchIngestID) {
+                    Text("Choose an ingest…").tag(nil as Int?)
+                    ForEach(twitchIngest.endpoints) { Text($0.name).tag(Optional($0.id)) }
+                }.disabled(importing).onChange(of: twitchIngestID) { _, id in
+                    if let id, let endpoint = twitchIngest.endpoint(id: id, for: "twitch:\(channelID)") { twitchEndpoint = endpoint }
+                }
+                Text("Public endpoint list; no latency or availability is measured. Select a returned endpoint or enter one issued by Twitch below.").font(.caption)
+            }
+            if let failure = twitchIngest.failure { Text(failure.localizedDescription).font(.caption).foregroundStyle(.orange) }
+            if let until = twitchIngest.retryUntil { Text("Ingest discovery cooldown until \(until.formatted(date: .omitted, time: .standard)).").font(.caption) }
             TextField("Twitch ingest endpoint from your broadcaster settings", text: $twitchEndpoint)
+                .disabled(importing)
+                .onChange(of: twitchEndpoint) { _, value in
+                    if let id = twitchIngestID, twitchIngest.endpoints.first(where: { $0.id == id })?.endpoint != value { twitchIngestID = nil }
+                }
             Button(importing ? "Importing…" : "Add Twitch Ingest Draft") { importDestination() }
                 .disabled(importing || snapshot.isWorking || snapshot.verifiedAt == nil || channel == nil || twitchEndpoint.isEmpty || !snapshot.scopes.contains("channel:read:stream_key"))
             TextField("Twitch channel title", text: $twitchTitle)
@@ -281,14 +314,20 @@ struct ProviderAccountsView: View {
         let provider = provider, event = event, endpoint = twitchEndpoint
         importing = true; importError = nil
         importJob?.cancel()
+        let attempt = UUID(); importID = attempt
         importJob = Task {
-            defer { importing = false }
+            defer { if importID == attempt { importing = false } }
             do {
-                let connection = try await accounts.importConnection(provider: provider, channel: channel, event: event, endpoint: endpoint)
-                guard !Task.isCancelled else { return }
-                destinations.createManaged(provider: provider, channel: channel, event: event, connection: connection)
+                let connection = try await accounts.importConnection(provider: provider, channel: channel, event: provider == .restream ? nil : event, endpoint: endpoint)
+                guard !Task.isCancelled, importID == attempt, self.provider == provider, channelID == channel.id,
+                      provider != .twitch || twitchEndpoint == endpoint else { return }
+                if provider == .restream { destinations.createRestreamRelay(connection: connection) }
+                else { destinations.createManaged(provider: provider, channel: channel, event: event, connection: connection) }
             } catch {
-                if !Task.isCancelled { importError = (error as? ProviderFailure ?? ProviderFailure(.unavailable)).localizedDescription }
+                if !Task.isCancelled, !(error is CancellationError), importID == attempt, self.provider == provider,
+                   channelID == channel.id, provider != .twitch || twitchEndpoint == endpoint {
+                    importError = (error as? ProviderFailure ?? ProviderFailure(.unavailable)).localizedDescription
+                }
             }
         }
     }

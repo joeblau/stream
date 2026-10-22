@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "dateUTC": "2026-10-22",
+  "sourceBaseline": "d413aa1",
+  "result": "PASS",
+  "mode": "--slot-lifecycle",
+  "host": {
+    "architecture": "arm64",
+    "macOS": "27.2",
+    "chrome": "155.0.8059.85",
+    "node": "24.15.0"
+  },
+  "nativeCLI_SHA256": "ea384ed3dc9d4cc6deaf2b68d370cd9281db8ecffb8afe0832bc5e3d0e1a7fdd",
+  "sourceSHA256": {
+    "apple/scripts/native_interview_return_audio_cli.swift": "0823cb27a9505a8e1ae266a35d29ad28dc897f28aaed97c67b895974a9d407ea",
+    "apple/scripts/run_native_interview_return_audio_harness.zsh": "8bc08a38b79009402fb16a1251d404de4f7eeb6a516773d96e6b554a65334ef2",
+    "workers/interviews/test/browser/native-interview-return-audio-browser.mjs": "ec4af875dec633f57256cf0925ed022e77fbc6591d111fe5f0fdd6d26d1b815e"
+  },
+  "proofLog": "stream-wave3-guest-slots-browser-relay-final-20261022.log",
+  "proofLogSHA256": "b7067db9ca6e9963d4fe0aa9a1b125082be092a23f48783f74fbae0b0c091106",
+  "transcript": [
+    "Scope: explicit null AudioContext sink and muted owned HTML player; actual stream/decoded PCM routing only, no normal rendered output/AEC qualification",
+    "Actual focused browser selected-relay receipt (muted HTML; counts are metadata, not PCM qualification): {\"packets\":133,\"samples\":0,\"codec\":\"audio/opus\",\"local\":\"relay\",\"remote\":\"relay\"}",
+    "PASS actual Manager/default SDK/local UDP relay/Chrome slot lifecycle: second pre-arrival position deliberately selected, stable distinct camera/screen IDs and bound name/title metadata, native decoded Program On Air/Backstage exclusion, actual host/browser full-lease rejoin without Program replay, actual project reload, removal/end cleanup",
+    "Scope: explicit verified null AudioContext sinks; actual media/control/native PCM only. No normal HTML output/AEC or return-video sync qualification; existing full audio suite remains separate.",
+    "Released native build slot 1: wave3-final-slot-relay-scope; exit 0"
+  ],
+  "qualified": [
+    "Actual owned Worker and UDP-only Coturn; both selected Chrome candidates relay",
+    "Shipping guest and default native SDK Manager/controller-issued sink/mixer",
+    "Deliberately selected second saved position before admission; independent stable camera/screen IDs",
+    "Stable name/title/public reconnect metadata; actual SceneStore disk reload before/after full-lease rejoin",
+    "Native decoded guest PCM positive only after OnAir; Backstage revokes Program; reconnect does not replay permission",
+    "Actual browser/host rejoin, removal, room end and permanent native cleanup",
+    "Real AudioContext null sinkId verification; muted owned HTML player"
+  ],
+  "notQualified": [
+    "Normal HTML/speaker PCM or acoustic/browser AEC",
+    "Muted HTML returned totalSamplesReceived0;133packet receipt is transport metadata, not decoded PCM",
+    "Return-video A/V timing; retained #127 raw105.104ms failure unchanged",
+    "System lock observation (generated model explicitly unlocked), microphone capture/effects (synthetic and VoicePolishOff)",
+    "Deployed TURN/Internet/mobile/universal capacity or shipping TCP/TLS adoption"
+  ],
+  "retainedFailedAttempts": {
+    "stream-wave3-guest-slots-browser-20261022.log": "Native full build passed; default mic offlineFX HAL stalled bootstrap",
+    "stream-wave3-guest-slots-browser-owned-20261022.log": "Room/bootstrap passed; synchronous Prepare renderer stall",
+    "stream-wave3-guest-slots-browser-diagnostic-20261022.log": "Exact Prepare expression blocked renderer, Browser.getVersion responded",
+    "stream-wave3-guest-slots-browser-null-sink-20261022.log": "Direct actual null constructor did not return within unchanged CDP10s",
+    "stream-wave3-guest-slots-browser-constructor-20261022.log": "Actual null constructor returned after CDP10s; second constructor then began",
+    "stream-wave3-guest-slots-browser-final-20261022.log": "Muted HTML did not consume return PCM; not a decoded-return positive control"
+  }
+}

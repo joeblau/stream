@@ -7,6 +7,8 @@ public struct ProviderAPI: Sendable {
     public typealias Request = @Sendable (ManagedProvider, URLRequest) async throws -> Data
     private let send: Request
     public init(send: @escaping Request) { self.send = send }
+    // Kept internal so the Restream adapter shares this exact transport boundary.
+    func performRestreamRead(_ request: URLRequest) async throws -> Data { try await send(.restream, request) }
     public func channels(_ provider: ManagedProvider) async throws -> [ProviderChannel] {
         let path: String, query: [String: String]
         switch provider {
@@ -58,7 +60,8 @@ public struct ProviderAPI: Sendable {
                 return ProviderEvent(id: id, provider: .restream, title: row["title"] as? String ?? id,
                     description: row["description"] as? String ?? "",
                     scheduledAt: (row["scheduledFor"] as? Double).flatMap { $0.isFinite ? Date(timeIntervalSince1970: $0) : nil },
-                    state: row["status"] as? String == "upcoming" ? .upcoming : .unknown)
+                    state: row["status"] as? String == "upcoming" ? .upcoming : .unknown,
+                    coverURL: (row["coverUrl"] as? String).flatMap(URL.init(string:)))
             })
         }
         // Twitch channel schedule segments are not discrete live-event grants.

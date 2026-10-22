@@ -183,7 +183,7 @@ private func require(_ value: @autoclosure () throws -> Bool, _ message: String)
         print("PASS: actual native file grant→shipping missing-linked-asset repair→app-scope bookmark; chooser UI qualification remains separate")
         let mediaProof = try await command("mediaPortable")
         try require(mediaProof.mediaQualified && mediaProof.assetMetadataQualified, "Native package media/metadata qualification did not finish")
-        print("PASS: actual sandbox package metadata rejects unsafe/undeclared/duplicate assets; normal video/pad/playlist/scene-sound portability, copied video decode and PCM after original removal, missing-reference Assets repair, and unchanged live profile")
+        print("PASS: actual sandbox package metadata rejects unsafe/undeclared/duplicate assets; normal video/pad/playlist/scene-sound portability, copied video decode and production sound-pad PCM/nonzero Program mix after original removal, same-ID missing-reference Assets repair, and unchanged live profile")
         for _ in 0..<2 { _ = try await NSWorkspace.shared.open([repair], withApplicationAt: appURL, configuration: open) }
         var ignored = linked
         for _ in 0..<100 {

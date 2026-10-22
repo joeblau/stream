@@ -34,25 +34,38 @@ source = source.replace('deinit { url.stopAccessingSecurityScopedResource() }', 
 boundary = '            let tracks = try await asset.load(.tracks)'
 assert source.count(boundary) == 1
 source = source.replace(boundary, boundary + '\n            await FixtureState.shared.waitAfterMetadata(url.lastPathComponent)')
+# A single fixture-owned host-time boundary: default is the actual CM clock.
+# Only the exact transport-range case freezes/advances it. Decoder, transport,
+# source frames and end callbacks remain the production implementation.
+clock = 'CMClockGetTime(CMClockGetHostTimeClock())'
+assert source.count(clock) >= 10
+source = source.replace(clock, 'FixtureClock.shared.now()')
 source += '''
 extension MediaSourcePlayback {
     func lifecycleHeldDelivery() -> (@Sendable () -> Void)? {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
-        guard let sample = audioOutput?.copyNextSampleBuffer() else { return nil }
+        let sample: CMSampleBuffer?
+        if let offlineAudio { sample = try? offlineAudio.next(through: trimOut, end: trimOut) }
+        else { sample = audioOutput?.copyNextSampleBuffer() }
+        guard let sample else { return nil }
         let handler = onAudioSample, generation = loadGeneration
         let held = FixtureSample(sample)
         return { [self] in deliverAudio([held.value], handler: handler, generation: generation) }
+    }
+    func lifecycleItemPosition() -> Double? {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return offlineAudio?.time(at: FixtureClock.shared.now(), playing: isPlaying).seconds
     }
     func lifecycleAnimatedCallbacks() -> ((@Sendable (SourceDefinitionID, MediaSourceStatus) -> Void)?, (@Sendable (SourceDefinitionID, Double) -> Void)?) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         return (animated?.onStatus, animated?.onReachedEnd)
     }
-    func lifecycleState() -> (loaded: Bool, player: Bool, reader: Bool, pending: Bool, retired: Bool) {
+    func lifecycleState() -> (loaded: Bool, videoPlayer: Bool, decoder: Bool, pending: Bool, retired: Bool, observing: Bool) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
-        return (didLoad, player != nil, audioReader != nil, loadTask != nil, retired)
+        return (didLoad, player != nil, audioReader != nil || offlineAudio != nil, loadTask != nil, retired, offlinePositionObserver != nil)
     }
 }
 '''

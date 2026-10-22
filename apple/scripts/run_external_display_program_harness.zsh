@@ -48,6 +48,18 @@ permissions_path=File.join(folder,'fixtures/PermissionsManager.swift'); File.wri
 target['sources'].reject!{|entry| entry.is_a?(String) && File.basename(entry)=='PermissionsManager.swift'}
 target['sources'][0]['excludes'] << 'PermissionsManager.swift' unless target['sources'][0]['excludes'].include?('PermissionsManager.swift')
 target['sources'] << permissions_path
+# This owned renderer workload declares its lifecycle context explicitly. The
+# production constructor still observes the real login session and fails closed
+# when it is locked or unavailable; this generated copy observes no OS events.
+controller_path=File.join(folder,'fixtures/Mac/StreamController.swift')
+controller=File.read(File.exist?(controller_path) ? controller_path : File.join(root,'StreamMac/StreamController.swift'))
+constructor='DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))'
+abort 'Resilience construction fixture boundary changed' unless controller.scan(Regexp.new(Regexp.escape(constructor))).length == 1
+controller.sub!(constructor, 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"), observeSystem: false, initialSessionState: .unlocked)')
+FileUtils.mkdir_p(File.dirname(controller_path)); File.write(controller_path,controller)
+target['sources'].reject!{|entry| entry.is_a?(String) && File.basename(entry)=='StreamController.swift'}
+target['sources'][0]['excludes'] << 'StreamController.swift' unless target['sources'][0]['excludes'].include?('StreamController.swift')
+target['sources'] << controller_path
 spec['targets']['ExternalDisplayProgramHarness']=target
 spec['schemes']['ExternalDisplayProgramHarness']={'build'=>{'targets'=>{'ExternalDisplayProgramHarness'=>'all'}}}
 File.write(File.join(folder,'project.json'),JSON.pretty_generate(spec))

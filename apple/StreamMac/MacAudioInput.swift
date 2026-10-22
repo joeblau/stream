@@ -114,7 +114,17 @@ final class MacAudioInput: ObservableObject {
     private let sampleQueue = DispatchQueue(label: "com.joeblau.StreamMac.mic-samples",
                                             qos: .userInitiated)
 
-    init() {
+    private let discoverDevices: () -> [AVCaptureDevice]
+    private let defaultDeviceUID: () -> String?
+    private let resolveDevice: (String) -> AVCaptureDevice?
+
+    init(discoverDevices: @escaping () -> [AVCaptureDevice] = {
+        AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInMicrophone, .external], mediaType: .audio, position: .unspecified).devices
+    }, defaultDeviceUID: @escaping () -> String? = { AVCaptureDevice.default(for: .audio)?.uniqueID },
+         resolveDevice: @escaping (String) -> AVCaptureDevice? = { AVCaptureDevice(uniqueID: $0) }) {
+        self.discoverDevices = discoverDevices
+        self.defaultDeviceUID = defaultDeviceUID
+        self.resolveDevice = resolveDevice
         refreshDevices()
     }
 
@@ -130,16 +140,51 @@ final class MacAudioInput: ObservableObject {
 
     /// Starts capture from the system default audio input device.
     func start() {
-        guard let device = AVCaptureDevice.default(for: .audio) else {
+        guard let uid = defaultDeviceUID() else {
             errorMessage = "No audio input device is available."
             audioInputLog.error("No default audio input device")
+            return
+        }
+        start(deviceUID: uid)
+    }
+
+    /// A persisted prohibited selection must not silently capture the default.
+    /// Missing ordinary selections retain the existing default fallback policy.
+    func start(preferredDeviceUID: String?) {
+        if let uid = preferredDeviceUID {
+            guard StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: uid) else {
+                refuseLoopbackInput(); return
+            }
+            if let device = devices.first(where: { $0.uniqueID == uid }) {
+                start(device: device); return
+            }
+        }
+        start()
+    }
+
+    func start(deviceUID: String) {
+        guard StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: deviceUID) else {
+            refuseLoopbackInput(); return
+        }
+        guard let device = resolveDevice(deviceUID) else {
+            stopDefaultCapture()
+            errorMessage = "The selected audio input is unavailable. Choose another microphone."
             return
         }
         start(device: device)
     }
 
+    private func refuseLoopbackInput() {
+        stopDefaultCapture()
+        lastRequestedDeviceUID = nil
+        errorMessage = StudioAudioDeviceRouting.feedbackRepair
+    }
+
     /// Starts capture from a specific device (one of `devices`).
     func start(device: AVCaptureDevice) {
+        guard StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: device.uniqueID) else {
+            refuseLoopbackInput(); return
+        }
         guard permissionAvailable else { return }
         stopDefaultCapture()
         let request = defaultRequest
@@ -184,12 +229,7 @@ final class MacAudioInput: ObservableObject {
 
     /// Re-enumerates audio input devices (built-in mic plus wired/USB inputs).
     func refreshDevices() {
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInMicrophone, .external],
-            mediaType: .audio,
-            position: .unspecified
-        )
-        devices = discovery.devices
+        devices = discoverDevices().filter { StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: $0.uniqueID) }
         // A05: remember names (a later-unplugged enabled device stays named)
         // and read each device's hardware input channel count from its
         // formats — the channel-mapping UI's option list.
@@ -253,9 +293,11 @@ final class MacAudioInput: ObservableObject {
     private func reconcileAdditionalCaptures() {
         let enabled = additionalInputs
         let enabledUIDs = Set(enabled.map(\.deviceUID))
+        additionalInputErrors = additionalInputErrors.filter { enabledUIDs.contains($0.key) }
 
         // Stopped being enabled (or disarmed): tear the capture down.
-        for (uid, capture) in Array(deviceCaptures) where !additionalInputsArmed || !enabledUIDs.contains(uid) {
+        for (uid, capture) in Array(deviceCaptures) where !additionalInputsArmed || !enabledUIDs.contains(uid)
+            || !StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: uid) {
             let box = UncheckedSendableBox(capture.session)
             sessionQueue.async { box.value.stopRunning() }
             deviceCaptures[uid] = nil
@@ -270,6 +312,10 @@ final class MacAudioInput: ObservableObject {
         var missing: Set<String> = []
         for selection in enabled {
             let uid = selection.deviceUID
+            guard StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: uid) else {
+                additionalInputErrors[uid] = StudioAudioDeviceRouting.feedbackRepair
+                continue
+            }
             guard let device = devices.first(where: { $0.uniqueID == uid }),
                   device.isConnected else {
                 // Enabled but unplugged: report honestly; the same uniqueID
@@ -296,6 +342,9 @@ final class MacAudioInput: ObservableObject {
     private func startAdditionalCapture(device: AVCaptureDevice,
                                         mapping: AudioInputMapping) {
         let uid = device.uniqueID
+        guard StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: uid) else {
+            additionalInputErrors[uid] = StudioAudioDeviceRouting.feedbackRepair; return
+        }
         let request = additionalRequest
         Task { [weak self] in
             let granted = await Self.requestMicrophoneAccess()
@@ -313,6 +362,9 @@ final class MacAudioInput: ObservableObject {
     private func configureAndStartAdditional(device: AVCaptureDevice,
                                              mapping: AudioInputMapping) {
         let uid = device.uniqueID
+        guard StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: uid) else {
+            additionalInputErrors[uid] = StudioAudioDeviceRouting.feedbackRepair; return
+        }
         guard deviceCaptures[uid] == nil else { return }
         let session = AVCaptureSession()
         session.beginConfiguration()
@@ -402,6 +454,9 @@ final class MacAudioInput: ObservableObject {
     }
 
     private func configureAndStart(device: AVCaptureDevice) {
+        guard StudioAudioDeviceRouting.allowsCaptureOrMonitoring(deviceUID: device.uniqueID) else {
+            refuseLoopbackInput(); return
+        }
         let session = AVCaptureSession()
         session.beginConfiguration()
         do {

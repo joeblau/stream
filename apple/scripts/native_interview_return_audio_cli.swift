@@ -139,6 +139,7 @@ private final class ReturnPrivateTone: @unchecked Sendable {
     let privacyTokens = (0..<4).map { _ in UUID() }
     let recipientProbe = ReturnProgramProbe(), recipientProbeToken = UUID()
     let local = AudioChannelID.media(SourceDefinitionID())
+    let preparedSlot: GuestSlot
     private var producer: Task<Void, Never>?
     private var privateMicProducer: Task<Void, Never>?
     private let privateMicTone = ReturnPrivateTone()
@@ -148,8 +149,20 @@ private final class ReturnPrivateTone: @unchecked Sendable {
         saved.outputProfile = .init(canvasWidth: 320, canvasHeight: 180, frameRate: 30)
         saved.monitoringEnabled = false; saved.audioInputs = []
         saved.micVolume = 0
+        // This owned synthetic-routing fixture does not qualify microphone FX.
+        // Keep the real mixer/insert gate, with the ordinary Off configuration,
+        // so an offline FX graph cannot initialize a physical HAL output.
+        saved.voicePolishEnabled = false
         DesktopSettingsStore().saveNonSecret(saved)
         scenes = SceneStore(directory: DesktopStorage.projectDirectory)
+        // Pick the second pre-arrival position deliberately. Admission must not
+        // silently choose the first free slot and reconnect must reuse this one.
+        _ = scenes.createGuestSlot(name: "Owned unused position")
+        var prepared = scenes.createGuestSlot(name: "Owned browser interview position")!
+        prepared.title = "Owned interview title"; prepared.localName = "Owned local guest name"
+        prepared.cameraPlaceholder.message = "Owned waiting camera"
+        prepared.screenPlaceholder.message = "Owned waiting screen"
+        scenes.replaceGuestSlot(prepared); preparedSlot = prepared
         let blank = scenes.addScene(Scene(name: "Owned Guest Return", layers: [], background: .solid(colorHex: "#000000")))
         preview = .init(selected: blank)
         controller = .init(sceneStore: scenes, previewProgram: preview, permissions: PermissionsManager(), audioEngine: mixer)
@@ -168,6 +181,21 @@ private final class ReturnPrivateTone: @unchecked Sendable {
     }
     func command(_ command: NativeInterviewCommand) throws {
         guard dispatcher.execute(.interview(command)).error == nil else { throw NativeInterviewError.changed }
+    }
+    func verifyPreparedSlotReload() throws {
+        let reloaded = SceneStore(directory: DesktopStorage.projectDirectory)
+        guard let saved = reloaded.guestSlots.first(where: { $0.id == preparedSlot.id }),
+              saved == scenes.guestSlots.first(where: { $0.id == preparedSlot.id }),
+              saved.cameraSourceID == preparedSlot.cameraSourceID,
+              saved.screenSourceID == preparedSlot.screenSourceID,
+              saved.cameraSourceID != saved.screenSourceID,
+              saved.reconnectPeerID == manager.currentReadyLease?.receive.peerID else { throw NativeInterviewError.changed }
+        for (id, role) in [(saved.cameraSourceID, GuestSourceRole.camera), (saved.screenSourceID, .screen)] {
+            guard let source = reloaded.sources.first(where: { $0.id == id }),
+                  case .guest(let payload) = source.payload, payload.slotID == saved.id, payload.role == role else {
+                throw NativeInterviewError.changed
+            }
+        }
     }
     func startTone() async {
         _ = await mixer.reserveCaptureHoldback(token: UUID(), milliseconds: 60)
@@ -271,6 +299,13 @@ private final class ReturnPrivateTone: @unchecked Sendable {
                         }, "audioAccepted": admission.acceptedPackets, "program": current.program.snapshot(),
                         "programAllowed": current.manager.state.routes.values.contains { $0.programAllowed },
                         "privateTalkback": current.manager.talkback != nil]
+                    if let slot = current.scenes.guestSlots.first(where: { $0.id == current.preparedSlot.id }) {
+                        state["preparedSlot"] = ["id": slot.id.uuidString.lowercased(),
+                            "camera": slot.cameraSourceID.rawValue.uuidString.lowercased(),
+                            "screen": slot.screenSourceID.rawValue.uuidString.lowercased(),
+                            "name": slot.resolvedName, "title": slot.title,
+                            "peer": slot.reconnectPeerID?.uuidString.lowercased() ?? ""]
+                    }
                     state["publicChatEnabled"] = current.manager.publicChatContext != nil
                     state["privacyBuses"] = current.privacyProbes.map { $0.snapshot() }
                     state["recipientPCM"] = current.recipientProbe.snapshot()
@@ -338,6 +373,12 @@ private final class ReturnPrivateTone: @unchecked Sendable {
                     while current.manager.state.snapshot.phase != .connected && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
                     guard current.manager.state.snapshot.phase == .connected else { throw NativeInterviewError.timeout }
                     _ = output.emit(["type": "private-invite", "url": try await current.manager.inviteForSharing().absoluteString])
+                case "slot-assign":
+                    guard let guest, current.manager.assignSlot(current.preparedSlot.id, to: guest) else { throw NativeInterviewError.changed }
+                    _ = output.emit(["type": "ack", "command": command])
+                case "slot-reload-check":
+                    try current.verifyPreparedSlotReload()
+                    _ = output.emit(["type": "ack", "command": command])
                 case "admit": guard let guest else { throw NativeInterviewError.malformed }; try current.command(.admit(guest))
                 case "message":
                     guard let context = current.manager.currentReadyLease, context.receive.peerID == guest,

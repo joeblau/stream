@@ -221,3 +221,128 @@ Final exact GitHub reconciliation closes #175 and #158 against their original
 criteria, marks their parent checklists and verifies **39 open / 22 closed**
 in the initial inventory, with zero open PRs. The remaining roadmap stays open;
 controlled qualification and local builds do not make pending hosted checks green.
+
+## Wave-three integrated fixes and measured gates — 2026-10-22 UTC
+
+Combined source `046c4c9` is published in `4b959de`, after `d413aa1`.
+This section supersedes earlier snapshots' remaining-gate wording. Independent
+original-criteria review and exact paginated GitHub reconciliation close
+**#128 and #129**, check their parent checklist and verify **37 open / 24 closed**
+in the initial 61-issue inventory, with zero open PRs.
+
+| Task or scope | Integrated change and actual evidence | Current disposition |
+| --- | --- | --- |
+| #133 provider accounts | `c85a401` fences delayed Twitch validation against credential refresh/replacement/cancellation. `e78e1f4` adds permitted exact-account Restream relay/key discovery and supported metadata; `0dd847a` adds public Twitch ingest selection and exact-account disabled-draft import. Native account/vault/API/destination fixtures pass; actual public discovery returns 14 Twitch and 19 Restream servers. | **Open.** The accepted Restream public-client OAuth broker boundary is unfinished software, not included in this frozen source. Registered consent and authorized ingest remain unqualified; public server discovery is not a live broadcast. |
+| #90 accessibility | `e2a3fbf` reproduces and fixes six stale queued native-focus races across replacement/detach/reattach, moved controls, newer presentations and missing scope. Actual field-editor/current-owner, live fallback, nested bookmarks and production sheet/attachment positives pass. | **Open.** Remaining semantic SwiftUI AX labels/actions/order, virtual fader/panel/operator qualification and visual contrast are unchanged. Native focus ownership does not substitute for a semantic accessibility tree or contrast proof. |
+| #155 portable shows | `180169f` adds production audio-only AVAudioFile decoding without AVPlayer/AVAssetReader or an output device. Nine actual strict lifecycle/format/timing/zero-trim cases pass. The final full signed sandbox app passes actual imported and repaired sound-pad PCM plus nonzero Program mix after original removal, alongside video/package/remap/private-exclusion/repair/restart assertions. | **Open only for successful native keyboard chooser selection.** The former full-pad HAL blocker is resolved through the production audio-only path. Actual typed drops and LaunchServices remain distinct from physical Finder gestures; distribution signing is not an extra original acceptance gate. |
+| #128 / #129 Backstage and persistent slots | `7083f6a` passes the actual Manager/default native SDK/owned Worker/local UDP TURN/Chrome lifecycle: deliberate second pre-arrival slot, stable camera/screen IDs and bound automatic metadata, SceneStore reload, native decoded OnAir PCM/Backstage exclusion, full-lease rejoin without admission replay, removal/end cleanup and selected relay candidates. | **Closed after publication and independent original-criteria review.** Final universal app/bundle and locally filtered Core verification pass; the parent checklist and exact API inventory are reconciled. Explicit null AudioContext sinks and muted HTML scope this proof to media/control/native PCM. The 133 returned packets with zero HTML decoded samples do not establish normal speaker output/AEC or return-video sync. |
+| Owned controller qualifications | `5efd2cf` managed-start, `987c04f` deck/audio/dual-canvas and `8245c3c` external-output generators declare an explicit simulated unlocked session only in their owned controller copies. Managed and external native suites pass; all three deck generators/source registrations and one full native IPC/512-layer/dispatcher suite pass. Production observation still detects the real locked host. | **Fixture correction integrated.** Production session defaults/guards and shared transport helpers are unchanged. Broad deck audio/dual-canvas media graphs were not rerun in this wave; no new HAL/decoder qualification is inferred. |
+| #92 performance | Actual hosted ARM workloads each run 600 seconds and achieve approximately 19.5367/20.2333 rendered fps with 7/0 failed renders. `c3fda71` now preserves atomic failure metrics and separates sparse replay-source inventory from nominal capacity, while retaining the original 30fps gate. Focused tests/smoke qualify diagnostics only. | **Open; original ARM sustained qualification failed.** The diagnostic correction is not a performance fix or new 600-second pass. Intel also fails the original video-PTS versus host-arrival-duration gate. Representative mixes/thermal evidence and measured resource ceilings remain unqualified. |
+| #171 isolated recording | Original `d413aa1` 10-second regression loses ISO audio while Program completes; the focused local correction passes. A local 2×60-second run retains all four ISO files, no missing camera-handoff frames, camera-A associated PCM cues within 80ms and a healthy RTMP output. | **Open; follow-up not counted integrated.** Strict guest lease-gap decoding finds a processed-ISO offline placeholder. Its factory-only fix and final unchanged 80ms/alias-repeat qualification are pending; partial positives do not supersede that gate. The measured enabled Mac class remains explicit. |
+| #152 sample profiles | Current official SDK/CLI/profile/enterprise docs still require app composition/export. New official MCP support triggers configured actions, rather than authoring profiles. The session remains locked, so the known blocked editor/AX mechanism was not retried. All 11 V2/12 V3 profile files, 3,440 plugin file/symlink records and app preference hashes remain unchanged. | **Open.** No genuine stream/record/interview exports were produced. A recipe, unrelated official sample or hand-authored archive is not an imported/editor-validated starter artifact. |
+
+Hosted [CI run 39714685947](https://github.com/joeblau/stream/actions/runs/39714685947)
+at exact published `d413aa1` is a terminal failure: **iOS succeeds; ARM and Intel
+each pass the full 586-test/82-suite Core run**, then both fail the same generated
+`MediaValues.swift` dependency on `ResolvedAssetAccess` in step 10.
+`dfa80f6` corrects that exact guest-preparation type-extraction boundary; the
+actual local 80-layout preparation suite passes. Later hosted qualifications
+were skipped. Local fixture corrections do not relabel this original run green.
+These full Core passes supersede the earlier 563/80 AudioHAL-excluded result
+only for their exact published source; all historical failures remain recorded.
+
+The actual ARM [600-second workload run 39713883982](https://github.com/joeblau/stream/actions/runs/39713883982)
+failed its original nominal gate at published `0d79056`. The original recordings
+and diagnostic failure receipt remain preserved in
+[PERFORMANCE_HOSTED_ARM_FAILURE_2026-10-22.json](PERFORMANCE_HOSTED_ARM_FAILURE_2026-10-22.json).
+Intel is also terminal **FAIL**: its workloads report 10,123/2,209 rendered
+frames, then the original 80ms video-PTS versus host-arrival-duration comparison
+fails at 59.192148398s divergence. This is not a decoded waveform A/V drift
+diagnosis. Both performance jobs failed; no new dispatch occurred. Artifact
+upload success, a workflow dispatch and a short smoke are not sustained capacity
+passes. The Intel original is retained at
+`/tmp/stream-performance-intel119611316368-original.log`.
+
+Final frozen `046c4c9` **passes unsigned universal Release and the actual bundle
+audit**, including arm64/x86_64, embedded camera/helper, sandbox declarations,
+six App Intents/three entities and no validation hooks. Logs:
+`/tmp/stream-wave3-final-account-{release,bundle}-20261022.log`. Its new local
+Core run **passes 563 tests/80 suites in 54.667s**, excluding exactly
+ChannelFXProcessorTests and VoicePolishProcessorTests for the known host HAL
+limitation; `/tmp/stream-wave3-shared-core-20261022.log`. This remains a filtered
+pass. The earlier published `d413aa1` full 586/82 hosted ARM/Intel runs precede
+the new ingest Core fields; no exact-source equivalence or new full-suite pass
+is claimed. Earlier `a5524f2` universal app/bundle also passed. Source publication and
+#128/#129 closure are now verified against the API. Optional TLS
+positive-control/guard-masking work and the Restream broker remain WIP outside
+this frozen source and are not counted as integrated acceptance.
+
+Detailed scoped receipts: [native focus](STUDIO_FOCUS_OWNERSHIP_2026-10-22.json),
+[saved slots/Backstage](GUEST_SLOT_BACKSTAGE_2026-10-22.json),
+[portable shows](PORTABLE_SHOW_NATIVE_ENTRY.md),
+[provider accounts](PROVIDER_ACCOUNTS.md), and the wave-three validation/report
+paths in [MACOS_TASK_STATUS.json](MACOS_TASK_STATUS.json).
+
+
+## Restream broker and optional TLS follow-up — 2026-10-22
+
+`4e32ca6` replaces direct native Restream confidential-secret authorization
+with a server Durable Object broker and public native S256/session client.
+Both settings panels accept a trusted HTTPS broker URL and expose cancellation;
+legacy credentials remain inactive and preserved. Independent review fixed
+failed-delete credential restoration, missing cancellation, and a cached-refresh
+revocation race. Eight actual workerd tests, strict types, local bundle dry-run,
+native authority/storage/controller and account/ingest regressions pass.
+`6cf420d` adds worker and native ownership CI coverage. The service is not
+deployed/configured, and real consent/chat/ingest acceptance remains open in
+#133. See [the broker contract](RESTREAM_AUTH_BROKER.md).
+
+Exact broker source passes unsigned macOS universal Release, actual bundle
+audit, a full iOS device-source build, and **563 tests/80 suites in 52.366s**
+with exactly the same two local DSP suite exclusions described above. These
+are source/build/local-fixture checks, not signed distribution or live OAuth.
+Logs: `/tmp/stream-broker-integrated-{mac-release,bundle,ios-device,core}-20261022.log`.
+
+`862ee7d` integrates an explicitly guarded source-built TURN/TLS prototype.
+Trusted relay control, certificate rejection and the real socket lifetime
+regression pass. Actual incoming camera/Opus is observed, but full returned
+browser PCM is still zero despite a verified native host tone and allowed
+capture route. **tlsQualified remains false**; SDK/default guards are unchanged.
+No issue closes from this prototype. See [the scoped qualification](NATIVE_GUEST_TLS_QUALIFICATION.md).
+
+The earlier published `b28510a` hosted ARM and iOS runs both pass all 586 Core
+tests without exclusions. ARM later fails the playback fixture pause-position
+assertion at `media_playback_lifecycle_harness.swift:201`; the original log is
+retained and the actual clock/position cause is under investigation with
+unchanged limits. This is not a whole-CI pass. The original sustained
+performance failures and pending strict ISO timing proof remain unchanged.
+The verified issue inventory remains **24 closed /37 open**.
+
+Final combined `862ee7d` also passes universal Release and the actual bundle
+audit after adding the guarded macOS TLS source. Its shared Core/iOS source
+is unchanged from the broker integration proof. No shipping TLS guard or SDK
+was adopted.
+
+
+## Playback CI fixture correction — 2026-10-22
+
+`7898737` changes only the playback fixture and its generated clock boundary.
+Controlled scheduler starvation reproduced both the original pause-range and
+loop-reset failures while actual playback followed the measured host clock.
+The exact elapsed time in the failed hosted job remains unknown. The correction
+preserves the original **0.39...0.49** pause range and exact **0.3** loop reset
+under controlled time, and adds separate measured real-host pause/PCM/PTS/end
+checks. Normal and deliberately delayed runs pass all ten cases; independent
+review and the parent integrated runner pass. Production playback is unchanged.
+Parent log: `/tmp/stream-wave4-root-media-lifecycle-20261022.log`. Fresh hosted
+CI remains required.
+
+Exact published `a346f56` iOS now passes all586 Core tests/82 suites in180.802s;
+the broker and browser interview workflows also pass. These results do not
+claim the whole desktop CI succeeds. The pending ISO branch now passes all
+four decoded files at the unchanged80ms gate, with exact cue counts, identities,
+marked black/silence and common origins/frontiers. Its complete workload still
+fails the separate RTMP frame count:3143 over123.9s versus the unchanged>3400
+requirement, despite continuous media and68ms maximum frame spacing. That
+production publisher discrepancy is under investigation. #171 remains open;
+the verified inventory remains **24 closed /37 open**.

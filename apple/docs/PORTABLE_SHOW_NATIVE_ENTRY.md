@@ -196,3 +196,52 @@ of the isolated worktree. Twelve PortableShow/StudioProjects tests also passed i
 `/tmp/stream-wave2-projects-core-tests-20261022.log`, including stinger grant
 exclusion and asset-ID remapping. The library-aware engine separately passed all
 five actual lifecycle cases in `/tmp/stream-wave2-projects-lifecycle-20261022.log`.
+
+
+## Production audio-only portability, 2026-10-22
+
+Audio-only media now decodes through `AVAudioFile` in production. Unlike the
+video route, this path creates neither `AVPlayer` nor `AVAssetReader`; it opens
+no playback device. The same monotonic Core Media host clock drives position,
+with bounded native-rate PCM reads delivered through the existing soundboard
+pump, channel ingest, faders/effects and Program mix. Video playback retains
+its existing player/reader route. Apple documents that
+[`AVAudioFile` reads files as PCM buffers](https://developer.apple.com/documentation/avfaudio/avaudiofile).
+
+Pause freezes the source-position anchor and rewinds its bounded lookahead for
+resume; seek/restart/loops reset the anchor and source frame. A playing-only
+position/end observer preserves audition end behavior without requiring a
+render pull. Scope ownership, load-generation checks and terminal sample drain
+remain shared with video playback. Delayed pulls skip obsolete source frames
+without discarding the first valid chunk at the admission edge. A nonpositive
+trim span produces a stable readable error with no clock/decoder churn; editing
+the trim repairs the same source.
+
+The full signed sandbox fixture uses the real production soundboard decoder and
+unchanged mixer ingest. It requires actual PCM and nonzero Program mix both
+from copied media after original-file removal and after same-ID linked-asset
+repair. The bounded `media-qualification.json` receipt retains both source and
+mixed-chunk counts. It substitutes no fixture decoder or successful panel result.
+The previous HAL-stall log remains historical evidence of the before behavior.
+Successful native keyboard chooser selection remains a separate open check.
+
+
+Final revised build/signature audit:
+`/tmp/stream-wave3-portable-audio-native-range-build-20261022.log`.
+Final full native run passed in
+`/tmp/stream-wave3-portable-audio-native-final-run-20261022.log`, including all
+previous native intake, import, copied video, sandbox repair and restart checks.
+The receipt in
+`build/portable-show-native-validation/artifacts-d9190b11-edc2-4eda-b361-52039fb7c7c9/native-receipts/media-qualification.json`
+records two copied PCM chunks and one nonzero copied Program chunk, then two
+repaired PCM chunks and one nonzero repaired Program chunk, after removing the
+original files. This resolves the earlier audio-only sound-pad decoder limit.
+The real chooser still canceled/aborted and remains UNQUALIFIED.
+
+Nine focused strict Swift 6 cases also passed in
+`/tmp/stream-wave3-portable-audio-zero-trim-20261022.log`: actual WAV, 44.1 kHz
+mono AIFF and AAC/M4A; source-frame trim/seek and pause/resume; host timestamps
+and frame durations; loops/end/recovery; delayed/starved pulls; zero-trim error
+and repair; stale loads, scope release, terminal PCM drain and animated callback
+retirement. These tests retain the production decoder and clock; their external
+bookmark boundary counts owned scope tokens without claiming a sandbox grant.

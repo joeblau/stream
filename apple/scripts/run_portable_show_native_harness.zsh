@@ -45,7 +45,14 @@ end
 generated_replace(target, root, folder, 'StreamController.swift') do |source|
   seam = '    func startPreview() {'
   abort 'Preview fixture boundary changed' unless source.include?(seam)
-  source.sub(seam, "    func startPreview() {\n        PortableNativeAppDriver.previewSuppressed += 1\n        return")
+  source.sub(seam, "    func startPreview() {\n        PortableNativeAppDriver.previewSuppressed += 1\n        return") + <<'SWIFT'
+
+// Read-only owned mixer access: production decode, ingest, faders and bus taps
+// remain unchanged; this fixture starts no capture or output device.
+extension StreamController {
+    var portableOwnedMixer: AudioMixEngine { audioEngine }
+}
+SWIFT
 end
 generated_replace(target, root, folder, 'RecordingController.swift') do |source|
   abort 'Recording folder boundary changed' unless source.include?('defaultDirectory: URL? = nil')
@@ -154,7 +161,7 @@ finally:
  # Only bounded metadata from this unique generated app is retained. The
  # persisted runtime and bookmark bytes remain in its owned app container.
  receipts=root/'native-receipts';receipts.mkdir()
- for name in ['report.json','open-receipt.json','termination-trace.json','window-close-trace.json','lifecycle-trace.json','media-progress.json']:
+ for name in ['report.json','open-receipt.json','termination-trace.json','window-close-trace.json','lifecycle-trace.json','media-progress.json','media-qualification.json']:
   source=container/name
   if not source.is_symlink() and source.is_file() and source.stat().st_size<=1024*1024:shutil.copyfile(source,receipts/name)
  print('Owned native qualification artifacts:',root,flush=True)

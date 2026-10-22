@@ -121,22 +121,37 @@ actor ProviderTokenVault {
         }
     }
     func validateTwitch() async throws {
-        let expected = generation(.twitch), token = try await current(.twitch)
-        var request = URLRequest(url: URL(string: "https://id.twitch.tv/oauth2/validate")!)
-        request.setValue("Bearer \(token.access)", forHTTPHeaderField: "Authorization"); request.timeoutInterval = 30
-        let (data, response) = try await transport(request)
-        do { try ProviderFailure.check(data: data, response: response) }
-        catch {
-            if (error as? ProviderFailure)?.kind == .authorization, generation(.twitch) == expected { disconnect(.twitch) }
-            throw error
+        let expected = generation(.twitch)
+        for attempt in 0..<2 {
+            try Task.checkCancellation()
+            let token = try await current(.twitch)
+            guard generation(.twitch) == expected else { throw CancellationError() }
+            try Task.checkCancellation()
+            var request = URLRequest(url: URL(string: "https://id.twitch.tv/oauth2/validate")!)
+            request.setValue("Bearer \(token.access)", forHTTPHeaderField: "Authorization"); request.timeoutInterval = 30
+            let (data, response) = try await transport(request)
+            try Task.checkCancellation()
+            guard generation(.twitch) == expected else { throw CancellationError() }
+            // Refresh preserves the account generation but can rotate both
+            // credentials while validation is suspended. Its predecessor's
+            // response must neither overwrite nor revoke the refreshed token.
+            guard load(.twitch) == token else {
+                if attempt == 0 { continue } // Validate the current token once.
+                throw CancellationError()
+            }
+            do { try ProviderFailure.check(data: data, response: response) }
+            catch {
+                if (error as? ProviderFailure)?.kind == .authorization { disconnect(.twitch) }
+                throw error
+            }
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["client_id"] as? String == clientID(.twitch), let id = object["user_id"] as? String,
+                  ProviderChannel.validID(id), let scopes = object["scopes"] as? [String],
+                  let seconds = object["expires_in"] as? Double, seconds.isFinite, seconds > 0 else { throw ProviderFailure(.authorization) }
+            var validated = token; validated.scopes = scopes; validated.expiresAt = Date().addingTimeInterval(seconds)
+            try save(validated, provider: .twitch)
+            return
         }
-        guard generation(.twitch) == expected,
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              object["client_id"] as? String == clientID(.twitch), let id = object["user_id"] as? String,
-              ProviderChannel.validID(id), let scopes = object["scopes"] as? [String],
-              let seconds = object["expires_in"] as? Double, seconds.isFinite, seconds > 0 else { throw ProviderFailure(.authorization) }
-        var validated = token; validated.scopes = scopes; validated.expiresAt = Date().addingTimeInterval(seconds)
-        try save(validated, provider: .twitch)
     }
     func send(_ provider: ManagedProvider, request: URLRequest, expectedGeneration: UUID? = nil,
               retryAuthorizedGET: Bool = true,

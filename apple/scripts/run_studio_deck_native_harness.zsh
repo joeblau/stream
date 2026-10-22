@@ -43,8 +43,16 @@ start=mic.index('    private nonisolated static func requestMicrophoneAccess() a
 finish=mic.index('    private func configureAndStart(device:',start)
 abort 'Microphone fixture boundary changed' unless start && finish
 File.write(File.join(folder,'fixtures/MacAudioInput.swift'),mic[0...start] + "    private nonisolated static func requestMicrophoneAccess() async -> Bool { false }\n\n" + mic[finish..])
-target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift','MacAudioInput.swift']}
+controller=File.read('StreamMac/StreamController.swift')
+constructor='DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"))'
+abort 'Owned lifecycle constructor boundary changed' unless controller.scan(constructor).length == 1
+# This generated workload explicitly simulates an unlocked session and later
+# injects lifecycle events. Production still samples the real login session.
+controller.sub!(constructor, 'DesktopResilienceCoordinator(url: DesktopStorage.projectDirectory.appendingPathComponent("resilience.json"), observeSystem: false, initialSessionState: .unlocked)')
+File.write(File.join(folder,'fixtures/StreamController.swift'),controller)
+target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift','MacAudioInput.swift','StreamController.swift']}
 target['sources'] << File.join(root,folder,'fixtures/MacAudioInput.swift')
+target['sources'] << File.join(root,folder,'fixtures/StreamController.swift')
 target['sources'] << File.join(root,'scripts/studio_deck_native_harness.swift')
 wire=File.read('scripts/studio_local_control_harness.swift')
 wire_start=wire.index('@MainActor final class MemoryCredentials:')
