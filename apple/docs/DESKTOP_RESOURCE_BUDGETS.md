@@ -243,6 +243,8 @@ isolate destruction. Events are constructed outside mailbox critical locks.
 The trace retained 22,780/22,788 events with no omissions or synchronous thread
 migrations. Mean full-record calibration overhead was about 0.0017 ms per call;
 nested measurements overlap and instrumentation adds cost.
+Both healthy callback peaks contain the profiler-only first-warm pixel hash
+(10.917/13.097 ms); they do not measure a shipping recorder callback peak.
 
 The regular Core Image call's wall/CPU difference does not separate off-thread
 work, host scheduling, driver work and GPU waiting. The existing task wait is

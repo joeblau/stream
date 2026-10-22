@@ -143,6 +143,13 @@
             "p95StartGapMilliseconds": 39.17354166333098
           }
         },
+        "maximumHealthyCallbackContainsOneTimePixelHash": {
+          "callbackThreadCPUMilliseconds": 9.943667,
+          "callbackWallMilliseconds": 11.273500000243075,
+          "hashIntervalNestedInCallback": true,
+          "oneTimeHashWallMilliseconds": 10.9166666661622,
+          "sequence": 31
+        },
         "slowOnlyPostSequences": [],
         "synchronousThreadMigrations": 0,
         "ticksWithoutPrimaryFanout": [
@@ -1391,6 +1398,13 @@
             "p95StartGapMilliseconds": 37.163249995501246
           }
         },
+        "maximumHealthyCallbackContainsOneTimePixelHash": {
+          "callbackThreadCPUMilliseconds": 11.271375,
+          "callbackWallMilliseconds": 13.189749995945022,
+          "hashIntervalNestedInCallback": true,
+          "oneTimeHashWallMilliseconds": 13.097166665829718,
+          "sequence": 31
+        },
         "slowOnlyPostSequences": [
           601
         ],
@@ -2574,7 +2588,8 @@
     "Local regular CI wall exceeds caller thread CPU, and existing sampled wait is mostly non-CPU. Off-thread work, host scheduling, driver work and GPU wait are not separated by regular-call wall minus CPU; kernel task samples are execution time, not utilization.",
     "No hosted-like whole-skip or1second stall reproduced. The local trace identifies API wall and small mailbox costs on this M3Max; it establishes no cause or fix for previous hosted paravirtual ARM/Intel frame deficits, historical59second endpoint divergence or the Intel1380second inspection deadline.",
     "Static first-warm pixel hash matches the prior trace. Replay source movie differs because this static run lost one allocation opportunity; replay warm hashes are not comparable across those different sources. No new fullbuffer pixel-equivalence claim is made.",
-    "No justified production patch is proposed. #92 remains open; old hosted logs/artifacts and nominal failures are unchanged."
+    "No justified production patch is proposed. #92 remains open; old hosted logs/artifacts and nominal failures are unchanged.",
+    "Both maximum healthy callback spans occur at sequence31 and include the profiler-only first-warm fullbuffer hash:10.916667ms inside11.273500ms static,13.097167ms inside13.189750ms replay. Those callback peaks are instrumentation overhead, not an observed shipping recorder callback cost."
   ],
   "secondsPerCase": 20,
   "sourceCommit": "78796d13dffc193217c6aa6ec3a8ecfb8a562182",
