@@ -282,3 +282,43 @@ Detailed scoped receipts: [native focus](STUDIO_FOCUS_OWNERSHIP_2026-10-22.json)
 [portable shows](PORTABLE_SHOW_NATIVE_ENTRY.md),
 [provider accounts](PROVIDER_ACCOUNTS.md), and the wave-three validation/report
 paths in [MACOS_TASK_STATUS.json](MACOS_TASK_STATUS.json).
+
+
+## Restream broker and optional TLS follow-up — 2026-10-22
+
+`4e32ca6` replaces direct native Restream confidential-secret authorization
+with a server Durable Object broker and public native S256/session client.
+Both settings panels accept a trusted HTTPS broker URL and expose cancellation;
+legacy credentials remain inactive and preserved. Independent review fixed
+failed-delete credential restoration, missing cancellation, and a cached-refresh
+revocation race. Eight actual workerd tests, strict types, local bundle dry-run,
+native authority/storage/controller and account/ingest regressions pass.
+`6cf420d` adds worker and native ownership CI coverage. The service is not
+deployed/configured, and real consent/chat/ingest acceptance remains open in
+#133. See [the broker contract](RESTREAM_AUTH_BROKER.md).
+
+Exact broker source passes unsigned macOS universal Release, actual bundle
+audit, a full iOS device-source build, and **563 tests/80 suites in 52.366s**
+with exactly the same two local DSP suite exclusions described above. These
+are source/build/local-fixture checks, not signed distribution or live OAuth.
+Logs: `/tmp/stream-broker-integrated-{mac-release,bundle,ios-device,core}-20261022.log`.
+
+`862ee7d` integrates an explicitly guarded source-built TURN/TLS prototype.
+Trusted relay control, certificate rejection and the real socket lifetime
+regression pass. Actual incoming camera/Opus is observed, but full returned
+browser PCM is still zero despite a verified native host tone and allowed
+capture route. **tlsQualified remains false**; SDK/default guards are unchanged.
+No issue closes from this prototype. See [the scoped qualification](NATIVE_GUEST_TLS_QUALIFICATION.md).
+
+The earlier published `b28510a` hosted ARM and iOS runs both pass all 586 Core
+tests without exclusions. ARM later fails the playback fixture pause-position
+assertion at `media_playback_lifecycle_harness.swift:201`; the original log is
+retained and the actual clock/position cause is under investigation with
+unchanged limits. This is not a whole-CI pass. The original sustained
+performance failures and pending strict ISO timing proof remain unchanged.
+The verified issue inventory remains **24 closed /37 open**.
+
+Final combined `862ee7d` also passes universal Release and the actual bundle
+audit after adding the guarded macOS TLS source. Its shared Core/iOS source
+is unchanged from the broker integration proof. No shipping TLS guard or SDK
+was adopted.

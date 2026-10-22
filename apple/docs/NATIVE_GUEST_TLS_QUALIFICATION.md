@@ -159,7 +159,9 @@ and `STREAM_INTERVIEW_TLS_OPENSSL`. The separate `--owned-null-contexts` flag
 is a diagnostic decoded-media attempt with the limits above. No successful
 full-flow result is currently recorded.
 
-Original issues #125/#126/#128/#129/#130 remain open from this work. Optional
+This prototype does not justify an issue closure. Issues #125/#126/#130
+remain open; #128/#129 were separately closed using their documented
+Backstage/slot validated-SDK acceptance, not this failed TLS full-flow attempt. Optional
 TLS control and incoming native media extend evidence; they do not establish
 supported shipping restricted-network media, return/rejoin/A/V behavior,
 Safari/mobile coverage, oldest-OS/Intel execution or larger measured capacity.

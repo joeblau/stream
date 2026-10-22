@@ -17,8 +17,8 @@
     "signing": "Five installed macOS profiles; zero unexpired app/helper/camera matches. No Developer ID distribution artifact, notarization, or extension/driver installation."
   },
   "validation": {
-    "sharedCore": "Final combined046c4c9 local Core PASS:563 tests/80 suites in54.667s, excluding exactly ChannelFXProcessorTests and VoicePolishProcessorTests for the known hostHAL limitation; /tmp/stream-wave3-shared-core-20261022.log. This is not a full-suite pass. Earlier exact publishedd413aa1 hosted ARM and Intel each pass FULL Core586/82 without exclusions and iOS succeeds, but that earlier Core source predates new ingest fields; no exact-source equivalence is claimed. Both desktop jobs later fail the generated guest-preparation type extraction, addressed locally by dfa80f6.",
-    "shippingApp": "Final frozen combined046c4c9 unsigned universal Release and actual bundle audit PASS: arm64/x86_64, embedded camera/browser helper, sandbox declarations, six App Intents/three entities and no transport validation hooks. Logs /tmp/stream-wave3-final-account-release-20261022.log and /tmp/stream-wave3-final-account-bundle-20261022.log. Earlier sourcea5524f2 also passed. No Developer ID/notarization or physical Intel runtime claim.",
+    "sharedCore": "Broker source4e32ca6 local Core PASS:563 tests/80 suites in52.366s, excluding exactly ChannelFXProcessorTests and VoicePolishProcessorTests for the known local hostHAL limitation. /tmp/stream-broker-integrated-core-20261022.log. This is not a full-suite pass. TLS862ee7d changes no shared Core or iOS source. Prior b28510a hosted ARM and iOS each pass full586/82 before the new broker source; ARM later fails playback fixture pause-position201.",
+    "shippingApp": "Final source 862ee7d unsigned universal Release and actual bundle audit PASS: arm64/x86_64 app, embedded camera/browser helper, sandbox declarations, six App Intents/three entities and no validation hooks. Logs /tmp/stream-broker-tls-final-release-20261022.log and /tmp/stream-broker-tls-final-bundle-20261022.log. Full iOS device-source build also PASS at equivalent iOS/shared Core source 4e32ca6; TLS changes only optional macOS receiver/tooling. No Developer ID/notarization or physical Intel runtime claim.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -89,13 +89,66 @@
     "wave3CredentialAndDiscovery": "c85a401 fences delayed Twitch validation against real credential refresh/replacement/cancellation; native held-response/vault regressions pass. e78e1f4 adds permitted exact-account Restream selected relay/key discovery and supported cover metadata;0dd847a adds public Twitch ingest selection and account-owned disabled-draft import with generation fences. Actual public discovery returns14 Twitch and19 Restream servers; native account/API/destination fixtures pass. Registered OAuth/authorized ingest remains unqualified. The accepted Restream public-client broker boundary is unfinished WIP and is not counted as integrated or issue133 completion. See /tmp/stream-wave3-provider-133-ac-review-20261022.md.",
     "wave3NativeFocus": "e2a3fbf reproduces and fixes six stale queued native focus races using actual NSTextFields, field editors, window replacement/detach/reattach, moved controls and consumed scope bookmarks. Actual production attachment/sheet/current-owner positive controls pass. Semantic SwiftUI AX actions/order/faders/panels and real visual contrast remain open. See STUDIO_FOCUS_OWNERSHIP_2026-10-22.json.",
     "wave3AudioOnlyPortable": "180169f implements actual production audio-only AVAudioFile decoding without AVPlayer/AVAssetReader or an output device, preserving monotonic host PTS, trim/seek/pause/loop/end and shared generation/drain/grant ownership. Nine actual strict lifecycle/timing/format/zero-trim cases pass. Final whole-source signed sandbox app passes imported copied/repaired pad PCM and nonzero Program mix after original removal, plus existing video/package/remap/private-exclusion/repair/restart assertions. The former full-pad HAL blocker is resolved by this production path; successful native keyboard chooser selection is the sole remaining issue155 gate. See /tmp/stream-wave3-portable-audio-report-20261022.md.",
-    "wave3HostedCI": "Run39714685947 at publishedd413aa1 is terminal failure: iOS succeeds; ARM and Intel each pass FULL Core586/82, then both fail step10 generated guest-preparation MediaValues.swift because ResolvedAssetAccess was unintentionally extracted. dfa80f6 fixes the exact production-type extraction boundary; actual local80-layout preparation passes. Later hosted native qualifications were skipped. This fix and later local passes do not relabel the original hosted run green. See /tmp/stream-wave3-published-ci-performance-report-20261022.md.",
+    "wave3HostedCI": "Exact b28510a: hosted ARM full586/82 Core PASS87.220s, then media_playback_lifecycle_harness.swift:201 pause-position assertion FAIL; actualpausedvalue not printed, root cause under investigation with original limits retained. iOS full586/82 PASS165.143s; Intel still running. Original ARM log SHA256 b51c76bc1736edcff6c5217ca343bd6decb941cf3b92b52499fa8cb6a09fba72. These hosted sources predate the broker.",
     "wave3OwnedControllerSessions": "5efd2cf managed-start,987c04f deck/native-audio/dual-canvas, and8245c3c external-output generated fixtures explicitly construct an owned simulated unlocked session with system observation disabled. Production default/lock gates and shared transport helpers stay unchanged; actual default observation still reports the real locked host. Managed-start and external native suites pass; all three deck generators/source registrations and one full deck-native IPC/512-layer/dispatcher suite pass. The broad deck audio/dual-canvas media graphs were not rerun in this wave. See /tmp/stream-wave3-deck-fixture-session-report-20261022.md.",
     "wave3GuestSlotsBackstage": "7083f6a passes actual Manager/default native SDK/owned Worker/local UDP TURN/Chrome saved-slot and Backstage lifecycle: deliberately chosen second pre-arrival slot, stable distinct camera/screen IDs, automatic bound metadata, SceneStore disk reload, native decoded Program OnAir positive/Backstage exclusion, full-lease rejoin without admission replay, removal/end cleanup. Browser candidates are relay. Explicit verified null AudioContext sinks and muted HTML scope this to actual media/control/native PCM;133 returned packets are metadata with0 HTML decoded samples, not normal speaker/AEC or return-video sync qualification. Issues128/129 remain open pending final combined proof/publication/independent original-criteria review; no universal browser/network/device requirement is inferred. See GUEST_SLOT_BACKSTAGE_2026-10-22.json. Tasks 128 and 129 are now closed after publication in 4b959de, independent original-criteria review and parent checklist reconciliation; the separately stated playback/return-video limits remain open.",
     "wave3Profiles": "No new author/export path found. Official current SDK/CLI and enterprise docs require app composition/export; official Stream Deck7.4 MCP triggers already configured actions rather than authoring profiles. Current session remains locked, so known blocked AX path was not repeated. All11V2/12V3 profile files,3440 plugin file/symlink records and app preferences hashes remain unchanged. No genuine sample profile artifacts produced; issue152 stays open. See /tmp/stream-wave3-profiles-report-20261022.md.",
     "wave3FinalCombined": "Published in 4b959de from validated source 046c4c9: unsigned universal Release and actual bundle audit PASS (/tmp/stream-wave3-final-account-{release,bundle}-20261022.log). Updated local Core PASS: 563 tests in 80 suites, 54.667 seconds, excluding exactly ChannelFXProcessorTests and VoicePolishProcessorTests for the unchanged local HAL limitation (/tmp/stream-wave3-shared-core-20261022.log and matching xcresult). Prior exact d413 hosted full Core passes on ARM/Intel describe different Core source before additive ingest fields; no new full-suite equivalence is claimed. Tasks 128/129 closed with exact API reconciliation. Broker, TLS and isolated-recording work is not counted integrated.",
     "wave3IsolatedRecordingPending": "Issue171 remains open. Owner reproduces originald41310-second ISO audio-end1s/video-end10.006667s failure while Program completes, then passes the same focused regression locally. A local2x60s run retains all four ISO files, no missing camera-handoff frames and three cameraA associated PCM cues within80ms with healthy RTMP. The strict guest gap check exposes a processed-ISO offline placeholder; its factory-only fix/final strict rerun are pending, unmerged and not counted as qualification. Source reports /tmp/stream-wave3-isolated-baseline-contract-20261022.log and /tmp/stream-wave3-isolated-qualified-20261022.log. Enabled Mac class remains the measured Mac15,8/M3Max16CPU boundary.",
-    "wave3HostedPerformanceTerminal": "Both native ARM/Intel jobs of run39713883982 are terminalFAIL; no new sustained dispatch. ARM600s profiles render11722/12140 frames (~19.5367/20.2333fps), below original30fps. Intel reports10123/2209 rendered frames and fails original80ms video-PTS versus host-arrival duration comparison at59.192148398s divergence. These observations do not establish decoded waveform A/V drift, resource ceilings or a new sustained pass. Intel original log /tmp/stream-performance-intel119611316368-original.log; atomic failure-report/source-cadence correction c3fda71 is diagnostics only."
+    "wave3HostedPerformanceTerminal": "Both native ARM/Intel jobs of run39713883982 are terminalFAIL; no new sustained dispatch. ARM600s profiles render11722/12140 frames (~19.5367/20.2333fps), below original30fps. Intel reports10123/2209 rendered frames and fails original80ms video-PTS versus host-arrival duration comparison at59.192148398s divergence. These observations do not establish decoded waveform A/V drift, resource ceilings or a new sustained pass. Intel original log /tmp/stream-performance-intel119611316368-original.log; atomic failure-report/source-cadence correction c3fda71 is diagnostics only.",
+    "wave3RestreamBroker": {
+      "source": "4e32ca6",
+      "ci": "6cf420d",
+      "worker": "8 actual workerd tests PASS; strict types, generated binding verification and local dry-run bundle PASS; independent review resolved deletion/reload, cancellation and crypto-await revocation findings.",
+      "native": "Production client/session/store/controller and existing account/ingest regressions PASS with owned HTTP/storage and no real Keychain.",
+      "integration": "Unsigned universal macOS Release, actual bundle audit, full iOS device-source build and 563 filtered Core tests PASS.",
+      "remaining": "No deployed/configured broker, confidential secret provisioning or real Restream consent/chat/ingest acceptance. Dormant legacy secrets remain preserved and inactive."
+    },
+    "wave3OptionalTLS": {
+      "source": "862ee7d",
+      "receipt": "NATIVE_GUEST_TLS_2026-10-22.json",
+      "status": "Guarded optional prototype only; tlsQualified=false; existing SDK and shipping guards unchanged.",
+      "passed": "Trusted TLS1.3 relay control, wrong CA/IP identity rejection and actual retired socket callback lifetime; incoming28 camera frames/7 Opus packets on exact d413 CLI. Four provenance tests and browser syntax pass after integration.",
+      "failed": "Full returned browser PCM stays zero despite positive native host tone and allowed capture gate; failure cause unclassified. Explicit null-sink attempt is not normal speaker/AEC qualification.",
+      "remaining": "No macOS native/default trust proof, DNS runtime, Intel/oldest OS execution, or complete return/rejoin/A/V acceptance."
+    },
+    "wave3BrokerTLSIntegrationReceipt": {
+      "source": "862ee7d",
+      "coreAndIOSSource": "4e32ca6",
+      "coreTests": 563,
+      "coreSuites": 80,
+      "coreSeconds": 52.366,
+      "excludedSuites": [
+        "ChannelFXProcessorTests",
+        "VoicePolishProcessorTests"
+      ],
+      "logs": {
+        "/tmp/stream-broker-integrated-mac-release-20261022.log": {
+          "bytes": 345624,
+          "sha256": "6f069600e536ed9eb985bf5cfa9714f50ca3aa1818590d34b611a70bdd469d85"
+        },
+        "/tmp/stream-broker-integrated-ios-device-20261022.log": {
+          "bytes": 444406,
+          "sha256": "96838a637ef8c789418b668c5aef9903c8496c7188b5f3181ac9d484d23b7ab7"
+        },
+        "/tmp/stream-broker-integrated-core-20261022.log": {
+          "bytes": 194104,
+          "sha256": "5ec6572924e96de1aa3c4535cd9237508525030dccff2cca2187a32bf8440892"
+        },
+        "/tmp/stream-broker-tls-final-release-20261022.log": {
+          "bytes": 241181,
+          "sha256": "92ba43c5a1a2e9f089cb34884dd777bcf8dfb4a03942327073a4bb3c9d715f15"
+        },
+        "/tmp/stream-broker-tls-final-bundle-20261022.log": {
+          "bytes": 517,
+          "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+        },
+        "/tmp/stream-broker-tls-provenance-20261022.log": {
+          "bytes": 102,
+          "sha256": "b8ab6f2984961e3909b3c968bc1ee60b6148f9b65c03a428710d2aa725163763"
+        }
+      }
+    }
   },
   "issues": [
     {
@@ -491,12 +544,14 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "Finish the accepted native/public-client Restream OAuth broker boundary; this is unfinished software, not satisfied by controlled native BYO-client-secret fixtures.",
+        "Configure/deploy the reviewed confidential-server/public-native Restream broker and qualify actual registered consent/refresh/chat/ingest; no service or app approval is provisioned by this source change.",
         "Registered OAuth apps and real authorized consent/refresh/ingest acceptance remain unqualified. Public Twitch14/Restream19-server discovery and exact-account native disabled-draft imports pass; these are not authorized broadcast acceptance."
       ],
       "evidence": [
         "PROVIDER_ACCOUNTS.md",
-        "/tmp/stream-wave3-provider-133-ac-review-20261022.md"
+        "/tmp/stream-wave3-provider-133-ac-review-20261022.md",
+        "RESTREAM_AUTH_BROKER.md",
+        "/tmp/stream-wave3-restream-broker-report-20261022.md"
       ]
     },
     {
@@ -921,11 +976,11 @@
     "currentlyOpen": 37,
     "closedSinceInitialInventory": 24
   },
-  "overallStatus": "Incomplete roadmap: exact initial inventory now 37 open / 24 closed, with zero open PRs. Tasks 128 and 129 closed after independent original-criteria review, actual scoped Manager/SDK/browser evidence, combined universal verification and publication; their parent checklist is reconciled. Source 046c4c9 passes universal Release, bundle audit and 563 filtered local Core tests. Prior exact d413 hosted ARM/Intel sources each pass all 586 Core tests before the same fixture compile failure, now corrected locally. Both original 600-second performance jobs failed their original bounds; diagnostics preserve those results without claiming a throughput fix. Broker, optional TLS and isolated-recording follow-ups remain outside this published batch.",
-  "integratedMain": "4b959de",
+  "overallStatus": "Incomplete roadmap:37 open /24 closed in the initial61 tasks; zero open PRs at last API audit. Tasks128/129 are closed and parent54 reconciled. Broker implementation and guarded optionalTLS control evidence are integrated; no new closure follows. Broker source passes unsigned universal macOS Release, bundle audit, full iOS source build and563 filtered local Core tests. OptionalTLS full browser-returnPCM still fails and its shipping guard remains disabled. Prior b285 hosted ARM/iOS full586 Core tests pass; ARM then fails playback fixture pause position, under investigation. Both original600-second performance jobs retain failed bounds. ISO source-clock history/pause fixes await strict actual media proof.",
+  "integratedMain": "862ee7d",
   "githubStateRefreshedAt": "2026-10-22T03:52:14.493741+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "4b959de551710b505ce211ca8c2529298c8bcf40",
+  "publishedIntegration": "862ee7d28b76e61cc21af58e8193b8675e942762",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -945,7 +1000,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "046c4c9",
+  "currentReviewBase": "862ee7d",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -971,7 +1026,10 @@
       "987c04f",
       "8245c3c",
       "c3fda71",
-      "7083f6a"
+      "7083f6a",
+      "4e32ca6",
+      "6cf420d",
+      "862ee7d"
     ],
     "githubWritesPerformed": true,
     "closuresPerformed": [
@@ -981,9 +1039,8 @@
     "proposedClosureAfterFinalCombinedBuildAndPublication": [],
     "pendingFinalVerification": [],
     "notIntegrated": [
-      "Restream public-client OAuth broker WIP",
-      "Optional TLS positive-control/guard-masking WIP",
-      "Issue171 strict80ms/alias-repeat work"
+      "Issue171 bounded original-source history, pause mapping and strict80ms repeated media proof",
+      "Hosted playback pause-position failure investigation"
     ],
     "githubCountsNote": "Exact paginated API reconciliation of the initial 61 issues verifies 37 open / 24 closed, zero open PRs, and parent54 checked for 128/129 after source publication and closure."
   }
