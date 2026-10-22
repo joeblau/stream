@@ -1,0 +1,435 @@
+{
+  "schemaVersion": 1,
+  "dateUTC": "2026-10-22",
+  "kind": "completed-owned-null-output-rtc-wave11-diagnostic",
+  "sourceBaseline": "ea3c834613ff6b9c85d4383ba1c85d644402ca50",
+  "sourceSHA256": {
+    "workers/interviews/test/browser/chrome-fixture.mjs": "663f61da04d376a4006d6882efdd458804f1d5350018c5c546f66b272e9845e5",
+    "workers/interviews/test/browser/native-interview-return-video-browser.mjs": "e79272b035f476410b2c290abf649d9298bc1f1418ba2d02fdad68467b916172",
+    "workers/interviews/test/browser/owned-loopback-failure-snapshot.mjs": "3ddfb6af3172526e2f7f064c5eeb0749b622ea138822a415c85ef43e949cb40d",
+    "workers/interviews/test/browser/owned-loopback-lifecycle.mjs": "dfc33a2327108c7129fe2b9a73ddab4712ee1bde07e94d909d3a196e6f0bd78c",
+    "workers/interviews/test/browser/owned-null-audio-loopback.mjs": "e5338cea44a2306b34065360d4fdccfef3bf56ed2c45898977ac09fb604490cb",
+    "workers/interviews/test/browser/owned_loopback_process.py": "aaa6889b9d39dd8014140a5193f218f791ca9386594fd02114eb0b76d7097189",
+    "workers/interviews/test/browser/run_owned_null_loopback.py": "7ec7b41cef071e4d9aa13a5a4ca887a13a1d032f86017e718ab1717349b566c4"
+  },
+  "invocation": {
+    "workingDirectory": "/private/tmp/stream-native-integration-20261021",
+    "command": [
+      "python3",
+      "/tmp/stream-native-build-slots-20261022.py",
+      "--label",
+      "wave11-owned-RTC",
+      "--",
+      "python3",
+      "workers/interviews/test/browser/run_owned_null_loopback.py",
+      "--node",
+      "/tmp/stream-native-integration-tools-20261021/node_modules/node/bin/node",
+      "--artifacts",
+      "/tmp/stream-wave11-owned-RTC-20261022"
+    ],
+    "environmentOverrides": {
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "count": 1
+  },
+  "runtime": {
+    "version": "24.15.0",
+    "binarySHA256": "3200fbd9f7fd4410426dd541e10d1ab829d3472f270d743c7fabd1696c03fe32",
+    "officialArchiveSHA256": "372331b969779ab5d15b949884fc6eaf88d5afe87bde8ba881d6400b9100ffc4",
+    "officialReleaseManifestSHA256": "1e812945dee26c3e4ca41a8c0b582668ff2401ba0ae727a122300c0e8514edb0"
+  },
+  "mediaConfiguration": {
+    "fakeAudioOutputArgument": "--fake-audio-output",
+    "browserOutputArgument": "--disable-audio-output",
+    "browserArgumentsVerifiedBeforeGeneratorNavigation": true,
+    "nullContextsVerified": true,
+    "ownedHTMLPlayerMuted": true,
+    "personalProfileUsed": false,
+    "fakeCaptureOrPermissionUIFlagsUsed": false,
+    "gatesSeconds": {
+      "startupIncludingMonitorHandshake": 10,
+      "noProgress": 16,
+      "total": 60,
+      "connection": 10,
+      "measurement": 12
+    },
+    "positivePCMAndRTPAssertionsChanged": false
+  },
+  "receipt": {
+    "schemaVersion": 1,
+    "kind": "owned-chrome-null-audio-loopback-diagnostic",
+    "scope": "Synthetic local RTC only; actual null WebAudio sinks + muted owned HTML. No native SDK, speaker/normal HTML output, AEC, AV or production qualification.",
+    "fakeOutputClockRequested": true,
+    "browser": "Chrome/155.0.8059.85",
+    "initializationFailure": {
+      "name": "OwnedInitializationFailure",
+      "message": "owned-init-deadline",
+      "snapshot": {
+        "phase": "connection-wait",
+        "peers": [
+          {
+            "connection": "new",
+            "iceConnection": "new",
+            "iceGathering": "complete",
+            "signaling": "stable",
+            "localCandidateCount": 2,
+            "remoteCandidateCount": 2
+          },
+          {
+            "connection": "new",
+            "iceConnection": "new",
+            "iceGathering": "complete",
+            "signaling": "stable",
+            "localCandidateCount": 2,
+            "remoteCandidateCount": 2
+          }
+        ],
+        "contexts": [
+          {
+            "state": "running",
+            "nullSink": true,
+            "sampleRate": 48000,
+            "currentTime": 10.12
+          },
+          {
+            "state": "running",
+            "nullSink": true,
+            "sampleRate": 48000,
+            "currentTime": 10.12
+          }
+        ],
+        "track": {
+          "enabled": true,
+          "muted": true,
+          "readyState": "live"
+        },
+        "html": {
+          "muted": true,
+          "paused": false,
+          "readyState": 4,
+          "currentTime": 10.012348
+        },
+        "senderPCM": {
+          "available": true,
+          "frames": 483328,
+          "rate": 48000,
+          "windows": 236,
+          "channels": [
+            {
+              "rms": 0.28284340023973886,
+              "amplitudes": [
+                0.39999991809053426,
+                2.1466344644139153e-06,
+                3.4197487975643987e-06,
+                0.0003563924665169917
+              ]
+            },
+            {
+              "rms": 0.14142157019503757,
+              "amplitudes": [
+                1.0737413383491199e-06,
+                0.1999999624182822,
+                3.073240223016032e-07,
+                1.4215308049565312e-07
+              ]
+            }
+          ]
+        },
+        "receiverPCM": {
+          "available": true,
+          "frames": 479232,
+          "rate": 48000,
+          "windows": 234,
+          "channels": [
+            {
+              "rms": 0,
+              "amplitudes": [
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "rms": 0,
+              "amplitudes": [
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        },
+        "iceErrors": [],
+        "stats": [
+          {
+            "status": "available",
+            "outbound": [
+              {
+                "codec": "audio/opus",
+                "clockRate": 48000,
+                "channels": 2,
+                "payloadType": 111,
+                "packetsSent": 0,
+                "bytesSent": 0
+              }
+            ],
+            "inbound": [],
+            "playout": [
+              {
+                "kind": "audio",
+                "synthesizedSamplesDuration": 0,
+                "synthesizedSamplesEvents": 0,
+                "totalSamplesDuration": 10.02,
+                "totalPlayoutDelay": 14414.4,
+                "totalSamplesCount": 480960
+              }
+            ],
+            "transport": []
+          },
+          {
+            "status": "available",
+            "outbound": [],
+            "inbound": [],
+            "playout": [
+              {
+                "kind": "audio",
+                "synthesizedSamplesDuration": 0,
+                "synthesizedSamplesEvents": 0,
+                "totalSamplesDuration": 10.02,
+                "totalPlayoutDelay": 14414.4,
+                "totalSamplesCount": 480960
+              }
+            ],
+            "transport": []
+          }
+        ]
+      }
+    },
+    "result": "UNQUALIFIED",
+    "phase": "connection-wait",
+    "reason": "OwnedInitializationFailure: owned-init-deadline",
+    "traceCounts": {
+      "WebRtcAudioDeviceImpl::RenderData": 612,
+      "VoE::PullRenderData": 613,
+      "WebRtcAudioRenderer::Render": 611,
+      "WebRtcAudioRenderer::SourceCallback": 612,
+      "PeerConnectionRemoteAudioSource::OnData": 613,
+      "WebAudioMediaStreamAudioSink::OnData": 613,
+      "WebAudioMediaStreamAudioSink::ProvideInput": 2287,
+      "WebAudioMediaStreamAudioSink::ProvideInput underrun": 2
+    },
+    "traceEventCount": 24999,
+    "traceBytes": 8485314,
+    "traceComplete": true,
+    "observations": [
+      {
+        "worklet": "sender",
+        "frames": 2048,
+        "channels": [
+          {
+            "rms": 0.2825636126767216,
+            "amplitudes": [
+              0.40000002373927884,
+              2.168669208220186e-06,
+              3.747115053483591e-06,
+              0.0003563030541678739
+            ]
+          },
+          {
+            "rms": 0.1413888025883565,
+            "amplitudes": [
+              1.091806034365574e-06,
+              0.19999996125964484,
+              3.664923941806042e-07,
+              1.4655649476419257e-07
+            ]
+          }
+        ]
+      },
+      {
+        "htmlEvent": {
+          "name": "loadedmetadata",
+          "muted": true,
+          "paused": false,
+          "readyState": 4
+        }
+      },
+      {
+        "htmlEvent": {
+          "name": "play",
+          "muted": true,
+          "paused": false,
+          "readyState": 4
+        }
+      },
+      {
+        "htmlEvent": {
+          "name": "playing",
+          "muted": true,
+          "paused": false,
+          "readyState": 4
+        }
+      },
+      {
+        "worklet": "receiver",
+        "frames": 2048,
+        "channels": [
+          {
+            "rms": 0,
+            "amplitudes": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "rms": 0,
+            "amplitudes": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ],
+    "phases": [
+      {
+        "phase": "sender-context",
+        "milliseconds": 0
+      },
+      {
+        "phase": "sender-constructor",
+        "milliseconds": 1
+      },
+      {
+        "phase": "sender-resume",
+        "milliseconds": 139
+      },
+      {
+        "phase": "sender-ready",
+        "milliseconds": 142
+      },
+      {
+        "phase": "receiver-context",
+        "milliseconds": 142
+      },
+      {
+        "phase": "receiver-constructor",
+        "milliseconds": 142
+      },
+      {
+        "phase": "receiver-resume",
+        "milliseconds": 142
+      },
+      {
+        "phase": "receiver-ready",
+        "milliseconds": 143
+      },
+      {
+        "phase": "create-offer",
+        "milliseconds": 223
+      },
+      {
+        "phase": "sender-local-description",
+        "milliseconds": 224
+      },
+      {
+        "phase": "receiver-remote-description",
+        "milliseconds": 224
+      },
+      {
+        "phase": "remote-track-before-html",
+        "milliseconds": 224
+      },
+      {
+        "phase": "remote-track-before-webaudio",
+        "milliseconds": 225
+      },
+      {
+        "phase": "remote-track-connected",
+        "milliseconds": 225
+      },
+      {
+        "phase": "create-answer",
+        "milliseconds": 225
+      },
+      {
+        "phase": "receiver-local-description",
+        "milliseconds": 235
+      },
+      {
+        "phase": "sender-remote-description",
+        "milliseconds": 236
+      },
+      {
+        "phase": "connection-wait",
+        "milliseconds": 236
+      }
+    ],
+    "processRetirement": "drained",
+    "directoryRetirement": "removed"
+  },
+  "wrapperProcessProof": {
+    "attemptCount": 1,
+    "browserArgumentsVerified": true,
+    "browserRetirement": "absent",
+    "elapsedSeconds": 11.429,
+    "exitCode": 77,
+    "nodeVersion": "24.15.0",
+    "remainingOwnedBrowser": false,
+    "result": "UNQUALIFIED"
+  },
+  "independentReadOnlyEndProof": {
+    "attemptCount": 1,
+    "nodeNumericPIDPresent": false,
+    "numericBrowserGroupPresent": false,
+    "originalBrowserIdentityPresent": false,
+    "ownedDirectoryPresent": false,
+    "sourceCommit": "ea3c834613ff6b9c85d4383ba1c85d644402ca50"
+  },
+  "rawArtifactSHA256": {
+    "/tmp/stream-wave11-owned-RTC-20261022/artifact-hashes.json": "175a8dd33ca4cb29a3e5688253637135ea342cbcab3187906fd3cf4422035555",
+    "/tmp/stream-wave11-owned-RTC-20261022/attempt.log": "edd6cfef3edd1044eeb46b5dee2b293951eb4313a354243165d158b9cb0332b9",
+    "/tmp/stream-wave11-owned-RTC-20261022/end-proof.json": "9c78c50c1acc5dd62550f6d8654e1aee66591fa5ace851660968aa70e6029e35",
+    "/tmp/stream-wave11-owned-RTC-20261022/monitor-ready.json": "7930cfdd5b83cfdbc1b38dd33684e6c08019296c654dc30e50e7cb1ed4821e98",
+    "/tmp/stream-wave11-owned-RTC-20261022/owned-process.json": "175878918c25e21ce47296752b45e46ae4b871934190992f14727b5432655616",
+    "/tmp/stream-wave11-owned-RTC-20261022/process-proof.json": "33a26430e31adecc5d698761c15219266f7ca67283673a16c8a943ef3dbd436e",
+    "/tmp/stream-wave11-owned-RTC-20261022/receipt.json": "23b4ad430988170dbe53aa951afd25d94a90f349bf1b7cbf08fd02af47cd9f85",
+    "/tmp/stream-wave11-owned-RTC-20261022/source-bindings.json": "aa24bb422821da28d051f692bab4160f7fe83a2043da1deebc1159f1529658fb"
+  },
+  "traceInterpretation": {
+    "retainedCountsAreLowerBounds": true,
+    "traceCompleteMeans": "Chrome tracing protocol ended; not an uncapped event inventory.",
+    "observedBatchByteCounter": 8485314,
+    "byteBudget": 8388608,
+    "counterIncludesDiscardedBatchBytes": true,
+    "separateAudioUtilityArgvOrFakeAudioWorkerProofRetained": false
+  },
+  "conclusions": [
+    "The single repaired-wrapper invocation completed as UNQUALIFIED/77 at the original connection deadline, distinct from the interrupted monitor attempt.",
+    "Both null contexts and the owned muted HTML player ran; generated sender PCM was positive. Named receive-clock callbacks were observed in the retained trace.",
+    "At failure both peer and ICE states were new. Sender outbound Opus reported zero packets and bytes; receiver inbound RTP rows and selected transport rows were absent.",
+    "Zero receiver PCM before connection does not reproduce the earlier native 931-RTP/zero-emission failure and does not establish a receive-clock or native codec defect."
+  ],
+  "staticSourceInspection": {
+    "files": [
+      "workers/interviews/test/browser/owned-null-audio-loopback.mjs",
+      "workers/interviews/public/guest.js"
+    ],
+    "result": "No demonstrated fixture negotiation/candidate-delivery defect found. Opposite-peer handlers precede descriptions; queued candidates are replayed after remote descriptions; the shipping guest serializes signaling separately.",
+    "nextBoundary": "Stable offer/answer and gathered/remote candidate counts versus ICE checking/transport progress. Current receipt exposes selected pairs only; nonselected candidate pairs/checks, candidate categories and DTLS states are unobserved.",
+    "productionOrHarnessChangeMade": false
+  },
+  "limits": [
+    "No connection or positive inbound RTP control; the 12-second measurement phase was never reached.",
+    "No cause assigned to ICE startup or the prior native 931-packet failure. Incoming RTP absence is an absent row, not an explicit receiver packetsReceived=0 counter.",
+    "Observed callback counts are retained lower bounds, not full-duration rates; there is no separately retained audio-utility argv or FakeAudioWorker causal proof.",
+    "No native SDK, native return mix-minus, normal or physical audio output, browser/physical AEC, rendered A/V timing, mobile/deployed networking or full issue127 acceptance is qualified.",
+    "Original failed and interrupted receipts remain unchanged; no retry or media/timeout gate relaxation occurred."
+  ]
+}

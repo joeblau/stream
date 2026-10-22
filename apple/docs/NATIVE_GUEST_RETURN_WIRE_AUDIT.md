@@ -250,3 +250,70 @@ an actual detached child whose leader exits before retirement, synthetic late
 group/reuse cases, and the exact terminal latch around cleanup/write boundaries.
 The thirteen Python process checks and nine Node snapshot/lifecycle checks do
 not replace the unqualified browser receipts or establish receive-clock timing.
+
+## Wave11 completed owned null-output diagnostic
+
+The one separately scheduled replacement used published source
+`ea3c834613ff6b9c85d4383ba1c85d644402ca50`, the reviewed tracked monitor, and
+the verified official Node 24.15.0 runtime. Its fresh private artifacts are at
+`/tmp/stream-wave11-owned-RTC-20261022/`; the native-slot label was
+`wave11-owned-RTC`. It completed in 11.429 seconds with **UNQUALIFIED / exit 77**.
+This is a completed negative discriminator, distinct from the interrupted
+external-monitor attempt. No second invocation, changed flags or gate relaxation
+followed. The full deidentified receipt, exact source/runtime hashes, invocation,
+raw artifact hashes, phase timings and cleanup proofs are tracked in
+[the wave11 machine receipt](NATIVE_GUEST_RETURN_NULL_OUTPUT_WAVE11_2026-10-22.json).
+
+The monitor verified the actual browser's exact owned profile and
+`--disable-audio-output` argument before releasing generator-page navigation.
+The original fixture switch was `--fake-audio-output`. Both 48 kHz null contexts
+were verified before generation and were running at 10.12 seconds in the failure
+snapshot; the owned HTML player was muted and playing. No capture/device/fake-UI
+permission flag or personal profile was used. Contexts were ready at 142/143 ms;
+offer/answer processing reached connection-wait at 236 ms. The unchanged 10-second
+connection deadline then failed; the 12-second measurement phase never began.
+
+The failure snapshot now distinguishes source, connection and consumer evidence:
+
+- Generated sender PCM: 483328 frames, tone amplitudes 0.3999999181/0.1999999624.
+  The receiver Worklet processed 479232 frames, with zero RMS and tone amplitudes.
+- Both peers at failure: connection `new`, ICE `new`, gathering `complete`,
+  signaling `stable`, two local and two remote candidate lines, no surfaced ICE
+  errors. Candidate counts do not prove connectivity or usable candidate pairs.
+- The sender's Opus 48 kHz/stereo/PT111 outbound row reported 0 packets/0 bytes.
+  The receiver had no inbound RTP row; this is not an explicit measured receiver
+  `packetsReceived=0` counter. Neither peer had a selected-pair transport entry.
+  The live/enabled remote track was still muted.
+
+The retained trace includes 612 `RenderData`, 613 `PullRenderData`, and 613 remote
+`OnData` callbacks, unlike the earlier zero-callback receipt. These are **retained
+lower bounds**, not a complete 10-second inventory or rates: the event buffer
+retained 24999 events, while the byte counter reached 8485314 bytes, including a
+discarded batch beyond the 8 MiB budget. `traceComplete=true` means the tracing
+protocol ended; it does not mean no events were discarded. No separate
+audio-utility argv or `FakeAudioWorker` receipt was retained. Named callbacks
+occurred under the verified browser null-output configuration; their precise
+causal path and normal output behavior are not established.
+
+The source and actual PCM controls therefore show that generated audio and
+receive-clock callbacks can run in this configuration. With no connected/RTP
+positive control, the zero receiver window neither reproduces nor explains the
+old native 931-packet/zero-emission failure. It does not qualify native packet
+interoperability, mix-minus, normal/physical output, AEC, rendered A/V timing or
+whole issue 127. The old 105.104 ms timing failure remains unchanged.
+
+Static inspection found no demonstrated missing offer/answer/candidate handoff
+in this owned pair: opposite-peer handlers precede descriptions, pending queues
+target the correct peer, and queued delivery follows remote-description setup.
+The separate shipping guest serializes its signaling through `signalChain`.
+No production or harness change follows from this result. The next source
+boundary is stable SDP versus ICE-check/transport startup. The current receipt
+only emits selected candidate pairs; nonselected pair/check progress, candidate
+categories and DTLS states remain unobserved, so no ICE cause is assigned.
+
+The launcher reported its owned group drained and exact directory removed.
+The monitor then observed the original browser absent. A separate read-only end
+check confirmed the Node PID absent, original browser identity absent, numeric
+browser group empty and owned directory absent. Independent review verified
+these receipts, source bindings and raw hashes. The original interrupted
+receipt/log hashes remain unchanged.
