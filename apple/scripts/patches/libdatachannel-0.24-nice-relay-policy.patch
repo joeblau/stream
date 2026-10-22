@@ -1,0 +1,18 @@
+--- a/src/impl/icetransport.cpp
++++ b/src/impl/icetransport.cpp
+@@ -393,4 +393,7 @@
+ #else // USE_NICE == 1
++
++extern "C" int stream_rtc_nice_relay_policy_20261021_v1() { return 1; }
++extern "C" int stream_rtc_turn_transports_20261021_v1() { return 3; }
+ 
+ IceTransport::MainLoopWrapper *IceTransport::MainLoop = nullptr;
+ 
+@@ -471,6 +474,7 @@
+ 
+ 	g_object_set(G_OBJECT(mNiceAgent.get()), "controlling-mode", TRUE, nullptr); // decided later
+ 	g_object_set(G_OBJECT(mNiceAgent.get()), "ice-udp", TRUE, nullptr);
++	g_object_set(G_OBJECT(mNiceAgent.get()), "force-relay", config.iceTransportPolicy == TransportPolicy::Relay ? TRUE : FALSE, nullptr);
+ 	g_object_set(G_OBJECT(mNiceAgent.get()), "ice-tcp", config.enableIceTcp ? TRUE : FALSE,
+ 	             nullptr);
+ 

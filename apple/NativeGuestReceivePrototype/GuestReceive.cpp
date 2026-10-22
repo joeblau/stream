@@ -8,9 +8,23 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <dlfcn.h>
 #include <mutex>
 #include <map>
 #include <sstream>
+
+// Explicit qualification builds may use an application-owned public-SDK
+// backend receipt. Default builds retain their pinned UDP-only capability,
+// even if an unrelated archive happens to export a similarly named symbol.
+static int compiledTurnTransports() {
+#ifdef STREAM_NATIVE_NICE_TURN_TCP
+    const auto receipt = reinterpret_cast<int (*)()>(dlsym(RTLD_DEFAULT, "stream_rtc_turn_transports_20261021_v1"));
+    const auto policy = reinterpret_cast<int (*)()>(dlsym(RTLD_DEFAULT, "stream_rtc_nice_relay_policy_20261021_v1"));
+    return receipt && policy && policy() == 1 ? receipt() & 3 : 1;
+#else
+    return 1;
+#endif
+}
 
 static_assert(RTC_VERSION_MAJOR == 0 && RTC_VERSION_MINOR == 24 && RTC_VERSION_PATCH == 0,
               "Guest receive requires the qualified public libdatachannel 0.24.0 ABI");
@@ -376,10 +390,12 @@ extern "C" SGReceiver *SGReceiverCreateConfigured(uint64_t generation, const cha
             const bool relay = scheme == "turn" || scheme == "turns";
             if (relay) {
                 if (server.type != rtc::IceServer::Type::Turn || !boundedText(entry.username, 256, true) || !boundedText(entry.credential, 2048, true)) return nullptr;
-                // The pinned public libjuice transport supports UDP TURN only.
-                // Validate every descriptor, but do not claim an unusable
-                // TCP/TLS relay as the configuration's required capability.
-                if (server.relayType != rtc::IceServer::RelayType::TurnUdp) continue;
+                // TCP/TLS require a qualified compiled backend, not just a URL
+                // the public configuration parser happens to accept.
+                const int supported = compiledTurnTransports();
+                const int required = server.relayType == rtc::IceServer::RelayType::TurnUdp ? 1
+                    : server.relayType == rtc::IceServer::RelayType::TurnTcp ? 2 : 4;
+                if (!(supported & required)) continue;
                 server.username = entry.username; server.password = entry.credential; hasRelay = true;
             } else if (server.type != rtc::IceServer::Type::Stun || entry.username || entry.credential) return nullptr;
             configuration.value.iceServers.push_back(std::move(server));
