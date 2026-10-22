@@ -318,30 +318,30 @@ private final class DeckInputTiming: @unchecked Sendable {
         try require(!dispatcher.state.fxChain(forLabel: channel.label).isActive, "Media FX UI inherited microphone voice-polish processing")
         controller.startPreview(); recorder.start(stream: controller)
         try await command(base + ".play")
-        try await wait("Actual pad player did not play", until: { dispatcher.soundboard.padStatuses[pad.id]?.phase == .playing })
+        try await wait("Actual pad playout did not play", until: { dispatcher.soundboard.padStatuses[pad.id]?.phase == .playing })
         let timing = DeckInputTiming()
         dispatcher.soundboard.deckFixtureObserve(pad.id) { timing.receive($0) }
-        print("TRACE initial actual player \(String(describing: dispatcher.soundboard.deckFixturePlayerState(pad.id)))")
+        print("TRACE initial actual playout \(String(describing: dispatcher.soundboard.deckFixturePlayoutState(pad.id)))")
         _ = try await measure("pad.play.startup")
-        print("TRACE after startup actual player \(String(describing: dispatcher.soundboard.deckFixturePlayerState(pad.id)))")
-        try await wait("Actual player clock did not advance", until: { (dispatcher.soundboard.deckFixturePlayerState(pad.id)?.seconds ?? 0) > 0.25 })
+        print("TRACE after startup actual playout \(String(describing: dispatcher.soundboard.deckFixturePlayoutState(pad.id)))")
+        try await wait("Actual playout clock did not advance", until: { (dispatcher.soundboard.deckFixturePlayoutState(pad.id)?.seconds ?? 0) > 0.25 })
         let unity = try await measure("pad.play.steady", settle: 100, duration: 350)
         for row in timing.snapshot() { print("INPUT \(row)") }
         print("TRACE sound mixer \(await controller.audioStatsSnapshot())")
         try require(timing.timingValid, "Retimed source duration does not match actual sample count/rate")
         try require(unity.rms > 0.15 && abs(unity.frequency - 80) < 8, "Sound did not reach the shipping Program mixer")
-        let beforePause = dispatcher.soundboard.deckFixturePlayerState(pad.id)!.seconds
+        let beforePause = dispatcher.soundboard.deckFixturePlayoutState(pad.id)!.seconds
         try await command(base + ".pause")
         let silence = try await measure("pad.pause", settle: 400)
-        let paused = dispatcher.soundboard.deckFixturePlayerState(pad.id)!
-        try require(silence.rms < 0.00001 && paused.rate == 0 && abs(paused.seconds - beforePause) < 0.12, "Pause did not hold actual player and silence Program")
+        let paused = dispatcher.soundboard.deckFixturePlayoutState(pad.id)!
+        try require(silence.rms < 0.00001 && paused.rate == 0 && abs(paused.seconds - beforePause) < 0.12, "Pause did not hold actual playout and silence Program")
         let pausedSnapshot = try await snapshot()
-        try require(pausedSnapshot.playback?[base] == "paused", "Paused feedback did not follow actual player")
+        try require(pausedSnapshot.playback?[base] == "paused", "Paused feedback did not follow actual playout")
         try await command(base + ".play"); _ = try await measure("pad.resume")
-        try require(dispatcher.soundboard.deckFixturePlayerState(pad.id)!.seconds > paused.seconds + 0.2, "Play rewound instead of resuming")
+        try require(dispatcher.soundboard.deckFixturePlayoutState(pad.id)!.seconds > paused.seconds + 0.2, "Play rewound instead of resuming")
         try await command(base + ".restart")
         try await Task.sleep(for: .milliseconds(180))
-        try require(dispatcher.soundboard.deckFixturePlayerState(pad.id)!.seconds < 0.4, "Restart did not seek actual player to beginning")
+        try require(dispatcher.soundboard.deckFixturePlayoutState(pad.id)!.seconds < 0.4, "Restart did not seek actual playout to beginning")
         try await command(base + ".gain", value: 0.25)
         let half = try await measure("pad.gain.half")
         try require(half.rms / unity.rms > 0.43 && half.rms / unity.rms < 0.57, "Normalized controller gain did not change actual PCM")
@@ -355,7 +355,7 @@ private final class DeckInputTiming: @unchecked Sendable {
         try await command(base + ".restart")
         try await Task.sleep(for: .milliseconds(3_200))
         let looped = try await measure("pad.loop.crosses.end", settle: 0)
-        try require(looped.rms > 0.15 && dispatcher.soundboard.deckFixturePlayerState(pad.id)!.rate > 0, "Loop flag did not produce PCM after actual file end")
+        try require(looped.rms > 0.15 && dispatcher.soundboard.deckFixturePlayoutState(pad.id)!.rate > 0, "Loop flag did not produce PCM after actual file end")
         let loopState = try await snapshot()
         try require(loopState.loops?[base] == true, "Loop feedback missing")
         // The actual reader emits 8192-frame chunks (171 ms) with 150 ms
@@ -382,7 +382,7 @@ private final class DeckInputTiming: @unchecked Sendable {
         let hostedBypass = try await measure("hosted.AU.bypass", settle: 400)
         try require(hosted.rms < hostedBypass.rms * 0.3 && hostedBypass.rms > 0.15, "Hosted AU bypass did not change actual PCM")
         try await command(base + ".stop"); let stopped = try await measure("pad.stop", settle: 400)
-        try require(stopped.rms < 0.00001 && dispatcher.soundboard.deckFixturePlayerState(pad.id)!.rate == 0, "Stop did not stop actual audio")
+        try require(stopped.rms < 0.00001 && dispatcher.soundboard.deckFixturePlayoutState(pad.id)!.rate == 0, "Stop did not stop actual audio")
         print("TRACE actual sound transport, PCM gain/mute, loop, native/hosted AU bypass PASS")
         let loadingPad = SoundPad(name: "Pause during load", bookmarkData: try bookmark("tone-low.wav"), fileName: "tone-low.wav")
         try require(dispatcher.execute(.addSoundPad(loadingPad)).error == nil, "Could not add loading-race pad")
@@ -390,12 +390,12 @@ private final class DeckInputTiming: @unchecked Sendable {
         // turn, so pause necessarily precedes asynchronous AVAsset configure.
         try require(dispatcher.execute(.playSoundPad(loadingPad.id)).error == nil, "Cold Play failed")
         try require(dispatcher.execute(.pauseSoundPad(loadingPad.id)).error == nil, "Cold Pause failed")
-        try await wait("Paused cold player did not finish loading", until: { dispatcher.soundboard.deckFixturePlayerState(loadingPad.id) != nil })
+        try await wait("Paused cold player did not finish loading", until: { dispatcher.soundboard.deckFixturePlayoutState(loadingPad.id) != nil })
         let coldPaused = try await measure("pad.pause.before.load.completes")
-        try require(coldPaused.rms < 0.00001 && dispatcher.soundboard.deckFixturePlayerState(loadingPad.id)?.rate == 0, "Late load completion ignored Pause and started audio")
+        try require(coldPaused.rms < 0.00001 && dispatcher.soundboard.deckFixturePlayoutState(loadingPad.id)?.rate == 0, "Late load completion ignored Pause and started audio")
         let loadingBase = "sound.\(loadingPad.id.rawValue.uuidString)"
         try await command(loadingBase + ".play")
-        try await wait("Cold paused player did not advance after Play", until: { (dispatcher.soundboard.deckFixturePlayerState(loadingPad.id)?.seconds ?? 0) > 0.25 })
+        try await wait("Cold paused player did not advance after Play", until: { (dispatcher.soundboard.deckFixturePlayoutState(loadingPad.id)?.seconds ?? 0) > 0.25 })
         let coldResumed = try await measure("pad.play.after.cold.pause")
         try require(coldResumed.rms > 0.15 && abs(coldResumed.frequency - 80) < 8, "Play did not release cold Pause")
         try await command(loadingBase + ".stop")
@@ -405,12 +405,12 @@ private final class DeckInputTiming: @unchecked Sendable {
         try require(dispatcher.execute(.addSoundPad(cuePad)).error == nil, "Could not add restart cue pad")
         let cue = "sound.\(cuePad.id.rawValue.uuidString)"
         try await command(cue + ".play")
-        try await wait("Actual cue player did not reach second tone", until: { (dispatcher.soundboard.deckFixturePlayerState(cuePad.id)?.seconds ?? 0) > 1.3 })
+        try await wait("Actual cue playout did not reach second tone", until: { (dispatcher.soundboard.deckFixturePlayoutState(cuePad.id)?.seconds ?? 0) > 1.3 })
         let lateCue = try await measure("restart.before.1000Hz", settle: 100)
         try require(lateCue.rms > 0.15 && abs(lateCue.frequency - 1_000) < 15, "Cue source did not decode its later PCM segment")
         try await command(cue + ".restart")
         try await wait("Restarted actual cue clock did not advance from beginning", until: {
-            guard let state = dispatcher.soundboard.deckFixturePlayerState(cuePad.id) else { return false }
+            guard let state = dispatcher.soundboard.deckFixturePlayoutState(cuePad.id) else { return false }
             return state.seconds > 0.1 && state.seconds < 0.4
         })
         let earlyCue = try await measure("restart.after.440Hz", settle: 100, duration: 200)
@@ -464,14 +464,14 @@ private final class DeckInputTiming: @unchecked Sendable {
         try await command(movie + ".play")
         try await wait("Actual native video did not load/play", until: { controller.capturePool.mediaStatus(for: video.id).phase == .playing })
         try await Task.sleep(for: .milliseconds(350))
-        let videoPosition = controller.capturePool.deckFixturePlayerState(for: video.id)!.seconds
+        let videoPosition = controller.capturePool.deckFixturePlayoutState(for: video.id)!.seconds
         try await command(movie + ".pause"); try await Task.sleep(for: .milliseconds(250))
-        let heldVideo = controller.capturePool.deckFixturePlayerState(for: video.id)!
+        let heldVideo = controller.capturePool.deckFixturePlayoutState(for: video.id)!
         try require(heldVideo.rate == 0 && abs(heldVideo.seconds - videoPosition) < 0.12, "Video pause did not hold actual AVPlayer")
         try await command(movie + ".play"); try await Task.sleep(for: .milliseconds(250))
-        try require(controller.capturePool.deckFixturePlayerState(for: video.id)!.seconds > heldVideo.seconds + 0.15, "Video play did not resume actual AVPlayer")
+        try require(controller.capturePool.deckFixturePlayoutState(for: video.id)!.seconds > heldVideo.seconds + 0.15, "Video play did not resume actual AVPlayer")
         try await command(movie + ".stop"); try await Task.sleep(for: .milliseconds(100))
-        let stoppedVideo = controller.capturePool.deckFixturePlayerState(for: video.id)!
+        let stoppedVideo = controller.capturePool.deckFixturePlayoutState(for: video.id)!
         try require(stoppedVideo.rate == 0 && stoppedVideo.seconds < 0.05, "Video stop did not rewind actual AVPlayer")
         let asset = await dispatcher.assetLibrary.importFile(at: root.appendingPathComponent("pages.pdf"), mode: .copy)!
         let pdf = scenes.addSource(SourceDefinition(name: "Owned PDF", payload: .pdf(.init(assetIdentifier: asset.id.description))))
