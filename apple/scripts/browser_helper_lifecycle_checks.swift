@@ -8,11 +8,14 @@ import Foundation
         var isCapturing = false
         var starts = 0
         var beforeStart: (@MainActor () async -> Void)?
+        var beforeStop: (@MainActor () async -> Void)?
+        var stops = 0
+        var invalidations = 0
         let requiresScreenCaptureAccess = false
         var onFailure: (@MainActor (String) -> Void)?
         func start(helperPID: Int32) async throws { precondition(helperPID == 42); await beforeStart?(); starts += 1; isCapturing = true }
-        func invalidateInput() {}
-        func stop() async { isCapturing = false }
+        func invalidateInput() { invalidations += 1 }
+        func stop() async { await beforeStop?(); isCapturing = false; stops += 1 }
     }
     @MainActor private final class Transport: BrowserWidgetHelperTransport {
         let pid: Int32 = 42
@@ -20,6 +23,8 @@ import Foundation
         var onSend: (@MainActor (BrowserWidgetAudioCommand) -> Void)?
         var commands: [BrowserWidgetAudioCommand] = []
         var closed = false
+        var closeCount = 0
+        var onClose: (@MainActor () -> Void)?
         var hasTerminated = false
         var holdStop = false
         var reply: ((BrowserWidgetAudioReply) -> Void)?
@@ -38,7 +43,7 @@ import Foundation
             reply?(.init(state: state, widgetID: value.widgetID, helperPID: pid,
                          requestID: value.requestID, generation: value.generation))
         }
-        func close() { closed = true }
+        func close() { onClose?(); closeCount += 1; closed = true }
     }
     @MainActor private final class States {
         var values: [BrowserOverlayLoadState] = []
@@ -117,6 +122,62 @@ import Foundation
             BrowserWidgetLocalRetirement.retry()
             precondition(!fm.fileExists(atPath: freshRoot.path))
             print("PASS: actual local session stages off-main, holds old files through exact Stop ACK/reload, rejects stale receipt, and quarantines shutdown files until confirmed owned process exit; no helper/capture")
+        }
+        // Session failure revokes authority immediately, but the exact helper
+        // must outlive both a pending capture start and a pending capture stop.
+        // Replacement demand stays behind the existing shutdown barrier.
+        for holdStart in [true, false] {
+            let transport = Transport(), driver = Driver(), states = States(), held = HeldStart()
+            let session = BrowserWidgetHelperSession(applicationURL: path, mixer: AudioMixEngine(),
+                validationAudioDriver: driver, transportForQualification: transport)
+            session.prepareMixerForAudio = { .init(isCurrent: { true }) }
+            transport.reply = { [weak session] in session?.validationReceive($0) }
+            let id = UUID(), generation = UUID(), lease = BrowserWidgetPageLease(widgetID: id, generation: generation)
+            try await session.loadForQualification(id: id, generation: generation, html: "owned-shutdown", options: .init(), callbacks: states.callbacks)
+            if holdStart { driver.beforeStart = { await held.wait() } }
+            session.setProgramAudioDemand([lease], exclusions: .init(id: UUID(), helperPID: 42, isCurrent: { true }))
+            if holdStart { await held.untilEntered() }
+            else {
+                await session.waitUntilStopped()
+                precondition(session.audibleLeases == [lease] && driver.isCapturing)
+                driver.beforeStop = { driver.beforeStop = nil; await held.wait() }
+            }
+            let stopsBeforeFailure = driver.stops, invalidationsBeforeFailure = driver.invalidations
+            transport.onClose = {
+                precondition(!driver.isCapturing && driver.stops > stopsBeforeFailure,
+                             "Helper close preceded actual driver stop completion")
+            }
+            driver.onFailure?("owned_shutdown_ordering")
+            precondition(session.failure != nil && session.audibleLeases.isEmpty && driver.invalidations > invalidationsBeforeFailure,
+                         "Session failure did not synchronously revoke old capture authority")
+            if !holdStart { await held.untilEntered() }
+            // Let the shutdown task reach its held join/stop before observing.
+            for _ in 0..<100 { await Task.yield() }
+            precondition(!transport.closed && !transport.commands.contains { $0.action == .close },
+                         "Helper terminated before pending capture start/stop retired")
+            let replacementID = UUID()
+            var replacementFinished = false
+            let replacement = Task {
+                defer { replacementFinished = true }
+                do {
+                    try await session.loadForQualification(id: replacementID, generation: UUID(), html: "replacement", options: .init(), callbacks: states.callbacks)
+                    preconditionFailure("Cancelled replacement unexpectedly installed")
+                } catch is CancellationError {} catch { preconditionFailure("Replacement escaped shutdown barrier: \(error)") }
+            }
+            for _ in 0..<1000 {
+                if session.validationHasPendingLoad(replacementID) { break }
+                await Task.yield()
+            }
+            precondition(session.validationHasPendingLoad(replacementID) && !replacementFinished &&
+                         !transport.commands.contains { $0.action == .load && $0.widgetID == replacementID },
+                         "New demand bypassed old capture cleanup")
+            // Withdraw the queued replacement, so this inert fixture never
+            // falls through to a real helper launch after the old owner closes.
+            session.release(replacementID)
+            held.release()
+            await session.waitUntilStopped(); await replacement.value
+            precondition(transport.closeCount == 1 && !driver.isCapturing && session.demandCount == 0)
+            print("PASS: actual session failure retains old helper through held capture \(holdStart ? "start join" : "stop"), fences replacement demand and closes once after cleanup; inert transport/driver only")
         }
         // Actual session consumption of a current capture-owner proof. A retired
         // demand while capture start is held must never reach helper Resume.

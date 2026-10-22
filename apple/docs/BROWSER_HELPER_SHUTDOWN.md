@@ -1,0 +1,9 @@
+# Browser helper shutdown ownership
+
+Session failure revokes page/capture authority immediately. The owning session then joins its cancelled audio task, awaits capture stop, drains its mixer history and removes its owned channel before requesting helper termination. A new load waits for that shutdown transaction. Cleanup captures the exact old connection and only clears the current connection when its identity still matches.
+
+Transport disconnect fences its sockets and notifies the session. It does not independently terminate a still-running helper ahead of capture retirement. Helper death itself remains external and cannot be delayed by this policy. Launch identity/accept failures still terminate before capture adoption.
+
+The controlled qualification in `BROWSER_HELPER_SHUTDOWN_2026-10-22.json` compiles the actual session, capture, protocol, exclusion and local-content sources with the existing inert command fixture. Its driver and transport do not start capture, launch the helper, produce PCM or access an audio device. The mixer methods in that fixture are inert. All lifecycle checks pass, including held capture-start join, held capture stop, synchronous authority withdrawal, replacement-load blocking/cancellation and exactly-once close after driver stop. Reverting only the session's close ordering makes the same test fail at `Helper close preceded actual driver stop completion`. Both first compile/runtime outcomes, immutable generated sources and commands are retained in the receipt.
+
+This proves the session transaction with controlled dependencies. Actual transport `NSRunningApplication` termination and mixer cleanup are source-reviewed, not executed by this fixture. The production browser-audio selector remains disabled. This does not qualify actual per-widget/shared helper capture, Program/ISO/monitor sound, sync, levels, channel layout, duplicate prevention or distribution provisioning, and does not close issue #124.
