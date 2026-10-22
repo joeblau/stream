@@ -16,13 +16,16 @@ async function waitUntil(check: () => boolean): Promise<void> {
   assert.fail("SDK lifecycle test timed out");
 }
 
-test("bundled SDK routes independent device instances, updates tallies, and persists only stable bindings", async () => {
+for (const scenario of ["scene", "destination"] as const) test(`bundled SDK ${scenario} routes independent device instances, updates tallies, and persists only stable bindings`, async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "stream-deck-test-"));
   const projectID = randomUUID(), sceneID = randomUUID();
-  const commandID = `scene.${sceneID}.select`;
+  const commandID = scenario === "scene" ? `scene.${sceneID}.select` : `destination.${sceneID}.event.${"e".repeat(64)}.start`;
+  const secondCommandID = scenario === "scene" ? commandID : `destination.${sceneID}.event.${"e".repeat(64)}.endRemote`;
+  const dispatched: string[] = [];
   const state: Snapshot = { projectID, revision: 1, stream: "idle", recording: "paused", preview: "active", pendingStagedEdits: false,
     stagedSceneID: sceneID, layerVisibility: {}, macroProgress: { phase: "idle", stepIndex: 0, totalSteps: 0, message: "" } };
-  const commands = [{ id: commandID, title: "Opening", category: "Scenes", available: true }];
+  if (scenario === "destination") state.transport = { destinations: [{ id: sceneID, name: "Opening", state: "idle", eventKey: "e".repeat(64), endingPending: false, confirmationPending: false }], confirmationPending: false, endingPending: false };
+  const commands = [...new Set([commandID, secondCommandID])].map(id => ({ id, title: "Opening", category: scenario === "scene" ? "Scenes" : "Destinations", available: true, requiresConfirmation: id.endsWith(".endRemote") }));
   const nativePeers = new Map<net.Socket, string>();
   let connections = 0, executions = 0;
   const native = net.createServer(socket => {
@@ -37,7 +40,11 @@ test("bundled SDK routes independent device instances, updates tallies, and pers
         if (request.type === "authenticate") send("authenticated", { snapshot: state });
         if (request.type === "subscribe") send("snapshot", { snapshot: state });
         if (request.type === "capabilities") send("capabilities", { commands, totalCommands: commands.length });
-        if (request.type === "command") { ++executions; send("result", { result: { succeeded: true }, snapshot: state }); }
+        if (request.type === "command") {
+          ++executions; dispatched.push(request.commandID);
+          if (request.commandID.endsWith(".endRemote")) { state.transport!.destinations[0].confirmationPending = true; state.transport!.confirmationPending = true; ++state.revision; }
+          send("result", { result: { succeeded: true }, snapshot: state });
+        }
       }
     });
   });
@@ -45,7 +52,7 @@ test("bundled SDK routes independent device instances, updates tallies, and pers
   const pairing = { version: 1, clientID: randomUUID(), token: "a".repeat(64), host: "127.0.0.1", port: (native.address() as net.AddressInfo).port };
   const sd = new WebSocketServer({ port: 0, host: "127.0.0.1" }); await once(sd, "listening");
   const received: any[] = [];
-  const settings = new Map([ ["key-a", { commandID, projectID }], ["key-b", { commandID, projectID }] ]);
+  const settings = new Map([ ["key-a", { commandID, projectID }], ["key-b", { commandID: secondCommandID, projectID }] ]);
   let sdPeer: any;
   sd.on("connection", (peer: any) => {
     sdPeer = peer;
@@ -82,6 +89,12 @@ test("bundled SDK routes independent device instances, updates tallies, and pers
     send("keyDown", "key-a"); send("keyDown", "key-a"); send("keyDown", "key-b");
     await waitUntil(() => executions === 2); await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(executions, 2, "Held repeat is suppressed independently for each device");
+    assert.deepEqual(dispatched, [commandID, secondCommandID], "SDK retargeted explicit multi-action variants");
+    if (scenario === "destination") {
+      await waitUntil(() => received.some(message => message.event === "setImage" && message.context === "key-b"
+        && Buffer.from(message.payload.image.split(",")[1], "base64").toString().includes("CONFIRM IN STUDIO")));
+      assert.equal(state.transport!.destinations[0].remoteEnd, undefined, "Accepted review request must not invent ended receipt");
+    }
     send("keyUp", "key-a"); send("keyUp", "key-b"); send("keyDown", "key-a");
     await waitUntil(() => executions === 3);
     send("propertyInspectorDidAppear", "key-b");
@@ -90,7 +103,7 @@ test("bundled SDK routes independent device instances, updates tallies, and pers
     await waitUntil(() => received.some(message => message.event === "setSettings"));
     const persisted = received.find(message => message.event === "setSettings").payload;
     assert.deepEqual(persisted, { commandID, projectID }); assert.equal(JSON.stringify(persisted).includes(pairing.token), false);
-    commands[0].title = "Renamed Opening"; ++state.revision;
+    for (const command of commands) command.title = "Renamed Opening"; ++state.revision;
     for (const [peer, sessionID] of nativePeers) peer.write(JSON.stringify({ version: 1, type: "event", sessionID, snapshot: state }) + "\n");
     await waitUntil(() => received.filter(message => message.event === "setTitle" && message.payload.title === "Renamed Opening").length >= 2);
     send("willDisappear", "key-a"); await new Promise(resolve => setTimeout(resolve, 50));

@@ -8,6 +8,8 @@ struct StudioPaletteAction: Identifiable {
     let category: String
     let command: StudioCommand?
     var unavailableReason: String?
+    var requiresConfirmation = false
+    var target: StudioControlTarget? = nil
 }
 
 extension StudioCommandDispatcher {
@@ -33,9 +35,10 @@ extension StudioCommandDispatcher {
             result.append(.init(id: "studio.scene.next", title: "Select Next Scene", category: "Scenes", command: nil, unavailableReason: "Select a scene first."))
             result.append(.init(id: "studio.scene.previous", title: "Select Previous Scene", category: "Scenes", command: nil, unavailableReason: "Select a scene first."))
         }
-        add("output.stream.toggle", state.stream.isActive ? "End Stream" : "Go Live", "Output", state.stream.isActive ? .stopStream : .startStream)
+        add("output.stream.toggle", state.stream.isActive ? "Stop All Local Publishing" : "Go Live", "Output", state.stream.isActive ? .stopStream : .startStream)
         add("output.stream.start", "Start Stream", "Output", .startStream)
-        add("output.stream.stop", "Stop Stream", "Output", .stopStream)
+        add("output.stream.stop", "Stop All Local Publishing", "Output", .stopStream)
+        result += controllerDestinationActions()
         add("output.record.start", "Start Recording", "Output", .startRecording)
         add("output.record.stop", "Stop Recording", "Output", .stopRecording)
         add("output.record.pause", "Pause Recording", "Output", .pauseRecording)
@@ -84,6 +87,7 @@ extension StudioCommandDispatcher {
             let scene = stagedScene?.id == storedScene.id ? stagedScene! : storedScene
             let sceneID = scene.id.rawValue.uuidString
             add("scene.\(sceneID).select", "Select \(scene.name)", "Scenes", .selectScene(scene.id))
+            add("scene.\(sceneID).run", "Run \(scene.name)", "Scenes", .runScene(scene.id))
             for layer in scene.layers {
                 let layerID = layer.id.rawValue.uuidString
                 add("scene.\(sceneID).layer.\(layerID).visibility", "\(layer.isVisible ? "Hide" : "Show") \(layer.name) — \(scene.name)",

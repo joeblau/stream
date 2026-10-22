@@ -125,7 +125,20 @@ private final class EndingClock: @unchecked Sendable {
         coordinator.request([first], mode: .both)
         precondition(!coordinator.isWorking && outputs.states[a.id] == .live)
         let fresh = coordinator.targets.first { $0.id == a.id }!
-        coordinator.request([fresh], mode: .remote)
+        let beforeReview = await http.postCount
+        precondition(coordinator.requestControllerReview([fresh], mode: .remote))
+        let cancelledReview = coordinator.controllerReview!.id
+        precondition(!coordinator.requestControllerReview([fresh], mode: .both), "A repeated key replaced the review")
+        precondition(!coordinator.isWorking && outputs.liveCount == 2)
+        let afterReview = await http.postCount
+        precondition(afterReview == beforeReview, "Review request completed remote event before native consent")
+        coordinator.cancelControllerReview(UUID())
+        precondition(coordinator.controllerReview?.id == cancelledReview, "Another connection cancelled this review")
+        coordinator.cancelControllerReview(cancelledReview)
+        coordinator.confirmControllerReview(cancelledReview)
+        precondition(!coordinator.isWorking && coordinator.controllerReview == nil, "Cancelled review was replayed")
+        precondition(coordinator.requestControllerReview([fresh], mode: .remote))
+        coordinator.confirmControllerReview(coordinator.controllerReview!.id)
         await until { !coordinator.isWorking }
         precondition(coordinator.reports[a.id]?.remote?.confirmsEnd == true && outputs.liveCount == 2 && localCalls == 1)
         let beforeBoth = await http.postCount
@@ -134,6 +147,19 @@ private final class EndingClock: @unchecked Sendable {
         precondition(outputs.activeCount == 0 && coordinator.reports[b.id]?.remote?.disposition == .unsupported)
         precondition(coordinator.reports[a.id]?.local == .stopped && coordinator.reports[b.id]?.local == .stopped)
         let afterBoth = await http.postCount; precondition(afterBoth == beforeBoth + 1)
+        var reviewTarget = StudioEndingTarget(id: UUID(), name: "Stable name", session: UUID(), binding: binding)
+        let reviewGate = StudioEndingCoordinator()
+        var reviewMutations = 0
+        reviewGate.bind(.init(targets: { [reviewTarget] }, stopLocal: { _ in reviewMutations += 1; return .stopped },
+            localReceipt: { _ in .stopped }, remote: { _, _ in reviewMutations += 1; return .init(.ended) }, canEndRemote: { _ in true }))
+        precondition(reviewGate.requestControllerReview([reviewTarget], mode: .both))
+        let staleReview = reviewGate.controllerReview!.id
+        reviewTarget = .init(id: reviewTarget.id, name: "Renamed", session: reviewTarget.session, binding: reviewTarget.binding)
+        reviewGate.refreshAvailability()
+        precondition(reviewGate.controllerReview?.id == staleReview, "Rename invalidated stable session binding")
+        reviewTarget = .init(id: reviewTarget.id, name: reviewTarget.name, session: UUID(), binding: reviewTarget.binding)
+        reviewGate.refreshAvailability(); reviewGate.confirmControllerReview(staleReview)
+        precondition(reviewGate.controllerReview == nil && !reviewGate.isWorking && reviewMutations == 0, "Stale confirmation ended a replacement session")
         // Shared event targets mutate once; different event failures produce
         // independent receipts while every captured local stop still completes.
         let targets = [StudioEndingTarget(id: UUID(), name: "First", session: UUID(), binding: binding),

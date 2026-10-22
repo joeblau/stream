@@ -24,6 +24,7 @@ end
 target=spec['targets'].delete('StreamMac')
 target['type']='tool'
 target['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS']='$(inherited) STREAM_NATIVE_VALIDATION'
+target['settings']['base']['OTHER_SWIFT_FLAGS']='$(inherited) -j2'
 keychain=File.read('StreamCore/KeychainStore.swift')
 prefix=keychain.split('    private let service: String',2).first
 abort 'Keychain fixture boundary changed' if prefix==keychain
@@ -35,8 +36,17 @@ File.write(File.join(folder,'fixtures/KeychainStore.swift'),prefix + <<'SWIFT')
 }
 SWIFT
 spec['targets']['StreamCore']['sources']=[{'path'=>File.join(root,'StreamCore'),'excludes'=>['KeychainStore.swift']},File.join(root,folder,'fixtures/KeychainStore.swift')]
-target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift']}
+# Deny physical microphone capture in this generated tool. Composition,
+# audio mixing, real native publishers and recording writers remain shipping code.
+mic=File.read('StreamMac/MacAudioInput.swift')
+start=mic.index('    private nonisolated static func requestMicrophoneAccess() async -> Bool {')
+finish=mic.index('    private func configureAndStart(device:',start)
+abort 'Microphone fixture boundary changed' unless start && finish
+File.write(File.join(folder,'fixtures/MacAudioInput.swift'),mic[0...start] + "    private nonisolated static func requestMicrophoneAccess() async -> Bool { false }\n\n" + mic[finish..])
+target['sources'][0]={'path'=>File.join(root,'StreamMac'),'excludes'=>['StreamMacApp.swift','MacAudioInput.swift']}
+target['sources'] << File.join(root,folder,'fixtures/MacAudioInput.swift')
 target['sources'] << File.join(root,'scripts/studio_deck_native_harness.swift')
+target['sources'] << File.join(root,'scripts/studio_deck_transport_fixtures.swift')
 spec['targets']['StudioDeckNativeHarness']=target
 spec['schemes']['StudioDeckNativeHarness']={'build'=>{'targets'=>{'StudioDeckNativeHarness'=>'all'}}}
 require File.join(root, 'scripts/desktop_transport_fixture')
@@ -49,6 +59,6 @@ xcodebuild -resolvePackageDependencies -project "$DECK_NATIVE_DIR/StudioDeckNati
 python3 scripts/repair_desktop_transport_archives.py "$DECK_NATIVE_BUILD_PATH"
 xcodebuild -project "$DECK_NATIVE_DIR/StudioDeckNativeValidation.xcodeproj" \
   -scheme StudioDeckNativeHarness -destination 'platform=macOS' \
-  -derivedDataPath "$DECK_NATIVE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath "$DECK_NATIVE_BUILD_PATH" CODE_SIGNING_ALLOWED=NO -jobs 2 build
 readonly DECK_NATIVE_PRODUCTS="${DECK_NATIVE_BUILD_PATH:A}/Build/Products/Debug"
 env DYLD_FRAMEWORK_PATH="$DECK_NATIVE_PRODUCTS" "$DECK_NATIVE_PRODUCTS/StudioDeckNativeHarness"

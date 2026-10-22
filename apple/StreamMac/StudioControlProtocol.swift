@@ -17,6 +17,8 @@ struct StudioControlRequest: Codable, Sendable {
     var page: Int?
     var text: String?
     var cursor: Int?
+    /// Negotiate bounded response framing in the authentication handshake.
+    var responseChunks: Bool?
 }
 struct StudioControlProtocolError: Codable, Equatable, Error, Sendable {
     var code: String
@@ -30,6 +32,8 @@ struct StudioControlCapability: Codable, Equatable, Sendable {
     var unavailableReason: String?
     var kind: String? = nil
     var argument: String? = nil
+    var requiresConfirmation: Bool? = nil
+    var target: StudioControlTarget? = nil
 }
 struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var projectID: String
@@ -52,6 +56,7 @@ struct StudioControlSnapshot: Codable, Equatable, Sendable {
     var chat: StudioControlChatState? = nil
     var interview: StudioControlInterviewState? = nil
     var recordingCountdown: Int? = nil
+    var transport: StudioControlTransportState? = nil
 }
 struct StudioControlInterviewState: Codable, Equatable, Sendable {
     struct Member: Codable, Equatable, Sendable {
@@ -94,6 +99,7 @@ struct StudioControlResponse: Codable, Sendable {
     var nextCursor: Int?
     var totalCommands: Int?
     var result: StudioControlCommandResult?
+    var responseChunk: StudioControlResponseChunk?
 }
 struct StudioControlSession {
     private(set) var clientID: UUID?
@@ -115,7 +121,7 @@ struct StudioControlSession {
         guard let clientID, clientStillPaired(clientID), let sessionID, request.sessionID == sessionID else {
             return .init(code: "unauthorized", message: "This connection needs a fresh authenticated session.")
         }
-        guard request.type != .authenticate, request.token == nil else {
+        guard request.type != .authenticate, request.token == nil, request.responseChunks == nil else {
             return .init(code: "invalidRequest", message: "Authenticate only once per connection; tokens belong only in the handshake.")
         }
         guard !requests.contains(request.id) else { return .init(code: "duplicateRequest", message: "This request ID was already handled. It will not execute again.") }
@@ -157,5 +163,68 @@ struct StudioControlFrameBuffer {
         }
         guard buffer.count <= Self.maximumFrameBytes else { throw StudioControlProtocolError(code: "messageSize", message: "A JSON message exceeded 65536 bytes.") }
         return frames
+    }
+}
+
+struct StudioControlTarget: Codable, Equatable, Sendable {
+    var kind: String
+    var id: String
+    var name: String
+    var eventID: String? = nil
+    var provider: String? = nil
+    var channelID: String? = nil
+}
+struct StudioControlTransportState: Codable, Equatable, Sendable {
+    struct Destination: Codable, Equatable, Sendable {
+        var id: UUID
+        var name: String
+        var state: String
+        var eventKey: String?
+        var managedStart: String?
+        var localStop: String?
+        var remoteEnd: String?
+        var endingPending: Bool
+        var confirmationPending: Bool
+    }
+    var destinations: [Destination]
+    var confirmationPending: Bool
+    var endingPending: Bool
+    var endingCountdown: Int?
+}
+
+/// A negotiated framing extension: reconstruct the complete original response
+/// before interpreting any state. Resource maps/arrays are never truncated.
+struct StudioControlResponseChunk: Codable, Sendable {
+    var transferID: UUID
+    var index: Int
+    var count: Int
+    var totalBytes: Int
+    var responseType: String
+    var snapshotRevision: UInt64?
+    var body: Data
+}
+enum StudioControlResponseFramer {
+    static let chunkBytes = 24 * 1024
+    static let maximumResponseBytes = 16 * 1024 * 1024
+    static func frames(_ response: StudioControlResponse, chunking: Bool) throws -> [Data] {
+        let encoder = JSONEncoder(), data = try JSONEncoder().encode(response)
+        guard data.count <= maximumResponseBytes else {
+            throw StudioControlProtocolError(code: "responseLimit", message: "This response exceeds the 16 MiB local control response limit. Reduce the project's resource data before reconnecting.")
+        }
+        if data.count <= StudioControlFrameBuffer.maximumFrameBytes { return [data] }
+        guard chunking else {
+            throw StudioControlProtocolError(code: "responseChunksRequired", message: "This project needs a controller that supports negotiated bounded response chunks. Update the controller and reconnect.")
+        }
+        let transfer = UUID(), count = (data.count + chunkBytes - 1) / chunkBytes
+        return try (0..<count).map { index in
+            let lower = index * chunkBytes, upper = min(data.count, lower + chunkBytes)
+            let chunk = StudioControlResponseChunk(transferID: transfer, index: index, count: count, totalBytes: data.count,
+                responseType: response.type, snapshotRevision: response.snapshot?.revision, body: data.subdata(in: lower..<upper))
+            let frame = try encoder.encode(StudioControlResponse(type: "responseChunk", id: response.id, sessionID: response.sessionID, responseChunk: chunk))
+            guard frame.count <= StudioControlFrameBuffer.maximumFrameBytes else {
+                throw StudioControlProtocolError(code: "messageSize", message: "The response chunk exceeded the local frame limit.")
+            }
+            return frame
+        }
     }
 }
