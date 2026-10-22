@@ -30,6 +30,7 @@ struct RecordingLibraryView: View { let recorder: FixtureRecorder; var openReque
 struct SessionRecoveryReviewButton: View { var relink: () -> Void; var body: some View { EmptyView() } }
 struct FixtureControlsView: View {
     var kind: String
+    init(kind: String) { self.kind = kind }
     @State private var workspace = FixtureWorkspace()
     private let dispatcher = FixtureDispatcher(), recorder = FixtureRecorder(), controller = FixtureController()
     private var reduceMotion = true
