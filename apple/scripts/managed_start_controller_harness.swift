@@ -137,6 +137,8 @@ private actor StartPublisherProbe: Publisher {
         let controller = StreamController(sceneStore: scenes, previewProgram: preview, permissions: PermissionsManager(), publisherFactory: { _ in
             let probe = StartPublisherProbe(); allocations.append(probe); return probe
         })
+        try check(!controller.resilience.isLocked,
+            "Owned managed-start fixture did not begin in its explicit unlocked session")
         let suite = "stream.managed-controller.\(UUID())", defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite); accounts.shutdown(); controller.shutdownManagedStart(); controller.stopStream(); controller.stopPreview(); scenes.flushPendingWrites() }
         let recorder = RecordingController(defaults: defaults, defaultDirectory: folder.appendingPathComponent("recordings"))
