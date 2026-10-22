@@ -1,0 +1,627 @@
+{
+  "actualSourceReceipt": {
+    "scope": "Actual full Mac graph compiled as arm64 tool; runtime only actual guest Factory/ISO worker/writer/decoder plus owned store/leases/BGRA/timeline. No Receiver/RTC/capture/mixer/StudioRuntime/StreamController.",
+    "sourceCommit": "477607883b475cbc19263bd2176e046ca09d5537",
+    "sourceHashes": {
+      "/private/tmp/stream-raw-video-full-core-products-20261022/StreamCore.framework/Versions/A/StreamCore": "e55cf959a464ec4342e5b3aec72167f65939c5c0fe202fff807dd037ed7ed845",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamCore/RawVideoResourceBudget.swift": "f608982f1ebf961838c66acf2d32b42c2802851dd1ebec0b0c1cf9d9e4fd1488",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/FrameDeliveryConverter.swift": "46e9df06e3b2dcf941f48295d2d8841b6a6d1faaf14bdd41978dd5f0ab2a00d8",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/GuestMediaReceipts.swift": "b3ba1a5b8c4450c1075b97827908ecfd3203bf78b8f7d8708eb84b2e20047a7a",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/GuestVideoFrameStore.swift": "544c4b452439ad06aaaef1f42791cf35bdca93a81004f517a655d2b3ba0892d1",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/IsolatedRecordingTypes.swift": "9ad457d29fb7548f0f81a4182a74da3a0a3ac033e92cb96b807e64558dc70372",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/IsolatedVideoRecorder.swift": "5a4b6562410a91ceb977fb903d18cb38e714d29eb1c01f3b1db9b4f98eb4ac8a",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/IsolatedVideoTypes.swift": "3fb8aae74a75ad5db7b2acc4eaf9a2bda616a5e21984d68d68ff28d2970dc3c0",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/LayerGraph.swift": "84bf12ec33fbfc61162a26faeec5cfc83262d66ec4820a8ee2110543568845d7",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/ProgramRecordingSession.swift": "63afe8eac41cb01e5fbb14a0cccb642680804a13e834db7f07c478ad7018b11e",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/RawVideoResourceCoordinator.swift": "16e4c0314c6f3da380743017bbef82635319ca75c428f318fa433785543f1d90",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/RecordingChatPaint.swift": "52e77afb8b0ab962d2b87c93afc9e05470f79312e9c29ae0a21e7e58e3ced2ff",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/RecordingFrameDelivery.swift": "6a9b14cfa36103bddebaf0f65e6b73b92775668ac2d46661157f892100894c65",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/RecordingPreferences.swift": "45dfc617028b304bde7a69d4f3947d9f2732fa9c20968d7efd189fcd76ef7f15",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/RecordingVideoSourceFactory.swift": "1ae09f08b6013480be93f377a27d0c254b4e5375d615c76f106c2f001a86d578",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/StreamMac/SceneRenderer.swift": "6b1d908822f502d5b7bd4367c3094e633a053c0250faa52847fa0825e761e923",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/scripts/prepare_recording_guest_iso_private.py": "1275b676b3be44adb44bab8c96800a69d51f8c91f5e72676a59162e67cad9b4b",
+      "/private/tmp/stream-wave17-recording-iso-proof-20261022/apple/scripts/recording_guest_iso_private_harness.swift": "230ca56bd298f79f030c0d9ea6666721f7bc2869445e59c527508ce6ef02e494"
+    }
+  },
+  "admission": {
+    "atomicSourceAndPrivateBeforeFactoryAndWriter": true,
+    "isoHeadroom": 2,
+    "isoQueueByteBudget": 48000000,
+    "isoQueueCapacity": 6,
+    "privateCapacity": 8,
+    "privateReservationBytes": 29491712,
+    "retiredExposedBanksRemainCharged": true,
+    "sourceCapacity": 4,
+    "sourceReservationBytes": 14745856,
+    "totalReservationBytes": 44237568
+  },
+  "bindings": [
+    {
+      "bytes": 16562,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/scripts/recording_guest_iso_private_harness.swift",
+      "sha256": "230ca56bd298f79f030c0d9ea6666721f7bc2869445e59c527508ce6ef02e494"
+    },
+    {
+      "bytes": 2663,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/scripts/prepare_recording_guest_iso_private.py",
+      "sha256": "1275b676b3be44adb44bab8c96800a69d51f8c91f5e72676a59162e67cad9b4b"
+    },
+    {
+      "bytes": 2877,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/scripts/run_recording_guest_iso_private.py",
+      "sha256": "64a3b1fc3910dbf165b0b857535d67eb3f0513f0e1ba07c19db8070e96d3c0fa"
+    },
+    {
+      "bytes": 4570,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/scripts/prepare_frame_delivery_broker.py",
+      "sha256": "816e94eba20cd05ab0a3e444b76c53fc860a1e609d0d35e22f82efc6f429b0d7"
+    },
+    {
+      "bytes": 1303,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/scripts/desktop_transport_fixture.rb",
+      "sha256": "473bc85f1b730529e4d44fb652c0881eb710c4847060571aa9976ebd7298fe1c"
+    },
+    {
+      "bytes": 482,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/result.json",
+      "sha256": "3a390e6727f8bc3ee9338056c7a8f256a6fd906ca1b6d40cb6c3e512ee78130e"
+    },
+    {
+      "bytes": 3471,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/iso-source-receipt.json",
+      "sha256": "5e1db0f42f7f4111d398d989e2f1dce1982b6cea9cdc5cd7bb04a0072c76eba7"
+    },
+    {
+      "bytes": 893,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/production-source.json",
+      "sha256": "4c20f002692f4ed672ba2e066eeabac51e4d59881c200a7e213300d1463b53d1"
+    },
+    {
+      "bytes": 6031,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/project.json",
+      "sha256": "bbb98ffbd6837a5b6f1ac1f2bbd9a67b1ad8f85f2eb13a49b24433853dd3db5b"
+    },
+    {
+      "bytes": 51567,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/CompositionEngine.swift",
+      "sha256": "68051c54f45bfdbc1fc005cc16cccdc750a7e1dfb0813692d7eccd80fcf97791"
+    },
+    {
+      "bytes": 26137,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/FrameDeliveryBroker.swift",
+      "sha256": "e48e46e7706d0637015ab65814c302ea4d27c2b0e02e7b7b69c11f8bbed6b569"
+    },
+    {
+      "bytes": 16562,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/fixture-source-matching-receipt.swift",
+      "sha256": "230ca56bd298f79f030c0d9ea6666721f7bc2869445e59c527508ce6ef02e494"
+    },
+    {
+      "bytes": 78020464,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/RecordingGuestISOPrivateHarness",
+      "sha256": "4bcdd1b2471080d1bb93d6abb7b3105046db20b84054dbeffeef3a7d55561bfd"
+    },
+    {
+      "bytes": 7421,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/media/observations.json",
+      "sha256": "bbf71b8b0c74b3df71ddfbc063691555c7719eb253bd0ca4ba194ead1931c706"
+    },
+    {
+      "bytes": 3281,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/media/owned-guest-iso.mp4",
+      "sha256": "c712c7636a89072a8dd03be51f4c1f723d74f28c0dfb7205deb4aad411a085fb"
+    },
+    {
+      "bytes": 1324,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/media/owned-guest-iso.mp4.video-isolated.json",
+      "sha256": "d810252d99cb2a2612e831a4fa8c5b21059cb1d3a75fb98401481e1e6f14f9d5"
+    },
+    {
+      "bytes": 788,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed/media/owned-guest-iso.mp4.recording.json",
+      "sha256": "125def8f16aa8f6591cf40621a38e97163bb9c438cd7d4a4b39f2b4f8f50896d"
+    },
+    {
+      "bytes": 388,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-first/result.json",
+      "sha256": "8f7a3cbc0a01cbc1703c46b292a8d69552d308d041422b3dd77916b3339e3a3e"
+    },
+    {
+      "bytes": 3471,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-first/iso-source-receipt.json",
+      "sha256": "da14d10c39eac1a0452d18f77d314f765f666b020960400caad33c2338ea10b0"
+    },
+    {
+      "bytes": 16560,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-first/fixture-source-matching-receipt.swift",
+      "sha256": "da2a79fdb9c6d8f9f40ac0809b80019a74261780d17fb180acd920a7ef48cebb"
+    },
+    {
+      "bytes": 388,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-access-fixed/result.json",
+      "sha256": "8f7a3cbc0a01cbc1703c46b292a8d69552d308d041422b3dd77916b3339e3a3e"
+    },
+    {
+      "bytes": 3471,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-access-fixed/iso-source-receipt.json",
+      "sha256": "69e8802c2a3d42197ab721ec5305878eba145c1f649425878d3a3400e227049e"
+    },
+    {
+      "bytes": 16552,
+      "path": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-access-fixed/fixture-source-matching-receipt.swift",
+      "sha256": "90026eacf9fd7fdb797c565c5a4e4cc6f9a3e30c1b76e24dbb93c4964e97edae"
+    },
+    {
+      "bytes": 709970,
+      "path": "/tmp/stream-recording-guest-iso-private-first-20261022.log",
+      "sha256": "1761efc4546c33a42652ef2796f8c81cad1fb249c037328bce8398570f9919c8"
+    },
+    {
+      "bytes": 575216,
+      "path": "/tmp/stream-recording-guest-iso-private-access-fixed-20261022.log",
+      "sha256": "8807b8dfad13cbc8aefdbaf6eef933e94eff4b5ea193cc1683044f44c933e819"
+    },
+    {
+      "bytes": 483514,
+      "path": "/tmp/stream-recording-guest-iso-private-sendable-fixed-20261022.log",
+      "sha256": "0954d7c8cd3ff7c3fd5c584347f6eb8afc2c2b6f542f07ec922095fd36f1fca9"
+    }
+  ],
+  "bounds": {
+    "buildJobs": 2,
+    "compileDeadlineSeconds": 600,
+    "pollDeadlineSeconds": 5,
+    "runtimeDeadlineSeconds": 120,
+    "swiftJobs": 2
+  },
+  "command": "PYTHONDONTWRITEBYTECODE=1 STREAM_VENDOR_ROOT=/tmp/stream-native-integration-20261021/apple/Vendor python3 /tmp/stream-native-build-slots-20261022.py --label recording-guest-iso-private-sendable -- python3 apple/scripts/run_recording_guest_iso_private.py --output apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed --derived apple/build/recording-guest-iso-private-20261022/derived --core-framework-dir /tmp/stream-raw-video-full-core-products-20261022",
+  "date": "2026-10-22",
+  "host": {
+    "architecture": "arm64",
+    "machineClass": "Apple M3 Max (Mac15,8, 16 CPUs)"
+  },
+  "limits": [
+    "No NativeGuestReceiver, RTC, real capture, audio samples or AudioMixEngine.run, StudioRuntime, StreamController, physical device, operator or throughput qualification.",
+    "One 0.4-second video-only file; frame ingress waits accepted writer progress, so this is not a sustained30fps/performance or full original issue171 acceptance run.",
+    "The actual existing budget manifest contains a policy-qualified field; this run does not independently qualify machine capacity.",
+    "Exact inherited generated Engine/Broker and desktop transport compile seam are retained, but runtime constructs neither Engine nor a transport.",
+    "Raw and processed factories are both exercised; actual worker uses processed. Guest-only paint is empty and checked not invented; prior generic converter proof owns nonempty ShouldNotPropagate paint.",
+    "Two fixture-only compile failures are preserved; their source snapshots were reconstructed and byte-verified against each original precompile source receipt. No failed native runtime was retried."
+  ],
+  "originalOutcomes": [
+    {
+      "cause": "Fixture internal declarations exposed private ISOFrameObservation; runtime not started.",
+      "directory": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-first",
+      "exit": 65,
+      "phase": "compile",
+      "result": "FAIL"
+    },
+    {
+      "cause": "Fixture polling predicate required @Sendable under Swift6; runtime not started.",
+      "directory": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-access-fixed",
+      "exit": 65,
+      "phase": "compile",
+      "result": "FAIL"
+    },
+    {
+      "compileExit": 0,
+      "directory": "/tmp/stream-wave17-recording-iso-proof-20261022/apple/build/recording-guest-iso-private-20261022/proof-sendable-fixed",
+      "result": "PASS",
+      "runtimeExit": 0
+    }
+  ],
+  "productionBaseCommit": "477607883b475cbc19263bd2176e046ca09d5537",
+  "productionChanges": false,
+  "rawObservations": {
+    "decodedPTS": [
+      0,
+      0.03333333333333333,
+      0.06666666666666667,
+      0.1,
+      0.13333333333333333,
+      0.16666666666666666,
+      0.2,
+      0.23333333333333334,
+      0.26666666666666666,
+      0.3,
+      0.3333333333333333,
+      0.36666666666666664
+    ],
+    "decodedPixels": [
+      [
+        0,
+        0,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ]
+    ],
+    "direct": {
+      "frames": [
+        {
+          "available": true,
+          "duration": 0.03333333333333333,
+          "pixel": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "prepared": true,
+          "pts": 10000,
+          "sequence": 1,
+          "sourceTime": 10000
+        },
+        {
+          "available": true,
+          "duration": 0.03333333333333333,
+          "pixel": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "prepared": true,
+          "pts": 10000.033333333333,
+          "sequence": 2,
+          "sourceTime": 10000
+        },
+        {
+          "available": true,
+          "duration": 0.03333333333333333,
+          "pixel": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "prepared": true,
+          "pts": 10000.066666666668,
+          "sequence": 3,
+          "sourceTime": 10000
+        },
+        {
+          "available": true,
+          "duration": 0.03333333333333333,
+          "pixel": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "prepared": true,
+          "pts": 10000.1,
+          "sequence": 4,
+          "sourceTime": 10000
+        },
+        {
+          "available": true,
+          "duration": 0.03333333333333333,
+          "pixel": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "prepared": true,
+          "pts": 10000.133333333333,
+          "sequence": 5,
+          "sourceTime": 10000
+        },
+        {
+          "available": true,
+          "duration": 0.03333333333333333,
+          "pixel": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "prepared": true,
+          "pts": 10000.166666666666,
+          "sequence": 6,
+          "sourceTime": 10000
+        },
+        {
+          "available": true,
+          "duration": 0.03333333333333333,
+          "pixel": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "prepared": true,
+          "pts": 10000.2,
+          "sequence": 7,
+          "sourceTime": 10000
+        },
+        {
+          "available": true,
+          "duration": 0.03333333333333333,
+          "pixel": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "prepared": true,
+          "pts": 10000.233333333334,
+          "sequence": 8,
+          "sourceTime": 10000
+        }
+      ],
+      "heldPrivateFrames": 8,
+      "privateCapacityFailure": true,
+      "sourceAllocationsWhilePrivateHeld": 4
+    },
+    "duration": 0.4,
+    "privateBytes": 29491712,
+    "privateCapacity": 8,
+    "progress": {
+      "droppedAudio": 0,
+      "durationSeconds": 0.4,
+      "file": "owned-guest-iso.mp4",
+      "id": "owned-guest",
+      "missingAudioFrames": 0,
+      "missingVideoFrames": 6,
+      "name": "Owned guest",
+      "renderDrops": 0,
+      "sourceAvailable": false,
+      "status": "complete",
+      "videoSamples": 12,
+      "warning": "Source unavailable; marked black frames are being recorded."
+    },
+    "replacementLeaseAvailable": true,
+    "retiredBanksCharged": true,
+    "scope": "Actual guest Factory raw/processed renderer + IsolatedVideoRecorder + native writer/video decoder, owned guest store/leases/BGRA and timeline only. No Receiver/RTC/audio/mixer/capture/device/StudioRuntime/StreamController or performance qualification.",
+    "sourceBytes": 14745856,
+    "sourceCapacity": 4,
+    "worker": [
+      {
+        "available": true,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000,
+        "sequence": 1,
+        "sourceTime": 10000
+      },
+      {
+        "available": true,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.033333333333,
+        "sequence": 2,
+        "sourceTime": 10000.033333333333
+      },
+      {
+        "available": true,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.066666666668,
+        "sequence": 3,
+        "sourceTime": 10000.066666666668
+      },
+      {
+        "available": true,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.1,
+        "sequence": 4,
+        "sourceTime": 10000.1
+      },
+      {
+        "available": true,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.133333333333,
+        "sequence": 5,
+        "sourceTime": 10000.133333333333
+      },
+      {
+        "available": true,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.166666666666,
+        "sequence": 6,
+        "sourceTime": 10000.166666666666
+      },
+      {
+        "available": false,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.2,
+        "sequence": 7,
+        "sourceTime": 10000.2
+      },
+      {
+        "available": false,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.233333333334,
+        "sequence": 8,
+        "sourceTime": 10000.233333333334
+      },
+      {
+        "available": false,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.266666666666,
+        "sequence": 9,
+        "sourceTime": 10000.266666666666
+      },
+      {
+        "available": false,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.3,
+        "sequence": 10,
+        "sourceTime": 10000.3
+      },
+      {
+        "available": false,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.333333333334,
+        "sequence": 11,
+        "sourceTime": 10000.333333333334
+      },
+      {
+        "available": false,
+        "duration": 0.03333333333333333,
+        "pixel": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "prepared": true,
+        "pts": 10000.366666666667,
+        "sequence": 12,
+        "sourceTime": 10000.366666666667
+      }
+    ]
+  },
+  "rawResult": {
+    "copiedCoreSHA256": "e55cf959a464ec4342e5b3aec72167f65939c5c0fe202fff807dd037ed7ed845",
+    "executableSHA256": "4bcdd1b2471080d1bb93d6abb7b3105046db20b84054dbeffeef3a7d55561bfd",
+    "observationsSHA256": "bbf71b8b0c74b3df71ddfbc063691555c7719eb253bd0ca4ba194ead1931c706",
+    "result": "PASS",
+    "runnerSHA256": "64a3b1fc3910dbf165b0b857535d67eb3f0513f0e1ba07c19db8070e96d3c0fa",
+    "scope": "Owned actual guest Factory/ISO worker/writer/video decoder, no capture/RTC/audio graph"
+  },
+  "result": "PASS",
+  "schemaVersion": 1,
+  "scope": "Actual guest Factory raw/processed renderer -> isolated worker -> prepared ProgramRecordingSession -> native H264 writer -> actual AVAssetReader decoded video. Owned synthetic pixels/guest store/leases/timeline only."
+}
