@@ -95,3 +95,45 @@ The roadmap also contains unfinished software, beyond external qualification. Na
 ## Concrete external prerequisites
 
 The local SDK probe found no NDI runtime/SDK, DeckLink runtime/SDK or Zoom Meeting SDK. The installed Zoom application is not the Meeting SDK. These tasks also need real media bridge implementations; a prerequisite diagnostic cannot substitute for one. A Developer ID certificate exists, but matching StreamMac/camera/helper provisioning profiles were not found. The read-only HAL probe did not find an installed Stream virtual microphone. No driver installation, extension activation, system-default changes, credential updates, signing submissions, public broadcasts or GitHub issue edits were performed.
+
+## Native controls and diagnostics follow-up — 2026-10-22 UTC
+
+A further wave used up to ten concurrent subagents, independent acceptance
+review and combined validation. Original issue criteria for #91 and #147–#150
+are implemented and qualify for closure after this source is published. The
+current GitHub reconciliation is recorded separately in MACOS_TASK_STATUS.json.
+
+- StreamCore passed 584 tests in 82 suites. Its production and test trees remain
+  identical to that tested snapshot after the later macOS-only integration.
+- The combined unsigned Release app, browser helper and camera extension build
+  for arm64 and x86_64. Bundle checks retain all six App Intents, three entities,
+  sandbox declarations and the absence of transport validation hooks. The
+  optional libnice backend is absent from the shipping executable.
+- Combined native dispatcher/IPC checks passed exact scene/destination/event
+  controls, 512 complete destination receipts, separate 256-layer Preview and
+  Program receipts, real localhost RTMP acknowledgement/decoding, recording
+  countdown cancellation and two independently finalized recording segments.
+- All 28 combined controller/SDK tests and 21 actual Worker tests pass. A clean
+  Node 24.15 install enforces engines and peer dependencies; Worker types now
+  match pinned Wrangler. Official Elgato validation/packaging passes.
+- Actual media PCM validates sound transport, gain/mute, native/AU bypass,
+  staged isolation, PDF/markers and decoder retirement. The original audio
+  sample timing grid/duration/DTS is preserved. Actor-side insert identity and
+  revision checks reject stale add/remove/prune operations.
+- Diagnostics distinguish timestamp offset, observed rate skew and uncertain
+  delivery. Actual default RTMP/SRT media remains healthy through recorder
+  storage failure. Failed publishers stop their live timers. Resource and
+  clock exports are bounded and redacted.
+
+Genuine sample Stream Deck profile exports and remaining package/device
+qualification keep #152 open. The two quiet 120-second owned workloads improve
+#92 evidence without qualifying representative physical capture, Intel or
+resource ceilings. Shared encoded publishing still fails its independent 80 ms
+media gate; its correctly uncertain callback telemetry does not repair that
+media result. The guest HTML player clock-reset fix and successful raw-track
+matrices do not resolve the retained 105.104 ms failure or establish normal
+rendered PCM/AEC qualification for #127. Optional TCP TURN qualifies only its
+owned newer-macOS backend; the shipping UDP-only backend and unsupported TLS
+remain explicit. See STUDIO_DIAGNOSTICS.md, DECK_AUDIO_MEDIA_VALIDATION.md,
+DESKTOP_RESOURCE_BUDGETS.md, GUEST_RETURN_AV_ORACLES.md and
+NATIVE_GUEST_TCP_QUALIFICATION.md for evidence and reproducible boundaries.

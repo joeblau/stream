@@ -1,6 +1,6 @@
 # Native controller audio and media validation
 
-`apple/scripts/run_deck_audio_media_harness.zsh` creates a generated macOS tool target and runs a bounded, fixture-owned media session. It compiles with at most two jobs. Set `STREAM_VENDOR_ROOT` when using an isolated worktree whose pinned vendor packages are shared read-only.
+`apple/scripts/run_deck_audio_media_harness.zsh` creates a generated macOS tool target and runs a bounded, fixture-owned media session. It passes `-jobs 2` to Xcode. Set `STREAM_VENDOR_ROOT` when using an isolated worktree whose pinned vendor packages are shared read-only.
 
 The tool pairs an in-memory credential store with the shipping loopback server and sends authenticated stable-ID commands through the shipping dispatcher. Actual AVPlayer/AVAssetReader sound and playlist playback feeds AudioMixEngine's Program bus and the native recorder. Measured PCM windows distinguish play, pause, resume, gain, mute, file-end looping, native high-pass bypass, and an installed Apple AU effect's bypass. The resulting recording is decoded independently. The same session checks actual video transport, rendered PDF pages, recording marker persistence, stable bindings after rename/deletion, multiple bindings, reconnect snapshots, and decoder/pump/hosted-unit retirement.
 
