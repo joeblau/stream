@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import StreamCore
 
@@ -64,6 +65,7 @@ struct SecondaryCanvasPanelView: View {
                             Text(layout.placements[layer.id] == nil ? "Follows Program" : "Independent geometry").font(.caption).foregroundStyle(.secondary)
                             Button("Follow Program") { edit { $0.placements[layer.id] = nil } }
                                 .disabled(layout.placements[layer.id] == nil || scene.isEffectivelyLocked(layer))
+                                .accessibilityLabel("Follow Program for \(layer.name) on secondary canvas")
                         }
                     }
                 }
@@ -90,7 +92,12 @@ struct SecondaryCanvasPanelView: View {
     private func guideSlider(_ title: String, value: Double, update: @escaping (inout SecondaryCanvasLayout, Double) -> Void) -> some View {
         HStack {
             Text(title).frame(width: 50, alignment: .leading)
-            Slider(value: Binding(get: { value }, set: { changed in edit { update(&$0, changed) } }), in: 0...0.4)
+            Slider(value: Binding(get: { value }, set: { changed in edit { update(&$0, changed) } }), in: 0...0.4) {
+                Text("Secondary canvas safe zone \(title)")
+            }
+            .labelsHidden()
+            .accessibilityValue(Text((0...0.4).contains(value)
+                ? String(format: "%.1f percent", value * 100) : "Safe zone value unavailable"))
             Text("\(Int(value * 100))%").monospacedDigit().frame(width: 40)
         }
     }
