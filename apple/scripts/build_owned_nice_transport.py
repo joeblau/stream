@@ -56,7 +56,7 @@ def checkout(root, name, url, pin, recursive=False):
             run("git", "-C", source, "submodule", "update", "--init", "--recursive", "--jobs", "2")
     if run("git", "-C", source, "rev-parse", "HEAD", capture=True).strip() != pin:
         raise RuntimeError(f"Unexpected source revision: {name}")
-    changed = run("git", "-C", source, "diff", "--name-only", capture=True).splitlines()
+    changed = run("git", "-C", source, "diff", "HEAD", "--name-only", capture=True).splitlines()
     allowed = ["src/impl/icetransport.cpp"] if name == "libdatachannel-source" else []
     if changed not in ([], allowed):
         raise RuntimeError(f"Unrelated source changes preserved; choose another build directory: {name}")
@@ -64,6 +64,11 @@ def checkout(root, name, url, pin, recursive=False):
         status = run("git", "-C", source, "submodule", "status", "--recursive", capture=True)
         if any(not line.startswith(" ") for line in status.splitlines()):
             raise RuntimeError("SDK submodule revision differs from its pinned source")
+        clean = subprocess.run(["git", "-C", str(source), "submodule", "foreach", "--quiet", "--recursive",
+                                "git diff HEAD --quiet --exit-code"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if clean.returncode != 0:
+            raise RuntimeError("SDK submodule has staged or unstaged tracked changes; preserved without building")
     return source
 
 
