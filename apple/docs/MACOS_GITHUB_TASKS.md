@@ -414,3 +414,49 @@ The final combined shipping source `16e8782` passes unsigned universal macOS Rel
 - A diagnostic source-availability check now uses the original 17,850 total-frame allowance; decoder grace and all original nominal/render/A/V gates remain unchanged. The new real ARM run still **fails**: 16,957 and 17,047 rendered frames, approximately 28.26/28.41 fps, versus 17,850 required. Both recordings complete, and replay decodes all 16,956 available source frames. Intel also fails at 17,366/17,058 rendered frames; replay decodes all 17,366 available frames and both recordings complete. The earlier long stall did not recur, while the nominal frame deficit remains. **#92 remains open**; see [the preserved ARM](PERFORMANCE_HOSTED_ARM_39724736435.json) and [Intel](PERFORMANCE_HOSTED_INTEL_39724736435.json) measured failures.
 
 The older `b53ae5d` CI run has passed both macOS Core and lifecycle steps, and iOS passed all 586 tests in 82 suites. Its later Mac stages are still active at this snapshot, so no complete macOS CI pass is asserted. New-source CI must validate the newly enabled checks.
+
+## Current controls, authenticated IPC and font cohort — 2026-10-22 UTC
+
+Read-only paginated GitHub reconciliation of all original 61 issue bodies keeps
+**25 closed / 36 open**: 25 feature tasks and 11 trackers remain open, with zero
+open pull requests and no state changes. This cohort makes no closure decision.
+PTZ issue **#165 is already closed and is outside this original 61-issue
+inventory**; its regression fix neither reopens it nor changes these counts.
+
+Canonical shipping source `b6994ef` and the CI-only follow-up `28263d3` include
+the following reviewed changes. The parent validates exact `28263d3`: unsigned
+universal Release for arm64/x86_64 and the actual bundle audit pass, as do all
+four focused gain/PTZ/socket/font checks. Shared Core, iOS, broadcast and project
+source are unchanged from `44c078e`; no unchanged local Core/iOS suite was rerun
+for this documentation pass. Exact root receipts and log hashes are retained
+under `wave6Review` in [the ledger](MACOS_TASK_STATUS.json).
+
+| Scope | New integrated evidence | Original acceptance disposition |
+| --- | --- | --- |
+| #90 accessibility | Pad color controls are named selection buttons; pad/playlist/scene-sound gains and PDF controls identify their targets. Gain labels handle huge/nonfinite persisted values without integer traps. Numeric crop fields/steppers validate complete finite geometry and preserve the displayed basis; zoom reports its target/value. Real PTZ native actions request bounded nudges with exact input ownership. Source/model checks and controlled native target-action tests pass. | **Open.** No new complete semantic AX/VoiceOver order, platform keyboard traversal, virtual fader/table/layer action, visual contrast or whole-window/small-layout operator acceptance is claimed. Offscreen PTZ AX delivery remains explicitly UNQUALIFIED77. |
+| #165 PTZ regression, already closed | Entered sends complete before old-target Stop/disconnect; superseded queued motion, timers, pointer release and callbacks cannot affect a replacement. Actual NSButton target-action and controlled pointer cases pass. | **Closed state preserved.** A 250 ms nudge bounds controller intent. Local network content processing/timeout is not camera acknowledgment or guaranteed physical movement duration. This adds no new closure or physical acceptance claim. |
+| #124 browser audio | Production defaults to the declared shared container and sealed same-team Apple-anchored peer identity, pinned executable/hash and kernel audit-token authority on both channels. Private-/tmp/prototype mode compiles only with native validation. Real owned socket/SecCode identity/refusal, negative production compile and silent validation helper IPC/retirement pass. | **Open; selector/startup stay disabled.** No macOS profile authorizes this declared group here. Actual provisioned sandbox/group launch, genuine WebKit attribution/tails, every-route acknowledged exclusions and live audio/A/V validation remain pending. NoReady probes establish fail-closed refusal; a locked session may exit at the initial CGSession guard, so those probes do not prove delivery through every parser branch. |
+| #127 guest return diagnostics | Shipping generated Opus independently decodes through existing libopus: 109 payloads/104640 stereo frames with retained 960-step source/RTP framing and correct channel identity. Exact browser source distinguishes WebAudio FIFO ticks from the platform receive-decoder clock. | **Open.** No production media behavior changes or successful network sends follow from the cross-decoder proof. The clock explanation remains a hypothesis. Owned browser discriminators exit77 before connected measurement; the old 931-RTP/zero-PCM and 105.104 ms results, normal output/AEC and broader routing/sync qualification remain unresolved. |
+| #92 title-font preparation | A bounded local 20-second static/replay comparison removes repeated font preparation. All four cases render 601 frames, but original replay decodes **601/601** and candidate replay **600/601** available frames. Registry/locale/language invalidation and complete-buffer renderer/owned-font/nested-bake checks pass. | **Open.** The measured candidate precedes the final separately tested nested-retention guard. Lookup counts are not cache-miss counts; a warm pixel hash is not every-frame parity. Static Core Image time increased. No universal speedup, repeated 600-second/hosted pass, waveform A/V or resource ceiling is inferred; all original hosted failures remain failed. |
+
+See [semantic control scope](STUDIO_SEMANTIC_CONTROLS.md),
+[PTZ authority and limits](PTZ_CONTROL_AUTHORITY_VALIDATION.md),
+[browser production/prototype policy](research/browser-widget-audio.md),
+[guest wire/clock audit](NATIVE_GUEST_RETURN_WIRE_AUDIT.md) and
+[the bounded font receipt](TITLE_FONT_CACHE_PROFILE_2026-10-22.json).
+The remaining original tasks and trackers retain their previous acceptance
+limits. Local fixes do not stand in for native AX, signed provisioned IPC,
+authorized provider/device flows or the original measured performance gates.
+
+At the current read-only snapshot, published source is still `44c078e`.
+[Its hosted CI run](https://github.com/joeblau/stream/actions/runs/39728335886)
+is active, with **Intel failed**, ARM still running and the iOS job successful.
+Intel passes the full **586 Core tests/82 suites in 192.316 seconds**, then fails
+Deck receiver step 11 with exit132 because the receiver rejects generated
+native media. Diagnosis is pending; no unmerged fix or root cause is counted.
+The exact original 5,214,080-byte log is retained at
+`/tmp/stream-ci-44c078e-119657621592-original.log`, SHA256
+`bd50bd7481d39d4cbac75da423ebac3a3dec5d700d7be9d41a90c68479c2e87d`.
+Neither the passing Core/iOS result nor the new local universal checks are a
+whole desktop CI pass. Later cancellation, terminal results or a published fix
+must be recorded as a new receipt without relabelling this failure.

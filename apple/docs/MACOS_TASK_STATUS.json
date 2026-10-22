@@ -9,16 +9,16 @@
     "os": "macOS 27.2 (26B118)",
     "toolchain": "Xcode 27.2 (27B5038j)"
   },
-  "scope": "Tracks 61 original macOS issues (48 feature tasks and 13 roadmap or epic trackers). Fresh paginated GitHub inventory: 36 open and 25 closed, consisting of 25 open features and 11 open trackers. This batch adds no issue closures.",
+  "scope": "Tracks 61 original macOS issues (48 feature tasks and 13 roadmap or epic trackers). Fresh paginated GitHub inventory: 36 open and 25 closed, consisting of 25 open features and 11 open trackers. This cohort adds no closures; already closed PTZ issue 165 is outside this original inventory.",
   "prerequisites": {
     "ndi": "SDK headers/runtime missing (actual read-only probe)",
     "deckLink": "SDK headers/runtime missing (actual read-only probe)",
     "screenRecordingAccess": true,
-    "signing": "Five installed macOS profiles; zero unexpired app/helper/camera matches. No Developer ID distribution artifact, notarization, or extension/driver installation."
+    "signing": "Read-only inventory:3 valid signing identities (1 Developer ID Application, 2 Apple Development); 5 macOS profiles, none authorizing the declared shared browser App Group for host/helper. Two iOS profiles contain that group. No positive provisioned macOS shared-container launch, Developer ID distribution artifact, notarization or extension/driver installation is claimed; no profiles/identities/containers changed."
   },
   "validation": {
     "sharedCore": "Final combined 9cbe0b9 local Core PASS:563 tests/80 suites in52.689s; exactly ChannelFXProcessorTests and VoicePolishProcessorTests excluded for the known local HAL limitation. /tmp/stream-wave4-parent-final-core-20261022.log. Earlier exact a346f56 hosted ARM, Intel and iOS each pass FULL586/82; that source predates the new routing policy. Both Mac workflows later fail the same fixture pause assertion, now corrected with preserved bounds. No current whole-hosted-CI pass is claimed.",
-    "shippingApp": "Final combined 9cbe0b9 unsigned universal Release and actual bundle audit PASS (arm64/x86_64 app and embedded camera/browser helper, sandbox declarations, six App Intents/three entities, no validation hooks); full iOS device-source build PASS. Logs /tmp/stream-wave4-parent-final-{universal,bundle,ios}-20261022.log. No Developer ID/notarization or physical Intel/runtime device IO qualification.",
+    "shippingApp": "Current combined 28263d3 unsigned universal Release and actual bundle audit PASS: arm64/x86_64 app and embedded camera/browser helper, sandbox declarations, six App Intents/three entities and no transport validation hooks. /tmp/stream-wave6-parent-final-{universal,bundle}-20261022.log with exact hashes under wave6Review. This cohort changes no StreamCore/iOS/broadcast/project source from 44c; no new iOS build or unchanged local Core rerun was performed. No Developer ID/notarization or runtime device IO qualification.",
     "diagnosticLifecycle": "Post-merge native workspace passes pre-view/hidden/detached sampling and retired-runtime sample fencing; bounded redacted-export diagnostics fixture also passes.",
     "guestHealth": "Actual frame-store state/count/generation regression passed",
     "guestControllerHealth": "Actual renderer/controller fixture passed waiting camera, separately inactive unapproved screen and retired unavailable sources",
@@ -28,7 +28,7 @@
     "controllers": "Post-merge actual local control and six native shortcut/palette/window-readiness groups pass: real key dispatch and catalog, binding persistence/conflicts/repeats, text/button focus, attached sheets, palette navigation/focus restoration, unrelated-window isolation, studio identity/reopen and uninstall. Actual global modal-only Carbon/AppKit check passes. Stream Deck typecheck and all 10 tests pass. Earlier native MIDI/OSC/macros, universal helper and official packaging pass; physical controller/keyboard and signed pairing remain unqualified.",
     "nativeInterviewProgramISO": "Actual manager/default native receiver through local TURN/Chrome decoded Program and guest ISO: 316946/294390 identical Float32 values, zero rational cue difference/history misses; separate screen approval/stop and Backstage privacy pass",
     "guestPrivateMessages": "Actual shipping dispatcher/manager/default receiver through local TURN/Chrome passes both directions/receipts, private Backstage routes, rejoin history wipe and stale-context refusal alongside unchanged stereo audio return",
-    "review": "Final independent subagent review finds no actionable merge-resolution issue in portable package bounds/typed token remapping, workspace operation ownership/asset grants, recorder warnings or recovery. Production-source diff from e5925bf through reviewed HEAD is empty; later commits are fixture-only, so the successful universal build covers current shipping code.",
+    "review": "Current scoped independent source reviews find no remaining concrete issues in gain formatting, numeric crop validation, PTZ input/transport ownership or signed-peer IPC policy. Focused font cache and actual renderer pixel/registry/nested-bake cases pass. Historical reviewed-source-equality claims refer only to their named earlier heads, not this production-changing cohort. Native AX/VoiceOver, provisioned browser IPC, original performance and guest playback acceptance remain open.",
     "performance": "Two earlier quiet120-second owned ARM workloads and separate60-second effects rendering remain scoped evidence. Actual hosted600-second ARM workloads at0d79056 fail original30fps qualification: approximately19.5367 and20.2333 rendered fps, with7/0 failed renders. c3fda71 preserves atomic failure metrics and distinguishes sparse replay-source inventory from nominal capacity while retaining the original gate; its focused smoke is not a sustained qualification fix. Native Intel hosted run is terminalFAIL:10123/2209 rendered frames and original80ms video-PTS-versus-host-arrival duration check reports59.192148398s divergence. This is not a decoded waveform A/V drift diagnosis. Both architecture performance jobs failed; representative resource ceilings remain unqualified. See PERFORMANCE_HOSTED_ARM_FAILURE_2026-10-22.json.",
     "sharedCoreIOS": "Exact published a346f56 hosted iOS full586 tests/82 suites PASS180.802s, job119633732045. Original log /tmp/stream-ci-a346f56-119633732045-original.log SHA256112939a6917de52b3b0be2ecf9e075327b7087a01a75caeb584b50b4382264bb. New playback fixture7898737 changes no shared Core/iOS app source.",
     "appIntentsMetadata": "Actual unsigned bundle contains all six documented App Intents and three stable resource entities; an owned bundle with scene action removed is rejected",
@@ -259,7 +259,13 @@
         "bytes": 517,
         "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
       }
-    ]
+    ],
+    "wave6CombinedNative": "Exact 28263d3 xcodegen, unsigned universal Release and bundle audit PASS; focused gain/PTZ/socket/font4/4 PASS. No ledger-task builds were run. Root receipts /tmp/stream-wave6-parent-final-results-20261022.json and /tmp/stream-wave6-focused-results-20261022.json retain exact source/log hashes. Local checks do not turn the active/failing hosted 44c workflow green.",
+    "wave6Accessibility": "Named pad color buttons, pad/playlist/scene-sound gain and PDF controls, overflow-safe percent formatting, validated numeric crop fields/steppers, zoom labels and real native PTZ nudge actions are integrated. Source/type/model checks and controlled native PTZ ownership/action cases pass; platform keyboard/AX delivery remains explicitly UNQUALIFIED 77. No new VoiceOver, full semantic order, visual contrast or whole-window operator acceptance.",
+    "wave6BrowserIPC": "Production defaults to sealed bundled same-team Apple-anchored peers, exact executable/hash and kernel audit-token identity on both channels, then shared-container sockets. Prototype policy/tmp/mode exist only under STREAM_NATIVE_VALIDATION. Actual ad hoc socket identity/refusal, negative production compile and silent validation IPC/retirement pass. NoReady helper probes prove fail-closed refusal only: they may return at CGSession preflight and do not prove delivery through every parser branch. Positive provisioned sandbox/group, genuine WebKit audio and acknowledged every-route exclusions remain unqualified.",
+    "wave6FontProfile": "Bounded local M3 Max20 s static/replay before/after: all four render601 frames without failed renders or whole-skipped opportunities; original replay decodes 601/601, candidate600/601 (450 due before short allowance). Font construction/lookup span falls4.472/4.628ms to0.054/0.038ms, while static CI render time rises. Candidate lookup counts are not measured misses. Trace predates final nested-retention guard, separately proven by real renderer and negative control. No universal speedup, long-run/hosted pass, waveform sync or resource ceiling is inferred.",
+    "wave6GuestWireAudit": "Shipping Opus payloads independently decode through existing libopus 1.6.1:109 packets / 104640 stereo frames,960-step RTP/source framing and matching source identity. No production sender/SDP/transport changes or successful network sends. Exact Chromium source supports a receive-clock hypothesis, not a proven cause of old 931 RTP / zero PCM. Owned all-Chrome and fake-output-clock probes exit 77 before connected measurement; original 105.104 ms and normal output/AEC gates remain open.",
+    "wave6HostedCI": "Intel failed Deck receiver step 11 after full Core 586/82 PASS in 192.316 s; diagnosis pending. ARM remains active; iOS job succeeded. No whole-run pass or current-cohort hosted qualification."
   },
   "issues": [
     {
@@ -746,11 +752,14 @@
       "completion": "remaining acceptance",
       "remaining": [
         "An earlier raw-track A/V run exceeded 100 ms (105.104 ms; contiguous PCM 103.104 ms). Later bounded two-capture-per-source matrices pass but do not establish a fix for that variable failure. Normal rendered PCM/AEC/talkback playback remains unqualified; the recorded locked-session SCK calibration exits 77 with zero shareable displays.",
-        "Program/Secondary/Clean selection, conservative feedback-driven bitrate and whole-AU admission, same-lease budget retention and optional-video failure isolation are implemented and locally verified. Multiple simultaneous recipients/capacity, physical AEC, desktop/mobile browsers, deployed/restricted-network and sustained A/V qualification remain. Natural higher-resolution upshift and actual high-to-low resolution impairment have not been qualified."
+        "Program/Secondary/Clean selection, conservative feedback-driven bitrate and whole-AU admission, same-lease budget retention and optional-video failure isolation are implemented and locally verified. Multiple simultaneous recipients/capacity, physical AEC, desktop/mobile browsers, deployed/restricted-network and sustained A/V qualification remain. Natural higher-resolution upshift and actual high-to-low resolution impairment have not been qualified.",
+        "Current source/wire audit and independent libopus decode demonstrate non-silent interoperable generated Opus payloads, without production changes or successful network sends. The receive-clock cause remains a source-supported hypothesis. Both owned browser discriminators stop before connected/RTP measurement and are UNQUALIFIED 77, not a repair or a reproduced old 931-packet symptom."
       ],
       "evidence": [
         "GUEST_RETURN_AV_ORACLES.md",
-        "NATIVE_GUEST_TCP_QUALIFICATION.md"
+        "NATIVE_GUEST_TCP_QUALIFICATION.md",
+        "NATIVE_GUEST_RETURN_WIRE_AUDIT.md",
+        "NATIVE_GUEST_RETURN_WIRE_AUDIT_2026-10-22.json"
       ]
     },
     {
@@ -795,8 +804,14 @@
       "githubState": "open",
       "completion": "production enablement and acceptance remain gated",
       "remaining": [
-        "Public transparent PDF pixels, Program-only page leases/retirement, shared-channel retention, native mixer/ISO controls and stale-seed/queued-PCM fencing are implemented and locally verified. Production selector/startup remains disabled. Signed/sandboxed shared-container IPC, actual WebKit audio attribution/retirement/tails, acknowledged every-route recapture exclusion, permission/device lifecycle, new live same-page A/V and sustained multi-widget qualification remain required before enablement.",
-        "Capture start/Stop resource authority is fixed: seven controlled actual-owner cases and silent sibling-page IPC pass, including final Stop retirement. These are lifecycle proofs; production enablement and original audible capture/routing requirements remain pending."
+        "Public transparent PDF pixels, Program-only page leases/retirement, shared-channel retention, native mixer/ISO controls and stale-seed/queued-PCM fencing are implemented and locally verified. Production selector/startup remains disabled. Positive provisioned signed/sandboxed shared-container IPC, actual WebKit audio attribution/retirement/tails, acknowledged every-route recapture exclusion, permission/device lifecycle, new live same-page A/V and sustained multi-widget qualification remain required before enablement.",
+        "Capture start/Stop resource authority is fixed: seven controlled actual-owner cases and silent sibling-page IPC pass, including final Stop retirement. These are lifecycle proofs; production enablement and original audible capture/routing requirements remain pending.",
+        "Fail-closed production shared-container and bidirectional signed-peer policy is now implemented and reviewed. Real kernel/SecCode ad hoc identity/refusal and silent validation IPC pass, but prototype policy cannot compile into shipped code. No macOS profile authorizes the declared group here; no positive provisioned/sandboxed launch or real browser audio/exclusion/sync acceptance is inferred. NoReady probes do not identify which prerequisite refused."
+      ],
+      "evidence": [
+        "research/browser-widget-audio.md",
+        "/tmp/stream-wave6-browser-shared-ipc-report-20261022.md",
+        "/tmp/stream-wave6-browser-shared-ipc-audit-20261022.md"
       ]
     },
     {
@@ -866,7 +881,8 @@
         "Both hosted architecture performance jobs failed. Native Intel reaches10123/2209 rendered frames then fails the original80ms video-PTS versus host-arrival-duration check at59.192148398s divergence; no decoded waveform A/V drift diagnosis is inferred. Representative mixes, independent sustained waveform A/V, thermal evidence and resource ceilings remain unqualified.",
         "Measured encoder/output counts and storage/uplink ceilings; observed recording write rate is not a maximum.",
         "Production due-tick idle cliff is corrected and its actual scheduling helper passes deterministic600s simulation, but no fresh sustained GPU/hardware qualification follows from that virtual-clock result; original resource/performance failures remain failed.",
-        "Fresh run 39724736435 on native ARM VirtualMac2,1 improves to about 28.26/28.41 rendered fps but still fails the unchanged 17,850-frame gate with 16,957/17,047 frames. Both writers complete and actual-source replay decodes all 16,956 available frames; this is not nominal 30 fps capacity. Current Intel also fails nominal capacity at 17,366/17,058 rendered frames; replay decodes all 17,366 available frames and both writers complete. The prior long stall did not recur, but the real frame deficit remains."
+        "Fresh run 39724736435 on native ARM VirtualMac2,1 improves to about 28.26/28.41 rendered fps but still fails the unchanged 17,850-frame gate with 16,957/17,047 frames. Both writers complete and actual-source replay decodes all 16,956 available frames; this is not nominal 30 fps capacity. Current Intel also fails nominal capacity at 17,366/17,058 rendered frames; replay decodes all 17,366 available frames and both writers complete. The prior long stall did not recur, but the real frame deficit remains.",
+        "Registry-aware title font caching and actual native pixel/owned-font/nested-bake regressions pass. Bounded20 s candidate profile renders 601 but decodes 600/601 replay frames versus original 601/601; its trace predates the final nested guard. This does not replace either failed 600-second hosted result, qualify representative physical mixes/Intel/resource ceilings or prove waveform A/V sync."
       ],
       "evidence": [
         "DESKTOP_RESOURCE_BUDGETS.md",
@@ -878,7 +894,8 @@
         "PERFORMANCE_HOSTED_ARM_FAILURE_2026-10-22.json",
         "/tmp/stream-wave3-published-ci-performance-report-20261022.md",
         "PERFORMANCE_HOSTED_ARM_39724736435.json",
-        "PERFORMANCE_HOSTED_INTEL_39724736435.json"
+        "PERFORMANCE_HOSTED_INTEL_39724736435.json",
+        "TITLE_FONT_CACHE_PROFILE_2026-10-22.json"
       ]
     },
     {
@@ -906,9 +923,9 @@
       "githubState": "open",
       "completion": "remaining acceptance",
       "remaining": [
-        "SwiftUI semantic AX labels/actions/order, named table/layer actions, virtual fader/panel operator qualification and visual contrast comparison remain open; the locked-session AX/contrast limitations are unchanged.",
-        "Six concrete stale native focus ownership races are reproduced and fixed in e2a3fbf, with current-owner/removed-target/nested-presentation/real-sheet positive controls passing. This does not substitute for the remaining semantic accessibility or contrast acceptance.",
-        "Concrete scene-button, media-label and non-color clipping source gaps are repaired and compiled universally. Full semantic actions/order, keyboard operator traversal and visual contrast remain unqualified; the bounded locked-host fixture exits 77."
+        "Full VoiceOver labels/actions/order, keyboard traversal, virtual fader/table/layer actions, complete smaller-display layouts and actual visual contrast remain unqualified. The locked/offscreen semantic AX limitation is not a passed operator check.",
+        "Prior exact native focus ownership/restoration and meter/chat owner preservation proofs remain scoped evidence; they do not qualify every virtual control or panel transition.",
+        "Current source repairs named pad color/PDF/audio controls, safe gain values, validated numeric crop/steppers, zoom labels and native bounded PTZ actions. Source/model/native target-action checks pass; actual platform keyboard/AX delivery is UNQUALIFIED 77. No physical PTZ stop guarantee is claimed."
       ],
       "evidence": [
         "STUDIO_CONTROLS.md",
@@ -916,7 +933,12 @@
         "/tmp/stream-wave2-90-acceptance-20261022.md",
         "STUDIO_FOCUS_OWNERSHIP_2026-10-22.json",
         "STUDIO_SEMANTIC_CONTROLS.md",
-        "STUDIO_SEMANTIC_CONTROLS_2026-10-22.json"
+        "STUDIO_SEMANTIC_CONTROLS_2026-10-22.json",
+        "PTZ_CONTROL_AUTHORITY_VALIDATION.md",
+        "/tmp/stream-wave6-accessibility-source-checks-20261022.json",
+        "/tmp/stream-wave6-providers-accessibility-controls-review.md",
+        "/tmp/stream-wave6-providers-crop-review.md",
+        "/tmp/stream-wave6-providers-ptz-review.md"
       ]
     },
     {
@@ -1100,11 +1122,11 @@
     "currentlyOpen": 36,
     "closedSinceInitialInventory": 25
   },
-  "overallStatus": "Incomplete roadmap: 36 of the original 61 issues remain open; 25 are closed, and there are zero open pull requests. Integrated accessibility, browser capture retirement, CI receiver prerequisites and a diagnostic input boundary correction pass their scoped reviews/checks. Final universal macOS Release and bundle audit pass. Both real hosted ARM and Intel performance runs fail the unchanged frame-count gate; their recordings complete. No whole accessibility or browser-audio acceptance is inferred.",
-  "integratedMain": "16e8782",
-  "githubStateRefreshedAt": "2026-10-22T05:28:04.265601+00:00",
+  "overallStatus": "Incomplete roadmap: 36 of the original 61 issues remain open; 25 are closed, with zero open pull requests. Current combined 28263d3 passes unsigned universal Release, bundle audit and four focused gain/PTZ/socket/font checks. Source/model/native-action repairs do not qualify full accessibility or provisioned browser IPC. The bounded20 s font candidate decodes 600/601 replay frames versus original 601/601; it is not sustained capacity. Published44c hosted Intel fails Deck receiver step 11 after full586/82 Core PASS; ARM remains active and iOS succeeds. No whole-CI pass or issue closure is claimed.",
+  "integratedMain": "28263d3cd4f4f3200948af6205c83f6932b1b4b8",
+  "githubStateRefreshedAt": "2026-10-22T06:12:15.610629+00:00",
   "reviewedFollowupBranch": "integrate/native-completion-20261021",
-  "publishedIntegration": "16e8782b80ef806e58efa5cbfcc992a8e7103317",
+  "publishedIntegration": "44c078e2c7434ab416c1a6c56e256bd34059ffb7",
   "pullRequestReconciliation": {
     "recordedMerged": [
       210,
@@ -1124,7 +1146,7 @@
     ],
     "note": "Exact ancestry and stable patch/replacement audit precede publication. Original superseded PRs are not represented as merged or their historical checks as passing. Current direct GitHub inventory has zero open PRs."
   },
-  "currentReviewBase": "16e8782",
+  "currentReviewBase": "28263d3cd4f4f3200948af6205c83f6932b1b4b8",
   "wave2Review": {
     "sourceBase": "33e9bc90e4e40422a3af72183f57e966b84bb67d",
     "githubWritesPerformed": true,
@@ -1270,6 +1292,198 @@
       "openPullRequests": 0,
       "newClosures": 0,
       "inventory": "/tmp/stream-wave5-publication-inventory-20261022.json"
+    }
+  },
+  "wave6Review": {
+    "recordedAt": "2026-10-22T06:18:09.866517+00:00",
+    "sourceBase": "44c078e2c7434ab416c1a6c56e256bd34059ffb7",
+    "shippingSource": "b6994ef93883cf5cf8db90031bb87219a79546d4",
+    "validatedIntegratedHead": "28263d3cd4f4f3200948af6205c83f6932b1b4b8",
+    "sourceBoundary": "28263d3 adds CI coverage only after b6994ef. StreamCore, iOS, broadcast and project source are unchanged from 44c; latest local universal/bundle proof binds28263d3. No broader unchanged-source claim is made.",
+    "integratedCommits": [
+      "3dd65a2",
+      "c745a23",
+      "2881d8a",
+      "fdbf697",
+      "ca8858b",
+      "4228240",
+      "5f5f0d9",
+      "2a2b7af",
+      "04dca2f",
+      "b6994ef",
+      "28263d3"
+    ],
+    "githubWritesPerformed": false,
+    "closuresPerformed": [],
+    "proposedClosures": [],
+    "keepOpen": [
+      90,
+      92,
+      124,
+      127
+    ],
+    "github": {
+      "recordedAt": "2026-10-22T06:12:15.610629+00:00",
+      "originalIssues": 61,
+      "closed": 25,
+      "open": 36,
+      "openFeatureTasks": 25,
+      "openTrackers": 11,
+      "openPullRequests": 0,
+      "stateChanges": [],
+      "inventory": "/tmp/stream-wave6-original 61-github-inventory-20261022.json"
+    },
+    "outsideOriginalInventory": [
+      {
+        "number": 165,
+        "githubState": "closed",
+        "newClosureDecision": false,
+        "scope": "PTZ runtime/keyboard regression repair only; controlled native target actions and ordered old-target Stop pass, not platform AX/physical device acknowledgment. Does not change original 61 counts.",
+        "evidence": "PTZ_CONTROL_AUTHORITY_VALIDATION.md"
+      }
+    ],
+    "nativeChecks": [
+      {
+        "label": "generate",
+        "exit": 0,
+        "log": "/tmp/stream-wave6-parent-final-generate-20261022.log",
+        "bytes": 168,
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "label": "universal",
+        "exit": 0,
+        "log": "/tmp/stream-wave6-parent-final-universal-20261022.log",
+        "bytes": 337836,
+        "sha256": "db7ef4969e9e2fea0969b8716951b2c836c8bdacd6ff53892f2ef6fe1c1ee2fc"
+      },
+      {
+        "label": "bundle",
+        "exit": 0,
+        "log": "/tmp/stream-wave6-parent-final-bundle-20261022.log",
+        "bytes": 517,
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ],
+    "focusedChecks": [
+      {
+        "label": "gain",
+        "exit": 0,
+        "log": "/tmp/stream-wave6-combined-gain-20261022.log",
+        "bytes": 264,
+        "sha256": "cb6b40aa574e8d22b28a4472404d84f82b68f3e1c01346134e217c2f3bd7ce6f"
+      },
+      {
+        "label": "ptz",
+        "exit": 0,
+        "log": "/tmp/stream-wave6-combined-ptz-20261022.log",
+        "bytes": 1446,
+        "sha256": "59b7d5c6388486d3fa0eaf9d3b3439adc4a3685397904fd34605c68da7e92059"
+      },
+      {
+        "label": "socket",
+        "exit": 0,
+        "log": "/tmp/stream-wave6-combined-socket-20261022.log",
+        "bytes": 2833,
+        "sha256": "6d411b13c7ae87b8eab3047fa5d2366853a4947889df8b51120e0580f8e323f4"
+      },
+      {
+        "label": "font",
+        "exit": 0,
+        "log": "/tmp/stream-wave6-combined-font-20261022.log",
+        "bytes": 2739,
+        "sha256": "d0a374cd5dd528fad7b1b2c0c34349c8afd746070ac04ffaa03c90b12252ab42"
+      }
+    ],
+    "accessibility": {
+      "result": "Named pad color buttons, pad/playlist/scene-sound gain and PDF controls, overflow-safe percent formatting, validated numeric crop fields/steppers, zoom labels and real native PTZ nudge actions are integrated. Source/type/model checks and controlled native PTZ ownership/action cases pass; platform keyboard/AX delivery remains explicitly UNQUALIFIED 77. No new VoiceOver, full semantic order, visual contrast or whole-window operator acceptance.",
+      "evidence": [
+        "STUDIO_SEMANTIC_CONTROLS.md",
+        "/tmp/stream-wave6-providers-crop-review.md",
+        "PTZ_CONTROL_AUTHORITY_VALIDATION.md"
+      ]
+    },
+    "browserIPC": {
+      "commit": "04dca2f",
+      "result": "Production defaults to sealed bundled same-team Apple-anchored peers, exact executable/hash and kernel audit-token identity on both channels, then shared-container sockets. Prototype policy/tmp/mode exist only under STREAM_NATIVE_VALIDATION. Actual ad hoc socket identity/refusal, negative production compile and silent validation IPC/retirement pass. NoReady helper probes prove fail-closed refusal only: they may return at CGSession preflight and do not prove delivery through every parser branch. Positive provisioned sandbox/group, genuine WebKit audio and acknowledged every-route exclusions remain unqualified.",
+      "report": "/tmp/stream-wave6-browser-shared-ipc-report-20261022.md",
+      "productionEnabled": false,
+      "positiveProvisionedSandboxQualified": false
+    },
+    "fontProfile": {
+      "commit": "b6994ef",
+      "qualification": false,
+      "secondsPerCase": 20,
+      "originalReplayDecoded": 601,
+      "candidateReplayDecoded": 600,
+      "availableReplayFrames": 601,
+      "receipt": "TITLE_FONT_CACHE_PROFILE_2026-10-22.json",
+      "result": "Bounded local M3 Max20 s static/replay before/after: all four render601 frames without failed renders or whole-skipped opportunities; original replay decodes 601/601, candidate600/601 (450 due before short allowance). Font construction/lookup span falls4.472/4.628ms to0.054/0.038ms, while static CI render time rises. Candidate lookup counts are not measured misses. Trace predates final nested-retention guard, separately proven by real renderer and negative control. No universal speedup, long-run/hosted pass, waveform sync or resource ceiling is inferred."
+    },
+    "guestWireAudit": {
+      "commit": "4228240",
+      "productionBehaviorChanged": false,
+      "result": "Shipping Opus payloads independently decode through existing libopus 1.6.1:109 packets / 104640 stereo frames,960-step RTP/source framing and matching source identity. No production sender/SDP/transport changes or successful network sends. Exact Chromium source supports a receive-clock hypothesis, not a proven cause of old 931 RTP / zero PCM. Owned all-Chrome and fake-output-clock probes exit 77 before connected measurement; original 105.104 ms and normal output/AEC gates remain open.",
+      "receipt": "NATIVE_GUEST_RETURN_WIRE_AUDIT_2026-10-22.json"
+    },
+    "hostedCI": {
+      "recordedAt": "2026-10-22T06:15:26.829226+00:00",
+      "run": 39728335886,
+      "head": "44c078e2c7434ab416c1a6c56e256bd34059ffb7",
+      "status": "in_progress",
+      "conclusion": null,
+      "jobs": [
+        {
+          "id": 119657621592,
+          "name": "StreamMac build and tests (macos-26-intel)",
+          "status": "completed",
+          "conclusion": "failure",
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39728335886/job/119657621592",
+          "started_at": "2026-10-22T05:30:38Z",
+          "completed_at": "2026-10-22T06:13:14Z"
+        },
+        {
+          "id": 119657621710,
+          "name": "StreamCore tests (iOS Simulator)",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39728335886/job/119657621710",
+          "started_at": "2026-10-22T05:30:35Z",
+          "completed_at": "2026-10-22T05:37:50Z"
+        },
+        {
+          "id": 119657621755,
+          "name": "StreamMac build and tests (macos-26)",
+          "status": "in_progress",
+          "conclusion": null,
+          "html_url": "https://github.com/joeblau/stream/actions/runs/39728335886/job/119657621755",
+          "started_at": "2026-10-22T05:30:34Z",
+          "completed_at": null
+        }
+      ],
+      "intelFailure": {
+        "job": 119657621592,
+        "step": 11,
+        "exit": 132,
+        "log": "/tmp/stream-ci-44c078e-119657621592-original.log",
+        "bytes": 5214080,
+        "sha256": "bd50bd7481d39d4cbac75da423ebac3a3dec5d700d7be9d41a90c68479c2e87d",
+        "core": "Full 586 tests/82 suites PASS in 192.316 s",
+        "classification": "Deck receiver rejected generated native media; diagnosis pending; no whole-run pass"
+      },
+      "note": "Intel failed Deck receiver step 11 after full Core 586/82 PASS in 192.316 s; diagnosis pending. ARM remains active; iOS job succeeded. No whole-run pass or current-cohort hosted qualification.",
+      "receipt": "/tmp/stream-wave6-published-ci-readonly-20261022.json"
+    },
+    "acceptanceAudit": {
+      "originalIssueBodiesRead": 61,
+      "originalAcceptanceStatesPreserved": true,
+      "remainingIssuesUnchangedExceptScopedEvidence": [
+        90,
+        92,
+        124,
+        127
+      ],
+      "note": "All61 original issue bodies/states were refreshed and compared with the ledger. The four cohort-affected original criteria and closed 165 regression scope were reviewed; unrelated acceptance dispositions are retained, not newly requalified. No unsupported closure, extra physical-device prerequisite or GitHub checkbox mutation."
     }
   }
 }
