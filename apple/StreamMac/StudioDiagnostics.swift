@@ -37,6 +37,8 @@ struct StudioDiagnosticSnapshot: Codable, Sendable {
     var targetFPS = 0
     var program = CompositionMetrics()
     var preview = CompositionMetrics()
+    var programKernel = CompositionKernelMetrics()
+    var previewKernel = CompositionKernelMetrics()
     var programClock: AVClockSnapshot = .unsupported
     var secondaryClock: AVClockSnapshot = .unsupported
     var sourceAudioClocks: [String: AVClockSnapshot] = [:]
@@ -49,6 +51,16 @@ struct StudioDiagnosticSnapshot: Codable, Sendable {
     var sources: [SourceDiagnosticSnapshot] = []
     var outputs: [DestinationDiagnosticSnapshot] = []
     var cpuPercent = 0.0
+    var resourceSampleAgeMilliseconds: Double?
+    var resourceCPUCapacityPercent: Double?
+    var currentResidentBytes: UInt64?
+    var physicalFootprintBytes: UInt64?
+    var metalAllocatedBytes: Int?
+    var mainActorDelayMilliseconds: Double?
+    var metalUnifiedMemory: Bool?
+    var metalRecommendedWorkingSetBytes: UInt64?
+    var metalCounterSetCount: Int?
+    var resourcePreviewLevel = "normal"
     var hardwareCanvasCeiling = OutputCapabilities.current.hardwareTier.displayName
     var hardwareFPSCeiling = OutputCapabilities.current.hardwareMaxFrameRate
     var estimatedEncoderSessions = 0
@@ -111,6 +123,15 @@ extension StudioDiagnosticSnapshot {
                 "preparing", "recording", "paused", "finishing", "unavailable", "capturing", "ready", "inactive"]
             return allowed.contains(value) ? value : "unknown"
         }
+        func kernel(_ value: CompositionKernelMetrics) -> CompositionKernelMetrics {
+            var result = value
+            result.backend = value.backend.hasPrefix("Core Image on Metal:") ? "Core Image on Metal" : "unavailable"
+            if value.unavailableReason != nil { result.unavailableReason = "Core Image kernel execution time unavailable." }
+            return result
+        }
+        exported.resourcePreviewLevel = ["normal", "reduced", "minimum"].contains(resourcePreviewLevel) ? resourcePreviewLevel : "unknown"
+        exported.programKernel = kernel(programKernel)
+        exported.previewKernel = kernel(previewKernel)
         exported.streamState = state(streamState)
         exported.recordingState = state(recordingState)
         exported.os = String(os.prefix(256))
@@ -305,9 +326,18 @@ private struct StudioDiagnosticsContent: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Studio Health").font(.headline)
                 Text(String(format: "CPU %.1f%% · Peak memory %.0f MB · Encoder sessions %d (reserved / active)", snapshot.cpuPercent, Double(snapshot.peakMemoryBytes) / 1_000_000, snapshot.estimatedEncoderSessions))
+                if let age = snapshot.resourceSampleAgeMilliseconds {
+                    Text("Resource sample age \(String(format: "%.0f ms", age)) · CPU \(snapshot.resourceCPUCapacityPercent.map { String(format: "%.1f%% of logical machine capacity", $0) } ?? "measuring") · Main actor delay \(snapshot.mainActorDelayMilliseconds.map { String(format: "%.1f ms", $0) } ?? "unavailable")")
+                    Text("Current resident \(snapshot.currentResidentBytes.map { String(format: "%.1f MB", Double($0) / 1_000_000) } ?? "unavailable") · Physical footprint \(snapshot.physicalFootprintBytes.map { String(format: "%.1f MB", Double($0) / 1_000_000) } ?? "unavailable") · Metal allocated \(snapshot.metalAllocatedBytes.map { String(format: "%.1f MB", Double($0) / 1_000_000) } ?? "unavailable")")
+                    Text("Optional preview budget: \(snapshot.resourcePreviewLevel) · Unified memory \(snapshot.metalUnifiedMemory.map { $0 ? "yes" : "no" } ?? "unavailable") · Metal working set \(snapshot.metalRecommendedWorkingSetBytes.map { String(format: "%.0f MB", Double($0) / 1_000_000) } ?? "unavailable") · Counter sets \(snapshot.metalCounterSetCount.map(String.init) ?? "unavailable")")
+                } else { Text("Runtime resource sample unavailable") }
                 Text("Encoder count includes recording reservations (Program, secondary, ISO, preflight and overlapping finalization) plus active publishers; it is not measured hardware utilization.")
                     .foregroundStyle(.secondary)
                 Text("Hardware canvas ceiling \(snapshot.hardwareCanvasCeiling), \(snapshot.hardwareFPSCeiling) fps · Thermal state \(snapshot.thermalState)")
+                if let milliseconds = snapshot.programKernel.meanMilliseconds {
+                    Text(String(format: "Core Image Metal kernel mean %.3f ms · Max %.3f ms · Samples %d", milliseconds, snapshot.programKernel.maximumMilliseconds, snapshot.programKernel.samples))
+                } else { Text("Core Image Metal kernel time unavailable") }
+                Text("Sampled completed Core Image tasks; kernel time is not process-wide GPU utilization.").foregroundStyle(.secondary)
                 AVClockDiagnosticRow(title: "Program compositor / mixed audio fanout", clock: snapshot.programClock)
                 if snapshot.secondaryClock.videoSamples > 0 {
                     AVClockDiagnosticRow(title: "Secondary compositor / mixed audio fanout", clock: snapshot.secondaryClock)
