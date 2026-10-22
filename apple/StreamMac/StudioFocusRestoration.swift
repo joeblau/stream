@@ -10,22 +10,32 @@ import SwiftUI
     }
     private weak var window: NSWindow?
     private var bookmarks: [String: Bookmark] = [:]
+    /// A queued completion belongs to one attachment and presentation intent.
+    /// A new presentation, restoration request or detach retires older work,
+    /// even if the same NSWindow/control is subsequently attached again.
+    private var restorationGeneration: UInt64 = 0
     func attach(_ window: NSWindow?) {
         guard self.window !== window else { return }
+        restorationGeneration &+= 1
         bookmarks.removeAll(); self.window = window
     }
     func remember(_ scope: String) {
         guard bookmarks[scope] == nil, let window else { return }
+        restorationGeneration &+= 1
         if let editor = window.firstResponder as? NSTextView, editor.isFieldEditor,
            let owner = editor.delegate as? NSView, owner.window === window {
             bookmarks[scope] = Bookmark(owner)
         } else { bookmarks[scope] = Bookmark(window.firstResponder) }
     }
     func restore(_ scope: String, fallback: (@MainActor () -> Void)? = nil) {
-        let bookmark = bookmarks.removeValue(forKey: scope)
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let window = self.window, window.attachedSheet == nil else { return }
-            if let view = bookmark?.responder as? NSView, view.window === window,
+        guard let window, let bookmark = bookmarks.removeValue(forKey: scope) else { return }
+        restorationGeneration &+= 1
+        let generation = restorationGeneration
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.window === window,
+                  self.restorationGeneration == generation,
+                  window.attachedSheet == nil else { return }
+            if let view = bookmark.responder as? NSView, view.window === window,
                !view.isHiddenOrHasHiddenAncestor, window.makeFirstResponder(view) { return }
             fallback?()
         }
