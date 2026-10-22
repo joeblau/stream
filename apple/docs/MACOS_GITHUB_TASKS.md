@@ -1385,3 +1385,69 @@ unchanged bodies/states and zero open PRs or outside-inventory open issues. All
 open trackers have incomplete children; no closure is justified. Prior wave
 objects and original evidence remain intact. This ledger work runs no native
 fixture, benchmark, decoder or build and performs no GitHub write/publication.
+
+## Bounded copy-cost repairs and deterministic PCM checks — 2026-10-22 UTC
+
+Exact `57c0f25` passes generation, unsigned universal arm64/x86_64 Release and
+the actual bundle audit with the two production cost repairs integrated. Current
+`7fbe42d` has **840 verified source/recipe paths**, with exactly three later recipe
+changes: CI adds three bounded JSON artifact paths; the PCM fixture and runner
+change. Shipping app/Core/vendor inputs remain identical to the successful build.
+**Not all 840 recipe hashes are claimed identical to the old built tree**, and
+no second app build was needed for the fixture-only delta.
+
+- Empty raw recording-chat paint avoids redundant encoding while preserving
+  absent/existing attachments and all nonempty filtering/order/mode semantics.
+  Actual whole-source baseline/fixed sample proofs and 25 independent checks
+  pass; this narrow proof claims no measured speedup or rendering session.
+- Private BGRA copying writes active pixels once and still zeros target padding.
+  Five stride/canary/source/timing cases and prior converter/bank/broker controls
+  pass. One local helper comparison changes median cost from **0.318292 to
+  0.142250 ms**. It does not establish compositor/writer throughput, bandwidth,
+  resource ceilings or the cause of old hosted deficits.
+- The exact integrated new CI prefix passes in **8.1335 seconds** on combined
+  shipping source with input-verified copied Core. Thirteen existing Python
+  performance checks also pass. Neither runs a sustained workload or repeats
+  the full Core suite.
+- Per-case sampler reset/prime fixes cross-case CPU baseline by source argument;
+  parsing/source proof is not a post-change measurement. Rehearsal now waits
+  within its original bound for asynchronous storage rejection and unchanged
+  terminal cleanup, with the expected folder error required. This fixture remains
+  parse/source-qualified; its revised integrated runtime awaits CI.
+
+The PCM correction is also fixture-only. Original delayed pulls at 120/250 ms,
+a 100 ms pause and a 40 ms read advance now use an explicitly **controlled native
+frame grid after real AVAudioFile reads**. A new 200 ms advance requires zero
+handoff after full-horizon expiry and exact next-pull recovery. The independent
+real-host pause/resume/end case and direct fresh/partial byte-range, PTS, rate,
+duration, expiry and malformed checks are unchanged, including the original
+30/160 ms and one-microsecond gates. There is no shipping clock change, expired
+host sample rebasing or deadline increase.
+
+One full positive compile/fixture invocation passes in **3.947550 seconds**. The
+targeted fresh-admission omission compiles then traps at the intended native
+frame **4800 versus 6720** and stale PTS **−60 ms**. Final independent review
+verifies **221 bindings**. This controlled proof is separate from real-host
+scheduling and a future hosted run; original failures stay failed.
+
+Original e41 native CI is terminal **FAILURE on both Macs**, with iOS success:
+ARM software step 14 times out at 90 seconds; Intel passes actual normal/software
+RTMP/SRT step 14 then fails the immediate rehearsal cleanup assertion in step 15.
+Pending Preparing alone does not prove an eventual production leak. Annotation
+step 17 is unreached on both. The newer published 500 run passes **613 tests
+across 84 suites** on ARM (84.165 seconds) and iOS (234.930 seconds), then ARM
+fails the old step-10 PCM assertion after a requested 40 ms sleep actually lasts
+169.576458 ms, beyond the entire decoded horizon. Intel remains active at the
+retained snapshot. No whole native CI success or corrected hosted pass is claimed.
+
+Original hosted performance failures and the named M3 Max sustained pass remain
+separate. These component and fixture changes do not establish a scheduling/GPU/
+bank-exhaustion cause or complete **#92**. No new 600-second performance dispatch
+has been accepted or run at this snapshot.
+
+The fresh **2026-10-22T23:36:16Z** complete read-only audit confirms original 61
+issues **27 closed / 34 open**, all 135 macOS issues **101 closed / 34 open**,
+unchanged bodies/states and zero open PRs or outside-inventory open issues.
+All open trackers retain incomplete children; no closure is justified. Every
+prior wave object and failed receipt remains intact. This ledger work performs
+no native test, build, decoder, workload, API write or publication.
