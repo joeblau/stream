@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "measurementCommit": "fd5f1ce",
+  "date": "2026-10-22T00:57:28Z",
+  "hardwareModel": "Mac15,8",
+  "os": "Version 27.2 (Build 26B118)",
+  "architecture": "arm64",
+  "processTranslated": false,
+  "processors": 16,
+  "physicalMemoryBytes": 137438953472,
+  "metal": {
+    "counterSets": [
+      "timestamp"
+    ],
+    "device": "Apple M3 Max",
+    "recommendedWorkingSetBytes": 115448725504,
+    "unifiedMemory": true,
+    "utilizationUnavailableReason": "Metal does not expose process-wide GPU utilization through this collector."
+  },
+  "samplingSecondsPerWorkload": 120,
+  "originalReportSHA256": "99e02637c112e14cb3b83d7e1fd64409b4cb332fc3950f18ffee3d7f25845245",
+  "publishingOutputs": 0,
+  "recordingEncoderSessions": 1,
+  "qualification": "Owned static/decoded-media engineering observations only; no physical capture, input-to-photon UI, independent waveform drift, hardware ceilings, Intel, long thermal or uplink qualification.",
+  "workloads": [
+    {
+      "workload": "Static owned desktop/camera placeholders + 10 shape/title layers",
+      "profile": [
+        1920,
+        1080,
+        30
+      ],
+      "layers": 12,
+      "decodedOwnedSourceFrames": 0,
+      "actualRenderWindowSeconds": 120.04041945833524,
+      "achievedFPS": 29.989898537879753,
+      "renderedFrames": 3600,
+      "missedDeadlines": 1,
+      "failedRenders": 0,
+      "recordingDroppedVideo": 0,
+      "recordingDroppedAudio": 0,
+      "recordingComplete": true,
+      "hostClockDurationErrorSeconds": 0.012188334003440104,
+      "mainActorMaximumSchedulingDelayMilliseconds": 15.007042,
+      "cpuMeanFractionOfMachineLogicalCapacity": 0.02776078892520114,
+      "cpuMaximumFractionOfMachineLogicalCapacity": 0.035480942038715185,
+      "peakPhysicalFootprintBytes": 263193632,
+      "peakMetalAllocatedBytes": 10944512,
+      "actualKernelTimingSamples": 120,
+      "actualKernelMeanMilliseconds": 0.40355694448711193,
+      "actualKernelMaximumMilliseconds": 4.421874997206032,
+      "observedRecordingBytesPerSecond": 573131.275,
+      "maximumRecordingFrontierSkewSeconds": 0.030485791,
+      "originalMedia": "case0-1920x1080-30.mp4",
+      "originalMediaBytes": 68775753,
+      "originalMediaSHA256": "fdb3ea2c6966e0b9af6308e162c16fee2bfeaf072896899b09c5c6375bdaaef8"
+    },
+    {
+      "workload": "Real owned 1080p H.264 decode reused by desktop/camera placeholders + 10 shape/title layers",
+      "profile": [
+        1920,
+        1080,
+        30
+      ],
+      "layers": 12,
+      "decodedOwnedSourceFrames": 3600,
+      "actualRenderWindowSeconds": 120.04201974999887,
+      "achievedFPS": 29.931185825453706,
+      "renderedFrames": 3593,
+      "missedDeadlines": 8,
+      "failedRenders": 0,
+      "recordingDroppedVideo": 0,
+      "recordingDroppedAudio": 0,
+      "recordingComplete": true,
+      "hostClockDurationErrorSeconds": 0.008375834000617033,
+      "mainActorMaximumSchedulingDelayMilliseconds": 89.680083,
+      "cpuMeanFractionOfMachineLogicalCapacity": 0.029008249860517154,
+      "cpuMaximumFractionOfMachineLogicalCapacity": 0.037051536060379024,
+      "peakPhysicalFootprintBytes": 262423584,
+      "peakMetalAllocatedBytes": 22691840,
+      "actualKernelTimingSamples": 120,
+      "actualKernelMeanMilliseconds": 0.47744756933146465,
+      "actualKernelMaximumMilliseconds": 0.5626249985652976,
+      "observedRecordingBytesPerSecond": 575528.425,
+      "maximumRecordingFrontierSkewSeconds": 0.028630707,
+      "originalMedia": "case1-1920x1080-30.mp4",
+      "originalMediaBytes": 69063411,
+      "originalMediaSHA256": "b1a09e0afbbf6faeafb3d63be134360cafe1516973a5e32adb3c2ec974debf9f"
+    }
+  ]
+}
