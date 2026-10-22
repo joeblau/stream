@@ -18,6 +18,7 @@ import Foundation
         }
         snapshot.audioUnderruns = Dictionary(uniqueKeysWithValues: (0..<300).map { ("\(secret)-\($0)", Int64($0)) })
         snapshot.audioTapDrops = snapshot.audioUnderruns
+        snapshot.sourceAudioClocks = snapshot.audioUnderruns.mapValues { _ in .unsupported }
         snapshot.events = (0..<300).map { _ in .init(time: Date(), state: "output.\(id).live") }
         snapshot.events.append(.init(time: Date(), state: secret))
         let data = try snapshot.redactedExportData()
@@ -40,6 +41,7 @@ import Foundation
         // Matching channels remain correlatable within one bundle; bundles do
         // not expose an enduring machine/channel fingerprint.
         precondition(Set((document["audioUnderruns"] as! [String: Any]).keys) == Set((document["audioTapDrops"] as! [String: Any]).keys))
+        precondition(Set((document["sourceAudioClocks"] as! [String: Any]).keys) == Set((document["audioUnderruns"] as! [String: Any]).keys))
         let second = try JSONSerialization.jsonObject(with: snapshot.redactedExportData()) as! [String: Any]
         precondition((second["outputs"] as! [[String: Any]])[0]["id"] as! String != outputID)
         precondition(snapshot.outputs[0].id == id && snapshot.sources.count == 300, "Export cannot mutate the live inspector snapshot")

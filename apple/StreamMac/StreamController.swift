@@ -627,6 +627,8 @@ final class StreamController: ObservableObject {
         snapshot.targetFPS = activeProfile.frameRate
         snapshot.program = await engine.metricsSnapshot()
         snapshot.preview = await previewEngine.metricsSnapshot()
+        snapshot.programClock = destinationOutputs.fanout.programClock.snapshot()
+        snapshot.secondaryClock = destinationOutputs.fanout.secondaryClock.snapshot()
         snapshot.streamState = switch streamState {
         case .idle: "idle"
         case .connecting: "connecting"
@@ -652,17 +654,17 @@ final class StreamController: ObservableObject {
             else if !keys.isDisjoint(with: capturePool.activeSources) { state = "capturing" }
             else { state = keys.isEmpty ? "ready" : "inactive" }
             let count = keys.compactMap { SourceFrameProviders.shared.deliveryCount(for: $0) }.first
-            snapshot.sources.append(.init(id: source.id.description, kind: source.payload.kind, state: state, deliveredFrames: count))
+            let clock = keys.map { SourceFrameProviders.shared.captureClock(for: $0) }.first { $0.state != .unsupported } ?? .unsupported
+            snapshot.sources.append(.init(id: source.id.description, kind: source.payload.kind, state: state, deliveredFrames: count, captureClock: clock))
         }
         snapshot.outputs = await destinationOutputs.diagnosticsSnapshot()
         let audio = await audioEngine.statsSnapshot()
-        // Audio labels can contain capture endpoints or device IDs. Export only
-        // deterministic hashes so repeated snapshots remain correlatable.
-        func pseudonym(_ label: String) -> String {
-            SHA256.hash(data: Data(label.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
-        }
-        snapshot.audioUnderruns = Dictionary(uniqueKeysWithValues: audio.channels.map { (pseudonym($0.key), $0.value.underrunFrames) })
-        snapshot.audioTapDrops = Dictionary(uniqueKeysWithValues: audio.tapDrops.map { (pseudonym($0.key), $0.value) })
+        // Runtime labels identify the affected local channel. Only the bounded
+        // redacted export boundary serializes these; it pseudonymizes every
+        // audio key consistently across clocks/underruns/tap drops per bundle.
+        snapshot.audioUnderruns = Dictionary(uniqueKeysWithValues: audio.channels.map { ($0.key, $0.value.underrunFrames) })
+        snapshot.audioTapDrops = audio.tapDrops
+        snapshot.sourceAudioClocks = audioEngine.sourceClockSnapshots(videoReference: destinationOutputs.fanout.programClock)
         snapshot.sampleProcess()
         return snapshot
     }

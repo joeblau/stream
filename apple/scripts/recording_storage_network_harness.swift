@@ -8,6 +8,9 @@ import StreamCore
 private final class StorageNetworkCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var tone = false
+    private var clockSourcesActive = true
+    func setClockSourcesActive(_ value: Bool) { lock.lock(); clockSourcesActive = value; lock.unlock() }
+    func hasClockSources() -> Bool { lock.lock(); defer { lock.unlock() }; return clockSourcesActive }
     private var flashes: [Double] = []
     private var sounds: [Double] = []
     private var previousLight = false
@@ -132,6 +135,7 @@ private struct StorageNetworkMedia: Codable {
     }
     static func main() async throws {
         setbuf(stdout, nil)
+        let validateClocks = ProcessInfo.processInfo.environment["STORAGE_NETWORK_CLOCK_VALIDATION"] == "1"
         let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let ffmpeg = try receiverExecutable()
@@ -186,6 +190,10 @@ private struct StorageNetworkMedia: Codable {
         for destination in destinations { controller.startDestination(destination.id) }
         try await wait("Actual publishers did not acknowledge: \(controller.destinationOutputs.states)", until: { controller.destinationOutputs.liveCount == 2 })
         recorder.start(stream: controller)
+        // These silent generated PCM sources enter the real shipping ingest,
+        // conversion and ring path, with original timestamps untouched. They
+        // are not alternative telemetry counters or publisher substitutes.
+        let clockIDs = ["stable", "offset", "skew", "drops", "held"].map { AudioChannelID.application(bundleID: "fixture.clock." + $0) }
         let source = Task.detached(priority: .userInitiated) {
             let clock = ContinuousClock(), start = clock.now
             // Two capture chunks of delivery headroom preserve each original
@@ -196,6 +204,15 @@ private struct StorageNetworkMedia: Codable {
                 let pts = origin + Double(index) / 100
                 let sample = try ProgramRecordingFixtures.audio(at: pts, timestampBase: 0, constantTone: capture.hasTone(), eventSeconds: -1)
                 mixer.enqueue(.microphone(deviceUID: nil), sample)
+                if validateClocks && capture.hasClockSources() {
+                    for (kind, id) in clockIDs.enumerated() {
+                        if kind == 3 && index % 7 == 0 { continue }
+                        if kind == 4 && (300..<310).contains(index) { continue }
+                        let elapsed = Double(kind == 4 && index == 310 ? 300 : index) / 100
+                        let originalPTS = origin + elapsed * (kind == 2 ? 1.01 : 1) + (kind == 1 ? 0.12 : 0)
+                        mixer.enqueue(id, try ProgramRecordingFixtures.audio(at: originalPTS, timestampBase: 0, eventSeconds: -1))
+                    }
+                }
                 index += 1
                 try await clock.sleep(until: start.advanced(by: .seconds(Double(index) / 100)))
             }
@@ -203,6 +220,37 @@ private struct StorageNetworkMedia: Codable {
         defer { source.cancel() }
         try await wait("Shipping recorder did not accept real compositor/mixer tracks", until: { recorder.state == .recording && recorder.progress.durationSeconds >= 0.5 })
         print("TRACE actual publishers acknowledged; recorder accepted both tracks; encoder owners \(controller.activePublishingEncoderCount)/\(controller.reservedRecordingEncoderCount)")
+        var clockEvidence: [String: StudioDiagnosticSnapshot] = [:]
+        if validateClocks {
+            try await Task.sleep(for: .seconds(4.5))
+            let measured = await controller.diagnosticSnapshot()
+            clockEvidence["controlled-source-clocks"] = measured
+            func clock(_ index: Int) throws -> AVClockSnapshot {
+                guard let value = measured.sourceAudioClocks[clockIDs[index].label] else { throw CocoaError(.fileReadUnknown) }
+                print("CLOCK original \(index): \(value)")
+                return value
+            }
+            let stable = try clock(0), offset = try clock(1), skew = try clock(2), drops = try clock(3), held = try clock(4)
+            try check(stable.state == .stable && abs(stable.relativeRateMillisecondsPerSecond ?? 100) < 2, "Actual stable PCM timestamp clock was not stable")
+            try check(offset.state == .offset && abs(offset.relativeRateMillisecondsPerSecond ?? 100) < 2 && abs((offset.audioMinusVideoMilliseconds ?? 0) - (stable.audioMinusVideoMilliseconds ?? 0) - 120) < 10, "Actual fixed source timestamp offset was confused with rate skew")
+            try check(skew.state == .drifting && abs((skew.relativeRateMillisecondsPerSecond ?? 0) - 10) < 2, "Actual 1% source timestamp skew was not measured as 10 ms/s")
+            try check(drops.state == .stable, "Dropped actual PCM callbacks fabricated rate skew")
+            try check(held.state == .unstable && held.relativeRateMillisecondsPerSecond == nil, "Held actual PCM callback fabricated confident clock drift")
+            try check(measured.programClock.state == .stable && measured.outputs.allSatisfy { $0.encoderInputClock?.state == .stable }, "Faulting source observations did not remain isolated from healthy real output timestamp clocks")
+            let camera = LatestCameraFrame(), frame = try ProgramRecordingFixtures.video(at: CMClockGetTime(CMClockGetHostTimeClock()).seconds, timestampBase: 0)
+            camera.store(frame.imageBuffer!, position: .front, presentationTime: frame.presentationTimeStamp)
+            try check(camera.captureClock.snapshot().state == .noAudio, "Video-only actual camera holder invented associated audio")
+            camera.clear()
+            capture.setClockSourcesActive(false)
+            try await Task.sleep(for: .seconds(2.1))
+            let stale = await controller.diagnosticSnapshot(); clockEvidence["stopped-source-clocks"] = stale
+            try check(clockIDs.allSatisfy { stale.sourceAudioClocks[$0.label]?.state == .staleAudio }, "Stopped actual PCM source retained a confident current reading")
+            try check(stale.programClock.state == .stable && stale.outputs.allSatisfy { $0.encoderInputClock?.state == .stable }, "Stopped PCM sources disturbed healthy real output clocks")
+            capture.setClockSourcesActive(true)
+            try await Task.sleep(for: .milliseconds(100))
+            let rejoined = await controller.diagnosticSnapshot(); clockEvidence["rejoined-source-clocks"] = rejoined
+            try check(clockIDs.allSatisfy { rejoined.sourceAudioClocks[$0.label]?.state == .warming && (rejoined.sourceAudioClocks[$0.label]?.discontinuities ?? 0) > 0 }, "Rejoined actual source did not establish a fresh observation window")
+        }
         preview.stage(light)
         try await Task.sleep(for: .milliseconds(350))
         try check(capture.snapshot().flashes.isEmpty, "Staging leaked unpublished flash into Program")
@@ -228,6 +276,12 @@ private struct StorageNetworkMedia: Codable {
         try check(recorder.lastError?.contains("storage") == true && recorder.lastPartialRecordingURL == original, "Storage failure was not retained visibly")
         print("TRACE actual recorder failure: \(recorder.lastError ?? "missing"); audio/video states \(recorder.progress.audioStatus)/\(recorder.progress.videoStatus); recording reservations \(controller.reservedRecordingEncoderCount); live network publishers \(controller.destinationOutputs.liveCount)")
         try check(controller.destinationOutputs.liveCount == 2 && controller.activePublishingEncoderCount == 2, "Recording cleanup stopped/replaced a healthy actual network publisher")
+        if validateClocks {
+            let afterFailure = await controller.diagnosticSnapshot(); clockEvidence["storage-failure-network-healthy"] = afterFailure
+            print("CLOCK Program after recording failure: \(afterFailure.programClock)")
+            for output in afterFailure.outputs { print("CLOCK output \(output.id) after recording failure: \(String(describing: output.encoderInputClock))") }
+            try check(afterFailure.programClock.state == .stable && afterFailure.outputs.allSatisfy { $0.encoderInputClock?.state == .stable }, "Actual storage failure disturbed real output timestamp clocks")
+        }
         let framesAtCleanup = capture.snapshot().videos
         try await pulse(); try await pulse()
         try check(capture.snapshot().videos > framesAtCleanup + 40 && controller.destinationOutputs.liveCount == 2 && !controller.isPreviewing,
@@ -263,6 +317,10 @@ private struct StorageNetworkMedia: Codable {
         await library.refresh(access: RecordingDirectoryAccess(url: moved, scoped: false), activeURLs: [])
         try check(library.entries.contains { $0.url.lastPathComponent == original.lastPathComponent && $0.status == "recoverable" && $0.canExport },
             "Readable interrupted local media was not conservatively classified as recoverable")
+        if validateClocks {
+            for (phase, snapshot) in clockEvidence { try snapshot.redactedExportData().write(to: root.appendingPathComponent("clock-" + phase + ".json"), options: .atomic) }
+            print("PASS: actual original PCM timestamps distinguish stable, 120ms fixed offset, 1% rate skew, dropped and held callbacks, source stop/rejoin and video-only camera; real Program/RTMP/SRT clocks remain healthy through independent real recorder storage failure")
+        }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(results).write(to: root.appendingPathComponent("decoded-media.json"), options: .atomic)
         let sourceEvidence: [String: Any] = ["sourceFlashPTS": snapshot.flashes, "sourceTonePTS": snapshot.sounds,

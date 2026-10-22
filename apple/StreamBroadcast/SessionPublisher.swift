@@ -19,6 +19,8 @@ private let sessionLog = Logger(subsystem: "com.joeblau.Stream", category: "sess
 /// publishing overhead — treat WHIP as experimental and validate its footprint
 /// on device against a real endpoint.
 actor SessionPublisher: Publisher {
+    private let encoderInputClock = AVClockTelemetry()
+    func encoderInputClockSnapshot() -> AVClockSnapshot { encoderInputClock.snapshot() }
     private let transport: StreamCore.StreamProtocol
     private let mixer = MediaMixer(captureSessionMode: .manual,
                                    multiTrackAudioMixingEnabled: true)
@@ -175,6 +177,7 @@ actor SessionPublisher: Publisher {
     }
 
     func start(_ settings: StreamSettings) async throws {
+        encoderInputClock.reset()
         self.settings = settings
         await networkController.setExternalEncoding(encodedInput)
         await Self.registerFactories()
@@ -232,6 +235,7 @@ actor SessionPublisher: Publisher {
     /// Builds a fresh session for the configured URL (scheme selects SRT vs WHIP),
     /// wires the encoder + ABR, attaches the stream to the mixer, and connects.
     private func connectAndPublish() async throws {
+        encoderInputClock.reset()
         guard let url = URL(string: settings.rtmpURL) else {
             throw NSError(domain: "com.joeblau.Stream.Broadcast", code: 20, userInfo: [
                 NSLocalizedDescriptionKey: "The \(transport.displayName) URL is not valid."])
@@ -678,6 +682,7 @@ actor SessionPublisher: Publisher {
         lastMediaAt = DispatchTime.now().uptimeNanoseconds
         lastVideoAppendAt = lastMediaAt
         telemetry.recordEncoded()
+        encoderInputClock.record(.video, presentationSeconds: sample.presentationTimeStamp.seconds)
         await stream?.append(sample)
         return false
     }
@@ -690,10 +695,12 @@ actor SessionPublisher: Publisher {
             // PES. Prime AAC format before accepting an IDR, then ask the group
             // for a fresh IDR so no dependent references were silently omitted.
             encodedAudioReady = true
+            encoderInputClock.record(.audio, presentationSeconds: audio.sample.presentationTimeStamp.seconds)
             await stream.append(audio.buffer, when: audio.when)
             return true
         }
         guard !encodedNeedsKeyframe else { return false }
+        encoderInputClock.record(.audio, presentationSeconds: audio.sample.presentationTimeStamp.seconds)
         await stream.append(audio.buffer, when: audio.when)
         return false
     }
@@ -711,7 +718,9 @@ actor SessionPublisher: Publisher {
         let duration = CMTime(value: 1, timescale: CMTimeScale(encodeFrameRate))
         let normalized = timeline.normalize(sb, kind: .video, fallbackDuration: duration)
         telemetry.recordEncoded()
-        await mixer.append(enforceMonotonicVideo(normalized, minStep: duration))
+        let admitted = enforceMonotonicVideo(normalized, minStep: duration)
+        encoderInputClock.record(.video, presentationSeconds: admitted.presentationTimeStamp.seconds)
+        await mixer.append(admitted)
     }
 
     /// See RTMPPublisher.enforceMonotonicVideo — a real frame arriving just after a
@@ -772,6 +781,7 @@ actor SessionPublisher: Publisher {
         lastMicAppendAt = now
         let normalized = timeline.normalize(sb, kind: .program,
                                              fallbackDuration: CMTime(value: 512, timescale: 48_000))
+        encoderInputClock.record(.audio, presentationSeconds: normalized.presentationTimeStamp.seconds)
         #if os(macOS)
         if let planar = PublisherProgramAudio.planar(normalized) {
             await mixer.append(planar.buffer, when: planar.when, track: 0)
@@ -811,6 +821,7 @@ actor SessionPublisher: Publisher {
     func pause() async {
         guard isRunning, !isPaused, !userInitiatedStop else { return }
         isPaused = true
+        encoderInputClock.reset()
         if encodedInput { encodedNeedsKeyframe = true }
         // Tell the ABR the capture is paused so it doesn't read the draining queue
         // as congestion (parity with RTMP).
@@ -821,6 +832,7 @@ actor SessionPublisher: Publisher {
     func resume() async {
         guard isRunning, isPaused, !userInitiatedStop else { return }
         isPaused = false
+        encoderInputClock.reset()
         await networkController.setCapturePaused(false)
         timeline.markDiscontinuity()
         // `isPaused` is now false, so requestRecovery's guard passes; single-flight

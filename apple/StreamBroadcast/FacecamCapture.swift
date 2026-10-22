@@ -345,7 +345,7 @@ final class FacecamCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         // Delivered on `queue`, the same queue that owns `currentPosition`, so the
         // stamp is always the camera that produced these pixels.
-        latest.store(pixelBuffer, position: currentPosition)
+        latest.store(pixelBuffer, position: currentPosition, presentationTime: sampleBuffer.presentationTimeStamp)
     }
 
     #endif

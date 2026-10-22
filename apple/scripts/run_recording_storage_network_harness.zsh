@@ -44,7 +44,7 @@ xcodebuild -resolvePackageDependencies -project "$STORAGE_NETWORK_DIR/RecordingS
   -scheme RecordingStorageNetworkHarness -derivedDataPath "$STORAGE_NETWORK_BUILD_PATH"
 python3 scripts/repair_desktop_transport_archives.py "$STORAGE_NETWORK_BUILD_PATH"
 xcodebuild -project "$STORAGE_NETWORK_DIR/RecordingStorageNetworkValidation.xcodeproj" -scheme RecordingStorageNetworkHarness \
-  -destination 'platform=macOS' -derivedDataPath "$STORAGE_NETWORK_BUILD_PATH" CODE_SIGNING_ALLOWED=NO build
+  -destination 'platform=macOS' -derivedDataPath "$STORAGE_NETWORK_BUILD_PATH" CODE_SIGNING_ALLOWED=NO -jobs 2 build
 readonly STORAGE_NETWORK_PRODUCTS="${STORAGE_NETWORK_BUILD_PATH:A}/Build/Products/Debug"
 sysctl -n hw.model machdep.cpu.brand_string
 sw_vers

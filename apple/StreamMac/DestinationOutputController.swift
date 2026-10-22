@@ -252,6 +252,7 @@ final class DestinationOutputController: ObservableObject {
             }
             let runtime = runtimes[id]
             let stats = await runtime?.publisher.statsSnapshot()
+            let inputClock = await runtime?.publisher.encoderInputClockSnapshot()
             let mailbox: (depth: Int, drops: Int)?
             if let encoded = runtime?.encoded {
                 let counters = encoded.statistics(); mailbox = (counters.depth, counters.drops)
@@ -260,7 +261,8 @@ final class DestinationOutputController: ObservableObject {
                 targetFPS: stats?.frameRate, achievedFPS: stats?.achievedFrameRate,
                 bitrate: stats?.bitRate, socketQueueBytes: stats?.queueBytes,
                 stalledSeconds: stats?.zeroOutputSeconds, encoderCongestionDrops: stats?.droppedFrames,
-                videoQueueDepth: mailbox?.depth ?? 0, videoMailboxDrops: mailbox?.drops ?? 0))
+                videoQueueDepth: mailbox?.depth ?? 0, videoMailboxDrops: mailbox?.drops ?? 0,
+                encoderInputClock: inputClock, sharedEncodedClock: runtime?.encoderGroup?.encodedClock.snapshot()))
         }
         return result
     }
@@ -346,6 +348,8 @@ final class DestinationVideoMailbox: @unchecked Sendable {
 /// Capture-thread fanout snapshots sinks under a lock and releases it BEFORE
 /// ingress. Both ingress methods are synchronous bounded enqueues.
 final class DestinationMediaFanout: @unchecked Sendable {
+    let programClock = AVClockTelemetry()
+    let secondaryClock = AVClockTelemetry()
     private struct Sink { var publisher: any Publisher; var video: DestinationVideoMailbox; var canvas: OutputCanvas; var group: DestinationSharedEncoder? }
     private var lock = os_unfair_lock_s()
     private var sinks: [UUID: Sink] = [:]
@@ -365,6 +369,7 @@ final class DestinationMediaFanout: @unchecked Sendable {
         return Array(sinks.values)
     }
     func enqueueVideo(_ sample: CMSampleBuffer, canvas: OutputCanvas = .program) {
+        (canvas == .program ? programClock : secondaryClock).record(.video, presentationSeconds: sample.presentationTimeStamp.seconds)
         var visited = Set<UUID>()
         for sink in snapshot() where sink.canvas == canvas {
             if let group = sink.group { if visited.insert(group.id).inserted { group.enqueueVideo(sample) } }
@@ -372,6 +377,9 @@ final class DestinationMediaFanout: @unchecked Sendable {
         }
     }
     func enqueueAudio(_ sample: CMSampleBuffer) {
+        let now = ProcessInfo.processInfo.systemUptime
+        programClock.record(.audio, presentationSeconds: sample.presentationTimeStamp.seconds, observedHostSeconds: now)
+        secondaryClock.record(.audio, presentationSeconds: sample.presentationTimeStamp.seconds, observedHostSeconds: now)
         var visited = Set<UUID>()
         for sink in snapshot() {
             if let group = sink.group { if visited.insert(group.id).inserted { group.enqueueAudio(sample) } }
@@ -392,6 +400,8 @@ struct DestinationDiagnosticSnapshot: Codable, Sendable {
     var encoderCongestionDrops: Int?
     var videoQueueDepth: Int
     var videoMailboxDrops: Int
+    var encoderInputClock: AVClockSnapshot? = nil
+    var sharedEncodedClock: AVClockSnapshot? = nil
 }
 
 private final class DestinationMailboxCounters: @unchecked Sendable {

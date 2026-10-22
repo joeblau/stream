@@ -37,6 +37,9 @@ struct StudioDiagnosticSnapshot: Codable, Sendable {
     var targetFPS = 0
     var program = CompositionMetrics()
     var preview = CompositionMetrics()
+    var programClock: AVClockSnapshot = .unsupported
+    var secondaryClock: AVClockSnapshot = .unsupported
+    var sourceAudioClocks: [String: AVClockSnapshot] = [:]
     var streamState = "idle"
     var recordingState = "idle"
     var recordingVideoFrames = 0
@@ -83,6 +86,7 @@ struct SourceDiagnosticSnapshot: Codable, Sendable {
     var state: String
     var deliveredFrames: Int?
     var deliveryFPS: Double?
+    var captureClock: AVClockSnapshot = .unsupported
 }
 
 /// Export has its own boundary even when a future collector accidentally adds
@@ -135,6 +139,9 @@ extension StudioDiagnosticSnapshot {
         }
         exported.audioUnderruns = channels(audioUnderruns)
         exported.audioTapDrops = channels(audioTapDrops)
+        exported.sourceAudioClocks = Dictionary(uniqueKeysWithValues: sourceAudioClocks.keys.sorted().prefix(256).map {
+            (identifier($0, kind: "audio"), sourceAudioClocks[$0]!)
+        })
         exported.events = events.suffix(256).map { event in
             let components = event.state.split(separator: ".", omittingEmptySubsequences: false)
             let label: String
@@ -301,14 +308,26 @@ private struct StudioDiagnosticsContent: View {
                 Text("Encoder count includes recording reservations (Program, secondary, ISO, preflight and overlapping finalization) plus active publishers; it is not measured hardware utilization.")
                     .foregroundStyle(.secondary)
                 Text("Hardware canvas ceiling \(snapshot.hardwareCanvasCeiling), \(snapshot.hardwareFPSCeiling) fps · Thermal state \(snapshot.thermalState)")
+                AVClockDiagnosticRow(title: "Program compositor / mixed audio fanout", clock: snapshot.programClock)
+                if snapshot.secondaryClock.videoSamples > 0 {
+                    AVClockDiagnosticRow(title: "Secondary compositor / mixed audio fanout", clock: snapshot.secondaryClock)
+                }
+                Text("A−V projects timestamp clocks to the same host observation time. Rate skew measures their relative advancement; positive means audio advances faster. Callback delivery changes can affect these observations. This is not measured lip sync, device oscillator drift or receiver playout.")
+                    .foregroundStyle(.secondary)
                 ForEach(snapshot.outputs, id: \.id) { output in
                     let name = UUID(uuidString: output.id).flatMap { workspace.runtime.controller.destinationOutputs.names[$0] } ?? "Output"
                     Text("\(name): \(output.state) · \(output.achievedFPS.map(String.init) ?? "—") fps · \(output.bitrate.map { "\($0 / 1000) kbps" } ?? "—")")
                     Text("Video queue \(output.videoQueueDepth), shed \(output.videoMailboxDrops) · Socket \(output.socketQueueBytes.map(String.init) ?? "unavailable") bytes · Congestion drops \(output.encoderCongestionDrops.map(String.init) ?? "unavailable")")
+                    AVClockDiagnosticRow(title: "\(name) \(output.sharedEncodedClock == nil ? "normalized raw encoder ingress" : "encoded publisher ingress")", clock: output.encoderInputClock ?? .unsupported)
+                    AVClockDiagnosticRow(title: "\(name) shared H.264/AAC encoded callbacks", clock: output.sharedEncodedClock ?? .unsupported)
                 }
                 ForEach(snapshot.sources, id: \.id) { source in
                     let name = workspace.runtime.sceneStore.sources.first { $0.id.description == source.id }?.name ?? source.kind
                     Text("\(name): \(source.state) · Capture delivery \(source.deliveryFPS.map { String(format: "%.1f fps", $0) } ?? "—")")
+                    AVClockDiagnosticRow(title: "\(name) capture callbacks", clock: source.captureClock)
+                }
+                ForEach(snapshot.sourceAudioClocks.keys.sorted(), id: \.self) { label in
+                    AVClockDiagnosticRow(title: "\(label) original PCM / Program video", clock: snapshot.sourceAudioClocks[label] ?? .unsupported)
                 }
                 Text("Capture delivery counts new camera/screen frames. A static screen may deliver zero while Program keeps its output cadence.")
                     .foregroundStyle(.secondary)
@@ -330,5 +349,38 @@ private struct StudioDiagnosticsContent: View {
         do {
             try snapshot.redactedExportData().write(to: url, options: .atomic)
         } catch { exportError = error.localizedDescription }
+    }
+}
+
+private struct AVClockDiagnosticRow: View {
+    let title: String
+    let clock: AVClockSnapshot
+    private var state: String {
+        switch clock.state {
+        case .unsupported: "Unavailable: boundary not instrumented"
+        case .noAudio: "Unavailable: no associated audio observations"
+        case .noVideo: "Unavailable: no video observations"
+        case .warming: "Measuring: needs two seconds of fresh observations"
+        case .staleAudio: "Unavailable: audio observations older than two seconds"
+        case .staleVideo: "Unavailable: video observations older than two seconds"
+        case .unstable: "Uncertain: callback delivery jitter"
+        case .stable: "Stable timestamp progression"
+        case .offset: "Timestamp offset"
+        case .drifting: "Observed timestamp-rate skew"
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(title): \(state)")
+            if let offset = clock.audioMinusVideoMilliseconds,
+               let rate = clock.relativeRateMillisecondsPerSecond,
+               let uncertainty = clock.rateUncertaintyMillisecondsPerSecond {
+                Text(String(format: "A−V %+.1f ms · Rate %+.2f ms/s (SE %.2f) · Window %.1f s", offset, rate, uncertainty, clock.windowSeconds))
+            }
+            Text("Residual RMS audio \(clock.audioResidualMilliseconds.map { String(format: "%.2f ms", $0) } ?? "unavailable"), video \(clock.videoResidualMilliseconds.map { String(format: "%.2f ms", $0) } ?? "unavailable")")
+                .foregroundStyle(.secondary)
+            Text("Age audio \(clock.audioAgeMilliseconds.map { String(format: "%.0f ms", $0) } ?? "unavailable"), video \(clock.videoAgeMilliseconds.map { String(format: "%.0f ms", $0) } ?? "unavailable") · Samples \(clock.audioSamples)/\(clock.videoSamples) · Rejected \(clock.rejectedSamples) · Epoch changes \(clock.discontinuities)")
+                .foregroundStyle(.secondary)
+        }.accessibilityElement(children: .combine)
     }
 }
