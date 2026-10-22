@@ -7,21 +7,43 @@ output count, capture mix, resolution or frame rate.
 ## Protect optional work first
 
 The runtime samples actual process CPU time, task resident/physical-footprint
-bytes, thermal state and the Program compositor's missed-deadline deltas once
-per second. CPU is normalized to this Mac's logical capacity. The existing
+bytes, thermal state and separate Program compositor deadline/render-health
+deltas once per second. CPU is normalized to this Mac's logical capacity. The existing
 capability model now derives an optional-preview footprint budget of one fifth
 of physical RAM, bounded to 256 MiB–4 GiB.
 
 Three seconds of CPU use above 80% of logical capacity, footprint above the
-budget, serious thermal state or at least 10% missed Program deadlines reduces
+budget, serious thermal state or at least 10% Program deadline misses or failed
+render attempts reduces
 staged preview to at most 15 fps and a 1280-pixel long edge. Critical thermal
 state reduces it immediately to 5 fps / 640 pixels; sustained severe footprint
-or missed-deadline pressure does so after one second. Monitor image conversion
+or Program deadline/render-failure pressure (at least 35%) does so after one second. Monitor image conversion
 cadence follows the same guard. Thirty clear seconds restore one stage at a
 time. Invalid or stale observations cannot restore or escalate the policy.
 Stopping the pipeline clears observation windows and the CPU baseline while
 retaining the last safe preview level. Idle time cannot count as measured
 pressure or recovery, and a new lifecycle requires a fresh CPU delta.
+
+Program `attempts` count ticks with a scene that enter the primary render path;
+`failed` counts those attempts that produce no Program frame, including a fast
+failure that skips no clock deadline. Successful transition fallback still counts
+as a produced frame. Scheduler `missedDeadlines` instead counts skipped clock
+opportunities. The guard measures failures / attempts separately from skipped
+opportunities / (attempts + skipped opportunities), and uses their maximum at the
+existing thresholds; it never adds the ratios or relabels render failure as a
+clock miss. These are generic Program render outcomes, not allocation-failure,
+GPU-utilization, downstream delivery or frame-pool ownership diagnoses.
+
+The first snapshot establishes a baseline. A changed `startedAt` lifecycle,
+rolled-back counter or invalid counter interval resets observation windows while
+retaining the current preview level; valid CPU, memory and thermal signals still
+act. No-attempt intervals have an unavailable render-failure ratio. They cannot
+advance the 30-second recovery window, even after 29 measured-clear seconds;
+fresh positive-attempt healthy intervals must establish a new window. CPU,
+thermal, footprint and measured skipped-clock pressure can still reduce preview
+while no render attempts occur. Actual zero failures with positive attempts is a
+measured zero and may support recovery. Stopping the coordinator resets its
+counter baseline as before.
 
 Only the optional preview engine, its secondary raster and monitor conversion
 cadence change. Program geometry, source enables, media clocks, outgoing
@@ -34,7 +56,19 @@ The bounded `resource-budget.v1.json` in the machine directory persists hardware
 and OS identity, native/translated architecture, existing output ceilings,
 derived preview gate and the latest 120 observations. Atomic background writes
 are capped at 1 MiB. There are no URLs, account credentials, source names,
-bookmarks or captured media in that report.
+bookmarks or captured media in that report. Each new sample adds an optional
+`programHealth` object with availability status, separate interval counts and
+optional ratios. Baseline/reset/invalid and zero-denominator ratios remain absent,
+not exported as measured healthy zero. Existing report fields and version 1 are
+retained; old reports without the optional object remain decodable.
+
+`DesktopResourceBudgetTests` exercises the shipping counter-delta converter and
+policy together: fast failures with zero clock misses, distinct denominators,
+maximum rather than sum, lifecycle/counter resets, malformed and `Int.max`
+counters, missing denominators, default-zero caller compatibility, idle pressure,
+and interrupted recovery. This is a preview guard correction; it does not change
+SceneRenderer, pool capacity, frame retention, Program PTS, source pulls or active
+outputs, and it does not establish recovery from renderer starvation.
 
 ## Actual Metal observations
 
@@ -480,3 +514,12 @@ interactive UI mixes, long thermal runs, independent sustained A/V sync,
 measured storage/uplink ceilings, supported output/encoder counts and named
 Intel configurations. Missing counters or failed workloads remain gaps or
 measured limits, never a fabricated successful benchmark.
+
+The 2026-10-22 focused correction passed 12 `DesktopResourceBudgetTests` against
+a fresh actual Core module under Swift 6 with two build jobs. An additional
+optimized, warnings-as-errors owned probe compiled the exact shipping metrics
+and report declarations plus the coordinator's decision block, confirming field
+mapping, idle-interrupted recovery, epoch reset and optional-field compatibility
+with old reports. That extracted-source probe does not execute the process/Metal
+sampler or replace a combined application typecheck. No renderer/media performance
+or starvation-recovery qualification is inferred from these logic checks.
