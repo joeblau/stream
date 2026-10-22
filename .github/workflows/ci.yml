@@ -86,6 +86,7 @@ jobs:
       - name: Test saved guest preparation and native controller feedback
         run: |
           zsh scripts/run_video_encoder_fallback_harness.zsh
+          zsh scripts/run_publisher_repeat_cache_harness.zsh
           zsh scripts/run_studio_deck_process_diagnostics_harness.zsh
           STREAM_CORE_FRAMEWORK_DIR="$PWD/build/desktop/Build/Products/Debug" zsh scripts/run_guest_preparation_harness.zsh
           # Exercise actual owned localhost RTMP and independent recording.
