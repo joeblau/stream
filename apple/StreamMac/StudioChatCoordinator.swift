@@ -23,8 +23,11 @@ enum StudioGuestPublicChatUpdate {
     @Published var includeAvatar = false
     @Published var staticEmotesEnabled = false { didSet { if !staticEmotesEnabled { cancelStaticEmoteLoads() } } }
     @Published private(set) var staticEmoteLoads = 0
+    @Published private(set) var staticEmotePreviewKeys: [String: String] = [:]
     private struct EmoteLoad { let id: UUID; let task: Task<Void, Never> }
     private var emoteTasks: [LayerID: EmoteLoad] = [:]
+    private var emotePreviewTasks: [String: EmoteLoad] = [:]
+    private var emoteInFlight: Set<UUID> = []
     private var sourceEpochs: [String: UUID] = [:], emoteMessageEpochs: [String: UUID] = [:]
     private let staticEmoteResolve: (@MainActor (StudioChatMessage) async throws -> URL)?
     private let staticEmoteLoad: @Sendable (URL) async throws -> CGImage
@@ -83,7 +86,10 @@ enum StudioGuestPublicChatUpdate {
         return data
     }
     func bindAccounts(_ accounts: ProviderAccountSession) {
+        cancelStaticEmoteLoads()
         directChat?.shutdown()
+        sourceEpochs = sourceEpochs.filter { !$0.key.hasPrefix("direct:") }
+        connections = connections.filter { !$0.key.hasPrefix("direct:") }
         let manager = StudioDirectChatManager(request: { [weak accounts] provider, request in
             guard let accounts else { throw CancellationError() }; return try await accounts.chatRequest(provider, request)
         }, identity: { [weak accounts] provider in
@@ -100,6 +106,10 @@ enum StudioGuestPublicChatUpdate {
         switch action {
         case .message(let message):
             if queue.receive(message) {
+                if !staticEmotePreviewKeys.isEmpty {
+                    let retained = Set(queue.messages.map(\.id))
+                    staticEmotePreviewKeys = staticEmotePreviewKeys.filter { retained.contains($0.key) }
+                }
                 if message.staticEmote != nil, let source = sourceEpochs[message.connectionID], connections[message.connectionID]?.state == "Connected" {
                     emoteMessageEpochs[message.id] = source
                     if emoteMessageEpochs.count > 1_000 {
@@ -333,14 +343,22 @@ enum StudioGuestPublicChatUpdate {
     /// the resulting layer value is identical to the captured snapshot.
     private func cancelStaticEmoteLoad(in slot: LayerID) {
         emoteTasks.removeValue(forKey: slot)?.task.cancel()
-        staticEmoteLoads = emoteTasks.count
+        updateStaticEmoteLoads()
     }
     private func cancelStaticEmoteLoads() {
-        emoteTasks.values.forEach { $0.task.cancel() }; emoteTasks.removeAll(); staticEmoteLoads = 0
+        emoteTasks.values.forEach { $0.task.cancel() }; emoteTasks.removeAll()
+        emotePreviewTasks.values.forEach { $0.task.cancel() }; emotePreviewTasks.removeAll()
+        staticEmotePreviewKeys.removeAll(); updateStaticEmoteLoads()
     }
-    func staticEmoteStagingError(for id: String, alert: Bool) -> String? {
+    // Presentation tickets retire immediately; an operation permit lasts until
+    // its actual await exits, even if a resolver/loader ignores cancellation.
+    private func updateStaticEmoteLoads() { staticEmoteLoads = emoteInFlight.count }
+    private func finishStaticEmoteOperation(_ ticket: UUID) {
+        emoteInFlight.remove(ticket); updateStaticEmoteLoads()
+    }
+    private func staticEmoteMessageError(for id: String) -> String? {
+        guard !closed else { return "This chat session has ended." }
         guard staticEmotesEnabled else { return "Enable manual static Twitch emote tiles first." }
-        if let reason = audienceStagingError { return reason }
         guard let message = queue.message(id), message.platform == "Twitch", message.staticEmote?.valid == true,
               message.connectionID.hasPrefix("direct:twitch:"), connections[message.connectionID]?.state == "Connected",
               let epoch = sourceEpochs[message.connectionID], emoteMessageEpochs[id] == epoch else {
@@ -349,10 +367,77 @@ enum StudioGuestPublicChatUpdate {
         guard let metadata = message.staticEmote, CommentAvatarStore.shared.canPublishStaticEmote(metadata.id) else {
             return "This app run's 32 static emote identities are full. Text and existing taken tiles remain available."
         }
+        return nil
+    }
+    func staticEmotePreviewError(for id: String) -> String? {
+        if let reason = staticEmoteMessageError(for: id) { return reason }
+        guard emotePreviewTasks[id] == nil, staticEmoteLoads < 2 else { return "Wait for the bounded artwork loads to finish." }
+        return nil
+    }
+    /// Only explicit, still-authorized message previews reach the native row.
+    /// The cache keeps pixels; this workspace keeps bounded ephemeral keys.
+    func staticEmoteImage(for id: String) -> CGImage? {
+        guard staticEmoteMessageError(for: id) == nil, let key = staticEmotePreviewKeys[id] else { return nil }
+        return CommentAvatarStore.shared.image(key)
+    }
+    private func staticEmoteResolver() -> (@MainActor (StudioChatMessage) async throws -> URL)? {
+        if let supplied = staticEmoteResolve { return supplied }
+        guard let manager = directChat else { error = "The authorized Twitch reader is unavailable."; return nil }
+        return { [weak manager] value in
+            guard let manager else { throw CancellationError() }; return try await manager.staticEmoteURL(for: value)
+        }
+    }
+    /// Display artwork in native chat independently of scene selection or Take.
+    /// Metadata, transport, image limits and cache are shared with manual tiles.
+    @discardableResult func showStaticEmote(_ id: String) -> Bool {
+        if let reason = staticEmotePreviewError(for: id) { error = reason; return false }
+        guard let message = queue.message(id), let metadata = message.staticEmote,
+              let epoch = sourceEpochs[message.connectionID], let resolve = staticEmoteResolver() else { return false }
+        let load = staticEmoteLoad, ticket = UUID()
+        emoteInFlight.insert(ticket); error = nil
+        let task = Task { @MainActor [weak self] in
+            defer { self?.finishStaticEmoteOperation(ticket) }
+            do {
+                try Task.checkCancellation()
+                let cached = CommentAvatarStore.shared.staticEmoteKey(metadata.id)
+                var downloaded: CGImage?
+                if cached == nil {
+                    let url = try await resolve(message)
+                    try Task.checkCancellation()
+                    guard StudioStaticEmoteLoader.accepts(url) else { throw ProviderFailure(.invalidResponse) }
+                    downloaded = try await load(url)
+                    try Task.checkCancellation()
+                }
+                guard let self, !Task.isCancelled, self.emotePreviewTasks[id]?.id == ticket,
+                      self.staticEmoteMessageError(for: id) == nil, self.queue.message(id) == message,
+                      self.sourceEpochs[message.connectionID] == epoch, self.emoteMessageEpochs[id] == epoch else {
+                    self?.finishStaticEmotePreview(id, ticket: ticket); return
+                }
+                let key: String
+                if let cached { key = cached }
+                else if let downloaded, let published = CommentAvatarStore.shared.publishStaticEmote(downloaded, identity: metadata.id) { key = published }
+                else { throw RecordingChatError.invalid("This app run's 32 static emote identities are full; text remains available.") }
+                self.staticEmotePreviewKeys[id] = key
+                self.finishStaticEmotePreview(id, ticket: ticket)
+            } catch {
+                guard let self, !Task.isCancelled, self.emotePreviewTasks[id]?.id == ticket else { return }
+                self.error = "Static emote artwork could not be shown; text remains available. \(error.localizedDescription)"
+                self.finishStaticEmotePreview(id, ticket: ticket)
+            }
+        }
+        emotePreviewTasks[id] = .init(id: ticket, task: task); updateStaticEmoteLoads()
+        return true
+    }
+    private func finishStaticEmotePreview(_ id: String, ticket: UUID) {
+        if emotePreviewTasks[id]?.id == ticket { emotePreviewTasks[id] = nil; updateStaticEmoteLoads() }
+    }
+    func staticEmoteStagingError(for id: String, alert: Bool) -> String? {
+        if let reason = staticEmoteMessageError(for: id) { return reason }
+        if let reason = audienceStagingError { return reason }
         if alert, let reason = audienceAlertError(for: id) { return reason }
         let slot = alert ? selectedAlertSlot : selectedSlot
         guard let slot, (alert ? availableAlertSlots : availableSlots).contains(where: { $0.id == slot }) else { return "Choose a staged comment or alert slot first." }
-        guard emoteTasks[slot] == nil, emoteTasks.count < 2 else { return "Wait for the bounded artwork loads to finish." }
+        guard emoteTasks[slot] == nil, staticEmoteLoads < 2 else { return "Wait for the bounded artwork loads to finish." }
         return nil
     }
     /// Deliberate first-static-emote tile, beside the untouched public caption.
@@ -362,19 +447,15 @@ enum StudioGuestPublicChatUpdate {
         guard let message = queue.message(id), let metadata = message.staticEmote,
               let scene = previewProgram?.stagedScene, let slot = alert ? selectedAlertSlot : selectedSlot,
               let layer = scene.layers.first(where: { $0.id == slot }), let epoch = sourceEpochs[message.connectionID] else { return false }
-        let resolve: @MainActor (StudioChatMessage) async throws -> URL
-        if let supplied = staticEmoteResolve { resolve = supplied }
-        else {
-            guard let manager = directChat else { error = "The authorized Twitch reader is unavailable."; return false }
-            resolve = { [weak manager] value in
-                guard let manager else { throw CancellationError() }; return try await manager.staticEmoteURL(for: value)
-            }
-        }
+        guard let resolve = staticEmoteResolver() else { return false }
         let load = staticEmoteLoad, ticket = UUID()
         let author = includeAuthor, platform = includePlatform
         let style = message.audienceEvent.map { audienceStyle(for: $0) }
+        emoteInFlight.insert(ticket)
         let task = Task { @MainActor [weak self] in
+            defer { self?.finishStaticEmoteOperation(ticket) }
             do {
+                try Task.checkCancellation()
                 let cached = CommentAvatarStore.shared.staticEmoteKey(metadata.id)
                 var downloaded: CGImage?
                 if cached == nil {
@@ -409,11 +490,11 @@ enum StudioGuestPublicChatUpdate {
                 self.finishStaticEmote(slot, ticket: ticket)
             }
         }
-        emoteTasks[slot] = .init(id: ticket, task: task); staticEmoteLoads = emoteTasks.count
+        emoteTasks[slot] = .init(id: ticket, task: task); updateStaticEmoteLoads()
         return true
     }
     private func finishStaticEmote(_ slot: LayerID, ticket: UUID) {
-        if emoteTasks[slot]?.id == ticket { emoteTasks[slot] = nil; staticEmoteLoads = emoteTasks.count }
+        if emoteTasks[slot]?.id == ticket { emoteTasks[slot] = nil; updateStaticEmoteLoads() }
     }
     var selectedCommentPresentation: CommentTextLayout? {
         commentPresentation(for: availableSlots.first(where: { $0.id == selectedSlot }))

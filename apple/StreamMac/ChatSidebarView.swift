@@ -97,7 +97,7 @@ struct ChatSidebarView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Toggle("Enable Manual Static Twitch Emote Tiles", isOn: $coordinator.staticEmotesEnabled)
                     .toggleStyle(.checkbox)
-                Text("Explicit tile buttons load the first supported static emote beside the complete caption, using the avatar area. Each result is staged; Take publishes it. Direct Live Editing must be off. Up to 32 identities stay in memory for this app run; existing taken tiles are never evicted.")
+                Text("Show emote displays the first supported static emote in chat beside the complete caption. Separate Stage buttons use the comment artwork area and require Direct Live Editing off; Take publishes them. Up to 32 identities stay in memory for this app run; existing taken tiles are never evicted.")
                     .studioTextStyle(.caption2).foregroundStyle(.studioSecondary)
                 if coordinator.staticEmoteLoads > 0 { Text("Loading \(coordinator.staticEmoteLoads) artwork request(s)…").studioTextStyle(.caption) }
                 Toggle("Enable Manual Alert Promotion", isOn: $coordinator.alertPromotionEnabled)
@@ -227,7 +227,13 @@ struct ChatSidebarView: View {
                     .studioTextStyle(.caption, weight: .semibold)
                     .foregroundStyle(audienceColor(coordinator.audienceStyle(for: event)))
             }
-            Text(message.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 8) {
+                if let image = coordinator.staticEmoteImage(for: message.id), let metadata = message.staticEmote {
+                    Image(image, scale: 1, label: Text("Static Twitch emote: \(metadata.label)"))
+                        .resizable().scaledToFit().frame(width: 32, height: 32)
+                }
+                Text(message.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Button(coordinator.queue.favorites.contains(message.id) ? "Unfavorite" : "Favorite") { coordinator.favorite(message.id) }
                 Button("Queue") { coordinator.enqueue(message.id) }
@@ -238,7 +244,12 @@ struct ChatSidebarView: View {
                         .help(coordinator.audienceAlertError(for: message.id) ?? "Stage this event in the separate alert slot; Take publishes it.")
                 }
             }.controlSize(.small)
-            if message.staticEmote != nil {
+            if let metadata = message.staticEmote {
+                Button("Show emote") { coordinator.showStaticEmote(message.id) }
+                    .controlSize(.small)
+                    .accessibilityLabel("Show Twitch emote \(metadata.label) from \(message.author)")
+                    .disabled(coordinator.staticEmotePreviewError(for: message.id) != nil)
+                    .help(coordinator.staticEmotePreviewError(for: message.id) ?? "Display this static emote in native chat.")
                 HStack {
                     Button("Stage Comment + Static Emote") { coordinator.stageStaticEmote(message.id, alert: false) }
                         .disabled(coordinator.staticEmoteStagingError(for: message.id, alert: false) != nil)

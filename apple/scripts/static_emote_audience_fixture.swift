@@ -140,6 +140,7 @@ private actor EmoteFixtureLoader {
         let value = chat.queue.messages[0]
         precondition(value.staticEmote == .init(id: "25", setID: "0", label: "Kappa") && !chat.staticEmotesEnabled)
         precondition(!chat.stageStaticEmote(value.id, alert: false) && http.metadataReads == 0)
+        precondition(!chat.showStaticEmote(value.id) && chat.staticEmoteImage(for: value.id) == nil && http.metadataReads == 0)
         chat.staticEmotesEnabled = true; chat.alertPromotionEnabled = true
         // A Hide on an already-hidden slot is still new operator intent. The
         // layer value may remain identical, so snapshot equality alone cannot
@@ -258,8 +259,72 @@ private actor EmoteFixtureLoader {
         precondition(chat.stageAudienceAlert(value.id))
         for _ in 0..<3 { await Task.yield() }
         precondition(chat.staticEmoteLoads == 0 && preview.stagedScene == plainAlertScene)
+        // Native chat display does not require a staged target or DLE off.
+        // Reusing pixels still requires this message's current reader epoch.
+        chat.selectedSlot = nil; chat.selectedAlertSlot = nil
+        preview.setDirectLiveEditing(true)
+        let nativeStaged = preview.stagedScene, nativeProgram = preview.programScene, readsBeforePreview = http.metadataReads
+        precondition(chat.staticEmoteStagingError(for: value.id, alert: false) != nil)
+        precondition(chat.showStaticEmote(value.id)); await wait { chat.staticEmoteLoads == 0 }
+        precondition(chat.staticEmoteImage(for: value.id) != nil && http.metadataReads == readsBeforePreview)
+        precondition(chat.queue.message(value.id)?.text == value.text && preview.stagedScene == nativeStaged && preview.programScene == nativeProgram,
+                     "Native emote preview changed the literal caption or a scene")
+        chat.staticEmotesEnabled = false
+        precondition(chat.staticEmotePreviewKeys.isEmpty && chat.staticEmoteImage(for: value.id) == nil)
+        chat.staticEmotesEnabled = true
+        clock.advance(); first.push(message("native-preview", emote: "owned-5"))
+        await wait { chat.queue.messages.last?.staticEmote?.id == "owned-5" }
+        let nativeMessage = chat.queue.messages.last!
+        precondition(chat.showStaticEmote(nativeMessage.id)); await wait { await loader.count == 1 }
+        precondition(chat.staticEmoteImage(for: nativeMessage.id) == nil)
+        await loader.finish(artwork); await wait { chat.staticEmoteLoads == 0 }
+        precondition(chat.staticEmoteImage(for: nativeMessage.id) != nil && preview.stagedScene == nativeStaged && preview.programScene == nativeProgram)
+        preview.setDirectLiveEditing(false); chat.selectedSlot = comment; chat.selectedAlertSlot = alert
+
+        // Preview and staging share the SAME two-load budget. A noncooperative
+        // image completion after opt-out may neither publish pixels nor stage.
+        clock.advance(); first.push(message("native-budget-stage", emote: "owned-6"))
+        await wait { chat.queue.messages.last?.staticEmote?.id == "owned-6" }
+        precondition(chat.stageStaticEmote(chat.queue.messages.last!.id, alert: false)); await wait { await loader.count == 1 }
+        clock.advance(); first.push(message("native-budget-preview", emote: "owned-7"))
+        await wait { chat.queue.messages.last?.staticEmote?.id == "owned-7" }
+        let pendingNative = chat.queue.messages.last!
+        precondition(chat.showStaticEmote(pendingNative.id)); await wait { await loader.count == 2 }
+        first.push(message("native-budget-refused", emote: "owned-8"))
+        await wait { chat.queue.messages.last?.staticEmote?.id == "owned-8" }
+        let refusedNative = chat.queue.messages.last!, boundedReads = http.metadataReads
+        precondition(!chat.showStaticEmote(refusedNative.id) && chat.staticEmoteLoads == 2 && http.metadataReads == boundedReads)
+        let beforeNativeOptOut = preview.stagedScene
+        chat.staticEmotesEnabled = false
+        chat.staticEmotesEnabled = true
+        precondition(chat.staticEmoteLoads == 2 && chat.staticEmotePreviewKeys.isEmpty)
+        precondition(!chat.showStaticEmote(refusedNative.id)
+            && !chat.stageStaticEmote(refusedNative.id, alert: false) && http.metadataReads == boundedReads,
+            "Cancel/re-enable released permits while two real artwork loads remained held")
+        await loader.finish(artwork); await wait { chat.staticEmoteLoads == 1 }
+        clock.advance(); precondition(chat.showStaticEmote(refusedNative.id))
+        await wait { await loader.count == 2 }
+        let replacementReads = http.metadataReads
+        precondition(chat.staticEmoteLoads == 2 && !chat.showStaticEmote(pendingNative.id) && http.metadataReads == replacementReads,
+                     "One completed cancellation admitted more than one replacement")
+        chat.staticEmotesEnabled = false
+        await loader.finish(artwork); await loader.finish(artwork)
+        for _ in 0..<3 { await Task.yield() }
+        precondition(chat.staticEmotePreviewKeys.isEmpty && chat.staticEmoteLoads == 0 && preview.stagedScene == beforeNativeOptOut)
+        chat.staticEmotesEnabled = true
+        precondition(http.metadataReads == replacementReads, "Opt-in automatically retried a canceled artwork operation")
+        clock.advance(); precondition(chat.showStaticEmote(refusedNative.id)); await wait { await loader.count == 1 }
+        first.push(message("native-budget-refused", removed: true)); await wait { chat.queue.message(refusedNative.id) == nil }
+        await loader.finish(artwork); for _ in 0..<3 { await Task.yield() }
+        precondition(chat.staticEmoteImage(for: refusedNative.id) == nil && chat.staticEmotePreviewKeys.isEmpty && chat.staticEmoteLoads == 0)
+        precondition(chat.showStaticEmote(nativeMessage.id)); await wait { chat.staticEmoteLoads == 0 }
+        precondition(chat.staticEmoteImage(for: nativeMessage.id) != nil)
         for (index, reason) in [(1, "direct-live"), (2, "tombstone"), (3, "source-close")] {
             clock.advance(); first.push(message(reason, emote: "owned-\(index)")); await wait { chat.queue.messages.last?.staticEmote?.id == "owned-\(index)" }
+            if index == 3 {
+                precondition(chat.showStaticEmote(nativeMessage.id)); await wait { chat.staticEmoteLoads == 0 }
+                precondition(chat.staticEmoteImage(for: nativeMessage.id) != nil)
+            }
             let item = chat.queue.messages.last!; precondition(chat.stageStaticEmote(item.id, alert: false)); await wait { await loader.count == 1 }
             if index == 1 { preview.setDirectLiveEditing(true) }
             else if index == 2 { first.push(message(reason, removed: true)); await wait { chat.queue.message(item.id) == nil } }
@@ -267,22 +332,45 @@ private actor EmoteFixtureLoader {
             let staged = preview.stagedScene, program = preview.programScene
             await loader.finish(artwork); await wait { chat.staticEmoteLoads == 0 }
             precondition(preview.stagedScene == staged && preview.programScene == program, "Late artwork crossed \(reason) authority")
+            if index == 3 { precondition(chat.staticEmotePreviewKeys.isEmpty && chat.staticEmoteImage(for: nativeMessage.id) == nil) }
             preview.setDirectLiveEditing(false)
         }
         manager.connect(.twitch); await wait { !manager.snapshot(.twitch).target.isEmpty }
         second.push(welcome()); await wait { manager.snapshot(.twitch).isConnected }
         precondition(chat.staticEmoteStagingError(for: value.id, alert: false) != nil, "Old provider message rearmed after reader rejoin")
+        precondition(!chat.showStaticEmote(nativeMessage.id), "Old native emote preview rearmed after reader rejoin")
         second.push(message("fresh")); await wait { chat.queue.messages.last?.id == StudioDirectChatDecoder.identity(.twitch, "owner", "fresh") }
         let fresh = chat.queue.messages.last!; precondition(chat.stageStaticEmote(fresh.id, alert: false)); await wait { chat.staticEmoteLoads == 0 }
+        precondition(chat.showStaticEmote(fresh.id)); await wait { chat.staticEmoteLoads == 0 }
+        precondition(chat.staticEmoteImage(for: fresh.id) != nil)
         clock.advance(); second.push(message("retiring", emote: "owned-4")); await wait { chat.queue.messages.last?.staticEmote?.id == "owned-4" }
         let retiring = chat.queue.messages.last!
         precondition(chat.stageStaticEmote(retiring.id, alert: false)); await wait { await loader.count == 1 }
         let beforeClose = preview.programScene, stagedBeforeClose = preview.stagedScene
         chat.shutdown(); await loader.finish(artwork)
         try? await Task.sleep(for: .milliseconds(20))
-        precondition(preview.stagedScene == stagedBeforeClose && chat.staticEmoteLoads == 0)
+        precondition(preview.stagedScene == stagedBeforeClose && chat.staticEmoteLoads == 0 && chat.staticEmotePreviewKeys.isEmpty)
         chat.shutdown(); precondition(!chat.staticEmotesEnabled && preview.programScene == beforeClose)
         precondition(!chat.stageStaticEmote(fresh.id, alert: false))
+        // A separate coordinator keeps the original shutdown boundary above
+        // independent. Deliver already decoded owned-reader messages, then
+        // rebind accounts without an old-reader close to test exact retirement.
+        let rebound = StudioChatCoordinator(dispatcher: runtime.dispatcher, previewProgram: preview,
+            staticEmoteResolve: { [weak manager] in guard let manager else { throw CancellationError() }; return try await manager.staticEmoteURL(for: $0) },
+            staticEmoteLoad: { try await loader.load($0) })
+        defer { rebound.shutdown() }
+        let currentConnection = chat.connections[fresh.connectionID]!
+        rebound.receive(.connection(id: fresh.connectionID, uuid: currentConnection.uuid, platform: "Twitch", state: "Connected"))
+        rebound.receive(.message(fresh)); rebound.receive(.message(retiring)); rebound.staticEmotesEnabled = true
+        precondition(rebound.showStaticEmote(fresh.id)); await wait { rebound.staticEmoteLoads == 0 }
+        precondition(rebound.staticEmoteImage(for: fresh.id) != nil)
+        clock.advance(); precondition(rebound.showStaticEmote(retiring.id)); await wait { await loader.count == 1 }
+        rebound.bindAccounts(runtime.providerAccounts) // Existing nil-credential fixture session; no reader connects.
+        precondition(rebound.staticEmotePreviewKeys.isEmpty && rebound.staticEmoteImage(for: fresh.id) == nil
+            && !rebound.showStaticEmote(fresh.id) && rebound.staticEmoteLoads == 1,
+            "Account rebinding reused an old cached message or released held operation occupancy")
+        await loader.finish(artwork); await wait { rebound.staticEmoteLoads == 0 }
+        precondition(rebound.staticEmotePreviewKeys.isEmpty && preview.stagedScene == stagedBeforeClose && preview.programScene == beforeClose)
         let localStore = CommentAvatarStore(); var firstKey: String?
         for index in 0..<32 { let key = localStore.publishStaticEmote(artwork, identity: "owned-\(index)"); precondition(key != nil); if index == 0 { firstKey = key } }
         precondition(!localStore.canPublishStaticEmote("over-capacity") && localStore.canPublishStaticEmote("owned-0"))
@@ -303,6 +391,6 @@ private actor EmoteFixtureLoader {
             CGImageDestinationAddImage(destination, publicImage, nil); precondition(CGImageDestinationFinalize(destination))
             print("PASS: documented public Twitch CDN sample through shipping strict URL/no-redirect/ephemeral bounded PNG loader; not a live authorized chat-feed acceptance")
         }
-        print("PASS: actual Twitch decoder/shared reader metadata request→manual bounded static PNG tile→shipping staged text/dispatcher/Program pixels+Take; complete Unicode/literal text+actual native movie/archive message/show readback, no-op Hide/repeated plain-text intent fences, aspect/alpha preserved, no private/public-feed media, defaultoff/DLE/tombstone/sourceclose/rejoin/retired fences and non-evicting32identity capacity")
+        print("PASS: actual Twitch decoder/shared reader metadata request→manual bounded static PNG native-chat preview and staged tile→shipping staged text/dispatcher/Program pixels+Take; preview independent of slots/DLE with unchanged caption/scenes and shared two-load budget; complete Unicode/literal text+actual native movie/archive message/show readback, no-op Hide/repeated plain-text intent fences, aspect/alpha preserved, no private/public-feed media, defaultoff/DLE/tombstone/sourceclose/rejoin/retired fences and non-evicting32identity capacity")
     }
 }
