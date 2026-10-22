@@ -94,6 +94,22 @@ final class FixtureAudioPullTiming: @unchecked Sendable {
     var snapshot: (Double, Double)? { lock.withLock { interval } }
 }
 
+/// One owned decoder stall; normal lifecycle coverage never arms this hook.
+final class FixtureOfflineDecodeDelay: @unchecked Sendable {
+    static let shared = FixtureOfflineDecodeDelay()
+    private let lock = NSLock()
+    private var armed = false
+    func arm() { lock.withLock { armed = true } }
+    func afterRead() {
+        let delay = lock.withLock { let value = armed; armed = false; return value }
+        guard delay else { return }
+        let start = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        Thread.sleep(forTimeInterval: 0.040)
+        let elapsed = CMClockGetTime(CMClockGetHostTimeClock()).seconds - start
+        FileHandle.standardError.write(Data("PCM OWNED DECODE DELAY: \(elapsed) seconds\n".utf8))
+    }
+}
+
 private final class FixtureAudioEvents: @unchecked Sendable {
     private let lock = NSLock()
     private var status = MediaSourceStatus()
@@ -353,15 +369,40 @@ private final class FixtureAudioEvents: @unchecked Sendable {
             let file = try AVAudioFile(forWriting: root.appendingPathComponent("ramp.wav"), settings: settings)
             try file.write(from: pcm)
         }
+        let admission = try MediaSourcePlayback.lifecyclePCMAdmission(root.appendingPathComponent("ramp.wav"))
+        func bytes(_ sample: CMSampleBuffer) -> Data {
+            let block = sample.dataBuffer!
+            var data = Data(count: CMBlockBufferGetDataLength(block))
+            let result = data.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: $0.count, destination: $0.baseAddress!) }
+            precondition(result == noErr)
+            return data
+        }
+        let original = admission.original, fresh = admission.fresh!, partial = admission.partial!
+        let nativeBytes = bytes(original), bytesPerFrame = 2 * MemoryLayout<Float>.stride
+        precondition(CMSampleBufferGetNumSamples(original) == 4_096 && CMSampleBufferGetNumSamples(fresh) == 4_096)
+        precondition(bytes(fresh) == nativeBytes && CMTimeCompare(fresh.presentationTimeStamp, original.presentationTimeStamp) == 0)
+        precondition(CMSampleBufferGetNumSamples(partial) == 2_656
+            && bytes(partial) == nativeBytes.subdata(in: (1_440 * bytesPerFrame)..<nativeBytes.count),
+            "PCM admission discarded or changed surviving native stereo source frames")
+        precondition(CMTimeCompare(partial.presentationTimeStamp, original.presentationTimeStamp + CMTime(value: 1_440, timescale: 48_000)) == 0
+            && CMTimeCompare(partial.duration, CMTime(value: 2_656, timescale: 48_000)) == 0
+            && partial.decodeTimeStamp.isValid == original.decodeTimeStamp.isValid,
+            "PCM range clipping changed the source time grid, native DTS validity or duration")
+        let partialASBD = CMAudioFormatDescriptionGetStreamBasicDescription(partial.formatDescription!)!.pointee
+        precondition(partialASBD.mSampleRate == 48_000 && partialASBD.mChannelsPerFrame == 2 && partialASBD.mBytesPerFrame == UInt32(bytesPerFrame))
+        precondition(admission.expired == nil && admission.invalidClock == nil && admission.distantClock == nil)
+        print("PASS PCM admission: actual4096-frame stereo ramp retains fresh native bytes; partial1440-frame removal preserves2656frames bit-for-bit and exact sourcePTS/duration/rate/channelgrid; fullyexpired/invalid/overflow clocks emit nothing")
         fixture.configure(loops: false, end: .hold, trimIn: nil, trimOut: nil); fixture.select("ramp.wav")
         let late = MediaSourcePlayback(sourceID: SourceDefinitionID()) { fixture.payload() }, lateEvents = FixtureAudioEvents()
         late.onStatus = { _, status in lateEvents.note(status) }; late.onAudioSample = { lateEvents.sample($0) }
         late.load(); try await until("delayed-pull real decoder") { lateEvents.snapshot.status.phase == .ready }
         late.play()
-        for interval in [120, 250, 120] {
+        if CommandLine.arguments.contains("--decode-delay") { FixtureOfflineDecodeDelay.shared.arm() }
+        for (index, interval) in [120, 250, 120, 250].enumerated() {
             if interval == 120 && lateEvents.snapshot.count > 0 { late.pause(); try await Task.sleep(for: .milliseconds(100)); late.play() }
             try await Task.sleep(for: .milliseconds(interval))
             lateEvents.resetFirst()
+            if index == 3 { FixtureOfflineDecodeDelay.shared.arm() }
             let before = late.lifecycleItemPosition()!
             _ = late.pullFrame()
             let after = late.lifecycleItemPosition()!
