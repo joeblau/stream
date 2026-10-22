@@ -13,10 +13,9 @@ import StreamCore
 /// and observes `dispatcher.ptzStore` / `dispatcher.ptz` directly — no other
 /// wiring, no new environment objects required.
 ///
-/// Focus-loss stop: movement buttons send their move on press and `.ptzStop`
-/// on release, and the whole section sends `.ptzStopAll` on disappear — a
-/// camera never drives unattended (the dispatcher/controller also stop on
-/// disconnect).
+/// Pointer release retires its exact motion lease; native activation requests
+/// a bounded nudge. Focus loss/disappearance revoke interactive intent and
+/// queue best-effort Stops. Physical camera completion remains unconfirmed.
 struct PTZControlSectionView: View {
     @EnvironmentObject private var dispatcher: StudioCommandDispatcher
     @State private var isAddingTarget = false

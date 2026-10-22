@@ -1,7 +1,9 @@
 # PTZ native controls and ordered Stop authority
 
-This is a partial software correction for #90 and #165. Both issues retain
-their broader acceptance and physical/accessibility qualification limits.
+This fixes runtime and keyboard-control regressions associated with #165,
+which is closed; this change makes no new closure decision for that issue.
+#90 remains open. Physical PTZ and keyboard/accessibility delivery remain
+unqualified by these controlled fixtures.
 
 The previous movement pad consisted of gesture-only images; the zoom buttons
 had empty target actions. The replacement uses genuine `NSButton` controls.
@@ -70,4 +72,4 @@ keyboard/AX delivery and makes no AX override or further locked-session/window
 attempt. Its successful exit applies to the controlled ownership/native
 target-action cases only. A real studio keyboard traversal, VoiceOver/AX
 delivery, held-pointer window lifecycle and physical VISCA motion remain
-unqualified. These fixtures do not close #90 or #165.
+unqualified. #90 remains open; these fixtures do not change #165's closed state.
