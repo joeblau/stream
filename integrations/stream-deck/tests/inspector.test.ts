@@ -181,3 +181,29 @@ test("inspector retains missing stable bindings with explicit unavailable feedba
   peer.onclose?.();
   assert.match(element("availability").textContent, /Connect to Stream Studio/);
 });
+
+
+test("inspector trusts only the fresh studio-scoped profile descriptor across profile switches", async () => {
+  const { element, peer } = await inspector();
+  const settings = { commandID: "show.show-a.profile.profile-a.select", projectID: "profile-a", scope: "studio", authority: "stale-settings" };
+  const command = { id: settings.commandID, title: "Open Interview", category: "Show Profiles", available: true, scope: "studio", authority: "fresh-descriptor" };
+  const state = { status: "Connected", projectID: "profile-b", settings, commands: [command] };
+  const before = peer.sent.length;
+  peer.receive(state);
+  assert.equal(element("availability").textContent, "Available");
+  assert.match(element("project").textContent, /Current show’s saved profiles/);
+  assert.equal(element("command").value, settings.commandID);
+  assert.equal(peer.sent.length, before, "A profile switch must preserve the binding without persisting new scope or authority");
+  for (const scope of [undefined, "project", "unknown"]) {
+    peer.receive({ ...state, commands: [{ ...command, scope }] });
+    assert.match(element("availability").textContent, /current project/);
+    assert.match(element("project").textContent, /different project/);
+  }
+  peer.receive({ ...state, commands: [] });
+  assert.match(element("availability").textContent, /current project/);
+  assert.equal(element("command").children.at(-1)?.disabled, true);
+  peer.receive({ ...state, status: "Disconnected" });
+  assert.match(element("availability").textContent, /Connect to Stream Studio/);
+  assert.doesNotMatch(element("project").textContent, /Current show’s saved profiles/);
+  assert.equal(peer.sent.length, before);
+});

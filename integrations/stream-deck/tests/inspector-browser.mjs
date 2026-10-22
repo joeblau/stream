@@ -90,6 +90,26 @@ try {
   assert.equal(await evaluate('document.getElementById("command").selectedOptions[0].disabled'), true);
   update({ ...state, projectID: 'other-project' });
   await wait(() => evaluate('document.getElementById("availability").textContent.includes("current project")'), 'project change');
+  const profileSettings = { commandID: 'show.show-a.profile.profile-a.select', projectID: 'project-a', scope: 'studio', authority: 'stale-settings' };
+  const profileState = { ...state, projectID: 'profile-b', settings: profileSettings,
+    commands: commands.map(command => command.id === profileSettings.commandID ? { ...command, scope: 'studio', authority: 'fresh-descriptor' } : command) };
+  const beforeProfile = frames.length;
+  update(profileState);
+  await wait(() => evaluate('document.getElementById("availability").textContent === "Available"'), 'fresh studio scope across profile switch');
+  assert.match(await evaluate('document.getElementById("project").textContent'), /Current show’s saved profiles/);
+  assert.equal(await evaluate('document.getElementById("command").value'), profileSettings.commandID);
+  assert.equal(frames.length, beforeProfile, 'Scope display must preserve projectID without rebinding or persisting authority');
+  for (const scope of [undefined, 'unknown']) {
+    update({ ...profileState, commands: commands.map(command => ({ ...command, scope })) });
+    await wait(() => evaluate('document.getElementById("availability").textContent.includes("current project")'), 'unknown scope remains guarded');
+  }
+  update({ ...profileState, commands: commands.filter(command => command.id !== profileSettings.commandID) });
+  await wait(() => evaluate('document.getElementById("command").selectedOptions[0].disabled'), 'missing profile descriptor after show switch');
+  assert.match(await evaluate('document.getElementById("availability").textContent'), /current project/);
+  update({ ...profileState, status: 'Disconnected' });
+  await wait(() => evaluate('document.getElementById("availability").textContent.includes("Connect to Stream Studio")'), 'stale scope after disconnect');
+  assert.doesNotMatch(await evaluate('document.getElementById("project").textContent'), /Current show’s saved profiles/);
+  assert.equal(frames.length, beforeProfile);
   update({ ...state, settings: { commandID: 'output.record.marker', projectID: 'project-a', text: 'Original' } });
   await wait(() => evaluate('document.getElementById("marker").value === "Original"'), 'marker binding');
   await evaluate('document.getElementById("marker").value="Draft 👩🏽‍🚀"'); update({ ...state, settings: { commandID: 'output.record.marker', projectID: 'project-a', text: 'Original' } });
