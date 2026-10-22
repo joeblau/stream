@@ -1,0 +1,300 @@
+{
+  "artifacts": {
+    "/private/tmp/stream-wave17-monitor-engine-initial-20261022.log": {
+      "bytes": 754667,
+      "sha256": "8e75728b5ffbe18f0b6d1ea7b8575c294f6ee5bde4e0274b04bea5689a1a187e"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-matching-core-20261022.log": {
+      "bytes": 502877,
+      "sha256": "e440daef00eb4f6f639ec2445ee235896e7bc915a7ada0f0ee307920ede5fd98"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-initial/optional-source-receipt.json": {
+      "bytes": 3298,
+      "sha256": "94ec9ee0a92ff419488aee82a0a9595ed895734ed138a5f56b642ff37b64efc8"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-initial/result.json": {
+      "bytes": 300,
+      "sha256": "cb3fa06ceee474566997977c2d19b0e7d96af176cd67ca78fbbbe9b3866a04b7"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-initial/run_optional_frame_delivery_engine.py": {
+      "bytes": 2989,
+      "sha256": "1212633c1bc336d59eb658b4fb9786501f5208fcb3618750bea047d5a7d3f19f"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/CompositionEngine.swift": {
+      "bytes": 51567,
+      "sha256": "68051c54f45bfdbc1fc005cc16cccdc750a7e1dfb0813692d7eccd80fcf97791"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/FrameDeliveryBroker.swift": {
+      "bytes": 26137,
+      "sha256": "e48e46e7706d0637015ab65814c302ea4d27c2b0e02e7b7b69c11f8bbed6b569"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/OptionalFrameDeliveryEngineHarness": {
+      "bytes": 78794528,
+      "sha256": "85b1668e3d8d8c7d2279897702d75a4363450f5f86c6aaaf51e96aab16d18442"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/actual_broker_fixture_helpers.swift": {
+      "bytes": 25209,
+      "sha256": "a1053e8fde3a254502a83c72248501aa87e37e171aa464c207c9de546ff01332"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/clock_cases.swift": {
+      "bytes": 13032,
+      "sha256": "8d986858b5490e0a60e8fca1560b13d0b8d6c637abfbbb840a71d5148747d927"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/observations.json": {
+      "bytes": 2674,
+      "sha256": "34d6c3e68708a8293e4ae94b998b2c217cc0f399dd9d6347a77795f15cd743b9"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/optional-source-receipt.json": {
+      "bytes": 3304,
+      "sha256": "cd0b5ce16011298d5521fa8ba20e1508b11884b31092b44472e40e9c6a8d9c51"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/optional_frame_delivery_engine_harness.swift": {
+      "bytes": 10984,
+      "sha256": "c4ded951c02341ac8a819bd58f0fd96d68d4e8cb36964389e1b2c2922f08f1a3"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/prepare_optional_frame_delivery_engine.py": {
+      "bytes": 3590,
+      "sha256": "18ecd12d63c1cbf8a545b86a77b2f968eca1d3419da3cfea61fe835d1660dbfa"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/production-source.json": {
+      "bytes": 893,
+      "sha256": "d5b760f860836d130b9b3e31af49c06aa14a353be53c5b70f090e4be20aa58e7"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/result.json": {
+      "bytes": 496,
+      "sha256": "a85d580514abd361067b163db7b2942b5c475dfaa178a5a1d5279763fac97b49"
+    },
+    "/private/tmp/stream-wave17-monitor-engine-proof-20261022/apple/build/optional-frame-delivery-engine-20261022/proof-matching-core/run_optional_frame_delivery_engine.py": {
+      "bytes": 3570,
+      "sha256": "2fc624c1db0918083ad02714ae3c2376b5c4457a8d13a35c6dd123b35ddbbab1"
+    }
+  },
+  "assertions": {
+    "banks": [
+      {
+        "bytes": 5440,
+        "capacity": 5,
+        "kind": "monitor",
+        "output": "owned-healthy",
+        "state": "quarantined"
+      },
+      {
+        "bytes": 5440,
+        "capacity": 5,
+        "kind": "monitor",
+        "output": "owned-monitor",
+        "state": "quarantined"
+      },
+      {
+        "bytes": 5440,
+        "capacity": 5,
+        "kind": "monitor",
+        "output": "owned-monitor",
+        "state": "quarantined"
+      },
+      {
+        "bytes": 4352,
+        "capacity": 4,
+        "kind": "rendererSource",
+        "output": "program",
+        "state": "exposed"
+      }
+    ],
+    "canceledPreparationRefunded": true,
+    "canceledRegistrationAbsent": true,
+    "concurrentStopBarrierCompleted": true,
+    "healthyImages": {
+      "count": 3,
+      "pixels": [
+        [
+          219,
+          56,
+          98,
+          255
+        ],
+        [
+          219,
+          56,
+          98,
+          255
+        ],
+        [
+          219,
+          56,
+          98,
+          255
+        ]
+      ],
+      "times": [
+        0.5333333333333333,
+        0.5666666666666667,
+        0.6
+      ],
+      "unchanged": true
+    },
+    "oldImages": {
+      "count": 5,
+      "pixels": [
+        [
+          80,
+          134,
+          204,
+          255
+        ],
+        [
+          80,
+          134,
+          204,
+          255
+        ],
+        [
+          80,
+          134,
+          204,
+          255
+        ],
+        [
+          80,
+          134,
+          204,
+          255
+        ],
+        [
+          80,
+          134,
+          204,
+          255
+        ]
+      ],
+      "times": [
+        0.03333333333333333,
+        0.06666666666666667,
+        0.1,
+        0.13333333333333333,
+        0.16666666666666666
+      ],
+      "unchanged": true
+    },
+    "originalAttempts": 18,
+    "originalFailed": 0,
+    "originalRendered": 18,
+    "replacementBankIsFresh": true,
+    "replacementImages": {
+      "count": 5,
+      "pixels": [
+        [
+          219,
+          56,
+          98,
+          255
+        ],
+        [
+          219,
+          56,
+          98,
+          255
+        ],
+        [
+          219,
+          56,
+          98,
+          255
+        ],
+        [
+          219,
+          56,
+          98,
+          255
+        ],
+        [
+          219,
+          56,
+          98,
+          255
+        ]
+      ],
+      "times": [
+        0.43333333333333335,
+        0.4666666666666667,
+        0.5,
+        0.5333333333333333,
+        0.5666666666666667
+      ],
+      "unchanged": true
+    },
+    "retiredCallbacksRefused": true,
+    "scope": "Actual OptionalFrameDelivery + synthetic CompositionEngine/SceneRenderer/broker/native CV/CGImage. Owned shape pixels and bitmap only; no StudioRuntime, window, display, capture, device, mixer, network, UI input, preference or performance qualification.",
+    "sourceBankCapacity": 4
+  },
+  "date": "2026-10-22",
+  "fixtureHashes": {
+    "apple/scripts/composition_clock_authority_harness.swift": "d91876c53d4d18cc86a15e1ee132325bba023b27ab43c4003c2ee82ee2647c56",
+    "apple/scripts/frame_delivery_broker_harness.swift": "393ff68f856c4d1a1ce7679a62868b0f80fde53793394d75e3bf7583b8b30c95",
+    "apple/scripts/optional_frame_delivery_engine_harness.swift": "c4ded951c02341ac8a819bd58f0fd96d68d4e8cb36964389e1b2c2922f08f1a3",
+    "apple/scripts/prepare_optional_frame_delivery_engine.py": "18ecd12d63c1cbf8a545b86a77b2f968eca1d3419da3cfea61fe835d1660dbfa",
+    "apple/scripts/run_optional_frame_delivery_engine.py": "2fc624c1db0918083ad02714ae3c2376b5c4457a8d13a35c6dd123b35ddbbab1"
+  },
+  "initialFailure": "Tool compilation selected old Core in privately copied cache ahead of explicit current Core path, causing missing new Core types. Runner now replaces only its owned copied Core with exact immutable full Core before build. No production code or assertion changed; failed receipt/log/source preserved.",
+  "initialFailureRunnerSnapshot": "Initial runner snapshot reconstructed from the sole dependency-copy hunk and verified byte-for-byte against runnerSHA256 retained by failure result. Successful runner snapshot is a direct copy.",
+  "parentUniversal": {
+    "checks": [
+      {
+        "bytes": 168,
+        "exit": 0,
+        "label": "generate",
+        "log": "/tmp/stream-wave17-initial-parent-final-generate-20261022.log",
+        "sha256": "498590b63dc58692e6d61f4576cbbfe4bc576d367aa426a43f00066b218b7f47"
+      },
+      {
+        "bytes": 358440,
+        "exit": 0,
+        "label": "universal",
+        "log": "/tmp/stream-wave17-initial-parent-final-universal-20261022.log",
+        "sha256": "ae69b83fb5dc90fa51103c8614e17b2b4102f749998e26add93d12d5763ca6c1"
+      },
+      {
+        "bytes": 517,
+        "exit": 0,
+        "label": "bundle",
+        "log": "/tmp/stream-wave17-initial-parent-final-bundle-20261022.log",
+        "sha256": "e29594cee473bcd110b372e6b843eed1bbe4899815b5d42b05800504997af29b"
+      }
+    ],
+    "receipt": "/tmp/stream-wave17-initial-parent-final-results-20261022.json",
+    "scope": "Parent combined arm64+x86_64 Release App build and bundle layout PASS; this tool is single arm64.",
+    "sha256": "faf40cbfa458b6dd6c3c6db1c7cb16e5c8816dc1c137e4eec31564ba9a92aad0"
+  },
+  "preservedInitialProof": {
+    "path": "apple/docs/OPTIONAL_FRAME_IMAGE_DELIVERY_2026-10-22.json",
+    "scope": "Separate converter/bank5/CGImage reuse+letterbox+PTS, bounded MainActor handoff and memory-only external controller proof; unchanged historical bytes.",
+    "sha256": "8ca585e7e158e1e2506f5ae3f0b39b251247e8ed9b16460f3b9ade30e95e950a"
+  },
+  "productionCommit": "fee9ae52b8ff0493e892cbe9558ef8e01c381a88",
+  "productionDiff": "No StreamMac or StreamCore production changes in this follow-up.",
+  "qualificationLimits": [
+    "No StreamController or StudioRuntime construction at runtime; canonical merged routes were source-reviewed and typechecked by parent universal App build.",
+    "No native windows, displays, surfaces, capture, devices, mixer, network, UI input, preferences, physical hardware, operator flow or sustained performance qualification.",
+    "Canceled preparation case cancels the task before install begins; it does not claim a held actor-install race. Initial focused external controller proof separately exercises held injected subscription ACK and replacement.",
+    "Source4 is the actual admitted descriptor plus 18/18 render observation; broker owner separately proves original ring/transfer/render storage invariant and alias-negative control.",
+    "Concurrent Stop checks actual closed probe after both callers finish; no deliberately stalled cleanup operation."
+  ],
+  "runtime": "PASS",
+  "runtimeProductionHashes": {
+    "apple/StreamCore/RawVideoResourceBudget.swift": "f608982f1ebf961838c66acf2d32b42c2802851dd1ebec0b0c1cf9d9e4fd1488",
+    "apple/StreamMac/CompositionEngine.swift": "68051c54f45bfdbc1fc005cc16cccdc750a7e1dfb0813692d7eccd80fcf97791",
+    "apple/StreamMac/FrameDeliveryBroker.swift": "e48e46e7706d0637015ab65814c302ea4d27c2b0e02e7b7b69c11f8bbed6b569",
+    "apple/StreamMac/FrameDeliveryConverter.swift": "46e9df06e3b2dcf941f48295d2d8841b6a6d1faaf14bdd41978dd5f0ab2a00d8",
+    "apple/StreamMac/OptionalFrameDelivery.swift": "30e397fa961a02c8db4a27f14253c096ab5165816af22924fdd30b596a5ce422",
+    "apple/StreamMac/OptionalMonitorImageHandoff.swift": "10757107e1b11c5adb68db06873e83ff243ac1c2b4f4075947a1ed67983db14c",
+    "apple/StreamMac/PreviewImageConverter.swift": "acd2e29c2619576f871e616cf112822f9835aa938a3db5b57d436f52e699c1b6",
+    "apple/StreamMac/RawVideoResourceCoordinator.swift": "16e4c0314c6f3da380743017bbef82635319ca75c428f318fa433785543f1d90",
+    "apple/StreamMac/SceneRenderer.swift": "6b1d908822f502d5b7bd4367c3094e633a053c0250faa52847fa0825e761e923"
+  },
+  "scope": "Actual OptionalFrameDelivery, synthetic CompositionEngine/SceneRenderer, broker, source/private CV pools and deferred CGImages. Owned16px shape pixels and bitmap readback only.",
+  "typecheckedRouteHashes": {
+    "apple/StreamMac/ExternalDisplayOutputController.swift": "ad7ba390f3a250877d5fa25caa534d483761d8d59cdba9268ee2defc39391542",
+    "apple/StreamMac/ExternalDisplayOutputView.swift": "4bf3157636c13e9aef512b683ac4c6913d106a5c399cee79768cade09cd9f00d",
+    "apple/StreamMac/ExternalProgramImageConverter.swift": "b3780943c71335bed1917306c3725ed2ccfc2ceb368508f99d92ef2b9d6ae118",
+    "apple/StreamMac/StreamController.swift": "eef4b1e1e2e21fba47372292c0024980986db22365efab3c066037d5f39b1642"
+  }
+}
