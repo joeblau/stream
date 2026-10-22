@@ -38,4 +38,17 @@ import Testing
         #expect(budget.level.maximumFrameRate == 5 && budget.level.maximumLongEdge == 640)
         #expect(budget.level.notice != nil)
     }
+    @Test func idleGapsCannotCountAsSustainedPressureOrRecovery() {
+        var budget = DesktopResourceBudget()
+        _ = budget.update(sample(0, cpu: 0.9))
+        _ = budget.update(sample(2, cpu: 0.9))
+        budget.resetObservations()
+        #expect(budget.update(sample(100, cpu: 0.9)) == .normal)
+        #expect(budget.update(sample(103, cpu: 0.9)) == .reduced)
+        _ = budget.update(sample(104))
+        budget.resetObservations()
+        #expect(budget.update(sample(500)) == .reduced)
+        #expect(budget.update(sample(529)) == .reduced)
+        #expect(budget.update(sample(530)) == .normal)
+    }
 }

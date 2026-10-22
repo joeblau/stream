@@ -86,6 +86,7 @@ private struct WorkloadResult: Codable {
     var kernels: CompositionKernelMetrics
     var storageBytesPerSecond: Double
     var maximumRecordingFrontierSkewSeconds: Double?
+    var validationSeconds: Double
 }
 
 private final class PerformanceRecordingProbe: @unchecked Sendable {
@@ -210,8 +211,10 @@ private final class PerformanceRecordingProbe: @unchecked Sendable {
                 print("MEASURED LIMIT: \(width)x\(height) \(fps) recording failed: \(result.error ?? "Unknown writer failure")")
             }
             let measured = started.duration(to: clock.now).components
+            let samplingSeconds = max(0, metrics.sampledAt - metrics.startedAt)
+            let totalSeconds = Double(measured.seconds) + Double(measured.attoseconds) / 1e18
             results.append(.init(width: width, height: height, fps: fps, layers: scene.layers.count,
-                seconds: Double(measured.seconds) + Double(measured.attoseconds) / 1e18, compositor: metrics,
+                seconds: samplingSeconds, compositor: metrics,
                 healthySinkFrames: arrival.count, hostClockDurationErrorSeconds: arrival.error,
                 maxMainActorSchedulingDelayMilliseconds: maxDelay, processCPUSeconds: after.processCPUSeconds - before.processCPUSeconds,
                 peakMemoryBytes: after.peakMemoryBytes, recording: result.progress, recordingComplete: result.completed,
@@ -219,7 +222,8 @@ private final class PerformanceRecordingProbe: @unchecked Sendable {
                 workload: replayURL == nil ? "Static owned desktop/camera placeholders + 10 shape/title layers" : "Real owned 1080p H.264 decode reused by desktop/camera placeholders + 10 shape/title layers",
                 decodedSourceFrames: replay.decodedFrames, resources: resources, kernels: kernels,
                 storageBytesPerSecond: Double(result.progress.bytesWritten) / max(1, workloadSeconds),
-                maximumRecordingFrontierSkewSeconds: recordingProbe.skew))
+                maximumRecordingFrontierSkewSeconds: recordingProbe.skew,
+                validationSeconds: max(0, totalSeconds - samplingSeconds)))
             if let decode { decode.cancel(); _ = try? await decode.value }
             if replayURL != nil { precondition(replay.decodedFrames >= fps * Int(workloadSeconds - 5), "Owned replay decoder did not sustain its source cadence") }
             previousRecording = url

@@ -40,6 +40,7 @@ struct DesktopMetalCapabilities: Codable, Sendable {
     }
     private let device = MTLCreateSystemDefaultDevice()
     private var previous: (time: Double, cpu: Double)?
+    func reset() { previous = nil }
     var metalCapabilities: DesktopMetalCapabilities {
         .init(device: device.map { String($0.name.prefix(128)) }, unifiedMemory: device?.hasUnifiedMemory,
               recommendedWorkingSetBytes: device?.recommendedMaxWorkingSetSize,
@@ -146,7 +147,10 @@ private actor DesktopResourceReportStore {
             }
         }
     }
-    func stop() { task?.cancel(); task = nil; previous = nil }
+    func stop() {
+        task?.cancel(); task = nil; previous = nil
+        policy.resetObservations(); sampler.reset(); samples.removeAll()
+    }
     deinit { task?.cancel() }
 }
 
