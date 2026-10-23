@@ -1,0 +1,50 @@
+name: Owned scene semantic observation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-scene-semantics-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  owned-scene-baseline:
+    name: Owned scene component baseline (macos-26)
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record native environment
+        run: |
+          mkdir -p apple/build/scene-selection-semantics-environment
+          {
+            sw_vers
+            xcodebuild -version
+            xcrun swiftc --version
+            uname -m
+          } | tee apple/build/scene-selection-semantics-environment/toolchain.log
+          test "$(uname -m)" = "arm64"
+          test "$(sysctl -in sysctl.proc_translated || true)" != "1"
+          git rev-parse HEAD > apple/build/scene-selection-semantics-environment/source-head.txt
+      - name: Observe genuine native baselines and owned scene component once
+        working-directory: apple
+        env:
+          SCENE_SEMANTICS_DIR: build/scene-selection-semantics/${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          # The runner preserves genuine AppKit/SwiftUI baseline gates. Exit 77
+          # means unavailable/unqualified; it is retained as a non-passing job.
+          # No retry, alternate observer, trust request or global input follows.
+          zsh scripts/run_scene_selection_native_harness.zsh --owned-bundle --public-cax-child
+      - name: Retain first scene semantic outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owned-scene-semantics-macos-26
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            apple/build/scene-selection-semantics-environment
+            apple/build/scene-selection-semantics
