@@ -1451,3 +1451,44 @@ unchanged bodies/states and zero open PRs or outside-inventory open issues.
 All open trackers retain incomplete children; no closure is justified. Every
 prior wave object and failed receipt remains intact. This ledger work performs
 no native test, build, decoder, workload, API write or publication.
+
+## Native row diagnostics and active new-source performance run — 2026-10-22 UTC
+
+Current `69210da` adds diagnostic-only native row observations and durable
+artifacts. All **11 original assertions and 40 cases**, viewport widths, startup,
+50 ms settle, 60-second compile and 90-second runtime bounds remain unchanged.
+One owned offscreen M3/macOS 27.2 invocation compiles and passes all cases.
+Captured/fresh identities remain stable; no requested-style mismatch or relevant
+notification is observed. This does not reproduce or identify the original Intel
+failure or establish a production repair. Independent review clears 46 checks.
+
+A reviewed **manual-only** control-row workflow is prepared, and main CI gains
+one artifact upload path. It has **not been dispatched** at this snapshot.
+Actual `57c0f25` unsigned universal arm64/x86_64 Release and bundle PASS remains
+the shipping build: app/Core/vendor inputs are unchanged. The current manifest
+verifies **841 source/recipe paths**, with five explicit post-build recipes
+(CI, the two PCM fixture files, row diagnostic fixture and new workflow).
+Among the previous 840 paths, only CI and the row fixture change relative to
+published `9906185`; no claim makes all current recipes equal the old build.
+
+Original `50084bb` native CI is now terminal **FAILURE on both Macs**, with iOS
+success. Core passes **613 tests across 84 suites** in 84.165 seconds on ARM,
+240.447 seconds on Intel and 234.930 seconds on iOS. Intel PCM passes with an
+owned 146.525 ms delay, then row fixture line 98 rejects native style persistence.
+Its original artifact does not identify the exact case or cause. ARM's separate
+169.576 ms delay expires the entire 150 ms PCM horizon; that failed original
+receipt is unchanged by the later controlled fixture repair.
+
+Exact 990 native CI remains active at 2026-10-23T00:00:14.781567+00:00: iOS passes 613 tests across 84 suites in 237.338 seconds; both Mac jobs are active. No whole-run conclusion is asserted.
+
+One source-bound 600-second-per-case ARM/Intel performance dispatch was accepted after publication of 9906185 (run 39873529565, one POST, no transport retry). It remains active at 2026-10-23T00:00:13.708521+00:00; no measurement window, result, capacity or improvement is claimed. The accepted run uses
+the original 600-second cases and unchanged gates. Original e41 hosted failures,
+Intel deadline/inspection boundaries and the named local M3 Max pass remain
+unchanged; neither the new active run nor component copy timings close **#92**.
+
+The complete read-only audit at **2026-10-22T23:59:12.588884+00:00** confirms
+original 61 issues **27 closed / 34 open**, all 135 macOS issues **101 closed /
+34 open**, unchanged original bodies/states, zero open PRs and no outside-
+inventory open issue. All open trackers have incomplete children; no closure is
+justified. Historical wave objects and failed receipts remain intact. This
+ledger work performs no native test, build, workload, API write or publication.
