@@ -1,11 +1,16 @@
 # Hosted owned-window keyboard setup: source preparation
 
-This is an unexecuted fixture change. No compiler, native UI, workflow dispatch,
-trust request or settings change has been performed for it. The first hosted
-outcome remains unchanged in `HOSTED_SCENE_SEMANTIC_OBSERVATION_2026-10-22.json`:
-actual AX baselines and scene actions passed, while window-local keyboard
-delivery was unqualified with a visible, non-key window and an inactive app.
-All nine earlier local outcomes and their original machine receipt are retained.
+The first branch-scoped hosted attempt ended at exit 77. Both compilers passed,
+and the genuine stock/AppKit and production scene AX checks passed. The one
+owned activation request did not establish an active app and key owned window
+within the unchanged two-second deadline. No keyboard focus calibration or
+production key sequence was reached, and no fallback or rerun followed.
+
+The earlier hosted outcome is unchanged in
+`HOSTED_SCENE_SEMANTIC_OBSERVATION_2026-10-22.json`. All nine earlier local
+outcomes and their original machine receipt remain unchanged. The new companion
+`HOSTED_SCENE_KEYBOARD_SETUP_2026-10-22.json` binds this attempt and its separate
+compile-only history. This component evidence does not complete #90 or #155.
 
 The opt-in `--owned-keyboard-setup` addresses that missing setup boundary. It
 requires `GITHUB_ACTIONS=true`, `RUNNER_ENVIRONMENT=github-hosted`, the exact
@@ -55,14 +60,51 @@ now includes focus-state/change-observer structure, so identical native grouping
 in default mode has not been demonstrated. The production
 `SceneSelectionButton.swift` is unchanged.
 
-The prepared manual workflow remains single ARM macOS 26, with no matrix,
-automatic trigger, retry, trust/defaults/HID change, other-app query, Core build
-or full studio launch. It adds the explicit flag to the existing bundled child
-command and retains the original 120/120-second compile and 30-second owned
-runtime limits. Publication and one possible branch-scoped hosted dispatch
-require parent review and are not performed by this preparation.
+The manual workflow remains single ARM macOS 26, with no matrix, automatic
+trigger, retry, trust/defaults/HID change, other-app query, Core build or full
+studio launch. It adds the explicit flag to the existing bundled child command
+and retains the original 120/120-second compile and 30-second owned runtime
+limits. The executable was launched directly from its properly formed bundle;
+LaunchServices was not used in this hosted attempt.
 
-A future first outcome must retain all inputs, compile/runtime results, phase
-facts and callback oracles, including any unavailable baseline or first failure.
-No success is predicted. Even a complete component pass would not close #90 or
-qualify #155's separate native chooser/sandbox keyboard flow.
+## Retained first outcomes
+
+Source preparation was committed as `2abb8bf8db5490cb6c3742be4e71195275ae0fb2`.
+The first compile-only batch passed the Objective-C bridge and failed Swift
+compilation on the imported API name `canBecomeKeyWindow`. No executable ran.
+A separate one-token correction, `e597907ce1c9238aa4f5872cfc317941485bbccd`, used
+`canBecomeKey`. The single fresh corrected compile-only batch passed both
+compilers without invoking its executable. Both batches retain their original
+sources, logs and receipts.
+
+The first hosted run was [39889238145](https://github.com/joeblau/stream/actions/runs/39889238145),
+job `120204727369`, at exact commit `e597907ce1c9238aa4f5872cfc317941485bbccd`.
+Its ARM host reported macOS 26.6.2 (25G83), Xcode 26.6 (17F113), and Swift 6.3.3.
+The Objective-C and strict Swift 6 compilers returned zero; the native runtime
+returned 77. The archive retains the executable, five actual input snapshots,
+receipt, raw logs, capability facts and before/after activation facts.
+
+The external own-parent C AX baseline observed actual `AXButton` roles for the
+stock SwiftUI and AppKit controls. Both AX presses returned success and caused
+the expected callbacks. The direct in-process AppKit API separately reported
+`AXUnknown` and returned false from its press method while still causing a
+callback; that is not treated as the external baseline result. The actual
+production scene buttons had the expected names and status values, and the
+scene-two AX press changed selection and recorded callback `[2]`.
+
+Before and after the one activation request, the window was visible, but
+`NSApp.isActive`, `window.isKeyWindow` and `NSApp.keyWindow === window` were all
+false. `activationQualified` was false at the two-second deadline. Scene
+callbacks stayed `[2]`; stock callbacks stayed `[1]`. The stock `[1]` callback
+came from the earlier AX press, not a keyboard event. There were no stock-focus,
+stock-keyboard, scene-focus or production-keyboard phase artifacts. Thus the
+stock Space → Tab → Space calibration and original production keyboard oracle
+were not reached. Read-only `keyboardNavigationEnabled=false` is descriptive;
+it is not an established cause or permission diagnosis.
+
+The first native outcome ends this attempt. It demonstrates neither a keyboard
+control defect nor a lock-state cause. No settings, TCC, VoiceOver, global HID,
+other-app observation or production source change was made. The original
+keyboard and contrast requirements remain in scope; full workspace action,
+focus, dialog and small-window delivery are not inferred from these component
+AX checks. Any different launch boundary requires a separately reviewed plan.
