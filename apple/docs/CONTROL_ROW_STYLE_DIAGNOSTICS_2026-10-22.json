@@ -95,5 +95,287 @@
     "path": "/tmp/stream-wave22-control-row-native-20261022.log",
     "sha256": "2898ed7f7f56550e26871925f30e2eb332f79fb258fef424dae85b866af992a9"
   },
-  "pendingGate": "One small hosted Intel/ARM diagnostic invocation should retain the first result. No original Intel style-reset/refusal, stale reference, app-launch or production-layout cause established."
+  "pendingGate": "One small hosted Intel/ARM diagnostic invocation should retain the first result. No original Intel style-reset/refusal, stale reference, app-launch or production-layout cause established.",
+  "hostedEvidence": {
+    "historicalFields": "All preceding fields, including pendingGate, remain verbatim from the original local-stage receipt; these first hosted outcomes supersede that pending evidence gate only.",
+    "originalLocalReceiptSHA256": "a501d0d0616853831486976616f2323ce1769f697d07ed85d09d76aa345d5434",
+    "publishedHead": "d0ec6ff952052ce0e66c17acb247702f065d8dfd",
+    "scope": "First diagnostic-source manual workflow invocation: 40 unchanged component cases on each hosted architecture, 80 total. No repeated run, no production repair, full workspace, AX, keyboard, focus or contrast qualification. Original500 Intel failure cause remains UNKNOWN.",
+    "hosts": [
+      {
+        "architecture": "arm",
+        "workflowRun": 39875859848,
+        "job": 120161185313,
+        "publishedHead": "d0ec6ff952052ce0e66c17acb247702f065d8dfd",
+        "conclusion": "success",
+        "sourceSHA256": {
+          "apple/StreamMac/StudioAccessibility.swift": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c",
+          "apple/StreamMac/StudioControlRow.swift": "581b2013d6b3daa9bcfb4d294fcb6332467979cf2b43b4c78d10de593c5e18be",
+          "apple/StreamMac/MainWindowView.swift": "ea55a02c769481eb568f9fb025d8896488b7188d052f9e94f3bcbd65f19715f6",
+          "apple/scripts/test_studio_control_rows.py": "7969eb51554e03a43431cb638baf19f12d54eda405f130b585bf3d6f44dc009e"
+        },
+        "originalLog": {
+          "path": "/tmp/stream-control-rows-d0ec6ff-120161185313-original.log",
+          "sha256": "5045f6d6ce255076a0acd7b85578a8d594ac41507eb7063c69675ff86a3f5731"
+        },
+        "originalArchive": {
+          "id": 12467992455,
+          "path": "/tmp/stream-control-rows-d0ec6ff-artifact12467992455-original.zip",
+          "bytes": 222417,
+          "sha256": "9a34b54a85b088ef989dbc00ee582a4c07f7fe63061575b79e23c455b7adb2cb",
+          "metadata": "/tmp/stream-control-rows-d0ec6ff-artifact12467992455-metadata",
+          "entryCount": 10
+        },
+        "ownerReceipt": {
+          "path": "/tmp/stream-control-rows-d0ec6ff-arm-receipt-20261022.json",
+          "sha256": "6b18f88eae8145a76b4ede15a3dbfc6760bdfb12df443b38d40ea239e5a12a07"
+        },
+        "archiveEntrySHA256": {
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/1-StudioControlRow.swift": {
+            "bytes": 909,
+            "sha256": "581b2013d6b3daa9bcfb4d294fcb6332467979cf2b43b4c78d10de593c5e18be"
+          },
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/3-test_studio_control_rows.py": {
+            "bytes": 20318,
+            "sha256": "7969eb51554e03a43431cb638baf19f12d54eda405f130b585bf3d6f44dc009e"
+          },
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/2-MainWindowView.swift": {
+            "bytes": 60456,
+            "sha256": "ea55a02c769481eb568f9fb025d8896488b7188d052f9e94f3bcbd65f19715f6"
+          },
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/0-StudioAccessibility.swift": {
+            "bytes": 6476,
+            "sha256": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c"
+          },
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/ControlRows": {
+            "bytes": 708664,
+            "sha256": "02eb6dd2747401d89bcafc8613347fc7c4322ec9c97294cd4f14ccf165de2463"
+          },
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/OwnedControlRows.swift": {
+            "bytes": 21008,
+            "sha256": "85fb9e1218afca600f74acd8dec91f4c52a0a5d4bc46673e76cf6e3101880a6f"
+          },
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/compile.log": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/failed-phase.json": {
+            "bytes": 3111,
+            "sha256": "2dd2ee886712123c1d74f2cdc56f924d0b50c211356f63fab898c0daa41752db"
+          },
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/result.json": {
+            "bytes": 3396,
+            "sha256": "9397f4405b8f20a26e927d1feaaa3a316e34556c88201057f2e6813b37efae56"
+          },
+          "invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/runtime.log": {
+            "bytes": 342180,
+            "sha256": "45bca472bb45bb8bc19b724122f1860a963906c609f1652314c03e3c457bd75d"
+          }
+        },
+        "stages": [
+          {
+            "stage": "compile",
+            "command": [
+              "xcrun",
+              "swiftc",
+              "-swift-version",
+              "6",
+              "-strict-concurrency=complete",
+              "-j2",
+              "-parse-as-library",
+              "/Users/runner/work/stream/stream/apple/StreamMac/StudioAccessibility.swift",
+              "/Users/runner/work/stream/stream/apple/StreamMac/StudioControlRow.swift",
+              "/Users/runner/work/stream/stream/apple/build/studio-control-rows-validation/artifacts/invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/OwnedControlRows.swift",
+              "-o",
+              "/Users/runner/work/stream/stream/apple/build/studio-control-rows-validation/artifacts/invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/ControlRows"
+            ],
+            "timeoutSeconds": 60,
+            "exitCode": 0,
+            "seconds": 13.48310674999999
+          },
+          {
+            "stage": "runtime",
+            "command": [
+              "/Users/runner/work/stream/stream/apple/build/studio-control-rows-validation/artifacts/invocation-68a668b3-a37c-429d-82e8-3e6e1268eedd/ControlRows"
+            ],
+            "timeoutSeconds": 90,
+            "exitCode": 0,
+            "seconds": 21.866926417000002
+          }
+        ],
+        "sourceInputsUnchanged": true,
+        "passCases": 40,
+        "layoutObservations": 280,
+        "host": {
+          "activationPolicy": 2,
+          "applicationRunning": false,
+          "event": "host",
+          "os": "Version 26.6.2 (Build 25G83)",
+          "preferredStyle": 1,
+          "uptimeSeconds": 396.46146475
+        },
+        "notifications": [
+          {
+            "applicationRunning": false,
+            "event": "notification",
+            "name": "NSPreferredScrollerStyleDidChangeNotification",
+            "preferredStyle": 0,
+            "uptimeSeconds": 396.7561214166667
+          }
+        ],
+        "firstStyleAssignment": {
+          "kind": "transport",
+          "textPoints": 11,
+          "requestedStyle": 1,
+          "actualStyle": 1,
+          "uptimeSeconds": 396.84300075000004
+        },
+        "notificationBeforeFirstStyleAssignment": true,
+        "styleMismatchesAfterAssignment": 0,
+        "staleScrollOrDocumentIdentities": 0,
+        "visibleOrKeyWindowObservations": 0,
+        "applicationRunningObservations": [
+          false
+        ]
+      },
+      {
+        "architecture": "intel",
+        "workflowRun": 39875859848,
+        "job": 120161185908,
+        "publishedHead": "d0ec6ff952052ce0e66c17acb247702f065d8dfd",
+        "conclusion": "success",
+        "sourceSHA256": {
+          "apple/StreamMac/StudioAccessibility.swift": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c",
+          "apple/StreamMac/StudioControlRow.swift": "581b2013d6b3daa9bcfb4d294fcb6332467979cf2b43b4c78d10de593c5e18be",
+          "apple/StreamMac/MainWindowView.swift": "ea55a02c769481eb568f9fb025d8896488b7188d052f9e94f3bcbd65f19715f6",
+          "apple/scripts/test_studio_control_rows.py": "7969eb51554e03a43431cb638baf19f12d54eda405f130b585bf3d6f44dc009e"
+        },
+        "originalLog": {
+          "path": "/tmp/stream-control-rows-d0ec6ff-120161185908-original.log",
+          "bytes": 367954,
+          "sha256": "75043544cf325c87e06d8c4506e2de48bb72b28a84429a7d8147612ce56ea27c"
+        },
+        "originalArchive": {
+          "id": 12468621228,
+          "path": "/tmp/stream-control-rows-d0ec6ff-artifact12468621228-original.zip",
+          "bytes": 213722,
+          "sha256": "b0234714a238fca109d513c257756aa8a733efdd03f57a8b6e7f698a995b4f5b",
+          "metadata": "/tmp/stream-control-rows-d0ec6ff-artifact12468621228-metadata",
+          "entryCount": 10
+        },
+        "ownerReceipt": {
+          "path": "/tmp/stream-control-rows-d0ec6ff-intel-receipt-20261022.json",
+          "sha256": "51bcc1466cee47fdb8e98832be1376c3719328c6aa9db3b4d1d4443578f469b0"
+        },
+        "archiveEntrySHA256": {
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/1-StudioControlRow.swift": {
+            "bytes": 909,
+            "sha256": "581b2013d6b3daa9bcfb4d294fcb6332467979cf2b43b4c78d10de593c5e18be"
+          },
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/2-MainWindowView.swift": {
+            "bytes": 60456,
+            "sha256": "ea55a02c769481eb568f9fb025d8896488b7188d052f9e94f3bcbd65f19715f6"
+          },
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/3-test_studio_control_rows.py": {
+            "bytes": 20318,
+            "sha256": "7969eb51554e03a43431cb638baf19f12d54eda405f130b585bf3d6f44dc009e"
+          },
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/0-StudioAccessibility.swift": {
+            "bytes": 6476,
+            "sha256": "ed3661855ba351ee8b84067836b76e5297f7a8d437b63e81b8c663039fecc44c"
+          },
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/ControlRows": {
+            "bytes": 676800,
+            "sha256": "478e9f16728a86de0fb5c5503a118fdcfb1c3a494bbbbe33944905f90bcd4698"
+          },
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/OwnedControlRows.swift": {
+            "bytes": 21008,
+            "sha256": "85fb9e1218afca600f74acd8dec91f4c52a0a5d4bc46673e76cf6e3101880a6f"
+          },
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/compile.log": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/failed-phase.json": {
+            "bytes": 3113,
+            "sha256": "24753820c5fa7c881c694aa699fbbf14ee5d0e2cfbf082b02026a8a148e5c501"
+          },
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/result.json": {
+            "bytes": 3397,
+            "sha256": "434be684e0eb95fa71192e53114324f6f08c116dd9de5b84bf49b67cfa6ba0fe"
+          },
+          "invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/runtime.log": {
+            "bytes": 342194,
+            "sha256": "7ed3a9ccbed7eff024d73903703f04342bdf09a79d0b7fbb2c236fd0ee685154"
+          }
+        },
+        "stages": [
+          {
+            "stage": "compile",
+            "command": [
+              "xcrun",
+              "swiftc",
+              "-swift-version",
+              "6",
+              "-strict-concurrency=complete",
+              "-j2",
+              "-parse-as-library",
+              "/Users/runner/work/stream/stream/apple/StreamMac/StudioAccessibility.swift",
+              "/Users/runner/work/stream/stream/apple/StreamMac/StudioControlRow.swift",
+              "/Users/runner/work/stream/stream/apple/build/studio-control-rows-validation/artifacts/invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/OwnedControlRows.swift",
+              "-o",
+              "/Users/runner/work/stream/stream/apple/build/studio-control-rows-validation/artifacts/invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/ControlRows"
+            ],
+            "timeoutSeconds": 60,
+            "exitCode": 0,
+            "seconds": 14.223937293000063
+          },
+          {
+            "stage": "runtime",
+            "command": [
+              "/Users/runner/work/stream/stream/apple/build/studio-control-rows-validation/artifacts/invocation-c65c4dbf-1d88-49e7-af76-63f04ffa7a56/ControlRows"
+            ],
+            "timeoutSeconds": 90,
+            "exitCode": 0,
+            "seconds": 22.870850625000003
+          }
+        ],
+        "sourceInputsUnchanged": true,
+        "passCases": 40,
+        "layoutObservations": 280,
+        "host": {
+          "activationPolicy": 2,
+          "applicationRunning": false,
+          "event": "host",
+          "os": "Version 26.6.1 (Build 25G76)",
+          "preferredStyle": 1,
+          "uptimeSeconds": 953.8514762670001
+        },
+        "notifications": [
+          {
+            "applicationRunning": false,
+            "event": "notification",
+            "name": "NSPreferredScrollerStyleDidChangeNotification",
+            "preferredStyle": 0,
+            "uptimeSeconds": 954.0492504250001
+          }
+        ],
+        "firstStyleAssignment": {
+          "kind": "transport",
+          "textPoints": 11,
+          "requestedStyle": 1,
+          "actualStyle": 1,
+          "uptimeSeconds": 954.1976023740001
+        },
+        "notificationBeforeFirstStyleAssignment": true,
+        "styleMismatchesAfterAssignment": 0,
+        "staleScrollOrDocumentIdentities": 0,
+        "visibleOrKeyWindowObservations": 0,
+        "applicationRunningObservations": [
+          false
+        ]
+      }
+    ],
+    "currentNextAction": "No additional local or unchanged diagnostic rerun is warranted. Retain the passing hosted cases and original failure; a future first failure must be analyzed from its phase/notification/identity evidence before changing source or gates."
+  }
 }
