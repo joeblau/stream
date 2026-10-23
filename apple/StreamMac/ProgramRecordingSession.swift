@@ -158,6 +158,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
     private var awaitingFinishBoundary = false
     private var finishBoundaryCancelled = false
     private var videoInputFinished = false
+    private var audioInputFinished = false
     private var epochSourceStart: CMTime = .invalid
     private var epochVideoPTS: CMTime = .invalid
     private var timestampOffset: CMTime = .zero
@@ -435,6 +436,21 @@ final class ProgramRecordingSession: @unchecked Sendable {
             }
         }
         if finishRequested {
+            // A completed PCM tail must release ideal interleaving even when
+            // video is still queued. Close admission atomically with the empty
+            // queue check, then call the native input outside the inlet lock.
+            if failure == nil, started, writer?.status == .writing, !awaitingFinishBoundary,
+               configuration.requiresAudio, !audioInputFinished, finishSourceCutoff.isNumeric,
+               audioReached(finishSourceCutoff), let audioInput {
+                lock.lock()
+                let audioEmpty = audio.isEmpty
+                if audioEmpty {
+                    acceptingAudio = false; audioTailOpen = false
+                    audioInputFinished = true
+                }
+                lock.unlock()
+                if audioEmpty { audioInput.markAsFinished() }
+            }
             lock.lock(); let videoEmpty = video.isEmpty; let empty = videoEmpty && audio.isEmpty; lock.unlock()
             // An ended video input must no longer hold up ideal interleaving
             // while its independent PCM tap supplies the final source window.
@@ -766,7 +782,7 @@ final class ProgramRecordingSession: @unchecked Sendable {
             complete(error: failure ?? "No program media was received."); return
         }
         if !videoInputFinished { videoInput?.markAsFinished(); videoInputFinished = true }
-        audioInput?.markAsFinished()
+        if !audioInputFinished { audioInput?.markAsFinished(); audioInputFinished = true }
         if endTime.isNumeric { writer.endSession(atSourceTime: endTime) }
         writeManifest(status: "finishing")
         writer.finishWriting { [self] in
